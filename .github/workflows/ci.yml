@@ -1,0 +1,125 @@
+# CI — build, test, pack-to-artifacts, and optional RID publish smoke.
+# No registry publish (npm / Homebrew / GitHub Packages). nuget.org is forbidden.
+# Distribution channels land in Phase 2b (see release.yml stub).
+
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  CONFIGURATION: Release
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore KyberWeave.sln
+
+      - name: Build
+        run: dotnet build KyberWeave.sln -c ${{ env.CONFIGURATION }} --no-restore
+
+      - name: Test
+        run: >
+          dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          --logger "trx;LogFileName=kyber-weave.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: test-results
+          path: TestResults/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Pack (CI artifacts only — not published)
+        run: >
+          dotnet pack KyberWeave.sln
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          -o ./artifacts/nupkg
+
+      - name: Upload pack artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nupkg-artifacts
+          path: artifacts/nupkg/
+          retention-days: 14
+
+  publish-smoke:
+    name: Self-contained publish smoke (linux-x64)
+    runs-on: ubuntu-latest
+    needs: build-test
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish CLI (self-contained single-file)
+        run: >
+          dotnet publish src/KyberWeave.Cli/KyberWeave.Cli.csproj
+          -c ${{ env.CONFIGURATION }}
+          -r linux-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o ./artifacts/cli-linux-x64
+
+      - name: Publish MCP (self-contained single-file)
+        run: >
+          dotnet publish src/KyberWeave.Mcp/KyberWeave.Mcp.csproj
+          -c ${{ env.CONFIGURATION }}
+          -r linux-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o ./artifacts/mcp-linux-x64
+
+      - name: Smoke --help
+        run: |
+          set -euo pipefail
+          ./artifacts/cli-linux-x64/kyber-weave --help
+          ./artifacts/mcp-linux-x64/kyber-weave-mcp --help || true
+
+      - name: Upload RID smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: rid-smoke-linux-x64
+          path: |
+            artifacts/cli-linux-x64/
+            artifacts/mcp-linux-x64/
+          retention-days: 7
+          if-no-files-found: warn

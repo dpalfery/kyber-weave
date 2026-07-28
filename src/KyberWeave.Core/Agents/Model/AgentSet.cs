@@ -1,0 +1,44 @@
+namespace KyberWeave.Core.Agents.Model;
+
+/// <summary>
+/// A collection of agents discovered across all coding harness directories in a project.
+/// </summary>
+public sealed class AgentSet
+{
+    private readonly List<AgentModel> _agents;
+
+    public AgentSet(IEnumerable<AgentModel> agents)
+    {
+        _agents = agents.ToList();
+    }
+
+    public IReadOnlyList<AgentModel> Agents => _agents;
+    public int Count => _agents.Count;
+
+    /// <summary>
+    /// Returns all unique role names found across any harness.
+    /// </summary>
+    public IEnumerable<string> GetAllRoleNames() =>
+        _agents.Select(a => a.RoleName).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r);
+
+    /// <summary>
+    /// Gets agents grouped by role name and harness kind.
+    /// </summary>
+    public IReadOnlyDictionary<string, Dictionary<HarnessKind, AgentModel>> GetRoleHarnessMatrix()
+    {
+        var matrix = new Dictionary<string, Dictionary<HarnessKind, AgentModel>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var agent in _agents)
+        {
+            if (!matrix.TryGetValue(agent.RoleName, out var harnessMap))
+            {
+                harnessMap = new Dictionary<HarnessKind, AgentModel>();
+                matrix[agent.RoleName] = harnessMap;
+            }
+
+            harnessMap[agent.Harness] = agent;
+        }
+
+        return matrix;
+    }
+}

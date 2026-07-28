@@ -1,0 +1,24 @@
+# Routing eval set for the sample skills.
+# Each case asserts which skill SHOULD fire for a prompt.
+# An omitted/empty/"none" expected value asserts that NO skill should fire (negative case).
+cases:
+  - prompt: "I'm locked out of my laptop and forgot my password"
+    expected: password-reset
+
+  - prompt: "Checkout is throwing 500 errors for a lot of users right now"
+    expected: incident-triage
+
+  - prompt: "Is a 240 per night hotel reimbursable?"
+    expected: expense-policy
+
+  - prompt: "Can you review this pull request before I merge it?"
+    expected: pr-review
+
+  - prompt: "What's the weather in Kolkata tomorrow?"
+    expected: none
+
+  - prompt: "Reset my corporate account password please"
+    expected: password-reset
+
+  - prompt: "Production database is down, users can't log in"
+    expected: incident-triage

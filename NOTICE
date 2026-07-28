@@ -1,0 +1,24 @@
+Kyber-Weave
+===========
+
+Kyber-Weave's skill-governance feature originated as SkillForge, an MIT-licensed
+project by the SkillForge contributors. That work was absorbed into this
+repository and is now maintained here: Kyber-Weave owns the code, and there is
+no upstream to track or contribute back to.
+
+The MIT licence under which the absorbed work was received is retained in
+LICENSE and continues to apply to it, including the original copyright notice:
+
+    Copyright (c) 2026 SkillForge contributors
+
+Third-party components
+----------------------
+
+Kyber-Weave depends on the following packages, each under its own licence:
+
+  Markdig                  — BSD-2-Clause
+  YamlDotNet               — MIT
+  Spectre.Console          — MIT
+  Spectre.Console.Cli      — MIT
+  ModelContextProtocol     — MIT
+  Microsoft.Extensions.*   — MIT

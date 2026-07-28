@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KyberWeave.Mcp</RootNamespace>
+    <AssemblyName>kyber-weave-mcp</AssemblyName>
+
+    <!-- dotnet tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>kyber-weave-mcp</ToolCommandName>
+    <IsPackable>true</IsPackable>
+    <PackageId>KyberWeave.Mcp</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>KyberWeave</Authors>
+    <Description>Kyber-Weave documentation MCP server: retrieve governed repository documentation over stdio.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

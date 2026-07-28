@@ -1,0 +1,70 @@
+# Kyber-Weave analyzer severity settings.
+# Mirrors MotorcycleRAG root .editorconfig suppressions/downgrades so isolated
+# builds (no parent .editorconfig) produce the same warning surface as nested.
+root = true
+
+[*.{cs,csx}]
+# Turn off non-substantive style / naming / formatting / documentation categories
+dotnet_analyzer_diagnostic.category-Style.severity = none
+dotnet_analyzer_diagnostic.category-Naming.severity = none
+dotnet_analyzer_diagnostic.category-Formatting.severity = none
+dotnet_analyzer_diagnostic.category-Documentation.severity = none
+
+# Explicitly silence common Sonar / style rule IDs considered noise
+dotnet_diagnostic.S103.severity = none
+dotnet_diagnostic.S3059.severity = none
+dotnet_diagnostic.S1227.severity = none
+dotnet_diagnostic.S2302.severity = none
+dotnet_diagnostic.S1172.severity = none
+dotnet_diagnostic.S2360.severity = none
+dotnet_diagnostic.S1200.severity = none
+dotnet_diagnostic.S4487.severity = none
+dotnet_diagnostic.S3776.severity = none
+
+# Naming Rules (CA1700-1799) - TREAT AS SUGGESTION
+dotnet_diagnostic.CA1700.severity = suggestion
+dotnet_diagnostic.CA1701.severity = suggestion
+dotnet_diagnostic.CA1702.severity = suggestion
+dotnet_diagnostic.CA1703.severity = suggestion
+dotnet_diagnostic.CA1704.severity = suggestion
+dotnet_diagnostic.CA1707.severity = suggestion
+dotnet_diagnostic.CA1708.severity = suggestion
+dotnet_diagnostic.CA1709.severity = suggestion
+dotnet_diagnostic.CA1710.severity = suggestion
+dotnet_diagnostic.CA1711.severity = suggestion
+dotnet_diagnostic.CA1712.severity = suggestion
+dotnet_diagnostic.CA1713.severity = suggestion
+dotnet_diagnostic.CA1714.severity = suggestion
+dotnet_diagnostic.CA1715.severity = suggestion
+dotnet_diagnostic.CA1716.severity = suggestion
+dotnet_diagnostic.CA1717.severity = suggestion
+dotnet_diagnostic.CA1718.severity = suggestion
+dotnet_diagnostic.CA1719.severity = suggestion
+dotnet_diagnostic.CA1720.severity = suggestion
+dotnet_diagnostic.CA1721.severity = suggestion
+dotnet_diagnostic.CA1724.severity = suggestion
+dotnet_diagnostic.CA1725.severity = suggestion
+dotnet_diagnostic.CA1726.severity = suggestion
+
+# Documentation Rules (CA1200-1299) - TREAT AS SUGGESTION
+dotnet_diagnostic.CA1200.severity = suggestion
+dotnet_diagnostic.CA1201.severity = suggestion
+dotnet_diagnostic.CA1202.severity = suggestion
+dotnet_diagnostic.CA1203.severity = suggestion
+dotnet_diagnostic.CA1204.severity = suggestion
+
+# Globalization Rules (CA1300-1399) - TREAT AS SUGGESTION
+dotnet_diagnostic.CA1300.severity = suggestion
+dotnet_diagnostic.CA1301.severity = suggestion
+dotnet_diagnostic.CA1302.severity = suggestion
+dotnet_diagnostic.CA1303.severity = suggestion
+dotnet_diagnostic.CA1304.severity = suggestion
+dotnet_diagnostic.CA1305.severity = suggestion
+dotnet_diagnostic.CA1306.severity = suggestion
+dotnet_diagnostic.CA1307.severity = suggestion
+dotnet_diagnostic.CA1308.severity = suggestion
+dotnet_diagnostic.CA1309.severity = suggestion
+dotnet_diagnostic.CA1310.severity = suggestion
+dotnet_diagnostic.CA1311.severity = suggestion
+dotnet_diagnostic.CA1312.severity = suggestion
+dotnet_diagnostic.CA1313.severity = suggestion

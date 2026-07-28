@@ -1,0 +1,95 @@
+# Sample: Kyber-Weave agent validate / scan / sync-check
+#
+# Copy to .github/workflows/ and replace PIN placeholders.
+# See README.md in this directory for install channels and harness adaptation.
+
+name: Kyber-Weave Agent Gate
+
+"on":
+  pull_request:
+  push:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: kyber-weave-agent-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # PIN: published @dpalfery/kyber-weave SemVer — replace before production use
+  KYBER_WEAVE_VERSION: "0.1.0"
+  NODE_VERSION: "22"
+  # Repository root passed to agent commands (harnesses discovered under .*/agents).
+  PROJECT_ROOT: "."
+
+jobs:
+  agent-gate:
+    name: Agent validate / scan (${{ matrix.harness }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # Adapt to the harnesses your host keeps in sync.
+        harness: [codex, cursor, claude, github, opencode, kilo]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Kyber-Weave (npm, pinned)
+        run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
+
+      - name: Validate agents (${{ matrix.harness }})
+        run: >
+          kyber-weave agent validate "${{ env.PROJECT_ROOT }}"
+          --harness ${{ matrix.harness }}
+          --format table
+
+      - name: Scan agents SARIF (${{ matrix.harness }})
+        run: >
+          kyber-weave agent scan "${{ env.PROJECT_ROOT }}"
+          --harness ${{ matrix.harness }}
+          --fail-on critical
+          --format sarif
+          > "kyber-weave-agent-${{ matrix.harness }}.sarif"
+
+      - name: Upload agents SARIF (${{ matrix.harness }})
+        if: always()
+        uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
+        with:
+          sarif_file: kyber-weave-agent-${{ matrix.harness }}.sarif
+          category: kyber-weave-agent-${{ matrix.harness }}
+
+  agent-sync:
+    name: Agent sync-check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Kyber-Weave (npm, pinned)
+        run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
+
+      - name: Cross-harness sync-check
+        run: >
+          kyber-weave agent sync-check "${{ env.PROJECT_ROOT }}"
+          --format table

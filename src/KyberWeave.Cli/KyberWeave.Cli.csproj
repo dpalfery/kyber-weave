@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>KyberWeave.Cli</RootNamespace>
+    <AssemblyName>kyber-weave</AssemblyName>
+
+    <!-- dotnet tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>kyber-weave</ToolCommandName>
+    <PackageId>KyberWeave.Tool</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>KyberWeave</Authors>
+    <Description>Kyber-Weave governance CLI: validate, lint, security-scan and drift-check skills, agent definitions and documentation.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" Version="0.49.1" />
+    <PackageReference Include="Spectre.Console.Cli" Version="0.49.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
+  </ItemGroup>
+
+</Project>

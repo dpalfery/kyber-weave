@@ -1,0 +1,207 @@
+using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Search;
+using KyberWeave.Core.Text;
+using Xunit;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// The scoring engine, isolated from the corpus on disk. These cover the properties that
+/// ranking depends on; <see cref="RetrievalRegressionTests"/> covers whether real
+/// questions find real answers.
+/// </summary>
+public sealed class DocumentCorpusTests : IDisposable
+{
+    private readonly DocFixture _fixture = new();
+
+    /// <summary>
+    /// Six documents, all about one system. Five mention "session" — the shared
+    /// vocabulary that used to decide every query — and only one mentions "kerberos".
+    /// </summary>
+    private DocumentCorpus Build()
+    {
+        _fixture.WithCatalog().WithSourceRoot("1-Presentation/Api");
+
+        Write("alpha", "The session service manages session state for the session store.");
+        Write("beta", "Session handling and session cookies across the session lifetime.");
+        Write("gamma", "A session begins when the session token is issued.");
+        Write("delta", "Session expiry and session renewal are configured per session.");
+        Write("epsilon", "Session diagnostics for the session subsystem.");
+        Write("zeta", "Kerberos ticket renewal for the session gateway.");
+
+        return DocumentCorpus.Build(_fixture.Load());
+    }
+
+    private void Write(string slug, string body) => _fixture.Write($"6-Docs/{slug}.md", $"""
+        ---
+        id: api/{slug}
+        title: {slug}
+        doc-type: reference
+        status: current
+        component: MotorcycleRAG API
+        owner: API maintainers
+        last-reviewed: 2026-07-21
+        ---
+        # {slug}
+
+        ## Detail
+
+        {body}
+        """);
+
+    /// <summary>
+    /// A term in nearly every document says nothing about which one is relevant, however
+    /// often it occurs. Plain term frequency treated it as full evidence, which is how
+    /// documents dense in shared vocabulary won every query.
+    /// </summary>
+    [Fact]
+    public void A_Rare_Term_Outweighs_A_Ubiquitous_One()
+    {
+        var corpus = Build();
+
+        Assert.True(corpus.InverseDocumentFrequency("kerberos") > corpus.InverseDocumentFrequency("session"));
+    }
+
+    [Fact]
+    public void A_Term_In_Most_Documents_Is_Treated_As_Carrying_No_Information()
+    {
+        var corpus = Build();
+
+        Assert.False(corpus.IsInformative("session"));
+        Assert.True(corpus.IsInformative("kerberos"));
+    }
+
+    /// <summary>
+    /// Formal documentation rarely writes "why" or "getting", so rarity alone rates them
+    /// as highly discriminating. They are scaffolding, and treating them as evidence
+    /// rejected the very question this work started from.
+    /// </summary>
+    [Theory]
+    [InlineData("why")]
+    [InlineData("getting")]
+    [InlineData("keep")]
+    [InlineData("tell")]
+    public void Question_Scaffolding_Is_Never_Informative(string word)
+    {
+        Assert.False(Build().IsInformative(word));
+    }
+
+    /// <summary>
+    /// One incidental word must not carry a document. This is what let "best hiking trails
+    /// in patagonia" score 0.42 and return three confident results.
+    /// </summary>
+    [Fact]
+    public void A_Query_Mostly_Absent_From_A_Document_Scores_Far_Below_One_Fully_Present()
+    {
+        var corpus = Build();
+        var zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
+
+        var onTopic = Score(corpus, zeta, "kerberos ticket renewal");
+        var offTopic = Score(corpus, zeta, "kerberos snorkelling parade marmalade");
+
+        Assert.True(onTopic > offTopic * 2,
+            $"on-topic {onTopic:0.000} should dominate mostly-absent {offTopic:0.000}");
+    }
+
+    [Fact]
+    public void A_Query_With_No_Informative_Terms_Scores_Zero()
+    {
+        var corpus = Build();
+        var zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
+
+        Assert.Equal(0, Score(corpus, zeta, "why do we keep getting session"));
+    }
+
+    private static double Score(DocumentCorpus corpus, DocumentModel doc, string query) =>
+        corpus.ScoreBody(
+            doc,
+            TextVectorizer.VectorizeFused(query),
+            TextVectorizer.Vectorize(query).Keys.ToList());
+
+    public void Dispose() => _fixture.Dispose();
+}
+
+/// <summary>
+/// Documents and code joins go stale at wildly different rates, so they are tracked
+/// separately: the CodeGraph daemon rewrites its database continuously while
+/// documentation is edited by hand.
+/// </summary>
+public sealed class DocumentIndexHostTests : IDisposable
+{
+    private readonly DocFixture _fixture = new();
+
+    private DocumentIndexHost NewHost()
+    {
+        _fixture.WithCatalog().Write("6-Docs/thing.md", """
+            ---
+            id: api/thing
+            title: Thing
+            doc-type: reference
+            status: current
+            component: MotorcycleRAG API
+            owner: API maintainers
+            last-reviewed: 2026-07-21
+            ---
+            # Thing
+
+            ## Detail
+
+            Kerberos ticket renewal.
+            """);
+        return new DocumentIndexHost(
+            _fixture.Root,
+            () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
+            () => new Core.Docs.Parsing.DocumentLoader(_fixture.Root).Load());
+    }
+
+    [Fact]
+    public void An_Unchanged_Repository_Rebuilds_Nothing()
+    {
+        var host = NewHost();
+
+        host.Current();
+        host.Current();
+        host.Current();
+
+        Assert.Equal(1, host.CorpusBuilds);
+        Assert.Equal(1, host.JoinBuilds);
+    }
+
+    /// <summary>
+    /// A code-graph write must not force a re-read and re-vectorisation of every
+    /// document. That is the expensive half, and it is the half that did not change.
+    /// </summary>
+    [Fact]
+    public void A_CodeGraph_Change_Rebuilds_Only_The_Joins()
+    {
+        var host = NewHost();
+        host.Current();
+
+        var db = Path.Combine(_fixture.Root, ".codegraph");
+        Directory.CreateDirectory(db);
+        File.WriteAllText(Path.Combine(db, "codegraph.db"), "not a real database");
+
+        host.Current();
+
+        Assert.Equal(1, host.CorpusBuilds);
+        Assert.Equal(2, host.JoinBuilds);
+    }
+
+    [Fact]
+    public void A_Documentation_Change_Rebuilds_The_Corpus()
+    {
+        var host = NewHost();
+        host.Current();
+
+        var doc = Path.Combine(_fixture.Root, "6-Docs", "thing.md");
+        File.WriteAllText(doc, File.ReadAllText(doc) + "\n\n## More\n\nExtra prose.\n");
+        File.SetLastWriteTimeUtc(doc, DateTime.UtcNow.AddMinutes(1));
+
+        host.Current();
+
+        Assert.Equal(2, host.CorpusBuilds);
+    }
+
+    public void Dispose() => _fixture.Dispose();
+}

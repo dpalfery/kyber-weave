@@ -1,0 +1,76 @@
+# Sample: Kyber-Weave skill validate / lint / scan
+#
+# Copy to .github/workflows/ and replace PIN placeholders.
+# See README.md in this directory for install channels and path adaptation.
+
+name: Kyber-Weave Skill Gate
+
+"on":
+  pull_request:
+  push:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: kyber-weave-skill-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # PIN: published @dpalfery/kyber-weave SemVer — replace before production use
+  KYBER_WEAVE_VERSION: "0.1.0"
+  NODE_VERSION: "22"
+  # Space-separated skill roots. Missing directories are skipped.
+  SKILL_DIRS: ".agents/skills"
+  MIN_DESC_SCORE: "70"
+
+jobs:
+  skill-gate:
+    name: Skill validate / lint / scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Kyber-Weave (npm, pinned)
+        run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
+
+      - name: Validate / lint / scan skill directories
+        run: |
+          set -euo pipefail
+          EXIT_CODE=0
+          mkdir -p kyber-weave-sarif
+          for skills_dir in ${SKILL_DIRS}
+          do
+            if [ ! -d "${skills_dir}" ]
+            then
+              echo "Skipping missing skill directory: ${skills_dir}"
+              continue
+            fi
+            safe_name=$(echo "${skills_dir}" | tr '/.' '__')
+            echo "::group::${skills_dir}"
+            kyber-weave skill validate "${skills_dir}" --format table || EXIT_CODE=1
+            kyber-weave skill lint "${skills_dir}" --min-desc-score "${MIN_DESC_SCORE}" --format table || EXIT_CODE=1
+            kyber-weave skill scan "${skills_dir}" --fail-on critical --format sarif \
+              > "kyber-weave-sarif/skills-${safe_name}.sarif" || EXIT_CODE=1
+            echo "::endgroup::"
+          done
+          exit "${EXIT_CODE}"
+
+      - name: Upload skill scan SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
+        with:
+          sarif_file: kyber-weave-sarif
+          category: kyber-weave-skills

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <PackageId>KyberWeave.Core</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>KyberWeave</Authors>
+    <Description>The Kyber-Weave engine: parses, validates, security-scans and drift-checks the artifacts that shape agent behaviour — skills, agent definitions and documentation.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Internal helpers (link normalization, vocabulary parsing) are unit-tested
+         directly rather than only through the public command surface. -->
+    <InternalsVisibleTo Include="KyberWeave.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="0.38.0" />
+    <PackageReference Include="YamlDotNet" Version="16.2.1" />
+  </ItemGroup>
+
+</Project>

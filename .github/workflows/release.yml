@@ -1,0 +1,35 @@
+# Release / distribution (Phase 2b — stub)
+#
+# TODO (2b):
+# - Matrix: self-contained single-file publish for osx-arm64, osx-x64, linux-x64, win-x64
+#   for both KyberWeave.Cli and KyberWeave.Mcp
+# - Attach binaries to a GitHub Release on tag push
+# - Publish npm package @dpalfery/kyber-weave (wrapper selecting the correct RID binary)
+# - Bump Homebrew formula/cask from the same Release
+# - Optional: push PackAsTool packages to GitHub Packages only (never nuget.org)
+#
+# This workflow is intentionally a no-op until Phase 2b lands.
+
+name: Release (stub)
+
+"on":
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Phase 2b placeholder — no publish runs yet"
+        required: false
+        default: "noop"
+
+permissions:
+  contents: read
+
+jobs:
+  stub:
+    name: Phase 2b placeholder
+    runs-on: ubuntu-latest
+    steps:
+      - name: Document Phase 2b scope
+        run: |
+          echo "Release automation is Phase 2b."
+          echo "Channels: npm @dpalfery/kyber-weave, GitHub Releases, Homebrew;"
+          echo "optional GitHub Packages. nuget.org is forbidden."
