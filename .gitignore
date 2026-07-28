@@ -1,4 +1,6 @@
-bin/
+**/bin/
+!npm/bin/
+!npm/bin/**
 obj/
 *.user
 .vs/
