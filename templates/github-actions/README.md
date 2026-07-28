@@ -52,29 +52,40 @@ env:
 
 ### Install options
 
-**Preferred — npm (Phase 2b):**
+**Preferred — npm:**
 
 ```yaml
-- uses: actions/setup-node@...
+- uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
   with:
     node-version: ${{ env.NODE_VERSION }}
 - run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
 ```
 
-**Also first-class — GitHub Release asset** for the runner RID (download + chmod + PATH).
+The npm package downloads the matching GitHub Release binaries for the runner RID at install time (or on first CLI invocation). Ensure the runner can reach `github.com` releases, or pre-stage binaries and set `KYBER_WEAVE_BINARY_DIR`.
 
-**Homebrew** for macOS runners / local developer machines once the formula ships.
-
-**Advanced only:** GitHub Packages `dotnet tool` for .NET specialists. **nuget.org is not used.**
-
-Until Phase 2b publishes npm/Releases, hosts may build from this repository’s source as a temporary fallback:
+**Also first-class — GitHub Release asset** for the runner RID:
 
 ```yaml
-- run: dotnet build src/KyberWeave.Cli/KyberWeave.Cli.csproj -c Release
-- run: >
-    dotnet run --project src/KyberWeave.Cli/KyberWeave.Cli.csproj
-    -c Release --no-build -- skill validate .agents/skills --format table
+- name: Install Kyber-Weave from Release
+  env:
+    TAG: v${{ env.KYBER_WEAVE_VERSION }}
+  run: |
+    set -euo pipefail
+    RID=linux-x64
+    curl -fsSL -o kw.tgz \
+      "https://github.com/dpalfery/kyber-weave/releases/download/${TAG}/kyber-weave-${RID}.tar.gz"
+    tar -xzf kw.tgz
+    sudo install -m 755 kyber-weave /usr/local/bin/kyber-weave
 ```
+
+**Homebrew** for macOS runners / local developer machines:
+
+```bash
+brew tap dpalfery/kyber-weave
+brew install kyber-weave
+```
+
+**Advanced only:** GitHub Packages `dotnet tool` for .NET specialists. **nuget.org is not used.**
 
 ---
 

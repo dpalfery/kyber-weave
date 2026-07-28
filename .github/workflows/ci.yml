@@ -1,6 +1,6 @@
-# CI — build, test, pack-to-artifacts, and optional RID publish smoke.
-# No registry publish (npm / Homebrew / GitHub Packages). nuget.org is forbidden.
-# Distribution channels land in Phase 2b (see release.yml stub).
+# CI — build, test, pack-to-artifacts, and RID publish smoke.
+# No registry publish here (npm / Homebrew / GitHub Packages belong to release.yml).
+# nuget.org is forbidden.
 
 name: CI
 
@@ -73,11 +73,19 @@ jobs:
           path: artifacts/nupkg/
           retention-days: 14
 
+      - name: Setup Node (npm package layout check)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: npm pack dry-run
+        working-directory: npm
+        run: KYBER_WEAVE_SKIP_DOWNLOAD=1 npm pack --dry-run
+
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
     runs-on: ubuntu-latest
     needs: build-test
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

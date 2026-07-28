@@ -2,6 +2,8 @@
 
 **Governance for every artifact that shapes agent behaviour.** Skills, agent definitions, and documentation are all supply-chain artifacts, and Kyber-Weave gives all three the same treatment: parsed, validated against a closed spec, checked for drift against a source of truth, security-scanned, and made retrievable.
 
+> **Thank you, SkillForge.** Kyber-Weave’s skill-governance feature originated as **SkillForge**, an MIT-licensed open-source project by the SkillForge contributors. That work was absorbed into this repository and is maintained here. The original MIT licence and copyright (`Copyright (c) 2026 SkillForge contributors`) are retained — see [NOTICE](NOTICE) and [LICENSE](LICENSE).
+
 Each artifact class differs only in what its source of truth *is*:
 
 | Artifact class | Source of truth it answers to |
@@ -14,24 +16,32 @@ Each artifact class differs only in what its source of truth *is*:
 
 ---
 
-## Install (frictionless — no .NET SDK required)
+## Install (no .NET SDK required)
 
 Kyber-Weave ships as **self-contained platform binaries** (`kyber-weave` and `kyber-weave-mcp` on your PATH). Pick one channel:
 
-| Channel | Status | Command / how |
-|---|---|---|
-| **npm** | Primary (Phase 2b) | `npm i -g @dpalfery/kyber-weave` |
-| **GitHub Releases** | Primary (Phase 2b) | Download the RID asset for your OS/arch from [Releases](https://github.com/dpalfery/kyber-weave/releases) |
-| **Homebrew** | Primary (Phase 2b) | `brew install …` (formula will track Release tags) |
-| GitHub Packages (`dotnet tool`) | Optional / advanced | .NET specialists only — **not** the default story; **nuget.org is not used** |
+| Channel | Command / how |
+|---|---|
+| **npm** (primary) | `npm i -g @dpalfery/kyber-weave` |
+| **Homebrew** (primary) | `brew tap dpalfery/kyber-weave && brew install kyber-weave` |
+| **GitHub Releases** (primary) | Download the RID asset for your OS/arch from [Releases](https://github.com/dpalfery/kyber-weave/releases) |
+| GitHub Packages (`dotnet tool`) | Optional / advanced — .NET specialists only. **nuget.org is not used.** |
 
-Until Phase 2b publishes those channels, build from source (below). Host CI should pin an **npm version** or **Release tag**, not a NuGet feed.
+Supported release RIDs: `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`.
+
+The npm package is a thin Node wrapper: on install (or first run) it downloads the matching GitHub Release binaries for your platform. Details: [`npm/README.md`](npm/README.md) and [`docs/distribution.md`](docs/distribution.md).
+
+Host CI should pin an **npm version** or **Release tag**, not a NuGet feed. See [`templates/github-actions/`](templates/github-actions/).
 
 ---
 
 ## What it does
 
 Three symmetric CLI branches, one per artifact class.
+
+### Skills *(thank you, SkillForge)*
+
+Skill validate / lint / scan / route / catalog / pack / new grew from the **SkillForge** open-source project (MIT; `Copyright (c) 2026 SkillForge contributors`). Absorbed into Kyber-Weave and maintained here — attribution and licence terms: [NOTICE](NOTICE), [LICENSE](LICENSE).
 
 | Command | What it answers | Gate |
 |---|---|---|
@@ -42,9 +52,19 @@ Three symmetric CLI branches, one per artifact class.
 | `skill catalog` | Inventory with version / owner / score | — |
 | `skill pack` | Bundle a skill into a Copilot Studio–compatible `.zip` | — |
 | `skill new` | Scaffold a spec-correct skill from a template | — |
+
+### Agents
+
+| Command | What it answers | Gate |
+|---|---|---|
 | `agent validate` | Are harness agent manifests spec-conformant? | fails on **error** |
 | `agent sync-check` | Are roles synchronized across all 6 harness folders? | fails on **error** |
 | `agent catalog` | Role × harness governance parity matrix | — |
+
+### Docs
+
+| Command | What it answers | Gate |
+|---|---|---|
 | `docs validate` | Does documentation frontmatter conform to the ontology? | fails on **error** |
 | `docs drift` | Do documented code references still resolve in CodeGraph? | fails on **error** |
 | `docs graph` | Export `nodes.jsonl` / `edges.jsonl` joined to CodeGraph ids | — |
@@ -55,9 +75,6 @@ Three symmetric CLI branches, one per artifact class.
 ## Run it
 
 ```bash
-# from source (developers / until Phase 2b ships installers)
-dotnet run --project src/KyberWeave.Cli -- <branch> <command> [args]
-
 # after install (npm / Release / Homebrew) — binaries on PATH
 kyber-weave skill validate ./samples/skills
 kyber-weave skill lint ./samples/skills --explain
@@ -68,6 +85,9 @@ kyber-weave agent sync-check .
 kyber-weave docs validate .
 kyber-weave docs drift .
 kyber-weave docs graph . --out ./build/doc-graph
+
+# from source (developers)
+dotnet run --project src/KyberWeave.Cli -- <branch> <command> [args]
 ```
 
 ### `skill lint --explain` makes the routing score auditable
@@ -128,7 +148,7 @@ dotnet build KyberWeave.sln -c Release
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 ```
 
-Self-contained publish (Phase 2b ships these per RID):
+Self-contained publish (same flags the Release workflow uses):
 
 ```bash
 dotnet publish src/KyberWeave.Cli/KyberWeave.Cli.csproj -c Release \
@@ -165,7 +185,9 @@ src/
 tests/KyberWeave.Tests/
 samples/                  # exemplar + deliberately bad skills; routing eval set
 templates/github-actions/ # host gate workflows (npm / Release pin)
-docs/                     # ALM & governance playbook
+npm/                      # @dpalfery/kyber-weave thin Node wrapper
+homebrew/                 # formula source for dpalfery/homebrew-kyber-weave
+docs/                     # ALM playbook + distribution notes
 ```
 
 Hosts may drop a root `kyber-weave.yml` to override ontology defaults and harness capability profiles.
@@ -178,8 +200,11 @@ Hosts may drop a root `kyber-weave.yml` to override ontology defaults and harnes
 - **The routing simulator approximates, not replicates** the orchestrator.
 - **`docs drift` needs a CodeGraph index and the `sqlite3` CLI.**
 - Some agent Core APIs exist without CLI verbs (`agent route` / `lint` / `new`) — known gap.
-- **Distribution channels (npm, Releases, Homebrew) land in Phase 2b.** This repo’s CI currently builds, tests, and smoke-publishes a single RID; it does not publish to registries.
 
-## Licence
+## Licence and attribution
 
-MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Built on [Markdig](https://github.com/xoofx/markdig), [YamlDotNet](https://github.com/aaubry/YamlDotNet), [Spectre.Console](https://spectreconsole.net/), and the [ModelContextProtocol](https://github.com/modelcontextprotocol/csharp-sdk) C# SDK.
+MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+**SkillForge** — Kyber-Weave’s skill-governance feature originated as SkillForge, an MIT-licensed open-source project by the SkillForge contributors (`Copyright (c) 2026 SkillForge contributors`). That work was absorbed into this repository; there is no separate upstream to track. The MIT licence under which it was received is retained in [LICENSE](LICENSE) and explained in [NOTICE](NOTICE). Thank you to the SkillForge contributors.
+
+Built on [Markdig](https://github.com/xoofx/markdig), [YamlDotNet](https://github.com/aaubry/YamlDotNet), [Spectre.Console](https://spectreconsole.net/), and the [ModelContextProtocol](https://github.com/modelcontextprotocol/csharp-sdk) C# SDK.

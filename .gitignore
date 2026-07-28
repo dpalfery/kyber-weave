@@ -7,3 +7,6 @@ nupkg/
 /TestResults/
 *.sarif
 .DS_Store
+/artifacts/
+/npm/vendor/
+/npm/*.tgz
