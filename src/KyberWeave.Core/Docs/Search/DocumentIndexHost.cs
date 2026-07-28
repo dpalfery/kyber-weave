@@ -58,6 +58,9 @@ public sealed class DocumentIndexHost
     /// <summary>Repository root the index is built over.</summary>
     public string RepoRoot => _repoRoot;
 
+    /// <summary>Documentation root relative to <see cref="RepoRoot"/> (from ontology / host config).</summary>
+    public string DocsRelativeRoot => _docsRelativeRoot;
+
     /// <summary>How many times the document corpus has been parsed. For diagnostics and tests.</summary>
     public int CorpusBuilds { get; private set; }
 

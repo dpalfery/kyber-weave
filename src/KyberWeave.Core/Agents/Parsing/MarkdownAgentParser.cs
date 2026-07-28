@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Parsing;
@@ -40,7 +41,7 @@ public sealed class MarkdownAgentParser : IAgentParser
         string description = string.Empty;
         string model = string.Empty;
         string body = read.HasFrontmatter ? read.Body : raw;
-        var tools = new List<string>();
+        var tools = new Collection<string>();
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (read.HasFrontmatter)

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using KyberWeave.Core.Skills.Model;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -20,7 +21,7 @@ public sealed class RoutingEvalCase
 
 public sealed class RoutingEvalFile
 {
-    [YamlMember(Alias = "cases")] public List<RoutingEvalCase> Cases { get; set; } = new();
+    [YamlMember(Alias = "cases")] public Collection<RoutingEvalCase> Cases { get; set; } = [];
 
     public static RoutingEvalFile Load(string path)
     {

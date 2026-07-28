@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace KyberWeave.Core.Agents.Model;
 
 /// <summary>
@@ -12,6 +14,6 @@ public sealed class AgentModel
     public string Description { get; set; } = string.Empty;
     public string InstructionsBody { get; set; } = string.Empty;
     public string ModelPreference { get; set; } = string.Empty;
-    public List<string> Tools { get; set; } = new();
+    public Collection<string> Tools { get; set; } = [];
     public Dictionary<string, string> FrontmatterOrMetadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

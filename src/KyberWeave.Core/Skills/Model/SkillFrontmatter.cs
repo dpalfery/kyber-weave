@@ -9,6 +9,8 @@ namespace KyberWeave.Core.Skills.Model;
 /// </summary>
 public sealed class SkillFrontmatter
 {
+    private static readonly char[] AllowedToolsSeparators = [' ', '\t', ','];
+
     /// <summary>Required. Lowercase a-z, 0-9 and hyphens; must match the parent directory name.</summary>
     [YamlMember(Alias = "name")]
     public string? Name { get; set; }
@@ -41,7 +43,7 @@ public sealed class SkillFrontmatter
     public IReadOnlyList<string> AllowedTools =>
         string.IsNullOrWhiteSpace(AllowedToolsRaw)
             ? Array.Empty<string>()
-            : AllowedToolsRaw.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            : AllowedToolsRaw.Split(AllowedToolsSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>
     /// Captures any front matter keys not part of the spec. Compliant runtimes ignore

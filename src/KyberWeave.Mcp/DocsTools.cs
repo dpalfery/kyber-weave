@@ -55,13 +55,14 @@ public sealed class DocsTools
         {
             // Saying so plainly is the whole point of the relevance floor. An agent told
             // to use this before grepping needs an explicit signal that it may now grep.
+            var docsIndex = Path.Combine(_host.DocsRelativeRoot, "README.md").Replace('\\', '/');
             return $"""
                 No document in the governed corpus scored above the relevance threshold for '{query}'.
                 {index.DocumentCount} documents were considered.
 
                 This is a real miss, not an empty corpus. Either the subject is undocumented, or the
                 question uses vocabulary the documentation does not. Try naming a component, a doc-id
-                ("webui/architecture"), or a code symbol; or fall back to reading 6-Docs/README.md.
+                ("webui/architecture"), or a code symbol; or fall back to reading {docsIndex}.
                 """;
         }
 

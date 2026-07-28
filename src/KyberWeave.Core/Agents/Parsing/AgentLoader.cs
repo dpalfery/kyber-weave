@@ -34,7 +34,7 @@ public static class AgentLoader
         return new AgentSet(validAgents);
     }
 
-    public static List<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
+    public static IReadOnlyList<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
     {
         var results = new List<AgentLoadResult>();
         var fullRoot = Path.GetFullPath(projectRoot);

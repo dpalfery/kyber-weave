@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Agents.Model;
 
@@ -20,7 +21,7 @@ public sealed class TomlAgentParser : IAgentParser
         string description = string.Empty;
         string instructions = string.Empty;
         string model = string.Empty;
-        var tools = new List<string>();
+        var tools = new Collection<string>();
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // Simple TOML line-and-block extractor

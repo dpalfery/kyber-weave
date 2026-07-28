@@ -5,6 +5,8 @@ namespace KyberWeave.Tests;
 
 public class SkillParserTests
 {
+    private static readonly string[] ExpectedAllowedTools = ["search", "fetch"];
+
     private const string Valid = """
 ---
 name: my-skill
@@ -31,7 +33,7 @@ See scripts/run.py for details.
         Assert.StartsWith("Use to do a thing", skill.Frontmatter.Description);
         Assert.Equal("MIT", skill.Frontmatter.License);
         Assert.Equal("me", skill.Frontmatter.Metadata!["author"]);
-        Assert.Equal(new[] { "search", "fetch" }, skill.Frontmatter.AllowedTools);
+        Assert.Equal(ExpectedAllowedTools, skill.Frontmatter.AllowedTools);
     }
 
     [Fact]

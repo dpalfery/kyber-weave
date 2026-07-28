@@ -10,12 +10,6 @@ using YamlDotNet.Serialization.NamingConventions;
 
 namespace KyberWeave.Core.Skills.Parsing;
 
-/// <summary>Raised when a SKILL.md cannot be parsed at all (malformed YAML, missing fences).</summary>
-public sealed class SkillParseException : Exception
-{
-    public SkillParseException(string message, Exception? inner = null) : base(message, inner) { }
-}
-
 /// <summary>
 /// Parses a single SKILL.md file into a <see cref="Skill"/>. Uses Markdig with the
 /// YAML front matter extension to split front matter from body, YamlDotNet to
@@ -135,7 +129,7 @@ public static class SkillParser
         void Consider(string target)
         {
             if (string.IsNullOrWhiteSpace(target)) return;
-            if (target.StartsWith("http://") || target.StartsWith("https://") || target.StartsWith("#") || target.StartsWith("mailto:"))
+            if (target.StartsWith("http://") || target.StartsWith("https://") || target.StartsWith('#') || target.StartsWith("mailto:"))
                 return;
             var normalized = target.Trim();
             if (normalized.StartsWith("./", StringComparison.Ordinal))
