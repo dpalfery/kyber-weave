@@ -2,7 +2,7 @@
 
 **Governance for every artifact that shapes agent behaviour.** Skills, agent definitions, and documentation are all supply-chain artifacts, and Kyber-Weave gives all three the same treatment: parsed, validated against a closed spec, checked for drift against a source of truth, security-scanned, and made retrievable.
 
-> **Thank you, SkillForge.** Kyber-Weave’s skill-governance feature originated as **SkillForge**, an MIT-licensed open-source project by the SkillForge contributors. That work was absorbed into this repository and is maintained here. The original MIT licence and copyright (`Copyright (c) 2026 SkillForge contributors`) are retained — see [NOTICE](NOTICE) and [LICENSE](LICENSE).
+> **Thank you, [SkillForge](https://github.com/bonaniibm/SkillForge).** Kyber-Weave’s skill-governance feature originated as **[SkillForge](https://github.com/bonaniibm/SkillForge)** ([bonaniibm/SkillForge](https://github.com/bonaniibm/SkillForge)), an MIT-licensed open-source project by the SkillForge contributors. That work was absorbed into this repository and is maintained here; there is no ongoing upstream sync. The original MIT licence and copyright (`Copyright (c) 2026 SkillForge contributors`) are retained — see [NOTICE](NOTICE) and [LICENSE](LICENSE).
 
 Each artifact class differs only in what its source of truth *is*:
 
@@ -39,9 +39,9 @@ Host CI should pin an **npm version** or **Release tag**, not a NuGet feed. See 
 
 Three symmetric CLI branches, one per artifact class.
 
-### Skills *(thank you, SkillForge)*
+### Skills *(thank you, [SkillForge](https://github.com/bonaniibm/SkillForge))*
 
-Skill validate / lint / scan / route / catalog / pack / new grew from the **SkillForge** open-source project (MIT; `Copyright (c) 2026 SkillForge contributors`). Absorbed into Kyber-Weave and maintained here — attribution and licence terms: [NOTICE](NOTICE), [LICENSE](LICENSE).
+Skill validate / lint / scan / route / catalog / pack / new grew from **[SkillForge](https://github.com/bonaniibm/SkillForge)** ([bonaniibm/SkillForge](https://github.com/bonaniibm/SkillForge)), an MIT-licensed open-source project (`Copyright (c) 2026 SkillForge contributors`). Absorbed into Kyber-Weave and maintained here — no ongoing upstream sync. Attribution and licence terms: [NOTICE](NOTICE), [LICENSE](LICENSE).
 
 | Command | What it answers | Gate |
 |---|---|---|
@@ -205,6 +205,6 @@ Hosts may drop a root `kyber-weave.yml` to override ontology defaults and harnes
 
 MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-**SkillForge** — Kyber-Weave’s skill-governance feature originated as SkillForge, an MIT-licensed open-source project by the SkillForge contributors (`Copyright (c) 2026 SkillForge contributors`). That work was absorbed into this repository; there is no separate upstream to track. The MIT licence under which it was received is retained in [LICENSE](LICENSE) and explained in [NOTICE](NOTICE). Thank you to the SkillForge contributors.
+**[SkillForge](https://github.com/bonaniibm/SkillForge)** ([bonaniibm/SkillForge](https://github.com/bonaniibm/SkillForge)) — Kyber-Weave’s skill-governance feature originated as SkillForge, an MIT-licensed open-source project by the SkillForge contributors (`Copyright (c) 2026 SkillForge contributors`). That work was absorbed into this repository and is maintained here; there is no ongoing upstream sync. The MIT licence under which it was received is retained in [LICENSE](LICENSE) and explained in [NOTICE](NOTICE). Thank you to the SkillForge contributors.
 
 Built on [Markdig](https://github.com/xoofx/markdig), [YamlDotNet](https://github.com/aaubry/YamlDotNet), [Spectre.Console](https://spectreconsole.net/), and the [ModelContextProtocol](https://github.com/modelcontextprotocol/csharp-sdk) C# SDK.
