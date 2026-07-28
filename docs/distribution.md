@@ -4,7 +4,7 @@ Kyber-Weave distributes **self-contained single-file binaries** (no .NET runtime
 
 | Channel | Package / location | Notes |
 | --- | --- | --- |
-| **npm** | `@dpalfery/kyber-weave` | Thin Node wrapper; downloads Release assets for the package version tag |
+| **npm** | `@dpalfery/kyber-weave` | Thin Node wrapper; downloads Release assets for the package version tag; verifies SHA-256 from `SHA256SUMS.txt`; HTTPS-only redirects |
 | **GitHub Releases** | `kyber-weave-<rid>.tar.gz` / `.zip`, `kyber-weave-mcp-<rid>.*` | Source of truth for binaries |
 | **Homebrew** | `dpalfery/kyber-weave` tap → `kyber-weave` | Formula installs CLI + MCP from Release assets |
 | GitHub Packages | `KyberWeave.Tool` / `KyberWeave.Mcp` | Optional secondary `dotnet tool` channel |

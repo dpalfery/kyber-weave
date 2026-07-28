@@ -8,6 +8,7 @@ Thin Node wrapper around **self-contained** Kyber-Weave binaries (`kyber-weave`,
 2. **postinstall** (and first CLI run if scripts were skipped) downloads the matching GitHub Release assets for your platform:
    - Tag = `v` + `package.json` `version` (e.g. `0.1.0` → `v0.1.0`)
    - Assets: `kyber-weave-<rid>.tar.gz` / `.zip` and `kyber-weave-mcp-<rid>.tar.gz` / `.zip`
+   - Integrity: downloads `SHA256SUMS.txt` over **HTTPS only** (HTTP redirects rejected) and verifies each archive's SHA-256 before extract
 3. Binaries land under `vendor/<rid>/` inside the package install directory.
 
 Supported RIDs: `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`.
@@ -33,4 +34,4 @@ Download Release assets from https://github.com/dpalfery/kyber-weave/releases, e
 
 ## Licence
 
-MIT — see the repository root [LICENSE](https://github.com/dpalfery/kyber-weave/blob/main/LICENSE).
+MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE) (SkillForge attribution).
