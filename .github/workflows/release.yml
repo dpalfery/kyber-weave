@@ -122,14 +122,10 @@ jobs:
           mkdir -p dist
           if [[ "${RID}" == win-* ]]
           then
-            (
-              cd "publish/cli/${RID}"
-              zip -9 "../../dist/kyber-weave-${RID}.zip" kyber-weave.exe
-            )
-            (
-              cd "publish/mcp/${RID}"
-              zip -9 "../../dist/kyber-weave-mcp-${RID}.zip" kyber-weave-mcp.exe
-            )
+            # -j junks directory paths so the archive contains only the .exe basename.
+            # Paths are relative to the workspace root (same as the tar branch).
+            zip -9 -j "dist/kyber-weave-${RID}.zip" "publish/cli/${RID}/kyber-weave.exe"
+            zip -9 -j "dist/kyber-weave-mcp-${RID}.zip" "publish/mcp/${RID}/kyber-weave-mcp.exe"
           else
             tar -C "publish/cli/${RID}" -czf "dist/kyber-weave-${RID}.tar.gz" kyber-weave
             tar -C "publish/mcp/${RID}" -czf "dist/kyber-weave-mcp-${RID}.tar.gz" kyber-weave-mcp
