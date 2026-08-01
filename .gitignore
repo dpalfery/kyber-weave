@@ -12,3 +12,8 @@ nupkg/
 /artifacts/
 /npm/vendor/
 /npm/*.tgz
+
+# Cursor MCP secrets (keep .cursor/mcp.json tracked)
+.cursor/**/*.env
+.cursor/**/*.env.*
+!.cursor/**/*.env.example
