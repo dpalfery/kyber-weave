@@ -13,7 +13,7 @@
       "url": "https://mcp.context7.com/mcp"
     },
     "azure-mcp": {
-      "command": "azmcp",
+      "command": "${userHome}/.local/bin/azmcp",
       "args": [
         "server",
         "start",
@@ -22,15 +22,19 @@
         "--read-only"
       ],
       "env": {
-        "AZURE_MCP_COLLECT_TELEMETRY": "false"
+        "AZURE_MCP_COLLECT_TELEMETRY": "false",
+        "PATH": "${userHome}/.local/bin:${env:PATH}"
       }
     },
     "github": {
-      "command": "github-mcp-server",
+      "command": "${userHome}/.local/bin/github-mcp-server",
       "args": [
         "stdio"
       ],
-      "envFile": "${workspaceFolder}/.cursor/github-mcp.env"
+      "envFile": "${workspaceFolder}/.cursor/github-mcp.env",
+      "env": {
+        "PATH": "${userHome}/.local/bin:${env:PATH}"
+      }
     },
     "microsoft-learn": {
       "url": "https://learn.microsoft.com/api/mcp"
