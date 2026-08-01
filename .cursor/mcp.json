@@ -13,7 +13,7 @@
       "url": "https://mcp.context7.com/mcp"
     },
     "azure-mcp": {
-      "command": "/Users/dave/.local/bin/azmcp",
+      "command": "azmcp",
       "args": [
         "server",
         "start",
@@ -26,7 +26,7 @@
       }
     },
     "github": {
-      "command": "/Users/dave/.local/bin/github-mcp-server",
+      "command": "github-mcp-server",
       "args": [
         "stdio"
       ],
