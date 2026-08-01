@@ -6,10 +6,18 @@ description: >-
   to the Kyber-Weave ontology.
 author: dpalfery
 
-# Consumers pick their own targets; 'agent-skills' deploys to .agents/skills/
-# and is the cross-client default `kyber-weave docs init` uses.
-# targets:
-#   - agent-skills
+# Pinned deliberately. Left unset, APM auto-detects targets from the harness
+# folders present in the repository, resolves to 'all', and `apm compile` then
+# writes AGENTS.md, CLAUDE.md, GEMINI.md, .github/copilot-instructions.md and a
+# file per harness — overwriting the hand-authored AGENTS.md files in this tree.
+#
+# 'agent-skills' scopes compile to .agents/skills/, which produces no compile
+# output at all, so those files stay hand-authored.
+#
+# This does not constrain consumers: --target outranks apm.yml in APM's
+# resolution chain, and `kyber-weave docs init` always passes it explicitly.
+targets:
+  - agent-skills
 
 dependencies:
   apm: []

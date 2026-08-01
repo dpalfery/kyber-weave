@@ -77,7 +77,17 @@ nearest-match suggestion is computable, offer it.
 
 ## A note on these files
 
-`AGENTS.md` and `CLAUDE.md` here are **hand-authored**. `apm compile` generates files at
-these exact paths from `.apm/instructions/`, and would overwrite them. This repository
-uses APM only to distribute the `kyber-weave-docs` skill via `apm install` — do not run
-`apm compile` here without moving this content into `.apm/` first.
+`AGENTS.md` and `CLAUDE.md` here are **hand-authored and stay that way.**
+
+`apm compile` generates files at exactly these paths. Left unconfigured, APM auto-detects
+targets from the harness folders present and resolves to `all`, which writes `AGENTS.md`,
+`CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` and a file per harness — over
+the top of these.
+
+[`apm.yml`](apm.yml) pins `targets: [agent-skills]` to prevent that. Compile then scopes to
+`.agents/skills/` and produces no output, so these files are safe. **Do not remove that
+pin**, and do not add `.apm/instructions/`. This repository uses APM for one thing:
+distributing the `kyber-weave-docs` skill via `apm install`.
+
+Consumers are unaffected — `--target` outranks `apm.yml` in APM's resolution chain, and
+`docs init` always passes it explicitly.
