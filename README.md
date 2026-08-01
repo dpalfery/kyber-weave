@@ -20,8 +20,15 @@ Each artifact class differs only in what its source of truth *is*:
 
 Kyber-Weave ships as **self-contained platform binaries** (`kyber-weave` and `kyber-weave-mcp` on your PATH). Pick one channel:
 
+```bash
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
+```
+
+Or pick another channel:
+
 | Channel | Command / how |
 |---|---|
+| **Install script** (macOS / Linux) | `curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \| sh` |
 | **npm** (primary) | `npm i -g @dpalfery/kyber-weave` |
 | **Homebrew** (primary) | `brew tap dpalfery/kyber-weave && brew install kyber-weave` |
 | **GitHub Releases** (primary) | Download the RID asset for your OS/arch from [Releases](https://github.com/dpalfery/kyber-weave/releases) |
@@ -29,7 +36,13 @@ Kyber-Weave ships as **self-contained platform binaries** (`kyber-weave` and `ky
 
 Supported release RIDs: `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`.
 
-The npm package is a thin Node wrapper: on install (or first run) it downloads the matching GitHub Release binaries for your platform. Details: [`npm/README.md`](npm/README.md) and [`docs/distribution.md`](docs/distribution.md).
+The install script and the npm package both fetch the matching GitHub Release binaries for your platform and verify them against the release's `SHA256SUMS.txt` over HTTPS. The script installs to `~/.local/bin` by default and needs no sudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh -s -- --version 0.1.1 --install-dir /usr/local/bin
+```
+
+`--version` pins a release (default: latest), `--install-dir` chooses the target, `--no-mcp` skips the MCP server; `KYBER_WEAVE_VERSION` / `KYBER_WEAVE_INSTALL_DIR` / `KYBER_WEAVE_NO_MCP` do the same. Windows is not covered by the script — use npm. Details: [`npm/README.md`](npm/README.md) and [`docs/distribution.md`](docs/distribution.md).
 
 Host CI should pin an **npm version** or **Release tag**, not a NuGet feed. See [`templates/github-actions/`](templates/github-actions/).
 
@@ -190,7 +203,7 @@ homebrew/                 # formula source for dpalfery/homebrew-kyber-weave
 docs/                     # ALM playbook + distribution notes
 ```
 
-Hosts may drop a root `kyber-weave.yml` to override ontology defaults and harness capability profiles.
+Hosts may drop a `.kyber-weave/kyber-weave.yml` to override ontology defaults and harness capability profiles. A legacy root `kyber-weave.yml` is still read when `.kyber-weave/kyber-weave.yml` is absent.
 
 ---
 

@@ -170,7 +170,8 @@ public class OntologyConfigTests
         Directory.CreateDirectory(root);
         try
         {
-            File.WriteAllText(Path.Combine(root, "kyber-weave.yml"), "ontology: [unclosed");
+            var configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
+            File.WriteAllText(Path.Combine(configDir.FullName, "kyber-weave.yml"), "ontology: [unclosed");
 
             var result = KyberWeaveConfigLoader.TryLoad(root);
 

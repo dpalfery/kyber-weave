@@ -129,7 +129,8 @@ public class HarnessProfileConfigTests
         Directory.CreateDirectory(root);
         try
         {
-            File.WriteAllText(Path.Combine(root, "kyber-weave.yml"), """
+            var configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
+            File.WriteAllText(Path.Combine(configDir.FullName, "kyber-weave.yml"), """
                 harness:
                   profiles:
                     not-a-harness:

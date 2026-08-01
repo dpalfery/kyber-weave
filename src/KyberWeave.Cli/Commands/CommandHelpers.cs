@@ -34,7 +34,7 @@ public static class CommandHelpers
     }
 
     /// <summary>
-    /// Loads <c>kyber-weave.yml</c> for CLI commands. On failure, adds
+    /// Loads <c>.kyber-weave/kyber-weave.yml</c> for CLI commands. On failure, adds
     /// <see cref="KyberWeaveConfigLoader.ConfigLoadErrorCode"/> and returns false.
     /// </summary>
     public static bool TryLoadConfig(

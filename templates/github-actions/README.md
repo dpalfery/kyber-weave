@@ -20,7 +20,7 @@ These are **product templates**, not live host CI.
    - Skills: `SKILL_DIRS`
    - Agents: `PROJECT_ROOT` / `HARNESS` matrix
    - Docs: `DOCS_ROOT` (CLI default is host-dependent; templates use `docs`)
-4. Optionally add a root `kyber-weave.yml` for ontology / harness overrides.
+4. Optionally add a `.kyber-weave/kyber-weave.yml` for ontology / harness overrides.
 5. Wire job names into branch protection if they should block merges.
 6. Grant `security-events: write` if you keep SARIF upload steps.
 

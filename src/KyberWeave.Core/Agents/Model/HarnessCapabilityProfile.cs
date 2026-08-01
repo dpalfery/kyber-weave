@@ -7,7 +7,7 @@ namespace KyberWeave.Core.Agents.Model;
 /// </summary>
 /// <remarks>
 /// Product defaults deliberately omit host-specific role→skill satisfaction maps
-/// (e.g. MotorcycleRAG conductor→conductor). Hosts restore those via <c>kyber-weave.yml</c>.
+/// (e.g. MotorcycleRAG conductor→conductor). Hosts restore those via <c>.kyber-weave/kyber-weave.yml</c>.
 /// </remarks>
 public sealed class HarnessCapabilityProfile
 {
