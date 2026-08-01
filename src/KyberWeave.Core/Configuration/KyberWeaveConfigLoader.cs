@@ -4,7 +4,8 @@ namespace KyberWeave.Core.Configuration;
 
 /// <summary>
 /// Loads the combined Kyber-Weave configuration from YAML text or a repository root
-/// (<c>kyber-weave.yml</c>, optionally overridden by an explicit <c>--config</c> path).
+/// (<c>.kyber-weave/kyber-weave.yml</c>, falling back to a legacy root <c>kyber-weave.yml</c>,
+/// and optionally overridden by an explicit <c>--config</c> path).
 /// </summary>
 public static class KyberWeaveConfigLoader
 {
@@ -78,8 +79,16 @@ public static class KyberWeaveConfigLoader
             return explicitPath;
         }
 
-        var defaultPath = Path.Combine(repoRoot, KyberWeaveYamlParser.DefaultFileName);
-        return File.Exists(defaultPath) ? defaultPath : null;
+        var defaultPath = Path.Combine(
+            repoRoot,
+            KyberWeaveYamlParser.DefaultDirectoryName,
+            KyberWeaveYamlParser.DefaultFileName);
+        if (File.Exists(defaultPath))
+            return defaultPath;
+
+        // Legacy location: repo-root kyber-weave.yml, kept working for existing hosts.
+        var legacyPath = Path.Combine(repoRoot, KyberWeaveYamlParser.DefaultFileName);
+        return File.Exists(legacyPath) ? legacyPath : null;
     }
 
     private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document) =>

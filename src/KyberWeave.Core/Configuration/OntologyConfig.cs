@@ -5,7 +5,7 @@ namespace KyberWeave.Core.Configuration;
 /// <summary>
 /// Documentation ontology: closed vocabularies, required-key matrix, docs root,
 /// exclusion lists, and catalog column positions. Product defaults mirror the
-/// historical hardcoded behaviour; hosts override via <c>kyber-weave.yml</c>.
+/// historical hardcoded behaviour; hosts override via <c>.kyber-weave/kyber-weave.yml</c>.
 /// </summary>
 public sealed class OntologyConfig
 {

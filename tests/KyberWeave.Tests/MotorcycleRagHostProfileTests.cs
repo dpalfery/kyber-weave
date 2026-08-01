@@ -154,15 +154,39 @@ public class MotorcycleRagHostProfileTests
     }
 
     [Fact]
-    public void HostProfile_Loads_From_Repo_Root_Kyber_Weave_Yml()
+    public void HostProfile_Loads_From_Kyber_Weave_Folder()
     {
         using var repo = new HostProfileRepoFixture();
-        repo.WriteRootConfig(HostProfileYaml);
+        repo.WriteHostConfig(HostProfileYaml);
 
         var config = KyberWeaveConfigLoader.Load(repo.Root);
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
         Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
+    }
+
+    [Fact]
+    public void HostProfile_Loads_From_Legacy_Repo_Root_Kyber_Weave_Yml()
+    {
+        using var repo = new HostProfileRepoFixture();
+        repo.WriteLegacyRootConfig(HostProfileYaml);
+
+        var config = KyberWeaveConfigLoader.Load(repo.Root);
+
+        Assert.Equal("6-Docs", config.Ontology.DocsRoot);
+        Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
+    }
+
+    [Fact]
+    public void HostProfile_In_Kyber_Weave_Folder_Wins_Over_Legacy_Root_File()
+    {
+        using var repo = new HostProfileRepoFixture();
+        repo.WriteLegacyRootConfig("ontology:\n  docs-root: legacy-docs\n");
+        repo.WriteHostConfig(HostProfileYaml);
+
+        var config = KyberWeaveConfigLoader.Load(repo.Root);
+
+        Assert.Equal("6-Docs", config.Ontology.DocsRoot);
     }
 
     private const string ValidReference = """
@@ -292,7 +316,14 @@ public class MotorcycleRagHostProfileTests
             return this;
         }
 
-        public void WriteRootConfig(string yaml) =>
+        public void WriteHostConfig(string yaml)
+        {
+            var dir = Path.Combine(Root, ".kyber-weave");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "kyber-weave.yml"), yaml);
+        }
+
+        public void WriteLegacyRootConfig(string yaml) =>
             File.WriteAllText(Path.Combine(Root, "kyber-weave.yml"), yaml);
 
         public AgentSet LoadAgentSet() => AgentLoader.LoadAll(Root);

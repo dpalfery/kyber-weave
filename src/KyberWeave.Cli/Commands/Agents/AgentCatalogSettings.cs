@@ -10,6 +10,6 @@ public sealed class AgentCatalogSettings : CommandSettings
     public string Path { get; set; } = ".";
 
     [CommandOption("-c|--config <PATH>")]
-    [Description("Path to kyber-weave.yml. Defaults to <path>/kyber-weave.yml when present.")]
+    [Description("Path to kyber-weave.yml. Defaults to <path>/.kyber-weave/kyber-weave.yml (or legacy <path>/kyber-weave.yml) when present.")]
     public string? Config { get; set; }
 }

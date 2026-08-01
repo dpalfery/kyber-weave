@@ -4,6 +4,7 @@ Kyber-Weave distributes **self-contained single-file binaries** (no .NET runtime
 
 | Channel | Package / location | Notes |
 | --- | --- | --- |
+| **Install script** | `scripts/install.sh` | `curl … \| sh` for macOS/Linux; resolves latest tag (or `--version`), verifies SHA-256 from `SHA256SUMS.txt`, HTTPS-only redirects; installs to `~/.local/bin` without sudo |
 | **npm** | `@dpalfery/kyber-weave` | Thin Node wrapper; downloads Release assets for the package version tag; verifies SHA-256 from `SHA256SUMS.txt`; HTTPS-only redirects |
 | **GitHub Releases** | `kyber-weave-<rid>.tar.gz` / `.zip`, `kyber-weave-mcp-<rid>.*` | Source of truth for binaries |
 | **Homebrew** | `dpalfery/kyber-weave` tap → `kyber-weave` | Formula installs CLI + MCP from Release assets |
@@ -43,6 +44,21 @@ Windows archives contain `*.exe`; others contain extensionless binaries.
 | `HOMEBREW_TAP_TOKEN` | GitHub repo Actions secrets | PAT with `contents:write` on `dpalfery/homebrew-kyber-weave` |
 
 Without these secrets, Release assets still publish; npm and Homebrew tap updates are skipped with a workflow warning.
+
+## Install script
+
+`scripts/install.sh` is served straight from the default branch via
+`raw.githubusercontent.com`, so it is **not** versioned with a release — keep it
+backward-compatible with older tags. It only ever reads Release assets, so a
+script change never requires a re-release.
+
+Covers `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`. Windows is out of
+scope (no `.zip` handling); Windows users get npm.
+
+```bash
+# smoke the script end-to-end without touching a real bin dir
+sh scripts/install.sh --install-dir "$(mktemp -d)" --version 0.1.1
+```
 
 ## Local smoke
 
