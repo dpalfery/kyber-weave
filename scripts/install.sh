@@ -173,6 +173,7 @@ VERSION="${VERSION#v}"
 TAG="v${VERSION}"
 
 if [ -z "$INSTALL_DIR" ]; then
+    [ -n "${HOME:-}" ] || die "HOME is unset; pass --install-dir <dir> (or set KYBER_WEAVE_INSTALL_DIR)"
     INSTALL_DIR="${HOME}/.local/bin"
 fi
 
