@@ -74,6 +74,11 @@ app.Configure(config =>
     {
         docs.SetDescription("Validate documentation frontmatter and its joins to the code graph.");
 
+        docs.AddCommand<DocsInitCommand>("init")
+            .WithDescription("Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM.")
+            .WithExample("docs", "init", ".")
+            .WithExample("docs", "init", ".", "--docs-root", "docs", "--target", "claude,agent-skills");
+
         docs.AddCommand<DocsValidateCommand>("validate")
             .WithDescription("Check documentation frontmatter against the ontology schema (KW-DOC-SPEC-*).")
             .WithExample("docs", "validate", ".");

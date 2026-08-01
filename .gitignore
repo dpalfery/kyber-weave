@@ -12,3 +12,7 @@ nupkg/
 /artifacts/
 /npm/vendor/
 /npm/*.tgz
+
+# CodeGraph index — host-owned and machine-local. Kyber-Weave reads it read-only
+# and never creates it; the daemon rebuilds it per machine.
+.codegraph/

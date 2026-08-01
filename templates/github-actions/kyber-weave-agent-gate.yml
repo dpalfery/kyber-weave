@@ -1,7 +1,8 @@
 # Sample: Kyber-Weave agent validate / scan / sync-check
 #
-# Copy to .github/workflows/ and replace PIN placeholders.
-# See README.md in this directory for install channels and harness adaptation.
+# Copy to .github/workflows/ and adapt the harness matrix below.
+# The install script tracks the latest release; add `--version <x.y.z>` to the
+# install step where a job must be reproducible. See README.md in this directory.
 
 name: Kyber-Weave Agent Gate
 
@@ -19,9 +20,6 @@ permissions:
   contents: read
 
 env:
-  # PIN: published @dpalfery/kyber-weave SemVer — replace before production use
-  KYBER_WEAVE_VERSION: "0.1.0"
-  NODE_VERSION: "22"
   # Repository root passed to agent commands (harnesses discovered under .*/agents).
   PROJECT_ROOT: "."
 
@@ -42,13 +40,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Kyber-Weave (npm, pinned)
-        run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
+      - name: Install Kyber-Weave
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+            | sh -s -- --no-mcp
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Validate agents (${{ matrix.harness }})
         run: >
@@ -81,13 +78,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Kyber-Weave (npm, pinned)
-        run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
+      - name: Install Kyber-Weave
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+            | sh -s -- --no-mcp
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Cross-harness sync-check
         run: >

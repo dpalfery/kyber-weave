@@ -1,0 +1,101 @@
+---
+id: ci-pipelines/rule-reference
+title: Rule reference
+doc-type: reference
+status: current
+component: CI Pipelines
+owner: dpalfery
+last-reviewed: 2026-08-01
+---
+
+# Rule reference
+
+Every rule id Kyber-Weave emits. Ids are stable and suitable for suppression and SARIF
+baselines — see [CI Pipelines architecture](architecture.md) for why they never change.
+
+## Documentation — [DocGraph](../docgraph/governance.md)
+
+### Schema — `docs validate`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-SPEC-001` | Error | No frontmatter block, or unparseable YAML |
+| `KW-DOC-SPEC-002` | Error | `doc-type`, `status`, or `last-reviewed` outside its vocabulary or format |
+| `KW-DOC-SPEC-003` | Error | Required key missing or empty for this doc-type |
+| `KW-DOC-SPEC-004` | Error | `component` or `owner` absent from the catalog |
+| `KW-DOC-SPEC-005` | Error | `source-root` path does not exist |
+| `KW-DOC-SPEC-006` | Error | Duplicate `id`, or reference to an unknown id |
+
+### Drift — `docs drift`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-DRIFT-001` | Error / Critical | `code-refs` symbol unresolved. Critical when the index itself is missing. |
+| `KW-DOC-DRIFT-002` | Error | `api-endpoints` route matches no indexed route |
+| `KW-DOC-DRIFT-003` | Warning | `source-root` exists but nothing beneath it is indexed |
+
+## Skills — [Skill governance](../context-hygiene/skills.md)
+
+| Id range | Tier | Meaning |
+|---|---|---|
+| `KW-SKILL-SPEC-001`…`-012` | Spec | Agent Skills open-format conformance. Mostly errors; `-007` and `-009` warn, `-010` informs. |
+| `KW-SKILL-LINT-001`…`-006` | Routing | Description quality dimensions that reduce routing reliability |
+| `KW-SKILL-LINT-010` | Routing | **Name collision** — the only error in this tier |
+| `KW-SKILL-LINT-011` | Routing | Description overlap between two skills |
+
+### Skill security — `skill scan`
+
+| Id | Meaning |
+|---|---|
+| `KW-SKILL-SEC-001` | Ignore-previous-instructions |
+| `KW-SKILL-SEC-002` | Disregard-guidelines |
+| `KW-SKILL-SEC-003` | System-prompt override |
+| `KW-SKILL-SEC-004` | Persona hijack |
+| `KW-SKILL-SEC-005` | Exfiltration phrasing |
+| `KW-SKILL-SEC-006` | HTML comment concealment |
+| `KW-SKILL-SEC-007` | Base64 blob |
+| `KW-SKILL-SEC-008` | Sandbox bypass |
+| `KW-SKILL-SEC-010` | `curl \| sh` |
+| `KW-SKILL-SEC-011` | `wget \| sh` |
+| `KW-SKILL-SEC-012` | `eval` of base64 |
+| `KW-SKILL-SEC-013` | Destructive command |
+| `KW-SKILL-SEC-020` | AWS key |
+| `KW-SKILL-SEC-021` | GitHub token |
+| `KW-SKILL-SEC-022` | Private key |
+| `KW-SKILL-SEC-023` | Slack token |
+| `KW-SKILL-SEC-024` | OpenAI key |
+| `KW-SKILL-SEC-025` | Password assignment |
+| `KW-SKILL-SEC-030` | Missing author |
+| `KW-SKILL-SEC-031` | Missing version |
+| `KW-SKILL-SEC-032` | Missing license |
+
+## Agents — [Agent harness governance](../context-hygiene/agents.md)
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-AGENT-SPEC-001` | Error | Missing name |
+| `KW-AGENT-SPEC-002` | Error | Missing description |
+| `KW-AGENT-SPEC-003` | Error | Missing instructions |
+| `KW-AGENT-SPEC-004` | Error | Broken file reference |
+| `KW-AGENT-SYNC-001` | Error | Role not present in every harness |
+| `KW-AGENT-SYNC-002` | Error | Instruction drift between harness copies |
+| `KW-AGENT-LINT-001` | Warning | Routing score too low |
+
+### Agent security — `agent scan`
+
+`KW-AGENT-SEC-001`…`-008`, `-020`…`-025`, `-030`…`-032` mirror the skill security codes
+above, one-for-one. Both come from the same
+[instruction-surface engine](../context-hygiene/security-scanning.md); the prefixes differ
+only so hosts can gate the two artifact classes at different severities.
+
+## Shared
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-PARSE-000` | Error | An artifact could not be parsed |
+| `KW-CONFIG-001` | Error | `kyber-weave.yml` invalid or unreadable |
+
+## Related
+
+- [CI Pipelines architecture](architecture.md) — severity gating and output formats
+- [Workflow runbook](workflows-runbook.md) — wiring these into GitHub Actions
