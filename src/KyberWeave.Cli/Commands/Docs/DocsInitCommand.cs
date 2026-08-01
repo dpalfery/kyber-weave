@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Core.Processes;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -88,19 +89,18 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 return;
             }
 
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit();
+            var result = ProcessRunner.ReadToEnd(process);
 
-            if (process.ExitCode == 0)
+            if (result.ExitCode == 0)
             {
                 AnsiConsole.MarkupLine($"  [green]deployed[/] kyber-weave-docs skill → target [bold]{Markup.Escape(settings.Target)}[/]");
                 AnsiConsole.WriteLine();
                 return;
             }
 
-            var detail = error.Trim().Length > 0 ? error.Trim() : output.Trim();
-            SkillUnavailable(command, $"apm exited {process.ExitCode}: {detail}");
+            var error = result.StandardError.Trim();
+            var detail = error.Length > 0 ? error : result.StandardOutput.Trim();
+            SkillUnavailable(command, $"apm exited {result.ExitCode}: {detail}");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)
         {

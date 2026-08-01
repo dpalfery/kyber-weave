@@ -47,6 +47,22 @@ real value that clears the default** — `Clone` falls back only on null. That i
 drops the inherited `DevOps/*` exclusions. Preserve this when adding config keys, and add
 the key to `OntologyYamlSection` with a hyphenated name.
 
+## Child processes go through `ProcessRunner`
+
+Never call `ReadToEnd()` on one redirected stream and then the other, and never call
+`WaitForExit()` before draining both. An OS pipe buffer is finite, so a child that fills
+the stream you are not currently reading blocks on write while you block on a read that
+can never complete.
+
+This is a silent bug — every fixture and happy path is quiet enough to fit in the buffer,
+so it survives testing and hangs on the first talkative input. It had been written three
+separate times in this repository before being centralised.
+
+`Processes/ProcessRunner.ReadToEnd` starts both reads before awaiting either. Use it for
+anything with `RedirectStandardOutput` or `RedirectStandardError`.
+`ProcessRunnerTests` reintroduces the deadlock against a child that writes 300 KB to each
+stream and fails on a timeout, so a regression is caught rather than hanging CI.
+
 ## Dependencies
 
 Markdig and YamlDotNet only. Adding a third needs a stated reason — see the sqlite3
