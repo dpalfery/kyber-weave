@@ -214,6 +214,12 @@ Hosts may drop a `.kyber-weave/kyber-weave.yml` to override ontology defaults an
 - **`docs drift` needs a CodeGraph index and the `sqlite3` CLI.**
 - Some agent Core APIs exist without CLI verbs (`agent route` / `lint` / `new`) — known gap.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for workflow and local build/test steps.
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security reports go through
+[GitHub Security Advisories](SECURITY.md) — not public issues.
+
 ## Licence and attribution
 
 MIT. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

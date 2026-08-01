@@ -1,0 +1,59 @@
+name: Bug report
+description: Report unexpected behavior or a defect
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. For security issues, use [Security Advisories](https://github.com/dpalfery/kyber-weave/security/advisories/new) instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps or commands that trigger the problem
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Kyber-Weave version, release tag, or commit SHA
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, install channel (npm / Homebrew / Release / from source), .NET SDK if relevant
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      render: text
+    validations:
+      required: false
