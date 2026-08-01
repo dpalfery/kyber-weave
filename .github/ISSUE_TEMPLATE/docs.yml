@@ -1,0 +1,37 @@
+name: Documentation
+description: Report a docs gap, typo, or request clearer guidance
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Typo / clarity
+        - Missing documentation
+        - Incorrect documentation
+        - Example or sample request
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: location
+    attributes:
+      label: Where
+      description: File path, URL, or section (README, docs/, samples, etc.)
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: What should change and why?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or outline
+    validations:
+      required: false

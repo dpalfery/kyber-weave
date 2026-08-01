@@ -1,0 +1,24 @@
+name: Security (redirect)
+description: How to report a vulnerability privately — do not use this for public disclosure
+title: "[Security]: please use private advisory"
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not describe vulnerabilities in a public issue.**
+
+        Report privately via GitHub Security Advisories:
+
+        → [Open a private security advisory](https://github.com/dpalfery/kyber-weave/security/advisories/new)
+
+        See [SECURITY.md](https://github.com/dpalfery/kyber-weave/blob/main/SECURITY.md) for details.
+
+        If you opened this issue by mistake, close it without sharing exploit details and file an advisory instead.
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I understand security reports must use a private GitHub Security Advisory, not a public issue.
+          required: true
