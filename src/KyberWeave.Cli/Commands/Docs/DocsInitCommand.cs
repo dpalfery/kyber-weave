@@ -29,8 +29,10 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             result = DocsScaffolder.Scaffold(
                 settings.Path, settings.DocsRoot, settings.Owner, settings.Force);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
+            // ArgumentException covers a --docs-root that escapes the repository root and
+            // an --owner that would inject structure into the emitted YAML or catalog row.
             AnsiConsole.MarkupLine($"[red]Could not scaffold: {Markup.Escape(ex.Message)}[/]");
             return 1;
         }

@@ -49,8 +49,17 @@ public static class DocsScaffolder
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         var root = Path.GetFullPath(repoRoot);
 
+        RequireEmittableValue(owner, nameof(owner));
+
         var detected = string.IsNullOrWhiteSpace(docsRoot);
-        var resolvedDocsRoot = detected ? DetectDocsRoot(root) : docsRoot!.Trim().Replace('\\', '/').TrimEnd('/');
+        var resolvedDocsRoot = detected
+            ? DetectDocsRoot(root)
+            : RequireEmittableValue(docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), nameof(docsRoot));
+
+        // Checked before the first write, not only inside Write. The host config resolves
+        // inside the root and would otherwise be created successfully and left behind,
+        // pointing at a docs root that the very next write then rejects.
+        RequireContained(root, resolvedDocsRoot, nameof(docsRoot));
 
         var files = new List<ScaffoldedFile>
         {
@@ -80,9 +89,59 @@ public static class DocsScaffolder
         return "docs";
     }
 
+    /// <summary>
+    /// Rejects values that would change the structure of what they are emitted into.
+    /// </summary>
+    /// <remarks>
+    /// These reach two formats: YAML frontmatter, where a newline adds a key, and the
+    /// pipe-delimited catalog row, where a <c>|</c> shifts the columns the component and
+    /// owner vocabularies are read from. Rejecting beats escaping — two formats would need
+    /// two escapes, and a scaffolder that silently rewrites what the operator typed is
+    /// worse than one that stops and says why.
+    /// </remarks>
+    private static string RequireEmittableValue(string value, string parameterName)
+    {
+        if (value.Any(c => char.IsControl(c) || c is '|' or '"'))
+        {
+            throw new ArgumentException(
+                $"'{parameterName}' may not contain control characters, '|' or '\"'. " +
+                "These values are written into YAML frontmatter and a pipe-delimited catalog row.",
+                parameterName);
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="relativePath"/> under <paramref name="repoRoot"/>, refusing
+    /// anything that lands outside it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Path.Combine(string, string)"/> returns its second argument outright when
+    /// that argument is rooted, and <c>..</c> segments walk upward, so an unchecked
+    /// operator-supplied docs root places files anywhere the process can reach.
+    /// </remarks>
+    private static string RequireContained(string repoRoot, string relativePath, string parameterName)
+    {
+        var absolute = Path.GetFullPath(
+            Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+        var boundary = repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!absolute.StartsWith(boundary, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"Refusing to write outside the repository root: '{relativePath}' resolves to '{absolute}'.",
+                parameterName);
+        }
+
+        return absolute;
+    }
+
     private static ScaffoldedFile Write(string repoRoot, string relativePath, string content, bool force)
     {
-        var absolute = Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        // Enforced per write as well as up front, so the invariant holds for every path
+        // this type will ever emit, not only the ones routed through the docs root.
+        var absolute = RequireContained(repoRoot, relativePath, nameof(relativePath));
 
         if (File.Exists(absolute) && !force)
             return new ScaffoldedFile(relativePath, false);

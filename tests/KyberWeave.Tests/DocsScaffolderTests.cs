@@ -139,6 +139,66 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.All(set.Documents, d => Assert.Equal("platform-team", d.Frontmatter.Owner));
     }
 
+    /// <summary>
+    /// <c>--docs-root</c> is operator-supplied and reaches <c>Path.Combine</c>, which
+    /// returns a rooted second argument outright and happily walks upward through '..'.
+    /// Unchecked, <c>docs init</c> writes its scaffolding anywhere the process can reach.
+    /// </summary>
+    [Theory]
+    [InlineData("../escaped")]
+    [InlineData("../../escaped")]
+    [InlineData("docs/../../escaped")]
+    public void RefusesADocsRootThatEscapesTheRepositoryRoot(string escaping)
+    {
+        var error = Assert.Throws<ArgumentException>(
+            () => DocsScaffolder.Scaffold(_temp.Path, escaping));
+
+        Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
+
+        // Nothing at all, not merely no documents: the host config resolves inside the
+        // root, so a check that only fired per write would leave it behind pointing at a
+        // docs root that was rejected a moment later.
+        Assert.Empty(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void RefusesAnAbsoluteDocsRoot()
+    {
+        using var elsewhere = new TempDirectory();
+
+        Assert.Throws<ArgumentException>(
+            () => DocsScaffolder.Scaffold(_temp.Path, Path.Combine(elsewhere.Path, "pwned")));
+
+        Assert.Empty(Directory.GetFiles(elsewhere.Path, "*", SearchOption.AllDirectories));
+    }
+
+    /// <summary>
+    /// <c>owner</c> lands in YAML frontmatter and in a pipe-delimited catalog row, so a
+    /// newline would add a key and a pipe would shift the columns the component and owner
+    /// vocabularies are parsed from.
+    /// </summary>
+    [Theory]
+    [InlineData("platform\nstatus: current")]
+    [InlineData("platform | Injected")]
+    [InlineData("platform\"quote")]
+    [InlineData("platform\r\nid: hijacked")]
+    public void RefusesAnOwnerThatWouldInjectStructure(string owner)
+    {
+        Assert.Throws<ArgumentException>(
+            () => DocsScaffolder.Scaffold(_temp.Path, owner: owner));
+
+        Assert.Empty(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public void AcceptsOrdinaryOwnerAndDocsRootValues()
+    {
+        var result = DocsScaffolder.Scaffold(_temp.Path, "team-docs", "platform-team");
+
+        Assert.Equal("team-docs", result.DocsRoot);
+        Assert.All(result.Files, f => Assert.True(f.Written));
+    }
+
     /// <summary>The whole point: a freshly initialized repository validates clean.</summary>
     [Theory]
     [InlineData(null)]
