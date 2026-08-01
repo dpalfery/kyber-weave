@@ -430,6 +430,22 @@ public sealed class DocsScaffolderTests : IDisposable
     }
 
     /// <summary>
+    /// Windows resolves paths case-insensitively while Unix does not. Exercise both modes
+    /// directly so the regression remains covered on the project's Unix CI runners.
+    /// </summary>
+    [Fact]
+    public void ContainmentComparisonUsesTargetPlatformCasingRules()
+    {
+        const string boundary = @"C:\work\repo\";
+        const string differentlyCasedChild = @"c:\WORK\REPO\docs\catalog.md";
+
+        Assert.True(DocsScaffolder.IsWithinRepositoryBoundary(
+            differentlyCasedChild, boundary, isWindows: true));
+        Assert.False(DocsScaffolder.IsWithinRepositoryBoundary(
+            differentlyCasedChild, boundary, isWindows: false));
+    }
+
+    /// <summary>
     /// <c>owner</c> lands in YAML frontmatter and in a pipe-delimited catalog row, so a
     /// newline would add a key and a pipe would shift the columns the component and owner
     /// vocabularies are parsed from.

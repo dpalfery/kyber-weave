@@ -173,7 +173,7 @@ public static class DocsScaffolder
             Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
         var boundary = repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!absolute.StartsWith(boundary, StringComparison.Ordinal))
+        if (!IsWithinRepositoryBoundary(absolute, boundary, OperatingSystem.IsWindows()))
         {
             throw new ArgumentException(
                 $"Refusing to write outside the repository root: '{relativePath}' resolves to '{absolute}'.",
@@ -182,6 +182,15 @@ public static class DocsScaffolder
 
         return absolute;
     }
+
+    /// <summary>
+    /// Applies the path-comparison semantics of the target platform to a normalized path
+    /// and repository boundary. Kept separate so Windows behavior is testable on every CI host.
+    /// </summary>
+    internal static bool IsWithinRepositoryBoundary(string absolutePath, string boundary, bool isWindows) =>
+        absolutePath.StartsWith(
+            boundary,
+            isWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     /// <summary>
     /// Creates the host config when the repository has none; otherwise sets only its
