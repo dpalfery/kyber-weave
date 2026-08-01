@@ -1,3 +1,4 @@
+using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -13,12 +14,40 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DocsScaffolderTests : IDisposable
 {
+    private const string ConfigPath = ".kyber-weave/kyber-weave.yml";
+
+    /// <summary>
+    /// A config as an operator would actually keep one: comments, a moved docs root, and
+    /// three kinds of override the scaffolder's own template never emits.
+    /// </summary>
+    private const string HandMaintainedConfig =
+        """
+        # Ours, not the tool's.
+        ontology:
+          docs-root: 6-Docs  # moved in 2024
+          excluded-segments:
+            - archive
+          catalog:
+            component-column: 3
+            owner-column: 8
+        harness:
+          profiles:
+            claude:
+              directory-name: .agents/agents
+        """;
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
 
     private string Read(string relativePath) =>
         File.ReadAllText(Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+    private void WriteHostConfig(string yaml)
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml"), yaml);
+    }
 
     [Theory]
     [InlineData("docs")]
@@ -42,6 +71,61 @@ public sealed class DocsScaffolderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
 
         Assert.Equal("docs", DocsScaffolder.Scaffold(_temp.Path).DocsRoot);
+    }
+
+    /// <summary>
+    /// Re-running <c>docs init</c> must honor the docs root an existing
+    /// <c>.kyber-weave/kyber-weave.yml</c> declares. <c>docs validate</c> reads the root
+    /// from there, so a re-run that re-detected by convention (<c>docs</c> ranks ahead of
+    /// <c>6-Docs</c>) would scaffold into a different tree than validate then reads.
+    /// </summary>
+    [Fact]
+    public void AnExistingConfigDocsRootWinsOverConventionalDetection()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml"),
+            """
+            ontology:
+              docs-root: 6-Docs
+            """);
+
+        // A docs/ directory would otherwise be detected first.
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "6-Docs"));
+
+        var result = DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.Equal("6-Docs", result.DocsRoot);
+        Assert.True(result.DocsRootDetected);
+        Assert.True(File.Exists(Path.Combine(_temp.Path, "6-Docs", "catalog.md")));
+        Assert.True(File.Exists(Path.Combine(_temp.Path, "6-Docs", "documentation-ontology.md")));
+        Assert.False(File.Exists(Path.Combine(_temp.Path, "docs", "catalog.md")));
+    }
+
+    /// <summary>
+    /// The root <c>docs init</c> resolves must match the root <c>docs validate</c> resolves,
+    /// even when a config omits <c>docs-root</c> (validate falls back to the product
+    /// default). A re-detected conventional root would diverge.
+    /// </summary>
+    [Fact]
+    public void InitResolvesToTheSameRootValidateUsesWhenConfigOmitsDocsRoot()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml"),
+            """
+            ontology:
+              excluded-files: []
+            """);
+
+        // A docs/ directory would be detected by convention, but validate ignores it.
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
+
+        var result = DocsScaffolder.Scaffold(_temp.Path);
+        var validateRoot = KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot;
+
+        Assert.Equal(validateRoot, result.DocsRoot);
     }
 
     [Fact]
@@ -112,6 +196,179 @@ public sealed class DocsScaffolderTests : IDisposable
 
         Assert.NotEqual("hand written", Read("docs/catalog.md"));
         Assert.True(result.Files.Single(f => f.RelativePath == "docs/catalog.md").Written);
+    }
+
+    /// <summary>
+    /// A host config carries settings this scaffolder's template knows nothing about —
+    /// harness profiles, catalog column overrides, closed vocabularies. Regenerating it
+    /// under <c>--force</c> would discard all of them to restate a docs root the file
+    /// already had.
+    /// </summary>
+    [Fact]
+    public void ForceDoesNotOverwriteTheHostConfig()
+    {
+        WriteHostConfig(HandMaintainedConfig);
+
+        var result = DocsScaffolder.Scaffold(_temp.Path, force: true);
+
+        Assert.Equal(HandMaintainedConfig, Read(ConfigPath));
+
+        var entry = result.Files.Single(f => f.RelativePath == ConfigPath);
+        Assert.Equal(ScaffoldOutcome.Preserved, entry.Outcome);
+        Assert.False(entry.Written);
+    }
+
+    /// <summary>
+    /// Moving the docs root is the one config change <c>docs init</c> owns — leaving it
+    /// stale would point <c>docs validate</c> at a different tree than the catalog was just
+    /// written to. Everything else in the file, including comments and keys the scaffolder
+    /// never emits, has to survive the edit.
+    /// </summary>
+    [Fact]
+    public void AnExplicitDocsRootRewritesThatKeyAndNothingElse()
+    {
+        WriteHostConfig(HandMaintainedConfig);
+
+        var result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
+
+        var config = KyberWeaveConfigLoader.Load(_temp.Path);
+        Assert.Equal("handbook", config.Ontology.DocsRoot);
+
+        // Every other override the operator wrote is still in force.
+        Assert.Equal(3, config.Ontology.CatalogComponentColumn);
+        Assert.Equal(8, config.Ontology.CatalogOwnerColumn);
+        Assert.Equal(["archive"], config.Ontology.ExcludedPathSegments);
+        Assert.Equal(".agents/agents", config.Harness.Profiles[HarnessKind.Claude].DirectoryName);
+
+        // Verbatim, not merely semantically: comments and key order are the operator's.
+        var text = Read(ConfigPath);
+        Assert.Equal(
+            HandMaintainedConfig.Replace(
+                "docs-root: 6-Docs  # moved in 2024", "docs-root: handbook  # moved in 2024",
+                StringComparison.Ordinal),
+            text);
+
+        Assert.Equal(ScaffoldOutcome.Updated, result.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
+    }
+
+    /// <summary>
+    /// A re-run that resolves the root out of the config must not rewrite the file it just
+    /// read: an unchanged docs root is not a reason to touch operator state.
+    /// </summary>
+    [Fact]
+    public void AnUnchangedDocsRootLeavesTheConfigByteForByteIdentical()
+    {
+        WriteHostConfig(HandMaintainedConfig);
+
+        var result = DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.Equal(HandMaintainedConfig, Read(ConfigPath));
+        Assert.Equal(ScaffoldOutcome.Preserved, result.Files.Single(f => f.RelativePath == ConfigPath).Outcome);
+    }
+
+    /// <summary>
+    /// A config with no <c>docs-root</c> gains one rather than being regenerated, and the
+    /// keys around it stay put.
+    /// </summary>
+    [Fact]
+    public void AConfigWithoutADocsRootGainsTheKeyInPlace()
+    {
+        WriteHostConfig(
+            """
+            ontology:
+              excluded-segments:
+                - archive
+            """);
+
+        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+
+        var config = KyberWeaveConfigLoader.Load(_temp.Path);
+        Assert.Equal("handbook", config.Ontology.DocsRoot);
+        Assert.Equal(["archive"], config.Ontology.ExcludedPathSegments);
+    }
+
+    /// <summary>
+    /// Only a direct child of <c>ontology</c> is the configured docs root. An unknown
+    /// nested mapping may legitimately use the same key name and must remain operator state.
+    /// </summary>
+    [Fact]
+    public void ANestedDocsRootIsNotMistakenForTheOntologyDocsRoot()
+    {
+        WriteHostConfig(
+            """
+            ontology:
+              extension:
+                docs-root: extension-docs
+            """);
+
+        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+
+        var text = Read(ConfigPath);
+        Assert.Contains("\n  docs-root: handbook\n", text, StringComparison.Ordinal);
+        Assert.Contains("\n    docs-root: extension-docs", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Comment indentation is presentation only. It must not determine the indentation of
+    /// an inserted key when direct ontology children already establish the block depth.
+    /// </summary>
+    [Fact]
+    public void AnInsertedDocsRootUsesTheShallowestContentIndent()
+    {
+        WriteHostConfig(
+            """
+            ontology:
+                # Deliberately deeper than the keys around it.
+              excluded-files: []
+            """);
+
+        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+
+        var text = Read(ConfigPath);
+        Assert.Contains("\n  docs-root: handbook\n", text, StringComparison.Ordinal);
+        Assert.Equal("handbook", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
+    }
+
+    /// <summary>
+    /// A config with no <c>ontology:</c> block at all — harness settings only — gains one
+    /// without losing the block it does have.
+    /// </summary>
+    [Fact]
+    public void AConfigWithoutAnOntologyBlockGainsOne()
+    {
+        WriteHostConfig(
+            """
+            harness:
+              profiles:
+                claude:
+                  directory-name: .agents/agents
+            """);
+
+        DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
+
+        var config = KyberWeaveConfigLoader.Load(_temp.Path);
+        Assert.Equal("handbook", config.Ontology.DocsRoot);
+        Assert.Equal(".agents/agents", config.Harness.Profiles[HarnessKind.Claude].DirectoryName);
+    }
+
+    /// <summary>
+    /// Hosts configured through the legacy repo-root <c>kyber-weave.yml</c> are read from
+    /// that file. Creating <c>.kyber-weave/kyber-weave.yml</c> alongside it would not
+    /// overwrite it, but would shadow it — the same loss by a different route.
+    /// </summary>
+    [Fact]
+    public void TheLegacyRootConfigIsUpdatedRatherThanShadowed()
+    {
+        File.WriteAllText(Path.Combine(_temp.Path, "kyber-weave.yml"), HandMaintainedConfig);
+
+        var result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
+
+        Assert.False(Directory.Exists(Path.Combine(_temp.Path, ".kyber-weave")));
+
+        var config = KyberWeaveConfigLoader.Load(_temp.Path);
+        Assert.Equal("handbook", config.Ontology.DocsRoot);
+        Assert.Equal(3, config.Ontology.CatalogComponentColumn);
+        Assert.Contains(result.Files, f => f.RelativePath == "kyber-weave.yml");
     }
 
     /// <summary>

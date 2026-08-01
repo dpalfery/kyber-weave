@@ -2,10 +2,37 @@ using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
+/// <summary>What the scaffolder did to one file.</summary>
+public enum ScaffoldOutcome
+{
+    /// <summary>The file did not exist and was written whole.</summary>
+    Created,
+
+    /// <summary>The file existed and was edited in place, keeping the rest of its content.</summary>
+    Updated,
+
+    /// <summary>The file existed and was left alone; <c>force</c> would have overwritten it.</summary>
+    Skipped,
+
+    /// <summary>
+    /// The file existed and was left alone because it is operator state rather than
+    /// scaffolding. <c>force</c> does not reach it.
+    /// </summary>
+    Preserved
+}
+
 /// <summary>One file the scaffolder considered writing.</summary>
 /// <param name="RelativePath">Repository-relative path, forward-slashed.</param>
-/// <param name="Written">False when the file already existed and was left alone.</param>
-public sealed record ScaffoldedFile(string RelativePath, bool Written);
+/// <param name="Outcome">What happened to it.</param>
+/// <param name="Note">
+/// Why, when the outcome alone would understate it — an edit that touched one key, or a
+/// file held back from <c>force</c>. Plain text; the caller escapes it for its own output.
+/// </param>
+public sealed record ScaffoldedFile(string RelativePath, ScaffoldOutcome Outcome, string? Note = null)
+{
+    /// <summary>True when the file's content changed.</summary>
+    public bool Written => Outcome is ScaffoldOutcome.Created or ScaffoldOutcome.Updated;
+}
 
 /// <summary>What <see cref="DocsScaffolder"/> did.</summary>
 /// <param name="DocsRoot">The documentation root the corpus was scaffolded into.</param>
@@ -32,7 +59,9 @@ public sealed record ScaffoldResult(
 /// </para>
 /// <para>
 /// Existing files are never overwritten unless <c>force</c> is set. Re-running is
-/// therefore safe, and a partially adopted repository can be topped up.
+/// therefore safe, and a partially adopted repository can be topped up. The host config is
+/// the exception in the other direction: it is operator state, so <c>force</c> does not
+/// reach it and only its docs root is ever rewritten.
 /// </para>
 /// </remarks>
 public static class DocsScaffolder
@@ -53,7 +82,7 @@ public static class DocsScaffolder
 
         var detected = string.IsNullOrWhiteSpace(docsRoot);
         var resolvedDocsRoot = detected
-            ? DetectDocsRoot(root)
+            ? ResolveDocsRoot(root)
             : RequireEmittableValue(docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), nameof(docsRoot));
 
         // Checked before the first write, not only inside Write. The host config resolves
@@ -63,8 +92,7 @@ public static class DocsScaffolder
 
         var files = new List<ScaffoldedFile>
         {
-            Write(root, $"{KyberWeaveYamlParser.DefaultDirectoryName}/{KyberWeaveYamlParser.DefaultFileName}",
-                HostConfig(resolvedDocsRoot), force),
+            WriteHostConfig(root, resolvedDocsRoot),
             Write(root, $"{resolvedDocsRoot}/documentation-ontology.md",
                 OntologyReference(resolvedDocsRoot, owner), force),
             Write(root, $"{resolvedDocsRoot}/catalog.md",
@@ -87,6 +115,24 @@ public static class DocsScaffolder
         }
 
         return "docs";
+    }
+
+    /// <summary>
+    /// The docs root to scaffold into when the operator supplied none. An existing host
+    /// config wins over convention: every other docs command resolves <c>docs-root</c>
+    /// from <c>.kyber-weave/kyber-weave.yml</c> (configured value, else product default),
+    /// so a re-run of <c>docs init</c> that re-detected by convention could land
+    /// <c>catalog.md</c> and <c>documentation-ontology.md</c> in a different tree than
+    /// <c>docs validate</c> then reads. A missing or unreadable config falls back to
+    /// <see cref="DetectDocsRoot"/>, preserving fresh-repo behaviour.
+    /// </summary>
+    internal static string ResolveDocsRoot(string repoRoot)
+    {
+        var loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+        if (loaded.Success && loaded.ConfigPath is not null && loaded.Config is not null)
+            return loaded.Config.Ontology.DocsRoot;
+
+        return DetectDocsRoot(repoRoot);
     }
 
     /// <summary>
@@ -137,18 +183,70 @@ public static class DocsScaffolder
         return absolute;
     }
 
+    /// <summary>
+    /// Creates the host config when the repository has none; otherwise sets only its
+    /// <c>ontology.docs-root</c>, in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The host config is operator state, not scaffolding, so <c>force</c> deliberately
+    /// does not reach it. The template emitted here carries two keys; a host file may carry
+    /// harness profiles, catalog column overrides, closed vocabularies and a required-key
+    /// matrix. Regenerating it would discard every one of them in order to restate a docs
+    /// root the file already had — a silent loss, since the only thing an operator asked
+    /// for was fresh scaffolding.
+    /// </para>
+    /// <para>
+    /// The one key <c>docs init</c> owns is the docs root, and it is rewritten only when it
+    /// disagrees with the root being scaffolded into — which, since an unsupplied root is
+    /// read back out of this same file, means only when the operator moved it with
+    /// <c>--docs-root</c>. Leaving it stale instead would point <c>docs validate</c> at a
+    /// different tree than the one the catalog was just written to.
+    /// </para>
+    /// </remarks>
+    private static ScaffoldedFile WriteHostConfig(string repoRoot, string docsRoot)
+    {
+        var existingPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot);
+        if (existingPath is null)
+        {
+            return Write(
+                repoRoot,
+                $"{KyberWeaveYamlParser.DefaultDirectoryName}/{KyberWeaveYamlParser.DefaultFileName}",
+                HostConfig(docsRoot),
+                force: false);
+        }
+
+        var relativePath = Path.GetRelativePath(repoRoot, existingPath).Replace('\\', '/');
+        var existing = File.ReadAllText(existingPath);
+        var updated = HostConfigYaml.WithDocsRoot(existing, docsRoot);
+
+        if (string.Equals(existing, updated, StringComparison.Ordinal))
+        {
+            return new ScaffoldedFile(
+                relativePath,
+                ScaffoldOutcome.Preserved,
+                "your configuration, kept as-is; --force does not overwrite it");
+        }
+
+        File.WriteAllText(existingPath, updated);
+        return new ScaffoldedFile(
+            relativePath, ScaffoldOutcome.Updated, "docs-root only; the rest of the file is untouched");
+    }
+
     private static ScaffoldedFile Write(string repoRoot, string relativePath, string content, bool force)
     {
         // Enforced per write as well as up front, so the invariant holds for every path
         // this type will ever emit, not only the ones routed through the docs root.
         var absolute = RequireContained(repoRoot, relativePath, nameof(relativePath));
 
-        if (File.Exists(absolute) && !force)
-            return new ScaffoldedFile(relativePath, false);
+        var existed = File.Exists(absolute);
+        if (existed && !force)
+            return new ScaffoldedFile(relativePath, ScaffoldOutcome.Skipped);
 
         Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
         File.WriteAllText(absolute, content);
-        return new ScaffoldedFile(relativePath, true);
+        return new ScaffoldedFile(
+            relativePath, existed ? ScaffoldOutcome.Updated : ScaffoldOutcome.Created);
     }
 
     private static string HostConfig(string docsRoot) =>

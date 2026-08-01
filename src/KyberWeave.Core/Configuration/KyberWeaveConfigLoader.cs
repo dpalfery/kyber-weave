@@ -62,33 +62,47 @@ public static class KyberWeaveConfigLoader
         }
     }
 
-    private static string? ResolveConfigPath(string repoRoot, string? configPath)
+    /// <summary>
+    /// The host config file a repository root already has, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so that a writer — <c>docs init</c> — edits the same file every reader
+    /// resolves. Creating <c>.kyber-weave/kyber-weave.yml</c> in a repository configured
+    /// through the legacy root path would not overwrite that file, but would shadow it,
+    /// which loses the operator's settings just as thoroughly.
+    /// </remarks>
+    internal static string? FindConfigPath(string repoRoot)
     {
-        if (!string.IsNullOrWhiteSpace(configPath))
-        {
-            var explicitPath = Path.IsPathRooted(configPath)
-                ? configPath
-                : Path.Combine(repoRoot, configPath);
-            if (!File.Exists(explicitPath))
-            {
-                throw new FileNotFoundException(
-                    $"Kyber-Weave config file not found: {explicitPath}",
-                    explicitPath);
-            }
-
-            return explicitPath;
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
 
         var defaultPath = Path.Combine(
-            repoRoot,
+            Path.GetFullPath(repoRoot),
             KyberWeaveYamlParser.DefaultDirectoryName,
             KyberWeaveYamlParser.DefaultFileName);
         if (File.Exists(defaultPath))
             return defaultPath;
 
         // Legacy location: repo-root kyber-weave.yml, kept working for existing hosts.
-        var legacyPath = Path.Combine(repoRoot, KyberWeaveYamlParser.DefaultFileName);
+        var legacyPath = Path.Combine(Path.GetFullPath(repoRoot), KyberWeaveYamlParser.DefaultFileName);
         return File.Exists(legacyPath) ? legacyPath : null;
+    }
+
+    private static string? ResolveConfigPath(string repoRoot, string? configPath)
+    {
+        if (string.IsNullOrWhiteSpace(configPath))
+            return FindConfigPath(repoRoot);
+
+        var explicitPath = Path.IsPathRooted(configPath)
+            ? configPath
+            : Path.Combine(repoRoot, configPath);
+        if (!File.Exists(explicitPath))
+        {
+            throw new FileNotFoundException(
+                $"Kyber-Weave config file not found: {explicitPath}",
+                explicitPath);
+        }
+
+        return explicitPath;
     }
 
     private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document) =>
