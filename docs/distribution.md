@@ -52,12 +52,21 @@ extensionless binaries.
 
 ## Release flow
 
-1. Rev the release by pushing a new `v*` tag, e.g. `v0.1.1` (the tag is the version source of truth)
-2. `.github/workflows/release.yml` stamps that version onto the binaries, publishes each RID, and creates a GitHub Release with archives and `SHA256SUMS.txt`
-3. Optionally pushes `PackAsTool` nupkgs to GitHub Packages — never to nuget.org
+Cut a release in either way (the `v*` tag is the version source of truth):
+
+1. **Push a tag:** `git tag v0.1.1 && git push origin v0.1.1`
+2. **Or Run workflow:** Actions → Release → Run workflow → enter `0.1.1` (or `v0.1.1`).  
+   The workflow creates tag `v0.1.1` at that commit via `gh release create --target`  
+   (it does not `git push` a tag, so the workflow is not re-triggered).
+
+Then `.github/workflows/release.yml` stamps that version onto the binaries, publishes
+each RID, and creates a GitHub Release with archives and `SHA256SUMS.txt`. Optionally
+pushes `PackAsTool` nupkgs to GitHub Packages — never to nuget.org.
+
+Check **dry_run** on a manual run to build artifacts only (no tag, no Release).
 
 No npm or Homebrew secrets are required. Since the install script reads only Release
-assets, **steps 1–2 alone are enough for the documented install path to work.**
+assets, creating the GitHub Release alone is enough for the documented install path.
 
 ## Continuous integration security
 

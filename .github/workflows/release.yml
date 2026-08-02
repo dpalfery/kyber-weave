@@ -1,13 +1,14 @@
 # Release — self-contained binaries and GitHub Release
 #
-# Triggers on v* tags. Builds the RID matrix, stamps Version from the tag,
-# attaches archives + SHA256SUMS.txt to a GitHub Release, and optionally pushes
-# PackAsTool packages to GitHub Packages.
+# Two ways to cut a release:
+# 1. Push a `v*` tag (e.g. git push origin v0.1.2)
+# 2. Actions → Release → Run workflow, enter a version (creates the tag + Release)
+#
+# Builds the RID matrix, stamps Version from the tag, attaches archives +
+# SHA256SUMS.txt to a GitHub Release, and optionally pushes PackAsTool packages
+# to GitHub Packages.
 #
 # npm and Homebrew are not published from this workflow. nuget.org is forbidden.
-#
-# Versioning: push a new `v*` tag (e.g. v0.1.2) to cut a release. The tag is the
-# source of truth for the Release name and binary Version metadata.
 
 name: Release
 
@@ -17,13 +18,17 @@ name: Release
       - "v*"
   workflow_dispatch:
     inputs:
+      version:
+        description: "Release version (e.g. 0.1.2 or v0.1.2). Creates tag vX.Y.Z at this commit."
+        type: string
+        required: true
       dry_run:
-        description: "Build and package only — skip creating the GitHub Release"
+        description: "Build and package only — do not create the tag or GitHub Release"
         type: boolean
         default: false
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: false
 
 permissions:
@@ -42,25 +47,66 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
+      create_release: ${{ steps.meta.outputs.create_release }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: Derive version from tag
+      - name: Derive version
         id: meta
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          REF="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
           then
-            REF="v0.1.0-dev.${GITHUB_RUN_NUMBER}"
-            echo "::warning::workflow_dispatch without tag — using ${REF} for artifact names only"
+            RAW="${INPUT_VERSION:-}"
+            if [[ -z "${RAW}" ]]
+            then
+              echo "::error::version input is required when running via workflow_dispatch"
+              exit 1
+            fi
+            # Accept 0.1.2 or v0.1.2
+            RAW="${RAW#v}"
+            if [[ ! "${RAW}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+            then
+              echo "::error::version '${INPUT_VERSION}' is not a valid SemVer (expected X.Y.Z or vX.Y.Z)"
+              exit 1
+            fi
+            TAG="v${RAW}"
+            VERSION="${RAW}"
+
+            if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1 \
+              || gh release view "${TAG}" >/dev/null 2>&1
+            then
+              echo "::error::tag or Release ${TAG} already exists. Choose a new version."
+              exit 1
+            fi
+
+            if [[ "${INPUT_DRY_RUN}" == "true" ]]
+            then
+              CREATE_RELEASE=false
+              echo "Dry run — will build ${TAG} artifacts without creating the tag or Release"
+            else
+              CREATE_RELEASE=true
+            fi
+          else
+            # Tag push: GITHUB_REF_NAME is the tag
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+            CREATE_RELEASE=true
           fi
-          TAG="${REF}"
-          VERSION="${REF#v}"
+
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "Release version=${VERSION} tag=${TAG}"
+          echo "create_release=${CREATE_RELEASE}" >> "${GITHUB_OUTPUT}"
+          echo "Release version=${VERSION} tag=${TAG} create_release=${CREATE_RELEASE}"
 
   build:
     name: Publish ${{ matrix.rid }}
@@ -140,9 +186,7 @@ jobs:
     name: GitHub Release
     needs: [version, build]
     runs-on: ubuntu-latest
-    if: >
-      github.ref_type == 'tag' &&
-      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+    if: needs.version.outputs.create_release == 'true'
     permissions:
       contents: write
     steps:
@@ -163,11 +207,15 @@ jobs:
           sha256sum * | tee SHA256SUMS.txt
           ls -la
 
-      - name: Create GitHub Release
+      - name: Create tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
           VERSION: ${{ needs.version.outputs.version }}
+          # Tag push: tag already exists. workflow_dispatch: create tag at this commit
+          # via --target so we do not git-push a tag (which would re-trigger this workflow).
+          TARGET_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           NOTES="$(cat <<EOF
@@ -189,18 +237,20 @@ jobs:
           \`\`\`
           EOF
           )"
-          gh release create "${TAG}" \
-            --title "Kyber-Weave ${VERSION}" \
-            --notes "${NOTES}" \
-            release-assets/*
+
+          ARGS=(release create "${TAG}" --title "Kyber-Weave ${VERSION}" --notes "${NOTES}")
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]
+          then
+            ARGS+=(--target "${TARGET_SHA}")
+          fi
+          ARGS+=(release-assets/*)
+          gh "${ARGS[@]}"
 
   gh-packages:
     name: Optional GitHub Packages (dotnet tool)
     needs: [version, build]
     runs-on: ubuntu-latest
-    if: >
-      github.ref_type == 'tag' &&
-      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
+    if: needs.version.outputs.create_release == 'true'
     permissions:
       contents: read
       packages: write
