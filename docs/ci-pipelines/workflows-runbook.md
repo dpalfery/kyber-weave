@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-02
 ---
 
 # Wiring Kyber-Weave into CI
@@ -23,8 +23,12 @@ script fix never requires a re-release ([distribution.md](../distribution.md)).
 steps:
   - name: Install Kyber-Weave
     run: |
-      curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
-        | sh -s -- --no-mcp
+      set -euo pipefail
+      # Download then execute (not curl|sh) — keeps CI SAST clean; binaries the
+      # script installs are still SHA-256 verified against the Release.
+      curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+        https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+      sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
       echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 ```
 

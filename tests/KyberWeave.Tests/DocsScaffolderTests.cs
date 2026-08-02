@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
@@ -127,6 +128,55 @@ public sealed class DocsScaffolderTests : IDisposable
 
         Assert.Equal(validateRoot, result.DocsRoot);
         Assert.Equal(DocsRootSource.Configuration, result.DocsRootSource);
+    }
+
+    /// <summary>
+    /// A broken host config is operator state requiring repair. Falling back to convention
+    /// would write a corpus that validation cannot load, and an explicit root must not
+    /// bypass the same preflight.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("handbook")]
+    public void InvalidHostConfigStopsBeforeAnyScaffoldWrite(string? docsRoot)
+    {
+        const string yaml = "ontology: [unclosed";
+        WriteHostConfig(yaml);
+
+        var exception = Assert.Throws<InvalidDataException>(
+            () => DocsScaffolder.Scaffold(_temp.Path, docsRoot));
+
+        Assert.Contains(KyberWeaveConfigLoader.ConfigLoadErrorCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave.yml", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(yaml, Read(ConfigPath));
+        Assert.Single(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
+    }
+
+    /// <summary>
+    /// The CLI must translate the preflight failure into its normal handled-error contract;
+    /// otherwise Spectre reports an unhandled error and exits 255.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("handbook")]
+    public void CliReturnsOneAndTheConfigDiagnosticWithoutWriting(string? docsRoot)
+    {
+        const string yaml = "ontology: [unclosed";
+        WriteHostConfig(yaml);
+
+        var attempt = DocsInitCommand.TryScaffold(new DocsInitSettings
+        {
+            Path = _temp.Path,
+            DocsRoot = docsRoot,
+            NoSkill = true
+        });
+
+        Assert.Equal(1, attempt.ExitCode);
+        Assert.Null(attempt.Result);
+        Assert.Contains(KyberWeaveConfigLoader.ConfigLoadErrorCode, attempt.Error, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave.yml", attempt.Error, StringComparison.Ordinal);
+        Assert.Equal(yaml, Read(ConfigPath));
+        Assert.Single(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
     }
 
     [Fact]

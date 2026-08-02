@@ -23,20 +23,14 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
     public override int Execute(CommandContext context, DocsInitSettings settings)
     {
-        ScaffoldResult result;
-        try
+        var attempt = TryScaffold(settings);
+        if (attempt.ExitCode != 0)
         {
-            result = DocsScaffolder.Scaffold(
-                settings.Path, settings.DocsRoot, settings.Owner, settings.Force);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            // ArgumentException covers a --docs-root that escapes the repository root and
-            // an --owner that would inject structure into the emitted YAML or catalog row.
-            AnsiConsole.MarkupLine($"[red]Could not scaffold: {Markup.Escape(ex.Message)}[/]");
-            return 1;
+            AnsiConsole.MarkupLine($"[red]Could not scaffold: {Markup.Escape(attempt.Error!)}[/]");
+            return attempt.ExitCode;
         }
 
+        var result = attempt.Result!;
         var rootNote = result.DocsRootSource switch
         {
             DocsRootSource.Configuration => " [grey](configured)[/]",
@@ -66,6 +60,25 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         AnsiConsole.MarkupLine("  3. Ask your agent to apply the [grey]kyber-weave-docs[/] skill to the failing documents.");
 
         return 0;
+    }
+
+    /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>
+    internal static (int ExitCode, ScaffoldResult? Result, string? Error) TryScaffold(
+        DocsInitSettings settings)
+    {
+        try
+        {
+            var result = DocsScaffolder.Scaffold(
+                settings.Path, settings.DocsRoot, settings.Owner, settings.Force);
+            return (0, result, null);
+        }
+        catch (Exception ex) when (ex is
+            IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException)
+        {
+            // InvalidDataException carries KW-CONFIG-001 for a broken host config;
+            // ArgumentException covers an escaping docs root or structurally unsafe owner.
+            return (1, null, ex.Message);
+        }
     }
 
     /// <summary>Fixed-width so the file paths line up under one another.</summary>

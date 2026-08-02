@@ -95,8 +95,9 @@ public static class DocsScaffolder
         var resolvedOwner = owner.Trim();
         RequireCatalogValue(resolvedOwner, nameof(owner));
 
+        var loadedConfig = RequireLoadableHostConfig(root);
         (string DocsRoot, DocsRootSource Source) resolution = string.IsNullOrWhiteSpace(docsRoot)
-            ? ResolveDocsRoot(root)
+            ? ResolveDocsRoot(root, loadedConfig)
             : (docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
         var resolvedDocsRoot = resolution.DocsRoot;
         resolvedDocsRoot = RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
@@ -139,16 +140,34 @@ public static class DocsScaffolder
     /// from <c>.kyber-weave/kyber-weave.yml</c> (configured value, else product default),
     /// so a re-run of <c>docs init</c> that re-detected by convention could land
     /// <c>catalog.md</c> and <c>documentation-ontology.md</c> in a different tree than
-    /// <c>docs validate</c> then reads. A missing or unreadable config falls back to
-    /// <see cref="DetectDocsRoot"/>, preserving fresh-repo behaviour.
+    /// <c>docs validate</c> then reads. Only a missing config falls back to
+    /// <see cref="DetectDocsRoot"/>; an invalid or unreadable one must stop scaffolding.
     /// </summary>
-    internal static (string DocsRoot, DocsRootSource Source) ResolveDocsRoot(string repoRoot)
+    internal static (string DocsRoot, DocsRootSource Source) ResolveDocsRoot(
+        string repoRoot,
+        KyberWeaveConfigLoadResult loaded)
     {
-        var loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
-        if (loaded.Success && loaded.ConfigPath is not null && loaded.Config is not null)
+        if (loaded.ConfigPath is not null && loaded.Config is not null)
             return (loaded.Config.Ontology.DocsRoot, DocsRootSource.Configuration);
 
         return (DetectDocsRoot(repoRoot), DocsRootSource.Convention);
+    }
+
+    /// <summary>
+    /// Loads host configuration before the first scaffold write. An existing file that
+    /// cannot be read is operator state requiring repair, not permission to infer a
+    /// different root and write a second corpus.
+    /// </summary>
+    private static KyberWeaveConfigLoadResult RequireLoadableHostConfig(string repoRoot)
+    {
+        var loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+        if (loaded.Success)
+            return loaded;
+
+        var path = loaded.ConfigPath ?? KyberWeaveYamlParser.DefaultFileName;
+        throw new InvalidDataException(
+            $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load '{path}': " +
+            (loaded.Error ?? "The configuration could not be read."));
     }
 
     /// <summary>

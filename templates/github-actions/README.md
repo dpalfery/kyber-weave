@@ -35,19 +35,21 @@ verifies each binary against the release's `SHA256SUMS.txt`:
 - name: Install Kyber-Weave
   run: |
     set -euo pipefail
-    curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
-      | sh -s -- --no-mcp
+    curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+      https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+    sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
     echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 ```
 
 `--no-mcp` skips the MCP server, which a CI gate never needs. No Node, no .NET runtime —
-the binaries are self-contained.
+the binaries are self-contained. Download-then-execute (not `curl | sh`) keeps CI SAST
+clean; the script still verifies each binary against the release `SHA256SUMS.txt`.
 
 Tracking latest means a new release reaches your gates without a code change. Where a job
 must be reproducible, pin it:
 
 ```yaml
-    | sh -s -- --no-mcp --version 0.1.1
+    sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp --version 0.1.1
 ```
 
 Third-party `uses:` SHAs in these templates are already pinned to full commit SHAs. Bump

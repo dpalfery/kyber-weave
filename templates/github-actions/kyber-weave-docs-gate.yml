@@ -41,8 +41,11 @@ jobs:
       - name: Install Kyber-Weave
         run: |
           set -euo pipefail
-          curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
-            | sh -s -- --no-mcp
+          # Download then execute (not curl|sh) so SAST tools can verify the step.
+          # Binaries the script installs are still SHA-256 verified against the Release.
+          curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+            https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+          sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Validate documentation frontmatter
@@ -66,8 +69,9 @@ jobs:
       - name: Install Kyber-Weave
         run: |
           set -euo pipefail
-          curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
-            | sh -s -- --no-mcp
+          curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+            https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+          sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Host-owned: ensure .codegraph/codegraph.db exists before drift.

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-02
 ---
 
 # Distribution and release flow
@@ -69,6 +69,27 @@ enough for the documented install path to work.**
 |---|---|
 | `NPM_TOKEN` | Publishing the npm wrapper |
 | `HOMEBREW_TAP_TOKEN` | PAT with `contents:write` on the Homebrew tap |
+
+## Continuous integration security
+
+`.github/workflows/ci.yml` is the PR gate for this repository. Besides build, test, pack,
+and RID publish smoke, it runs blocking security jobs modeled on the same tools used in
+sibling product repos — without Azure or container scans, which do not apply here:
+
+| Job | What it covers |
+|---|---|
+| CodeQL (`csharp`, `javascript-typescript`) | SAST with `security-extended` queries |
+| Trivy filesystem | Dependency, misconfig, secret, and license findings at HIGH/CRITICAL |
+| Semgrep Community | Additional SAST (`p/default`, ERROR) |
+| gitleaks | Secret scan of the full history fetch |
+| Skill and docs gate | Dogfoods the PR's CLI: `skill validate` / `lint` / `scan` on `.apm/skills/kyber-weave-docs`, plus `docs validate` |
+
+Findings upload as SARIF to the GitHub Security tab (`security-events: write`). Dependabot
+covers NuGet, GitHub Actions, and the npm wrapper weekly. NuGet Audit is on for transitive
+packages; HIGH/CRITICAL advisories fail restore under `TreatWarningsAsErrors`.
+
+`docs drift` stays a local/author gate until CI can provision a CodeGraph index — see
+[the workflow runbook](ci-pipelines/workflows-runbook.md).
 
 ## Smoke tests
 
