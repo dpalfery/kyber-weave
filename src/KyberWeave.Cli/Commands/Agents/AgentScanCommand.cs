@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Security;
 using KyberWeave.Core.Diagnostics;

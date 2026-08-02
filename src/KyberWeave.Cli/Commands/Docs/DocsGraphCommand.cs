@@ -1,8 +1,7 @@
-using Spectre.Console;
-using Spectre.Console.Cli;
-using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Export;
+using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
 

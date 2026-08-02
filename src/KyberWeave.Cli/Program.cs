@@ -1,7 +1,7 @@
-using Spectre.Console.Cli;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Skills;
+using Spectre.Console.Cli;
 
 var app = new CommandApp();
 app.Configure(config =>

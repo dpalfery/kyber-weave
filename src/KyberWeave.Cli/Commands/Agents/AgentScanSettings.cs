@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using KyberWeave.Cli.Commands;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Agents;

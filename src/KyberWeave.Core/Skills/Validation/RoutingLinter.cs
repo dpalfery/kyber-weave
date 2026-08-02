@@ -98,9 +98,9 @@ public sealed class RoutingLinter
             .Select(s => (Skill: s, Vec: TextVectorizer.Vectorize(s.Frontmatter.Description!)))
             .ToList();
 
-        for (int i = 0; i < vectors.Count; i++)
+        for (var i = 0; i < vectors.Count; i++)
         {
-            for (int j = i + 1; j < vectors.Count; j++)
+            for (var j = i + 1; j < vectors.Count; j++)
             {
                 var sim = TextVectorizer.CosineSimilarity(vectors[i].Vec, vectors[j].Vec);
                 if (sim >= OverlapThreshold)

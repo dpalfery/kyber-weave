@@ -1,9 +1,9 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Skills.Model;
 using Markdig;
 using Markdig.Extensions.Yaml;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
-using KyberWeave.Core.Skills.Model;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;

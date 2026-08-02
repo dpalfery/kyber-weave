@@ -48,6 +48,24 @@ jobs:
       - name: Restore
         run: dotnet restore KyberWeave.sln
 
+      # Curated packs only — whitespace + a small style set from .editorconfig.
+      # Skip `dotnet format analyzers`: CA quality rules already fail the build via
+      # TreatWarningsAsErrors / AnalysisMode=all.
+      - name: Format (whitespace)
+        run: >
+          dotnet format KyberWeave.sln whitespace
+          --verify-no-changes
+          --no-restore
+          -v minimal
+
+      - name: Format (style)
+        run: >
+          dotnet format KyberWeave.sln style
+          --verify-no-changes
+          --severity warn
+          --no-restore
+          -v minimal
+
       - name: List vulnerable NuGet packages
         run: |
           set -euo pipefail

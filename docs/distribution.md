@@ -78,11 +78,17 @@ sibling product repos — without Azure or container scans, which do not apply h
 
 | Job | What it covers |
 |---|---|
+| Build and test | Restore, `dotnet format` (whitespace + curated style), NuGet audit, build, test, pack |
 | CodeQL (`csharp`, `javascript-typescript`) | SAST with `security-extended` queries |
 | Trivy filesystem | Dependency, misconfig, secret, and license findings at HIGH/CRITICAL |
 | Semgrep Community | Additional SAST (`p/default`, ERROR) |
 | gitleaks | Secret scan of the full history fetch |
 | Skill and docs gate | Dogfoods the PR's CLI: `skill validate` / `lint` / `scan` on `.apm/skills/kyber-weave-docs`, plus `docs validate` |
+
+Formatting is gated by [`.editorconfig`](../.editorconfig): whitespace plus a small style
+pack (file-scoped namespaces, usings, predefined types, `var` when apparent). The
+`analyzers` format subcommand is intentionally unused — CA quality rules already fail
+the build.
 
 Findings upload as SARIF to the GitHub Security tab (`security-events: write`). Dependabot
 covers NuGet, GitHub Actions, and the npm wrapper weekly. NuGet Audit is on for transitive
