@@ -10,7 +10,7 @@ public sealed class DocsInitSettings : CommandSettings
     public string Path { get; set; } = ".";
 
     [CommandOption("--docs-root <DIR>")]
-    [Description("Documentation root. Defaults to the first existing conventional root (docs, 6-Docs, doc, documentation), else 'docs'.")]
+    [Description("Documentation root. Honors an existing .kyber-weave/kyber-weave.yml docs-root; otherwise the first existing conventional root (docs, 6-Docs, doc, documentation), else 'docs'.")]
     public string? DocsRoot { get; set; }
 
     [CommandOption("--owner <OWNER>")]
@@ -28,6 +28,6 @@ public sealed class DocsInitSettings : CommandSettings
     public bool NoSkill { get; set; }
 
     [CommandOption("--force")]
-    [Description("Overwrite existing scaffolded files instead of leaving them alone.")]
+    [Description("Overwrite existing scaffolded documents instead of leaving them alone. Never overwrites .kyber-weave/kyber-weave.yml.")]
     public bool Force { get; set; }
 }

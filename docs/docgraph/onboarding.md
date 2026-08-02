@@ -30,7 +30,16 @@ This writes three files and leaves any that already exist alone, so it is safe t
 | `<docs-root>/catalog.md` | The component and owner vocabulary, seeded with one example row |
 
 The docs root is detected from the first conventional directory that exists — `docs`,
-`6-Docs`, `doc`, `documentation` — or created as `docs`. Override with `--docs-root`.
+`6-Docs`, `doc`, `documentation` — or created as `docs`. Re-running with an existing
+`.kyber-weave/kyber-weave.yml` honors its `docs-root` first, so scaffolding lands in the
+same tree `docs validate` reads. Override with `--docs-root`.
+
+`--force` regenerates the two scaffolded documents. It never overwrites your host config:
+that file is yours, and it holds settings — harness profiles, catalog column overrides,
+closed vocabularies — that the emitted template knows nothing about and would silently
+drop. The one key `docs init` will rewrite there is `ontology.docs-root`, in place and only
+when `--docs-root` moves it, so the catalog and the validator never end up reading
+different trees. Comments and every other key survive the edit.
 
 ### APM is an expected dependency
 

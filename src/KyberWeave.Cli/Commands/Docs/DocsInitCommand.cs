@@ -43,9 +43,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         foreach (var file in result.Files)
         {
-            AnsiConsole.MarkupLine(file.Written
-                ? $"  [green]created[/]  {Markup.Escape(file.RelativePath)}"
-                : $"  [grey]exists[/]   {Markup.Escape(file.RelativePath)} [grey](left alone; --force to overwrite)[/]");
+            AnsiConsole.MarkupLine($"  {Label(file.Outcome)} {Markup.Escape(file.RelativePath)}{Note(file)}");
         }
 
         AnsiConsole.WriteLine();
@@ -61,6 +59,24 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         AnsiConsole.MarkupLine("  3. Ask your agent to apply the [grey]kyber-weave-docs[/] skill to the failing documents.");
 
         return 0;
+    }
+
+    /// <summary>Fixed-width so the file paths line up under one another.</summary>
+    private static string Label(ScaffoldOutcome outcome) => outcome switch
+    {
+        ScaffoldOutcome.Created => "[green]created[/]  ",
+        ScaffoldOutcome.Updated => "[green]updated[/]  ",
+        ScaffoldOutcome.Preserved => "[grey]kept[/]     ",
+        _ => "[grey]exists[/]   "
+    };
+
+    private static string Note(ScaffoldedFile file)
+    {
+        var note = file.Note ?? (file.Outcome == ScaffoldOutcome.Skipped
+            ? "left alone; --force to overwrite"
+            : null);
+
+        return note is null ? string.Empty : $" [grey]({Markup.Escape(note)})[/]";
     }
 
     private static void DeploySkill(DocsInitSettings settings)

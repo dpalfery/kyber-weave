@@ -182,7 +182,10 @@ public sealed class DocsScaffolderTests : IDisposable
         var result = DocsScaffolder.Scaffold(_temp.Path);
 
         Assert.Equal("hand written", Read("docs/catalog.md"));
-        Assert.False(result.Files.Single(f => f.RelativePath == "docs/catalog.md").Written);
+        var catalog = result.Files.Single(f => f.RelativePath == "docs/catalog.md");
+        Assert.Equal(ScaffoldOutcome.Skipped, catalog.Outcome);
+        Assert.Null(catalog.Note);
+        Assert.False(catalog.Written);
         Assert.True(result.Files.Single(f => f.RelativePath == "docs/documentation-ontology.md").Written);
     }
 
@@ -215,6 +218,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         var entry = result.Files.Single(f => f.RelativePath == ConfigPath);
         Assert.Equal(ScaffoldOutcome.Preserved, entry.Outcome);
+        Assert.Equal("your configuration, kept as-is; --force does not overwrite it", entry.Note);
         Assert.False(entry.Written);
     }
 
