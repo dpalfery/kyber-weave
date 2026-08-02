@@ -2,6 +2,8 @@
 
 Thin Node wrapper around **self-contained** Kyber-Weave binaries (`kyber-weave`, `kyber-weave-mcp`). End users do **not** need a .NET runtime.
 
+The release workflow does not publish this package to npm; keep it for local/manual use. The documented install path is `scripts/install.sh`.
+
 ## How binaries are obtained
 
 1. `npm i -g @dpalfery/kyber-weave` installs this small package.

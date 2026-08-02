@@ -1,14 +1,16 @@
 # Kyber-Weave Homebrew formula (source)
 
-Canonical formula used by the tap [`dpalfery/homebrew-kyber-weave`](https://github.com/dpalfery/homebrew-kyber-weave).
+Canonical formula for the tap [`dpalfery/homebrew-kyber-weave`](https://github.com/dpalfery/homebrew-kyber-weave).
 
-Install (once the tap is published and a Release exists):
+The release workflow does **not** update this tap. After each `v*` GitHub Release, refresh
+`version` and `sha256` values here (or in the tap) manually from the Release's
+`SHA256SUMS.txt`. See [`docs/distribution.md`](../docs/distribution.md).
+
+Install (once the tap is published and checksums match a Release):
 
 ```bash
 brew tap dpalfery/kyber-weave
 brew install kyber-weave
 ```
 
-The Release workflow refreshes SHA256 checksums in the tap when `HOMEBREW_TAP_TOKEN` is configured. Until then, update `sha256` values manually after each `v*` GitHub Release (see `docs/distribution.md`).
-
-SHA256 placeholders below are replaced at release time. Do not `brew install` from this file until checksums match published assets.
+Do not `brew install` from this file until checksums match published assets.
