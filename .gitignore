@@ -21,3 +21,7 @@ nupkg/
 # them here, so this is generated output — including skills from other packages.
 .agents/
 apm_modules/
+# Cursor MCP secrets (keep .cursor/mcp.json tracked)
+.cursor/**/*.env
+.cursor/**/*.env.*
+!.cursor/**/*.env.example
