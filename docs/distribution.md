@@ -35,10 +35,9 @@ It covers `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`. Windows is out of 
 
 ## Other published artifacts
 
-The release pipeline still publishes an npm wrapper and a Homebrew formula. They work, but
-they are **not currently documented install paths** — the docs deliberately present one
-way in. Treat them as published artifacts to keep building, not as channels to point users
-at.
+The `npm/` wrapper and `homebrew/` formula live in-tree for local experiments and
+manual packaging, but the release workflow does **not** publish them. The documented
+install path is `scripts/install.sh` against GitHub Release assets.
 
 `nuget.org` is never used. A `dotnet tool` package may go to GitHub Packages as an
 optional secondary channel for .NET specialists.
@@ -53,22 +52,12 @@ extensionless binaries.
 
 ## Release flow
 
-1. Push a `v*` tag, e.g. `v0.1.1`
-2. `.github/workflows/release.yml` publishes each RID and creates a GitHub Release with archives and `SHA256SUMS.txt`
-3. If `NPM_TOKEN` is set, publishes the npm wrapper (wrapper only — binaries still come from the Release)
-4. If `HOMEBREW_TAP_TOKEN` is set, updates the tap formula with the new SHA-256 values
-5. Optionally pushes `PackAsTool` nupkgs to GitHub Packages — never to nuget.org
+1. Rev the release by pushing a new `v*` tag, e.g. `v0.1.1` (the tag is the version source of truth)
+2. `.github/workflows/release.yml` stamps that version onto the binaries, publishes each RID, and creates a GitHub Release with archives and `SHA256SUMS.txt`
+3. Optionally pushes `PackAsTool` nupkgs to GitHub Packages — never to nuget.org
 
-Without those secrets, Release assets still publish and the dependent steps skip with a
-workflow warning. Since the install script reads only Release assets, **step 2 alone is
-enough for the documented install path to work.**
-
-### Required secrets
-
-| Secret | Purpose |
-|---|---|
-| `NPM_TOKEN` | Publishing the npm wrapper |
-| `HOMEBREW_TAP_TOKEN` | PAT with `contents:write` on the Homebrew tap |
+No npm or Homebrew secrets are required. Since the install script reads only Release
+assets, **steps 1–2 alone are enough for the documented install path to work.**
 
 ## Continuous integration security
 

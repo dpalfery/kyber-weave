@@ -1,16 +1,13 @@
-# Release — self-contained binaries, GitHub Release, npm, Homebrew
+# Release — self-contained binaries and GitHub Release
 #
-# Triggers on v* tags. Builds RID matrix publishes, attaches archives to a
-# GitHub Release, optionally publishes @dpalfery/kyber-weave to npm, optionally
-# refreshes the Homebrew tap, and optionally pushes PackAsTool packages to
-# GitHub Packages.
+# Triggers on v* tags. Builds the RID matrix, stamps Version from the tag,
+# attaches archives + SHA256SUMS.txt to a GitHub Release, and optionally pushes
+# PackAsTool packages to GitHub Packages.
 #
-# nuget.org is forbidden.
+# npm and Homebrew are not published from this workflow. nuget.org is forbidden.
 #
-# Secrets (document; do not invent tokens):
-# - NPM_TOKEN — npm Automation token with publish rights to @dpalfery/kyber-weave
-# - HOMEBREW_TAP_TOKEN — PAT with contents:write on dpalfery/homebrew-kyber-weave
-#   (optional; Release assets still publish without it)
+# Versioning: push a new `v*` tag (e.g. v0.1.2) to cut a release. The tag is the
+# source of truth for the Release name and binary Version metadata.
 
 name: Release
 
@@ -21,7 +18,7 @@ name: Release
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Build and package only — skip Release/npm/Homebrew publish"
+        description: "Build and package only — skip creating the GitHub Release"
         type: boolean
         default: false
 
@@ -37,7 +34,6 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   CONFIGURATION: Release
-  NPM_PACKAGE_DIR: npm
 
 jobs:
   version:
@@ -177,7 +173,8 @@ jobs:
           NOTES="$(cat <<EOF
           ## Kyber-Weave ${VERSION}
 
-          Self-contained binaries (no .NET runtime required).
+          Self-contained binaries (no .NET runtime required). Tag \`${TAG}\` stamps
+          this Release and the binary Version metadata.
 
           | Tool | Asset pattern |
           | --- | --- |
@@ -186,155 +183,16 @@ jobs:
 
           RIDs: \`linux-x64\`, \`linux-arm64\`, \`osx-x64\`, \`osx-arm64\`, \`win-x64\`.
 
-          Install: \`npm i -g @dpalfery/kyber-weave@${VERSION}\` · \`brew install dpalfery/kyber-weave/kyber-weave\` · or download assets below.
+          Install:
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh -s -- --version ${VERSION}
+          \`\`\`
           EOF
           )"
           gh release create "${TAG}" \
             --title "Kyber-Weave ${VERSION}" \
             --notes "${NOTES}" \
             release-assets/*
-
-  npm-publish:
-    name: Publish npm package
-    needs: [version, release]
-    runs-on: ubuntu-latest
-    if: >
-      github.ref_type == 'tag' &&
-      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Sync package version to tag
-        working-directory: ${{ env.NPM_PACKAGE_DIR }}
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          node -e "
-            const fs = require('fs');
-            const p = JSON.parse(fs.readFileSync('package.json','utf8'));
-            p.version = process.env.VERSION;
-            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
-          "
-
-      - name: Pack dry-run
-        working-directory: ${{ env.NPM_PACKAGE_DIR }}
-        run: npm pack --dry-run
-
-      - name: Publish to npm
-        working-directory: ${{ env.NPM_PACKAGE_DIR }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${NODE_AUTH_TOKEN:-}" ]
-          then
-            echo "::warning::NPM_TOKEN secret is not set — skipping npm publish. Add a repo/org secret named NPM_TOKEN (Automation token with publish to @dpalfery)."
-            exit 0
-          fi
-          KYBER_WEAVE_SKIP_DOWNLOAD=1 npm publish --access public
-
-  homebrew-tap:
-    name: Update Homebrew tap
-    needs: [version, release]
-    runs-on: ubuntu-latest
-    if: >
-      github.ref_type == 'tag' &&
-      (github.event_name != 'workflow_dispatch' || inputs.dry_run != true)
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout product repo
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Download Release assets for checksums
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: binaries-*
-          path: release-assets
-          merge-multiple: true
-
-      - name: Generate formula with SHA256
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          import hashlib, os, pathlib, re
-
-          version = os.environ["VERSION"]
-          assets = pathlib.Path("release-assets")
-
-          def sha(name: str) -> str:
-              data = (assets / name).read_bytes()
-              return hashlib.sha256(data).hexdigest()
-
-          mapping = {
-              "REPLACE_WITH_RELEASE_SHA256_OSX_ARM64_CLI": sha("kyber-weave-osx-arm64.tar.gz"),
-              "REPLACE_WITH_RELEASE_SHA256_OSX_ARM64_MCP": sha("kyber-weave-mcp-osx-arm64.tar.gz"),
-              "REPLACE_WITH_RELEASE_SHA256_OSX_X64_CLI": sha("kyber-weave-osx-x64.tar.gz"),
-              "REPLACE_WITH_RELEASE_SHA256_OSX_X64_MCP": sha("kyber-weave-mcp-osx-x64.tar.gz"),
-              "REPLACE_WITH_RELEASE_SHA256_LINUX_ARM64_CLI": sha("kyber-weave-linux-arm64.tar.gz"),
-              "REPLACE_WITH_RELEASE_SHA256_LINUX_ARM64_MCP": sha("kyber-weave-mcp-linux-arm64.tar.gz"),
-              "REPLACE_WITH_RELEASE_SHA256_LINUX_X64_CLI": sha("kyber-weave-linux-x64.tar.gz"),
-              "REPLACE_WITH_RELEASE_SHA256_LINUX_X64_MCP": sha("kyber-weave-mcp-linux-x64.tar.gz"),
-          }
-
-          text = pathlib.Path("homebrew/kyber-weave.rb").read_text()
-          text = re.sub(r'version "[^"]+"', f'version "{version}"', text, count=1)
-          for placeholder, digest in mapping.items():
-              text = text.replace(placeholder, digest)
-          pathlib.Path("Formula-kyber-weave.rb").write_text(text)
-          print(text)
-          PY
-
-      - name: Push formula to homebrew-kyber-weave tap
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]
-          then
-            echo "::warning::HOMEBREW_TAP_TOKEN secret is not set — skipping tap update."
-            echo "Commit Formula-kyber-weave.rb manually to dpalfery/homebrew-kyber-weave (Formula/kyber-weave.rb)."
-            mkdir -p artifacts
-            cp Formula-kyber-weave.rb artifacts/
-            exit 0
-          fi
-          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/dpalfery/homebrew-kyber-weave.git" tap
-          mkdir -p tap/Formula
-          cp Formula-kyber-weave.rb tap/Formula/kyber-weave.rb
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/kyber-weave.rb
-          if git diff --cached --quiet
-          then
-            echo "No formula changes"
-            exit 0
-          fi
-          git commit -m "kyber-weave ${VERSION}"
-          git push origin HEAD:main
-
-      - name: Upload generated formula artifact
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: homebrew-formula
-          path: Formula-kyber-weave.rb
-          retention-days: 30
-          if-no-files-found: warn
 
   gh-packages:
     name: Optional GitHub Packages (dotnet tool)
