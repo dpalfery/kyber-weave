@@ -21,6 +21,19 @@ public enum ScaffoldOutcome
     Preserved
 }
 
+/// <summary>Where the documentation root used by <c>docs init</c> came from.</summary>
+public enum DocsRootSource
+{
+    /// <summary>The operator supplied <c>--docs-root</c>.</summary>
+    Explicit,
+
+    /// <summary>An existing host configuration supplied the root.</summary>
+    Configuration,
+
+    /// <summary>The root was selected from the conventional directory names.</summary>
+    Convention
+}
+
 /// <summary>One file the scaffolder considered writing.</summary>
 /// <param name="RelativePath">Repository-relative path, forward-slashed.</param>
 /// <param name="Outcome">What happened to it.</param>
@@ -36,11 +49,11 @@ public sealed record ScaffoldedFile(string RelativePath, ScaffoldOutcome Outcome
 
 /// <summary>What <see cref="DocsScaffolder"/> did.</summary>
 /// <param name="DocsRoot">The documentation root the corpus was scaffolded into.</param>
-/// <param name="DocsRootDetected">True when the root was inferred rather than supplied.</param>
+/// <param name="DocsRootSource">Where the resolved documentation root came from.</param>
 /// <param name="Files">Every file considered, written or skipped.</param>
 public sealed record ScaffoldResult(
     string DocsRoot,
-    bool DocsRootDetected,
+    DocsRootSource DocsRootSource,
     IReadOnlyList<ScaffoldedFile> Files)
 {
     public bool WroteAnything => Files.Any(f => f.Written);
@@ -82,10 +95,10 @@ public static class DocsScaffolder
         var resolvedOwner = owner.Trim();
         RequireCatalogValue(resolvedOwner, nameof(owner));
 
-        var detected = string.IsNullOrWhiteSpace(docsRoot);
-        var resolvedDocsRoot = detected
+        (string DocsRoot, DocsRootSource Source) resolution = string.IsNullOrWhiteSpace(docsRoot)
             ? ResolveDocsRoot(root)
-            : docsRoot!.Trim().Replace('\\', '/').TrimEnd('/');
+            : (docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
+        var resolvedDocsRoot = resolution.DocsRoot;
         resolvedDocsRoot = RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
 
         // Checked before the first write, not only inside Write. The host config resolves
@@ -102,7 +115,7 @@ public static class DocsScaffolder
                 Catalog(resolvedOwner), force)
         };
 
-        return new ScaffoldResult(resolvedDocsRoot, detected, files);
+        return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files);
     }
 
     /// <summary>
@@ -129,13 +142,13 @@ public static class DocsScaffolder
     /// <c>docs validate</c> then reads. A missing or unreadable config falls back to
     /// <see cref="DetectDocsRoot"/>, preserving fresh-repo behaviour.
     /// </summary>
-    internal static string ResolveDocsRoot(string repoRoot)
+    internal static (string DocsRoot, DocsRootSource Source) ResolveDocsRoot(string repoRoot)
     {
         var loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
         if (loaded.Success && loaded.ConfigPath is not null && loaded.Config is not null)
-            return loaded.Config.Ontology.DocsRoot;
+            return (loaded.Config.Ontology.DocsRoot, DocsRootSource.Configuration);
 
-        return DetectDocsRoot(repoRoot);
+        return (DetectDocsRoot(repoRoot), DocsRootSource.Convention);
     }
 
     /// <summary>

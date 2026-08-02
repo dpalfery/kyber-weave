@@ -37,7 +37,14 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             return 1;
         }
 
-        var rootNote = result.DocsRootDetected ? " [grey](detected)[/]" : string.Empty;
+        var rootNote = result.DocsRootSource switch
+        {
+            DocsRootSource.Configuration => " [grey](configured)[/]",
+            DocsRootSource.Convention => " [grey](detected)[/]",
+            DocsRootSource.Explicit => string.Empty,
+            _ => throw new InvalidOperationException(
+                $"Unknown documentation root source: {result.DocsRootSource}")
+        };
         AnsiConsole.MarkupLine($"Documentation root: [bold]{Markup.Escape(result.DocsRoot)}[/]{rootNote}");
         AnsiConsole.WriteLine();
 

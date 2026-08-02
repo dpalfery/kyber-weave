@@ -61,7 +61,7 @@ public sealed class DocsScaffolderTests : IDisposable
         var result = DocsScaffolder.Scaffold(_temp.Path);
 
         Assert.Equal(existing, result.DocsRoot);
-        Assert.True(result.DocsRootDetected);
+        Assert.Equal(DocsRootSource.Convention, result.DocsRootSource);
     }
 
     [Fact]
@@ -97,7 +97,7 @@ public sealed class DocsScaffolderTests : IDisposable
         var result = DocsScaffolder.Scaffold(_temp.Path);
 
         Assert.Equal("6-Docs", result.DocsRoot);
-        Assert.True(result.DocsRootDetected);
+        Assert.Equal(DocsRootSource.Configuration, result.DocsRootSource);
         Assert.True(File.Exists(Path.Combine(_temp.Path, "6-Docs", "catalog.md")));
         Assert.True(File.Exists(Path.Combine(_temp.Path, "6-Docs", "documentation-ontology.md")));
         Assert.False(File.Exists(Path.Combine(_temp.Path, "docs", "catalog.md")));
@@ -126,6 +126,7 @@ public sealed class DocsScaffolderTests : IDisposable
         var validateRoot = KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot;
 
         Assert.Equal(validateRoot, result.DocsRoot);
+        Assert.Equal(DocsRootSource.Configuration, result.DocsRootSource);
     }
 
     [Fact]
@@ -134,6 +135,7 @@ public sealed class DocsScaffolderTests : IDisposable
         var result = DocsScaffolder.Scaffold(_temp.Path);
 
         Assert.Equal("docs", result.DocsRoot);
+        Assert.Equal(DocsRootSource.Convention, result.DocsRootSource);
         Assert.True(Directory.Exists(Path.Combine(_temp.Path, "docs")));
     }
 
@@ -145,7 +147,7 @@ public sealed class DocsScaffolderTests : IDisposable
         var result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
 
         Assert.Equal("handbook", result.DocsRoot);
-        Assert.False(result.DocsRootDetected);
+        Assert.Equal(DocsRootSource.Explicit, result.DocsRootSource);
         Assert.True(File.Exists(Path.Combine(_temp.Path, "handbook", "catalog.md")));
     }
 
