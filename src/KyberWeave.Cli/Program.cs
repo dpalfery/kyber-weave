@@ -1,7 +1,7 @@
-using Spectre.Console.Cli;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Skills;
+using Spectre.Console.Cli;
 
 var app = new CommandApp();
 app.Configure(config =>
@@ -73,6 +73,11 @@ app.Configure(config =>
     config.AddBranch("docs", docs =>
     {
         docs.SetDescription("Validate documentation frontmatter and its joins to the code graph.");
+
+        docs.AddCommand<DocsInitCommand>("init")
+            .WithDescription("Scaffold host config, the catalog, and the ontology reference; deploy the authoring skill via APM.")
+            .WithExample("docs", "init", ".")
+            .WithExample("docs", "init", ".", "--docs-root", "docs", "--target", "claude,agent-skills");
 
         docs.AddCommand<DocsValidateCommand>("validate")
             .WithDescription("Check documentation frontmatter against the ontology schema (KW-DOC-SPEC-*).")

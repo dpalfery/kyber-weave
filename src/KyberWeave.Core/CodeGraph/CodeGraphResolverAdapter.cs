@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.CodeGraph;
 
@@ -153,17 +154,17 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start the 'sqlite3' process.");
 
-        var output = process.StandardOutput.ReadToEnd();
-        var error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        // Both pipes are drained concurrently. This query returns the whole node table, so
+        // stdout is large by design and stderr must not be left to fill behind it.
+        var result = ProcessRunner.ReadToEnd(process);
 
-        if (process.ExitCode != 0)
+        if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(
-                $"Reading the CodeGraph index with 'sqlite3' failed (exit {process.ExitCode}): {error.Trim()}");
+                $"Reading the CodeGraph index with 'sqlite3' failed (exit {result.ExitCode}): {result.StandardError.Trim()}");
         }
 
-        return output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        return result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
     }
 
     /// <inheritdoc />

@@ -1,10 +1,9 @@
 using System.ComponentModel;
-using Spectre.Console;
-using Spectre.Console.Cli;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Validation;
-using KyberWeave.Cli.Commands;
+using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Skills;
 

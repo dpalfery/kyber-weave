@@ -1,6 +1,10 @@
-# CI — build, test, pack-to-artifacts, and RID publish smoke.
+# CI — build, test, pack-to-artifacts, RID publish smoke, and security gates.
 # No registry publish here (npm / Homebrew / GitHub Packages belong to release.yml).
 # nuget.org is forbidden.
+#
+# Security jobs mirror motorcycle-rag-system's pr-gate (CodeQL, Trivy fs, Semgrep,
+# gitleaks) without Azure/container/Dockerfile scans — this repo ships binaries, not
+# cloud infrastructure.
 
 name: CI
 
@@ -8,6 +12,9 @@ name: CI
   push:
     branches: [main, develop]
   pull_request:
+  schedule:
+    # Weekly CodeQL / dependency scan fallback when the tree is quiet
+    - cron: "0 0 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +23,8 @@ concurrency:
 
 permissions:
   contents: read
+  security-events: write
+  actions: read
 
 env:
   DOTNET_VERSION: "10.0.x"
@@ -38,6 +47,37 @@ jobs:
 
       - name: Restore
         run: dotnet restore KyberWeave.sln
+
+      # Curated packs only — whitespace + a small style set from .editorconfig.
+      # Skip `dotnet format analyzers`: CA quality rules already fail the build via
+      # TreatWarningsAsErrors / AnalysisMode=all.
+      - name: Format (whitespace)
+        run: >
+          dotnet format KyberWeave.sln whitespace
+          --verify-no-changes
+          --no-restore
+          -v minimal
+
+      - name: Format (style)
+        run: >
+          dotnet format KyberWeave.sln style
+          --verify-no-changes
+          --severity warn
+          --no-restore
+          -v minimal
+
+      - name: List vulnerable NuGet packages
+        run: |
+          set -euo pipefail
+          # Belt-and-suspenders for NuGetAudit during restore (NU1903/NU1904 are errors
+          # under TreatWarningsAsErrors). Clean output says "has no vulnerable packages";
+          # failures say "has the following vulnerable packages".
+          output="$(dotnet list KyberWeave.sln package --vulnerable --include-transitive 2>&1)"
+          printf '%s\n' "$output"
+          if printf '%s\n' "$output" | grep -Eqi 'has the following vulnerable packages'; then
+            echo "::error::Vulnerable NuGet packages detected"
+            exit 1
+          fi
 
       - name: Build
         run: dotnet build KyberWeave.sln -c ${{ env.CONFIGURATION }} --no-restore
@@ -131,3 +171,276 @@ jobs:
             artifacts/mcp-linux-x64/
           retention-days: 7
           if-no-files-found: warn
+
+  codeql:
+    name: CodeQL Analysis (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    needs: build-test
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [csharp, javascript-typescript]
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Setup .NET
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build solution
+        if: matrix.language == 'csharp'
+        run: |
+          set -euo pipefail
+          dotnet restore KyberWeave.sln
+          dotnet build KyberWeave.sln --configuration Release --no-restore
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  trivy:
+    name: Trivy OSS Security Scan
+    runs-on: ubuntu-latest
+    needs: build-test
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install verified Trivy CLI
+        env:
+          TRIVY_VERSION: "0.72.0"
+          TRIVY_SHA256: "bbb64b9695866ce4a7a8f5c9592002c5961cab378577fa3f8a040df362b9b2ea"
+        run: |
+          set -euo pipefail
+          archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$archive" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${archive}"
+          echo "${TRIVY_SHA256}  ${archive}" | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/trivy/bin"
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP/trivy/bin" trivy
+          echo "$RUNNER_TEMP/trivy/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/trivy/bin/trivy" --version
+
+      # Scan once to JSON, then convert to both SARIF (for GitHub Security) and
+      # table (for the job log). Scanning straight to SARIF leaves a failing job
+      # with no findings printed anywhere in the log.
+      - name: Scan repository with Trivy
+        run: |
+          set -euo pipefail
+          trivy fs \
+            --scanners vuln,misconfig,secret,license \
+            --severity HIGH,CRITICAL \
+            --format json \
+            --output trivy.json \
+            --skip-dirs .git \
+            --skip-dirs TestResults \
+            --skip-dirs artifacts \
+            --skip-dirs '**/bin' \
+            --skip-dirs '**/obj' \
+            .
+
+      - name: Convert Trivy report to SARIF
+        if: always() && hashFiles('trivy.json') != ''
+        run: trivy convert --format sarif --output trivy.sarif trivy.json
+
+      - name: Report Trivy findings
+        if: always() && hashFiles('trivy.json') != ''
+        run: trivy convert --format table --exit-code 1 trivy.json
+
+      - name: Upload Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
+        if: always() && hashFiles('trivy.sarif') != ''
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+  semgrep:
+    name: Semgrep Community SAST
+    runs-on: ubuntu-latest
+    needs: build-test
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep Community Edition
+        run: python -m pip install --disable-pip-version-check "setuptools<82" semgrep==1.136.0
+
+      - name: Scan repository with Semgrep
+        run: |
+          set -euo pipefail
+          semgrep scan \
+            --config p/default \
+            --severity ERROR \
+            --error \
+            --metrics=off \
+            --exclude 'TestResults/**' \
+            --exclude 'artifacts/**' \
+            --exclude '**/bin/**' \
+            --exclude '**/obj/**' \
+            --sarif-output semgrep.sarif
+
+      - name: Upload Semgrep SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
+        if: always() && hashFiles('semgrep.sarif') != ''
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  gitleaks:
+    name: Secret Scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  skill-docs-gate:
+    name: Skill and docs gate
+    runs-on: ubuntu-latest
+    needs: build-test
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Dogfood the PR's CLI rather than installing a release — gate behaviour must match
+      # the commit under test.
+      - name: Build CLI
+        run: >
+          dotnet build src/KyberWeave.Cli/KyberWeave.Cli.csproj
+          -c ${{ env.CONFIGURATION }}
+
+      - name: Skill validate / lint / scan
+        id: skill
+        run: |
+          set -euo pipefail
+          EXIT_CODE=0
+          mkdir -p kyber-weave-sarif
+          skills_dir=".apm/skills/kyber-weave-docs"
+          CLI="dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --"
+          $CLI skill validate "${skills_dir}" --format table || EXIT_CODE=1
+          $CLI skill lint "${skills_dir}" --min-desc-score 70 --format table || EXIT_CODE=1
+          $CLI skill scan "${skills_dir}" --fail-on critical --format sarif \
+            > "kyber-weave-sarif/skills-kyber-weave-docs.sarif" || EXIT_CODE=1
+          exit "${EXIT_CODE}"
+
+      - name: Upload skill scan SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
+        with:
+          sarif_file: kyber-weave-sarif
+          category: kyber-weave-skills
+
+      - name: Docs validate
+        run: >
+          dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --
+          docs validate . --format table
+
+      # docs drift needs a host-owned CodeGraph index (.codegraph/codegraph.db).
+      # Kyber-Weave does not create that index; without a CI indexer/cache the gate would
+      # fail closed on KW-DOC-DRIFT-001. Defer drift until an index is provisioned in CI.
+      # Local/PR authors still run: docs drift . (see AGENTS.md).
+
+  ci-summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs:
+      - build-test
+      - publish-smoke
+      - codeql
+      - trivy
+      - semgrep
+      - gitleaks
+      - skill-docs-gate
+    if: always()
+    steps:
+      - name: Evaluate gate results
+        run: |
+          set -euo pipefail
+          echo "## CI Results" > results.md
+          echo "" >> results.md
+          echo "| Job | Status |" >> results.md
+          echo "|-----|--------|" >> results.md
+          echo "| Build and test | ${{ needs.build-test.result }} |" >> results.md
+          echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
+          echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
+          echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} |" >> results.md
+          echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} |" >> results.md
+          echo "| Secret Scan (gitleaks) | ${{ needs.gitleaks.result }} |" >> results.md
+          echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
+          echo "" >> results.md
+
+          FAILED=false
+          for result in \
+            "${{ needs.build-test.result }}" \
+            "${{ needs.publish-smoke.result }}" \
+            "${{ needs.codeql.result }}" \
+            "${{ needs.trivy.result }}" \
+            "${{ needs.semgrep.result }}" \
+            "${{ needs.gitleaks.result }}" \
+            "${{ needs.skill-docs-gate.result }}"; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              FAILED=true
+              break
+            fi
+          done
+
+          if [ "$FAILED" = "true" ]; then
+            echo "## Gate FAILED" >> results.md
+            echo "" >> results.md
+            echo "One or more required jobs failed or were cancelled." >> results.md
+            cat results.md
+            exit 1
+          fi
+
+          echo "## Gate PASSED" >> results.md
+          echo "" >> results.md
+          echo "All required checks passed." >> results.md
+          cat results.md
+
+      - name: Upload gate results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: ci-results
+          path: results.md
+          retention-days: 14

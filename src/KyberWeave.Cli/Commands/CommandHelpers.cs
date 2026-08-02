@@ -1,9 +1,9 @@
-using Spectre.Console;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands;
 

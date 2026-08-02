@@ -33,14 +33,14 @@ public sealed class MarkdownAgentParser : IAgentParser
         var fileName = Path.GetFileName(filePath);
 
         // Standardize role name from file name (e.g. architect.agent.md -> architect, dotnet-dev.md -> dotnet-dev)
-        string roleName = fileName.Replace(".agent.md", "", StringComparison.OrdinalIgnoreCase)
+        var roleName = fileName.Replace(".agent.md", "", StringComparison.OrdinalIgnoreCase)
                                  .Replace(".md", "", StringComparison.OrdinalIgnoreCase);
 
         var read = MarkdownFrontmatterReader.Read(raw);
 
-        string description = string.Empty;
-        string model = string.Empty;
-        string body = read.HasFrontmatter ? read.Body : raw;
+        var description = string.Empty;
+        var model = string.Empty;
+        var body = read.HasFrontmatter ? read.Body : raw;
         var tools = new Collection<string>();
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 

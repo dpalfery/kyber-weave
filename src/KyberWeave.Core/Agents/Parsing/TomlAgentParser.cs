@@ -17,16 +17,16 @@ public sealed class TomlAgentParser : IAgentParser
         var dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
         var fileName = Path.GetFileNameWithoutExtension(filePath);
 
-        string name = fileName;
-        string description = string.Empty;
-        string instructions = string.Empty;
-        string model = string.Empty;
+        var name = fileName;
+        var description = string.Empty;
+        var instructions = string.Empty;
+        var model = string.Empty;
         var tools = new Collection<string>();
         var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // Simple TOML line-and-block extractor
         var lines = content.Replace("\r\n", "\n").Split('\n');
-        for (int i = 0; i < lines.Length; i++)
+        for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i].Trim();
             if (string.IsNullOrEmpty(line) || line.StartsWith('#')) continue;

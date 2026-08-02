@@ -1,8 +1,7 @@
 using System.ComponentModel;
-using Spectre.Console.Cli;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Security;
-using KyberWeave.Cli.Commands;
+using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Skills;
 

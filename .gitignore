@@ -13,6 +13,14 @@ nupkg/
 /npm/vendor/
 /npm/*.tgz
 
+# CodeGraph index — host-owned and machine-local. Kyber-Weave reads it read-only
+# and never creates it; the daemon rebuilds it per machine.
+.codegraph/
+
+# APM deploy target. Skills are authored in .apm/skills/ and `apm install` copies
+# them here, so this is generated output — including skills from other packages.
+.agents/
+apm_modules/
 # Cursor MCP secrets (keep .cursor/mcp.json tracked)
 .cursor/**/*.env
 .cursor/**/*.env.*
