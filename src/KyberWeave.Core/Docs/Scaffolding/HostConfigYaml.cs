@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -56,12 +57,99 @@ internal static partial class HostConfigYaml
                     StringComparison.Ordinal))
                 continue;
 
-            lines[i] = match.Groups["prefix"].Value + docsRoot + match.Groups["suffix"].Value;
+            var (value, suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
+            if (ScalarEquals(value, docsRoot))
+                return yaml;
+
+            lines[i] = match.Groups["prefix"].Value + QuoteScalar(docsRoot) + suffix;
             return string.Join(newline, lines);
         }
 
-        lines.Insert(ontology + 1, blockIndent + "docs-root: " + docsRoot);
+        lines.Insert(ontology + 1, blockIndent + "docs-root: " + QuoteScalar(docsRoot));
         return string.Join(newline, lines);
+    }
+
+    /// <summary>Quotes a single-line string as a YAML scalar without changing its value.</summary>
+    internal static string QuoteScalar(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        if (value.Any(char.IsControl))
+            throw new ArgumentException("YAML scalar values may not contain control characters.", nameof(value));
+
+        return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+    }
+
+    /// <summary>Compares a YAML scalar token by parsed value, preserving its original style.</summary>
+    private static bool ScalarEquals(string token, string expected)
+    {
+        try
+        {
+            var stream = new YamlStream();
+            stream.Load(new StringReader("value: " + token));
+            var root = (YamlMappingNode)stream.Documents[0].RootNode;
+            return root.Children.TryGetValue(new YamlScalarNode("value"), out var node)
+                && node is YamlScalarNode scalar
+                && string.Equals(scalar.Value, expected, StringComparison.Ordinal);
+        }
+        catch (YamlDotNet.Core.YamlException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Separates a scalar token from trailing whitespace or an inline comment without
+    /// treating a hash inside a quoted scalar as the start of that comment.
+    /// </summary>
+    private static (string Value, string Suffix) SplitScalarAndSuffix(string rest)
+    {
+        var quote = rest.Length > 0 && rest[0] is '\'' or '"' ? rest[0] : '\0';
+        var start = quote == '\0' ? 0 : 1;
+        for (var i = start; i < rest.Length; i++)
+        {
+            if (quote == '\'' && rest[i] == '\'')
+            {
+                if (i + 1 < rest.Length && rest[i + 1] == '\'')
+                {
+                    i++;
+                    continue;
+                }
+
+                quote = '\0';
+                continue;
+            }
+
+            if (quote == '"')
+            {
+                if (rest[i] == '\\')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (rest[i] == '"')
+                    quote = '\0';
+                continue;
+            }
+
+            if (quote != '\0')
+                continue;
+
+            if (rest[i] == '#' && i > 0 && char.IsWhiteSpace(rest[i - 1]))
+            {
+                var suffixStart = i - 1;
+                while (suffixStart > 0 && char.IsWhiteSpace(rest[suffixStart - 1]))
+                    suffixStart--;
+
+                return (rest[..suffixStart], rest[suffixStart..]);
+            }
+        }
+
+        var valueEnd = rest.Length;
+        while (valueEnd > 0 && char.IsWhiteSpace(rest[valueEnd - 1]))
+            valueEnd--;
+
+        return (rest[..valueEnd], rest[valueEnd..]);
     }
 
     /// <summary>Index of the top-level <c>ontology:</c> key, or -1.</summary>
@@ -119,7 +207,7 @@ internal static partial class HostConfigYaml
             lines.Add(string.Empty);
 
         lines.Add("ontology:");
-        lines.Add(DefaultIndent + "docs-root: " + docsRoot);
+        lines.Add(DefaultIndent + "docs-root: " + QuoteScalar(docsRoot));
         lines.Add(string.Empty);
         return lines;
     }
@@ -128,11 +216,9 @@ internal static partial class HostConfigYaml
     private static partial Regex OntologyKey();
 
     /// <summary>
-    /// Splits a <c>docs-root</c> line into the part before its value and the part after,
-    /// so the value can be replaced without disturbing indentation or a trailing comment.
-    /// A <c>#</c> only opens a comment when whitespace precedes it, so a value containing
-    /// one survives intact.
+    /// Splits a <c>docs-root</c> line into the part before its value and the remaining text,
+    /// which is then parsed without confusing a quoted hash for a trailing comment.
     /// </summary>
-    [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)docs-root[ \t]*:[ \t]*)(?<value>.*?)(?<suffix>(?:[ \t]+#.*)?[ \t]*)$")]
+    [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)docs-root[ \t]*:[ \t]*)(?<rest>.*)$")]
     private static partial Regex DocsRootKey();
 }

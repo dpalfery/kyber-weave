@@ -78,12 +78,15 @@ public static class DocsScaffolder
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         var root = Path.GetFullPath(repoRoot);
 
-        RequireEmittableValue(owner, nameof(owner));
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        var resolvedOwner = owner.Trim();
+        RequireCatalogValue(resolvedOwner, nameof(owner));
 
         var detected = string.IsNullOrWhiteSpace(docsRoot);
         var resolvedDocsRoot = detected
             ? ResolveDocsRoot(root)
-            : RequireEmittableValue(docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), nameof(docsRoot));
+            : docsRoot!.Trim().Replace('\\', '/').TrimEnd('/');
+        resolvedDocsRoot = RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
 
         // Checked before the first write, not only inside Write. The host config resolves
         // inside the root and would otherwise be created successfully and left behind,
@@ -94,9 +97,9 @@ public static class DocsScaffolder
         {
             WriteHostConfig(root, resolvedDocsRoot),
             Write(root, $"{resolvedDocsRoot}/documentation-ontology.md",
-                OntologyReference(resolvedDocsRoot, owner), force),
+                OntologyReference(resolvedDocsRoot, resolvedOwner), force),
             Write(root, $"{resolvedDocsRoot}/catalog.md",
-                Catalog(owner), force)
+                Catalog(resolvedOwner), force)
         };
 
         return new ScaffoldResult(resolvedDocsRoot, detected, files);
@@ -136,26 +139,36 @@ public static class DocsScaffolder
     }
 
     /// <summary>
-    /// Rejects values that would change the structure of what they are emitted into.
+    /// Rejects values that cannot remain on one generated line.
     /// </summary>
     /// <remarks>
-    /// These reach two formats: YAML frontmatter, where a newline adds a key, and the
-    /// pipe-delimited catalog row, where a <c>|</c> shifts the columns the component and
-    /// owner vocabularies are read from. Rejecting beats escaping — two formats would need
-    /// two escapes, and a scaffolder that silently rewrites what the operator typed is
-    /// worse than one that stops and says why.
+    /// YAML punctuation is quoted at the emission site. Control characters still change
+    /// the generated document's line structure and are therefore rejected before any write.
     /// </remarks>
     private static string RequireEmittableValue(string value, string parameterName)
     {
-        if (value.Any(c => char.IsControl(c) || c is '|' or '"'))
+        if (value.Any(char.IsControl))
         {
             throw new ArgumentException(
-                $"'{parameterName}' may not contain control characters, '|' or '\"'. " +
-                "These values are written into YAML frontmatter and a pipe-delimited catalog row.",
+                $"'{parameterName}' may not contain control characters. " +
+                "Generated values must remain on one line.",
                 parameterName);
         }
 
         return value;
+    }
+
+    /// <summary>Rejects values that would add a column to the pipe-delimited catalog row.</summary>
+    private static void RequireCatalogValue(string value, string parameterName)
+    {
+        RequireEmittableValue(value, parameterName);
+        if (value.Contains('|', StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"'{parameterName}' may not contain '|'. " +
+                "The value is written into a pipe-delimited catalog row.",
+                parameterName);
+        }
     }
 
     /// <summary>
@@ -258,27 +271,33 @@ public static class DocsScaffolder
             relativePath, existed ? ScaffoldOutcome.Updated : ScaffoldOutcome.Created);
     }
 
-    private static string HostConfig(string docsRoot) =>
-        $"""
+    private static string HostConfig(string docsRoot)
+    {
+        var yamlDocsRoot = HostConfigYaml.QuoteScalar(docsRoot);
+        return $"""
         # Kyber-Weave host configuration. Every ontology default is overridable here.
         # Reference: {docsRoot}/documentation-ontology.md
         ontology:
-          docs-root: {docsRoot}
+          docs-root: {yamlDocsRoot}
 
           # Product defaults exclude five DevOps paths from the repository the ontology
           # was first built for. An empty list clears them.
           excluded-files: []
 
         """;
+    }
 
-    private static string Catalog(string owner) =>
-        $"""
+    private static string Catalog(string owner)
+    {
+        RequireCatalogValue(owner, nameof(owner));
+        var yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
         ---
         id: catalog
         title: Component and owner catalog
         doc-type: reference
         status: draft
-        owner: {owner}
+        owner: {yamlOwner}
         last-reviewed: {Today}
         ---
 
@@ -304,18 +323,21 @@ public static class DocsScaffolder
         `ontology.catalog` override in `.kyber-weave/kyber-weave.yml`.
 
         """;
+    }
 
     private static string Today =>
         DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
-    private static string OntologyReference(string docsRoot, string owner) =>
-        $"""
+    private static string OntologyReference(string docsRoot, string owner)
+    {
+        var yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
         ---
         id: documentation-ontology
         title: The documentation ontology
         doc-type: reference
         status: draft
-        owner: {owner}
+        owner: {yamlOwner}
         last-reviewed: {Today}
         ---
 
@@ -416,4 +438,5 @@ public static class DocsScaffolder
         reviewed. The `kyber-weave-docs` skill covers the whole procedure.
 
         """;
+    }
 }

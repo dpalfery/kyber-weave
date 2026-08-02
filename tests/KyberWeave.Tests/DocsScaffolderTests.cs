@@ -244,7 +244,7 @@ public sealed class DocsScaffolderTests : IDisposable
         var text = Read(ConfigPath);
         Assert.Equal(
             HandMaintainedConfig.Replace(
-                "docs-root: 6-Docs  # moved in 2024", "docs-root: handbook  # moved in 2024",
+                "docs-root: 6-Docs  # moved in 2024", "docs-root: 'handbook'  # moved in 2024",
                 StringComparison.Ordinal),
             text);
 
@@ -304,7 +304,7 @@ public sealed class DocsScaffolderTests : IDisposable
         DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
 
         var text = Read(ConfigPath);
-        Assert.Contains("\n  docs-root: handbook\n", text, StringComparison.Ordinal);
+        Assert.Contains("\n  docs-root: 'handbook'\n", text, StringComparison.Ordinal);
         Assert.Contains("\n    docs-root: extension-docs", text, StringComparison.Ordinal);
     }
 
@@ -325,7 +325,7 @@ public sealed class DocsScaffolderTests : IDisposable
         DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook");
 
         var text = Read(ConfigPath);
-        Assert.Contains("\n  docs-root: handbook\n", text, StringComparison.Ordinal);
+        Assert.Contains("\n  docs-root: 'handbook'\n", text, StringComparison.Ordinal);
         Assert.Equal("handbook", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
     }
 
@@ -453,7 +453,6 @@ public sealed class DocsScaffolderTests : IDisposable
     [Theory]
     [InlineData("platform\nstatus: current")]
     [InlineData("platform | Injected")]
-    [InlineData("platform\"quote")]
     [InlineData("platform\r\nid: hijacked")]
     public void RefusesAnOwnerThatWouldInjectStructure(string owner)
     {
@@ -470,6 +469,90 @@ public sealed class DocsScaffolderTests : IDisposable
 
         Assert.Equal("team-docs", result.DocsRoot);
         Assert.All(result.Files, f => Assert.True(f.Written));
+    }
+
+    /// <summary>
+    /// YAML punctuation belongs to the value when quoted. It must survive both config and
+    /// document frontmatter parsing without being mistaken for a mapping or comment.
+    /// </summary>
+    [Fact]
+    public void QuotesYamlSpecialCharactersWithoutChangingTheirValues()
+    {
+        const string docsRoot = "docs'root#manual";
+        const string owner = "platform's: \"core\" #1";
+
+        DocsScaffolder.Scaffold(_temp.Path, docsRoot, owner);
+
+        var ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        var set = new DocumentLoader(_temp.Path, ontology).Load();
+        Assert.Equal(docsRoot, ontology.DocsRoot);
+        Assert.Contains(owner, set.Owners);
+        Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
+    }
+
+    /// <summary>Owner whitespace is canonicalized once so YAML and catalog agree.</summary>
+    [Fact]
+    public void TrimsOwnerBeforeWritingFrontmatterAndCatalog()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, owner: " platform ");
+
+        var ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        var set = new DocumentLoader(_temp.Path, ontology).Load();
+        var report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
+        Assert.Contains("platform", set.Owners);
+        Assert.All(set.Documents, document => Assert.Equal("platform", document.Frontmatter.Owner));
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+    }
+
+    /// <summary>Loaded config values pass the same pre-write validation as CLI values.</summary>
+    [Fact]
+    public void RefusesAControlCharacterDecodedFromExistingConfig()
+    {
+        const string yaml = "ontology:\n  docs-root: \"docs\\nstatus\"\n";
+        WriteHostConfig(yaml);
+
+        Assert.Throws<ArgumentException>(() => DocsScaffolder.Scaffold(_temp.Path));
+
+        Assert.Equal(yaml, Read(ConfigPath));
+        Assert.Single(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
+    }
+
+    /// <summary>A Windows drive colon is data, not YAML structure.</summary>
+    [Fact]
+    public void QuotesAWindowsStyleDocsRoot()
+    {
+        const string docsRoot = "C:/work/repo/docs";
+        var yaml = HostConfigYaml.WithDocsRoot("ontology:\n", docsRoot);
+        WriteHostConfig(yaml);
+
+        Assert.Contains("docs-root: 'C:/work/repo/docs'", yaml, StringComparison.Ordinal);
+        Assert.Equal(docsRoot, KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
+    }
+
+    /// <summary>
+    /// An unchanged setting is operator state. Plain, single-quoted, and double-quoted
+    /// styles must all remain byte-for-byte identical when they already parse to the value.
+    /// </summary>
+    [Theory]
+    [InlineData("docs")]
+    [InlineData("'docs'")]
+    [InlineData("\"docs\"")]
+    public void PreservesAnEquivalentExistingDocsRootScalar(string token)
+    {
+        var yaml = $"ontology:\n  docs-root: {token}\n";
+
+        Assert.Equal(yaml, HostConfigYaml.WithDocsRoot(yaml, "docs"));
+    }
+
+    /// <summary>A quoted hash belongs to the scalar; only the later hash opens a comment.</summary>
+    [Fact]
+    public void RewritesAQuotedDocsRootWithoutMistakingItsHashForAComment()
+    {
+        const string yaml = "ontology:\n  docs-root: 'old # root'  # keep this\n";
+
+        Assert.Equal(
+            "ontology:\n  docs-root: 'new # root'  # keep this\n",
+            HostConfigYaml.WithDocsRoot(yaml, "new # root"));
     }
 
     /// <summary>The whole point: a freshly initialized repository validates clean.</summary>
