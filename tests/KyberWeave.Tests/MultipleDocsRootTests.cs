@@ -126,6 +126,51 @@ public class MultipleDocsRootTests : IDisposable
     }
 
     /// <summary>
+    /// A bare slash collapses to empty after TrimEnd, and would otherwise be welcomed as
+    /// the repository root. Rootedness has to be checked before that trim.
+    /// </summary>
+    [Fact]
+    public void A_Root_That_Is_Only_A_Slash_Is_Absolute()
+    {
+        var result = TryLoad("ontology:\n  docs-root: '/'\n");
+
+        Assert.False(result.Success);
+        Assert.Contains("is absolute", result.ParseError, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Drive-letter forms are absolute on Windows; on Linux and macOS
+    /// <c>Path.IsPathRooted</c> does not treat them as rooted, so they must still fail.
+    /// </summary>
+    [Fact]
+    public void A_Windows_Drive_Root_Is_Absolute_On_Every_Host()
+    {
+        var result = TryLoad("ontology:\n  docs-root: 'C:/'\n");
+
+        Assert.False(result.Success);
+        Assert.Contains("is absolute", result.ParseError, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// On a case-sensitive volume, <c>docs</c> and <c>Docs</c> are different directories.
+    /// Collapsing them with OrdinalIgnoreCase would silently drop one.
+    /// </summary>
+    [Fact]
+    public void Case_Distinct_Roots_Survive_On_Case_Sensitive_Hosts()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var config = Load("""
+            ontology:
+              docs-root:
+                - docs
+                - Docs
+            """);
+
+        Assert.Equal(["docs", "Docs"], config.DocsRoots);
+    }
+
+    /// <summary>
     /// A mapping under the key is a typo, not a root. It must name the key rather than
     /// surface the deserializer's own type error.
     /// </summary>
@@ -393,6 +438,47 @@ public class MultipleDocsRootTests : IDisposable
 
         Assert.Equal("handbook", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
         Assert.Contains("excluded-files: []", File.ReadAllText(configPath), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A multi-line flow sequence is valid YAML. Parsing only the opening bracket would
+    /// fall through to the scalar rewrite and orphan the continuation lines — the exact
+    /// corruption multi-root scaffolding exists to prevent.
+    /// </summary>
+    [Fact]
+    public void Scaffolding_Leaves_A_Multi_Line_Flow_Sequence_Alone()
+    {
+        var configPath = WriteHostConfig("""
+            ontology:
+              docs-root: [
+                docs,
+                automation
+              ]
+            """);
+        var before = File.ReadAllText(configPath);
+
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        Assert.Equal(before, File.ReadAllText(configPath));
+    }
+
+    [Fact]
+    public void Scaffolding_Into_An_Unlisted_Root_Of_A_Multi_Line_Flow_Sequence_Reports()
+    {
+        var configPath = WriteHostConfig("""
+            ontology:
+              docs-root: [
+                docs,
+                automation
+              ]
+            """);
+        var before = File.ReadAllText(configPath);
+
+        var ex = Assert.Throws<InvalidDataException>(
+            () => DocsScaffolder.Scaffold(_temp.Path, "handbook"));
+
+        Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllText(configPath));
     }
 
     // --- helpers --------------------------------------------------------------------

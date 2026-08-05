@@ -121,9 +121,11 @@ public sealed partial class DocumentLoader
             ? _repoRoot
             : Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
-    /// <summary>Path identity follows the host filesystem's case rules.</summary>
-    private static StringComparer PathComparer =>
-        OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+    /// <summary>
+    /// Path identity follows the same rules as <see cref="DocsRootPath.PathComparer"/>,
+    /// so a root the normalizer kept as distinct is not later collapsed when walking files.
+    /// </summary>
+    private static StringComparer PathComparer => DocsRootPath.PathComparer;
 
     private DocumentModel Parse(string absolutePath, string relativePath)
     {

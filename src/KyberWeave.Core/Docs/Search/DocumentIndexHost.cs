@@ -122,19 +122,30 @@ public sealed class DocumentIndexHost
     /// A fingerprint of the documentation tree: newest mtime and file count, so an edit
     /// or a deletion is both noticed.
     /// </summary>
-    private long ComputeDocsStamp()
+    /// <remarks>
+    /// The stamp fingerprints the same document set <see cref="DocumentLoader.Load"/>
+    /// produces — each path once — so overlapping roots and a catalog that already lives
+    /// inside a root cannot inflate the count and make stamp mismatches look like corpus
+    /// changes when nothing moved.
+    /// </remarks>
+    internal long ComputeDocsStamp()
     {
         long stamp = 17;
         var count = 0;
         long newest = 0;
+        var visited = new HashSet<string>(DocsRootPath.PathComparer);
 
         foreach (var relativeRoot in _docsRelativeRoots)
         {
-            var docsRoot = Path.Combine(_repoRoot, relativeRoot);
+            var docsRoot = relativeRoot == DocsRootPath.RepositoryRoot
+                ? _repoRoot
+                : Path.Combine(_repoRoot, relativeRoot.Replace('/', Path.DirectorySeparatorChar));
             if (!Directory.Exists(docsRoot)) continue;
 
             foreach (var file in Directory.EnumerateFiles(docsRoot, "*.md", SearchOption.AllDirectories))
             {
+                if (!visited.Add(file)) continue;
+
                 count++;
                 var ticks = File.GetLastWriteTimeUtc(file).Ticks;
                 if (ticks > newest) newest = ticks;
@@ -143,8 +154,9 @@ public sealed class DocumentIndexHost
 
         if (_catalogRelativePath is not null)
         {
-            var catalog = Path.Combine(_repoRoot, _catalogRelativePath);
-            if (File.Exists(catalog))
+            var catalog = Path.Combine(
+                _repoRoot, _catalogRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(catalog) && visited.Add(catalog))
             {
                 count++;
                 var ticks = File.GetLastWriteTimeUtc(catalog).Ticks;

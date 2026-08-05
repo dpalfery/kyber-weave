@@ -105,6 +105,11 @@ internal static partial class HostConfigYaml
     /// Reads the entries of a <c>docs-root</c> written as a sequence, in either block or
     /// flow style. False when the key carries a scalar, which the caller rewrites in place.
     /// </summary>
+    /// <remarks>
+    /// A value that opens with <c>[</c> is always a flow sequence, never a scalar. Failing
+    /// to collect it — including a multi-line form — must not fall through to the scalar
+    /// rewrite, which would orphan the continuation lines below a new scalar value.
+    /// </remarks>
     private static bool TryReadSequence(
         List<string> lines,
         int keyIndex,
@@ -115,7 +120,25 @@ internal static partial class HostConfigYaml
         roots = [];
 
         if (value.StartsWith('['))
-            return TryParseSequence("value: " + value, out roots);
+        {
+            if (!TryCollectFlowSequence(lines, keyIndex, value, out var flow))
+            {
+                throw new InvalidDataException(
+                    "ontology.docs-root looks like a flow sequence but its brackets do not " +
+                    "balance. Fix the list by hand — rewriting the key would leave orphaned " +
+                    "continuation lines below a scalar.");
+            }
+
+            if (!TryParseSequence("value: " + flow, out roots))
+            {
+                throw new InvalidDataException(
+                    "ontology.docs-root looks like a flow sequence but could not be read. " +
+                    "Fix the list by hand — rewriting the key would leave orphaned " +
+                    "continuation lines below a scalar.");
+            }
+
+            return true;
+        }
 
         if (value.Length > 0)
             return false;
@@ -136,6 +159,102 @@ internal static partial class HostConfigYaml
         }
 
         return items.Count > 0 && TryParseSequence("value:\n" + string.Join('\n', items), out roots);
+    }
+
+    /// <summary>
+    /// Collects a flow sequence that may span several lines, stopping when brackets balance.
+    /// </summary>
+    private static bool TryCollectFlowSequence(
+        List<string> lines,
+        int keyIndex,
+        string value,
+        out string flow)
+    {
+        var depth = FlowBracketDepth(value);
+        if (depth == 0)
+        {
+            flow = value;
+            return true;
+        }
+
+        if (depth < 0)
+        {
+            flow = string.Empty;
+            return false;
+        }
+
+        var parts = new List<string> { value };
+        for (var i = keyIndex + 1; i < lines.Count && depth > 0; i++)
+        {
+            parts.Add(lines[i]);
+            depth += FlowBracketDepth(lines[i]);
+            if (depth < 0)
+            {
+                flow = string.Empty;
+                return false;
+            }
+        }
+
+        if (depth != 0)
+        {
+            flow = string.Empty;
+            return false;
+        }
+
+        flow = string.Join('\n', parts);
+        return true;
+    }
+
+    /// <summary>
+    /// Net change in <c>[]</c> nesting across <paramref name="text"/>, ignoring brackets
+    /// inside quoted scalars so a path like <c>"a[b]"</c> does not skew the depth.
+    /// </summary>
+    private static int FlowBracketDepth(string text)
+    {
+        var depth = 0;
+        var quote = '\0';
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (quote == '\'')
+            {
+                if (c == '\'')
+                {
+                    if (i + 1 < text.Length && text[i + 1] == '\'')
+                    {
+                        i++;
+                        continue;
+                    }
+
+                    quote = '\0';
+                }
+
+                continue;
+            }
+
+            if (quote == '"')
+            {
+                if (c == '\\')
+                {
+                    i++;
+                    continue;
+                }
+
+                if (c == '"') quote = '\0';
+                continue;
+            }
+
+            if (c is '\'' or '"')
+            {
+                quote = c;
+                continue;
+            }
+
+            if (c == '[') depth++;
+            else if (c == ']') depth--;
+        }
+
+        return depth;
     }
 
     private static bool TryParseSequence(string document, out IReadOnlyList<string> roots)
