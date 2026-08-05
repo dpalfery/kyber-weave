@@ -58,15 +58,114 @@ internal static partial class HostConfigYaml
                 continue;
 
             var (value, suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
+
+            if (TryReadSequence(lines, i, value, blockIndent, out var roots))
+                return WithDocsRootAmong(yaml, roots, docsRoot);
+
             if (ScalarEquals(value, docsRoot))
                 return yaml;
 
-            lines[i] = match.Groups["prefix"].Value + QuoteScalar(docsRoot) + suffix;
+            // A key written with no value at all ends at its colon, so the separating space
+            // has to be added back — 'docs-root:' + a scalar is not YAML.
+            var prefix = match.Groups["prefix"].Value;
+            if (prefix.EndsWith(':')) prefix += " ";
+
+            lines[i] = prefix + QuoteScalar(docsRoot) + suffix;
             return string.Join(newline, lines);
         }
 
         lines.Insert(ontology + 1, blockIndent + "docs-root: " + QuoteScalar(docsRoot));
         return string.Join(newline, lines);
+    }
+
+    /// <summary>
+    /// Resolves a multi-root <c>docs-root</c> against the root being scaffolded into. A
+    /// listed root leaves the file alone; anything else stops the scaffold.
+    /// </summary>
+    /// <remarks>
+    /// The single-root path rewrites the key's value, which against a list would leave the
+    /// <c>- item</c> lines orphaned below a scalar — the config would still parse, and would
+    /// mean something the operator never wrote. Ordering a host's roots is a decision this
+    /// command does not get to make on their behalf, so the unlisted case reports rather
+    /// than guesses. Everything else <c>docs init</c> writes is unaffected: only the config
+    /// is operator state.
+    /// </remarks>
+    private static string WithDocsRootAmong(string yaml, IReadOnlyList<string> roots, string docsRoot)
+    {
+        if (roots.Contains(docsRoot, StringComparer.Ordinal))
+            return yaml;
+
+        throw new InvalidDataException(
+            $"ontology.docs-root lists {roots.Count} documentation roots and none of them is " +
+            $"'{docsRoot}': {string.Join(", ", roots)}. Add it to that list by hand — the " +
+            "order of the roots is yours, and the first is the one this command scaffolds into.");
+    }
+
+    /// <summary>
+    /// Reads the entries of a <c>docs-root</c> written as a sequence, in either block or
+    /// flow style. False when the key carries a scalar, which the caller rewrites in place.
+    /// </summary>
+    private static bool TryReadSequence(
+        List<string> lines,
+        int keyIndex,
+        string value,
+        string blockIndent,
+        out IReadOnlyList<string> roots)
+    {
+        roots = [];
+
+        if (value.StartsWith('['))
+            return TryParseSequence("value: " + value, out roots);
+
+        if (value.Length > 0)
+            return false;
+
+        // A block sequence lives on the lines below the key. Its items may be indented past
+        // the key or sit at the key's own indent — both are valid YAML — so an item is
+        // recognised by its '-', and the first line that is not one ends the sequence.
+        var items = new List<string>();
+        for (var i = keyIndex + 1; i < lines.Count; i++)
+        {
+            var trimmed = lines[i].TrimStart();
+            if (trimmed.Length == 0 || trimmed[0] == '#') continue;
+
+            var indent = lines[i].Length - trimmed.Length;
+            if (trimmed[0] != '-' || indent < blockIndent.Length) break;
+
+            items.Add(lines[i]);
+        }
+
+        return items.Count > 0 && TryParseSequence("value:\n" + string.Join('\n', items), out roots);
+    }
+
+    private static bool TryParseSequence(string document, out IReadOnlyList<string> roots)
+    {
+        roots = [];
+        try
+        {
+            var stream = new YamlStream();
+            stream.Load(new StringReader(document));
+            var root = (YamlMappingNode)stream.Documents[0].RootNode;
+            if (!root.Children.TryGetValue(new YamlScalarNode("value"), out var node) ||
+                node is not YamlSequenceNode sequence)
+            {
+                return false;
+            }
+
+            var values = new List<string>();
+            foreach (var child in sequence.Children)
+            {
+                if (child is not YamlScalarNode { Value: { } scalar }) return false;
+                values.Add(scalar);
+            }
+
+            roots = values;
+            return values.Count > 0;
+        }
+        catch (YamlDotNet.Core.YamlException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Quotes a single-line string as a YAML scalar without changing its value.</summary>

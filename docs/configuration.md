@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-04
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -61,9 +61,10 @@ harness:
 
 | Key | Default | Effect |
 |---|---|---|
-| `docs-root` | `6-Docs` | Where the governed corpus lives |
+| `docs-root` | `6-Docs` | Where the governed corpus lives. One directory, or a list of them |
+| `catalog-path` | `<first root>/catalog.md` | The one catalog, when it lives somewhere else |
 | `excluded-segments` | `archive, node_modules, obj, bin` | Path segments never scanned |
-| `excluded-files` | five `DevOps/*` paths | Individual files to skip, relative to the docs root |
+| `excluded-files` | five `DevOps/*` paths | Individual files to skip, relative to a docs root |
 | `doc-types` | the 11 defaults | The closed doc-type vocabulary |
 | `statuses` | the 4 defaults | The closed status vocabulary |
 | `base-required-keys` | 6 keys | Required of every document |
@@ -87,6 +88,45 @@ Omitting a key entirely leaves the default in place. Under `required-keys`, a do
 mapped to an empty value clears that type's extra requirements; unlisted types keep
 theirs. An unknown doc-type name there is a configuration error, so a typo cannot silently
 disable a requirement.
+
+### Several documentation roots
+
+Not every repository keeps its documentation in one tree. A component's `README.md` often
+lives next to the code it describes, and moving it under `docs/` to bring it under
+governance trades away the thing that keeps it honest — its proximity to the code. So
+`docs-root` takes a list as readily as a directory:
+
+```yaml
+ontology:
+  docs-root:
+    - docs
+    - network_manager
+    - automation
+    - lab
+```
+
+Every root is walked with the same rules, and four things follow from the order:
+
+- **The first root is the primary one.** `docs init` scaffolds into it, and it is the root
+  named in the `KW-DOC-SPEC-001` hint that points an author at the ontology reference.
+- **The catalog is still one file.** By default `<first root>/catalog.md`; `catalog-path`
+  moves it. A `catalog.md` in any other root is an ordinary document contributing no
+  vocabulary — a component invented in one module's table must not become valid in every
+  other. A catalog outside every root is still parsed and validated as a document, so it
+  does not lose its own frontmatter checks by moving.
+- **`excluded-files` entries stay relative to a root**, so `vendored/upstream.md` skips
+  that file under whichever root it appears in. `excluded-segments` applies everywhere, as
+  before.
+- **Ids are unique across all roots.** Two roots holding a `README.md` need two ids;
+  `KW-DOC-SPEC-006` fails the collision either way, and prefixing with the root —
+  `automation/readme` — is the convention that scales.
+
+Roots may overlap. A document under two of them is loaded once, and a duplicate root is
+dropped rather than reported. A root that is absolute or escapes the repository is
+**`KW-CONFIG-001`**.
+
+`--docs-root` overrides the configured roots for one run and repeats: `--docs-root docs
+--docs-root automation`.
 
 ### The archive exclusion earns its default
 

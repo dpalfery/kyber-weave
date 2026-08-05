@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 
@@ -30,7 +31,8 @@ namespace KyberWeave.Core.Docs.Search;
 public sealed class DocumentIndexHost
 {
     private readonly string _repoRoot;
-    private readonly string _docsRelativeRoot;
+    private readonly IReadOnlyList<string> _docsRelativeRoots;
+    private readonly string? _catalogRelativePath;
     private readonly Func<ICodeGraphResolver> _resolverFactory;
     private readonly Func<DocumentSet> _documentSetFactory;
     private readonly Lock _gate = new();
@@ -44,13 +46,30 @@ public sealed class DocumentIndexHost
         string repoRoot,
         Func<ICodeGraphResolver> resolverFactory,
         Func<DocumentSet> documentSetFactory,
-        string docsRelativeRoot = "6-Docs")
+        string docsRelativeRoot = OntologyConfig.DefaultDocsRoot)
+        : this(repoRoot, resolverFactory, documentSetFactory, [docsRelativeRoot], null)
+    {
+    }
+
+    /// <summary>
+    /// Watches every documentation root, plus the catalog — which is tracked in its own
+    /// right so that one living outside all of the roots still invalidates the corpus when
+    /// edited.
+    /// </summary>
+    public DocumentIndexHost(
+        string repoRoot,
+        Func<ICodeGraphResolver> resolverFactory,
+        Func<DocumentSet> documentSetFactory,
+        IReadOnlyList<string> docsRelativeRoots,
+        string? catalogRelativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(resolverFactory);
         ArgumentNullException.ThrowIfNull(documentSetFactory);
+        ArgumentNullException.ThrowIfNull(docsRelativeRoots);
         _repoRoot = Path.GetFullPath(repoRoot);
-        _docsRelativeRoot = docsRelativeRoot;
+        _docsRelativeRoots = docsRelativeRoots;
+        _catalogRelativePath = catalogRelativePath;
         _resolverFactory = resolverFactory;
         _documentSetFactory = documentSetFactory;
     }
@@ -58,8 +77,12 @@ public sealed class DocumentIndexHost
     /// <summary>Repository root the index is built over.</summary>
     public string RepoRoot => _repoRoot;
 
-    /// <summary>Documentation root relative to <see cref="RepoRoot"/> (from ontology / host config).</summary>
-    public string DocsRelativeRoot => _docsRelativeRoot;
+    /// <summary>Documentation roots relative to <see cref="RepoRoot"/> (from ontology / host config).</summary>
+    public IReadOnlyList<string> DocsRelativeRoots => _docsRelativeRoots;
+
+    /// <summary>The primary documentation root.</summary>
+    public string DocsRelativeRoot =>
+        _docsRelativeRoots.Count > 0 ? _docsRelativeRoots[0] : OntologyConfig.DefaultDocsRoot;
 
     /// <summary>How many times the document corpus has been parsed. For diagnostics and tests.</summary>
     public int CorpusBuilds { get; private set; }
@@ -101,19 +124,35 @@ public sealed class DocumentIndexHost
     /// </summary>
     private long ComputeDocsStamp()
     {
-        var docsRoot = Path.Combine(_repoRoot, _docsRelativeRoot);
-        if (!Directory.Exists(docsRoot)) return 0;
-
         long stamp = 17;
         var count = 0;
         long newest = 0;
 
-        foreach (var file in Directory.EnumerateFiles(docsRoot, "*.md", SearchOption.AllDirectories))
+        foreach (var relativeRoot in _docsRelativeRoots)
         {
-            count++;
-            var ticks = File.GetLastWriteTimeUtc(file).Ticks;
-            if (ticks > newest) newest = ticks;
+            var docsRoot = Path.Combine(_repoRoot, relativeRoot);
+            if (!Directory.Exists(docsRoot)) continue;
+
+            foreach (var file in Directory.EnumerateFiles(docsRoot, "*.md", SearchOption.AllDirectories))
+            {
+                count++;
+                var ticks = File.GetLastWriteTimeUtc(file).Ticks;
+                if (ticks > newest) newest = ticks;
+            }
         }
+
+        if (_catalogRelativePath is not null)
+        {
+            var catalog = Path.Combine(_repoRoot, _catalogRelativePath);
+            if (File.Exists(catalog))
+            {
+                count++;
+                var ticks = File.GetLastWriteTimeUtc(catalog).Ticks;
+                if (ticks > newest) newest = ticks;
+            }
+        }
+
+        if (count == 0) return 0;
 
         stamp = (stamp * 31) + newest;
         stamp = (stamp * 31) + count;

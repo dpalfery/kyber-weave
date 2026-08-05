@@ -36,8 +36,9 @@ present without `code-refs`, or the reverse.
 
 ### `KW-DOC-SPEC-004` — value not in the catalog
 
-`component` or `owner` is not a row in `<docs-root>/catalog.md`. The diagnostic suggests
-the nearest catalog value when the edit distance is plausible.
+`component` or `owner` is not a row in the repository's one catalog —
+`<docs-root>/catalog.md`, or wherever `ontology.catalog-path` points. The diagnostic
+suggests the nearest catalog value when the edit distance is plausible.
 
 Two fixes, and picking the right one matters: if the value is a typo, correct the
 document. If the unit genuinely exists and is absent from the catalog, add the row. Do not
