@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-08-02
+last-reviewed: 2026-08-04
 code-refs:
   - DocsTools
 ---
@@ -220,6 +220,17 @@ Guessing wrong yields an **empty corpus rather than an error**, which is the fai
 to suspect first when every query returns a miss. Pass `--repo-root` explicitly in a client
 config.
 
+### The ontology comes from the host config
+
+Once the root is resolved, the server reads `.kyber-weave/kyber-weave.yml` from it and
+serves the same corpus [`docs validate`](governance.md) does — every `docs-root`, and the
+catalog wherever [config](../configuration.md) puts it. A repository with no config gets
+product defaults.
+
+A config that cannot be read is reported on **stderr** as `KW-CONFIG-001` and the server
+keeps running on defaults. That combination — a corpus that looks empty and a line on
+stderr the client may not surface — is worth checking before blaming the repo root.
+
 ## The tools
 
 ### `docs_explore(query, maxDocs = 5, charBudget = 12000)`
@@ -267,7 +278,7 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 |---|---|
 | The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
 | The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
-| Every query is a miss | Wrong repo root, or the docs root does not match `docs-root` in [config](../configuration.md) |
+| Every query is a miss | Wrong repo root, or `docs-root` in [config](../configuration.md) names a tree the documents are not in — check stderr for `KW-CONFIG-001` |
 | "no CodeGraph index was readable" | No `.codegraph/codegraph.db`, or `sqlite3` missing from PATH |
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |

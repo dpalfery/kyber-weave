@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,12 +17,15 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
 var repoRoot = ResolveRepoRoot(args);
+var ontology = ResolveOntology(repoRoot);
 
 // Composition root: factories for DocumentIndexHost. Core never invents these collaborators.
 builder.Services.AddSingleton(new DocumentIndexHost(
     repoRoot,
     () => CodeGraphResolverAdapter.ForRepository(repoRoot),
-    () => new DocumentLoader(repoRoot).Load()));
+    () => new DocumentLoader(repoRoot, ontology).Load(),
+    ontology.DocsRoots,
+    ontology.ResolvedCatalogPath));
 
 builder.Services
     .AddMcpServer()
@@ -58,4 +62,37 @@ static string ResolveRepoRoot(string[] args)
     }
 
     return Directory.GetCurrentDirectory();
+}
+
+/// <summary>
+/// The host's ontology from <c>.kyber-weave/kyber-weave.yml</c>, or product defaults when
+/// the repository has no config.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The server reads the same configuration the CLI does. Without this it served the product
+/// default root, so every repository that had moved its documentation — the common case,
+/// since the default is inherited from one origin repository — got an empty corpus from a
+/// server that reported no error, and multi-root configuration would not have reached
+/// retrieval at all.
+/// </para>
+/// <para>
+/// A config that cannot be read is reported and then stepped over rather than being fatal.
+/// The corpus will be wrong, but a client that has already spawned this process gets a
+/// server that answers and says why, instead of a transport that dies at startup.
+/// </para>
+/// </remarks>
+static OntologyConfig ResolveOntology(string repoRoot)
+{
+    var loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+    if (loaded.Success && loaded.Config is not null)
+        return loaded.Config.Ontology;
+
+    // stderr, never stdout: stdout is the JSON-RPC transport.
+    Console.Error.WriteLine(
+        $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load " +
+        $"'{loaded.ConfigPath ?? "kyber-weave.yml"}': {loaded.Error ?? "unknown error"}. " +
+        "Serving the default ontology; the corpus may be empty.");
+
+    return OntologyConfig.ProductDefaults;
 }

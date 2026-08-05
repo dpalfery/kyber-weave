@@ -21,7 +21,7 @@ Full explanation of what these do and why:
 2. Adjust the env paths:
    - Skills: `SKILL_DIRS`
    - Agents: `PROJECT_ROOT` and the `harness` matrix
-   - Docs: `DOCS_ROOT`
+   - Docs: nothing — the roots come from `ontology.docs-root` in config
 3. Optionally add a [`.kyber-weave/kyber-weave.yml`](../../docs/configuration.md) for ontology and harness overrides.
 4. Wire job names into branch protection if they should block merges.
 5. Keep `security-events: write` if you keep the SARIF upload steps.
@@ -61,7 +61,7 @@ them deliberately.
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
 kyber-weave skill validate .agents/skills --format table
 kyber-weave agent sync-check . --format table
-kyber-weave docs validate . --docs-root docs --format table
+kyber-weave docs validate . --format table
 ```
 
 ---
@@ -72,7 +72,7 @@ kyber-weave docs validate . --docs-root docs --format table
 | --- | --- | --- |
 | Skills | `.agents/skills` | Templates skip missing directories. |
 | Agents | repo root `.` | Matrix default: `codex`, `cursor`, `claude`, `github`, `opencode`, `kilo`. |
-| Docs root | `docs` | Hosts using another root should set `DOCS_ROOT`, or set `docs-root` in config. |
+| Docs roots | `ontology.docs-root` in config | One directory or several. `--docs-root <dir>`, repeated, overrides for a single run. |
 | CodeGraph | `.codegraph/codegraph.db` | Required for `docs drift` only. CodeGraph is **host-owned**, not part of Kyber-Weave. |
 
 `docs drift` is the one gate with an external prerequisite — build or cache a CodeGraph

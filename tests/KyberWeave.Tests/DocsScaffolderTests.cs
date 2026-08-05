@@ -573,16 +573,18 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.Single(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
     }
 
-    /// <summary>A Windows drive colon is data, not YAML structure.</summary>
+    /// <summary>
+    /// A Windows drive colon is data, not YAML structure. The quoted form is what
+    /// <c>docs init</c> would write; the loader then refuses it as absolute — covered
+    /// separately — so this assertion stops at the quote.
+    /// </summary>
     [Fact]
     public void QuotesAWindowsStyleDocsRoot()
     {
         const string docsRoot = "C:/work/repo/docs";
         var yaml = HostConfigYaml.WithDocsRoot("ontology:\n", docsRoot);
-        WriteHostConfig(yaml);
 
         Assert.Contains("docs-root: 'C:/work/repo/docs'", yaml, StringComparison.Ordinal);
-        Assert.Equal(docsRoot, KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
     }
 
     /// <summary>
