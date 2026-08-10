@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-04
 code-refs:
   - DocumentLoader
   - DocumentCorpus
@@ -22,7 +22,7 @@ at query time to a code index. It is the feature the rest of Kyber-Weave exists 
 ## The pipeline
 
 ```
-DocumentLoader.Load()        walk <docs-root>/**/*.md, parse frontmatter + body,
+DocumentLoader.Load()        walk every <docs-root>/**/*.md, parse frontmatter + body,
                              split on '##', read catalog vocabularies   → DocumentSet
         │
 DocumentCorpus.Build()       BM25 term statistics, fused term vectors   → DocumentCorpus
@@ -56,7 +56,7 @@ different rates:
 
 | Input | Fingerprint | Changes |
 |---|---|---|
-| Documentation | newest mtime + file count under the docs root | when a human edits a file |
+| Documentation | newest mtime + file count across the docs roots and the catalog | when a human edits a file |
 | Code graph | mtime + byte length of `.codegraph/codegraph.db` | continuously, while a coding session runs |
 
 Folding both into one fingerprint meant every background write by the CodeGraph daemon

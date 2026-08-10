@@ -3,12 +3,17 @@ using KyberWeave.Core.Docs.Model;
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>
-/// Documentation ontology: closed vocabularies, required-key matrix, docs root,
+/// Documentation ontology: closed vocabularies, required-key matrix, docs roots,
 /// exclusion lists, and catalog column positions. Product defaults mirror the
 /// historical hardcoded behaviour; hosts override via <c>.kyber-weave/kyber-weave.yml</c>.
 /// </summary>
 public sealed class OntologyConfig
 {
+    /// <summary>The docs root a repository has when it configures none.</summary>
+    internal const string DefaultDocsRoot = "6-Docs";
+
+    private static readonly string[] DefaultDocsRoots = [DefaultDocsRoot];
+
     private static readonly string[] DefaultDocTypes =
     [
         "architecture", "onboarding", "requirements", "adr", "plan", "spec",
@@ -37,7 +42,32 @@ public sealed class OntologyConfig
 
     public IReadOnlyList<string> Statuses { get; init; } = DefaultStatuses;
 
-    public string DocsRoot { get; init; } = "6-Docs";
+    /// <summary>
+    /// Every documentation root, in configured order. A repository that documents a
+    /// component next to its code brings those files under governance by naming the
+    /// module here rather than relocating them.
+    /// </summary>
+    public IReadOnlyList<string> DocsRoots { get; init; } = DefaultDocsRoots;
+
+    /// <summary>
+    /// The primary documentation root: where <c>docs init</c> scaffolds, and the root
+    /// named in the diagnostics that point an author at the ontology reference.
+    /// </summary>
+    public string DocsRoot => DocsRoots.Count > 0 ? DocsRoots[0] : DefaultDocsRoot;
+
+    /// <summary>
+    /// Repository-relative path of the catalog, when the host puts it somewhere other than
+    /// <c>&lt;primary root&gt;/catalog.md</c>. Read through <see cref="ResolvedCatalogPath"/>.
+    /// </summary>
+    public string? CatalogPath { get; init; }
+
+    /// <summary>
+    /// The one catalog this repository has. A <c>catalog.md</c> in any other root is an
+    /// ordinary document: the component and owner vocabularies come from this file alone,
+    /// because a vocabulary split across files is a vocabulary that cannot be closed.
+    /// </summary>
+    public string ResolvedCatalogPath =>
+        string.IsNullOrWhiteSpace(CatalogPath) ? $"{DocsRoot}/catalog.md" : CatalogPath;
 
     public IReadOnlyList<string> ExcludedPathSegments { get; init; } = DefaultExcludedSegments;
 
@@ -75,11 +105,23 @@ public sealed class OntologyConfig
     public OntologyConfig WithDocsRoot(string docsRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(docsRoot);
-        return Clone(docsRoot: docsRoot);
+        return WithDocsRoots([docsRoot]);
+    }
+
+    /// <summary>
+    /// Replaces the configured roots. Paths are canonicalized and checked for containment
+    /// here as well as at load, so an operator-supplied <c>--docs-root</c> cannot reach a
+    /// tree that the same value in <c>kyber-weave.yml</c> would have been refused.
+    /// </summary>
+    public OntologyConfig WithDocsRoots(IReadOnlyList<string> docsRoots)
+    {
+        ArgumentNullException.ThrowIfNull(docsRoots);
+        return Clone(docsRoots: DocsRootPath.NormalizeRoots(docsRoots, "docs-root"));
     }
 
     internal OntologyConfig Clone(
-        string? docsRoot = null,
+        IReadOnlyList<string>? docsRoots = null,
+        string? catalogPath = null,
         IReadOnlyList<string>? excludedPathSegments = null,
         IReadOnlyList<string>? excludedFiles = null,
         int? catalogComponentColumn = null,
@@ -90,7 +132,8 @@ public sealed class OntologyConfig
         IReadOnlyDictionary<DocType, IReadOnlyList<string>>? requiredKeysByType = null) =>
         new()
         {
-            DocsRoot = docsRoot ?? DocsRoot,
+            DocsRoots = docsRoots ?? DocsRoots,
+            CatalogPath = catalogPath ?? CatalogPath,
             ExcludedPathSegments = excludedPathSegments ?? ExcludedPathSegments,
             ExcludedFiles = excludedFiles ?? ExcludedFiles,
             CatalogComponentColumn = catalogComponentColumn ?? CatalogComponentColumn,

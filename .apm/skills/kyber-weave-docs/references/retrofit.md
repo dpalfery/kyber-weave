@@ -7,8 +7,8 @@ Work in this order. Each step makes the next one's errors meaningful instead of 
 
 ## 1. Establish the vocabulary first
 
-Nothing else can pass until `<docs-root>/catalog.md` names the components and owners the
-documents will claim. `kyber-weave docs init` seeds the table; fill it from what the
+Nothing else can pass until the catalog — `<docs-root>/catalog.md`, or wherever
+`ontology.catalog-path` points — names the components and owners the documents will claim. `kyber-weave docs init` seeds the table; fill it from what the
 repository actually contains.
 
 One row per genuine unit of the system. Resist one row per document — a catalog with
@@ -23,12 +23,23 @@ For every file, fill what needs no judgment:
 
 | Key | Derive from |
 |---|---|
-| `id` | Path below the docs root, without `.md`, e.g. `docgraph/architecture` |
+| `id` | Path below the docs root, without `.md`, e.g. `docgraph/architecture` — but see below when there are several roots |
 | `title` | The H1, or the filename in title case |
 | `last-reviewed` | Today, or `git log -1 --format=%ad --date=short <file>` |
 | `owner` | `CODEOWNERS` entry for the path, else the dominant committer |
 | `status` | **`draft`** — always, at this stage |
 | `doc-type` | Best guess from path and filename; see the heuristics below |
+
+#### Ids when documentation lives beside the code
+
+A repository whose `docs-root` names several roots — a module's `README.md` staying next
+to the code it describes — will have a `README.md` in most of them. The path below the
+root is then `readme` every time, and `KW-DOC-SPEC-006` fails the collision.
+
+Prefix with the root: `automation/readme`, `network_manager/readme`, `lab/readme`. The
+first root keeps bare ids, since it is the documentation tree proper and its paths are
+already distinct. Ids are permanent, so this is worth getting right in the first pass
+rather than renaming a corpus later.
 
 `status: draft` is the important one. It is honest, and retrieval demotes draft to 0.85 so
 a half-retrofitted corpus degrades gracefully instead of serving unreviewed metadata as

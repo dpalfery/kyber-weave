@@ -12,10 +12,11 @@ namespace KyberWeave.Core.Docs.Parsing;
 public sealed partial class DocumentLoader
 {
     private readonly string _repoRoot;
-    private readonly string _docsRoot;
+    private readonly IReadOnlyList<string> _docsRoots;
+    private readonly string _catalogPath;
     private readonly OntologyConfig _config;
 
-    public DocumentLoader(string repoRoot, string docsRelativeRoot = "6-Docs")
+    public DocumentLoader(string repoRoot, string docsRelativeRoot = OntologyConfig.DefaultDocsRoot)
         : this(repoRoot, OntologyConfig.ProductDefaults.WithDocsRoot(docsRelativeRoot))
     {
     }
@@ -26,23 +27,48 @@ public sealed partial class DocumentLoader
         ArgumentNullException.ThrowIfNull(config);
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
-        _docsRoot = Path.Combine(_repoRoot, config.DocsRoot);
+        _docsRoots = config.DocsRoots;
+        _catalogPath = Path.Combine(
+            _repoRoot, config.ResolvedCatalogPath.Replace('/', Path.DirectorySeparatorChar));
     }
 
+    /// <summary>
+    /// Walks every documentation root in configured order, then folds in the catalog when
+    /// it lives outside all of them.
+    /// </summary>
+    /// <remarks>
+    /// A document is loaded once even when the roots overlap — a module root nested inside
+    /// a wider one is a reasonable thing for a host to write, and the same file appearing
+    /// twice would report every finding twice and fail its own id-uniqueness check.
+    /// </remarks>
     public DocumentSet Load()
     {
         var documents = new List<DocumentModel>();
+        var visited = new HashSet<string>(PathComparer);
 
-        if (Directory.Exists(_docsRoot))
+        foreach (var docsRoot in _docsRoots)
         {
+            var absoluteRoot = Absolute(docsRoot);
+            if (!Directory.Exists(absoluteRoot)) continue;
+
             foreach (var file in Directory
-                         .EnumerateFiles(_docsRoot, "*.md", SearchOption.AllDirectories)
+                         .EnumerateFiles(absoluteRoot, "*.md", SearchOption.AllDirectories)
                          .OrderBy(p => p, StringComparer.Ordinal))
             {
+                if (!visited.Add(file)) continue;
+
                 var relative = ToRelative(file);
                 if (IsExcluded(relative)) continue;
                 documents.Add(Parse(file, relative));
             }
+        }
+
+        // The catalog is a governed document wherever it sits. A host that keeps it outside
+        // the roots — because no single root is the natural home for it — would otherwise
+        // trade frontmatter validation and retrievability for that placement.
+        if (!visited.Contains(_catalogPath) && File.Exists(_catalogPath))
+        {
+            documents.Add(Parse(_catalogPath, ToRelative(_catalogPath)));
         }
 
         var (components, owners) = ReadCatalogVocabularies();
@@ -63,14 +89,43 @@ public sealed partial class DocumentLoader
             return true;
         }
 
-        // Exclusion file paths are recorded relative to the docs root.
-        var prefix = _config.DocsRoot.TrimEnd('/') + "/";
-        var beneathDocs = relativePath.StartsWith(prefix, StringComparison.Ordinal)
-            ? relativePath[prefix.Length..]
-            : relativePath;
-
-        return _config.ExcludedFiles.Contains(beneathDocs, StringComparer.OrdinalIgnoreCase);
+        return _config.ExcludedFiles.Contains(BeneathRoot(relativePath), StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Strips the documentation root a path sits under, because exclusion entries are
+    /// recorded relative to a root rather than to the repository. The longest matching root
+    /// wins, so a nested root's entries stay relative to the nested root.
+    /// </summary>
+    private string BeneathRoot(string relativePath)
+    {
+        string? longest = null;
+        foreach (var root in _docsRoots)
+        {
+            if (root == ".")
+            {
+                longest ??= string.Empty;
+                continue;
+            }
+
+            var prefix = root + "/";
+            if (!relativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            if (longest is null || prefix.Length > longest.Length) longest = prefix;
+        }
+
+        return longest is null ? relativePath : relativePath[longest.Length..];
+    }
+
+    private string Absolute(string relativePath) =>
+        relativePath == "."
+            ? _repoRoot
+            : Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>
+    /// Path identity follows the same rules as <see cref="DocsRootPath.PathComparer"/>,
+    /// so a root the normalizer kept as distinct is not later collapsed when walking files.
+    /// </summary>
+    private static StringComparer PathComparer => DocsRootPath.PathComparer;
 
     private DocumentModel Parse(string absolutePath, string relativePath)
     {
@@ -230,18 +285,23 @@ public sealed partial class DocumentLoader
     /// Reads the Component and Owner columns from the catalog. The catalog is the
     /// authoritative vocabulary for both; this reader does not duplicate the values.
     /// </summary>
+    /// <remarks>
+    /// One file supplies both vocabularies, no matter how many documentation roots the
+    /// repository has. A <c>catalog.md</c> in a second root is an ordinary document:
+    /// merging them would mean a component invented in one module's table is silently
+    /// valid in every other, which is the drift <c>KW-DOC-SPEC-004</c> exists to stop.
+    /// </remarks>
     private (IReadOnlySet<string> Components, IReadOnlySet<string> Owners) ReadCatalogVocabularies()
     {
         var components = new HashSet<string>(StringComparer.Ordinal);
         var owners = new HashSet<string>(StringComparer.Ordinal);
 
-        var catalogPath = Path.Combine(_docsRoot, "catalog.md");
-        if (!File.Exists(catalogPath))
+        if (!File.Exists(_catalogPath))
         {
             return (components, owners);
         }
 
-        foreach (var line in File.ReadLines(catalogPath))
+        foreach (var line in File.ReadLines(_catalogPath))
         {
             if (!line.StartsWith('|')) continue;
 

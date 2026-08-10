@@ -50,9 +50,14 @@ and never widen the vocabulary to fit one document.
 | `onboarding` | `component`, `source-root` |
 | `adr`, `reference`, `rule`, `governance`, `index` | nothing |
 
-`component` and `owner` must already be rows in `<docs-root>/catalog.md`. If the value you
-need is not there, **add the catalog row first** — inventing a component in frontmatter
-fails `KW-DOC-SPEC-004`.
+`component` and `owner` must already be rows in the catalog. If the value you need is not
+there, **add the catalog row first** — inventing a component in frontmatter fails
+`KW-DOC-SPEC-004`.
+
+A repository has exactly one catalog, at `<docs-root>/catalog.md` — the first root, when
+`docs-root` names several — or wherever `ontology.catalog-path` puts it. A `catalog.md`
+sitting in another root is an ordinary document and supplies no vocabulary; adding a row
+there will not make a component valid.
 
 ## The pairing invariant
 
@@ -173,7 +178,7 @@ Agents and skills should look up the following properties dynamically to find th
 - **<documentation-ontology>**: `docs/documentation-ontology.md`
 
 1. Read the document. Decide what it actually *is* → `doc-type`.
-2. Check `<docs-root>/catalog.md` for the `component` and `owner`. Add a row if missing.
+2. Check the catalog for the `component` and `owner`. Add a row if missing.
 3. Write the base keys. Use a real ISO date for `last-reviewed`.
 4. Add type-specific keys. Honour the pairing invariant.
 5. Verify every `code-refs` symbol resolves before listing it.

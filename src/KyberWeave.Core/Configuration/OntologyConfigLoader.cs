@@ -6,6 +6,11 @@ namespace KyberWeave.Core.Configuration;
 /// <summary>Loads and merges ontology overrides from <c>kyber-weave.yml</c>.</summary>
 public static class OntologyConfigLoader
 {
+    /// <summary>Key names as an operator wrote them, so diagnostics name the real line.</summary>
+    internal const string DocsRootKey = "ontology.docs-root";
+
+    internal const string CatalogPathKey = "ontology.catalog-path";
+
     public static OntologyConfig LoadMerged(OntologyConfig defaults, string yamlPath)
     {
         ArgumentNullException.ThrowIfNull(defaults);
@@ -62,7 +67,8 @@ public static class OntologyConfigLoader
         }
 
         return defaults.Clone(
-            docsRoot: section.DocsRoot,
+            docsRoots: NormalizeDocsRoots(section.DocsRoot),
+            catalogPath: NormalizeCatalogPath(section.CatalogPath),
             excludedPathSegments: section.ExcludedSegments,
             excludedFiles: section.ExcludedFiles,
             catalogComponentColumn: section.Catalog?.ComponentColumn,
@@ -71,6 +77,61 @@ public static class OntologyConfigLoader
             statuses: section.Statuses,
             baseRequiredKeys: section.BaseRequiredKeys,
             requiredKeysByType: requiredKeys);
+    }
+
+    /// <summary>
+    /// Reads <c>ontology.docs-root</c> in either of its shapes — a directory, or a list of
+    /// them — into the canonical list form. A path failure becomes a
+    /// <see cref="YamlException"/> so it reaches the operator as <c>KW-CONFIG-001</c>
+    /// against the file they wrote, rather than as an unhandled argument error.
+    /// </summary>
+    internal static IReadOnlyList<string>? NormalizeDocsRoots(object? value)
+    {
+        if (value is null) return null;
+
+        List<string> raw = value switch
+        {
+            string scalar => [scalar],
+            IEnumerable<object?> sequence => sequence.Select(ToRootScalar).ToList(),
+            _ => throw InvalidDocsRoot()
+        };
+
+        try
+        {
+            return DocsRootPath.NormalizeRoots(raw, DocsRootKey);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new YamlException(ex.Message);
+        }
+    }
+
+    private static string ToRootScalar(object? entry) =>
+        entry as string ?? throw InvalidDocsRoot();
+
+    private static YamlException InvalidDocsRoot() =>
+        new($"{DocsRootKey} takes a directory, or a list of directories. " +
+            "Write 'docs-root: docs' for one root, or a '- ' item per root for several.");
+
+    private static string? NormalizeCatalogPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+
+        string path;
+        try
+        {
+            path = DocsRootPath.Normalize(value, CatalogPathKey);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new YamlException(ex.Message);
+        }
+
+        return path.Length > 0
+            ? path
+            : throw new YamlException(
+                $"{CatalogPathKey} '{value}' names no file. Give a repository-relative " +
+                "path to the catalog, e.g. 'docs/catalog.md'.");
     }
 
     private static bool TryParseDocType(string name, out DocType docType)
