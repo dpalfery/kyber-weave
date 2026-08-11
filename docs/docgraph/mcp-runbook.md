@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-04
 code-refs:
   - DocsTools
 ---
@@ -26,24 +26,185 @@ on stdout breaks the transport.
 
 ## Wiring it up
 
-Point any MCP client at the binary on your PATH:
+Every client launches the same process the same way — `kyber-weave-mcp` over stdio, with
+`--repo-root` pointing at the repository. Only the file it goes in and the names of the
+keys differ, and they differ more than you would expect:
+
+| Client | File | Server key | Notes |
+|---|---|---|---|
+| [Claude Code](#claude-code) | `.mcp.json` (repo root) | `mcpServers` | Committed servers need approval on first run |
+| [Cursor](#cursor) | `.cursor/mcp.json` | `mcpServers` | Same shape as Claude Code |
+| [VS Code / Copilot in the editor](#vs-code-and-github-copilot-in-the-editor) | `.vscode/mcp.json` | `servers` | Not `.mcp.json`, and not `mcpServers` |
+| [Copilot coding agent](#github-copilot-coding-agent) | Repository settings, not a file | `mcpServers` | `tools` is required; the binary must be installed first |
+| [Codex CLI](#codex-cli) | `~/.codex/config.toml` | `[mcp_servers.<name>]` | TOML, and the table name is snake_case |
+| [opencode](#opencode) | `opencode.json` | `mcp` | Command and arguments are one array |
+
+Use an **absolute path** to the binary in any client launched from a desktop icon rather
+than a shell — GUI processes inherit a minimal PATH that usually excludes `~/.local/bin`,
+and the failure looks like a server that will not start rather than a missing binary.
+
+### Claude Code
+
+`.mcp.json` in the repository root, so the whole team gets the server from a checkout:
+
+```json
+{
+  "mcpServers": {
+    "kyber-weave": {
+      "type": "stdio",
+      "command": "kyber-weave-mcp",
+      "args": ["--repo-root", "."]
+    }
+  }
+}
+```
+
+Or write it from the CLI, which is equivalent:
+
+```bash
+claude mcp add --scope project kyber-weave -- kyber-weave-mcp --repo-root .
+```
+
+Servers from a committed `.mcp.json` are **not trusted automatically** — a checkout cannot
+approve its own servers. Each user approves once on first run, and the server sits at
+`⏸ Pending approval` in `/mcp` until then.
+
+### Cursor
+
+`.cursor/mcp.json` in the repository, or `~/.cursor/mcp.json` to get it in every project.
+The shape matches Claude Code:
 
 ```json
 {
   "mcpServers": {
     "kyber-weave": {
       "command": "kyber-weave-mcp",
-      "args": ["--repo-root", "/path/to/your/repo"]
+      "args": ["--repo-root", "."]
     }
   }
 }
 ```
 
-From source:
+### VS Code and GitHub Copilot in the editor
+
+Copilot's agent mode reads `.vscode/mcp.json`. Two things differ from every other JSON
+client here, and both fail silently as "no tools appeared": the file is **not** `.mcp.json`
+at the root, and the key is **`servers`**, not `mcpServers`.
+
+```json
+{
+  "servers": {
+    "kyber-weave": {
+      "type": "stdio",
+      "command": "kyber-weave-mcp",
+      "args": ["--repo-root", "${workspaceFolder}"],
+      "env": {
+        "KYBER_WEAVE_REPO_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+`${workspaceFolder}` is worth using here rather than `.`: VS Code does not guarantee the
+server's working directory, and in a multi-root workspace `.` is genuinely ambiguous. The
+`env` entry is belt and braces — either mechanism alone resolves the root.
+
+### GitHub Copilot coding agent
+
+Configured in the repository's settings under **Copilot → coding agent → MCP
+configuration**, not in a file in the tree. `type` and `tools` are both required, and
+`tools` must name the tools to expose or use `["*"]`:
+
+```json
+{
+  "mcpServers": {
+    "kyber-weave": {
+      "type": "local",
+      "command": "kyber-weave-mcp",
+      "args": ["--repo-root", "."],
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+The coding agent runs in an **ephemeral container that has never heard of Kyber-Weave**, so
+this configuration alone starts nothing. Install the binary in
+`.github/workflows/copilot-setup-steps.yml`, which runs before the agent starts:
+
+```yaml
+name: Copilot setup steps
+on: workflow_dispatch
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Kyber-Weave
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+```
+
+`--repo-root .` is safe in this one case because the agent's working directory is the
+checkout. Everywhere else, prefer an explicit path.
+
+### Codex CLI
+
+TOML, not JSON, in `~/.codex/config.toml` — or `.codex/config.toml` in a trusted project.
+Note the underscore: the table is `mcp_servers`, not `mcpServers`.
+
+```toml
+[mcp_servers.kyber-weave]
+command = "kyber-weave-mcp"
+args = ["--repo-root", "/path/to/your/repo"]
+startup_timeout_sec = 10
+```
+
+Or from the CLI:
+
+```bash
+codex mcp add kyber-weave -- kyber-weave-mcp --repo-root /path/to/your/repo
+```
+
+Codex has no workspace-variable substitution, so an absolute path is the only reliable
+option in the user-level config. Verify with `codex mcp list`.
+
+### opencode
+
+`opencode.json` in the repository, or `~/.config/opencode/opencode.json` for all projects.
+The distinguishing quirk is that **`command` is a single array** holding the executable and
+its arguments together, rather than the `command` / `args` split every other client uses —
+and the environment key is `environment`, not `env`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "kyber-weave": {
+      "type": "local",
+      "command": ["kyber-weave-mcp", "--repo-root", "."],
+      "enabled": true,
+      "environment": {
+        "KYBER_WEAVE_REPO_ROOT": "."
+      }
+    }
+  }
+}
+```
+
+### From source
+
+Any of the above works against a source build by swapping the command:
 
 ```bash
 dotnet run --project src/KyberWeave.Mcp -- --repo-root .
 ```
+
+In a client config that means `"command": "dotnet"` with the rest as arguments. Build once
+with `-c Release` first — a client that times out during startup is usually waiting on a
+first-run compile.
 
 ### Resolving the repository root
 
@@ -58,6 +219,17 @@ this order:
 Guessing wrong yields an **empty corpus rather than an error**, which is the failure mode
 to suspect first when every query returns a miss. Pass `--repo-root` explicitly in a client
 config.
+
+### The ontology comes from the host config
+
+Once the root is resolved, the server reads `.kyber-weave/kyber-weave.yml` from it and
+serves the same corpus [`docs validate`](governance.md) does — every `docs-root`, and the
+catalog wherever [config](../configuration.md) puts it. A repository with no config gets
+product defaults.
+
+A config that cannot be read is reported on **stderr** as `KW-CONFIG-001` and the server
+keeps running on defaults. That combination — a corpus that looks empty and a line on
+stderr the client may not surface — is worth checking before blaming the repo root.
 
 ## The tools
 
@@ -104,7 +276,9 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 
 | Symptom | Cause |
 |---|---|
-| Every query is a miss | Wrong repo root, or the docs root does not match `docs-root` in [config](../configuration.md) |
+| The server never starts | `kyber-weave-mcp` is not on the PATH the client inherits — use an absolute path |
+| The client lists no tools at all | Wrong file or wrong key for that client — check the table in [Wiring it up](#wiring-it-up) |
+| Every query is a miss | Wrong repo root, or `docs-root` in [config](../configuration.md) names a tree the documents are not in — check stderr for `KW-CONFIG-001` |
 | "no CodeGraph index was readable" | No `.codegraph/codegraph.db`, or `sqlite3` missing from PATH |
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |

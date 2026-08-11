@@ -203,5 +203,39 @@ public sealed class DocumentIndexHostTests : IDisposable
         Assert.Equal(2, host.CorpusBuilds);
     }
 
+    /// <summary>
+    /// The stamp fingerprints the same set Load() produces. An overlapping root and a
+    /// catalog that already lives inside a root must not inflate the count.
+    /// </summary>
+    [Fact]
+    public void The_Docs_Stamp_Counts_Each_Document_Once()
+    {
+        _fixture.WithCatalog().Write("6-Docs/nested/guide.md", """
+            ---
+            id: nested/guide
+            title: Guide
+            doc-type: reference
+            status: current
+            component: MotorcycleRAG API
+            owner: API maintainers
+            last-reviewed: 2026-07-21
+            ---
+            # Guide
+            """);
+
+        DocumentIndexHost Host(params string[] roots) => new(
+            _fixture.Root,
+            () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
+            () => new Core.Docs.Parsing.DocumentLoader(_fixture.Root).Load(),
+            roots,
+            "6-Docs/catalog.md");
+
+        var single = Host("6-Docs").ComputeDocsStamp();
+        var overlapping = Host("6-Docs", "6-Docs/nested").ComputeDocsStamp();
+
+        Assert.Equal(single, overlapping);
+        Assert.NotEqual(0L, single);
+    }
+
     public void Dispose() => _fixture.Dispose();
 }

@@ -5,6 +5,13 @@
 # Security jobs mirror motorcycle-rag-system's pr-gate (CodeQL, Trivy fs, Semgrep,
 # gitleaks) without Azure/container/Dockerfile scans — this repo ships binaries, not
 # cloud infrastructure.
+# CI — build, test, pack-to-artifacts, RID publish smoke, and security gates.
+# No registry publish here (GitHub Release / optional GitHub Packages belong to
+# release.yml). nuget.org is forbidden.
+#
+# Security jobs mirror motorcycle-rag-system's pr-gate (CodeQL, Trivy fs, Semgrep,
+# gitleaks) without Azure/container/Dockerfile scans — this repo ships binaries, not
+# cloud infrastructure.
 
 name: CI
 
@@ -12,6 +19,9 @@ name: CI
   push:
     branches: [main, develop]
   pull_request:
+  schedule:
+    # Weekly CodeQL / dependency scan fallback when the tree is quiet
+    - cron: "0 0 * * 1"
   schedule:
     # Weekly CodeQL / dependency scan fallback when the tree is quiet
     - cron: "0 0 * * 1"
@@ -23,6 +33,8 @@ concurrency:
 
 permissions:
   contents: read
+  security-events: write
+  actions: read
   security-events: write
   actions: read
 
@@ -47,6 +59,37 @@ jobs:
 
       - name: Restore
         run: dotnet restore KyberWeave.sln
+
+      # Curated packs only — whitespace + a small style set from .editorconfig.
+      # Skip `dotnet format analyzers`: CA quality rules already fail the build via
+      # TreatWarningsAsErrors / AnalysisMode=all.
+      - name: Format (whitespace)
+        run: >
+          dotnet format KyberWeave.sln whitespace
+          --verify-no-changes
+          --no-restore
+          -v minimal
+
+      - name: Format (style)
+        run: >
+          dotnet format KyberWeave.sln style
+          --verify-no-changes
+          --severity warn
+          --no-restore
+          -v minimal
+
+      - name: List vulnerable NuGet packages
+        run: |
+          set -euo pipefail
+          # Belt-and-suspenders for NuGetAudit during restore (NU1903/NU1904 are errors
+          # under TreatWarningsAsErrors). Clean output says "has no vulnerable packages";
+          # failures say "has the following vulnerable packages".
+          output="$(dotnet list KyberWeave.sln package --vulnerable --include-transitive 2>&1)"
+          printf '%s\n' "$output"
+          if printf '%s\n' "$output" | grep -Eqi 'has the following vulnerable packages'; then
+            echo "::error::Vulnerable NuGet packages detected"
+            exit 1
+          fi
 
       # Curated packs only — whitespace + a small style set from .editorconfig.
       # Skip `dotnet format analyzers`: CA quality rules already fail the build via

@@ -22,9 +22,10 @@ permissions:
   contents: read
 
 env:
-  # Documentation root relative to the repository root (--docs-root).
-  # Override to match the host (e.g. "6-Docs" or "docs").
-  DOCS_ROOT: "docs"
+  # The documentation roots come from ontology.docs-root in
+  # .kyber-weave/kyber-weave.yml, so a repository with several of them is
+  # covered without editing this file. To override for one run, add
+  # --docs-root <dir> to the commands below, repeated once per root.
   PROJECT_ROOT: "."
 
 jobs:
@@ -51,7 +52,6 @@ jobs:
       - name: Validate documentation frontmatter
         run: >
           kyber-weave docs validate "${{ env.PROJECT_ROOT }}"
-          --docs-root "${{ env.DOCS_ROOT }}"
           --format table
 
   docs-drift:
@@ -90,5 +90,4 @@ jobs:
       - name: Verify documentation entity drift
         run: >
           kyber-weave docs drift "${{ env.PROJECT_ROOT }}"
-          --docs-root "${{ env.DOCS_ROOT }}"
           --format table

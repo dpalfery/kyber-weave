@@ -1,16 +1,10 @@
 ---
 name: kyber-weave-docs
-description: "Generate conformant Kyber-Weave frontmatter for repository
-  documentation so that docs validate and docs drift pass. Use when a document fails a
-  KW-DOC-SPEC or KW-DOC-DRIFT rule, when retrofitting an existing documentation
-  tree after kyber-weave docs init, or when authoring a new governed document
-  and you must choose doc-type, status, component, source-root, and code-refs.
-  Not for editing prose or style, authoring SKILL.md skills, or writing harness
-  agent definitions."
+description: "Generate conformant Kyber-Weave frontmatter for repository documentation so that docs validate and docs drift pass. Use when a document fails a  KW-DOC-SPEC or KW-DOC-DRIFT rule, when retrofitting an existing documentation tree after kyber-weave docs init, or when authoring a new governed document and you must choose doc-type, status, component, source-root, and code-refs.  Not for editing prose or style, authoring SKILL.md skills, or writing harness agent definitions."
 license: MIT
 metadata:
   author: dpalfery
-  version: 0.1.1
+  version: 0.1.2
 ---
 
 # Authoring Kyber-Weave documentation
@@ -56,9 +50,14 @@ and never widen the vocabulary to fit one document.
 | `onboarding` | `component`, `source-root` |
 | `adr`, `reference`, `rule`, `governance`, `index` | nothing |
 
-`component` and `owner` must already be rows in `<docs-root>/catalog.md`. If the value you
-need is not there, **add the catalog row first** — inventing a component in frontmatter
-fails `KW-DOC-SPEC-004`.
+`component` and `owner` must already be rows in the catalog. If the value you need is not
+there, **add the catalog row first** — inventing a component in frontmatter fails
+`KW-DOC-SPEC-004`.
+
+A repository has exactly one catalog, at `<docs-root>/catalog.md` — the first root, when
+`docs-root` names several — or wherever `ontology.catalog-path` puts it. A `catalog.md`
+sitting in another root is an ordinary document and supplies no vocabulary; adding a row
+there will not make a component valid.
 
 ## The pairing invariant
 
@@ -152,10 +151,34 @@ code-refs:
 right. `source-root` and `code-refs` appear together, satisfying the pairing invariant for
 an architecture document.
 
-## Workflow
+## Setting up a new repository
+
+Before a governed corpus can exist, every agent and skill must be able to resolve the
+docs root. It is declared once, in the repository's root `AGENTS.md`, under a canonical
+heading — never hardcode it, never assume it.
+
+1. **Read the root `AGENTS.md`** and look for the heading
+   `## Repository Configuration & Paths Registry (Config Reg)`.
+2. **If it exists, its declared values are authoritative.** Use `docs-root`,
+   `<documentation-index>`, and `<documentation-ontology>` as `<docs-root>` and its fixed
+   files everywhere in this skill.
+3. **If it does not exist, ask the user for the documentation root.** It is a
+   repository-relative directory, conventionally `docs`. Ask — where a new corpus lives is
+   the user's choice, not an agent's guess.
+4. **Update the root `AGENTS.md`** with the section, deriving the two fixed filenames
+   from the root the user provided:
+
+```markdown
+## Repository Configuration & Paths Registry (Config Reg)
+
+Agents and skills should look up the following properties dynamically to find the relevant documentation and references for this repository:
+
+- **<docs-root>**: `docs`
+- **<documentation-index>**: `docs/catalog.md`
+- **<documentation-ontology>**: `docs/documentation-ontology.md`
 
 1. Read the document. Decide what it actually *is* → `doc-type`.
-2. Check `<docs-root>/catalog.md` for the `component` and `owner`. Add a row if missing.
+2. Check the catalog for the `component` and `owner`. Add a row if missing.
 3. Write the base keys. Use a real ISO date for `last-reviewed`.
 4. Add type-specific keys. Honour the pairing invariant.
 5. Verify every `code-refs` symbol resolves before listing it.
@@ -169,6 +192,8 @@ make a failure disappear — that discards the guarantee the corpus exists to pr
 
 - Invent a `component` or `owner` that is not in the catalog
 - Add a `code-refs` symbol you have not verified
+- Guess the docs root during setup — ask the user and record the answer under the Config
+  Reg heading in `AGENTS.md`
 - Change `doc-type` or `status` vocabularies to fit one document
 - Set `status: current` on frontmatter you filled in without review
 - Backdate or forward-date `last-reviewed` — use the date it was actually reviewed
