@@ -1,3 +1,13 @@
+---
+id: alm-governance-playbook
+title: "Skills in your ALM: a governance playbook"
+doc-type: governance
+status: current
+component: ContextHygiene
+owner: dpalfery
+last-reviewed: 2026-08-01
+---
+
 # Skills in your ALM: a governance playbook
 
 The source article ([Modern Agents Have Skills Now](https://microsoft.github.io/mcscatblog/posts/modern-mcs-agent-skills/)) shows makers how Skills work inside Copilot Studio. This doc covers the part that matters once you operate skills at enterprise scale: treating them as governed software artifacts.

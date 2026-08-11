@@ -1,6 +1,8 @@
 # Sample: Kyber-Weave docs validate / drift
 #
-# Copy to .github/workflows/ and replace PIN placeholders.
+# Copy to .github/workflows/ and adapt the env paths below.
+# The install script tracks the latest release; add `--version <x.y.z>` to the
+# install step where a job must be reproducible.
 # docs drift requires a CodeGraph index at .codegraph/codegraph.db
 # (CodeGraph is host-owned; see README.md).
 
@@ -20,12 +22,10 @@ permissions:
   contents: read
 
 env:
-  # PIN: published @dpalfery/kyber-weave SemVer — replace before production use
-  KYBER_WEAVE_VERSION: "0.1.0"
-  NODE_VERSION: "22"
-  # Documentation root relative to the repository root (--docs-root).
-  # Override to match the host (e.g. "6-Docs" or "docs").
-  DOCS_ROOT: "docs"
+  # The documentation roots come from ontology.docs-root in
+  # .kyber-weave/kyber-weave.yml, so a repository with several of them is
+  # covered without editing this file. To override for one run, add
+  # --docs-root <dir> to the commands below, repeated once per root.
   PROJECT_ROOT: "."
 
 jobs:
@@ -39,18 +39,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Kyber-Weave (npm, pinned)
-        run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
+      - name: Install Kyber-Weave
+        run: |
+          set -euo pipefail
+          # Download then execute (not curl|sh) so SAST tools can verify the step.
+          # Binaries the script installs are still SHA-256 verified against the Release.
+          curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+            https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+          sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Validate documentation frontmatter
         run: >
           kyber-weave docs validate "${{ env.PROJECT_ROOT }}"
-          --docs-root "${{ env.DOCS_ROOT }}"
           --format table
 
   docs-drift:
@@ -65,13 +66,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Kyber-Weave (npm, pinned)
-        run: npm i -g "@dpalfery/kyber-weave@${{ env.KYBER_WEAVE_VERSION }}"
+      - name: Install Kyber-Weave
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+            https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+          sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Host-owned: ensure .codegraph/codegraph.db exists before drift.
       # Example (adapt to your CodeGraph install):
@@ -89,5 +90,4 @@ jobs:
       - name: Verify documentation entity drift
         run: >
           kyber-weave docs drift "${{ env.PROJECT_ROOT }}"
-          --docs-root "${{ env.DOCS_ROOT }}"
           --format table

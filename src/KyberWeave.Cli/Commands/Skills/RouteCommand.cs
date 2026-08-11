@@ -1,9 +1,8 @@
 using System.ComponentModel;
-using Spectre.Console;
-using Spectre.Console.Cli;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Routing;
-using KyberWeave.Cli.Commands;
+using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Skills;
 
@@ -101,7 +100,7 @@ public sealed class RouteCommand : Command<RouteSettings>
 
         var table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Rank"); table.AddColumn("Skill"); table.AddColumn("Score");
-        int rank = 1;
+        var rank = 1;
         foreach (var c in result.Ranked.Take(8))
         {
             var mark = rank == 1 && result.Fired ? "[green]→[/] " : "  ";

@@ -2,8 +2,8 @@ using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
-using KyberWeave.Core.Text;
 using KyberWeave.Core.Skills.Validation;
+using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.Agents.Validation;
 
@@ -41,7 +41,7 @@ public static class AgentSyncLinter
 
             foreach (var (harnessKind, profile) in profiles)
             {
-                bool satisfied = harnessMap.ContainsKey(harnessKind);
+                var satisfied = harnessMap.ContainsKey(harnessKind);
 
                 // If not satisfied natively in the harness folder, check if it's satisfied via skill mapping or skill directory
                 if (!satisfied)
@@ -73,7 +73,7 @@ public static class AgentSyncLinter
                 var baseAgent = roleAgents[0];
                 var baseVec = TextVectorizer.Vectorize(baseAgent.InstructionsBody);
 
-                for (int i = 1; i < roleAgents.Count; i++)
+                for (var i = 1; i < roleAgents.Count; i++)
                 {
                     var compareAgent = roleAgents[i];
                     var compareVec = TextVectorizer.Vectorize(compareAgent.InstructionsBody);

@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;

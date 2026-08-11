@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -24,16 +23,33 @@ internal static class DocsCommandComposition
             return false;
         }
 
+        // An unsupplied option leaves the configured roots alone; a supplied one replaces
+        // them outright. The flag has no default of its own, so it cannot be confused with
+        // the product default and silently ignored on a repository configured otherwise.
         var loaded = config.Ontology;
-        if (!string.Equals(settings.DocsRoot, OntologyConfig.ProductDefaults.DocsRoot, StringComparison.Ordinal)
-            && !string.Equals(settings.DocsRoot, loaded.DocsRoot, StringComparison.Ordinal))
+        if (settings.DocsRoots.Length == 0)
         {
-            ontology = loaded.WithDocsRoot(settings.DocsRoot);
+            ontology = loaded;
             return true;
         }
 
-        ontology = loaded;
-        return true;
+        try
+        {
+            ontology = loaded.WithDocsRoots(settings.DocsRoots);
+            return true;
+        }
+        catch (ArgumentException ex)
+        {
+            // A rejected --docs-root is the same class of operator error as a rejected
+            // docs-root in the config file, and reports under the same code.
+            report.Add(new Diagnostic(
+                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                Severity.Error,
+                ex.Message,
+                "--docs-root"));
+            ontology = OntologyConfig.ProductDefaults;
+            return false;
+        }
     }
 
     public static bool TryCreateLoader(

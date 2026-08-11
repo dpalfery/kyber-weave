@@ -40,9 +40,12 @@ internal sealed class CodeGraphFixtureDb : IDisposable
 
         using var process = System.Diagnostics.Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite3.");
-        process.WaitForExit();
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException(process.StandardError.ReadToEnd());
+
+        // Drain before waiting: WaitForExit with undrained redirected pipes deadlocks as
+        // soon as the child writes more than the pipe buffer holds.
+        var result = KyberWeave.Core.Processes.ProcessRunner.ReadToEnd(process);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException(result.StandardError);
     }
 
     public void Dispose()

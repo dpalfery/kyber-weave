@@ -58,7 +58,7 @@ public sealed class RoutingEvaluator
         foreach (var c in evalFile.Cases)
         {
             var result = _strategy.Route(c.Prompt, skills);
-            bool passed = c.ExpectsNoFire
+            var passed = c.ExpectsNoFire
                 ? !result.Fired
                 : result.Fired && string.Equals(result.SelectedSkill, c.Expected, StringComparison.OrdinalIgnoreCase);
             results.Add(new RoutingCaseResult(c, result, passed));

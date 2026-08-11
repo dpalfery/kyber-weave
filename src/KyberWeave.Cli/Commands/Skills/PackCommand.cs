@@ -1,11 +1,10 @@
 using System.ComponentModel;
 using System.IO.Compression;
-using Spectre.Console;
-using Spectre.Console.Cli;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Validation;
-using KyberWeave.Cli.Commands;
+using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Skills;
 

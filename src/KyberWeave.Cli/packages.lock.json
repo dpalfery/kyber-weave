@@ -19,19 +19,19 @@
       },
       "Markdig": {
         "type": "Transitive",
-        "resolved": "0.38.0",
-        "contentHash": "zKy3JFjQvr1wbuMtbfcZVjNNCIqHxSCjGMq/CBcyNsY/MPsxqcS3o8M7CZ2kcMGGIw5LI2ZZd8rFUaFeV6SvrQ=="
+        "resolved": "1.3.2",
+        "contentHash": "fZgOC/3CswUrndjDTac70aQpYdtxbW5+5bRumR7vzvI2HJbkmgKisB1c9oT+GA6v0jB/JDR9BLa9FiPzQmaK6A=="
       },
       "YamlDotNet": {
         "type": "Transitive",
-        "resolved": "16.2.1",
-        "contentHash": "im6zTVgesjcfTRfuMpnx51Rg2svWenp/3q5XBfcIzgj8PNIkkSD2xEl9HWcVi2SaJPP9XcXUdzed9gSDEuf1TA=="
+        "resolved": "18.1.0",
+        "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
       },
       "kyberweave.core": {
         "type": "Project",
         "dependencies": {
-          "Markdig": "[0.38.0, )",
-          "YamlDotNet": "[16.2.1, )"
+          "Markdig": "[1.3.2, )",
+          "YamlDotNet": "[18.1.0, )"
         }
       }
     }

@@ -14,6 +14,14 @@
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <RunAnalyzers>true</RunAnalyzers>
     <GenerateDocumentationFile Condition="'$(GenerateDocumentationFile)' == ''">false</GenerateDocumentationFile>
+
+    <!-- NuGet Audit: HIGH/CRITICAL fail the build (NU1903/NU1904). Low/moderate stay
+         warnings so advisory noise does not block unrelated work. Explicit Mode=all
+         matches the net10.0 default and documents intent for transitive packages. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>high</NuGetAuditLevel>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902</WarningsNotAsErrors>
   </PropertyGroup>
 
   <PropertyGroup>

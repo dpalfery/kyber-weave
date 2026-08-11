@@ -1,0 +1,11 @@
+# Kyber-Weave governs its own documentation with this file.
+#
+# The product default docs root is `6-Docs`, inherited from the repository the ontology
+# was first built for. This repository uses `docs/`, which is the override below — and
+# the fact that one line changes it is the point: the ontology is opinionated, not fixed.
+ontology:
+  docs-root: docs
+
+  # The product defaults exclude five DevOps paths that exist only in the origin
+  # repository. An empty list clears them rather than carrying dead exclusions forward.
+  excluded-files: []

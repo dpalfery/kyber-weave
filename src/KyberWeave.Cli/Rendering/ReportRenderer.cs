@@ -1,8 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Spectre.Console;
 using KyberWeave.Core.Diagnostics;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Rendering;
 

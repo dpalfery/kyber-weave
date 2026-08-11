@@ -92,8 +92,8 @@ public static class TextVectorizer
         foreach (var (k, v) in a)
             if (b.TryGetValue(k, out var bv)) dot += v * bv;
 
-        double magA = Math.Sqrt(a.Values.Sum(v => v * v));
-        double magB = Math.Sqrt(b.Values.Sum(v => v * v));
+        var magA = Math.Sqrt(a.Values.Sum(v => v * v));
+        var magB = Math.Sqrt(b.Values.Sum(v => v * v));
         return magA == 0 || magB == 0 ? 0 : dot / (magA * magB);
     }
 

@@ -1,5 +1,5 @@
-using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 
 namespace KyberWeave.Core.Docs.Validation;
