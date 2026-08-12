@@ -1,3 +1,4 @@
+using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Skills;
@@ -7,6 +8,7 @@ var app = new CommandApp();
 app.Configure(config =>
 {
     config.SetApplicationName("kyber-weave");
+    config.SetApplicationVersion($"kyber-weave {GetVersion()}");
 
     // Every artifact that shapes agent behaviour is governed the same way, so the three
     // branches are deliberately symmetric: one per artifact class.
@@ -98,3 +100,21 @@ app.Configure(config =>
 });
 
 return app.Run(args);
+
+static string GetVersion()
+{
+    var assembly = typeof(Program).Assembly;
+    var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    if (!string.IsNullOrWhiteSpace(infoVersion))
+    {
+        return infoVersion;
+    }
+
+    var nameVersion = assembly.GetName().Version;
+    if (nameVersion is not null)
+    {
+        return nameVersion.ToString();
+    }
+
+    return "0.0.0";
+}

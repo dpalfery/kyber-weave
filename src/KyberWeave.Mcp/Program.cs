@@ -1,3 +1,4 @@
+using System.Reflection;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
@@ -5,6 +6,12 @@ using KyberWeave.Core.Docs.Search;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+
+if (args.Contains("--version", StringComparer.OrdinalIgnoreCase) || args.Contains("-v", StringComparer.OrdinalIgnoreCase))
+{
+    Console.WriteLine($"kyber-weave-mcp {GetVersion()}");
+    return 0;
+}
 
 // Kyber-Weave's MCP surface is a separate executable rather than a `kyber-weave mcp`
 // subcommand. Stdio JSON-RPC owns stdout, and the CLI is built on Spectre.Console, which
@@ -33,6 +40,7 @@ builder.Services
     .WithToolsFromAssembly();
 
 await builder.Build().RunAsync().ConfigureAwait(false);
+return 0;
 
 /// <summary>
 /// The repository root, from <c>--repo-root</c>, else <c>KYBER_WEAVE_REPO_ROOT</c>, else
@@ -95,4 +103,22 @@ static OntologyConfig ResolveOntology(string repoRoot)
         "Serving the default ontology; the corpus may be empty.");
 
     return OntologyConfig.ProductDefaults;
+}
+
+static string GetVersion()
+{
+    var assembly = typeof(Program).Assembly;
+    var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    if (!string.IsNullOrWhiteSpace(infoVersion))
+    {
+        return infoVersion;
+    }
+
+    var nameVersion = assembly.GetName().Version;
+    if (nameVersion is not null)
+    {
+        return nameVersion.ToString();
+    }
+
+    return "0.0.0";
 }

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-02
+last-reviewed: 2026-08-11
 ---
 
 # Distribution and release flow
@@ -23,8 +23,9 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 ```
 
 `scripts/install.sh` is the one install channel Kyber-Weave documents. It resolves the
-latest release tag (or `--version`), verifies SHA-256 against `SHA256SUMS.txt`, follows
-HTTPS-only redirects, and installs to `~/.local/bin` without sudo.
+latest release tag (or pre-release tags when `--prerelease` / `KYBER_WEAVE_PRERELEASE=1`
+is set, or a specific release via `--version`), verifies SHA-256 against `SHA256SUMS.txt`,
+follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo.
 
 The script is served from the **default branch**, not versioned with a release. It only
 ever reads Release assets, so it stays backward-compatible with older tags and a script
@@ -54,19 +55,55 @@ extensionless binaries.
 
 Cut a release in either way (the `v*` tag is the version source of truth):
 
-1. **Push a tag:** `git tag v0.1.1 && git push origin v0.1.1`
-2. **Or Run workflow:** Actions → Release → Run workflow → enter `0.1.1` (or `v0.1.1`).  
+1. **Push a tag:** `git tag v0.1.1 && git push origin v0.1.1` (or pre-release tags like `v0.2.0-rc.1` or `v0.2.0-dev.1`)
+2. **Or Run workflow:** Actions → Release → Run workflow → enter `0.1.1` (or `v0.1.1`, `0.2.0-rc.1`, `0.2.0-dev.1`).  
    The workflow creates tag `v0.1.1` at that commit via `gh release create --target`  
    (it does not `git push` a tag, so the workflow is not re-triggered).
 
 Then `.github/workflows/release.yml` stamps that version onto the binaries, publishes
-each RID, and creates a GitHub Release with archives and `SHA256SUMS.txt`. Optionally
-pushes `PackAsTool` nupkgs to GitHub Packages — never to nuget.org.
+each RID, and creates a GitHub Release with archives and `SHA256SUMS.txt` (passing
+`--prerelease=auto` for pre-release tags and `--generate-notes` for changelogs).
+Pushes `PackAsTool` nupkgs (including pre-release versions) to GitHub Packages
+(`https://nuget.pkg.github.com/dpalfery`) — never to nuget.org.
 
 Check **dry_run** on a manual run to build artifacts only (no tag, no Release).
 
 No npm or Homebrew secrets are required. Since the install script reads only Release
 assets, creating the GitHub Release alone is enough for the documented install path.
+
+### Tag conventions and pre-releases
+
+Kyber-Weave uses standard semantic versioning tags:
+
+- **Stable releases:** `v<major>.<minor>.<patch>` (e.g. `v0.1.1`, `v1.0.0`)
+- **Release candidates:** `v<major>.<minor>.<patch>-rc.<n>` (e.g. `v0.2.0-rc.1`)
+- **Development builds:** `v<major>.<minor>.<patch>-dev.<n>` (e.g. `v0.2.0-dev.1`)
+
+When a version containing a hyphen (`-`) is processed:
+
+- `.github/workflows/release.yml` passes `--prerelease=auto` to `gh release create`. GitHub Releases marks the release as a pre-release, keeping it off `/releases/latest` so standard `install.sh` users stay on stable releases.
+- Release notes automatically include a pre-release callout banner highlighting the candidate version.
+- Nuget tool packages (`.nupkg`) carrying pre-release versions are published to GitHub Packages, allowing testing via `dotnet tool update --prerelease`.
+
+### Binary versioning and inspection
+
+Binaries built by `.github/workflows/release.yml` embed the release tag and Git commit SHA via `AssemblyInformationalVersionAttribute`. Users and automated tools can inspect the version of installed binaries at any time:
+
+```bash
+kyber-weave --version
+# or
+kyber-weave -v
+```
+
+And for the MCP server:
+
+```bash
+kyber-weave-mcp --version
+# or
+kyber-weave-mcp -v
+```
+
+Output format: `kyber-weave <version>` (e.g. `kyber-weave 0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f` or `kyber-weave 0.2.0-rc.1`).
 
 ## Continuous integration security
 

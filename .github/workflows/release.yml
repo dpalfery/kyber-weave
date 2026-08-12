@@ -1,12 +1,12 @@
 # Release — self-contained binaries and GitHub Release
 #
 # Two ways to cut a release:
-# 1. Push a `v*` tag (e.g. git push origin v0.1.2)
+# 1. Push a `v*` tag (e.g. git push origin v0.1.2 or git push origin v0.2.0-rc.1)
 # 2. Actions → Release → Run workflow, enter a version (creates the tag + Release)
 #
 # Builds the RID matrix, stamps Version from the tag, attaches archives +
-# SHA256SUMS.txt to a GitHub Release, and optionally pushes PackAsTool packages
-# to GitHub Packages.
+# SHA256SUMS.txt to a GitHub Release (passing --prerelease=auto for pre-releases),
+# and publishes PackAsTool packages (including pre-releases) to GitHub Packages.
 #
 # npm and Homebrew are not published from this workflow. nuget.org is forbidden.
 
@@ -19,7 +19,7 @@ name: Release
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g. 0.1.2 or v0.1.2). Creates tag vX.Y.Z at this commit."
+        description: "Release version (e.g. 0.1.2, v0.1.2, or 0.2.0-rc.1). Creates tag vX.Y.Z at this commit."
         type: string
         required: true
       dry_run:
@@ -72,7 +72,7 @@ jobs:
               echo "::error::version input is required when running via workflow_dispatch"
               exit 1
             fi
-            # Accept 0.1.2 or v0.1.2
+            # Accept 0.1.2, v0.1.2, or 0.2.0-rc.1
             RAW="${RAW#v}"
             if [[ ! "${RAW}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
             then
@@ -218,8 +218,14 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
+
+          PRERELEASE_NOTICE=""
+          if [[ "${VERSION}" == *"-"* ]]; then
+            PRERELEASE_NOTICE=$'> [!NOTE]\n> **Pre-release build**: This is a pre-release version of Kyber-Weave ('"${VERSION}"').\n\n'
+          fi
+
           NOTES="$(cat <<EOF
-          ## Kyber-Weave ${VERSION}
+          ${PRERELEASE_NOTICE}## Kyber-Weave ${VERSION}
 
           Self-contained binaries (no .NET runtime required). Tag \`${TAG}\` stamps
           this Release and the binary Version metadata.
@@ -238,7 +244,7 @@ jobs:
           EOF
           )"
 
-          ARGS=(release create "${TAG}" --title "Kyber-Weave ${VERSION}" --notes "${NOTES}")
+          ARGS=(release create "${TAG}" --title "Kyber-Weave ${VERSION}" --notes "${NOTES}" --prerelease=auto --generate-notes)
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]
           then
             ARGS+=(--target "${TARGET_SHA}")
@@ -277,8 +283,10 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          # Secondary channel only — not the default install story. Never nuget.org.
+          # Secondary channel — packages (including pre-release .nupkg) published to GitHub Packages.
+          # Target index: https://nuget.pkg.github.com/dpalfery (never nuget.org).
           dotnet nuget push "./artifacts/nupkg/*.nupkg" \
             --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
             --api-key "${{ github.token }}" \
             --skip-duplicate
+

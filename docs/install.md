@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-11
 ---
 
 # Installing Kyber-Weave
@@ -17,7 +17,7 @@ install and no SDK requirement.
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
 ```
 
-This installs the **latest release tag** to `~/.local/bin` without sudo, placing two
+This installs the **latest stable release tag** to `~/.local/bin` without sudo, placing two
 binaries on your PATH:
 
 | Binary | Purpose |
@@ -35,19 +35,34 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | Flag | Environment variable | Effect |
 |---|---|---|
-| `--version <v>` | `KYBER_WEAVE_VERSION` | Install a specific release instead of latest |
+| `--version <v>` | `KYBER_WEAVE_VERSION` | Install a specific release (e.g. `0.1.1` or `0.2.0-rc.1`) instead of latest |
+| `--prerelease` | `KYBER_WEAVE_PRERELEASE=1` | Resolve and install candidate/pre-release builds (e.g. `v*-rc.*`, `v*-dev.*`) |
 | `--install-dir <d>` | `KYBER_WEAVE_INSTALL_DIR` | Target directory (default `~/.local/bin`) |
 | `--no-mcp` | `KYBER_WEAVE_NO_MCP=1` | CLI only; skip the MCP server |
+
+Pinning a specific version or install directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
   | sh -s -- --version 0.1.1 --install-dir /usr/local/bin
 ```
 
+Installing the latest pre-release (Release Candidate or development build):
+
+```bash
+# Using CLI flag
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+  | sh -s -- --prerelease
+
+# Using environment variable
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+  | KYBER_WEAVE_PRERELEASE=1 sh
+```
+
 ## What the script does
 
 1. Detects your OS and architecture and picks the matching RID
-2. Resolves the latest release tag, unless `--version` pinned one
+2. Resolves the latest stable release tag (or newest pre-release tag when `--prerelease` is active), unless `--version` pinned an explicit version
 3. Downloads `SHA256SUMS.txt` and each binary archive over HTTPS, following HTTPS-only redirects
 4. **Verifies every binary against its published checksum** before installing
 5. Extracts into the install directory
@@ -65,6 +80,26 @@ handle `.zip` extraction — download the asset from
 manually.
 
 ## Verify
+
+Verify the installation and output the build-stamped binary version:
+
+```bash
+kyber-weave --version
+# or short flag
+kyber-weave -v
+```
+
+Output example: `kyber-weave 0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f` or `kyber-weave 0.2.0-rc.1`.
+
+Verify the MCP server binary version:
+
+```bash
+kyber-weave-mcp --version
+# or short flag
+kyber-weave-mcp -v
+```
+
+View CLI general help:
 
 ```bash
 kyber-weave --help
