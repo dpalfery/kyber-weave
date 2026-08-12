@@ -15,7 +15,6 @@ name: CI
   schedule:
     # Weekly CodeQL / dependency scan fallback when the tree is quiet
     - cron: "0 0 * * 1"
-
   workflow_dispatch:
 
 concurrency:
