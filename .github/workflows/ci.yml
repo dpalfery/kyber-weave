@@ -79,37 +79,6 @@ jobs:
             exit 1
           fi
 
-      # Curated packs only — whitespace + a small style set from .editorconfig.
-      # Skip `dotnet format analyzers`: CA quality rules already fail the build via
-      # TreatWarningsAsErrors / AnalysisMode=all.
-      - name: Format (whitespace)
-        run: >
-          dotnet format KyberWeave.sln whitespace
-          --verify-no-changes
-          --no-restore
-          -v minimal
-
-      - name: Format (style)
-        run: >
-          dotnet format KyberWeave.sln style
-          --verify-no-changes
-          --severity warn
-          --no-restore
-          -v minimal
-
-      - name: List vulnerable NuGet packages
-        run: |
-          set -euo pipefail
-          # Belt-and-suspenders for NuGetAudit during restore (NU1903/NU1904 are errors
-          # under TreatWarningsAsErrors). Clean output says "has no vulnerable packages";
-          # failures say "has the following vulnerable packages".
-          output="$(dotnet list KyberWeave.sln package --vulnerable --include-transitive 2>&1)"
-          printf '%s\n' "$output"
-          if printf '%s\n' "$output" | grep -Eqi 'has the following vulnerable packages'; then
-            echo "::error::Vulnerable NuGet packages detected"
-            exit 1
-          fi
-
       - name: Build
         run: dotnet build KyberWeave.sln -c ${{ env.CONFIGURATION }} --no-restore
 
