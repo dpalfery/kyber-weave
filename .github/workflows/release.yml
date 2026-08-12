@@ -244,7 +244,10 @@ jobs:
           EOF
           )"
 
-          ARGS=(release create "${TAG}" --title "Kyber-Weave ${VERSION}" --notes "${NOTES}" --prerelease=auto --generate-notes)
+          ARGS=(release create "${TAG}" --title "Kyber-Weave ${VERSION}" --notes "${NOTES}" --generate-notes)
+          if [[ "${VERSION}" == *"-"* ]]; then
+            ARGS+=(--prerelease)
+          fi
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]
           then
             ARGS+=(--target "${TARGET_SHA}")
