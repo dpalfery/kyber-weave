@@ -97,12 +97,12 @@ public sealed class DocGraphProjection
                     "DESCRIBES", documentId, $"path:{document.Frontmatter.SourceRoot}"));
 
             foreach (var symbol in document.CodeRefs)
-            foreach (var node in codeGraph.ResolveSymbol(symbol))
-                edges.Add(new DocGraphEdge("REFERENCES", documentId, node.Id));
+                foreach (var node in codeGraph.ResolveSymbol(symbol))
+                    edges.Add(new DocGraphEdge("REFERENCES", documentId, node.Id));
 
             foreach (var endpoint in document.ApiEndpoints)
-            foreach (var node in codeGraph.ResolveRoute(endpoint))
-                edges.Add(new DocGraphEdge("EXPOSES", documentId, node.Id));
+                foreach (var node in codeGraph.ResolveRoute(endpoint))
+                    edges.Add(new DocGraphEdge("EXPOSES", documentId, node.Id));
 
             foreach (var adr in document.DecidedBy)
                 edges.Add(new DocGraphEdge("DECIDED_BY", documentId, DocId(adr)));
@@ -277,11 +277,11 @@ public sealed class DocGraphProjection
             }
 
             foreach (var source in sources)
-            foreach (var target in targets)
-            {
-                if (!StringComparer.Ordinal.Equals(source, target))
-                    related.Add(DocumentPair.Create(source, target));
-            }
+                foreach (var target in targets)
+                {
+                    if (!StringComparer.Ordinal.Equals(source, target))
+                        related.Add(DocumentPair.Create(source, target));
+                }
         }
 
         return related;
@@ -299,8 +299,8 @@ public sealed class DocGraphProjection
     {
         var ids = documentIds.Distinct(StringComparer.Ordinal).ToArray();
         for (var left = 0; left < ids.Length; left++)
-        for (var right = left + 1; right < ids.Length; right++)
-            related.Add(DocumentPair.Create(ids[left], ids[right]));
+            for (var right = left + 1; right < ids.Length; right++)
+                related.Add(DocumentPair.Create(ids[left], ids[right]));
     }
 
     private static bool PathsOverlap(string left, string right) =>

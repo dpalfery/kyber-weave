@@ -82,16 +82,16 @@ public sealed class GraphClaimCandidateSource : IClaimCandidateSource
     {
         var postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         for (var index = 0; index < tokenSets.Count; index++)
-        foreach (var token in tokenSets[index])
-        {
-            if (!postings.TryGetValue(token, out var indexes))
+            foreach (var token in tokenSets[index])
             {
-                indexes = [];
-                postings[token] = indexes;
-            }
+                if (!postings.TryGetValue(token, out var indexes))
+                {
+                    indexes = [];
+                    postings[token] = indexes;
+                }
 
-            indexes.Add(index);
-        }
+                indexes.Add(index);
+            }
 
         return postings.ToDictionary(
             item => item.Key,
