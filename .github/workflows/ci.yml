@@ -5,13 +5,6 @@
 # Security jobs mirror motorcycle-rag-system's pr-gate (CodeQL, Trivy fs, Semgrep,
 # gitleaks) without Azure/container/Dockerfile scans — this repo ships binaries, not
 # cloud infrastructure.
-# CI — build, test, pack-to-artifacts, RID publish smoke, and security gates.
-# No registry publish here (GitHub Release / optional GitHub Packages belong to
-# release.yml). nuget.org is forbidden.
-#
-# Security jobs mirror motorcycle-rag-system's pr-gate (CodeQL, Trivy fs, Semgrep,
-# gitleaks) without Azure/container/Dockerfile scans — this repo ships binaries, not
-# cloud infrastructure.
 
 name: CI
 
