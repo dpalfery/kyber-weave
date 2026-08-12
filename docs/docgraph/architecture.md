@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-04
+last-reviewed: 2026-08-12
 code-refs:
   - DocumentLoader
   - DocumentCorpus
@@ -35,15 +35,34 @@ DocumentIndexHost.Current()  cache, and rebuild whichever half is stale
 
 Each stage is a pure transform of the one before it. Nothing writes to disk.
 
-## There is no DocGraph database
+Documentation analysis branches from the same `DocumentSet` and an immutable projection
+of the export relationships:
+
+```
+ClaimExtractor              paragraphs, list items, table rows, code fences  → claims
+        │
+DocGraphProjection.Build()  document relationships + one-hop CodeGraph       → neighbors
+        │
+DocumentationAnalyzer       exact clusters + bounded graph/lexical/semantic  → findings
+```
+
+That shared projection keeps analysis graph-first rather than rebuilding relationships
+or scanning every claim pair. See [documentation analysis](analysis.md) for the blocking,
+classification, and review contracts.
+
+## Retrieval has no database
 
 The graph lives in process memory and is rebuilt from the Markdown on demand. The corpus
 is roughly 600 KB of prose for a repository of this size, and parsing plus vectorising it
 costs milliseconds — cheap enough that a persistence tier would buy latency at the cost of
 a cache-invalidation problem.
 
-The only durable artifact DocGraph produces is the optional `nodes.jsonl` / `edges.jsonl`
-export from `docs graph`, which is written for external consumers and never read back.
+The optional `nodes.jsonl` / `edges.jsonl` export from `docs graph` is written for external
+consumers and never read back. Documentation analysis has a separate local cache at
+`.kyber-weave/cache/docs-analysis.sqlite3` for reusable vectors and agent verdicts. It is
+not a retrieval database or a source of documentation, and deterministic analysis runs
+without it. The cache exists only when the narrow path is safely ignored; see
+[analysis privacy and persistence](analysis.md#local-cache-and-embedding-privacy).
 
 The one database in play is **CodeGraph's**, at `.codegraph/codegraph.db`. Kyber-Weave
 opens it read-only and issues nothing but `SELECT`. It does not create it, write to it, or
@@ -73,7 +92,7 @@ comfortable at hundreds of documents and is the first thing to revisit at thousa
 A document's `code-refs` entries are resolved through `ICodeGraphResolver`, a port with
 one production adapter that reads CodeGraph's SQLite index. Resolution is a **join, not a
 merge**: documentation stays in memory, code stays in the index, and the two meet only
-when a query needs them together.
+when retrieval, export, drift, or analysis needs them together.
 
 Both the reference as authored and its last dotted segment are indexed, so a `code-refs`
 entry of `KyberWeave.Core.Docs.Search.DocumentIndex` is findable by the bare `DocumentIndex`
@@ -84,9 +103,15 @@ beneath it win, and within that pool a declaration outranks an incidentally same
 member. A class named `X` is far likelier to be what documentation calls "X" than a
 property that happens to be called `X`.
 
-**The index is optional.** Without it, `IsAvailable` is false, joins come back empty, and
-retrieval still works completely — ranking never consults the code graph. Only
-[`docs drift`](governance.md) and `docs graph` hard-require it.
+Analysis also asks an optional one-hop neighborhood port for `contains`, `calls`,
+`references`, `instantiates`, `extends`, and `implements` edges. `imports` and
+high-degree code nodes are excluded because they connect too much of the repository to be
+useful evidence.
+
+**The index is optional.** Without it, `IsAvailable` is false, joins come back empty,
+retrieval still works completely, and analysis continues with document relationships and
+bounded lexical search after one warning. Only [`docs drift`](governance.md) and
+`docs graph` hard-require it.
 
 ## Why sqlite3 and not a library
 
@@ -104,6 +129,7 @@ creating.
 ## Related
 
 - [Retrieval and ranking](retrieval.md) — how a query becomes an answer
+- [Documentation analysis and review](analysis.md) — graph-first duplicates, conflicts, and terminology
 - [Documentation governance](governance.md) — the conformance and drift gates
 - [MCP server runbook](mcp-runbook.md) — serving this graph to an agent
 - [The documentation ontology](../documentation-ontology.md) — the schema all of this assumes

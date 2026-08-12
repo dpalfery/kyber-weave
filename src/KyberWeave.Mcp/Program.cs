@@ -3,6 +3,7 @@ using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -33,6 +34,7 @@ builder.Services.AddSingleton(new DocumentIndexHost(
     () => new DocumentLoader(repoRoot, ontology).Load(),
     ontology.DocsRoots,
     ontology.ResolvedCatalogPath));
+builder.Services.AddSingleton<IDocsAnalysisReader>(new RepositoryDocsAnalysisReader(repoRoot));
 
 builder.Services
     .AddMcpServer()

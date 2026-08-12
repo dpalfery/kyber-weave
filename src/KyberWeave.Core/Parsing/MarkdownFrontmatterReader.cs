@@ -12,7 +12,12 @@ namespace KyberWeave.Core.Parsing;
 /// <param name="HasFrontmatter">True when a frontmatter block was present.</param>
 /// <param name="Yaml">The raw YAML text with its delimiters removed.</param>
 /// <param name="Body">The Markdown body following the frontmatter block.</param>
-public readonly record struct FrontmatterReadResult(bool HasFrontmatter, string Yaml, string Body);
+/// <param name="BodyStartLine">The 1-based source line on which <paramref name="Body"/> begins.</param>
+public readonly record struct FrontmatterReadResult(
+    bool HasFrontmatter,
+    string Yaml,
+    string Body,
+    int BodyStartLine = 1);
 
 /// <summary>
 /// Format-agnostic reader for YAML frontmatter in Markdown files.
@@ -53,7 +58,8 @@ public static class MarkdownFrontmatterReader
             return new FrontmatterReadResult(false, string.Empty, content);
         }
 
-        return new FrontmatterReadResult(true, ExtractYaml(content, block), ExtractBody(content, block));
+        var (body, bodyStartLine) = ExtractBody(content, block);
+        return new FrontmatterReadResult(true, ExtractYaml(content, block), body, bodyStartLine);
     }
 
     /// <summary>Reads frontmatter and body from a file on disk.</summary>
@@ -69,10 +75,32 @@ public static class MarkdownFrontmatterReader
         return string.Join("\n", lines);
     }
 
-    private static string ExtractBody(string content, YamlFrontMatterBlock block)
+    private static (string Body, int StartLine) ExtractBody(string content, YamlFrontMatterBlock block)
     {
         var afterIndex = block.Span.End + 1;
-        if (afterIndex >= content.Length) return string.Empty;
-        return content[afterIndex..].TrimStart('\r', '\n');
+        while (afterIndex < content.Length && content[afterIndex] is '\r' or '\n')
+        {
+            afterIndex++;
+        }
+
+        var startLine = SourceLineAt(content, afterIndex);
+        return afterIndex >= content.Length
+            ? (string.Empty, startLine)
+            : (content[afterIndex..], startLine);
+    }
+
+    private static int SourceLineAt(string content, int position)
+    {
+        var line = 1;
+        for (var index = 0; index < position; index++)
+        {
+            if (content[index] == '\n' ||
+                content[index] == '\r' && (index + 1 >= position || content[index + 1] != '\n'))
+            {
+                line++;
+            }
+        }
+
+        return line;
     }
 }

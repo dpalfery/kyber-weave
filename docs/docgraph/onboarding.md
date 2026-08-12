@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-12
 ---
 
 # Adopting DocGraph in an existing repository
@@ -21,13 +21,18 @@ command does the mechanical half, a skill does the judgment half.
 kyber-weave docs init .
 ```
 
-This writes three files and leaves any that already exist alone, so it is safe to re-run:
+This considers four files and preserves existing operator-owned content, so it is safe to
+re-run:
 
 | File | Why |
 |---|---|
 | `.kyber-weave/kyber-weave.yml` | Host config, with `docs-root` set to your detected tree and the inherited `DevOps/*` exclusions cleared |
+| `.kyber-weave/.gitignore` | Safely merged narrow `cache/` entry for local analysis vectors and verdicts |
 | `<docs-root>/documentation-ontology.md` | The schema. Emitted because every `KW-DOC-SPEC-001` diagnostic tells the author to read it |
 | `<docs-root>/catalog.md` | The component and owner vocabulary, seeded with one example row |
+
+Initialization does **not** create an empty glossary. A managed glossary is created only
+when terminology evidence exists and `docs glossary --write` has something to merge.
 
 The docs root is detected from the first conventional directory that exists — `docs`,
 `6-Docs`, `doc`, `documentation` — or created as `docs`. Re-running with an existing
@@ -40,6 +45,11 @@ closed vocabularies — that the emitted template knows nothing about and would 
 drop. The one key `docs init` will rewrite there is `ontology.docs-root`, in place and only
 when `--docs-root` moves it, so the catalog and the validator never end up reading
 different trees. Comments and every other key survive the edit.
+
+The same conservative rule applies to `.kyber-weave/.gitignore`: an effective `cache/`
+entry is preserved, a missing one is appended without disturbing other patterns, and a
+later negation is countered with a final narrow entry. `--force` does not replace this
+operator-owned file.
 
 ### APM is an expected dependency
 
@@ -123,7 +133,24 @@ Be selective. Architecture documents, runbooks for a named service, and API refe
 earn `code-refs`; narrative and onboarding prose do not. **A document with no `code-refs`
 is completely valid** — an empty claim beats a false one.
 
-## 5. Serve it
+## 5. Analyze claims and terminology
+
+Once the corpus is valid, analysis can surface duplicated claims, potential conflicts,
+and overloaded terms without editing any source document:
+
+```bash
+kyber-weave docs analyze .
+kyber-weave docs review export . --out candidates.json
+kyber-weave docs glossary .
+```
+
+The default path is advisory, deterministic/lexical, and bounded. Embeddings are off. If
+you later enable a loopback embedding endpoint, Kyber-Weave sends no document text unless
+the local cache path is proven safely ignored. See
+[documentation analysis and review](analysis.md) before enabling `high-recall` or
+importing reusable verdicts.
+
+## 6. Serve it
 
 ```bash
 kyber-weave-mcp --repo-root .
@@ -132,7 +159,10 @@ kyber-weave-mcp --repo-root .
 See the [MCP runbook](mcp-runbook.md) for client configuration. Agents should reach the
 corpus through `docs_explore` rather than by reading files.
 
-## 6. Gate it
+The MCP surface also exposes capped read-only `docs_analysis_candidates` and
+`docs_glossary` tools; verdict and glossary writes remain CLI-only.
+
+## 7. Gate it
 
 Add the [docs gate workflow](../ci-pipelines/workflows-runbook.md) so the corpus cannot
 regress. Start with `docs validate` alone — it needs no index — and add `docs drift` once
@@ -156,4 +186,5 @@ ontology at all.
 - [The documentation ontology](../documentation-ontology.md) — the schema being adopted
 - [Governance gates](governance.md) — what `validate` and `drift` check
 - [Retrieval and ranking](retrieval.md) — why doc-type and status affect results
+- [Documentation analysis and review](analysis.md) — duplicates, conflicts, terms, and review
 - [Skill governance](../context-hygiene/skills.md) — the skill is itself a governed artifact

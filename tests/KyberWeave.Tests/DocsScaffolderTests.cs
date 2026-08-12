@@ -1,6 +1,8 @@
+using System.Text;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
@@ -254,6 +256,110 @@ public sealed class DocsScaffolderTests : IDisposable
     }
 
     /// <summary>
+    /// Analysis persistence is allowed only after the repository-owned state directory has
+    /// the exact narrow ignore entry. A fresh init must establish that safety without also
+    /// creating a glossary that has no reviewed senses.
+    /// </summary>
+    [Fact]
+    public void FreshInitCreatesOnlyTheNarrowCacheIgnoreAndNoEmptyGlossary()
+    {
+        var result = DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.Equal("cache/\n", Read(".kyber-weave/.gitignore"));
+        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+        Assert.False(File.Exists(Path.Combine(_temp.Path, "docs", "glossary.md")));
+        var entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
+        Assert.Equal(ScaffoldOutcome.Created, entry.Outcome);
+    }
+
+    /// <summary>
+    /// The state ignore file may contain operator-owned entries. Init owns only the narrow
+    /// cache line, including under <c>--force</c>, and must not regenerate the rest.
+    /// </summary>
+    [Fact]
+    public void ForceMergesCacheIgnoreWithoutReplacingExistingLines()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"),
+            "# operator entry\nlocal-notes/");
+
+        var result = DocsScaffolder.Scaffold(_temp.Path, force: true);
+
+        Assert.Equal(
+            "# operator entry\nlocal-notes/\ncache/\n",
+            Read(".kyber-weave/.gitignore"));
+        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+        var entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
+        Assert.Equal(ScaffoldOutcome.Updated, entry.Outcome);
+    }
+
+    /// <summary>
+    /// A prior exact entry is not sufficient when a later negation exposes the cache again.
+    /// Init must append the narrow rule after that negation so ordinary analysis can persist
+    /// safely, while preserving the operator's original lines for inspection.
+    /// </summary>
+    [Fact]
+    public void InitRepairsAnIneffectiveCacheIgnoreWithoutDiscardingItsLines()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        const string existing = "cache/\n!cache/docs-analysis.sqlite3\n";
+        File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"), existing);
+        Assert.False(AnalysisCacheSafety.IsSafe(_temp.Path));
+
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        Assert.Equal(existing + "cache/\n", Read(".kyber-weave/.gitignore"));
+        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+    }
+
+    /// <summary>
+    /// Re-running init must not duplicate or reformat an already effective ignore entry.
+    /// This keeps the merge byte-stable for hosts that maintain other local-state rules.
+    /// </summary>
+    [Fact]
+    public void CacheIgnoreMergeIsIdempotentAndPreservesExistingBytes()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        const string existing = "# local state\ncache/\nlocal-notes/\n";
+        File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"), existing);
+
+        var first = DocsScaffolder.Scaffold(_temp.Path);
+        var second = DocsScaffolder.Scaffold(_temp.Path, force: true);
+
+        Assert.Equal(existing, Read(".kyber-weave/.gitignore"));
+        Assert.Single(
+            File.ReadAllLines(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore")),
+            line => StringComparer.Ordinal.Equals(line, "cache/"));
+        Assert.All(
+            new[] { first, second },
+            result => Assert.Equal(
+                ScaffoldOutcome.Preserved,
+                result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore").Outcome));
+    }
+
+    /// <summary>
+    /// Reading and rewriting decoded text silently changes an operator-owned file's byte
+    /// representation. The merge must append in the detected encoding so the original BOM,
+    /// Unicode text, and CRLF bytes remain an exact prefix of the result.
+    /// </summary>
+    [Fact]
+    public void CacheIgnoreMergePreservesExistingEncodingPreambleAndBytePrefix()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        var path = Path.Combine(_temp.Path, ".kyber-weave", ".gitignore");
+        const string existing = "# opérateur\r\nlocal-notes/";
+        File.WriteAllText(path, existing, Encoding.Unicode);
+        var originalBytes = File.ReadAllBytes(path);
+
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        var appendedBytes = Encoding.Unicode.GetBytes("\r\ncache/\r\n");
+        Assert.Equal(originalBytes.Concat(appendedBytes), File.ReadAllBytes(path));
+        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+    }
+
+    /// <summary>
     /// A host config carries settings this scaffolder's template knows nothing about —
     /// harness profiles, catalog column overrides, closed vocabularies. Regenerating it
     /// under <c>--force</c> would discard all of them to restate a docs root the file
@@ -419,7 +525,8 @@ public sealed class DocsScaffolderTests : IDisposable
 
         var result = DocsScaffolder.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
 
-        Assert.False(Directory.Exists(Path.Combine(_temp.Path, ".kyber-weave")));
+        Assert.False(File.Exists(Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml")));
+        Assert.Equal("cache/\n", Read(".kyber-weave/.gitignore"));
 
         var config = KyberWeaveConfigLoader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);

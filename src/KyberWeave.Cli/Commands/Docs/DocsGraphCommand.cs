@@ -1,4 +1,5 @@
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Export;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -11,7 +12,12 @@ public sealed class DocsGraphCommand : Command<DocsGraphSettings>
     public override int Execute(CommandContext context, DocsGraphSettings settings)
     {
         var report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryCreateLoader(settings, report, out var loader))
+        if (!DocsCommandComposition.TryCreateLoader(
+                settings,
+                report,
+                out var loader,
+                out _,
+                out var config))
         {
             CommandHelpers.Finish(report, settings, "docs graph", "Document");
             return 1;
@@ -28,7 +34,15 @@ public sealed class DocsGraphCommand : Command<DocsGraphSettings>
             return 1;
         }
 
-        var result = new DocGraphExporter(resolver).Export(set, settings.Out);
+        var glossary = new ManagedGlossaryService(
+            settings.Path,
+            config,
+            TimeProvider.System).Load();
+        var glossaryContributor = new ManagedGlossaryGraphContributor(glossary);
+        var result = new DocGraphExporter(resolver).Export(
+            set,
+            settings.Out,
+            contributors: [glossaryContributor]);
 
         AnsiConsole.MarkupLine(
             $"[green]{result.NodeCount} nodes[/] → {Markup.Escape(result.NodesPath)}");

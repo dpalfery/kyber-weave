@@ -40,16 +40,18 @@ artifact as current guidance, and returns budgeted excerpts that name what they 
 [Retrieval →](docs/docgraph/retrieval.md)
 
 ```bash
-kyber-weave docs init .        # scaffold config, catalog, ontology + deploy the authoring skill
+kyber-weave docs init .        # scaffold config/catalog/ontology, protect local cache, deploy the skill
 kyber-weave docs validate .
 kyber-weave docs drift .
+kyber-weave docs analyze .     # advisory duplicate/conflict/terminology findings
 kyber-weave docs graph . --out ./build/doc-graph
 ```
 
 ### Adopting an existing tree
 
 `docs init` does the mechanical half — host config, the catalog that supplies the
-component and owner vocabularies, and the ontology reference every diagnostic points at.
+component and owner vocabularies, the ontology reference every diagnostic points at, and
+the narrow ignored cache path analysis needs before it can persist verdicts or vectors.
 It then deploys the **`kyber-weave-docs` skill** through
 [APM](https://microsoft.github.io/apm), defaulting to `.agents/skills/` so every
 APM-supported client picks it up.
@@ -67,10 +69,34 @@ corpus degrades gracefully rather than serving unreviewed metadata as current gu
 |---|---|
 | `docs_explore(query, maxDocs, charBudget)` | Ranked documents with frontmatter identity, prose within budget, and code joins as `symbol → file:line` |
 | `docs_for_symbol(symbol)` | Reverse lookup: documents whose `code-refs` **formally claim** a symbol — not those that merely mention it |
+| `docs_analysis_candidates(kind, cursor, limit, charBudget)` | Capped, stable, read-only duplicate/conflict/terminology evidence with local cost metrics |
+| `docs_glossary(term)` | Capped, read-only lookup of managed term senses, scopes, and aliases |
 
 It is a separate binary from the CLI on purpose: JSON-RPC owns stdout and Spectre.Console
 also writes there, so separate entry points make stream corruption structurally
 impossible. [MCP runbook →](docs/docgraph/mcp-runbook.md)
+
+### Documentation analysis and terminology
+
+`docs analyze` extracts line-addressable claims from paragraphs, list items, table rows,
+and code fences, then uses DocGraph and one-hop CodeGraph relationships before bounded
+lexical search. Exact duplicates are deterministic; potential conflicts and distinct term
+senses can be exported for agent review and imported as reusable, content-addressed
+verdicts. Source documents are never rewritten.
+
+```bash
+kyber-weave docs analyze .
+kyber-weave docs review export . --out candidates.json
+kyber-weave docs review import . --in verdicts.json
+kyber-weave docs glossary .          # preview
+kyber-weave docs glossary . --write  # merge proposals into one reference document
+```
+
+Embeddings are off by default. When enabled, endpoints must resolve only to loopback,
+redirects are disabled, and no document text is sent unless the local SQLite cache is
+safely ignored. Default hybrid search avoids all-pairs work; `high-recall` is an explicit
+quadratic first pass outside the default latency target.
+[Analysis and review →](docs/docgraph/analysis.md)
 
 ### One external dependency, and it's optional
 
@@ -157,6 +183,7 @@ dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 - **`docs init` expects [APM](https://microsoft.github.io/apm)** to deploy the authoring skill. Both it and CodeGraph are *expected* dependencies — Kyber-Weave detects them and degrades with a message, but never installs anything on your machine.
 - **Security scanning is necessary but not sufficient** — pair it with human review.
 - **The document index is rebuilt, never persisted.** Editing one document rebuilds the whole corpus; comfortable at hundreds of documents, worth revisiting at thousands.
+- **Documentation analysis persistence is a separate local cache.** `.kyber-weave/cache/docs-analysis.sqlite3` stores reusable vectors and verdicts only when the narrow cache path is safely ignored; it is never a source of retrieval prose.
 - Some agent Core APIs exist without CLI verbs (`agent route` / `lint` / `new`) — known gap.
 
 > **Naming note.** "Kyber" collides with CRYSTALS-Kyber / ML-KEM, the NIST post-quantum KEM

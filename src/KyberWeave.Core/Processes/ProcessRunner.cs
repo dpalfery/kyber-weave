@@ -12,6 +12,62 @@ public readonly record struct ProcessResult(int ExitCode, string StandardOutput,
 public static class ProcessRunner
 {
     /// <summary>
+    /// Starts a child process, transfers its standard input, and captures its output.
+    /// </summary>
+    /// <remarks>
+    /// The output reads begin before input is written. A child is allowed to fill its
+    /// output pipes before reading stdin, so writing all input first can deadlock just as
+    /// surely as draining stdout and stderr sequentially can. Closing stdin after the
+    /// write is equally important: many command-line tools do not proceed until EOF.
+    /// </remarks>
+    /// <param name="startInfo">
+    /// Process configuration with stdin, stdout, and stderr redirected and shell execution
+    /// disabled.
+    /// </param>
+    /// <param name="standardInput">The complete text to write to the child process.</param>
+    public static ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+    {
+        ArgumentNullException.ThrowIfNull(startInfo);
+        ArgumentNullException.ThrowIfNull(standardInput);
+
+        if (startInfo.UseShellExecute ||
+            !startInfo.RedirectStandardInput ||
+            !startInfo.RedirectStandardOutput ||
+            !startInfo.RedirectStandardError)
+        {
+            throw new ArgumentException(
+                "Standard input, standard output, and standard error must be redirected " +
+                "with shell execution disabled.",
+                nameof(startInfo));
+        }
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("The child process could not be started.");
+
+        // Reads start before the write because a child may produce more than one pipe
+        // buffer of output before it consumes any stdin.
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        var inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
+
+        try
+        {
+            Task.WhenAll(inputWrite, standardOutput, standardError).GetAwaiter().GetResult();
+        }
+        finally
+        {
+            // WhenAll does not finish until both output streams reach EOF, so waiting here
+            // cannot leave the child blocked on a full redirected pipe.
+            process.WaitForExit();
+        }
+
+        return new ProcessResult(
+            process.ExitCode,
+            standardOutput.GetAwaiter().GetResult(),
+            standardError.GetAwaiter().GetResult());
+    }
+
+    /// <summary>
     /// Drains both redirected streams, waits for exit, and returns what was captured.
     /// </summary>
     /// <remarks>
@@ -44,5 +100,19 @@ public static class ProcessRunner
         process.WaitForExit();
 
         return new ProcessResult(process.ExitCode, captured[0], captured[1]);
+    }
+
+    private static async Task WriteAndCloseAsync(StreamWriter writer, string input)
+    {
+        try
+        {
+            await writer.WriteAsync(input).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Close communicates EOF even for empty input. It also flushes any text still
+            // buffered by StreamWriter, so failures during that final transfer propagate.
+            writer.Close();
+        }
     }
 }

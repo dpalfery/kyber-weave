@@ -96,3 +96,57 @@ not fail the build.
 `docs validate` and `docs drift` exit non-zero on any **error**. Warnings and info do not
 gate. `--no-info` hides informational findings; `--format sarif` emits SARIF for code
 scanning.
+
+## Analysis — `docs analyze`
+
+Analysis is advisory by default and never edits source documentation.
+
+### `KW-DOC-ANALYSIS-001` — duplicate cluster
+
+Info for a pending near duplicate; Warning for a deterministic exact cluster or a
+high-confidence imported duplicate verdict. Confirm that the claims are substantively the
+same, not merely about the same topic.
+
+### `KW-DOC-ANALYSIS-002` — potential conflict
+
+Info while pending; Error only after a high-confidence imported `conflict` verdict.
+Confirm that both claims cannot be true in the same scope and time before choosing a
+canonical source.
+
+### `KW-DOC-ANALYSIS-003` — ambiguous terminology
+
+Warning when one informative term occurs in divergent contexts not fully accounted for by
+approved scoped glossary senses. Preview proposals with `docs glossary .`; do not rename
+terms automatically.
+
+### `KW-DOC-ANALYSIS-004` — invalid ignore markup
+
+Operational Error. `<kyber-ignore>` must be balanced, case-sensitive, non-nested, use
+`duplicate`, `conflict`, `terminology`, or `all`, and stay within frontmatter/`##`
+boundaries. Fix the markup; suppression never fails open.
+
+### `KW-DOC-ANALYSIS-005` — CodeGraph unavailable
+
+Warning. Analysis continues with document relationships and bounded lexical search. Build
+or restore `.codegraph/codegraph.db` for code-neighborhood evidence.
+
+### `KW-DOC-ANALYSIS-006` — embedding unavailable
+
+Warning in `prefer`, operational Error in `required`. Embeddings remain off by default and
+are never invoked unless the local cache path is safely ignored. Restore the loopback
+provider/safe cache, use `prefer` for lexical fallback, or use `off`.
+
+### `KW-DOC-REVIEW-001` — invalid or stale verdict bundle
+
+Operational Error. Regenerate candidates from the current corpus and validate every
+candidate id, claim hash, evidence id, label, confidence, and glossary proposal. Import is
+atomic; one invalid item writes nothing.
+
+### `KW-DOC-GLOSSARY-001` — invalid managed glossary
+
+Operational Error. Keep the document a conformant `reference`; use only `proposed`,
+`approved`, or `rejected` row status. Approved senses require a definition and at least
+one valid `component:<catalog value>` or `code-ref:<symbol>` scope.
+
+`docs analyze --fail-on none|warning|error` controls finding gating. Operational errors
+always return non-zero.

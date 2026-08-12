@@ -1,3 +1,5 @@
+using System.IO.Enumeration;
+using System.Text;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
@@ -79,6 +81,9 @@ public sealed record ScaffoldResult(
 /// </remarks>
 public static class DocsScaffolder
 {
+    private const string AnalysisCacheIgnorePath = ".kyber-weave/.gitignore";
+    private const string AnalysisCacheIgnoreEntry = "cache/";
+
     /// <summary>Roots checked, in order, when no docs root is supplied.</summary>
     private static readonly string[] ConventionalRoots = ["docs", "6-Docs", "doc", "documentation"];
 
@@ -110,6 +115,7 @@ public static class DocsScaffolder
         var files = new List<ScaffoldedFile>
         {
             WriteHostConfig(root, resolvedDocsRoot),
+            WriteAnalysisCacheIgnore(root),
             Write(root, $"{resolvedDocsRoot}/documentation-ontology.md",
                 OntologyReference(resolvedDocsRoot, resolvedOwner), force),
             Write(root, $"{resolvedDocsRoot}/catalog.md",
@@ -286,6 +292,126 @@ public static class DocsScaffolder
         return new ScaffoldedFile(
             relativePath, ScaffoldOutcome.Updated, "docs-root only; the rest of the file is untouched");
     }
+
+    /// <summary>
+    /// Establishes the narrow repository-local cache exclusion without regenerating the
+    /// operator's other ignore rules.
+    /// </summary>
+    /// <remarks>
+    /// An exact entry earlier in the file is not enough when a later negation exposes the
+    /// analysis database again. Appending the same narrow entry after that negation restores
+    /// protection while preserving every existing byte. The existing newline style is used
+    /// for the appended boundary so a merge does not introduce mixed line endings.
+    /// </remarks>
+    private static ScaffoldedFile WriteAnalysisCacheIgnore(string repoRoot)
+    {
+        var absolute = RequireContained(repoRoot, AnalysisCacheIgnorePath, nameof(repoRoot));
+        if (!File.Exists(absolute))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
+            File.WriteAllText(absolute, AnalysisCacheIgnoreEntry + "\n");
+            return new ScaffoldedFile(AnalysisCacheIgnorePath, ScaffoldOutcome.Created);
+        }
+
+        var existingBytes = File.ReadAllBytes(absolute);
+        var (encoding, preambleLength) = DetectEncoding(existingBytes);
+        var existing = encoding.GetString(
+            existingBytes,
+            preambleLength,
+            existingBytes.Length - preambleLength);
+        if (HasEffectiveAnalysisCacheIgnore(existing))
+        {
+            return new ScaffoldedFile(
+                AnalysisCacheIgnorePath,
+                ScaffoldOutcome.Preserved,
+                "your local-state ignore rules, kept as-is");
+        }
+
+        var newline = ExistingNewline(existing);
+        var boundary = existing.Length == 0 || EndsWithNewline(existing) ? string.Empty : newline;
+        var appendedBytes = encoding.GetBytes(boundary + AnalysisCacheIgnoreEntry + newline);
+        using (var stream = File.Open(absolute, FileMode.Append, FileAccess.Write, FileShare.None))
+        {
+            stream.Write(appendedBytes);
+        }
+
+        return new ScaffoldedFile(
+            AnalysisCacheIgnorePath,
+            ScaffoldOutcome.Updated,
+            "added cache/ only; existing ignore rules are untouched");
+    }
+
+    private static (Encoding Encoding, int PreambleLength) DetectEncoding(byte[] content) =>
+        content switch
+        {
+            [0x00, 0x00, 0xFE, 0xFF, ..] =>
+                (new UTF32Encoding(bigEndian: true, byteOrderMark: true), 4),
+            [0xFF, 0xFE, 0x00, 0x00, ..] => (Encoding.UTF32, 4),
+            [0xEF, 0xBB, 0xBF, ..] => (new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), 3),
+            [0xFE, 0xFF, ..] => (Encoding.BigEndianUnicode, 2),
+            [0xFF, 0xFE, ..] => (Encoding.Unicode, 2),
+            _ => (new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), 0)
+        };
+
+    private static bool HasEffectiveAnalysisCacheIgnore(string content)
+    {
+        var protectedByExactEntry = false;
+        using var reader = new StringReader(content);
+        while (reader.ReadLine() is { } line)
+        {
+            if (StringComparer.Ordinal.Equals(line, AnalysisCacheIgnoreEntry))
+            {
+                protectedByExactEntry = true;
+                continue;
+            }
+
+            if (protectedByExactEntry
+                && line.StartsWith('!')
+                && NegatesAnalysisCacheProtection(line[1..]))
+            {
+                protectedByExactEntry = false;
+            }
+        }
+
+        return protectedByExactEntry;
+    }
+
+    private static bool NegatesAnalysisCacheProtection(string pattern)
+    {
+        if (pattern.StartsWith('/')) pattern = pattern[1..];
+        if (pattern.Length == 0 || pattern.StartsWith('#')) return false;
+
+        const string databaseRelativePath = "cache/docs-analysis.sqlite3";
+        if (pattern.EndsWith('/'))
+            return databaseRelativePath.StartsWith(pattern, StringComparison.Ordinal);
+
+        if (!pattern.Contains('/'))
+        {
+            return FileSystemName.MatchesSimpleExpression(
+                pattern,
+                Path.GetFileName(databaseRelativePath),
+                ignoreCase: OperatingSystem.IsWindows());
+        }
+
+        return pattern.Contains('[')
+            ? pattern.StartsWith("cache/", StringComparison.Ordinal)
+            : FileSystemName.MatchesSimpleExpression(
+                pattern.Replace("**", "*", StringComparison.Ordinal),
+                databaseRelativePath,
+                ignoreCase: OperatingSystem.IsWindows());
+    }
+
+    private static string ExistingNewline(string content)
+    {
+        var lineFeed = content.IndexOf('\n', StringComparison.Ordinal);
+        if (lineFeed >= 0)
+            return lineFeed > 0 && content[lineFeed - 1] == '\r' ? "\r\n" : "\n";
+
+        return content.Contains('\r', StringComparison.Ordinal) ? "\r" : "\n";
+    }
+
+    private static bool EndsWithNewline(string content) =>
+        content.EndsWith('\n') || content.EndsWith('\r');
 
     private static ScaffoldedFile Write(string repoRoot, string relativePath, string content, bool force)
     {
