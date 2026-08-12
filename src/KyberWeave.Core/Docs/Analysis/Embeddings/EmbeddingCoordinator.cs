@@ -1,8 +1,7 @@
+using System.Text.Json;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Model;
-using KyberWeave.Core.Docs.Analysis.Persistence;
-using System.Text.Json;
 
 namespace KyberWeave.Core.Docs.Analysis.Embeddings;
 

@@ -1,5 +1,5 @@
-using KyberWeave.Core.Configuration;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Parsing;

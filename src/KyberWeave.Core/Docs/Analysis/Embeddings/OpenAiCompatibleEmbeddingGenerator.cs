@@ -1,7 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
-using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -169,7 +169,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
             throw new InvalidDataException("The embedding response must contain a data array with complete indices.");
 
         var vectors = new IReadOnlyList<float>?[expectedCount];
-        int? dimensions = configuredDimensions;
+        var dimensions = configuredDimensions;
         foreach (var item in data.EnumerateArray())
         {
             if (!item.TryGetProperty("index", out var indexValue)

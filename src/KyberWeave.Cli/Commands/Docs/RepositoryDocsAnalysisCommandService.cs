@@ -1,10 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
-using KyberWeave.Core.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
-using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Analysis.Review;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Parsing;

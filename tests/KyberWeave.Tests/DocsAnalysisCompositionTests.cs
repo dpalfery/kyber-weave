@@ -6,7 +6,6 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Docs.Analysis.Model;
-using KyberWeave.Core.Docs.Analysis.Persistence;
 using Xunit;
 
 namespace KyberWeave.Tests;

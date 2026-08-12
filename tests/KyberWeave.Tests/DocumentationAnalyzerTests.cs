@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
@@ -7,7 +8,6 @@ using KyberWeave.Core.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
-using System.Collections.ObjectModel;
 using Xunit;
 
 namespace KyberWeave.Tests;

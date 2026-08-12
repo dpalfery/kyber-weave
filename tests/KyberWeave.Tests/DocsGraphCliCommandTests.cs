@@ -20,9 +20,10 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        var exitCode = new DocsGraphCommand().Execute(
+        var execution = ProcessConsoleCapture.Run(() => new DocsGraphCommand().Execute(
             null!,
-            new DocsGraphSettings { Path = _repository.Path, Out = _output.Path });
+            new DocsGraphSettings { Path = _repository.Path, Out = _output.Path }));
+        var exitCode = execution.Result;
         var nodes = ReadJsonLines(Path.Combine(_output.Path, "nodes.jsonl"));
         var edges = ReadJsonLines(Path.Combine(_output.Path, "edges.jsonl"));
         var allOutput = File.ReadAllText(Path.Combine(_output.Path, "nodes.jsonl"))

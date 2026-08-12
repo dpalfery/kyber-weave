@@ -1,6 +1,6 @@
 using KyberWeave.Core.Configuration;
-using YamlDotNet.Core;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
