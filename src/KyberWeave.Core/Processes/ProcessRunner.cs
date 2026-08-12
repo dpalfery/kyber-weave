@@ -21,8 +21,9 @@ public static class ProcessRunner
     /// write is equally important: many command-line tools do not proceed until EOF.
     /// </remarks>
     /// <param name="startInfo">
-    /// Process configuration with stdin, stdout, and stderr redirected and shell execution
-    /// disabled.
+    /// Process configuration with stdin, stdout, and stderr redirected, shell execution
+    /// disabled, and arguments supplied through <see cref="ProcessStartInfo.ArgumentList"/>
+    /// rather than the concatenated <see cref="ProcessStartInfo.Arguments"/> string.
     /// </param>
     /// <param name="standardInput">The complete text to write to the child process.</param>
     public static ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
@@ -41,7 +42,18 @@ public static class ProcessRunner
                 nameof(startInfo));
         }
 
-        using var process = Process.Start(startInfo)
+        if (!string.IsNullOrEmpty(startInfo.Arguments))
+        {
+            throw new ArgumentException(
+                "Pass arguments through ArgumentList, not Arguments.",
+                nameof(startInfo));
+        }
+
+        // The caller's object is not started as-is. Arguments is a single string a shell
+        // would re-parse; ArgumentList is argv. A fresh start info carries only the file
+        // name, working directory, and argument list, with the shell kept off, so neither
+        // a concatenated command string nor UseShellExecute can reach Process.Start.
+        using var process = Process.Start(CreateSafeStartInfo(startInfo))
             ?? throw new InvalidOperationException("The child process could not be started.");
 
         // Reads start before the write because a child may produce more than one pipe
@@ -100,6 +112,24 @@ public static class ProcessRunner
         process.WaitForExit();
 
         return new ProcessResult(process.ExitCode, captured[0], captured[1]);
+    }
+
+    private static ProcessStartInfo CreateSafeStartInfo(ProcessStartInfo startInfo)
+    {
+        var safe = new ProcessStartInfo(startInfo.FileName)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = startInfo.WorkingDirectory,
+            CreateNoWindow = startInfo.CreateNoWindow
+        };
+
+        foreach (var argument in startInfo.ArgumentList)
+            safe.ArgumentList.Add(argument);
+
+        return safe;
     }
 
     private static async Task WriteAndCloseAsync(StreamWriter writer, string input)

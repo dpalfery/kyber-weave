@@ -75,6 +75,22 @@ public sealed class ProcessRunnerInputTests
     }
 
     [Fact]
+    public void Run_WhenArgumentsIsAConcatenatedString_RejectsTheStartInfo()
+    {
+        var startInfo = new ProcessStartInfo("sqlite3")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            Arguments = "--version"
+        };
+
+        var exception = Assert.Throws<ArgumentException>(() => ProcessRunner.Run(startInfo, string.Empty));
+        Assert.Equal("startInfo", exception.ParamName);
+    }
+
+    [Fact]
     public void Run_WhenProcessCannotStart_PropagatesTheStartupFailure()
     {
         var missingExecutable = Path.Combine(
