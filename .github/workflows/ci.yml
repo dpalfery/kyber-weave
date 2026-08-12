@@ -188,8 +188,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Intentional github/codeql-action v4 pin (v4.37.1)
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -207,8 +208,9 @@ jobs:
           dotnet restore KyberWeave.sln
           dotnet build KyberWeave.sln --configuration Release --no-restore
 
+      # Intentional github/codeql-action v4 pin (v4.37.1)
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
         with:
           category: "/language:${{ matrix.language }}"
 
@@ -264,6 +266,7 @@ jobs:
         if: always() && hashFiles('trivy.json') != ''
         run: trivy convert --format table --exit-code 1 trivy.json
 
+      # Intentional github/codeql-action v4 pin
       - name: Upload Trivy SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
         if: always() && hashFiles('trivy.sarif') != ''
@@ -303,6 +306,7 @@ jobs:
             --exclude '**/obj/**' \
             --sarif-output semgrep.sarif
 
+      # Intentional github/codeql-action v4 pin
       - name: Upload Semgrep SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
         if: always() && hashFiles('semgrep.sarif') != ''
@@ -363,6 +367,7 @@ jobs:
             > "kyber-weave-sarif/skills-kyber-weave-docs.sarif" || EXIT_CODE=1
           exit "${EXIT_CODE}"
 
+      # Intentional github/codeql-action v4 pin
       - name: Upload skill scan SARIF
         if: always()
         uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
