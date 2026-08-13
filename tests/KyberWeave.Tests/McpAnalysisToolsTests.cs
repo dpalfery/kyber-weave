@@ -93,6 +93,20 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.DoesNotContain(new string('x', 1_000), response, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("99")]
+    [InlineData("duplicate, conflict")]
+    public void AnalysisCandidates_NumericOrCompositeKind_ReturnsUnknownKind(string kind)
+    {
+        var tools = Tools(new StubAnalysisReader(Result(Candidate("candidate-a", AnalysisRuleKind.Duplicate))));
+
+        var response = tools.AnalysisCandidates(kind: kind, cursor: null, limit: 20, charBudget: 4_000);
+
+        Assert.Contains($"Unknown documentation-analysis kind '{kind}'", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("No 99 candidates", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("candidate-a", response, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Glossary_KnownAndUnknownTerms_ReturnConversationalReadOnlyResults()
     {

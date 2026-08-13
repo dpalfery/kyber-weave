@@ -657,6 +657,46 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
+    public void SparseLexicalCandidateSource_GlobalCandidateCapKeepsHighestScoringPairs()
+    {
+        var documents = Set(
+            Document("low-a", "docs/00-low-a.md", Status.Current, "unrelated copper material"),
+            Document("low-b", "docs/01-low-b.md", Status.Current, "distinct silver mineral"),
+            Document("high-a", "docs/02-high-a.md", Status.Current, "shared analysis runtime behavior is documented here"),
+            Document("high-b", "docs/03-high-b.md", Status.Current, "shared analysis runtime behavior is documented there"));
+        var request = new ClaimCandidateSourceRequest(
+            Extract(documents),
+            Graph(documents),
+            Config(
+                mode: DocsAnalysisSearchMode.HighRecall,
+                lexicalCandidateThreshold: 0.10,
+                maxNeighbors: 10,
+                maxCandidates: 1).Search);
+
+        var result = new SparseLexicalCandidateSource().FindCandidates(request);
+
+        var pair = Assert.Single(result.Pairs);
+        Assert.True(PairIdentities(pair).SetEquals(["high-a", "high-b"]));
+    }
+
+    [Fact]
+    public void GraphCandidateSource_IdLessDocuments_StillFindSharedComponentPairs()
+    {
+        var documents = Set(
+            Document("", "docs/left.md", Status.Current, "The runner records model token usage for automation.", component: "Runtime"),
+            Document("", "docs/right.md", Status.Current, "Automation runners record model token consumption.", component: "Runtime"));
+        var claims = Extract(documents);
+        var request = new ClaimCandidateSourceRequest(claims, Graph(documents), Config().Search);
+
+        var result = new GraphClaimCandidateSource().FindCandidates(request);
+
+        var pair = Assert.Single(result.Pairs);
+        Assert.Equal(CandidateSourceKind.Graph, pair.Source);
+        Assert.Equal(1, pair.Score.Graph);
+        Assert.True(pair.Score.Lexical >= Config().Search.LexicalCandidateThreshold);
+    }
+
+    [Fact]
     public void Analyze_NonidenticalCodeBlocksWithoutSubstantiveDisagreement_AreNotConflicts()
     {
         var documents = Set(

@@ -291,7 +291,8 @@ public sealed class ManagedGlossaryTests
 
         var markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
         Assert.Contains("loop-a1b2c3d4", markdown, StringComparison.Ordinal);
-        Assert.Contains(definition, markdown, StringComparison.Ordinal);
+        if (definition.Length > 0)
+            Assert.Contains(definition, markdown, StringComparison.Ordinal);
         Assert.Contains(scope, markdown, StringComparison.Ordinal);
         Assert.Contains(aliases, markdown, StringComparison.Ordinal);
     }
@@ -426,6 +427,41 @@ public sealed class ManagedGlossaryTests
     }
 
     [Fact]
+    public void Load_IndentedAtxHeading_UsesTermWithoutHashPrefix()
+    {
+        using var repository = Repository().WriteGlossary(ExistingGlossary("""
+              ## loop
+
+            | Sense ID | Status | Definition | Scope | Aliases |
+            |---|---|---|---|---|
+            | loop-a | approved | A definition. | component:Gameplay | gameplay loop |
+            """));
+
+        var result = Service(repository).Load();
+
+        var term = Assert.Single(result.Terms);
+        Assert.Equal("loop", term.Term);
+        Assert.DoesNotContain("# loop", result.Terms.Select(item => item.Term));
+    }
+
+    [Fact]
+    public void Load_DefinitionWithBackslashes_PreservesWindowsPathAndRegexEscapes()
+    {
+        using var repository = Repository().WriteGlossary(ExistingGlossary("""
+            ## path
+
+            | Sense ID | Status | Definition | Scope | Aliases |
+            |---|---|---|---|---|
+            | path-a | approved | Output is C:\build\out and tokens match \w+. | component:Gameplay | output path |
+            """));
+
+        var result = Service(repository).Load();
+
+        var sense = Assert.Single(Assert.Single(result.Terms).Senses);
+        Assert.Equal(@"Output is C:\build\out and tokens match \w+.", sense.Definition);
+    }
+
+    [Fact]
     public void Write_FirstCatalogOwnerContainsYamlPunctuation_RoundTripsExactOwner()
     {
         const string owner = "Docs: Core # on-call";
@@ -475,7 +511,7 @@ public sealed class ManagedGlossaryTests
             """);
         var settings = new DocsSettings { Path = repository.Root, Format = "json" };
 
-        var exitCode = new DocsValidateCommand().Execute(null!, settings);
+        var exitCode = ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings)).Result;
 
         Assert.Equal(1, exitCode);
     }

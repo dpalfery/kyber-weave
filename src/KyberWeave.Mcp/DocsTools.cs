@@ -28,6 +28,13 @@ public sealed class DocsTools
     private const int AnalysisCharCap = 12000;
     private const int AnalysisEvidenceCap = 8;
 
+    private static readonly HashSet<string> AnalysisKindNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        nameof(AnalysisRuleKind.Duplicate),
+        nameof(AnalysisRuleKind.Conflict),
+        nameof(AnalysisRuleKind.Terminology)
+    };
+
     private readonly DocumentIndexHost _host;
     private readonly IDocsAnalysisReader? _analysisReader;
 
@@ -309,7 +316,9 @@ public sealed class DocsTools
             return true;
         }
 
-        if (Enum.TryParse<AnalysisRuleKind>(kind.Trim(), ignoreCase: true, out var parsed))
+        var trimmed = kind.Trim();
+        if (AnalysisKindNames.Contains(trimmed)
+            && Enum.TryParse<AnalysisRuleKind>(trimmed, ignoreCase: true, out var parsed))
         {
             parsedKind = parsed;
             return true;

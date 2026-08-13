@@ -45,6 +45,42 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Assert.DoesNotContain("legacy loop", allOutput, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Execute_InvalidGlossary_ReturnsOperationalFailureInsteadOfThrowing()
+    {
+        WriteRepository();
+        Write("docs/glossary.md", """
+            ---
+            id: reference/glossary
+            title: Glossary
+            doc-type: reference
+            status: current
+            owner: Gameplay maintainers
+            last-reviewed: 2026-08-12
+            ---
+
+            # Glossary
+
+            ## loop
+
+            | Sense ID | Status | Definition | Scope | Aliases |
+            |---|---|---|---|---|
+            | loop-gameplay | CURRENT | The gameplay update cycle. | component:Gameplay | gameplay loop |
+            """);
+        using var codeGraph = new CodeGraphFixtureDb();
+        codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
+        var codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
+        Directory.CreateDirectory(codeGraphDirectory);
+        File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
+
+        var execution = ProcessConsoleCapture.Run(() => new DocsGraphCommand().Execute(
+            null!,
+            new DocsGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("KW-DOC-GLOSSARY-001", execution.Output, StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         _output.Dispose();
