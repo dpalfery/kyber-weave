@@ -206,7 +206,8 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.Equal(["term"], glossary.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal("docs_glossary", McpToolName(glossary));
         Assert.DoesNotContain(
-            typeof(DocsTools).GetMethods(BindingFlags.Instance | BindingFlags.Public),
+            typeof(DocsTools).GetMethods(
+                BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public),
             method => method.Name.Contains("Write", StringComparison.OrdinalIgnoreCase)
                 || method.GetParameters().Any(parameter =>
                     parameter.Name?.Contains("write", StringComparison.OrdinalIgnoreCase) == true));
