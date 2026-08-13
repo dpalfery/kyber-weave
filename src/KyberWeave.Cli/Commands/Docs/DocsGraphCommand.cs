@@ -35,12 +35,14 @@ public sealed class DocsGraphCommand : Command<DocsGraphSettings>
         }
 
         ManagedGlossaryLoadResult glossary;
+        ManagedGlossaryGraphContributor glossaryContributor;
         try
         {
             glossary = new ManagedGlossaryService(
                 settings.Path,
                 config,
                 TimeProvider.System).Load();
+            glossaryContributor = new ManagedGlossaryGraphContributor(glossary);
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
@@ -51,8 +53,6 @@ public sealed class DocsGraphCommand : Command<DocsGraphSettings>
                 ManagedGlossaryService.ValidationRuleCode);
             return 1;
         }
-
-        var glossaryContributor = new ManagedGlossaryGraphContributor(glossary);
         var result = new DocGraphExporter(resolver).Export(
             set,
             settings.Out,

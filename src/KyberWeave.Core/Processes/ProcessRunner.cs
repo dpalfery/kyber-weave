@@ -123,11 +123,24 @@ public static class ProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             WorkingDirectory = startInfo.WorkingDirectory,
-            CreateNoWindow = startInfo.CreateNoWindow
+            CreateNoWindow = startInfo.CreateNoWindow,
+            StandardInputEncoding = startInfo.StandardInputEncoding,
+            StandardOutputEncoding = startInfo.StandardOutputEncoding,
+            StandardErrorEncoding = startInfo.StandardErrorEncoding
         };
 
         foreach (var argument in startInfo.ArgumentList)
             safe.ArgumentList.Add(argument);
+
+        // A fresh ProcessStartInfo inherits the current environment. Clear and copy so a
+        // caller that removed or overrode variables keeps that view, without re-enabling
+        // the shell or the concatenated Arguments string.
+        safe.Environment.Clear();
+        foreach (var pair in startInfo.Environment)
+        {
+            if (pair.Value is not null)
+                safe.Environment[pair.Key] = pair.Value;
+        }
 
         return safe;
     }

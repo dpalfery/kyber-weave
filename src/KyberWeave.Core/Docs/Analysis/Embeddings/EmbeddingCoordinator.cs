@@ -57,7 +57,7 @@ public sealed class EmbeddingCoordinator
         {
             return Unavailable(config.Mode, ex.Message);
         }
-        catch (TaskCanceledException ex)
+        catch (OperationCanceledException ex)
         {
             return Unavailable(config.Mode, ex.Message);
         }

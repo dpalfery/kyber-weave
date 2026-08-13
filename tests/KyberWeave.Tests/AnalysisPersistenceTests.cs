@@ -39,6 +39,7 @@ public sealed class AnalysisPersistenceTests
     [Theory]
     [InlineData("cache/\n!cache/\n")]
     [InlineData("cache/\n!cache/docs-analysis.sqlite3\n")]
+    [InlineData("cache/\n!**/cache/**\n")]
     public void IsSafe_WhenLaterRuleNegatesCacheProtection_ReturnsFalse(string ignoreContents)
     {
         using var repository = new TempDirectory();

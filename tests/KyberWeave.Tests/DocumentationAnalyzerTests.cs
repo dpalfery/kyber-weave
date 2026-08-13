@@ -293,6 +293,31 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_ApprovedComponentScopeIgnoresCase_SuppressesTerminologyWarning()
+    {
+        var documents = Set(
+            Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop measures live-test runtime.", component: "Gameplay"),
+            Document("live-test", "docs/live-test.md", Status.Current, "The loop records live-test runtime samples.", component: "Gameplay"));
+        var source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
+        var glossary = new AnalysisGlossary(
+        [
+            new ApprovedGlossarySense(
+                "loop-gameplay",
+                "loop",
+                "The gameplay live-test wrapper.",
+                ["component:gameplay"],
+                ["gameplay loop"])
+        ]);
+
+        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+
+        Assert.DoesNotContain(
+            result.Candidates,
+            candidate => candidate.Kind == AnalysisRuleKind.Terminology
+                && StringComparer.OrdinalIgnoreCase.Equals(candidate.Term, "loop"));
+    }
+
+    [Fact]
     public void Analyze_ApprovedCodeRefScopedSensesCoverEveryOccurrence_SuppressesTerminologyWarning()
     {
         var documents = Set(

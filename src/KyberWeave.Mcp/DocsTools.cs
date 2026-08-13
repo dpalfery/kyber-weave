@@ -275,7 +275,7 @@ public sealed class DocsTools
         var sb = new StringBuilder();
         sb.Append(result.Senses.Count)
           .Append(result.Senses.Count == 1 ? " glossary sense for '" : " glossary senses for '")
-          .Append(result.Term)
+          .Append(result.Term.ReplaceLineEndings(" "))
           .AppendLine("'.");
         foreach (var sense in result.Senses
                      .OrderBy(sense => sense.Status)
@@ -387,7 +387,8 @@ public sealed class DocsTools
         var sb = new StringBuilder();
         sb.Append("candidate: ").AppendLine(candidate.Id);
         sb.Append("kind: ").AppendLine(candidate.Kind.ToString().ToLowerInvariant());
-        if (!string.IsNullOrWhiteSpace(candidate.Term)) sb.Append("term: ").AppendLine(candidate.Term);
+        if (!string.IsNullOrWhiteSpace(candidate.Term))
+            sb.Append("term: ").AppendLine(Truncate(candidate.Term.ReplaceLineEndings(" "), 240));
         sb.Append("evidence: ").AppendLine(string.Join(
             "; ",
             candidate.Claims

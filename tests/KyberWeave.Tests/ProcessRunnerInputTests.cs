@@ -51,6 +51,20 @@ public sealed class ProcessRunnerInputTests
         Assert.Equal(11, result.ExitCode);
     }
 
+    [Fact]
+    public void Run_PreservesCallerEnvironmentOverrides()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var startInfo = CreateShellStartInfo("printf '%s' \"$KYBER_WEAVE_PROCESS_MARKER\"");
+        startInfo.Environment["KYBER_WEAVE_PROCESS_MARKER"] = "from-caller";
+
+        var result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal("from-caller", result.StandardOutput);
+        Assert.Equal(0, result.ExitCode);
+    }
+
     [Theory]
     [InlineData("stdin")]
     [InlineData("stdout")]
