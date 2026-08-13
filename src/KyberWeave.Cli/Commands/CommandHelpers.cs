@@ -66,6 +66,11 @@ public static class CommandHelpers
         {
             var filtered = new DiagnosticReport();
             filtered.AddRange(report.Items.Where(i => i.Severity != Severity.Info));
+            foreach (var metric in report.Metrics)
+            {
+                filtered.AddMetric(metric.Key, metric.Value);
+            }
+
             report = filtered;
         }
 

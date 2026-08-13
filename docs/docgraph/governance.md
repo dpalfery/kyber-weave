@@ -5,7 +5,7 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-12
 code-refs:
   - DocSpecValidator
   - DocDriftLinter
@@ -21,6 +21,7 @@ code is still true.
 kyber-weave docs validate .
 kyber-weave docs drift .
 kyber-weave docs catalog .
+kyber-weave docs analyze .
 ```
 
 Starting from an ungoverned tree? Run [`docs init`](onboarding.md) first — these gates
@@ -43,6 +44,9 @@ Needs no code index. Exits non-zero on any error.
 `KW-DOC-SPEC-004` and `-006` carry a **nearest-match hint** computed by edit distance,
 offered only when the distance is plausibly a typo rather than a different word. A
 mistyped component says which one you probably meant.
+
+When the configured managed glossary exists, `docs validate` also checks its table,
+statuses, approved definitions, and component/code scopes as `KW-DOC-GLOSSARY-001`.
 
 ## Entity drift — `docs drift`
 
@@ -75,6 +79,40 @@ mention cannot be checked. A claim can.
 
 Reports doc-type coverage by component: which components have architecture documents,
 which have runbooks, and which have nothing. Advisory; it gates nothing.
+
+## Analysis — `docs analyze`, `docs review`, and `docs glossary`
+
+Analysis identifies evidence; it never edits source documentation. Exact duplicates are
+deterministic, while near duplicates, conflicts, and divergent term senses can be exported
+for bounded agent review and imported as content-addressed verdicts.
+
+```bash
+kyber-weave docs analyze .                         # advisory by default
+kyber-weave docs analyze . --fail-on warning       # gate warnings and errors
+kyber-weave docs review export . --out candidates.json
+kyber-weave docs review import . --in verdicts.json
+kyber-weave docs glossary .                        # preview
+kyber-weave docs glossary . --write                # merge proposals only
+```
+
+`--fail-on` accepts `none`, `warning`, or `error`; `none` is the default. Operational
+errors always return non-zero regardless of that setting. Review import validates the
+entire versioned bundle before one transaction. Glossary writes are confined to the
+configured glossary and preserve reviewed/human-owned content.
+
+| Rule | Severity | Fires when |
+|---|---|---|
+| `KW-DOC-ANALYSIS-001` | Info / Warning | Pending near duplicate, or exact/confirmed duplicate cluster |
+| `KW-DOC-ANALYSIS-002` | Info / Error | Pending potential conflict, or high-confidence confirmed conflict |
+| `KW-DOC-ANALYSIS-003` | Warning | One informative term has divergent unresolved senses |
+| `KW-DOC-ANALYSIS-004` | Operational Error | Ignore markup is malformed or unsupported |
+| `KW-DOC-ANALYSIS-005` | Warning | CodeGraph is unavailable; bounded lexical/document analysis continues |
+| `KW-DOC-ANALYSIS-006` | Warning / Operational Error | Embeddings unavailable in `prefer` / `required` mode |
+| `KW-DOC-REVIEW-001` | Operational Error | Review verdict bundle is invalid, stale, or cannot be persisted safely |
+| `KW-DOC-GLOSSARY-001` | Operational Error | Managed glossary structure or approved scope is invalid |
+
+See [documentation analysis and review](analysis.md) for claim extraction, graph blocking,
+cost modes, cache privacy, the review schemas, and glossary lifecycle.
 
 ## Wiring into CI
 

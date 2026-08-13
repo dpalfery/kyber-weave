@@ -141,6 +141,8 @@ public sealed partial class DocumentLoader
                 HasFrontmatter = false,
                 BodyLinks = ExtractRelativeLinks(raw),
                 Body = raw,
+                RawMarkdown = raw,
+                BodyStartLine = read.BodyStartLine,
                 Sections = SplitSections(raw)
             };
         }
@@ -170,6 +172,8 @@ public sealed partial class DocumentLoader
             Status = ParseStatus(frontmatter.Status),
             BodyLinks = ExtractRelativeLinks(read.Body),
             Body = read.Body,
+            RawMarkdown = raw,
+            BodyStartLine = read.BodyStartLine,
             Sections = SplitSections(read.Body)
         };
     }

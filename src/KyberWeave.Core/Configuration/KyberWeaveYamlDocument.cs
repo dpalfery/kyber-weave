@@ -6,4 +6,6 @@ internal sealed class KyberWeaveYamlDocument
     public OntologyYamlSection? Ontology { get; set; }
 
     public HarnessYamlSection? Harness { get; set; }
+
+    public DocsAnalysisYamlSection? DocsAnalysis { get; set; }
 }

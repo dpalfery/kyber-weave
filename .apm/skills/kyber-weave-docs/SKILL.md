@@ -4,7 +4,7 @@ description: "Generate conformant Kyber-Weave frontmatter for repository documen
 license: MIT
 metadata:
   author: dpalfery
-  version: 0.1.2
+  version: 0.1.3
 ---
 
 # Authoring Kyber-Weave documentation
@@ -188,6 +188,31 @@ Agents and skills should look up the following properties dynamically to find th
 Fix what a rule reports. Do not widen the ontology in `.kyber-weave/kyber-weave.yml` to
 make a failure disappear — that discards the guarantee the corpus exists to provide.
 
+## After conformance: analyze, do not auto-rewrite
+
+When the repository supports documentation analysis, run it only after `docs validate`
+and `docs drift` are clean:
+
+```bash
+kyber-weave docs analyze .
+```
+
+Treat duplicate, conflict, and terminology findings as evidence to review. Never merge,
+delete, or rewrite source documentation merely because analysis paired two claims. Exact
+duplicates are deterministic; conflicts and distinct term senses need a scope-aware human
+or agent verdict through `docs review export` / `docs review import`.
+
+Use `<kyber-ignore>` only for intentional, reviewed cases and only with `duplicate`,
+`conflict`, `terminology`, or `all`. The tags are case-sensitive, balanced, non-nested,
+and cannot cross frontmatter or a `##` boundary. Malformed suppression is an operational
+error rather than a silent ignore.
+
+`docs glossary .` previews terminology proposals; `--write` merges them into the one
+configured glossary without rewriting source documents. The glossary remains a conformant
+`reference` document. Humans approve/reject sense rows, supply approved definitions and
+component/code scopes, update `last-reviewed`, and return the document to `current` after
+review. Do not invent a glossary doc-type or use sense-row status as document status.
+
 ## Never
 
 - Invent a `component` or `owner` that is not in the catalog
@@ -197,3 +222,5 @@ make a failure disappear — that discards the guarantee the corpus exists to pr
 - Change `doc-type` or `status` vocabularies to fit one document
 - Set `status: current` on frontmatter you filled in without review
 - Backdate or forward-date `last-reviewed` — use the date it was actually reviewed
+- Auto-rewrite source prose from an unreviewed duplicate, conflict, or terminology candidate
+- Use ignore markup to hide a finding whose scope or evidence has not been reviewed

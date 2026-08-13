@@ -4,7 +4,7 @@ title: Component and owner catalog
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-12
 ---
 
 # Component and owner catalog
@@ -19,7 +19,7 @@ answers for it, and where its source lives.
 
 | Component | Type | Source root | Overview | Detailed documentation | Owner | Last reviewed | Status |
 |---|---|---|---|---|---|---|---|
-| DocGraph | Feature | `src/KyberWeave.Core/Docs` | The opinionated documentation ontology, its conformance gates, and the in-memory retrieval graph served over MCP. | [docgraph/architecture.md](docgraph/architecture.md) | dpalfery | 2026-08-01 | current |
+| DocGraph | Feature | `src/KyberWeave.Core/Docs` | The documentation ontology, conformance gates, graph-first claim analysis, managed terminology, and retrieval graph served over MCP. | [docgraph/architecture.md](docgraph/architecture.md) · [docgraph/analysis.md](docgraph/analysis.md) | dpalfery | 2026-08-12 | current |
 | ContextHygiene | Feature | `src/KyberWeave.Core/Skills` | Governance for the artifacts that shape an agent's context: Agent Skills and harness agent definitions. | [context-hygiene/skills.md](context-hygiene/skills.md) | dpalfery | 2026-08-01 | current |
 | CI Pipelines | Feature | `src/KyberWeave.Core/Diagnostics` | The diagnostic engine every gate reports through: stable rule ids, severity gating, and SARIF. | [ci-pipelines/architecture.md](ci-pipelines/architecture.md) | dpalfery | 2026-08-01 | current |
 | Distribution | Supporting | `scripts` | Self-contained platform binaries and the install path that places them. | [install.md](install.md) | dpalfery | 2026-08-01 | current |

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-12
 code-refs:
   - DocumentIndex
   - DocumentCorpus
@@ -112,8 +112,21 @@ the document holds without opening it, and can ask again deliberately — and is
 whether a section was dropped for lack of budget or lack of relevance, since only the
 former makes asking again worthwhile.
 
+## Retrieval is not analysis
+
+Retrieval ranks documents for a caller's question; documentation analysis compares
+line-addressable claims to find duplication, conflicts, and divergent terminology. They
+reuse the same parsed documents, declared identity, and DocGraph relationships, but their
+candidate algorithms and budgets are separate.
+
+Analysis starts with graph neighbors and exact content hashes, then optionally adds a
+sparse lexical top-k fallback or cached semantic reranking. The default never performs an
+all-pairs scan and never calls an embedding endpoint. See
+[Documentation analysis and review](analysis.md) for search modes and their cost bounds.
+
 ## Related
 
 - [DocGraph architecture](architecture.md) — how the index is built and kept fresh
 - [MCP server runbook](mcp-runbook.md) — the tools that expose this
+- [Documentation analysis and review](analysis.md) — claim comparison and review workflow
 - [The documentation ontology](../documentation-ontology.md) — the identity ranking reads

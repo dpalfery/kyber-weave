@@ -8,7 +8,7 @@ namespace KyberWeave.Cli.Commands;
 public class AnalysisSettings : CommandSettings
 {
     [CommandArgument(0, "[path]")]
-    [Description("Path to a SKILL.md, a skill directory, or a root containing many skills. Defaults to current directory.")]
+    [Description("Repository or artifact path to inspect, including its documentation corpus. Defaults to current directory.")]
     public string Path { get; set; } = ".";
 
     [CommandOption("-f|--format <FORMAT>")]

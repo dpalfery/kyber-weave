@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-12
 ---
 
 # Rule reference
@@ -33,6 +33,28 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-DOC-DRIFT-001` | Error / Critical | `code-refs` symbol unresolved. Critical when the index itself is missing. |
 | `KW-DOC-DRIFT-002` | Error | `api-endpoints` route matches no indexed route |
 | `KW-DOC-DRIFT-003` | Warning | `source-root` exists but nothing beneath it is indexed |
+
+### Analysis — `docs analyze`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-ANALYSIS-001` | Info / Warning | Duplicate cluster. Pending near duplicates inform; exact or high-confidence confirmed duplicates warn. |
+| `KW-DOC-ANALYSIS-002` | Info / Error | Potential conflict. Only a high-confidence imported conflict verdict errors. |
+| `KW-DOC-ANALYSIS-003` | Warning | Ambiguous terminology not fully explained by approved scoped senses. |
+| `KW-DOC-ANALYSIS-004` | Operational Error | Malformed, nested, unknown, or cross-boundary ignore markup. |
+| `KW-DOC-ANALYSIS-005` | Warning | CodeGraph unavailable; document relationships and bounded lexical search continue. |
+| `KW-DOC-ANALYSIS-006` | Warning / Operational Error | Embeddings unavailable: warning in `prefer`, error in `required`. |
+
+### Review and managed glossary
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-REVIEW-001` | Operational Error | Verdict bundle is invalid/stale, or safe atomic persistence is unavailable. |
+| `KW-DOC-GLOSSARY-001` | Operational Error | Configured managed glossary has invalid structure, status, definition, or scope. |
+
+Analysis findings respect `docs analyze --fail-on`; operational errors always return
+non-zero. See [analysis and review](../docgraph/analysis.md) for classifier and lifecycle
+details.
 
 ## Skills — [Skill governance](../context-hygiene/skills.md)
 

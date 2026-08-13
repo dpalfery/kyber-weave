@@ -96,6 +96,27 @@ app.Configure(config =>
         docs.AddCommand<DocsCatalogCommand>("catalog")
             .WithDescription("Display doc-type coverage by component.")
             .WithExample("docs", "catalog", ".");
+
+        docs.AddCommand<DocsAnalyzeCommand>("analyze")
+            .WithDescription("Find duplicate claims, potential conflicts, and ambiguous terminology.")
+            .WithExample("docs", "analyze", ".", "--format", "sarif")
+            .WithExample("docs", "analyze", ".", "--fail-on", "warning");
+
+        docs.AddBranch("review", review =>
+        {
+            review.SetDescription("Exchange bounded documentation candidates and reusable verdicts.");
+            review.AddCommand<DocsReviewExportCommand>("export")
+                .WithDescription("Export pending documentation analysis candidates for agent review.")
+                .WithExample("docs", "review", "export", ".", "--out", "candidates.json");
+            review.AddCommand<DocsReviewImportCommand>("import")
+                .WithDescription("Validate and atomically cache an agent verdict bundle.")
+                .WithExample("docs", "review", "import", ".", "--in", "verdicts.json");
+        });
+
+        docs.AddCommand<DocsGlossaryCommand>("glossary")
+            .WithDescription("Preview or merge managed glossary proposals from terminology analysis.")
+            .WithExample("docs", "glossary", ".")
+            .WithExample("docs", "glossary", ".", "--write");
     });
 });
 

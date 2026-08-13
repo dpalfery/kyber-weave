@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-12
 ---
 
 # Kyber-Weave documentation
@@ -36,6 +36,7 @@ retrieval graph served to agents over MCP. The primary feature.
 | [Adoption](docgraph/onboarding.md) | `docs init`, the authoring skill, retrofitting an existing tree |
 | [Architecture](docgraph/architecture.md) | The pipeline, the two-clock reload, the code-graph join |
 | [Retrieval and ranking](docgraph/retrieval.md) | Scoring, authority weighting, budgeted excerpts |
+| [Analysis and review](docgraph/analysis.md) | Graph-first duplicate/conflict/terminology detection, agent verdicts, managed glossary |
 | [Governance gates](docgraph/governance.md) | `docs validate`, `docs drift`, `docs catalog` |
 | [MCP server runbook](docgraph/mcp-runbook.md) | Serving the graph to an agent |
 

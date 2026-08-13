@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-08-04
+last-reviewed: 2026-08-12
 code-refs:
   - DocsTools
 ---
@@ -230,6 +230,9 @@ product defaults.
 A config that cannot be read is reported on **stderr** as `KW-CONFIG-001` and the server
 keeps running on defaults. That combination — a corpus that looks empty and a line on
 stderr the client may not surface — is worth checking before blaming the repo root.
+This fallback applies to the retrieval corpus initialized at startup. The analysis and
+glossary tools reload the current config for each call and return an unavailable response
+until the invalid config is fixed; they do not analyze on defaults.
 
 ## The tools
 
@@ -252,6 +255,31 @@ component, doc-id, or symbol instead. Treat that as permission to fall back to g
 The documents whose `code-refs` **formally claim** a symbol — not those that mention it in
 prose, which is exactly the distinction grep cannot make. Run it before renaming anything
 to find the documentation that must change with it.
+
+### `docs_analysis_candidates(kind?, cursor?, limit = 20, charBudget = 12000)`
+
+Runs the repository's current configured documentation analysis and returns candidates in
+stable kind, term, and candidate-id order. `kind` is optional and accepts `duplicate`,
+`conflict`, or `terminology`. Pass the returned candidate id as `cursor` to continue after
+that item.
+
+The tool is conversational rather than a bulk export: the hard candidate limit is 20,
+the hard response budget is 12,000 characters, and evidence per candidate is capped. The
+response keeps local cost/cache metrics and line-addressable evidence inside the same
+budget. Use [`docs review export`](analysis.md#cli-and-exit-behavior) when a reviewing
+agent needs the versioned rubric and hashes for reusable verdicts.
+
+### `docs_glossary(term)`
+
+Looks up one managed glossary term case-insensitively and returns its proposed, approved,
+and rejected senses, definitions, scopes, and aliases. An unknown term is an ordinary
+empty result, not an error. Output is capped at 20 senses and 12,000 characters.
+
+Both analysis tools are read-only. They accept no write parameter and cannot import a
+verdict or change the glossary. Reusable decisions enter through `docs review import`, and
+glossary proposals enter through `docs glossary --write` at the CLI. The MCP reader reloads
+the current config and corpus for each call; embeddings remain loopback-only and are not
+called unless the local cache is safely ignored.
 
 ## Reading a code join
 
@@ -281,10 +309,13 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 | Every query is a miss | Wrong repo root, or `docs-root` in [config](../configuration.md) names a tree the documents are not in — check stderr for `KW-CONFIG-001` |
 | "no CodeGraph index was readable" | No `.codegraph/codegraph.db`, or `sqlite3` missing from PATH |
 | Joins show `(unresolved)` | The symbol is in `code-refs` but not in the index — run [`docs drift`](governance.md) |
+| Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
+| `docs_glossary` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
 
 ## Related
 
 - [Retrieval and ranking](retrieval.md) — how results are chosen and budgeted
+- [Documentation analysis and review](analysis.md) — findings, review exchange, cache, and glossary
 - [DocGraph architecture](architecture.md) — the index behind these tools
 - [Installing Kyber-Weave](../install.md) — getting the binary on PATH

@@ -12,7 +12,9 @@ internal sealed class CodeGraphFixtureDb : IDisposable
         var dir = Path.Combine(Path.GetTempPath(), "kw-codegraph-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         DatabasePath = Path.Combine(dir, "codegraph.db");
-        RunSqlite($"CREATE TABLE nodes (id TEXT, kind TEXT, name TEXT, qualified_name TEXT, file_path TEXT, language TEXT, start_line INTEGER);");
+        RunSqlite(
+            "CREATE TABLE nodes (id TEXT, kind TEXT, name TEXT, qualified_name TEXT, file_path TEXT, language TEXT, start_line INTEGER); " +
+            "CREATE TABLE edges (source TEXT, target TEXT, kind TEXT);");
     }
 
     public void IndexSymbol(string name, string filePath, int startLine) =>
@@ -26,6 +28,9 @@ internal sealed class CodeGraphFixtureDb : IDisposable
     public void IndexFile(string filePath) =>
         RunSqlite(
             $"INSERT INTO nodes VALUES ('file-{filePath.GetHashCode()}', 'import', 'file', 'file', '{filePath}', 'csharp', 0);");
+
+    public void IndexEdge(string sourceId, string targetId, string kind) =>
+        RunSqlite($"INSERT INTO edges VALUES ('{sourceId}', '{targetId}', '{kind}');");
 
     private void RunSqlite(string sql)
     {

@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-04
+last-reviewed: 2026-08-12
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -55,6 +55,30 @@ harness:
       supports-native-parent-agents: false
       mapped-role-skill-overrides:
         reviewer: code-review
+
+docs-analysis:
+  statuses: [current]
+  glossary-path: docs/glossary.md
+  verdict-confidence: 0.80
+  search:
+    mode: hybrid
+    min-claim-tokens: 5
+    lexical-candidate-threshold: 0.45
+    lexical-duplicate-threshold: 0.90
+    semantic-candidate-threshold: 0.78
+    semantic-duplicate-threshold: 0.92
+    terminology-context-threshold: 0.30
+    max-neighbors-per-claim: 10
+    max-code-neighbors: 50
+    max-candidates: 500
+  embeddings:
+    mode: off
+    endpoint: http://127.0.0.1:1234/v1/embeddings
+    model: configured-model-name
+    dimensions: 768
+    batch-size: 64
+    timeout-seconds: 60
+    api-key-env: LOCAL_EMBEDDING_TOKEN
 ```
 
 ## Ontology keys
@@ -134,6 +158,58 @@ dropped rather than reported. A root that is absolute or escapes the repository 
 returns one has actively misled its caller. This pairs with the authority weighting in
 [retrieval](docgraph/retrieval.md), which demotes plans and superseded documents that are
 still in scope.
+
+## Documentation analysis
+
+The entire `docs-analysis` section is optional. Presets establish the defaults below; the
+individual values are advanced overrides rather than a required tuning exercise.
+
+| Key | Default | Effect |
+|---|---|---|
+| `statuses` | `[current]` | Existing ontology statuses eligible for claim extraction |
+| `glossary-path` | `<first-docs-root>/glossary.md` | Managed glossary, always beneath a configured docs root |
+| `verdict-confidence` | `0.80` | Minimum imported confidence for a durable classification or suppression |
+| `search.mode` | `hybrid` | `graph`, bounded `hybrid`, or explicitly expensive `high-recall` |
+| `search.min-claim-tokens` | `5` | Claims below this token count are not compared |
+| `search.lexical-candidate-threshold` | `0.45` | Minimum lexical evidence for ordinary candidacy |
+| `search.lexical-duplicate-threshold` | `0.90` | Lexical near-duplicate threshold |
+| `search.semantic-candidate-threshold` | `0.78` | Minimum semantic evidence for candidacy |
+| `search.semantic-duplicate-threshold` | `0.92` | Semantic near-duplicate threshold |
+| `search.terminology-context-threshold` | `0.30` | Maximum contextual similarity for divergent senses |
+| `search.max-neighbors-per-claim` | `10` | Per-source top-k bound |
+| `search.max-code-neighbors` | `50` | Code nodes above this degree are non-discriminating and skipped |
+| `search.max-candidates` | `500` | Hard analysis/review candidate cap |
+
+`graph` compares global exact duplicates plus graph neighbors. `hybrid` adds a sparse
+corpus-wide inverted-index fallback without an all-pairs scan and is the default.
+`high-recall` broadens lexical comparison and, when embeddings are enabled, performs a
+global exact cosine first pass. That first pass is explicitly quadratic and is outside
+the 10-second default-path target. See [analysis and review](docgraph/analysis.md).
+
+### Embeddings are local, optional, and persistence-gated
+
+`embeddings.mode` is one of:
+
+| Mode | Behavior |
+|---|---|
+| `off` | Default. Never constructs or invokes an embedding provider. |
+| `prefer` | Uses cached/local embeddings when safe; warns and falls back to lexical analysis otherwise. |
+| `required` | Treats an unavailable provider or unsafe cache as an operational error. |
+
+When mode is `prefer` or `required`, `endpoint` and `model` are required. `dimensions` is
+optional; the compatible request always sends batched string input, the model, and
+`encoding_format: float`. `batch-size` defaults to 64 and `timeout-seconds` to 60.
+`api-key-env` names an environment variable; it is not the token itself.
+
+The endpoint must be an absolute HTTP(S) URI whose every resolved address is loopback:
+`localhost`, the full `127.0.0.0/8` range, or `::1`. Kyber-Weave validates again when the
+socket connects and disables redirects, so a local name or response cannot escape to a
+remote endpoint. Credentials and headers are not logged or persisted.
+
+Embedding calls are also gated by `.kyber-weave/.gitignore` effectively protecting the
+narrow `cache/` path and by the cache not already being tracked. Without that proof,
+Kyber-Weave sends no document text. `prefer` falls back; `required` fails. `docs init`
+safely merges the ignore entry for new and existing hosts.
 
 ## Harness profiles
 
