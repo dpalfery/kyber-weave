@@ -25,3 +25,6 @@ apm_modules/
 .cursor/**/*.env
 .cursor/**/*.env.*
 !.cursor/**/*.env.example
+
+node_modules/
+
