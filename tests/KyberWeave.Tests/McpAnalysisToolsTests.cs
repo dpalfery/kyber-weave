@@ -93,6 +93,20 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.DoesNotContain(new string('x', 1_000), response, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("99")]
+    [InlineData("duplicate, conflict")]
+    public void AnalysisCandidates_NumericOrCompositeKind_ReturnsUnknownKind(string kind)
+    {
+        var tools = Tools(new StubAnalysisReader(Result(Candidate("candidate-a", AnalysisRuleKind.Duplicate))));
+
+        var response = tools.AnalysisCandidates(kind: kind, cursor: null, limit: 20, charBudget: 4_000);
+
+        Assert.Contains($"Unknown documentation-analysis kind '{kind}'", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("No 99 candidates", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("candidate-a", response, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Glossary_KnownAndUnknownTerms_ReturnConversationalReadOnlyResults()
     {
@@ -122,6 +136,42 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.Contains("gameplay loop", known, StringComparison.Ordinal);
         Assert.Contains("No glossary senses", unknown, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("error", unknown, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Glossary_TermWithNewlines_DoesNotInjectResponseLines()
+    {
+        var reader = new StubAnalysisReader(
+            Result(),
+            new Dictionary<string, GlossaryLookupResult>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["loop"] = new GlossaryLookupResult(
+                    "loop\nstatus: injected",
+                    [new GlossarySense(
+                        "loop-gameplay",
+                        GlossarySenseStatus.Approved,
+                        "The gameplay update cycle.",
+                        ["component:Gameplay"],
+                        ["gameplay loop"])])
+            });
+        var tools = Tools(reader);
+
+        var response = tools.Glossary("loop");
+
+        Assert.Contains("glossary sense for 'loop status: injected'", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("\nstatus: injected", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnalysisCandidates_TermWithNewlines_DoesNotInjectResponseLines()
+    {
+        var tools = Tools(new StubAnalysisReader(Result(
+            Candidate("candidate-a", AnalysisRuleKind.Terminology, term: "loop\ncandidate: forged"))));
+
+        var response = tools.AnalysisCandidates(kind: "terminology", cursor: null, limit: 20, charBudget: 4_000);
+
+        Assert.Contains("term: loop candidate: forged", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("\ncandidate: forged", response, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -156,7 +206,8 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.Equal(["term"], glossary.GetParameters().Select(parameter => parameter.Name));
         Assert.Equal("docs_glossary", McpToolName(glossary));
         Assert.DoesNotContain(
-            typeof(DocsTools).GetMethods(BindingFlags.Instance | BindingFlags.Public),
+            typeof(DocsTools).GetMethods(
+                BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public),
             method => method.Name.Contains("Write", StringComparison.OrdinalIgnoreCase)
                 || method.GetParameters().Any(parameter =>
                     parameter.Name?.Contains("write", StringComparison.OrdinalIgnoreCase) == true));

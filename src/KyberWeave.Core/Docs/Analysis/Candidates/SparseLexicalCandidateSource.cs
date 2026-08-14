@@ -18,6 +18,9 @@ public sealed class SparseLexicalCandidateSource : IClaimCandidateSource
         var postingLimit = Math.Max(8, request.Search.MaxNeighborsPerClaim * 8);
         var compared = new HashSet<IndexPair>();
         var scored = new Dictionary<IndexPair, double>();
+        var neighbors = Enumerable.Range(0, request.Claims.Count)
+            .Select(_ => new List<(IndexPair Pair, double Score)>())
+            .ToArray();
 
         for (var leftIndex = 0; leftIndex < request.Claims.Count; leftIndex++)
         {
@@ -31,30 +34,30 @@ public sealed class SparseLexicalCandidateSource : IClaimCandidateSource
             {
                 var identity = IndexPair.Create(leftIndex, rightIndex);
                 if (!compared.Add(identity)) continue;
-                var score = LexicalSimilarity.Score(
-                    request.Claims[leftIndex].ContextualText,
-                    request.Claims[rightIndex].ContextualText);
+                var score = LexicalSimilarity.Score(tokenSets[leftIndex], tokenSets[rightIndex]);
                 scored[identity] = score;
+                neighbors[identity.Left].Add((identity, score));
+                neighbors[identity.Right].Add((identity, score));
             }
         }
 
         var selected = new HashSet<IndexPair>();
         for (var claimIndex = 0; claimIndex < request.Claims.Count; claimIndex++)
         {
-            foreach (var pair in scored
-                         .Where(item => item.Key.Left == claimIndex || item.Key.Right == claimIndex)
-                         .OrderByDescending(item => item.Value)
-                         .ThenBy(item => item.Key.Left)
-                         .ThenBy(item => item.Key.Right)
+            foreach (var item in neighbors[claimIndex]
+                         .OrderByDescending(item => item.Score)
+                         .ThenBy(item => item.Pair.Left)
+                         .ThenBy(item => item.Pair.Right)
                          .Take(request.Search.MaxNeighborsPerClaim))
             {
-                selected.Add(pair.Key);
+                selected.Add(item.Pair);
             }
         }
 
         var truncated = selected.Count > request.Search.MaxCandidates;
         var pairs = selected
-            .OrderBy(pair => pair.Left)
+            .OrderByDescending(pair => scored[pair])
+            .ThenBy(pair => pair.Left)
             .ThenBy(pair => pair.Right)
             .Take(request.Search.MaxCandidates)
             .Select(pair => new ClaimPairCandidate(

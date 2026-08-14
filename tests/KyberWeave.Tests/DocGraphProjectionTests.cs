@@ -82,6 +82,25 @@ public sealed class DocGraphProjectionTests
         Assert.True(projection.AreDocumentsRelated("doc:architecture/parent", "doc:reference/child"));
     }
 
+    [Fact]
+    public void Build_IdLessDocuments_RegisterFallbackPathNodesAndSharedComponentRelatedness()
+    {
+        var set = new DocumentSet
+        {
+            Documents =
+            [
+                Document("", "docs/left.md", component: "Runtime"),
+                Document("", "docs/right.md", component: "Runtime")
+            ]
+        };
+
+        var projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+
+        Assert.Contains(projection.Nodes, node => node.Id == "doc:docs/left.md" && node.Label == "Document");
+        Assert.Contains(projection.Nodes, node => node.Id == "doc:docs/right.md" && node.Label == "Document");
+        Assert.True(projection.AreDocumentsRelated("doc:docs/left.md", "doc:docs/right.md"));
+    }
+
     [Theory]
     [MemberData(nameof(ApprovedCodeEdgeKinds))]
     public void AreDocumentsRelated_Traverses_Approved_OneHop_CodeGraph_Edges(string kind)

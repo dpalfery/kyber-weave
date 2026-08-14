@@ -34,11 +34,25 @@ public sealed class DocsGraphCommand : Command<DocsGraphSettings>
             return 1;
         }
 
-        var glossary = new ManagedGlossaryService(
-            settings.Path,
-            config,
-            TimeProvider.System).Load();
-        var glossaryContributor = new ManagedGlossaryGraphContributor(glossary);
+        ManagedGlossaryLoadResult glossary;
+        ManagedGlossaryGraphContributor glossaryContributor;
+        try
+        {
+            glossary = new ManagedGlossaryService(
+                settings.Path,
+                config,
+                TimeProvider.System).Load();
+            glossaryContributor = new ManagedGlossaryGraphContributor(glossary);
+        }
+        catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
+        {
+            DocsAnalysisCommandErrors.Render(
+                exception,
+                settings,
+                "docs graph",
+                ManagedGlossaryService.ValidationRuleCode);
+            return 1;
+        }
         var result = new DocGraphExporter(resolver).Export(
             set,
             settings.Out,

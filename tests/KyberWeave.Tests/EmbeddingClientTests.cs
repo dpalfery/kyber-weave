@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
@@ -106,6 +107,25 @@ public sealed class EmbeddingClientTests
 
         Assert.Single(result.Embeddings);
         Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public void Constructor_DisablesHttpClientTimeoutSoConfigTimeoutIsAuthoritative()
+    {
+        using var handler = new RecordingHandler(JsonResponse("""
+            { "data": [{ "index": 0, "embedding": [1, 0] }] }
+            """));
+        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+            handler,
+            ResolveTo(IPAddress.Loopback),
+            _ => null);
+
+        var client = typeof(OpenAiCompatibleEmbeddingGenerator)
+            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(generator) as HttpClient;
+
+        Assert.NotNull(client);
+        Assert.Equal(Timeout.InfiniteTimeSpan, client.Timeout);
     }
 
     [Fact]

@@ -116,6 +116,24 @@ public sealed class ClaimExtractionTests
         Assert.NotEqual(claims[0].ContentHash, claims[1].ContentHash);
     }
 
+    [Fact]
+    public void Extract_WithInlineCodeAndLiteralPlaceholderText_RestoresFenceWithoutColliding()
+    {
+        const string body = """
+            # Claims
+
+            ## Runtime
+
+            Run `dotnet test` even if the prose mentions KYBERINLINELITERAL0END.
+            """;
+
+        var claim = Assert.Single(new ClaimExtractor().Extract(Document(body)).Claims);
+
+        Assert.Contains("`dotnet test`", claim.ContextualText, StringComparison.Ordinal);
+        Assert.Contains("KYBERINLINELITERAL0END", claim.ContextualText, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet testEND", claim.ContextualText, StringComparison.Ordinal);
+    }
+
     private static void AssertClaim(
         Claim claim,
         ClaimKind expectedKind,
