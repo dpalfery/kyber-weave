@@ -23,7 +23,7 @@ public static partial class SkillReviewExchange
         PropertyNameCaseInsensitive = true
     };
 
-    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for|to)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
+    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
         RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
     private static partial Regex TriggerClauseRegex();
 
@@ -66,7 +66,8 @@ public static partial class SkillReviewExchange
         {
             foreach (var agent in agents)
             {
-                var id = agent.RoleName;
+                // Role names repeat across harnesses; the review key must distinguish them.
+                var id = AgentCandidateId(agent);
                 var description = agent.Description ?? string.Empty;
                 var dummySkill = new Skill
                 {
@@ -158,7 +159,20 @@ public static partial class SkillReviewExchange
             return Failure("The verdict bundle does not contain any verdicts.");
         }
 
-        var candidateMap = currentCandidates.ToDictionary(c => c.Id, StringComparer.Ordinal);
+        var candidateMap = new Dictionary<string, SkillReviewCandidate>(StringComparer.Ordinal);
+        foreach (var candidate in currentCandidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate.Id))
+            {
+                return Failure("Current candidates contain an empty id.");
+            }
+
+            if (!candidateMap.TryAdd(candidate.Id, candidate))
+            {
+                return Failure($"Current candidates contain duplicate id '{candidate.Id}'.");
+            }
+        }
+
         var seenCandidateIds = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var verdict in bundle.Verdicts)
@@ -193,8 +207,19 @@ public static partial class SkillReviewExchange
             }
         }
 
+        foreach (var id in candidateMap.Keys)
+        {
+            if (!seenCandidateIds.Contains(id))
+            {
+                return Failure($"Missing verdict for candidate id '{id}'.");
+            }
+        }
+
         return new SkillReviewImportResult(true, bundle.Verdicts.Count, bundle.Verdicts, new DiagnosticReport());
     }
+
+    private static string AgentCandidateId(AgentModel agent) =>
+        $"{agent.Harness}:{agent.RoleName}";
 
     private static SkillReviewImportResult Failure(string message)
     {

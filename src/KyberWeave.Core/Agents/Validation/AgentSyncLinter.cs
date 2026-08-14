@@ -18,7 +18,7 @@ public static partial class AgentSyncLinter
     public const string RuleLowRoutingScore = "KW-AGENT-LINT-001";
     public const string RuleMissingTriggerPhrasing = "KW-AGENT-LINT-002";
 
-    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for|to)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
+    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
         RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
     private static partial Regex TriggerClauseRegex();
 

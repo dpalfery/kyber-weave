@@ -27,7 +27,6 @@ public class DescriptionScorerTests
     [InlineData("Trigger when pull request validation fails on CI pipeline steps.")]
     [InlineData("Apply when formatting markdown tables according to repo standards.")]
     [InlineData("Use this skill when analyzing memory leaks in .NET applications.")]
-    [InlineData("Use this to generate architecture diagrams from C# models.")]
     public void Score_WhenExplicitTriggerClausePresent_AwardsFullTriggerScore(string description)
     {
         var skill = MakeSkill(description);
@@ -48,6 +47,7 @@ public class DescriptionScorerTests
     [InlineData("Validates authentication tokens and manages OAuth session lifecycles.")]
     [InlineData("Retrieves documents from vector database and reranks query results.")]
     [InlineData("Transforms legacy XML configuration files into modern YAML formats.")]
+    [InlineData("Use this to generate architecture diagrams from C# models.")]
     public void Score_WhenPureActionSummary_AwardsZeroTriggerScore(string description)
     {
         var skill = MakeSkill(description);

@@ -35,7 +35,7 @@ Skill and agent descriptions in multi-agent environments are **activation trigge
 
 ## 2. Approved Decisions
 
-- **D1 (Semantic & Trigger-First Focus)**: The primary quality signal is semantic intent—verifying that descriptions communicate **when to activate** the skill/agent (trigger condition and optional negative boundary) rather than merely summarizing actions. Heuristic word-length checks will only penalize extreme unrouted verbosity, avoiding rigid word count gating.
+- **D1 (Semantic & Trigger-First Focus)**: The primary quality signal is semantic intent—verifying that descriptions communicate **when to activate** the skill/agent (trigger condition and optional negative boundary) rather than merely summarizing actions. The length budget penalizes descriptions shorter than 40 characters as under-specified and excessive verbosity as noisy, without rigid word-count gating.
 - **D2 (Dual-Layer Governance)**:
   1. **Deterministic Fast Gate (CI-safe)**: Offline regex and lexical classification in `DescriptionScorer`, `RoutingLinter` (`KW-SKILL-LINT-007`), and `AgentSyncLinter` (`KW-AGENT-LINT-002`) to catch obvious action summaries, missing triggers, and vague openings.
   2. **Agent-Assisted Review Exchange**: Introduce `skill review export` / `import` (and agent review candidate generation) following the proven `IDocsAnalysisCommandService` / `DocsReviewExchange` pattern, allowing an agent/LLM reviewer to grade description trigger intent, suggest sharpened trigger phrasing, and cache content-addressed review verdicts.
@@ -46,7 +46,7 @@ Skill and agent descriptions in multi-agent environments are **activation trigge
 
 - **Existing Verification Infrastructure**:
   - `SpecValidator` checks spec conformance; `RoutingLinter` checks routing readiness and collisions; `AgentSyncLinter` checks harness parity, drift, and description scoring.
-  - `DescriptionScorer` computes total score (0-100) across 5 dimensions: Trigger clause (25), Negative boundary (20), Specific opening (15), Trigger keywords (20), Length budget (20).
+  - `DescriptionScorer` computes total score (0-100) across 5 dimensions: Trigger clause (35), Negative boundary (20), Specific opening (15), Trigger keywords (15), Length budget (15).
   - Diagnostic codes follow the stable `KW-*` pattern (`KW-SKILL-LINT-*`, `KW-AGENT-LINT-*`, `KW-SKILL-SPEC-*`, `KW-AGENT-SPEC-*`).
 - **Review Architecture Precedent**:
   - `KyberWeave.Core.Docs.Analysis.Review` provides a model for candidate bundles, verdict schemas, content hashing, and atomic filesystem exports/imports (`DocsReviewExportCommand`, `DocsReviewImportCommand`).
@@ -57,7 +57,7 @@ Skill and agent descriptions in multi-agent environments are **activation trigge
 
 | Task # | Test project / file | Runner command | Behavior asserted (RED → GREEN) |
 |---|---|---|---|
-| **T1** | `tests/KyberWeave.Tests/ValidationTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter FullyQualifiedName~DescriptionScorerTests` | `DescriptionScorer.Score` scores trigger-framed descriptions (`"Use when..."`, `"Invoke when..."`) high (35 pts for trigger dimension), awards 0 pts to pure action descriptions (`"Generates SQL..."`, `"Handles customer data..."`), and preserves scores for semantic trigger quality over arbitrary word length. |
+| **T1** | `tests/KyberWeave.Tests/DescriptionScorerTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter FullyQualifiedName~DescriptionScorerTests` | `DescriptionScorer.Score` scores trigger-framed descriptions (`"Use when..."`, `"Invoke when..."`) high (35 pts for trigger dimension), awards 0 pts to pure action descriptions (`"Generates SQL..."`, `"Handles customer data..."`, `"Use this to..."`), and preserves scores for semantic trigger quality over arbitrary word length. |
 | **T2** | `tests/KyberWeave.Tests/ValidationTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter FullyQualifiedName~RoutingLinterTests.Flags_Action_Summary_Without_Trigger` | `RoutingLinter.LintSkill` emits `KW-SKILL-LINT-007` (Warning) when a skill description explains only what the skill does without stating when to use it. |
 | **T3** | `tests/KyberWeave.Tests/AgentGovernanceTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter FullyQualifiedName~AgentGovernanceTests.AgentSyncLinter_Flags_Missing_Trigger_Phrasing` | `AgentSyncLinter.LintSet` evaluates agent descriptions with `DescriptionScorer`, emitting `KW-AGENT-LINT-002` (Warning) when an agent manifest description lacks trigger phrasing. |
 | **T4** | `tests/KyberWeave.Tests/SkillReviewTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj --filter FullyQualifiedName~SkillReviewTests` | `SkillReviewExchange.Export` serializes skill and agent description review candidates to JSON, and `SkillReviewExchange.Import` validates agent verdicts (e.g. `is_trigger_oriented`, `suggested_trigger_description`). |
@@ -69,7 +69,7 @@ Skill and agent descriptions in multi-agent environments are **activation trigge
 
 | # | Phase | Component | Description | Skills |
 |---|---|---|---|---|
-| **1** | Test | `KyberWeave.Tests` | Author failing unit tests for `DescriptionScorer` trigger vs action classification in `ValidationTests.cs`. Ref: Test Contract T1. | `test-dev` |
+| **1** | Test | `KyberWeave.Tests` | Author failing unit tests for `DescriptionScorer` trigger vs action classification in `DescriptionScorerTests.cs`. Ref: Test Contract T1. | `test-dev` |
 | **2** | Implementation | `KyberWeave.Core` | Refactor `src/KyberWeave.Core/Skills/Validation/DescriptionScorer.cs` to differentiate activation trigger framing from action-only summaries and adjust scoring weights. Ref: Test Contract T1. | `dotnet-dev` |
 | **3** | Test | `KyberWeave.Tests` | Author failing unit tests for `RoutingLinter` emitting `KW-SKILL-LINT-007` in `ValidationTests.cs`. Ref: Test Contract T2. | `test-dev` |
 | **4** | Implementation | `KyberWeave.Core` | Update `src/KyberWeave.Core/Skills/Validation/RoutingLinter.cs` to emit `KW-SKILL-LINT-007` when description is an action summary without trigger framing. Ref: Test Contract T2. | `dotnet-dev` |

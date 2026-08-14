@@ -25,8 +25,8 @@ public sealed class SkillReviewTests
         {
             RoleName = roleName,
             Harness = harness,
-            FilePath = $"/tmp/.claude/agents/{roleName}.md",
-            DirectoryPath = "/tmp/.claude/agents",
+            FilePath = $"/tmp/{harness}/agents/{roleName}.md",
+            DirectoryPath = $"/tmp/{harness}/agents",
             Description = description,
             InstructionsBody = "Agent instructions."
         };
@@ -87,12 +87,12 @@ public sealed class SkillReviewTests
         Assert.Equal("kyber-weave.skill-review.candidates/v1", result.Bundle.Schema);
         Assert.Equal(2, result.Bundle.Candidates.Count);
 
-        var triggerCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "schema-architect");
+        var triggerCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "Claude:schema-architect");
         Assert.Equal(SkillReviewCandidateType.Agent, triggerCandidate.Type);
         Assert.Equal(triggerAgent.Description, triggerCandidate.CurrentDescription);
         Assert.DoesNotContain("KW-AGENT-LINT-002", triggerCandidate.HeuristicFlags);
 
-        var actionCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "data-engineer");
+        var actionCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "Claude:data-engineer");
         Assert.Equal(SkillReviewCandidateType.Agent, actionCandidate.Type);
         Assert.Equal(actionAgent.Description, actionCandidate.CurrentDescription);
         Assert.Contains("KW-AGENT-LINT-002", actionCandidate.HeuristicFlags);
@@ -113,7 +113,7 @@ public sealed class SkillReviewTests
         Assert.Equal("kyber-weave.skill-review.candidates/v1", result.Bundle.Schema);
         Assert.Equal(2, result.Bundle.Candidates.Count);
         Assert.Contains(result.Bundle.Candidates, c => c.Id == "test-skill" && c.Type == SkillReviewCandidateType.Skill);
-        Assert.Contains(result.Bundle.Candidates, c => c.Id == "test-agent" && c.Type == SkillReviewCandidateType.Agent);
+        Assert.Contains(result.Bundle.Candidates, c => c.Id == "Claude:test-agent" && c.Type == SkillReviewCandidateType.Agent);
     }
 
     [Fact]
@@ -345,5 +345,98 @@ public sealed class SkillReviewTests
         Assert.False(result.Success);
         Assert.Equal(0, result.ImportedCount);
         Assert.Contains(result.Diagnostics.Items, d => d.Code == "KW-SKILL-REVIEW-001");
+    }
+
+    [Fact]
+    public void ExportCandidates_DuplicateRoleAcrossHarnesses_EmitsDistinctCandidateIds()
+    {
+        var claude = MakeAgent(
+            "schema-architect",
+            "Use when designing SQL schemas in Claude.",
+            HarnessKind.Claude);
+        var cursor = MakeAgent(
+            "schema-architect",
+            "Use when designing SQL schemas in Cursor.",
+            HarnessKind.Cursor);
+
+        var agentSet = new AgentSet([claude, cursor]);
+        var result = SkillReviewExchange.ExportCandidates(agents: agentSet);
+
+        Assert.Equal(2, result.Bundle.Candidates.Count);
+        Assert.Contains(result.Bundle.Candidates, c => c.Id == "Claude:schema-architect");
+        Assert.Contains(result.Bundle.Candidates, c => c.Id == "Cursor:schema-architect");
+        Assert.Equal(2, result.Bundle.Candidates.Select(c => c.Id).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void ImportVerdicts_OmittedCandidate_RejectsImport()
+    {
+        var candidates = new List<SkillReviewCandidate>
+        {
+            new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"]),
+            new("Claude:schema-architect", SkillReviewCandidateType.Agent, "Use when designing SQL schemas.", 85, [])
+        };
+
+        var json = """
+        {
+            "schema": "kyber-weave.skill-review.verdicts/v1",
+            "verdicts": [
+                {
+                    "candidate_id": "sql-generator",
+                    "is_trigger_oriented": false,
+                    "confidence": 0.95,
+                    "suggested_trigger_description": "Use when writing or optimizing PostgreSQL queries."
+                }
+            ]
+        }
+        """;
+
+        var result = SkillReviewExchange.ImportVerdicts(json, candidates);
+
+        Assert.NotNull(result);
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Contains(result.Diagnostics.Items, d =>
+            d.Code == "KW-SKILL-REVIEW-001" &&
+            d.Message.Contains("Claude:schema-architect", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ImportVerdicts_CompleteVerdictsForMultiHarnessAgents_Succeeds()
+    {
+        var claude = MakeAgent(
+            "schema-architect",
+            "Use when designing SQL schemas in Claude.",
+            HarnessKind.Claude);
+        var cursor = MakeAgent(
+            "schema-architect",
+            "Use when designing SQL schemas in Cursor.",
+            HarnessKind.Cursor);
+
+        var exported = SkillReviewExchange.ExportCandidates(agents: new AgentSet([claude, cursor]));
+        var json = """
+        {
+            "schema": "kyber-weave.skill-review.verdicts/v1",
+            "verdicts": [
+                {
+                    "candidate_id": "Claude:schema-architect",
+                    "is_trigger_oriented": true,
+                    "confidence": 0.9,
+                    "suggested_trigger_description": null
+                },
+                {
+                    "candidate_id": "Cursor:schema-architect",
+                    "is_trigger_oriented": true,
+                    "confidence": 0.8,
+                    "suggested_trigger_description": null
+                }
+            ]
+        }
+        """;
+
+        var result = SkillReviewExchange.ImportVerdicts(json, exported.Bundle);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.ImportedCount);
     }
 }

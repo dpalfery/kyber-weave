@@ -28,7 +28,7 @@ public sealed partial class RoutingLinter
     [GeneratedRegex(@"(^|\n)\s*(#+\s*)?(example|e\.g\.|for example|sample)", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
     private static partial Regex ExampleRegex();
 
-    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for|to)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
+    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
         RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
     private static partial Regex TriggerClauseRegex();
 
