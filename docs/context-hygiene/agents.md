@@ -6,11 +6,12 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Agents
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-14
 code-refs:
   - AgentLoader
   - AgentSpecValidator
   - AgentPromptScanner
+  - AgentSyncLinter
 ---
 
 # Agent harness governance
@@ -64,10 +65,31 @@ narrow to one.
 |---|---|
 | `KW-AGENT-SYNC-001` | A role exists in some harnesses but not others |
 | `KW-AGENT-SYNC-002` | The same role carries materially different instructions across harnesses |
-| `KW-AGENT-LINT-001` | An agent's description scores too low to route reliably |
+| `KW-AGENT-LINT-001` | An agent's description routing score is below threshold (< 50/100) |
+| `KW-AGENT-LINT-002` | An agent's description is an action summary or lacks trigger phrasing |
 
-`-002` is the one that pays for itself. Two copies of a role that diverged through
+`KW-AGENT-SYNC-002` is the one that pays for itself. Two copies of a role that diverged through
 independent edits still both look fine in isolation; only comparing them surfaces it.
+
+### Agent description trigger quality
+
+Multi-agent orchestrators use agent manifest descriptions as delegation triggers. When
+deciding whether to delegate a task to a specialized subagent, orchestrators match prompt
+intent against the trigger conditions defined in the description.
+
+Descriptions that only explain what the agent does (e.g. `"Builds C# projects and runs unit
+tests"`) fail to specify *when the orchestrator should delegate to it*. Manifest descriptions
+should lead with explicit trigger framing and negative boundaries:
+
+- **Trigger clause**: `"Use when authoring or running .NET unit tests. Do NOT use for editing application source code."`
+- **Lint rule `KW-AGENT-LINT-002`**: Emits a Warning when an agent description lacks an
+  explicit trigger condition (`"Use when..."`, `"Invoke when..."`, `"Trigger when..."`).
+- **Lint rule `KW-AGENT-LINT-001`**: Emits an Info finding when an agent description scores
+  below 50 on the [DescriptionScorer rubric](skills.md#descriptionscorer-rubric).
+- **Review exchange**: Agent descriptions can be exported alongside skills via
+  `kyber-weave skill review export` for LLM/agent-assisted semantic trigger review.
+  Candidate ids are `{Harness}:{RoleName}` so a role present in multiple harnesses is
+  not collapsed.
 
 ## Capability profiles
 

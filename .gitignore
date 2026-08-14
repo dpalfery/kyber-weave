@@ -17,6 +17,9 @@ nupkg/
 # and never creates it; the daemon rebuilds it per machine.
 .codegraph/
 
+# Local DOTNET_CLI_HOME used when the sandbox blocks ~/.dotnet first-run paths.
+.dotnet-home/
+
 # APM deploy target. Skills are authored in .apm/skills/ and `apm install` copies
 # them here, so this is generated output — including skills from other packages.
 .agents/
