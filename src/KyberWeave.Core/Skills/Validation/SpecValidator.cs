@@ -9,15 +9,15 @@ namespace KyberWeave.Core.Skills.Validation;
 /// (https://agentskills.io/specification). These are conformance rules: an Error means
 /// the skill is likely to misbehave or silently fail in a compliant runtime.
 /// </summary>
-public static class SpecValidator
+public static partial class SpecValidator
 {
     public const int NameMaxLength = 64;
     public const int DescriptionMaxLength = 1024;
     public const int CompatibilityMaxLength = 500;
 
     // lowercase letters, digits, single hyphens; no leading/trailing/consecutive hyphens
-    private static readonly Regex NamePattern =
-        new(@"^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.Compiled);
+    [GeneratedRegex(@"^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.None, matchTimeoutMilliseconds: 2000)]
+    private static partial Regex NamePattern();
 
     public static IEnumerable<Diagnostic> Validate(Skill skill)
     {
@@ -38,7 +38,7 @@ public static class SpecValidator
                 yield return new Diagnostic("KW-SKILL-SPEC-002", Severity.Error,
                     $"'name' is {name.Length} chars; the spec limit is {NameMaxLength}.", skillId, file);
 
-            if (!NamePattern.IsMatch(name))
+            if (!NamePattern().IsMatch(name))
                 yield return new Diagnostic("KW-SKILL-SPEC-003", Severity.Error,
                     $"'name' \"{name}\" must be lowercase letters, digits and single hyphens (no leading/trailing/consecutive hyphens).",
                     skillId, file, "e.g. 'hr-leave-eligibility-triage'.");

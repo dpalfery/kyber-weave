@@ -6,12 +6,13 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-14
 code-refs:
   - SkillLoader
   - RoutingLinter
   - DescriptionScorer
   - LexicalRoutingStrategy
+  - SkillReviewExchange
 ---
 
 # Skill governance
@@ -34,6 +35,8 @@ cannot make — whether a skill will actually be selected, and whether it is saf
 | `skill lint` | Will it route, and does it collide with another skill? | fails on **error** |
 | `skill scan` | Is it safe to load into context? | fails on **critical** (configurable) |
 | `skill route` | Which skill fires for this prompt? | fails below `--min-accuracy` |
+| `skill review export` | Export candidate descriptions for semantic review | — |
+| `skill review import` | Import and validate review verdicts | fails on **error** (`KW-SKILL-REVIEW-001`) |
 | `skill catalog` | Inventory with version / owner / score | — |
 | `skill pack` | Bundle into a Copilot Studio–compatible `.zip` | — |
 | `skill new` | Scaffold a spec-correct skill | — |
@@ -50,21 +53,58 @@ author.
 The distinctive half. A spec-valid skill that never fires is worthless, and the spec has
 nothing to say about that.
 
-`DescriptionScorer` produces an auditable 0–100 routing score across five dimensions:
+### Trigger framing vs. action summaries
+
+In multi-agent systems and LLM tool selection, descriptions are **activation triggers**,
+not passive documentation summaries. When an orchestrator or LLM selects which skill to
+invoke, it evaluates caller intent against the trigger condition declared in the description.
+
+Descriptions that summarize internal task actions (for example, `"Generates SQL queries,
+validates schema syntax, and connects to Postgres database"`) describe *what the skill does
+internally* rather than *when the orchestrator should activate it*. This leads to ambiguous
+routing and collisions.
+
+Effective skill descriptions lead with **explicit trigger framing** and define **negative
+boundaries**:
+- **Trigger phrasing**: Open with `"Use when..."`, `"Use for..."`, `"Invoke when..."`,
+  `"Apply when..."`, or `"Trigger when..."` (e.g. `"Use when the user requests database
+  query inspection, syntax validation, or PostgreSQL query tuning."`).
+- **Negative boundary**: State explicitly when *not* to use the skill (e.g. `"Do NOT use
+  for database schema migrations or user permission management."`).
+
+### DescriptionScorer rubric
+
+`DescriptionScorer` operationalizes this guidance into an auditable 0–100 score across
+five dimensions:
 
 ```
 password-reset — routing score 100/100
   Dimension          Score   Detail
-  Trigger clause     25/25   States when to use the skill.
+  Trigger clause     35/35   States when to use the skill.
   Negative boundary  20/20   States when NOT to use the skill — prevents over-firing.
-  Specific opening   15/15   Opens with a concrete action verb.
-  Trigger keywords   20/20   25 distinct content terms.
-  Length budget      20/20   289 chars — within a healthy routing budget.
+  Specific opening   15/15   Opens with a concrete trigger or action verb.
+  Trigger keywords   15/15   25 distinct content terms.
+  Length budget      15/15   289 chars — within a healthy routing budget.
 ```
 
-The score is a breakdown rather than a verdict, so an author can see which dimension cost
-them and fix that one. `KW-SKILL-LINT-010` — a name collision — is the only error in this
-tier; two skills cannot share a name and both be selectable.
+- **Trigger clause (35 pts)**: Highest-weighted dimension. Requires explicit trigger
+  conditions (`"Use when..."`, `"Use for..."`, `"Invoke when..."`). Descriptions leading
+  solely with action verbs without a trigger clause score 0.
+- **Negative boundary (20 pts)**: Explicit exclusion boundaries (`"Do NOT use for..."`,
+  `"Avoid using for..."`, `"Excludes..."`) that prevent over-firing.
+- **Specific opening (15 pts)**: Concrete opening rather than vague filler (`"helps with..."`,
+  `"assists with..."`).
+- **Trigger keywords (15 pts)**: Specificity and lexical richness across distinct domain terms.
+- **Length budget (15 pts)**: Conciseness within a healthy 40–500 character routing budget.
+
+### Diagnostic rules
+
+- `KW-SKILL-LINT-001` (Warning): Description routing score falls below threshold (`MinDescriptionScore: 70`).
+- `KW-SKILL-LINT-007` (Warning): Description is an action summary rather than a trigger specification.
+- `KW-SKILL-LINT-008` (Warning): Description contains excessive filler phrases (`"This skill is designed to..."`, `"allows the user to..."`).
+- `KW-SKILL-LINT-010` (Error): **Name collision** — two skills cannot share a name and both be selectable.
+- `KW-SKILL-LINT-011` (Warning): Description overlap between two skills.
+- `KW-SKILL-REVIEW-001` (Operational Error): Review verdict payload is malformed or invalid during `skill review import`.
 
 ## Routing simulation — `skill route`
 
