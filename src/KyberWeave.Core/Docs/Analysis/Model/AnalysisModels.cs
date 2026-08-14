@@ -69,7 +69,7 @@ public sealed record AnalysisGlossary(IReadOnlyList<ApprovedGlossarySense> Sense
     private static bool AppliesTo(ApprovedGlossarySense sense, Claim claim) =>
         sense.Scopes.Any(scope =>
             scope.StartsWith("component:", StringComparison.Ordinal)
-                ? StringComparer.Ordinal.Equals(scope["component:".Length..], claim.Component)
+                ? StringComparer.OrdinalIgnoreCase.Equals(scope["component:".Length..], claim.Component)
                 : scope.StartsWith("code-ref:", StringComparison.Ordinal)
                   && claim.CodeRefs.Contains(scope["code-ref:".Length..], StringComparer.Ordinal));
 }

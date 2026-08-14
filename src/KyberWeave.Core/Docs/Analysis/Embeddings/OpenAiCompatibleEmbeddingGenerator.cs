@@ -41,7 +41,11 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         ArgumentNullException.ThrowIfNull(handler);
         _resolveHost = resolveHost ?? throw new ArgumentNullException(nameof(resolveHost));
         _readEnvironment = readEnvironment ?? throw new ArgumentNullException(nameof(readEnvironment));
-        _client = new HttpClient(handler, disposeHandler: true);
+        _client = new HttpClient(handler, disposeHandler: true)
+        {
+            // HttpClient's default 100s timeout would silently clamp config.TimeoutSeconds.
+            Timeout = Timeout.InfiniteTimeSpan
+        };
     }
 
     public string GetProviderFingerprint(DocsAnalysisEmbeddingConfig config)

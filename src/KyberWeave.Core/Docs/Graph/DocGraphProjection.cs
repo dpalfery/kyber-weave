@@ -61,16 +61,14 @@ public sealed class DocGraphProjection
         var pathToId = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var document in documents.Documents)
-        {
-            if (!string.IsNullOrWhiteSpace(document.Frontmatter.Id))
-                pathToId.TryAdd(document.RelativePath, DocId(document.Frontmatter.Id));
-        }
+            pathToId.TryAdd(document.RelativePath, DocId(document.Subject));
 
         foreach (var document in documents.Documents)
         {
-            if (string.IsNullOrWhiteSpace(document.Frontmatter.Id)) continue;
-
-            var documentId = DocId(document.Frontmatter.Id);
+            // Claim.DocumentIdentity is document.Subject, which falls back to RelativePath
+            // when frontmatter has no id. Register the same node so graph candidacy can
+            // find intra-document and shared-concept pairs instead of querying a missing id.
+            var documentId = DocId(document.Subject);
             documentIds.Add(documentId);
 
             AddNode(nodes, emittedNodeIds, new DocGraphNode(

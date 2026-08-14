@@ -635,7 +635,7 @@ public sealed class ManagedGlossaryService
             .Select(heading =>
             {
                 var line = heading.Line + bodyStart;
-                var term = lines[line][3..].Trim().TrimEnd('#').TrimEnd();
+                var term = HeadingTerm(lines[line]);
                 return (Line: line, Term: term);
             })
             .ToList();
@@ -1034,17 +1034,14 @@ public sealed class ManagedGlossaryService
     {
         var cells = new List<string>();
         var current = new StringBuilder();
-        var escaped = false;
-        foreach (var character in line.Trim())
+        var trimmed = line.Trim();
+        for (var index = 0; index < trimmed.Length; index++)
         {
-            if (escaped)
+            var character = trimmed[index];
+            if (character == '\\' && index + 1 < trimmed.Length && trimmed[index + 1] == '|')
             {
-                current.Append(character);
-                escaped = false;
-            }
-            else if (character == '\\')
-            {
-                escaped = true;
+                current.Append('|');
+                index++;
             }
             else if (character == '|')
             {
@@ -1060,6 +1057,14 @@ public sealed class ManagedGlossaryService
         if (current.Length > 0) cells.Add(current.ToString().Trim());
         if (cells.Count > 0 && cells[0].Length == 0) cells.RemoveAt(0);
         return cells;
+    }
+
+    private static string HeadingTerm(string line)
+    {
+        var trimmed = line.TrimStart();
+        var hashes = 0;
+        while (hashes < trimmed.Length && trimmed[hashes] == '#') hashes++;
+        return trimmed[hashes..].Trim().TrimEnd('#').TrimEnd();
     }
 
     private static IReadOnlyList<string> SplitSemicolon(string value) =>

@@ -293,6 +293,31 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
+    public void Analyze_ApprovedComponentScopeIgnoresCase_SuppressesTerminologyWarning()
+    {
+        var documents = Set(
+            Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop measures live-test runtime.", component: "Gameplay"),
+            Document("live-test", "docs/live-test.md", Status.Current, "The loop records live-test runtime samples.", component: "Gameplay"));
+        var source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
+        var glossary = new AnalysisGlossary(
+        [
+            new ApprovedGlossarySense(
+                "loop-gameplay",
+                "loop",
+                "The gameplay live-test wrapper.",
+                ["component:gameplay"],
+                ["gameplay loop"])
+        ]);
+
+        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+
+        Assert.DoesNotContain(
+            result.Candidates,
+            candidate => candidate.Kind == AnalysisRuleKind.Terminology
+                && StringComparer.OrdinalIgnoreCase.Equals(candidate.Term, "loop"));
+    }
+
+    [Fact]
     public void Analyze_ApprovedCodeRefScopedSensesCoverEveryOccurrence_SuppressesTerminologyWarning()
     {
         var documents = Set(
@@ -654,6 +679,46 @@ public sealed class DocumentationAnalyzerTests
         var result = new SparseLexicalCandidateSource().FindCandidates(request);
 
         Assert.True(result.Pairs.Count <= request.Search.MaxCandidates);
+    }
+
+    [Fact]
+    public void SparseLexicalCandidateSource_GlobalCandidateCapKeepsHighestScoringPairs()
+    {
+        var documents = Set(
+            Document("low-a", "docs/00-low-a.md", Status.Current, "unrelated copper material"),
+            Document("low-b", "docs/01-low-b.md", Status.Current, "distinct silver mineral"),
+            Document("high-a", "docs/02-high-a.md", Status.Current, "shared analysis runtime behavior is documented here"),
+            Document("high-b", "docs/03-high-b.md", Status.Current, "shared analysis runtime behavior is documented there"));
+        var request = new ClaimCandidateSourceRequest(
+            Extract(documents),
+            Graph(documents),
+            Config(
+                mode: DocsAnalysisSearchMode.HighRecall,
+                lexicalCandidateThreshold: 0.10,
+                maxNeighbors: 10,
+                maxCandidates: 1).Search);
+
+        var result = new SparseLexicalCandidateSource().FindCandidates(request);
+
+        var pair = Assert.Single(result.Pairs);
+        Assert.True(PairIdentities(pair).SetEquals(["high-a", "high-b"]));
+    }
+
+    [Fact]
+    public void GraphCandidateSource_IdLessDocuments_StillFindSharedComponentPairs()
+    {
+        var documents = Set(
+            Document("", "docs/left.md", Status.Current, "The runner records model token usage for automation.", component: "Runtime"),
+            Document("", "docs/right.md", Status.Current, "Automation runners record model token consumption.", component: "Runtime"));
+        var claims = Extract(documents);
+        var request = new ClaimCandidateSourceRequest(claims, Graph(documents), Config().Search);
+
+        var result = new GraphClaimCandidateSource().FindCandidates(request);
+
+        var pair = Assert.Single(result.Pairs);
+        Assert.Equal(CandidateSourceKind.Graph, pair.Source);
+        Assert.Equal(1, pair.Score.Graph);
+        Assert.True(pair.Score.Lexical >= Config().Search.LexicalCandidateThreshold);
     }
 
     [Fact]

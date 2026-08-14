@@ -47,19 +47,18 @@ public sealed class GraphClaimCandidateSource : IClaimCandidateSource
                 }
             }
 
-            foreach (var right in overlap
+            foreach (var item in overlap
                          .OrderByDescending(item => Score(tokens[left], tokens[item.Key], item.Value))
                          .ThenBy(item => item.Key)
-                         .Take(request.Search.MaxNeighborsPerClaim)
-                         .Select(item => item.Key))
+                         .Take(request.Search.MaxNeighborsPerClaim))
             {
-                var identity = ClaimPair.Create(request.Claims[left], request.Claims[right]);
+                var identity = ClaimPair.Create(request.Claims[left], request.Claims[item.Key]);
                 pairs.TryAdd(identity, new ClaimPairCandidate(
                     identity.Left,
                     identity.Right,
                     CandidateSourceKind.Graph,
                     new CandidateScore(
-                        LexicalSimilarity.Score(identity.Left.ContextualText, identity.Right.ContextualText),
+                        Score(tokens[left], tokens[item.Key], item.Value),
                         null,
                         1)));
             }

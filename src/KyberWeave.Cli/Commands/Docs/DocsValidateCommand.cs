@@ -20,10 +20,22 @@ public sealed class DocsValidateCommand : Command<DocsSettings>
 
         var set = new DocumentLoader(settings.Path, ontology).Load();
         report.AddRange(new DocSpecValidator(settings.Path, ontology).Validate(set).Items);
-        report.AddRange(new ManagedGlossaryService(
-            settings.Path,
-            config,
-            TimeProvider.System).Validate().Items);
+        try
+        {
+            report.AddRange(new ManagedGlossaryService(
+                settings.Path,
+                config,
+                TimeProvider.System).Validate().Items);
+        }
+        catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
+        {
+            report.Add(new Diagnostic(
+                ManagedGlossaryService.ValidationRuleCode,
+                Severity.Error,
+                exception.Message,
+                "glossary",
+                Hint: "Fix the managed glossary path or contents, then re-run docs validate."));
+        }
 
         CommandHelpers.Finish(report, settings, "docs validate", "Document");
         return report.HasErrors ? 1 : 0;
