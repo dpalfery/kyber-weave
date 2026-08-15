@@ -53,14 +53,14 @@ public static class ProcessRunner
         // would re-parse; ArgumentList is argv. A fresh start info carries only the file
         // name, working directory, and argument list, with the shell kept off, so neither
         // a concatenated command string nor UseShellExecute can reach Process.Start.
-        using var process = Process.Start(CreateSafeStartInfo(startInfo))
+        using Process process = Process.Start(CreateSafeStartInfo(startInfo))
             ?? throw new InvalidOperationException("The child process could not be started.");
 
         // Reads start before the write because a child may produce more than one pipe
         // buffer of output before it consumes any stdin.
-        var standardOutput = process.StandardOutput.ReadToEndAsync();
-        var standardError = process.StandardError.ReadToEndAsync();
-        var inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
+        Task inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
 
         try
         {
@@ -103,10 +103,10 @@ public static class ProcessRunner
 
         // Both reads are started before either is awaited, so neither pipe can fill while
         // the other is being consumed.
-        var standardOutput = process.StandardOutput.ReadToEndAsync();
-        var standardError = process.StandardError.ReadToEndAsync();
+        Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+        Task<string> standardError = process.StandardError.ReadToEndAsync();
 
-        var captured = Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
+        string[] captured = Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
 
         // Safe only now: both streams are at EOF, so the child cannot be blocked on write.
         process.WaitForExit();
@@ -116,7 +116,7 @@ public static class ProcessRunner
 
     private static ProcessStartInfo CreateSafeStartInfo(ProcessStartInfo startInfo)
     {
-        var safe = new ProcessStartInfo(startInfo.FileName)
+        ProcessStartInfo safe = new ProcessStartInfo(startInfo.FileName)
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -129,14 +129,14 @@ public static class ProcessRunner
             StandardErrorEncoding = startInfo.StandardErrorEncoding
         };
 
-        foreach (var argument in startInfo.ArgumentList)
+        foreach (string argument in startInfo.ArgumentList)
             safe.ArgumentList.Add(argument);
 
         // A fresh ProcessStartInfo inherits the current environment. Clear and copy so a
         // caller that removed or overrode variables keeps that view, without re-enabling
         // the shell or the concatenated Arguments string.
         safe.Environment.Clear();
-        foreach (var pair in startInfo.Environment)
+        foreach (KeyValuePair<string, string?> pair in startInfo.Environment)
         {
             if (pair.Value is not null)
                 safe.Environment[pair.Key] = pair.Value;

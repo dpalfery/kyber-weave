@@ -18,20 +18,20 @@ public static class DocsAnalysisConfigLoader
 
         if (section is null)
         {
-            var resolvedDefaults = defaults.Clone(
+            DocsAnalysisConfig resolvedDefaults = defaults.Clone(
                 resolvedGlossaryPath: defaults.ResolveGlossaryPath(ontology));
             Validate(resolvedDefaults, ontology);
             return resolvedDefaults;
         }
 
-        var search = MergeSearch(defaults.Search, section.Search);
-        var embeddings = MergeEmbeddings(defaults.Embeddings, section.Embeddings);
-        var statuses = section.Statuses is null
+        DocsAnalysisSearchConfig search = MergeSearch(defaults.Search, section.Search);
+        DocsAnalysisEmbeddingConfig embeddings = MergeEmbeddings(defaults.Embeddings, section.Embeddings);
+        IReadOnlyList<string> statuses = section.Statuses is null
             ? defaults.Statuses
             : section.Statuses.ToArray();
-        var glossaryPath = NormalizeGlossaryPath(section.GlossaryPath, ontology.DocsRoots);
+        string? glossaryPath = NormalizeGlossaryPath(section.GlossaryPath, ontology.DocsRoots);
 
-        var merged = defaults.Clone(
+        DocsAnalysisConfig merged = defaults.Clone(
             statuses: statuses,
             glossaryPath: glossaryPath,
             resolvedGlossaryPath: glossaryPath ?? defaults.ResolveGlossaryPath(ontology),
@@ -115,7 +115,7 @@ public static class DocsAnalysisConfigLoader
         if (value is null)
             return null;
 
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var endpoint)
+        if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? endpoint)
             || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
             throw new YamlException(
@@ -159,7 +159,7 @@ public static class DocsAnalysisConfigLoader
 
     private static void Validate(DocsAnalysisConfig config, OntologyConfig ontology)
     {
-        foreach (var status in config.Statuses)
+        foreach (string status in config.Statuses)
         {
             if (!ontology.Statuses.Contains(status, StringComparer.Ordinal))
             {
@@ -196,7 +196,7 @@ public static class DocsAnalysisConfigLoader
         if (config.Embeddings.Dimensions is not null)
             RequirePositive(config.Embeddings.Dimensions.Value, "docs-analysis.embeddings.dimensions");
 
-        var embeddingsEnabled = config.Embeddings.Mode is
+        bool embeddingsEnabled = config.Embeddings.Mode is
             DocsAnalysisEmbeddingMode.Prefer or DocsAnalysisEmbeddingMode.Required;
         if (embeddingsEnabled && config.Embeddings.Endpoint is null)
         {
@@ -231,12 +231,12 @@ public static class DocsAnalysisConfigLoader
 
     private static bool ResolvesOnlyToLoopback(Uri endpoint)
     {
-        if (IPAddress.TryParse(endpoint.DnsSafeHost, out var address))
+        if (IPAddress.TryParse(endpoint.DnsSafeHost, out IPAddress? address))
             return LoopbackAddress.IsLoopback(address);
 
         try
         {
-            var addresses = Dns.GetHostAddresses(endpoint.DnsSafeHost);
+            IPAddress[] addresses = Dns.GetHostAddresses(endpoint.DnsSafeHost);
             return addresses.Length > 0 && addresses.All(LoopbackAddress.IsLoopback);
         }
         catch (SocketException)

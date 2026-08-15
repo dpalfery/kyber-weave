@@ -15,8 +15,8 @@ internal sealed class FakeCodeGraphResolver : ICodeGraphResolver
 
     public static FakeCodeGraphResolver WithSymbols(params (string Name, CodeGraphNode Node)[] symbols)
     {
-        var fake = new FakeCodeGraphResolver();
-        foreach (var (name, node) in symbols)
+        FakeCodeGraphResolver fake = new FakeCodeGraphResolver();
+        foreach ((string? name, CodeGraphNode? node) in symbols)
         {
             fake._symbols[name] = [node];
             if (!string.IsNullOrWhiteSpace(node.FilePath))
@@ -28,28 +28,28 @@ internal sealed class FakeCodeGraphResolver : ICodeGraphResolver
 
     public static FakeCodeGraphResolver WithRoutes(params string[] routes)
     {
-        var fake = new FakeCodeGraphResolver();
-        foreach (var route in routes)
+        FakeCodeGraphResolver fake = new FakeCodeGraphResolver();
+        foreach (string route in routes)
             fake._routes[route] = new CodeGraphNode($"route-{route}", "route", route, route, string.Empty, "csharp", 0);
 
         return fake;
     }
 
     public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name) =>
-        _symbols.TryGetValue(name, out var nodes) ? nodes : [];
+        _symbols.TryGetValue(name, out List<CodeGraphNode>? nodes) ? nodes : [];
 
     public IReadOnlyList<CodeGraphNode> ResolveRoute(string route) =>
-        _routes.TryGetValue(route, out var node) ? [node] : [];
+        _routes.TryGetValue(route, out CodeGraphNode? node) ? [node] : [];
 
     public bool HasFilesUnder(string relativePathPrefix)
     {
-        var normalized = relativePathPrefix.Replace('\\', '/').TrimEnd('/');
+        string normalized = relativePathPrefix.Replace('\\', '/').TrimEnd('/');
         return _files.Exists(p => p.StartsWith(normalized + "/", StringComparison.OrdinalIgnoreCase));
     }
 
     public IReadOnlyList<string> CandidateNames(string like)
     {
-        var prefix = like.Length <= 4 ? like : like[..4];
+        string prefix = like.Length <= 4 ? like : like[..4];
         return _symbols.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 

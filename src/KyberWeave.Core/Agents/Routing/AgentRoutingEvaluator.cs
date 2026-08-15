@@ -13,26 +13,26 @@ public static class AgentRoutingEvaluator
 {
     public static AgentRoutingResult Route(string prompt, AgentSet agentSet, double fireThreshold = 0.08)
     {
-        var promptVec = TextVectorizer.Vectorize(prompt);
-        var matrix = agentSet.GetRoleHarnessMatrix();
+        Dictionary<string, double> promptVec = TextVectorizer.Vectorize(prompt);
+        IReadOnlyDictionary<string, Dictionary<HarnessKind, AgentModel>> matrix = agentSet.GetRoleHarnessMatrix();
 
-        var ranked = matrix.Select(entry =>
+        List<RoutingCandidate> ranked = matrix.Select(entry =>
             {
-                var role = entry.Key;
-                var sampleAgent = entry.Value.Values.FirstOrDefault();
-                var routingText = sampleAgent != null
+                string role = entry.Key;
+                AgentModel? sampleAgent = entry.Value.Values.FirstOrDefault();
+                string routingText = sampleAgent != null
                     ? $"{role} {sampleAgent.Description}"
                     : role;
 
-                var score = TextVectorizer.CosineSimilarity(promptVec, TextVectorizer.Vectorize(routingText));
+                double score = TextVectorizer.CosineSimilarity(promptVec, TextVectorizer.Vectorize(routingText));
                 return new RoutingCandidate(role, score);
             })
             .OrderByDescending(c => c.Score)
             .ThenBy(c => c.SkillName, StringComparer.Ordinal)
             .ToList();
 
-        var top = ranked.FirstOrDefault();
-        var fired = top is not null && top.Score >= fireThreshold;
+        RoutingCandidate? top = ranked.FirstOrDefault();
+        bool fired = top is not null && top.Score >= fireThreshold;
         return new AgentRoutingResult(fired ? top!.SkillName : null, fired, ranked);
     }
 }

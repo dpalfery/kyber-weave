@@ -10,7 +10,7 @@ internal static class BinaryInstaller
 {
     internal static string ArchiveName(string binaryBaseName, string rid)
     {
-        var extension = PlatformRid.IsWindowsRid(rid) ? ".zip" : ".tar.gz";
+        string extension = PlatformRid.IsWindowsRid(rid) ? ".zip" : ".tar.gz";
         return $"{binaryBaseName}-{rid}{extension}";
     }
 
@@ -26,8 +26,8 @@ internal static class BinaryInstaller
             return;
         }
 
-        using var file = File.OpenRead(archivePath);
-        using var gzip = new GZipStream(file, CompressionMode.Decompress);
+        using FileStream file = File.OpenRead(archivePath);
+        using GZipStream gzip = new GZipStream(file, CompressionMode.Decompress);
         TarFile.ExtractToDirectory(gzip, destinationDirectory, overwriteFiles: true);
     }
 
@@ -42,18 +42,18 @@ internal static class BinaryInstaller
                 $"archive did not contain {Path.GetFileName(extractedBinaryPath)}");
         }
 
-        var directory = Path.GetDirectoryName(destinationPath)
+        string directory = Path.GetDirectoryName(destinationPath)
             ?? throw new SelfUpdateException($"cannot install to '{destinationPath}'.");
         Directory.CreateDirectory(directory);
 
-        var staging = Path.Combine(directory, "." + Path.GetFileName(destinationPath) + ".new");
+        string staging = Path.Combine(directory, "." + Path.GetFileName(destinationPath) + ".new");
         File.Copy(extractedBinaryPath, staging, overwrite: true);
         if (!windows)
             SetExecutable(staging);
 
         if (windows && File.Exists(destinationPath))
         {
-            var oldPath = destinationPath + ".old";
+            string oldPath = destinationPath + ".old";
             File.Delete(oldPath);
             File.Move(destinationPath, oldPath, overwrite: true);
             try
@@ -84,7 +84,7 @@ internal static class BinaryInstaller
 
     internal static void ClearMacQuarantine(string path)
     {
-        var startInfo = new ProcessStartInfo("xattr")
+        ProcessStartInfo startInfo = new ProcessStartInfo("xattr")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

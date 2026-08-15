@@ -83,16 +83,16 @@ public sealed class EmbeddingCoordinator
         IReadOnlyCollection<EmbeddingWorkItem> workItems,
         DocsAnalysisEmbeddingConfig config)
     {
-        var orderedWork = workItems.ToArray();
+        EmbeddingWorkItem[] orderedWork = workItems.ToArray();
         if (orderedWork.Length == 0) return Empty();
         if (orderedWork.Any(item => string.IsNullOrWhiteSpace(item.ContextualHash)))
             throw new ArgumentException("Embedding work items require a contextual hash.", nameof(workItems));
 
-        var model = string.IsNullOrWhiteSpace(config.Model)
+        string model = string.IsNullOrWhiteSpace(config.Model)
             ? throw new ArgumentException("An embedding model is required.", nameof(config))
             : config.Model;
-        var provider = _generator.GetProviderFingerprint(config);
-        var orderedKeys = orderedWork
+        string provider = _generator.GetProviderFingerprint(config);
+        EmbeddingCacheKey[] orderedKeys = orderedWork
             .Select(item => new EmbeddingCacheKey(
                 item.ContextualHash,
                 provider,
@@ -100,19 +100,19 @@ public sealed class EmbeddingCoordinator
                 config.Dimensions,
                 "float"))
             .ToArray();
-        var uniqueKeys = orderedKeys.Distinct().ToArray();
-        var cached = _persistence.LoadEmbeddings(uniqueKeys);
-        var misses = uniqueKeys.Where(key => !cached.ContainsKey(key)).ToArray();
-        var generatedByKey = new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
-        var usage = EmbeddingUsage.None;
+        EmbeddingCacheKey[] uniqueKeys = orderedKeys.Distinct().ToArray();
+        IReadOnlyDictionary<EmbeddingCacheKey, StoredEmbedding> cached = _persistence.LoadEmbeddings(uniqueKeys);
+        EmbeddingCacheKey[] misses = uniqueKeys.Where(key => !cached.ContainsKey(key)).ToArray();
+        Dictionary<EmbeddingCacheKey, StoredEmbedding> generatedByKey = new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
+        EmbeddingUsage usage = EmbeddingUsage.None;
 
         if (misses.Length > 0)
         {
-            var firstInputByKey = orderedKeys
+            Dictionary<EmbeddingCacheKey, string> firstInputByKey = orderedKeys
                 .Select((key, index) => new { key, orderedWork[index].Input })
                 .GroupBy(item => item.key)
                 .ToDictionary(group => group.Key, group => group.First().Input);
-            var generated = _generator.Generate(
+            EmbeddingGenerationResult generated = _generator.Generate(
                 misses,
                 misses.Select(key => firstInputByKey[key]).ToArray(),
                 config);
@@ -130,7 +130,7 @@ public sealed class EmbeddingCoordinator
             usage = generated.Usage;
         }
 
-        var ordered = orderedKeys.Select(key => cached.TryGetValue(key, out var hit)
+        StoredEmbedding[] ordered = orderedKeys.Select(key => cached.TryGetValue(key, out StoredEmbedding? hit)
             ? hit
             : generatedByKey[key]).ToArray();
         return new EmbeddingResolutionResult(
@@ -148,7 +148,7 @@ public sealed class EmbeddingCoordinator
         DocsAnalysisEmbeddingMode mode,
         string reason)
     {
-        var diagnostics = new DiagnosticReport();
+        DiagnosticReport diagnostics = new DiagnosticReport();
         diagnostics.Add(new Diagnostic(
             DocumentationAnalyzer.EmbeddingUnavailableRuleCode,
             mode == DocsAnalysisEmbeddingMode.Required ? Severity.Error : Severity.Warning,

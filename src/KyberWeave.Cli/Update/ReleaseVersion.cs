@@ -7,11 +7,11 @@ internal static class ReleaseVersion
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
-        var trimmed = version.Trim();
+        string trimmed = version.Trim();
         if (trimmed.StartsWith('v') || trimmed.StartsWith('V'))
             trimmed = trimmed[1..];
 
-        var plus = trimmed.IndexOf('+', StringComparison.Ordinal);
+        int plus = trimmed.IndexOf('+', StringComparison.Ordinal);
         if (plus >= 0)
             trimmed = trimmed[..plus];
 

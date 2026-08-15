@@ -39,12 +39,12 @@ public sealed class DocGraphExporter
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
 
         Directory.CreateDirectory(outputDirectory);
-        var nodesPath = Path.Combine(outputDirectory, "nodes.jsonl");
-        var edgesPath = Path.Combine(outputDirectory, "edges.jsonl");
+        string nodesPath = Path.Combine(outputDirectory, "nodes.jsonl");
+        string edgesPath = Path.Combine(outputDirectory, "edges.jsonl");
 
-        var projection = DocGraphProjection.Build(set, _resolver, contributors: contributors);
-        var nodeLines = projection.Nodes.Select(Node).ToList();
-        var edgeLines = projection.Edges.Select(Edge).ToList();
+        DocGraphProjection projection = DocGraphProjection.Build(set, _resolver, contributors: contributors);
+        List<string> nodeLines = projection.Nodes.Select(Node).ToList();
+        List<string> edgeLines = projection.Edges.Select(Edge).ToList();
 
         File.WriteAllLines(nodesPath, nodeLines);
         File.WriteAllLines(edgesPath, edgeLines);
@@ -54,14 +54,14 @@ public sealed class DocGraphExporter
 
     private static string Node(DocGraphNode node)
     {
-        var json = new JsonObject
+        JsonObject json = new JsonObject
         {
             ["type"] = "node",
             ["id"] = node.Id,
             ["label"] = node.Label
         };
 
-        foreach (var property in node.Properties)
+        foreach (KeyValuePair<string, string?> property in node.Properties)
         {
             if (property.Key is "type" or "id" or "label") continue;
             json[property.Key] = property.Value;

@@ -4,6 +4,7 @@ using KyberWeave.Core.Agents.Validation;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
@@ -24,16 +25,16 @@ public class HarnessProfileConfigTests
     ];
 
     [Fact]
-    public void ProductDefaults_Include_Six_Harness_Namespaces_Without_Conductor_Skill_Mapping()
+    public void ProductDefaultsIncludeSixHarnessNamespacesWithoutConductorSkillMapping()
     {
-        var config = HarnessProfileConfig.ProductDefaults;
+        HarnessProfileConfig config = HarnessProfileConfig.ProductDefaults;
 
         Assert.Equal(6, config.Profiles.Count);
 
-        foreach (var harness in SixHarnesses)
+        foreach (HarnessKind harness in SixHarnesses)
         {
             Assert.True(config.Profiles.ContainsKey(harness), $"Missing product default profile for {harness}.");
-            var profile = config.Profiles[harness];
+            HarnessCapabilityProfile profile = config.Profiles[harness];
             Assert.False(
                 profile.MappedRoleSkillOverrides.ContainsKey("conductor"),
                 $"Product default for {harness} must not auto-satisfy conductor via skill mapping.");
@@ -41,13 +42,13 @@ public class HarnessProfileConfigTests
     }
 
     [Fact]
-    public void HostOverride_Conductor_Mapping_Satisfies_Role_When_Skill_Directory_Present()
+    public void HostOverrideConductorMappingSatisfiesRoleWhenSkillDirectoryPresent()
     {
-        using var repo = new HarnessRepoFixture()
+        using HarnessRepoFixture repo = new HarnessRepoFixture()
             .WithConductorSkillDirectory()
             .WithAgent(HarnessKind.Kilo, "conductor");
 
-        var yamlPath = repo.WriteHostProfile("""
+        string yamlPath = repo.WriteHostProfile("""
             harness:
               profiles:
                 codex:
@@ -70,19 +71,19 @@ public class HarnessProfileConfigTests
                     conductor: conductor
             """);
 
-        var config = HarnessProfileConfigLoader.Load(yamlPath);
+        HarnessProfileConfig config = HarnessProfileConfigLoader.Load(yamlPath);
 
-        foreach (var harness in SixHarnesses)
+        foreach (HarnessKind harness in SixHarnesses)
         {
             Assert.True(
                 config.Profiles[harness].MappedRoleSkillOverrides.ContainsKey("conductor"),
                 $"Host override must map conductor for {harness}.");
         }
 
-        var agentSet = repo.LoadAgentSet();
-        var report = AgentSyncLinter.LintSet(agentSet, repo.Root, config);
+        AgentSet agentSet = repo.LoadAgentSet();
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, config);
 
-        var conductorMissing = report.Items
+        List<Diagnostic> conductorMissing = report.Items
             .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
             .ToList();
 
@@ -107,9 +108,9 @@ public class HarnessProfileConfigTests
     }
 
     [Fact]
-    public void Unknown_Harness_Profile_Name_Is_Rejected()
+    public void UnknownHarnessProfileNameIsRejected()
     {
-        var yamlPath = WriteTempYaml("""
+        string yamlPath = WriteTempYaml("""
             harness:
               profiles:
                 not-a-harness:
@@ -117,19 +118,19 @@ public class HarnessProfileConfigTests
                     conductor: conductor
             """);
 
-        var ex = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
+        YamlException ex = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
             () => HarnessProfileConfigLoader.Load(yamlPath));
         Assert.Contains("not-a-harness", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Unknown_Harness_Profile_Name_Through_TryLoad_Reports_KW_CONFIG_001()
+    public void UnknownHarnessProfileNameThroughTryLoadReportsKWCONFIG001()
     {
-        var root = Path.Combine(Path.GetTempPath(), "kw-config-unknown-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "kw-config-unknown-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            var configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
+            DirectoryInfo configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
             File.WriteAllText(Path.Combine(configDir.FullName, "kyber-weave.yml"), """
                 harness:
                   profiles:
@@ -138,7 +139,7 @@ public class HarnessProfileConfigTests
                         conductor: conductor
                 """);
 
-            var result = KyberWeaveConfigLoader.TryLoad(root);
+            KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(root);
 
             Assert.False(result.Success);
             Assert.Null(result.Config);
@@ -155,9 +156,9 @@ public class HarnessProfileConfigTests
     }
 
     [Fact]
-    public void Root_Level_SkillMd_Does_Not_Falsely_Satisfy_Mapped_Role_But_Skill_Dir_Does()
+    public void RootLevelSkillMdDoesNotFalselySatisfyMappedRoleButSkillDirDoes()
     {
-        var hostYaml = """
+        string hostYaml = """
             harness:
               profiles:
                 codex:
@@ -181,14 +182,14 @@ public class HarnessProfileConfigTests
             """;
 
         // Root-level SKILL.md alone must NOT satisfy mapped roles.
-        using (var repo = new HarnessRepoFixture()
+        using (HarnessRepoFixture repo = new HarnessRepoFixture()
             .WithRootSkillMd()
             .WithAgent(HarnessKind.Kilo, "conductor"))
         {
-            var config = HarnessProfileConfigLoader.Load(repo.WriteHostProfile(hostYaml));
-            var report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
+            HarnessProfileConfig config = HarnessProfileConfigLoader.Load(repo.WriteHostProfile(hostYaml));
+            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
 
-            var conductorMissing = report.Items
+            List<Diagnostic> conductorMissing = report.Items
                 .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
                 .ToList();
 
@@ -201,14 +202,14 @@ public class HarnessProfileConfigTests
         }
 
         // Canonical SKILL.md inside the mapped skill directory does satisfy.
-        using (var repo = new HarnessRepoFixture()
+        using (HarnessRepoFixture repo = new HarnessRepoFixture()
             .WithConductorSkillDirectory()
             .WithAgent(HarnessKind.Kilo, "conductor"))
         {
-            var config = HarnessProfileConfigLoader.Load(repo.WriteHostProfile(hostYaml));
-            var report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
+            HarnessProfileConfig config = HarnessProfileConfigLoader.Load(repo.WriteHostProfile(hostYaml));
+            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
 
-            var conductorMissing = report.Items
+            List<Diagnostic> conductorMissing = report.Items
                 .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
                 .ToList();
 
@@ -225,13 +226,13 @@ public class HarnessProfileConfigTests
     }
 
     [Fact]
-    public void WithoutOverride_Missing_Harness_Role_Emits_KW_AGENT_SYNC_001()
+    public void WithoutOverrideMissingHarnessRoleEmitsKWAGENTSYNC001()
     {
-        using var repo = new HarnessRepoFixture()
+        using HarnessRepoFixture repo = new HarnessRepoFixture()
             .WithAgent(HarnessKind.Kilo, "architect");
 
-        var agentSet = repo.LoadAgentSet();
-        var report = AgentSyncLinter.LintSet(agentSet, repo.Root, HarnessProfileConfig.ProductDefaults);
+        AgentSet agentSet = repo.LoadAgentSet();
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, HarnessProfileConfig.ProductDefaults);
 
         Assert.Contains(
             report.Items,
@@ -265,7 +266,7 @@ public class HarnessProfileConfigTests
 
         public HarnessRepoFixture WithAgent(HarnessKind harness, string roleName)
         {
-            var (folder, fileName) = harness switch
+            (string? folder, string? fileName) = harness switch
             {
                 HarnessKind.Codex => (".codex/agents", $"{roleName}.toml"),
                 HarnessKind.Cursor => (".cursor/agents", $"{roleName}.agent.md"),
@@ -276,10 +277,10 @@ public class HarnessProfileConfigTests
                 _ => throw new ArgumentOutOfRangeException(nameof(harness))
             };
 
-            var dir = Path.Combine(Root, folder.Replace('/', Path.DirectorySeparatorChar));
+            string dir = Path.Combine(Root, folder.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(dir);
 
-            var path = Path.Combine(dir, fileName);
+            string path = Path.Combine(dir, fileName);
             File.WriteAllText(path, $"""
                 ---
                 name: {roleName}
@@ -304,7 +305,7 @@ public class HarnessProfileConfigTests
 
         private string WriteTempYaml(string content)
         {
-            var path = Path.Combine(Root, "kyber-weave.yml");
+            string path = Path.Combine(Root, "kyber-weave.yml");
             File.WriteAllText(path, content);
             return path;
         }
@@ -312,7 +313,7 @@ public class HarnessProfileConfigTests
 
     private static string WriteTempYaml(string content)
     {
-        var path = Path.Combine(Path.GetTempPath(), "kw-harness-" + Guid.NewGuid().ToString("N") + ".yml");
+        string path = Path.Combine(Path.GetTempPath(), "kw-harness-" + Guid.NewGuid().ToString("N") + ".yml");
         File.WriteAllText(path, content);
         return path;
     }

@@ -9,7 +9,7 @@ public static class HarnessProfileConfigLoader
     public static HarnessProfileConfig Load(string yamlPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        var document = KyberWeaveYamlParser.ParseFile(yamlPath);
+        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
         return Merge(HarnessProfileConfig.ProductDefaults, document.Harness);
     }
 
@@ -18,20 +18,20 @@ public static class HarnessProfileConfigLoader
         if (section?.Profiles is null || section.Profiles.Count == 0)
             return defaults;
 
-        var merged = new Dictionary<HarnessKind, HarnessCapabilityProfile>();
-        foreach (var (kind, profile) in defaults.Profiles)
+        Dictionary<HarnessKind, HarnessCapabilityProfile> merged = new Dictionary<HarnessKind, HarnessCapabilityProfile>();
+        foreach ((HarnessKind kind, HarnessCapabilityProfile? profile) in defaults.Profiles)
             merged[kind] = CloneProfile(profile);
 
-        foreach (var (name, overrideSection) in section.Profiles)
+        foreach ((string? name, HarnessProfileYamlSection? overrideSection) in section.Profiles)
         {
-            if (!TryParseHarnessKind(name, out var kind))
+            if (!TryParseHarnessKind(name, out HarnessKind kind))
             {
                 throw new YamlException(
                     $"Unknown harness.profiles name '{name}'. " +
                     "Known profiles: codex, cursor, claude, githubcopilot, opencode, kilo.");
             }
 
-            if (!merged.TryGetValue(kind, out var existing))
+            if (!merged.TryGetValue(kind, out HarnessCapabilityProfile? existing))
             {
                 existing = new HarnessCapabilityProfile
                 {
@@ -64,7 +64,7 @@ public static class HarnessProfileConfigLoader
         if (section is null)
             return existing;
 
-        var overrides = existing.MappedRoleSkillOverrides;
+        Dictionary<string, string> overrides = existing.MappedRoleSkillOverrides;
         if (section.MappedRoleSkillOverrides is not null)
         {
             overrides = new Dictionary<string, string>(
@@ -87,7 +87,7 @@ public static class HarnessProfileConfigLoader
         if (string.IsNullOrWhiteSpace(name))
             return false;
 
-        var normalized = name.Trim().Replace("-", string.Empty, StringComparison.Ordinal)
+        string normalized = name.Trim().Replace("-", string.Empty, StringComparison.Ordinal)
             .Replace("_", string.Empty, StringComparison.Ordinal);
 
         foreach (HarnessKind candidate in Enum.GetValues<HarnessKind>())

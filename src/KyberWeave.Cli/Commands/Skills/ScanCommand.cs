@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Security;
 using Spectre.Console.Cli;
 
@@ -17,12 +18,12 @@ public sealed class ScanCommand : Command<ScanSettings>
 {
     public override int Execute(CommandContext context, ScanSettings settings)
     {
-        var report = new DiagnosticReport();
-        var set = CommandHelpers.LoadOrReport(settings.Path, report);
+        DiagnosticReport report = new DiagnosticReport();
+        SkillSet? set = CommandHelpers.LoadOrReport(settings.Path, report);
 
-        var scanner = new SkillScanner();
+        SkillScanner scanner = new SkillScanner();
         if (set is not null)
-            foreach (var skill in set.Skills)
+            foreach (Skill skill in set.Skills)
                 report.AddRange(scanner.Scan(skill));
 
         CommandHelpers.Finish(report, settings, "skill scan", "Skill");

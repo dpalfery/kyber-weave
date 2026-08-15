@@ -51,8 +51,8 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
     public string GetProviderFingerprint(DocsAnalysisEmbeddingConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        var endpoint = RequireEndpoint(config);
-        var identity = $"openai-compatible/v1\n{endpoint.AbsoluteUri}";
+        Uri endpoint = RequireEndpoint(config);
+        string identity = $"openai-compatible/v1\n{endpoint.AbsoluteUri}";
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
@@ -65,8 +65,8 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(config);
 
-        var orderedKeys = keys.ToArray();
-        var orderedInputs = inputs.ToArray();
+        EmbeddingCacheKey[] orderedKeys = keys.ToArray();
+        string[] orderedInputs = inputs.ToArray();
         if (orderedKeys.Length != orderedInputs.Length)
             throw new ArgumentException("Embedding keys and inputs must have the same count.", nameof(inputs));
         if (orderedKeys.Length == 0)
@@ -76,22 +76,22 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         if (config.TimeoutSeconds <= 0)
             throw new ArgumentOutOfRangeException(nameof(config), "Embedding timeout must be positive.");
 
-        var endpoint = RequireEndpoint(config);
+        Uri endpoint = RequireEndpoint(config);
         EnsureLoopback(endpoint);
-        var model = string.IsNullOrWhiteSpace(config.Model)
+        string model = string.IsNullOrWhiteSpace(config.Model)
             ? throw new ArgumentException("An embedding model is required.", nameof(config))
             : config.Model;
-        var bearerToken = string.IsNullOrWhiteSpace(config.ApiKeyEnv)
+        string? bearerToken = string.IsNullOrWhiteSpace(config.ApiKeyEnv)
             ? null
             : _readEnvironment(config.ApiKeyEnv);
 
-        var result = new List<StoredEmbedding>(orderedKeys.Length);
-        var usage = EmbeddingUsage.None;
-        for (var offset = 0; offset < orderedInputs.Length; offset += config.BatchSize)
+        List<StoredEmbedding> result = new List<StoredEmbedding>(orderedKeys.Length);
+        EmbeddingUsage usage = EmbeddingUsage.None;
+        for (int offset = 0; offset < orderedInputs.Length; offset += config.BatchSize)
         {
-            var count = Math.Min(config.BatchSize, orderedInputs.Length - offset);
-            var batchInputs = orderedInputs.AsSpan(offset, count).ToArray();
-            var parsed = SendBatchAsync(
+            int count = Math.Min(config.BatchSize, orderedInputs.Length - offset);
+            string[] batchInputs = orderedInputs.AsSpan(offset, count).ToArray();
+            ParsedBatch parsed = SendBatchAsync(
                     endpoint,
                     model,
                     config.Dimensions,
@@ -100,7 +100,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
                     config.TimeoutSeconds)
                 .GetAwaiter()
                 .GetResult();
-            for (var index = 0; index < parsed.Vectors.Count; index++)
+            for (int index = 0; index < parsed.Vectors.Count; index++)
                 result.Add(new StoredEmbedding(orderedKeys[offset + index], parsed.Vectors[index]));
             usage = usage.Add(parsed.Usage);
         }
@@ -116,9 +116,9 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         string? bearerToken,
         int timeoutSeconds)
     {
-        using var request = CreateRequest(endpoint, model, dimensions, inputs, bearerToken);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-        using var response = await _client.SendAsync(
+        using HttpRequestMessage request = CreateRequest(endpoint, model, dimensions, inputs, bearerToken);
+        using CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using HttpResponseMessage response = await _client.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellation.Token).ConfigureAwait(false);
@@ -130,9 +130,9 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
                 $"The local embedding endpoint returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).");
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellation.Token)
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellation.Token)
             .ConfigureAwait(false);
-        using var json = await JsonDocument.ParseAsync(
+        using JsonDocument json = await JsonDocument.ParseAsync(
             stream,
             cancellationToken: cancellation.Token).ConfigureAwait(false);
         return ParseBatch(json.RootElement, inputs.Count, dimensions);
@@ -147,7 +147,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         IReadOnlyList<string> inputs,
         string? bearerToken)
     {
-        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        Dictionary<string, object?> payload = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["input"] = inputs,
             ["model"] = model,
@@ -155,7 +155,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         };
         if (dimensions is not null) payload["dimensions"] = dimensions.Value;
 
-        var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = new StringContent(
                 JsonSerializer.Serialize(payload),
@@ -169,15 +169,15 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
 
     private static ParsedBatch ParseBatch(JsonElement root, int expectedCount, int? configuredDimensions)
     {
-        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+        if (!root.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("The embedding response must contain a data array with complete indices.");
 
-        var vectors = new IReadOnlyList<float>?[expectedCount];
-        var dimensions = configuredDimensions;
-        foreach (var item in data.EnumerateArray())
+        IReadOnlyList<float>?[] vectors = new IReadOnlyList<float>?[expectedCount];
+        int? dimensions = configuredDimensions;
+        foreach (JsonElement item in data.EnumerateArray())
         {
-            if (!item.TryGetProperty("index", out var indexValue)
-                || !indexValue.TryGetInt32(out var index)
+            if (!item.TryGetProperty("index", out JsonElement indexValue)
+                || !indexValue.TryGetInt32(out int index)
                 || index < 0
                 || index >= expectedCount
                 || vectors[index] is not null)
@@ -185,13 +185,13 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
                 throw new InvalidDataException("Embedding response index values must be unique and in range.");
             }
 
-            if (!item.TryGetProperty("embedding", out var embedding)
+            if (!item.TryGetProperty("embedding", out JsonElement embedding)
                 || embedding.ValueKind != JsonValueKind.Array)
             {
                 throw new InvalidDataException("Each embedding response item must contain a finite vector.");
             }
 
-            var raw = embedding.EnumerateArray().Select(ReadFiniteFloat).ToArray();
+            float[] raw = embedding.EnumerateArray().Select(ReadFiniteFloat).ToArray();
             dimensions ??= raw.Length;
             if (raw.Length == 0 || raw.Length != dimensions.Value)
                 throw new InvalidDataException("Embedding vector dimensions must be non-zero and consistent.");
@@ -208,7 +208,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
 
     private static float ReadFiniteFloat(JsonElement value)
     {
-        if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number)
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out double number)
             || !double.IsFinite(number) || number > float.MaxValue || number < -float.MaxValue)
         {
             throw new InvalidDataException("Embedding vectors must contain only finite values.");
@@ -219,17 +219,17 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
 
     private static IReadOnlyList<float> Normalize(IReadOnlyList<float> vector)
     {
-        var squaredNorm = vector.Sum(value => (double)value * value);
+        double squaredNorm = vector.Sum(value => (double)value * value);
         if (!double.IsFinite(squaredNorm) || squaredNorm <= 0)
             throw new InvalidDataException("Embedding vectors must have a finite, non-zero norm.");
 
-        var norm = Math.Sqrt(squaredNorm);
+        double norm = Math.Sqrt(squaredNorm);
         return vector.Select(value => (float)(value / norm)).ToArray();
     }
 
     private static EmbeddingUsage ReadUsage(JsonElement root)
     {
-        if (!root.TryGetProperty("usage", out var usage) || usage.ValueKind != JsonValueKind.Object)
+        if (!root.TryGetProperty("usage", out JsonElement usage) || usage.ValueKind != JsonValueKind.Object)
             return EmbeddingUsage.None;
 
         return new EmbeddingUsage(
@@ -239,8 +239,8 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
 
     private static int ReadNonNegativeInt(JsonElement parent, string propertyName)
     {
-        if (!parent.TryGetProperty(propertyName, out var value)) return 0;
-        if (!value.TryGetInt32(out var count) || count < 0)
+        if (!parent.TryGetProperty(propertyName, out JsonElement value)) return 0;
+        if (!value.TryGetInt32(out int count) || count < 0)
             throw new InvalidDataException($"Embedding usage '{propertyName}' must be a non-negative integer.");
         return count;
     }
@@ -263,7 +263,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
 
     private static Uri RequireEndpoint(DocsAnalysisEmbeddingConfig config)
     {
-        var endpoint = config.Endpoint
+        Uri endpoint = config.Endpoint
             ?? throw new ArgumentException("An embedding endpoint is required.", nameof(config));
         if (!endpoint.IsAbsoluteUri
             || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
@@ -293,16 +293,16 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         SocketsHttpConnectionContext context,
         CancellationToken cancellationToken)
     {
-        var addresses = await Dns.GetHostAddressesAsync(
+        IPAddress[] addresses = await Dns.GetHostAddressesAsync(
             context.DnsEndPoint.Host,
             cancellationToken).ConfigureAwait(false);
         if (addresses.Length == 0 || addresses.Any(address => !LoopbackAddress.IsLoopback(address)))
             throw new HttpRequestException("The embedding endpoint must resolve only to loopback addresses.");
 
         Exception? lastFailure = null;
-        foreach (var address in addresses)
+        foreach (IPAddress address in addresses)
         {
-            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            Socket socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             try
             {
                 await socket.ConnectAsync(

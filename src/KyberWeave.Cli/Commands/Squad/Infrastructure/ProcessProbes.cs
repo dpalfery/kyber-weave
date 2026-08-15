@@ -71,7 +71,7 @@ internal static class ProcessProbe
         string executable,
         Regex outputPattern)
     {
-        var startInfo = CreateStartInfo(executable);
+        ProcessStartInfo startInfo = CreateStartInfo(executable);
         ProcessResult result;
         try
         {
@@ -106,7 +106,7 @@ internal static class ProcessProbe
                 FailureReason: $"The '{executable} --version' output was not recognized.");
         }
 
-        var match = outputPattern.Match(result.StandardOutput);
+        Match match = outputPattern.Match(result.StandardOutput);
         if (!match.Success)
         {
             return new ToolProbeResult(
@@ -123,7 +123,7 @@ internal static class ProcessProbe
 
     private static ProcessStartInfo CreateStartInfo(string executable)
     {
-        var startInfo = new ProcessStartInfo(executable)
+        ProcessStartInfo startInfo = new ProcessStartInfo(executable)
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -149,7 +149,7 @@ internal static class ProcessProbe
 
     private static void CopyEnvironmentVariable(ProcessStartInfo startInfo, string name)
     {
-        var value = Environment.GetEnvironmentVariable(name);
+        string? value = Environment.GetEnvironmentVariable(name);
         if (!string.IsNullOrEmpty(value))
             startInfo.Environment[name] = value;
     }

@@ -31,12 +31,12 @@ public static class SquadSourceValidator
         ValidateAliases(agents);
         ValidateReservedFallbackPrefixes(agents, skills, fallbacks);
 
-        var agentNames = agents.Select(agent => agent.Name).ToHashSet(StringComparer.Ordinal);
-        var skillNames = skills.Select(skill => skill.Name).ToHashSet(StringComparer.Ordinal);
-        var aliases = agents.SelectMany(agent => agent.Aliases).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> agentNames = agents.Select(agent => agent.Name).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> skillNames = skills.Select(skill => skill.Name).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> aliases = agents.SelectMany(agent => agent.Aliases).ToHashSet(StringComparer.Ordinal);
         ValidateFallbackIdentities(agents, skills, fallbacks);
 
-        foreach (var agent in agents)
+        foreach (SquadAgent agent in agents)
         {
             if (!models.Profiles.ContainsKey(agent.ModelProfile))
             {
@@ -65,7 +65,7 @@ public static class SquadSourceValidator
                     "Use a fallback declared in profiles/fallbacks.yml.");
             }
 
-            foreach (var delegateName in agent.DelegatesTo)
+            foreach (string delegateName in agent.DelegatesTo)
             {
                 if (!agentNames.Contains(delegateName))
                 {
@@ -81,14 +81,14 @@ public static class SquadSourceValidator
         ValidateDistinctBundleEntries(bundle.AgentNames, "agent", bundle.SourcePath);
         ValidateDistinctBundleEntries(bundle.SkillNames, "skill", bundle.SourcePath);
 
-        foreach (var name in bundle.AgentNames)
+        foreach (string name in bundle.AgentNames)
         {
             if (agentNames.Contains(name))
             {
                 continue;
             }
 
-            var hint = aliases.Contains(name)
+            string hint = aliases.Contains(name)
                 ? "Bundle entries must use the agent's canonical name rather than an alias."
                 : "Add the canonical agent under agents/ or remove it from this bundle.";
             Throw(
@@ -98,7 +98,7 @@ public static class SquadSourceValidator
                 hint);
         }
 
-        foreach (var name in bundle.SkillNames)
+        foreach (string name in bundle.SkillNames)
         {
             if (!skillNames.Contains(name))
             {
@@ -120,7 +120,7 @@ public static class SquadSourceValidator
         int? startLine = null,
         IReadOnlyList<DiagnosticLocation>? relatedLocations = null)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         report.Add(new Diagnostic(
             InvalidSourceRule,
             Severity.Error,
@@ -136,10 +136,10 @@ public static class SquadSourceValidator
 
     private static void ValidateDuplicateAgents(IReadOnlyList<SquadAgent> agents)
     {
-        var seen = new Dictionary<string, SquadAgent>(StringComparer.Ordinal);
-        foreach (var agent in agents)
+        Dictionary<string, SquadAgent> seen = new Dictionary<string, SquadAgent>(StringComparer.Ordinal);
+        foreach (SquadAgent agent in agents)
         {
-            if (seen.TryGetValue(agent.Name, out var previous))
+            if (seen.TryGetValue(agent.Name, out SquadAgent? previous))
             {
                 Throw(
                     $"Agent identity '{agent.Name}' is duplicate.",
@@ -156,10 +156,10 @@ public static class SquadSourceValidator
 
     private static void ValidateDuplicateSkills(IReadOnlyList<SquadSkill> skills)
     {
-        var seen = new Dictionary<string, SquadSkill>(StringComparer.Ordinal);
-        foreach (var skill in skills)
+        Dictionary<string, SquadSkill> seen = new Dictionary<string, SquadSkill>(StringComparer.Ordinal);
+        foreach (SquadSkill skill in skills)
         {
-            if (seen.TryGetValue(skill.Name, out var previous))
+            if (seen.TryGetValue(skill.Name, out SquadSkill? previous))
             {
                 Throw(
                     $"Skill identity '{skill.Name}' is duplicate.",
@@ -176,14 +176,14 @@ public static class SquadSourceValidator
 
     private static void ValidateAliases(IReadOnlyList<SquadAgent> agents)
     {
-        var canonical = agents.ToDictionary(agent => agent.Name, StringComparer.Ordinal);
-        var aliases = new Dictionary<string, SquadAgent>(StringComparer.Ordinal);
+        Dictionary<string, SquadAgent> canonical = agents.ToDictionary(agent => agent.Name, StringComparer.Ordinal);
+        Dictionary<string, SquadAgent> aliases = new Dictionary<string, SquadAgent>(StringComparer.Ordinal);
 
-        foreach (var agent in agents)
+        foreach (SquadAgent agent in agents)
         {
-            foreach (var alias in agent.Aliases)
+            foreach (string alias in agent.Aliases)
             {
-                if (canonical.TryGetValue(alias, out var canonicalOwner))
+                if (canonical.TryGetValue(alias, out SquadAgent? canonicalOwner))
                 {
                     Throw(
                         $"Agent alias '{alias}' collides with canonical agent '{canonicalOwner.Name}'.",
@@ -194,7 +194,7 @@ public static class SquadSourceValidator
                         [new DiagnosticLocation(canonicalOwner.SourcePath, Message: "Canonical declaration.")]);
                 }
 
-                if (aliases.TryGetValue(alias, out var aliasOwner))
+                if (aliases.TryGetValue(alias, out SquadAgent? aliasOwner))
                 {
                     Throw(
                         $"Agent alias '{alias}' is already declared by '{aliasOwner.Name}'.",
@@ -215,23 +215,23 @@ public static class SquadSourceValidator
         IReadOnlyList<SquadSkill> skills,
         SquadFallbackProfiles fallbacks)
     {
-        foreach (var (profileName, profile) in fallbacks.Profiles)
+        foreach ((string? profileName, SquadFallbackProfile? profile) in fallbacks.Profiles)
         {
-            var prefix = profile.OutputIdentity.Prefix;
-            var relatedLocation = new DiagnosticLocation(
+            string prefix = profile.OutputIdentity.Prefix;
+            DiagnosticLocation relatedLocation = new DiagnosticLocation(
                 fallbacks.SourcePath,
                 Message: $"Fallback profile '{profileName}' reserves prefix '{prefix}'.");
 
-            foreach (var agent in agents)
+            foreach (SquadAgent agent in agents)
             {
                 ValidateIdentity(agent.Name, "Agent", agent.SourcePath, prefix, relatedLocation);
-                foreach (var alias in agent.Aliases)
+                foreach (string alias in agent.Aliases)
                 {
                     ValidateIdentity(alias, "Agent alias", agent.SourcePath, prefix, relatedLocation);
                 }
             }
 
-            foreach (var skill in skills)
+            foreach (SquadSkill skill in skills)
             {
                 ValidateIdentity(skill.Name, "Skill", skill.SourcePath, prefix, relatedLocation);
             }
@@ -263,15 +263,15 @@ public static class SquadSourceValidator
         IReadOnlyList<SquadSkill> skills,
         SquadFallbackProfiles fallbacks)
     {
-        var agentsByName = agents.ToDictionary(agent => agent.Name, StringComparer.Ordinal);
-        var skillsByName = skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
+        Dictionary<string, SquadAgent> agentsByName = agents.ToDictionary(agent => agent.Name, StringComparer.Ordinal);
+        Dictionary<string, SquadSkill> skillsByName = skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
 
-        foreach (var (profileName, profile) in fallbacks.Profiles)
+        foreach ((string? profileName, SquadFallbackProfile? profile) in fallbacks.Profiles)
         {
-            var shared = profile.SharedIdentities.ToHashSet(StringComparer.Ordinal);
-            foreach (var name in shared)
+            HashSet<string> shared = profile.SharedIdentities.ToHashSet(StringComparer.Ordinal);
+            foreach (string name in shared)
             {
-                if (!agentsByName.TryGetValue(name, out var agent))
+                if (!agentsByName.TryGetValue(name, out SquadAgent? agent))
                 {
                     Throw(
                         $"Fallback profile '{profileName}' declares shared identity '{name}' without both an agent and skill.",
@@ -280,7 +280,7 @@ public static class SquadSourceValidator
                         "Declare the same canonical identity as both an agent and a skill, or remove it from shared-identities.");
                 }
 
-                if (!skillsByName.TryGetValue(name, out var skill))
+                if (!skillsByName.TryGetValue(name, out SquadSkill? skill))
                 {
                     Throw(
                         $"Fallback profile '{profileName}' declares shared identity '{name}' without both an agent and skill.",
@@ -304,15 +304,15 @@ public static class SquadSourceValidator
                 }
             }
 
-            foreach (var agent in agents)
+            foreach (SquadAgent agent in agents)
             {
                 if (!skillsByName.ContainsKey(agent.Name) || shared.Contains(agent.Name))
                 {
                     continue;
                 }
 
-                var projectedName = $"{profile.OutputIdentity.Prefix}{agent.Name}";
-                if (skillsByName.TryGetValue(projectedName, out var collidingSkill))
+                string projectedName = $"{profile.OutputIdentity.Prefix}{agent.Name}";
+                if (skillsByName.TryGetValue(projectedName, out SquadSkill? collidingSkill))
                 {
                     Throw(
                         $"Fallback projection '{projectedName}' for agent '{agent.Name}' collides with a canonical skill.",
@@ -331,8 +331,8 @@ public static class SquadSourceValidator
         string kind,
         string sourcePath)
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in entries)
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string entry in entries)
         {
             if (!seen.Add(entry))
             {

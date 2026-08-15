@@ -1,5 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
 using Xunit;
@@ -13,12 +14,12 @@ public sealed class SquadSourceTests
         "856711e391c077cbee5211b2dfb76861163472c622bf414b5a52d6ce15e0b546";
 
     [Fact]
-    public void Load_ValidSource_LoadsDeterministically()
+    public void LoadValidSourceLoadsDeterministically()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
 
-        var first = SquadSourceLoader.Load(fixture.Path);
-        var second = SquadSourceLoader.Load(fixture.Path);
+        SquadSource first = SquadSourceLoader.Load(fixture.Path);
+        SquadSource second = SquadSourceLoader.Load(fixture.Path);
 
         Assert.Equal("kyber-squad", first.Manifest.Name);
         Assert.Equal("full", first.Bundle.Name);
@@ -41,57 +42,57 @@ public sealed class SquadSourceTests
     [InlineData("profiles/models.yml", "kyber-squad.model-profiles/v1", "kyber-squad.model-profiles/v2")]
     [InlineData("profiles/capabilities.yml", "kyber-squad.capability-profiles/v1", "kyber-squad.capability-profiles/v2")]
     [InlineData("profiles/fallbacks.yml", "kyber-squad.fallback-profiles/v1", "kyber-squad.fallback-profiles/v2")]
-    public void Load_UnsupportedSchema_ReportsSourceRelativeLocationAndHint(
+    public void LoadUnsupportedSchemaReportsSourceRelativeLocationAndHint(
         string relativePath,
         string validSchema,
         string unsupportedSchema)
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(relativePath, validSchema, unsupportedSchema);
 
-        var diagnostic = AssertInvalid(fixture, relativePath, unsupportedSchema);
+        Diagnostic diagnostic = AssertInvalid(fixture, relativePath, unsupportedSchema);
 
         Assert.Contains(validSchema, diagnostic.Hint!, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Load_AgentOmitsRequiredSchemaField_ReportsFieldAndSourceLocation()
+    public void LoadAgentOmitsRequiredSchemaFieldReportsFieldAndSourceLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "description: Use when planning multi-domain work.\n",
             string.Empty);
 
-        var diagnostic = AssertInvalid(fixture, "agents/architect.md", "description");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "description");
 
         Assert.Contains("add", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Load_AgentUsesUnknownFrontmatterField_ReportsClosedSchemaViolation()
+    public void LoadAgentUsesUnknownFrontmatterFieldReportsClosedSchemaViolation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "aliases: []",
             "aliases: []\nharness-model: gpt-example");
 
-        var diagnostic = AssertInvalid(fixture, "agents/architect.md", "harness-model");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "harness-model");
 
         Assert.Contains("remove", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Load_VersionSourceIsNotAssembly_ReportsRequiredLiteralAtManifestLocation()
+    public void LoadVersionSourceIsNotAssemblyReportsRequiredLiteralAtManifestLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "squad.yml",
             "version-source: kyber-weave-assembly",
             "version-source: release-tag");
 
-        var diagnostic = AssertInvalid(fixture, "squad.yml", "version-source");
+        Diagnostic diagnostic = AssertInvalid(fixture, "squad.yml", "version-source");
 
         Assert.Contains("kyber-weave-assembly", diagnostic.Hint!, StringComparison.Ordinal);
     }
@@ -100,13 +101,13 @@ public sealed class SquadSourceTests
     [InlineData("model-profile", "missing-model", "agents/architect.md")]
     [InlineData("capability-profile", "missing-capabilities", "agents/architect.md")]
     [InlineData("fallback", "missing-fallback", "agents/architect.md")]
-    public void Load_AgentReferencesUnknownProfile_ReportsAgentLocation(
+    public void LoadAgentReferencesUnknownProfileReportsAgentLocation(
         string key,
         string missingProfile,
         string relativePath)
     {
-        using var fixture = SquadFixture.CreateValid();
-        var original = key switch
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        string original = key switch
         {
             "model-profile" => "deep-planning",
             "capability-profile" => "architect",
@@ -119,9 +120,9 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void Load_ProfileUsesUnknownCapability_ReportsCapabilityProfileLocation()
+    public void LoadProfileUsesUnknownCapabilityReportsCapabilityProfileLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "      filesystem.read: allow",
@@ -133,15 +134,15 @@ public sealed class SquadSourceTests
     [Theory]
     [InlineData("grant")]
     [InlineData("true")]
-    public void Load_ProfileUsesUnknownPermissionDecision_ReportsAllowedDecisions(string decision)
+    public void LoadProfileUsesUnknownPermissionDecisionReportsAllowedDecisions(string decision)
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "      filesystem.write: deny",
             $"      filesystem.write: {decision}");
 
-        var diagnostic = AssertInvalid(fixture, "profiles/capabilities.yml", decision);
+        Diagnostic diagnostic = AssertInvalid(fixture, "profiles/capabilities.yml", decision);
 
         Assert.Contains("deny", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ask", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
@@ -149,41 +150,41 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void Load_ProfileOmitsDeclaredCapability_ReportsMissingDecisionAtProfileLocation()
+    public void LoadProfileOmitsDeclaredCapabilityReportsMissingDecisionAtProfileLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "      delegate: ask\n",
             string.Empty);
 
-        var diagnostic = AssertInvalid(fixture, "profiles/capabilities.yml", "delegate");
+        Diagnostic diagnostic = AssertInvalid(fixture, "profiles/capabilities.yml", "delegate");
 
         Assert.Contains("architect", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains("permission", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Load_FallbackProfileUsesUnknownField_ReportsClosedSchemaViolation()
+    public void LoadFallbackProfileUsesUnknownFieldReportsClosedSchemaViolation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/fallbacks.yml",
             "    no-agent-primitive: skill",
             "    no-agent-primitive: skill\n    harness-model: gpt-example");
 
-        var diagnostic = AssertInvalid(fixture, "profiles/fallbacks.yml", "harness-model");
+        Diagnostic diagnostic = AssertInvalid(fixture, "profiles/fallbacks.yml", "harness-model");
 
         Assert.Contains("remove", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Load_MissingFallbackProfilesSchema_ReportsRequiredSchemaLocation()
+    public void LoadMissingFallbackProfilesSchemaReportsRequiredSchemaLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         File.Delete(fixture.AbsolutePath("schemas/fallback-profiles.schema.json"));
 
-        var diagnostic = AssertInvalid(
+        Diagnostic diagnostic = AssertInvalid(
             fixture,
             "schemas/fallback-profiles.schema.json",
             "exists");
@@ -192,12 +193,12 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void Load_MalformedFallbackProfilesSchema_ReportsJsonAndSchemaLocation()
+    public void LoadMalformedFallbackProfilesSchemaReportsJsonAndSchemaLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("schemas/fallback-profiles.schema.json", "{");
 
-        var diagnostic = AssertInvalid(
+        Diagnostic diagnostic = AssertInvalid(
             fixture,
             "schemas/fallback-profiles.schema.json",
             "valid JSON");
@@ -206,15 +207,15 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void Load_FallbackProfilesSchemaUsesUnsupportedIdentityVersion_ReportsExpectedIdentity()
+    public void LoadFallbackProfilesSchemaUsesUnsupportedIdentityVersionReportsExpectedIdentity()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "schemas/fallback-profiles.schema.json",
             "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
             "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v2");
 
-        var diagnostic = AssertInvalid(
+        Diagnostic diagnostic = AssertInvalid(
             fixture,
             "schemas/fallback-profiles.schema.json",
             "fallback-profiles/v2");
@@ -223,12 +224,12 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void Load_MissingReferencedPath_ReportsDeclaringManifestLocation()
+    public void LoadMissingReferencedPathReportsDeclaringManifestLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace("squad.yml", "profiles/models.yml", "profiles/missing.yml");
 
-        var diagnostic = AssertInvalid(fixture, "squad.yml", "profiles/missing.yml");
+        Diagnostic diagnostic = AssertInvalid(fixture, "squad.yml", "profiles/missing.yml");
 
         Assert.Contains("exists", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
@@ -237,39 +238,39 @@ public sealed class SquadSourceTests
     [InlineData("../outside.yml")]
     [InlineData("profiles/../../outside.yml")]
     [InlineData("/tmp/outside.yml")]
-    public void Load_ManifestPathEscapesProductRoot_RejectsBeforeReadingOutsidePath(string unsafePath)
+    public void LoadManifestPathEscapesProductRootRejectsBeforeReadingOutsidePath(string unsafePath)
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace("squad.yml", "profiles/models.yml", unsafePath);
 
-        var diagnostic = AssertInvalid(fixture, "squad.yml", unsafePath);
+        Diagnostic diagnostic = AssertInvalid(fixture, "squad.yml", unsafePath);
 
         Assert.Contains("inside", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Load_ReferencedSymlinkEscapesProductRoot_RejectsResolvedTarget()
+    public void LoadReferencedSymlinkEscapesProductRootRejectsResolvedTarget()
     {
-        using var fixture = SquadFixture.CreateValid();
-        using var outside = new TempDirectory();
-        var outsideAgent = System.IO.Path.Combine(outside.Path, "architect.md");
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        using TempDirectory outside = new TempDirectory();
+        string outsideAgent = System.IO.Path.Combine(outside.Path, "architect.md");
         File.WriteAllText(outsideAgent, SquadFixture.ArchitectAgentLf, new UTF8Encoding(false));
-        var linkedAgent = fixture.AbsolutePath("agents/architect.md");
+        string linkedAgent = fixture.AbsolutePath("agents/architect.md");
         File.Delete(linkedAgent);
         File.CreateSymbolicLink(linkedAgent, outsideAgent);
 
-        var diagnostic = AssertInvalid(fixture, "agents/architect.md", "symbolic link");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "symbolic link");
 
         Assert.Contains("inside", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Load_AgentIsNotValidUtf8_ReportsEncodingAndSourceLocation()
+    public void LoadAgentIsNotValidUtf8ReportsEncodingAndSourceLocation()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         File.WriteAllBytes(fixture.AbsolutePath("agents/architect.md"), [0xc3, 0x28]);
 
-        var diagnostic = AssertInvalid(fixture, "agents/architect.md", "UTF-8");
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "UTF-8");
 
         Assert.Contains("UTF-8", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
@@ -277,15 +278,15 @@ public sealed class SquadSourceTests
     [Theory]
     [InlineData("agent", "missing-agent")]
     [InlineData("skill", "missing-skill")]
-    public void Load_BundleReferencesUnknownIdentity_ReportsBundleLocation(
+    public void LoadBundleReferencesUnknownIdentityReportsBundleLocation(
         string identityKind,
         string missingIdentity)
     {
-        using var fixture = SquadFixture.CreateValid();
-        var anchor = identityKind == "agent" ? "  - dotnet-dev" : "  - test-dev";
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        string anchor = identityKind == "agent" ? "  - dotnet-dev" : "  - test-dev";
         fixture.Replace("bundles/full.yml", anchor, $"{anchor}\n  - {missingIdentity}");
 
-        var diagnostic = AssertInvalid(fixture, "bundles/full.yml", missingIdentity);
+        Diagnostic diagnostic = AssertInvalid(fixture, "bundles/full.yml", missingIdentity);
 
         Assert.Contains(identityKind, diagnostic.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -293,12 +294,12 @@ public sealed class SquadSourceTests
     [Theory]
     [InlineData("agent", "agents/reviewer.md", "architect")]
     [InlineData("skill", "skills/reviewer/SKILL.md", "test-dev")]
-    public void Load_DuplicateIdentity_ReportsBothSourceLocations(
+    public void LoadDuplicateIdentityReportsBothSourceLocations(
         string identityKind,
         string duplicateRelativePath,
         string duplicateName)
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         if (identityKind == "agent")
         {
             fixture.Write(
@@ -314,9 +315,9 @@ public sealed class SquadSourceTests
             fixture.Replace("bundles/full.yml", "  - test-dev", "  - test-dev\n  - reviewer");
         }
 
-        var exception = Assert.Throws<SquadSourceValidationException>(
+        SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
             () => SquadSourceLoader.Load(fixture.Path));
-        var diagnostic = Assert.Single(
+        Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => item.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) &&
                     item.Message.Contains(duplicateName, StringComparison.Ordinal));
@@ -332,9 +333,9 @@ public sealed class SquadSourceTests
     [Theory]
     [InlineData("architect")]
     [InlineData("shared-alias")]
-    public void Load_AliasCollidesWithCanonicalOrExistingAlias_ReportsDeclaringAgent(string alias)
+    public void LoadAliasCollidesWithCanonicalOrExistingAliasReportsDeclaringAgent(string alias)
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
             "agents/dotnet-dev.md",
             SquadFixture.Agent("dotnet-dev", aliases: $"[{alias}]"));
@@ -345,21 +346,21 @@ public sealed class SquadSourceTests
                 SquadFixture.Agent("architect", aliases: "[shared-alias]"));
         }
 
-        var diagnostic = AssertInvalid(fixture, "agents/dotnet-dev.md", alias);
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/dotnet-dev.md", alias);
 
         Assert.Contains("alias", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Load_AliasReferenceInBundle_RejectsNonCanonicalIdentity()
+    public void LoadAliasReferenceInBundleRejectsNonCanonicalIdentity()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
             "agents/architect.md",
             SquadFixture.Agent("architect", aliases: "[planner]"));
         fixture.Replace("bundles/full.yml", "  - architect", "  - planner");
 
-        var diagnostic = AssertInvalid(fixture, "bundles/full.yml", "planner");
+        Diagnostic diagnostic = AssertInvalid(fixture, "bundles/full.yml", "planner");
 
         Assert.Contains("canonical", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
     }
@@ -368,12 +369,12 @@ public sealed class SquadSourceTests
     [InlineData("agent", "agents/architect.md", "role-architect")]
     [InlineData("alias", "agents/architect.md", "role-planner")]
     [InlineData("skill", "skills/test-dev/SKILL.md", "role-test-dev")]
-    public void Load_IdentityUsesReservedFallbackPrefix_ReportsDeclaringSourceAndFallbackProfile(
+    public void LoadIdentityUsesReservedFallbackPrefixReportsDeclaringSourceAndFallbackProfile(
         string identityKind,
         string expectedSourcePath,
         string reservedIdentity)
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         switch (identityKind)
         {
             case "agent":
@@ -397,9 +398,9 @@ public sealed class SquadSourceTests
                 throw new ArgumentOutOfRangeException(nameof(identityKind));
         }
 
-        var exception = Assert.Throws<SquadSourceValidationException>(
+        SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
             () => SquadSourceLoader.Load(fixture.Path));
-        var diagnostic = Assert.Single(
+        Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => string.Equals(item.FilePath, expectedSourcePath, StringComparison.Ordinal) &&
                     item.Message.Contains(reservedIdentity, StringComparison.Ordinal));
@@ -417,9 +418,9 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void Load_IdentitiesDifferingOnlyByReservedPrefixCase_RemainValid()
+    public void LoadIdentitiesDifferingOnlyByReservedPrefixCaseRemainValid()
     {
-        using var fixture = SquadFixture.CreateValid();
+        using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
             "agents/architect.md",
             SquadFixture.Agent("architect", name: "Role-architect", aliases: "[Role-planner]"));
@@ -429,25 +430,25 @@ public sealed class SquadSourceTests
         fixture.Replace("bundles/full.yml", "  - architect", "  - Role-architect");
         fixture.Replace("bundles/full.yml", "  - test-dev", "  - Role-test-dev");
 
-        var source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
 
-        var agent = Assert.Single(source.Agents, item => item.Name == "Role-architect");
+        SquadAgent agent = Assert.Single(source.Agents, item => item.Name == "Role-architect");
         Assert.Equal(["Role-planner"], agent.Aliases);
         Assert.Contains(source.Skills, item => item.Name == "Role-test-dev");
     }
 
     [Fact]
-    public void Load_LfAndUtf8BomVariants_ProduceSameNormalizedBodyAndStableSha256()
+    public void LoadLfAndUtf8BomVariantsProduceSameNormalizedBodyAndStableSha256()
     {
-        using var lfFixture = SquadFixture.CreateValid();
-        using var crlfFixture = SquadFixture.CreateValid();
+        using SquadFixture lfFixture = SquadFixture.CreateValid();
+        using SquadFixture crlfFixture = SquadFixture.CreateValid();
         crlfFixture.Write(
             "agents/architect.md",
             SquadFixture.ArchitectAgentLf.Replace("\n", "\r\n", StringComparison.Ordinal),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        var lfAgent = SquadSourceLoader.Load(lfFixture.Path).Agents.Single(agent => agent.Name == "architect");
-        var crlfAgent = SquadSourceLoader.Load(crlfFixture.Path).Agents.Single(agent => agent.Name == "architect");
+        SquadAgent lfAgent = SquadSourceLoader.Load(lfFixture.Path).Agents.Single(agent => agent.Name == "architect");
+        SquadAgent crlfAgent = SquadSourceLoader.Load(crlfFixture.Path).Agents.Single(agent => agent.Name == "architect");
 
         Assert.Equal(NormalizedArchitectBody, lfAgent.InstructionBody);
         Assert.Equal(NormalizedArchitectBody, crlfAgent.InstructionBody);
@@ -460,9 +461,9 @@ public sealed class SquadSourceTests
         string expectedRelativePath,
         string expectedMessageFragment)
     {
-        var exception = Assert.Throws<SquadSourceValidationException>(
+        SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
             () => SquadSourceLoader.Load(fixture.Path));
-        var diagnostic = Assert.Single(
+        Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => string.Equals(item.FilePath, expectedRelativePath, StringComparison.Ordinal) &&
                     (item.Message.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) ||
@@ -500,7 +501,7 @@ public sealed class SquadSourceTests
 
         public static SquadFixture CreateValid()
         {
-            var fixture = new SquadFixture();
+            SquadFixture fixture = new SquadFixture();
             fixture.Write("squad.yml", """
                 schema: kyber-squad.squad/v1
                 name: kyber-squad
@@ -577,7 +578,7 @@ public sealed class SquadSourceTests
             fixture.Write("agents/dotnet-dev.md", Agent("dotnet-dev"));
             fixture.Write("skills/test-dev/SKILL.md", Skill("test-dev", "Use when writing tests."));
 
-            foreach (var schema in new[]
+            foreach (string? schema in new[]
                      {
                          "squad", "bundle", "agent", "model-profiles", "capability-profiles"
                      })
@@ -667,8 +668,8 @@ public sealed class SquadSourceTests
 
         public void Replace(string relativePath, string oldValue, string newValue)
         {
-            var path = AbsolutePath(relativePath);
-            var content = File.ReadAllText(path);
+            string path = AbsolutePath(relativePath);
+            string content = File.ReadAllText(path);
             Assert.Contains(oldValue, content, StringComparison.Ordinal);
             File.WriteAllText(
                 path,
@@ -681,7 +682,7 @@ public sealed class SquadSourceTests
 
         public void Write(string relativePath, string content, Encoding encoding)
         {
-            var path = AbsolutePath(relativePath);
+            string path = AbsolutePath(relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             File.WriteAllText(path, content, encoding);
         }

@@ -111,18 +111,18 @@ public sealed class DocumentIndex
         ArgumentNullException.ThrowIfNull(corpus);
         ArgumentNullException.ThrowIfNull(resolver);
 
-        var bySymbol = new Dictionary<string, List<DocumentModel>>(StringComparer.Ordinal);
-        var joinsByPath = new Dictionary<string, IReadOnlyList<CodeJoin>>(StringComparer.Ordinal);
+        Dictionary<string, List<DocumentModel>> bySymbol = new Dictionary<string, List<DocumentModel>>(StringComparer.Ordinal);
+        Dictionary<string, IReadOnlyList<CodeJoin>> joinsByPath = new Dictionary<string, IReadOnlyList<CodeJoin>>(StringComparer.Ordinal);
 
-        foreach (var doc in corpus.Documents)
+        foreach (DocumentModel doc in corpus.Documents)
         {
-            var joins = new List<CodeJoin>();
+            List<CodeJoin> joins = new List<CodeJoin>();
 
-            foreach (var symbol in doc.CodeRefs)
+            foreach (string symbol in doc.CodeRefs)
             {
-                foreach (var key in SymbolKeys(symbol))
+                foreach (string key in SymbolKeys(symbol))
                 {
-                    if (!bySymbol.TryGetValue(key, out var list))
+                    if (!bySymbol.TryGetValue(key, out List<DocumentModel>? list))
                     {
                         list = [];
                         bySymbol[key] = list;
@@ -133,7 +133,7 @@ public sealed class DocumentIndex
                 joins.Add(ToJoin(doc, symbol, resolver.ResolveSymbol(symbol)));
             }
 
-            foreach (var endpoint in doc.ApiEndpoints)
+            foreach (string endpoint in doc.ApiEndpoints)
             {
                 joins.Add(ToJoin(doc, endpoint, resolver.ResolveRoute(endpoint)));
             }
@@ -172,21 +172,21 @@ public sealed class DocumentIndex
         // pair of words behave as a weak phrase match: "logged out" yields the term
         // "loggedout", which the troubleshooting runbook has and a spec that merely
         // "logged an error" does not. Fusing only one side threw that signal away.
-        var queryVector = TextVectorizer.VectorizeFused(query);
+        Dictionary<string, double> queryVector = TextVectorizer.VectorizeFused(query);
 
         // Coverage is judged on the plain words only — see DocumentCorpus.ScoreBody.
-        var coverageTerms = TextVectorizer.Vectorize(query).Keys.ToList();
-        var trimmed = query.Trim();
+        List<string> coverageTerms = TextVectorizer.Vectorize(query).Keys.ToList();
+        string trimmed = query.Trim();
 
         // Query terms are weighted by how rare they are corpus-wide before any
         // section-level comparison, so a term every document shares cannot decide which
         // part of a document is the answer.
-        var rarityWeighted = _corpus.WeightByRarity(queryVector);
+        Dictionary<string, double> rarityWeighted = _corpus.WeightByRarity(queryVector);
 
-        var scored = new List<(DocumentModel Doc, double Score)>();
-        foreach (var doc in _corpus.Documents)
+        List<(DocumentModel Doc, double Score)> scored = new List<(DocumentModel Doc, double Score)>();
+        foreach (DocumentModel doc in _corpus.Documents)
         {
-            var score = ScoreExact(doc, trimmed);
+            double score = ScoreExact(doc, trimmed);
             score += ScorePartialIdentity(doc, queryVector);
             score += TitleWeight * TextVectorizer.Similarity(doc.Frontmatter.Title ?? doc.RelativePath, trimmed);
             score += BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms);
@@ -197,7 +197,7 @@ public sealed class DocumentIndex
             scored.Add((doc, score));
         }
 
-        var top = scored
+        List<(DocumentModel Doc, double Score)> top = scored
             .OrderByDescending(s => s.Score)
             .ThenBy(s => s.Doc.RelativePath, StringComparer.Ordinal)
             .Take(maxDocs)
@@ -205,7 +205,7 @@ public sealed class DocumentIndex
 
         if (top.Count == 0) return [];
 
-        var perDocument = Math.Max(MinPerDocumentBudget, charBudget / top.Count);
+        int perDocument = Math.Max(MinPerDocumentBudget, charBudget / top.Count);
 
         return top
             .Select(s => new DocumentHit(
@@ -222,7 +222,7 @@ public sealed class DocumentIndex
     {
         if (string.IsNullOrWhiteSpace(symbol)) return [];
 
-        if (!_bySymbol.TryGetValue(symbol.Trim(), out var documents)) return [];
+        if (!_bySymbol.TryGetValue(symbol.Trim(), out List<DocumentModel>? documents)) return [];
 
         return documents
             .OrderBy(d => d.RelativePath, StringComparer.Ordinal)
@@ -231,7 +231,7 @@ public sealed class DocumentIndex
     }
 
     private IReadOnlyList<CodeJoin> JoinsFor(DocumentModel doc) =>
-        _joinsByPath.TryGetValue(doc.RelativePath, out var joins) ? joins : [];
+        _joinsByPath.TryGetValue(doc.RelativePath, out IReadOnlyList<CodeJoin>? joins) ? joins : [];
 
     /// <summary>
     /// Both the reference as authored and its last dotted segment are indexed, so a
@@ -240,12 +240,12 @@ public sealed class DocumentIndex
     /// </summary>
     private static IEnumerable<string> SymbolKeys(string reference)
     {
-        var value = reference.Trim();
+        string value = reference.Trim();
         if (value.Length == 0) yield break;
 
         yield return value;
 
-        var lastDot = value.LastIndexOf('.');
+        int lastDot = value.LastIndexOf('.');
         if (lastDot >= 0 && lastDot < value.Length - 1)
         {
             yield return value[(lastDot + 1)..];
@@ -270,21 +270,21 @@ public sealed class DocumentIndex
     {
         if (nodes.Count == 0) return new CodeJoin(reference, "unresolved", string.Empty);
 
-        var sourceRoot = doc.Frontmatter.SourceRoot?.Replace('\\', '/').TrimEnd('/');
+        string? sourceRoot = doc.Frontmatter.SourceRoot?.Replace('\\', '/').TrimEnd('/');
 
-        var scoped = string.IsNullOrWhiteSpace(sourceRoot) || sourceRoot == "."
+        List<CodeGraphNode> scoped = string.IsNullOrWhiteSpace(sourceRoot) || sourceRoot == "."
             ? []
             : nodes.Where(n => n.FilePath.Replace('\\', '/')
                        .StartsWith(sourceRoot + "/", StringComparison.OrdinalIgnoreCase))
                    .ToList();
 
-        var inSourceRoot = scoped.Count > 0;
-        var pool = inSourceRoot ? scoped : nodes;
+        bool inSourceRoot = scoped.Count > 0;
+        IReadOnlyList<CodeGraphNode> pool = inSourceRoot ? scoped : nodes;
 
         // Within the pool, a declaration beats an incidental member of the same name: a
         // class or interface named X is far likelier to be what documentation calls "X"
         // than a property that happens to be called X.
-        var node = pool
+        CodeGraphNode node = pool
             .OrderByDescending(n => DeclarationRank(n.Kind))
             .ThenBy(n => n.FilePath, StringComparer.Ordinal)
             .First();
@@ -315,7 +315,7 @@ public sealed class DocumentIndex
             score += ComponentWeight;
         }
 
-        foreach (var reference in doc.CodeRefs)
+        foreach (string reference in doc.CodeRefs)
         {
             if (SymbolKeys(reference).Contains(query, StringComparer.Ordinal))
             {
@@ -324,7 +324,7 @@ public sealed class DocumentIndex
             }
         }
 
-        foreach (var endpoint in doc.ApiEndpoints)
+        foreach (string endpoint in doc.ApiEndpoints)
         {
             if (string.Equals(endpoint, query, StringComparison.OrdinalIgnoreCase))
             {
@@ -356,14 +356,14 @@ public sealed class DocumentIndex
     /// </remarks>
     internal static double Authority(DocumentModel doc)
     {
-        var byType = doc.DocType switch
+        double byType = doc.DocType switch
         {
             DocType.Plan or DocType.Spec => 0.55,
             DocType.Adr => 0.9,
             _ => 1.0
         };
 
-        var byStatus = doc.Status switch
+        double byStatus = doc.Status switch
         {
             DocStatus.Superseded => 0.4,
             DocStatus.Draft or DocStatus.NeedsReview => 0.85,
@@ -404,17 +404,17 @@ public sealed class DocumentIndex
     {
         if (string.IsNullOrWhiteSpace(identity)) return 0;
 
-        var parts = TextVectorizer
+        List<string> parts = TextVectorizer
             .Vectorize(identity.Replace('/', ' ').Replace('-', ' '))
             .Keys
             .ToList();
 
         if (parts.Count == 0) return 0;
 
-        var covered = 0;
-        for (var i = 0; i < parts.Count; i++)
+        int covered = 0;
+        for (int i = 0; i < parts.Count; i++)
         {
-            var hit = queryVector.ContainsKey(parts[i])
+            bool hit = queryVector.ContainsKey(parts[i])
                 || (i + 1 < parts.Count && queryVector.ContainsKey(parts[i] + parts[i + 1]))
                 || (i > 0 && queryVector.ContainsKey(parts[i - 1] + parts[i]));
 
@@ -452,31 +452,31 @@ public sealed class DocumentIndex
     {
         if (doc.Sections.Count == 0) return DocumentExcerpt.Empty;
 
-        var ranked = doc.Sections
+        List<(DocumentSection Section, double Score)> ranked = doc.Sections
             .Select(section =>
             {
-                var vector = TextVectorizer.VectorizeFused(section.Heading + "\n" + section.Body);
-                var length = vector.Values.Sum();
-                var score = TextVectorizer.CosineSimilarity(queryVector, vector)
+                Dictionary<string, double> vector = TextVectorizer.VectorizeFused(section.Heading + "\n" + section.Body);
+                double length = vector.Values.Sum();
+                double score = TextVectorizer.CosineSimilarity(queryVector, vector)
                           * (length / (length + SectionSaturation));
                 return (Section: section, Score: score);
             })
             .OrderByDescending(s => s.Score)
             .ToList();
 
-        var chosen = new List<DocumentSection>();
-        var omitted = new List<DocumentSection>();
-        var spent = 0;
-        var budgetExhausted = false;
+        List<DocumentSection> chosen = new List<DocumentSection>();
+        List<DocumentSection> omitted = new List<DocumentSection>();
+        int spent = 0;
+        bool budgetExhausted = false;
 
-        foreach (var (section, score) in ranked)
+        foreach ((DocumentSection? section, double score) in ranked)
         {
-            var cost = section.Heading.Length + section.Body.Length;
+            int cost = section.Heading.Length + section.Body.Length;
 
             // The top section is always included even if it alone exceeds the budget —
             // it gets truncated at the transport edge. Returning nothing but a path would
             // make the tool a directory listing, which is what sent callers to Read.
-            var mustInclude = chosen.Count == 0 && score >= MinSectionScore;
+            bool mustInclude = chosen.Count == 0 && score >= MinSectionScore;
 
             if (score < MinSectionScore && !mustInclude)
             {

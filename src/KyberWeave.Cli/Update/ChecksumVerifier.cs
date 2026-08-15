@@ -14,25 +14,25 @@ internal static class ChecksumVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(sha256SumsText);
         ArgumentException.ThrowIfNullOrWhiteSpace(archiveName);
 
-        using var reader = new StringReader(sha256SumsText);
+        using StringReader reader = new StringReader(sha256SumsText);
         while (reader.ReadLine() is { } line)
         {
             if (line.Length == 0)
                 continue;
 
-            var parts = line.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
+            string[] parts = line.Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 2)
                 continue;
 
-            var hex = parts[0];
+            string hex = parts[0];
             if (hex.Length != 64 || !IsHex(hex))
                 continue;
 
-            var name = parts[1];
+            string name = parts[1];
             if (name.StartsWith('*'))
                 name = name[1..];
 
-            var slash = name.LastIndexOfAny(['/', '\\']);
+            int slash = name.LastIndexOfAny(['/', '\\']);
             if (slash >= 0)
                 name = name[(slash + 1)..];
 
@@ -46,7 +46,7 @@ internal static class ChecksumVerifier
 
     internal static void Verify(string expectedHex, ReadOnlySpan<byte> actualHash, string archiveName)
     {
-        var actual = Convert.ToHexString(actualHash).ToLowerInvariant();
+        string actual = Convert.ToHexString(actualHash).ToLowerInvariant();
         if (!string.Equals(actual, expectedHex, StringComparison.Ordinal))
         {
             throw new SelfUpdateException(
@@ -56,9 +56,9 @@ internal static class ChecksumVerifier
 
     private static bool IsHex(string value)
     {
-        foreach (var c in value)
+        foreach (char c in value)
         {
-            var ok = (c >= '0' && c <= '9')
+            bool ok = (c >= '0' && c <= '9')
                 || (c >= 'a' && c <= 'f')
                 || (c >= 'A' && c <= 'F');
             if (!ok)

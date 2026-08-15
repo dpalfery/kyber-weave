@@ -13,7 +13,7 @@ public static partial class SquadConfigLoader
         ArgumentNullException.ThrowIfNull(defaults);
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
 
-        var document = KyberWeaveYamlParser.ParseFile(yamlPath);
+        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
         return Merge(defaults, document.Squad);
     }
 
@@ -25,14 +25,14 @@ public static partial class SquadConfigLoader
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(cliVersion);
 
-        var match = CliVersionPattern().Match(cliVersion);
+        Match match = CliVersionPattern().Match(cliVersion);
         if (!match.Success)
         {
             throw new YamlException(
                 $"The Kyber-Weave CLI version '{cliVersion}' is not a stable X.Y.Z version.");
         }
 
-        var normalizedCliVersion = match.Groups["version"].Value;
+        string normalizedCliVersion = match.Groups["version"].Value;
         if (config.Version is not null &&
             !string.Equals(config.Version, normalizedCliVersion, StringComparison.Ordinal))
         {
@@ -50,19 +50,19 @@ public static partial class SquadConfigLoader
         if (section is null)
             return defaults;
 
-        var bundle = section.Bundle ?? defaults.Bundle;
+        string bundle = section.Bundle ?? defaults.Bundle;
         if (!string.Equals(bundle, "full", StringComparison.Ordinal))
             throw new YamlException($"squad.bundle '{bundle}' is invalid. Known bundles: full.");
 
-        var version = section.Version ?? defaults.Version;
+        string? version = section.Version ?? defaults.Version;
         if (version is not null && !PinnedVersionPattern().IsMatch(version))
             throw new YamlException("squad.version must be an exact stable X.Y.Z version.");
 
-        var translation = ParseTranslation(section.Translation) ?? defaults.Translation;
-        var targets = section.Targets is null
+        SquadTranslationMode translation = ParseTranslation(section.Translation) ?? defaults.Translation;
+        IReadOnlyList<SquadTarget> targets = section.Targets is null
             ? defaults.Targets
             : ParseTargets(section.Targets, "squad.targets");
-        var exclusions = section.Exclusions is null
+        IReadOnlyList<SquadTarget> exclusions = section.Exclusions is null
             ? defaults.Exclusions
             : ParseTargets(section.Exclusions, "squad.exclusions");
 

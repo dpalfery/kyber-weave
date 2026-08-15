@@ -45,14 +45,14 @@ internal sealed class GitHubReleaseClient : IDisposable
         _client.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
-        var token = readEnvironment("GITHUB_TOKEN") ?? readEnvironment("GH_TOKEN");
+        string? token = readEnvironment("GITHUB_TOKEN") ?? readEnvironment("GH_TOKEN");
         if (!string.IsNullOrWhiteSpace(token))
             _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Trim());
     }
 
     internal string ResolveLatestStable()
     {
-        var json = GetString(LatestApi, "the latest stable release");
+        string json = GetString(LatestApi, "the latest stable release");
         GitHubRelease payload;
         try
         {
@@ -72,7 +72,7 @@ internal sealed class GitHubReleaseClient : IDisposable
 
     internal string ResolveNewestListed()
     {
-        var json = GetString(ReleasesApi, "the GitHub Releases list");
+        string json = GetString(ReleasesApi, "the GitHub Releases list");
         GitHubRelease[] payload;
         try
         {
@@ -84,7 +84,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             throw new SelfUpdateException("could not parse the GitHub Releases list.", ex);
         }
 
-        foreach (var release in payload)
+        foreach (GitHubRelease release in payload)
         {
             if (release.Draft || string.IsNullOrWhiteSpace(release.TagName))
                 continue;
@@ -97,14 +97,14 @@ internal sealed class GitHubReleaseClient : IDisposable
 
     internal string DownloadChecksums(string tag)
     {
-        var uri = AssetUri(tag, "SHA256SUMS.txt");
+        Uri uri = AssetUri(tag, "SHA256SUMS.txt");
         return GetString(uri, $"SHA256SUMS.txt for {tag}");
     }
 
     internal void DownloadAsset(string tag, string archiveName, string destinationPath)
     {
-        var uri = AssetUri(tag, archiveName);
-        using var response = Send(uri);
+        Uri uri = AssetUri(tag, archiveName);
+        using HttpResponseMessage response = Send(uri);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             throw new SelfUpdateException(
@@ -112,8 +112,8 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
 
         EnsureSuccess(response, $"download failed: {uri}");
-        using var destination = File.Create(destinationPath);
-        using var stream = response.Content.ReadAsStream();
+        using FileStream destination = File.Create(destinationPath);
+        using Stream stream = response.Content.ReadAsStream();
         stream.CopyTo(destination);
     }
 
@@ -133,14 +133,14 @@ internal sealed class GitHubReleaseClient : IDisposable
         if (fileName.Contains('/', StringComparison.Ordinal) || fileName.Contains('\\', StringComparison.Ordinal))
             throw new SelfUpdateException($"refusing asset name '{fileName}'.");
 
-        var uri = new Uri(ReleaseDownloadBase, $"{tag}/{fileName}");
+        Uri uri = new Uri(ReleaseDownloadBase, $"{tag}/{fileName}");
         EnsureHttps(uri);
         return uri;
     }
 
     private string GetString(Uri uri, string what)
     {
-        using var response = Send(uri);
+        using HttpResponseMessage response = Send(uri);
         if (response.StatusCode == HttpStatusCode.NotFound)
             throw new SelfUpdateException($"could not download {what}. Does that release exist?");
 
@@ -168,7 +168,7 @@ internal sealed class GitHubReleaseClient : IDisposable
         if (response.IsSuccessStatusCode)
             return;
 
-        var status = (int)response.StatusCode;
+        int status = (int)response.StatusCode;
         throw new SelfUpdateException($"{failure} (HTTP {status}).");
     }
 
@@ -176,8 +176,8 @@ internal sealed class GitHubReleaseClient : IDisposable
     {
         try
         {
-            var normalized = ReleaseVersion.Normalize(version);
-            foreach (var c in normalized)
+            string normalized = ReleaseVersion.Normalize(version);
+            foreach (char c in normalized)
             {
                 if (char.IsAsciiLetterOrDigit(c) || c is '.' or '-')
                     continue;

@@ -6,10 +6,10 @@ namespace KyberWeave.Core.Security;
 /// Shared regex surfaces for scanning untrusted instruction prose (skills and agents).
 /// Pattern text is shared; callers attach their own stable KW-* rule codes.
 /// </summary>
-public static class InstructionSurfacePatterns
+public static partial class InstructionSurfacePatterns
 {
     public static readonly Regex HtmlComment =
-        new(@"<!--(.*?)-->", RegexOptions.Singleline | RegexOptions.Compiled);
+        MyRegex();
 
     public static readonly Regex Base64Blob =
         new(@"[A-Za-z0-9+/]{120,}={0,2}", RegexOptions.Compiled);
@@ -46,4 +46,7 @@ public static class InstructionSurfacePatterns
         ("openai-key", new(@"\bsk-[A-Za-z0-9]{20,}\b", RegexOptions.Compiled), "hardcoded OpenAI-style API key"),
         ("password-assignment", new(@"Password\s*=\s*[^\s;]+", RegexOptions.IgnoreCase | RegexOptions.Compiled), "hardcoded password assignment"),
     };
+
+    [GeneratedRegex(@"<!--(.*?)-->", RegexOptions.Compiled | RegexOptions.Singleline)]
+    private static partial Regex MyRegex();
 }

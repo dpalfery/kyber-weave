@@ -24,23 +24,23 @@ public sealed class DocumentationReviewExchangeTests
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
     [Fact]
-    public void Export_PendingCandidates_UsesVersionedSchemaAndCompleteBoundedEvidence()
+    public void ExportPendingCandidatesUsesVersionedSchemaAndCompleteBoundedEvidence()
     {
-        var exact = Candidate("exact", AnalysisRuleKind.Duplicate, isExact: true);
-        var pending = Candidate(
+        AnalysisCandidate exact = Candidate("exact", AnalysisRuleKind.Duplicate, isExact: true);
+        AnalysisCandidate pending = Candidate(
             "pending",
             AnalysisRuleKind.Conflict,
             sources: [CandidateSourceKind.Graph, CandidateSourceKind.Lexical],
             score: new CandidateScore(0.71, 0.84, 1));
 
-        var result = Exchange().Export([exact, pending]);
+        ReviewExportResult result = Exchange().Export([exact, pending]);
 
         Assert.Equal("kyber-weave.docs-review.candidates/v1", result.Bundle.Schema);
         Assert.Equal(DocumentationAnalyzer.AnalyzerVersion, result.Bundle.AnalyzerVersion);
         Assert.Equal(DocumentationAnalyzer.RubricVersion, result.Bundle.RubricVersion);
         Assert.Matches("^[a-f0-9]{64}$", result.Bundle.CandidateSetHash);
         Assert.Equal(5, result.Bundle.Rubric.Labels.Count);
-        var item = Assert.Single(result.Bundle.Candidates);
+        ReviewCandidateItem item = Assert.Single(result.Bundle.Candidates);
         Assert.Equal(pending.Id, item.CandidateId);
         Assert.Equal(pending.Kind, item.Kind);
         Assert.Equal(pending.Score, item.Score);
@@ -55,24 +55,24 @@ public sealed class DocumentationReviewExchangeTests
             Assert.True(evidence.StartLine > 0);
             Assert.True(evidence.EndLine >= evidence.StartLine);
         });
-        using var json = JsonDocument.Parse(result.Json);
+        using JsonDocument json = JsonDocument.Parse(result.Json);
         Assert.Equal(
             "kyber-weave.docs-review.candidates/v1",
             json.RootElement.GetProperty("schema").GetString());
     }
 
     [Fact]
-    public void Export_LongEvidence_EnforcesPerExcerptAndAggregateCharacterBudgets()
+    public void ExportLongEvidenceEnforcesPerExcerptAndAggregateCharacterBudgets()
     {
-        var candidate = Candidate(
+        AnalysisCandidate candidate = Candidate(
             "bounded",
             AnalysisRuleKind.Conflict,
             claimText: new string('x', 2_000));
-        var options = new ReviewExportOptions(MaxExcerptCharacters: 40, CharacterBudget: 65);
+        ReviewExportOptions options = new ReviewExportOptions(MaxExcerptCharacters: 40, CharacterBudget: 65);
 
-        var result = Exchange().Export([candidate], options);
+        ReviewExportResult result = Exchange().Export([candidate], options);
 
-        var excerpts = Assert.Single(result.Bundle.Candidates).Evidence.Select(item => item.Excerpt).ToArray();
+        string[] excerpts = Assert.Single(result.Bundle.Candidates).Evidence.Select(item => item.Excerpt).ToArray();
         Assert.All(excerpts, excerpt => Assert.True(excerpt.Length <= options.MaxExcerptCharacters));
         Assert.True(excerpts.Sum(excerpt => excerpt.Length) <= options.CharacterBudget);
         Assert.Equal(excerpts.Sum(excerpt => excerpt.Length), result.ExportedExcerptCharacters);
@@ -80,15 +80,15 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Export_CandidateSetHashIsStableAcrossInputOrderAndChangesWithCurrentContent()
+    public void ExportCandidateSetHashIsStableAcrossInputOrderAndChangesWithCurrentContent()
     {
-        var first = Candidate("first", AnalysisRuleKind.Conflict);
-        var second = Candidate("second", AnalysisRuleKind.Terminology, term: "loop");
-        var exchange = Exchange();
+        AnalysisCandidate first = Candidate("first", AnalysisRuleKind.Conflict);
+        AnalysisCandidate second = Candidate("second", AnalysisRuleKind.Terminology, term: "loop");
+        DocumentationReviewExchange exchange = Exchange();
 
-        var ordered = exchange.Export([first, second]).Bundle.CandidateSetHash;
-        var reversed = exchange.Export([second, first]).Bundle.CandidateSetHash;
-        var changed = exchange.Export([
+        string ordered = exchange.Export([first, second]).Bundle.CandidateSetHash;
+        string reversed = exchange.Export([second, first]).Bundle.CandidateSetHash;
+        string changed = exchange.Export([
             first,
             second with
             {
@@ -103,17 +103,17 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Export_UsesCachedVerdictsToReExportLowConfidenceAndUncertainButSuppressConfirmedBenign()
+    public void ExportUsesCachedVerdictsToReExportLowConfidenceAndUncertainButSuppressConfirmedBenign()
     {
-        var low = Candidate("low", AnalysisRuleKind.Duplicate);
-        var uncertain = Candidate("uncertain", AnalysisRuleKind.Conflict);
-        var benign = Candidate("benign", AnalysisRuleKind.Terminology, term: "loop");
-        var persistence = new RecordingPersistence(
+        AnalysisCandidate low = Candidate("low", AnalysisRuleKind.Duplicate);
+        AnalysisCandidate uncertain = Candidate("uncertain", AnalysisRuleKind.Conflict);
+        AnalysisCandidate benign = Candidate("benign", AnalysisRuleKind.Terminology, term: "loop");
+        RecordingPersistence persistence = new RecordingPersistence(
             Verdict(low, AnalysisVerdictLabel.Duplicate, 0.79),
             Verdict(uncertain, AnalysisVerdictLabel.Uncertain, 0.99),
             Verdict(benign, AnalysisVerdictLabel.Benign, 0.95));
 
-        var result = Exchange(persistence, confidence: 0.80).Export([low, uncertain, benign]);
+        ReviewExportResult result = Exchange(persistence, confidence: 0.80).Export([low, uncertain, benign]);
 
         Assert.Equal(
             [low.Id, uncertain.Id],
@@ -121,21 +121,21 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Export_ExcludesEveryHighConfidenceResolvedVerdictButKeepsUncertainPending()
+    public void ExportExcludesEveryHighConfidenceResolvedVerdictButKeepsUncertainPending()
     {
-        var duplicate = Candidate("duplicate", AnalysisRuleKind.Duplicate);
-        var conflict = Candidate("conflict", AnalysisRuleKind.Conflict);
-        var senses = Candidate("senses", AnalysisRuleKind.Terminology, term: "loop");
-        var benign = Candidate("benign", AnalysisRuleKind.Conflict);
-        var uncertain = Candidate("uncertain", AnalysisRuleKind.Conflict);
-        var persistence = new RecordingPersistence(
+        AnalysisCandidate duplicate = Candidate("duplicate", AnalysisRuleKind.Duplicate);
+        AnalysisCandidate conflict = Candidate("conflict", AnalysisRuleKind.Conflict);
+        AnalysisCandidate senses = Candidate("senses", AnalysisRuleKind.Terminology, term: "loop");
+        AnalysisCandidate benign = Candidate("benign", AnalysisRuleKind.Conflict);
+        AnalysisCandidate uncertain = Candidate("uncertain", AnalysisRuleKind.Conflict);
+        RecordingPersistence persistence = new RecordingPersistence(
             Verdict(duplicate, AnalysisVerdictLabel.Duplicate, 0.90),
             Verdict(conflict, AnalysisVerdictLabel.Conflict, 0.90),
             Verdict(senses, AnalysisVerdictLabel.DistinctSenses, 0.90),
             Verdict(benign, AnalysisVerdictLabel.Benign, 0.90),
             Verdict(uncertain, AnalysisVerdictLabel.Uncertain, 0.99));
 
-        var result = Exchange(persistence).Export([duplicate, conflict, senses, benign, uncertain]);
+        ReviewExportResult result = Exchange(persistence).Export([duplicate, conflict, senses, benign, uncertain]);
 
         Assert.Equal([uncertain.Id], result.Bundle.Candidates.Select(item => item.CandidateId));
         Assert.All(
@@ -144,16 +144,16 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Export_EvidenceIdsRemainStableAcrossSourceMovesAndDisambiguateRepeatedContentHashes()
+    public void ExportEvidenceIdsRemainStableAcrossSourceMovesAndDisambiguateRepeatedContentHashes()
     {
-        var original = Candidate("move-stable", AnalysisRuleKind.Conflict);
+        AnalysisCandidate original = Candidate("move-stable", AnalysisRuleKind.Conflict);
         original = original with
         {
             Claims = original.Claims
                 .Select(claim => claim with { ContentHash = "repeated-content" })
                 .ToArray()
         };
-        var moved = original with
+        AnalysisCandidate moved = original with
         {
             Claims = original.Claims
                 .Reverse()
@@ -167,28 +167,28 @@ public sealed class DocumentationReviewExchangeTests
                 })
                 .ToArray()
         };
-        var exchange = Exchange();
+        DocumentationReviewExchange exchange = Exchange();
 
-        var first = Assert.Single(exchange.Export([original]).Bundle.Candidates);
-        var second = Assert.Single(exchange.Export([moved]).Bundle.Candidates);
+        ReviewCandidateItem first = Assert.Single(exchange.Export([original]).Bundle.Candidates);
+        ReviewCandidateItem second = Assert.Single(exchange.Export([moved]).Bundle.Candidates);
 
         Assert.Equal(first.Evidence.Select(item => item.Id), second.Evidence.Select(item => item.Id));
         Assert.Equal(2, first.Evidence.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
-    public void Export_WhenBudgetCannotCoverNextCandidateStopsWithoutEmptyEvidenceAndHashesEmittedSet()
+    public void ExportWhenBudgetCannotCoverNextCandidateStopsWithoutEmptyEvidenceAndHashesEmittedSet()
     {
-        var first = Candidate("a-first", AnalysisRuleKind.Conflict, claimText: "12345");
-        var second = Candidate("b-second", AnalysisRuleKind.Conflict, claimText: "12345");
-        var third = Candidate("c-third", AnalysisRuleKind.Conflict, claimText: "12345");
-        var exchange = Exchange();
-        var options = new ReviewExportOptions(MaxExcerptCharacters: 20, CharacterBudget: 30);
+        AnalysisCandidate first = Candidate("a-first", AnalysisRuleKind.Conflict, claimText: "12345");
+        AnalysisCandidate second = Candidate("b-second", AnalysisRuleKind.Conflict, claimText: "12345");
+        AnalysisCandidate third = Candidate("c-third", AnalysisRuleKind.Conflict, claimText: "12345");
+        DocumentationReviewExchange exchange = Exchange();
+        ReviewExportOptions options = new ReviewExportOptions(MaxExcerptCharacters: 20, CharacterBudget: 30);
 
-        var result = exchange.Export([first, second, third], options);
-        var firstOnly = exchange.Export([first]).Bundle;
+        ReviewExportResult result = exchange.Export([first, second, third], options);
+        ReviewCandidateBundle firstOnly = exchange.Export([first]).Bundle;
 
-        var emitted = Assert.Single(result.Bundle.Candidates);
+        ReviewCandidateItem emitted = Assert.Single(result.Bundle.Candidates);
         Assert.Equal(first.Id, emitted.CandidateId);
         Assert.All(emitted.Evidence, evidence => Assert.NotEmpty(evidence.Excerpt));
         Assert.Equal(firstOnly.CandidateSetHash, result.Bundle.CandidateSetHash);
@@ -196,17 +196,17 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Import_ValidBundlePersistsAllVerdictsInOneAtomicCall()
+    public void ImportValidBundlePersistsAllVerdictsInOneAtomicCall()
     {
-        var candidates = new[]
+        AnalysisCandidate[] candidates = new[]
         {
             Candidate("duplicate", AnalysisRuleKind.Duplicate),
             Candidate("terminology", AnalysisRuleKind.Terminology, term: "loop")
         };
-        var persistence = new RecordingPersistence();
-        var exchange = Exchange(persistence);
-        var export = exchange.Export(candidates).Bundle;
-        var verdicts = VerdictBundle(
+        RecordingPersistence persistence = new RecordingPersistence();
+        DocumentationReviewExchange exchange = Exchange(persistence);
+        ReviewCandidateBundle export = exchange.Export(candidates).Bundle;
+        ReviewVerdictBundle verdicts = VerdictBundle(
             export,
             VerdictItem(export.Candidates[0], AnalysisVerdictLabel.Duplicate),
             VerdictItem(
@@ -221,7 +221,7 @@ public sealed class DocumentationReviewExchangeTests
                         ["Codex loop"])
                 ]));
 
-        var result = exchange.Import(Serialize(verdicts), candidates);
+        ReviewImportResult result = exchange.Import(Serialize(verdicts), candidates);
 
         Assert.True(result.Success, Join(result.Diagnostics));
         Assert.Equal(2, result.ImportedCount);
@@ -241,18 +241,18 @@ public sealed class DocumentationReviewExchangeTests
     [InlineData("evidence-reference")]
     [InlineData("glossary-sense")]
     [InlineData("glossary-blank-scope")]
-    public void Import_WhenAnyBundleContractIsInvalidRejectsEverythingWithReview001(string scenario)
+    public void ImportWhenAnyBundleContractIsInvalidRejectsEverythingWithReview001(string scenario)
     {
-        var candidate = Candidate(
+        AnalysisCandidate candidate = Candidate(
             "review",
             scenario is "glossary-sense" or "glossary-blank-scope"
                 ? AnalysisRuleKind.Terminology
                 : AnalysisRuleKind.Duplicate,
             term: scenario is "glossary-sense" or "glossary-blank-scope" ? "loop" : null);
-        var persistence = new RecordingPersistence();
-        var exchange = Exchange(persistence);
-        var export = exchange.Export([candidate]).Bundle;
-        var item = VerdictItem(
+        RecordingPersistence persistence = new RecordingPersistence();
+        DocumentationReviewExchange exchange = Exchange(persistence);
+        ReviewCandidateBundle export = exchange.Export([candidate]).Bundle;
+        ReviewVerdictItem item = VerdictItem(
             export.Candidates[0],
             scenario is "glossary-sense" or "glossary-blank-scope"
                 ? AnalysisVerdictLabel.DistinctSenses
@@ -265,7 +265,7 @@ public sealed class DocumentationReviewExchangeTests
                     [new ProposedGlossarySense("loop", "Agent cycle.", ["component:   "], [])],
                 _ => null
             });
-        var bundle = VerdictBundle(export, item);
+        ReviewVerdictBundle bundle = VerdictBundle(export, item);
         bundle = scenario switch
         {
             "schema" => bundle with { Schema = "kyber-weave.docs-review.verdicts/v2" },
@@ -297,23 +297,23 @@ public sealed class DocumentationReviewExchangeTests
             _ => throw new InvalidOperationException(scenario)
         };
 
-        var result = exchange.Import(Serialize(bundle), [candidate]);
+        ReviewImportResult result = exchange.Import(Serialize(bundle), [candidate]);
 
         Assert.False(result.Success);
         Assert.Equal(0, result.ImportedCount);
         Assert.Equal(0, persistence.SaveVerdictCallCount);
-        var finding = Assert.Single(result.Diagnostics.Items);
+        Diagnostic finding = Assert.Single(result.Diagnostics.Items);
         Assert.Equal("KW-DOC-REVIEW-001", finding.Code);
         Assert.Equal(Severity.Error, finding.Severity);
     }
 
     [Fact]
-    public void Import_MalformedJsonRejectsWithoutWriting()
+    public void ImportMalformedJsonRejectsWithoutWriting()
     {
-        var candidate = Candidate("malformed", AnalysisRuleKind.Conflict);
-        var persistence = new RecordingPersistence();
+        AnalysisCandidate candidate = Candidate("malformed", AnalysisRuleKind.Conflict);
+        RecordingPersistence persistence = new RecordingPersistence();
 
-        var result = Exchange(persistence).Import("{\"schema\":", [candidate]);
+        ReviewImportResult result = Exchange(persistence).Import("{\"schema\":", [candidate]);
 
         Assert.False(result.Success);
         Assert.Empty(persistence.Verdicts);
@@ -322,21 +322,21 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Import_OneInvalidVerdictRejectsOtherwiseValidVerdictsAtomically()
+    public void ImportOneInvalidVerdictRejectsOtherwiseValidVerdictsAtomically()
     {
-        var first = Candidate("first", AnalysisRuleKind.Duplicate);
-        var second = Candidate("second", AnalysisRuleKind.Conflict);
-        var candidates = new[] { first, second };
-        var persistence = new RecordingPersistence();
-        var exchange = Exchange(persistence);
-        var export = exchange.Export(candidates).Bundle;
-        var valid = VerdictItem(export.Candidates[0], AnalysisVerdictLabel.Duplicate);
-        var invalid = VerdictItem(export.Candidates[1], AnalysisVerdictLabel.Conflict) with
+        AnalysisCandidate first = Candidate("first", AnalysisRuleKind.Duplicate);
+        AnalysisCandidate second = Candidate("second", AnalysisRuleKind.Conflict);
+        AnalysisCandidate[] candidates = new[] { first, second };
+        RecordingPersistence persistence = new RecordingPersistence();
+        DocumentationReviewExchange exchange = Exchange(persistence);
+        ReviewCandidateBundle export = exchange.Export(candidates).Bundle;
+        ReviewVerdictItem valid = VerdictItem(export.Candidates[0], AnalysisVerdictLabel.Duplicate);
+        ReviewVerdictItem invalid = VerdictItem(export.Candidates[1], AnalysisVerdictLabel.Conflict) with
         {
             EvidenceIds = ["not-in-export"]
         };
 
-        var result = exchange.Import(Serialize(VerdictBundle(export, valid, invalid)), candidates);
+        ReviewImportResult result = exchange.Import(Serialize(VerdictBundle(export, valid, invalid)), candidates);
 
         Assert.False(result.Success);
         Assert.Equal(0, persistence.SaveVerdictCallCount);
@@ -344,37 +344,37 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Import_HighConfidenceBenignThenExportUnchangedCandidateSuppressesIt()
+    public void ImportHighConfidenceBenignThenExportUnchangedCandidateSuppressesIt()
     {
-        var candidate = Candidate("benign-round-trip", AnalysisRuleKind.Conflict);
-        var persistence = new RecordingPersistence();
-        var exchange = Exchange(persistence, confidence: 0.80);
-        var exported = exchange.Export([candidate]).Bundle;
-        var bundle = VerdictBundle(
+        AnalysisCandidate candidate = Candidate("benign-round-trip", AnalysisRuleKind.Conflict);
+        RecordingPersistence persistence = new RecordingPersistence();
+        DocumentationReviewExchange exchange = Exchange(persistence, confidence: 0.80);
+        ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;
+        ReviewVerdictBundle bundle = VerdictBundle(
             exported,
             VerdictItem(exported.Candidates[0], AnalysisVerdictLabel.Benign, confidence: 0.90));
 
-        var imported = exchange.Import(Serialize(bundle), [candidate]);
-        var reExported = exchange.Export([candidate]);
+        ReviewImportResult imported = exchange.Import(Serialize(bundle), [candidate]);
+        ReviewExportResult reExported = exchange.Export([candidate]);
 
         Assert.True(imported.Success, Join(imported.Diagnostics));
         Assert.Empty(reExported.Bundle.Candidates);
     }
 
     [Fact]
-    public void Import_RealSqliteAfterCurrentExport_PersistsClaimsFingerprintsAndVerdictAtomically()
+    public void ImportRealSqliteAfterCurrentExportPersistsClaimsFingerprintsAndVerdictAtomically()
     {
         RequireSqlite();
-        using var repository = SafeRepository();
+        using TempDirectory repository = SafeRepository();
         IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
-        var candidate = Candidate("sqlite-round-trip", AnalysisRuleKind.Conflict);
-        var exchange = new DocumentationReviewExchange(persistence);
-        var exported = exchange.Export([candidate]).Bundle;
-        var bundle = VerdictBundle(
+        AnalysisCandidate candidate = Candidate("sqlite-round-trip", AnalysisRuleKind.Conflict);
+        DocumentationReviewExchange exchange = new DocumentationReviewExchange(persistence);
+        ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;
+        ReviewVerdictBundle bundle = VerdictBundle(
             exported,
             VerdictItem(exported.Candidates[0], AnalysisVerdictLabel.Benign));
 
-        var imported = exchange.Import(Serialize(bundle), [candidate]);
+        ReviewImportResult imported = exchange.Import(Serialize(bundle), [candidate]);
 
         Assert.True(imported.Success, Join(imported.Diagnostics));
         Assert.Equal(2, persistence.LoadClaims(CurrentClaimIds(persistence)).Count);
@@ -387,20 +387,20 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void Import_RealSqliteWhenVerdictWriteFails_RollsBackClaimsFingerprintsAndVerdicts()
+    public void ImportRealSqliteWhenVerdictWriteFailsRollsBackClaimsFingerprintsAndVerdicts()
     {
         RequireSqlite();
-        using var repository = SafeRepository();
-        var persistence = new SqliteAnalysisPersistence(repository.Path);
-        var candidate = Candidate("sqlite-rollback", AnalysisRuleKind.Conflict);
-        var exchange = new DocumentationReviewExchange(persistence);
-        var exported = exchange.Export([candidate]).Bundle;
+        using TempDirectory repository = SafeRepository();
+        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        AnalysisCandidate candidate = Candidate("sqlite-rollback", AnalysisRuleKind.Conflict);
+        DocumentationReviewExchange exchange = new DocumentationReviewExchange(persistence);
+        ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;
         RunSqlite(
             persistence.DatabasePath,
             "CREATE TRIGGER reject_review BEFORE INSERT ON analysis_verdicts " +
             "BEGIN SELECT RAISE(ABORT, 'forced review failure'); END;");
 
-        var imported = exchange.Import(
+        ReviewImportResult imported = exchange.Import(
             Serialize(VerdictBundle(
                 exported,
                 VerdictItem(exported.Candidates[0], AnalysisVerdictLabel.Benign))),
@@ -426,7 +426,7 @@ public sealed class DocumentationReviewExchangeTests
         IReadOnlyList<CandidateSourceKind>? sources = null,
         CandidateScore? score = null)
     {
-        var claims = new[]
+        Claim[] claims = new[]
         {
             Claim(id + "-left", "hash-" + id + "-left", claimText, 10),
             Claim(id + "-right", "hash-" + id + "-right", claimText + " Related context.", 20)
@@ -503,8 +503,8 @@ public sealed class DocumentationReviewExchangeTests
 
     private static TempDirectory SafeRepository()
     {
-        var repository = new TempDirectory();
-        var stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
+        TempDirectory repository = new TempDirectory();
+        string stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), "cache/\n");
         return repository;
@@ -512,7 +512,7 @@ public sealed class DocumentationReviewExchangeTests
 
     private static void RequireSqlite()
     {
-        var startInfo = SqliteStartInfo();
+        ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("--version");
         try
         {
@@ -527,14 +527,14 @@ public sealed class DocumentationReviewExchangeTests
 
     private static string QuerySqlite(string databasePath, string sql)
     {
-        var result = RunSqlite(databasePath, sql);
+        ProcessResult result = RunSqlite(databasePath, sql);
         Assert.Equal(0, result.ExitCode);
         return result.StandardOutput;
     }
 
     private static ProcessResult RunSqlite(string databasePath, string sql)
     {
-        var startInfo = SqliteStartInfo();
+        ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("-batch");
         startInfo.ArgumentList.Add("-bail");
         startInfo.ArgumentList.Add(databasePath);
@@ -551,7 +551,7 @@ public sealed class DocumentationReviewExchangeTests
 
     private static JsonSerializerOptions CreateJsonOptions()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
         return options;
     }
@@ -573,7 +573,7 @@ public sealed class DocumentationReviewExchangeTests
         public void SaveVerdicts(IReadOnlyCollection<AnalysisVerdict> imported)
         {
             SaveVerdictCallCount++;
-            foreach (var verdict in imported) Verdicts[verdict.CandidateId] = verdict;
+            foreach (AnalysisVerdict verdict in imported) Verdicts[verdict.CandidateId] = verdict;
         }
 
         public IReadOnlyDictionary<EmbeddingCacheKey, StoredEmbedding> LoadEmbeddings(

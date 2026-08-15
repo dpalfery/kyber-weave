@@ -11,13 +11,13 @@ namespace KyberWeave.Tests;
 public class VersionRetrievalTests
 {
     [Fact]
-    public void CliAssembly_VersionRetrieval_ReturnsConfiguredVersion()
+    public void CliAssemblyVersionRetrievalReturnsConfiguredVersion()
     {
         // Arrange
-        var assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
+        Assembly assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
 
         // Act
-        var version = GetVersionFromAssembly(assembly);
+        string version = GetVersionFromAssembly(assembly);
 
         // Assert
         Assert.NotNull(version);
@@ -26,13 +26,13 @@ public class VersionRetrievalTests
     }
 
     [Fact]
-    public void McpAssembly_VersionRetrieval_ReturnsConfiguredVersion()
+    public void McpAssemblyVersionRetrievalReturnsConfiguredVersion()
     {
         // Arrange
-        var assembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
+        Assembly assembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
 
         // Act
-        var version = GetVersionFromAssembly(assembly);
+        string version = GetVersionFromAssembly(assembly);
 
         // Assert
         Assert.NotNull(version);
@@ -41,26 +41,26 @@ public class VersionRetrievalTests
     }
 
     [Fact]
-    public void GetVersionFromAssembly_PrefersInformationalVersion_OverAssemblyVersion()
+    public void GetVersionFromAssemblyPrefersInformationalVersionOverAssemblyVersion()
     {
         // Arrange
-        var assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
-        var expectedInformationalVersion = assembly
+        Assembly assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
+        string? expectedInformationalVersion = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
         // Act
-        var version = GetVersionFromAssembly(assembly);
+        string version = GetVersionFromAssembly(assembly);
 
         // Assert
         Assert.Equal(expectedInformationalVersion, version);
     }
 
     [Fact]
-    public void GetVersionFromAssembly_ReturnsFallback_WhenNoVersionAttributesPresent()
+    public void GetVersionFromAssemblyReturnsFallbackWhenNoVersionAttributesPresent()
     {
         // Arrange: string assembly (System.Private.CoreLib) may or may not have InformationalVersion,
         // but we test our helper with a custom resolution path.
-        var dummyVersion = GetVersionFromAssembly(null);
+        string dummyVersion = GetVersionFromAssembly(null);
 
         // Assert
         Assert.Equal("0.0.0", dummyVersion);
@@ -69,13 +69,13 @@ public class VersionRetrievalTests
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
-    public void Cli_VersionFlag_OutputsApplicationVersionAndExitsZero(string flag)
+    public void CliVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
     {
         // Arrange
-        var assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
+        Assembly assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
 
         // Act
-        var result = RunAssembly(assembly, flag);
+        ProcessResult result = RunAssembly(assembly, flag);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -86,13 +86,13 @@ public class VersionRetrievalTests
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
-    public void Mcp_VersionFlag_OutputsApplicationVersionAndExitsZero(string flag)
+    public void McpVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
     {
         // Arrange
-        var assembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
+        Assembly assembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
 
         // Act
-        var result = RunAssembly(assembly, flag);
+        ProcessResult result = RunAssembly(assembly, flag);
 
         // Assert
         Assert.Equal(0, result.ExitCode);
@@ -107,13 +107,13 @@ public class VersionRetrievalTests
             return "0.0.0";
         }
 
-        var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(infoVersion))
         {
             return infoVersion;
         }
 
-        var nameVersion = assembly.GetName().Version;
+        Version? nameVersion = assembly.GetName().Version;
         if (nameVersion is not null)
         {
             return nameVersion.ToString();
@@ -124,19 +124,19 @@ public class VersionRetrievalTests
 
     private static ProcessResult RunAssembly(Assembly assembly, params string[] args)
     {
-        var startInfo = new ProcessStartInfo("dotnet")
+        ProcessStartInfo startInfo = new ProcessStartInfo("dotnet")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
         };
         startInfo.ArgumentList.Add(assembly.Location);
-        foreach (var arg in args)
+        foreach (string arg in args)
         {
             startInfo.ArgumentList.Add(arg);
         }
 
-        using var process = Process.Start(startInfo)
+        using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"Could not start dotnet process for '{assembly.Location}'.");
 
         return ProcessRunner.ReadToEnd(process);

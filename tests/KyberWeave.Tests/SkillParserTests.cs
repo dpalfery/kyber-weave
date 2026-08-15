@@ -1,3 +1,4 @@
+using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using Xunit;
 
@@ -26,9 +27,9 @@ See scripts/run.py for details.
 """;
 
     [Fact]
-    public void Parses_frontmatter_fields()
+    public void ParsesFrontmatterFields()
     {
-        var skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
+        Skill skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
         Assert.Equal("my-skill", skill.Frontmatter.Name);
         Assert.StartsWith("Use to do a thing", skill.Frontmatter.Description);
         Assert.Equal("MIT", skill.Frontmatter.License);
@@ -37,32 +38,32 @@ See scripts/run.py for details.
     }
 
     [Fact]
-    public void Separates_body_from_frontmatter()
+    public void SeparatesBodyFromFrontmatter()
     {
-        var skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
+        Skill skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
         Assert.Contains("ALWAYS verify first.", skill.InstructionsBody);
         Assert.DoesNotContain("name: my-skill", skill.InstructionsBody);
     }
 
     [Fact]
-    public void Extracts_reference_links()
+    public void ExtractsReferenceLinks()
     {
-        var skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/nonexistent-dir");
+        Skill skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/nonexistent-dir");
         Assert.Contains(skill.ReferenceLinks, l => l.Target.Contains("scripts/run.py"));
         // directory does not exist, so it should not resolve
         Assert.All(skill.ReferenceLinks, l => Assert.False(l.Resolves));
     }
 
     [Fact]
-    public void Captures_unknown_keys()
+    public void CapturesUnknownKeys()
     {
-        var content = "---\nname: x\ndescription: d\nmystery: 42\n---\n\nbody";
-        var skill = SkillParser.Parse(content, "/tmp/x/SKILL.md", "/tmp/x");
+        string content = "---\nname: x\ndescription: d\nmystery: 42\n---\n\nbody";
+        Skill skill = SkillParser.Parse(content, "/tmp/x/SKILL.md", "/tmp/x");
         Assert.True(skill.Frontmatter.UnknownKeys.ContainsKey("mystery"));
     }
 
     [Fact]
-    public void Throws_on_missing_frontmatter()
+    public void ThrowsOnMissingFrontmatter()
     {
         Assert.Throws<SkillParseException>(() =>
             SkillParser.Parse("# Just a heading\nno frontmatter", "/tmp/x/SKILL.md", "/tmp/x"));

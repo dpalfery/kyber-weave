@@ -75,8 +75,8 @@ public static partial class DescriptionScorer
 
     public static DescriptionScore Score(Skill skill)
     {
-        var d = (skill.Frontmatter.Description ?? string.Empty).Trim();
-        var components = new List<ScoreComponent>();
+        string d = (skill.Frontmatter.Description ?? string.Empty).Trim();
+        List<ScoreComponent> components = new List<ScoreComponent>();
 
         if (string.IsNullOrWhiteSpace(d))
         {
@@ -107,8 +107,8 @@ public static partial class DescriptionScorer
             components.Add(new ScoreComponent("Specific opening", 7, 15, "Opening is acceptable but could lead with a stronger action verb."));
 
         // 4. Concrete trigger keywords / specificity via lexical richness (15)
-        var distinctTerms = Text.TextVectorizer.Vectorize(d).Count;
-        var kwPoints = distinctTerms switch
+        int distinctTerms = Text.TextVectorizer.Vectorize(d).Count;
+        int kwPoints = distinctTerms switch
         {
             >= 8 => 15,
             >= 5 => 10,
@@ -122,7 +122,7 @@ public static partial class DescriptionScorer
         // 5. Length within a routable budget (15): too short = under-specified, too long = noisy
         int lenPoints;
         string lenDetail;
-        var len = d.Length;
+        int len = d.Length;
         if (len < 40) { lenPoints = 5; lenDetail = $"{len} chars — likely under-specified for reliable routing."; }
         else if (len <= 500) { lenPoints = 15; lenDetail = $"{len} chars — within a healthy routing budget."; }
         else if (len <= SpecValidator.DescriptionMaxLength) { lenPoints = 10; lenDetail = $"{len} chars — long; trim to the routing essentials."; }

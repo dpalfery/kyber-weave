@@ -26,16 +26,16 @@ public sealed class SquadReleaseClientTests : IDisposable
     private readonly TempDirectory _temp = new();
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WithExactPublishedChecksum_UsesTheReleasePortAndReturnsArchiveIdentity()
+    public async Task DownloadAndExtractAsyncWithExactPublishedChecksumUsesTheReleasePortAndReturnsArchiveIdentity()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        var checksum = Sha256(archiveBytes);
-        using var handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        using RoutingHandler handler = ReleaseHandler(archiveBytes, $"{checksum}  {AssetName}\n");
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
-        var destination = Path.Combine(_temp.Path, "squad");
-        var request = new SquadReleaseRequest(Repository, Version, destination);
+        string destination = Path.Combine(_temp.Path, "squad");
+        SquadReleaseRequest request = new SquadReleaseRequest(Repository, Version, destination);
 
-        var result = await source.DownloadAndExtractAsync(request, CancellationToken.None);
+        SquadReleaseResult result = await source.DownloadAndExtractAsync(request, CancellationToken.None);
 
         Assert.Equal(Version, result.Version);
         Assert.Equal(AssetName, result.Asset.Name);
@@ -52,16 +52,16 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WithHttpApiOrigin_RejectsBeforeRequestOrFilesystemChange()
+    public async Task DownloadAndExtractAsyncWithHttpApiOriginRejectsBeforeRequestOrFilesystemChange()
     {
-        using var handler = new RoutingHandler();
+        using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
-        var before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(
             handler,
             new Uri("http://api.github.test/"));
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         Assert.Contains("HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -70,26 +70,26 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public void Constructor_WithRedirectFollowingHandler_RejectsTheUnsafeTransportContract()
+    public void ConstructorWithRedirectFollowingHandlerRejectsTheUnsafeTransportContract()
     {
-        using var handler = new HttpClientHandler
+        using HttpClientHandler handler = new HttpClientHandler
         {
             AllowAutoRedirect = true
         };
 
-        var exception = Assert.Throws<ArgumentException>(() =>
+        ArgumentException exception = Assert.Throws<ArgumentException>(() =>
             new GitHubSquadReleaseSource(handler, ApiRoot));
 
         Assert.Contains("redirect", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void Constructor_WithDefaultRedirectFollowingSocketsHandler_RejectsTheUnsafeTransportContract()
+    public void ConstructorWithDefaultRedirectFollowingSocketsHandlerRejectsTheUnsafeTransportContract()
     {
-        using var handler = new SocketsHttpHandler();
+        using SocketsHttpHandler handler = new SocketsHttpHandler();
         Assert.True(handler.AllowAutoRedirect);
 
-        var exception = Assert.Throws<ArgumentException>(() =>
+        ArgumentException exception = Assert.Throws<ArgumentException>(() =>
             new GitHubSquadReleaseSource(handler, ApiRoot));
 
         Assert.Contains("redirect", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -100,19 +100,19 @@ public sealed class SquadReleaseClientTests : IDisposable
     [InlineData("1.2.3+build.1")]
     [InlineData("not-a-version")]
     [InlineData("01.2.3")]
-    public async Task DownloadAndExtractAsync_WithNonStableReleaseVersion_RejectsBeforeHttpRequest(
+    public async Task DownloadAndExtractAsyncWithNonStableReleaseVersionRejectsBeforeHttpRequest(
         string version)
     {
-        using var handler = new RoutingHandler();
+        using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
-        var before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
-        var request = new SquadReleaseRequest(
+        SquadReleaseRequest request = new SquadReleaseRequest(
             Repository,
             version,
             Path.Combine(_temp.Path, "destination"));
 
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+        ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() =>
             source.DownloadAndExtractAsync(request, CancellationToken.None));
 
         Assert.Contains("stable X.Y.Z", exception.Message, StringComparison.Ordinal);
@@ -121,37 +121,37 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WithHttpsRedirect_FollowsRedirectAndVerifiesFinalAsset()
+    public async Task DownloadAndExtractAsyncWithHttpsRedirectFollowsRedirectAndVerifiesFinalAsset()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        var checksum = Sha256(archiveBytes);
-        using var handler = ReleaseHandler(
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        using RoutingHandler handler = ReleaseHandler(
             archiveBytes,
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: new Uri("https://objects.github.test/squad.zip"));
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
-        var result = await source.DownloadAndExtractAsync(Request(), CancellationToken.None);
+        SquadReleaseResult result = await source.DownloadAndExtractAsync(Request(), CancellationToken.None);
 
         Assert.Equal(checksum, result.Checksum.Sha256);
         Assert.Contains(new Uri("https://objects.github.test/squad.zip"), handler.Requests);
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WithRedirectDowngradeToHttp_RejectsBeforeFollowingOrChangingState()
+    public async Task DownloadAndExtractAsyncWithRedirectDowngradeToHttpRejectsBeforeFollowingOrChangingState()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        var checksum = Sha256(archiveBytes);
-        var insecureLocation = new Uri("http://objects.github.test/squad.zip");
-        using var handler = ReleaseHandler(
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        Uri insecureLocation = new Uri("http://objects.github.test/squad.zip");
+        using RoutingHandler handler = ReleaseHandler(
             archiveBytes,
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: insecureLocation);
         SeedDestinationAndState();
-        var before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         Assert.Contains("HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -160,11 +160,11 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenReleaseOmitsChecksumAsset_RejectsBeforeArchiveRequestOrFilesystemChange()
+    public async Task DownloadAndExtractAsyncWhenReleaseOmitsChecksumAssetRejectsBeforeArchiveRequestOrFilesystemChange()
     {
-        var archiveUri = new Uri("https://downloads.github.test/" + AssetName);
-        var releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
-        using var handler = new RoutingHandler();
+        Uri archiveUri = new Uri("https://downloads.github.test/" + AssetName);
+        Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
+        using RoutingHandler handler = new RoutingHandler();
         handler.Enqueue(releaseUri, () => JsonResponse($$"""
             {
               "tag_name": "v{{Version}}",
@@ -178,10 +178,10 @@ public sealed class SquadReleaseClientTests : IDisposable
             }
             """));
         SeedDestinationAndState();
-        var before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
-        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+        InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         Assert.Contains("SHA256SUMS.txt", exception.Message, StringComparison.Ordinal);
@@ -190,13 +190,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenChecksumHasOnlyLookalikeNames_RejectsMissingExactAssetRow()
+    public async Task DownloadAndExtractAsyncWhenChecksumHasOnlyLookalikeNamesRejectsMissingExactAssetRow()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        var checksum = Sha256(archiveBytes);
-        var manifest = $"{checksum}  nested/{AssetName}\n{checksum}  {AssetName}.sig\n";
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        string manifest = $"{checksum}  nested/{AssetName}\n{checksum}  {AssetName}.sig\n";
 
-        var exception = await DownloadFailure(archiveBytes, manifest);
+        Exception exception = await DownloadFailure(archiveBytes, manifest);
 
         Assert.Contains("checksum", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(AssetName, exception.Message, StringComparison.Ordinal);
@@ -206,13 +206,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     [InlineData(" ")]
     [InlineData("\t")]
     [InlineData(" *")]
-    public async Task DownloadAndExtractAsync_WhenChecksumRowDoesNotUseExactSha256sumTextFormat_RejectsIt(
+    public async Task DownloadAndExtractAsyncWhenChecksumRowDoesNotUseExactSha256sumTextFormatRejectsIt(
         string separator)
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        var checksum = Sha256(archiveBytes);
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
 
-        var exception = await DownloadFailure(
+        Exception exception = await DownloadFailure(
             archiveBytes,
             $"{checksum}{separator}{AssetName}\n");
 
@@ -221,13 +221,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenChecksumRowIsDuplicated_RejectsAmbiguousDigest()
+    public async Task DownloadAndExtractAsyncWhenChecksumRowIsDuplicatedRejectsAmbiguousDigest()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        var checksum = Sha256(archiveBytes);
-        var manifest = $"{checksum}  {AssetName}\n{checksum}  {AssetName}\n";
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        string manifest = $"{checksum}  {AssetName}\n{checksum}  {AssetName}\n";
 
-        var exception = await DownloadFailure(archiveBytes, manifest);
+        Exception exception = await DownloadFailure(archiveBytes, manifest);
 
         Assert.Contains("duplicate", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(AssetName, exception.Message, StringComparison.Ordinal);
@@ -235,13 +235,13 @@ public sealed class SquadReleaseClientTests : IDisposable
 
     [Theory]
     [MemberData(nameof(AmbiguousChecksumManifests))]
-    public async Task DownloadAndExtractAsync_WhenExactFilenameHasValidAndInvalidRows_RejectsAmbiguity(
+    public async Task DownloadAndExtractAsyncWhenExactFilenameHasValidAndInvalidRowsRejectsAmbiguity(
         string manifest)
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         manifest = manifest.Replace("{digest}", Sha256(archiveBytes), StringComparison.Ordinal);
 
-        var exception = await DownloadFailure(archiveBytes, manifest);
+        Exception exception = await DownloadFailure(archiveBytes, manifest);
 
         Assert.Contains("duplicate", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(AssetName, exception.Message, StringComparison.Ordinal);
@@ -254,12 +254,12 @@ public sealed class SquadReleaseClientTests : IDisposable
     };
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenAssetDigestDiffers_RejectsBeforeExtraction()
+    public async Task DownloadAndExtractAsyncWhenAssetDigestDiffersRejectsBeforeExtraction()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        var wrongChecksum = new string('0', 64);
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string wrongChecksum = new string('0', 64);
 
-        var exception = await DownloadFailure(archiveBytes, $"{wrongChecksum}  {AssetName}\n");
+        Exception exception = await DownloadFailure(archiveBytes, $"{wrongChecksum}  {AssetName}\n");
 
         Assert.Contains("checksum", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(AssetName, exception.Message, StringComparison.Ordinal);
@@ -272,12 +272,12 @@ public sealed class SquadReleaseClientTests : IDisposable
     [InlineData("C:/absolute.txt")]
     [InlineData("C:\\absolute.txt")]
     [InlineData("\\\\server\\share\\absolute.txt")]
-    public async Task DownloadAndExtractAsync_WhenArchivePathEscapesOrIsRooted_RejectsWholeArchive(
+    public async Task DownloadAndExtractAsyncWhenArchivePathEscapesOrIsRootedRejectsWholeArchive(
         string entryName)
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"), (entryName, "escape"));
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"), (entryName, "escape"));
 
-        var exception = await DownloadFailure(
+        Exception exception = await DownloadFailure(
             archiveBytes,
             $"{Sha256(archiveBytes)}  {AssetName}\n");
 
@@ -288,12 +288,12 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Theory]
     [InlineData("payload/real.txt")]
     [InlineData("../../outside.txt")]
-    public async Task DownloadAndExtractAsync_WhenArchiveContainsSymlinkEntry_RejectsWholeArchive(
+    public async Task DownloadAndExtractAsyncWhenArchiveContainsSymlinkEntryRejectsWholeArchive(
         string linkTarget)
     {
-        var archiveBytes = CreateArchiveWithSymlink("payload/link", linkTarget);
+        byte[] archiveBytes = CreateArchiveWithSymlink("payload/link", linkTarget);
 
-        var exception = await DownloadFailure(
+        Exception exception = await DownloadFailure(
             archiveBytes,
             $"{Sha256(archiveBytes)}  {AssetName}\n");
 
@@ -301,22 +301,22 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenExistingDestinationDirectoryIsSymlink_RejectsEscapeWithoutFollowingIt()
+    public async Task DownloadAndExtractAsyncWhenExistingDestinationDirectoryIsSymlinkRejectsEscapeWithoutFollowingIt()
     {
         if (OperatingSystem.IsWindows()) return; // CI runs Linux; the containment rule is platform-independent.
 
-        var destination = Path.Combine(_temp.Path, "destination");
-        var outside = Path.Combine(_temp.Path, "outside");
-        var state = Path.Combine(_temp.Path, ".kyber-weave");
+        string destination = Path.Combine(_temp.Path, "destination");
+        string outside = Path.Combine(_temp.Path, "outside");
+        string state = Path.Combine(_temp.Path, ".kyber-weave");
         Directory.CreateDirectory(destination);
         Directory.CreateDirectory(outside);
         Directory.CreateDirectory(state);
-        var outsideFile = Path.Combine(outside, "manifest.json");
+        string outsideFile = Path.Combine(outside, "manifest.json");
         await File.WriteAllTextAsync(
             outsideFile,
             "outside must stay unchanged",
             CancellationToken.None);
-        var linkedDirectory = Path.Combine(destination, "payload");
+        string linkedDirectory = Path.Combine(destination, "payload");
         Directory.CreateSymbolicLink(linkedDirectory, outside);
         await File.WriteAllTextAsync(
             Path.Combine(state, "squad.lock.yml"),
@@ -326,12 +326,12 @@ public sealed class SquadReleaseClientTests : IDisposable
             Path.Combine(state, "squad.receipt.json"),
             "preserve receipt",
             CancellationToken.None);
-        var before = SnapshotTree();
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        using var handler = ReleaseHandler(archiveBytes, $"{Sha256(archiveBytes)}  {AssetName}\n");
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        using RoutingHandler handler = ReleaseHandler(archiveBytes, $"{Sha256(archiveBytes)}  {AssetName}\n");
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
-        var exception = await Assert.ThrowsAnyAsync<Exception>(() =>
+        Exception exception = await Assert.ThrowsAnyAsync<Exception>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         Assert.Contains("symbolic link", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -343,11 +343,11 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenArchiveIsInvalid_RejectsWithoutDestinationOrStateChanges()
+    public async Task DownloadAndExtractAsyncWhenArchiveIsInvalidRejectsWithoutDestinationOrStateChanges()
     {
-        var invalidArchive = Encoding.UTF8.GetBytes("not a zip archive");
+        byte[] invalidArchive = Encoding.UTF8.GetBytes("not a zip archive");
 
-        var exception = await DownloadFailure(
+        Exception exception = await DownloadFailure(
             invalidArchive,
             $"{Sha256(invalidArchive)}  {AssetName}\n");
 
@@ -355,16 +355,16 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenCancellationArrivesBeforeArchiveValidation_CancelsWithoutPublishing()
+    public async Task DownloadAndExtractAsyncWhenCancellationArrivesBeforeArchiveValidationCancelsWithoutPublishing()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        using var cancellation = new CancellationTokenSource();
-        using var handler = ReleaseHandler(
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        using CancellationTokenSource cancellation = new CancellationTokenSource();
+        using RoutingHandler handler = ReleaseHandler(
             archiveBytes,
             $"{Sha256(archiveBytes)}  {AssetName}\n",
             cancelAfterArchiveRead: cancellation);
         SeedStateOnly();
-        var before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
@@ -374,16 +374,16 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndExtractAsync_WhenCancellationArrivesAfterStagingStarts_CancelsBeforePublish()
+    public async Task DownloadAndExtractAsyncWhenCancellationArrivesAfterStagingStartsCancelsBeforePublish()
     {
-        var archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        using var cancellation = new CancellationTokenSource();
-        var stagingCreated = false;
-        using var handler = ReleaseHandler(
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        using CancellationTokenSource cancellation = new CancellationTokenSource();
+        bool stagingCreated = false;
+        using RoutingHandler handler = ReleaseHandler(
             archiveBytes,
             $"{Sha256(archiveBytes)}  {AssetName}\n");
         SeedStateOnly();
-        var before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(
             handler,
             ApiRoot,
@@ -407,14 +407,14 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Theory]
     [InlineData("apm, version 1.2.3", "1.2.3")]
     [InlineData("apm, version 1.2.3-beta.2+build.7", "1.2.3-beta.2+build.7")]
-    public void ApmProcessProbe_WithExactSemanticVersion_UsesBarePathExecutableAndReturnsExactVersion(
+    public void ApmProcessProbeWithExactSemanticVersionUsesBarePathExecutableAndReturnsExactVersion(
         string standardOutput,
         string expectedVersion)
     {
-        var executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput + "\n", string.Empty));
-        var probe = new ApmProcessProbe(executor);
+        RecordingProcessExecutor executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput + "\n", string.Empty));
+        ApmProcessProbe probe = new ApmProcessProbe(executor);
 
-        var result = probe.Probe();
+        ToolProbeResult result = probe.Probe();
 
         Assert.True(result.IsAvailable);
         Assert.Equal(expectedVersion, result.Version);
@@ -423,13 +423,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public void McpProcessProbe_WithExactSemanticVersion_UsesBarePathExecutableAndReturnsExactVersion()
+    public void McpProcessProbeWithExactSemanticVersionUsesBarePathExecutableAndReturnsExactVersion()
     {
-        var executor = new RecordingProcessExecutor(
+        RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new ProcessResult(0, "kyber-weave-mcp 1.2.3\n", string.Empty));
-        var probe = new McpProcessProbe(executor);
+        McpProcessProbe probe = new McpProcessProbe(executor);
 
-        var result = probe.Probe();
+        ToolProbeResult result = probe.Probe();
 
         Assert.True(result.IsAvailable);
         Assert.Equal(Version, result.Version);
@@ -443,13 +443,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     [InlineData("apm, version v1.2.3")]
     [InlineData("apm, version 1.2.3 trailing")]
     [InlineData("noise\napm, version 1.2.3")]
-    public void ApmProcessProbe_WhenOutputIsNotTheExactToolEnvelopeAndSemanticVersion_RejectsIt(
+    public void ApmProcessProbeWhenOutputIsNotTheExactToolEnvelopeAndSemanticVersionRejectsIt(
         string standardOutput)
     {
-        var executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput, string.Empty));
-        var probe = new ApmProcessProbe(executor);
+        RecordingProcessExecutor executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput, string.Empty));
+        ApmProcessProbe probe = new ApmProcessProbe(executor);
 
-        var result = probe.Probe();
+        ToolProbeResult result = probe.Probe();
 
         Assert.True(result.IsAvailable);
         Assert.Null(result.Version);
@@ -462,13 +462,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     [InlineData("kyber-weave-mcp v1.2.3")]
     [InlineData("kyber-weave-mcp 1.2.3 extra")]
     [InlineData("kyber-weave 1.2.3")]
-    public void McpProcessProbe_WhenOutputIsNotTheExactToolEnvelopeAndSemanticVersion_RejectsIt(
+    public void McpProcessProbeWhenOutputIsNotTheExactToolEnvelopeAndSemanticVersionRejectsIt(
         string standardOutput)
     {
-        var executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput, string.Empty));
-        var probe = new McpProcessProbe(executor);
+        RecordingProcessExecutor executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput, string.Empty));
+        McpProcessProbe probe = new McpProcessProbe(executor);
 
-        var result = probe.Probe();
+        ToolProbeResult result = probe.Probe();
 
         Assert.True(result.IsAvailable);
         Assert.Null(result.Version);
@@ -477,13 +477,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public void ProcessProbes_WhenToolIsMissing_ReportUnavailableWithoutDisclosingStartupDetails()
+    public void ProcessProbesWhenToolIsMissingReportUnavailableWithoutDisclosingStartupDetails()
     {
-        var executor = new RecordingProcessExecutor(
+        RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new Win32Exception($"PATH={Secret}; Authorization=Bearer {Secret}"));
-        var probe = new ApmProcessProbe(executor);
+        ApmProcessProbe probe = new ApmProcessProbe(executor);
 
-        var result = probe.Probe();
+        ToolProbeResult result = probe.Probe();
 
         Assert.False(result.IsAvailable);
         Assert.Null(result.Version);
@@ -492,16 +492,16 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
-    public void ProcessProbes_WhenToolFails_DoNotExposeStandardStreamsEnvironmentOrAuthorization()
+    public void ProcessProbesWhenToolFailsDoNotExposeStandardStreamsEnvironmentOrAuthorization()
     {
-        var executor = new RecordingProcessExecutor(
+        RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new ProcessResult(
                 17,
                 $"GH_TOKEN={Secret}",
                 $"Authorization: Bearer {Secret}"));
-        var probe = new McpProcessProbe(executor);
+        McpProcessProbe probe = new McpProcessProbe(executor);
 
-        var result = probe.Probe();
+        ToolProbeResult result = probe.Probe();
 
         Assert.True(result.IsAvailable);
         Assert.Null(result.Version);
@@ -518,11 +518,11 @@ public sealed class SquadReleaseClientTests : IDisposable
     private async Task<Exception> DownloadFailure(byte[] archiveBytes, string checksumManifest)
     {
         SeedDestinationAndState();
-        var before = SnapshotTree();
-        using var handler = ReleaseHandler(archiveBytes, checksumManifest);
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        using RoutingHandler handler = ReleaseHandler(archiveBytes, checksumManifest);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
-        var exception = await Assert.ThrowsAnyAsync<Exception>(() =>
+        Exception exception = await Assert.ThrowsAnyAsync<Exception>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
         AssertTreeUnchanged(before);
@@ -531,7 +531,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
     private void SeedDestinationAndState()
     {
-        var destination = Path.Combine(_temp.Path, "destination");
+        string destination = Path.Combine(_temp.Path, "destination");
         Directory.CreateDirectory(destination);
         SeedStateOnly();
         File.WriteAllText(Path.Combine(destination, "unmanaged.txt"), "preserve destination");
@@ -539,7 +539,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
     private void SeedStateOnly()
     {
-        var state = Path.Combine(_temp.Path, ".kyber-weave");
+        string state = Path.Combine(_temp.Path, ".kyber-weave");
         Directory.CreateDirectory(state);
         File.WriteAllText(Path.Combine(state, "squad.lock.yml"), "preserve lock");
         File.WriteAllText(Path.Combine(state, "squad.receipt.json"), "preserve receipt");
@@ -555,9 +555,9 @@ public sealed class SquadReleaseClientTests : IDisposable
 
     private void AssertTreeUnchanged(IReadOnlyDictionary<string, byte[]> before)
     {
-        var after = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> after = SnapshotTree();
         Assert.Equal(before.Keys, after.Keys);
-        foreach (var path in before.Keys)
+        foreach (string path in before.Keys)
             Assert.Equal(before[path], after[path]);
     }
 
@@ -565,7 +565,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         RecordingProcessExecutor executor,
         string expectedExecutable)
     {
-        var startInfo = Assert.IsType<ProcessStartInfo>(executor.StartInfo);
+        ProcessStartInfo startInfo = Assert.IsType<ProcessStartInfo>(executor.StartInfo);
         Assert.Equal(expectedExecutable, startInfo.FileName);
         Assert.False(Path.IsPathFullyQualified(startInfo.FileName));
         Assert.DoesNotContain(Path.DirectorySeparatorChar, startInfo.FileName);
@@ -587,10 +587,10 @@ public sealed class SquadReleaseClientTests : IDisposable
         Uri? redirectArchiveTo = null,
         CancellationTokenSource? cancelAfterArchiveRead = null)
     {
-        var releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
-        var checksumUri = new Uri("https://downloads.github.test/SHA256SUMS.txt");
-        var archiveUri = new Uri("https://downloads.github.test/" + AssetName);
-        var handler = new RoutingHandler();
+        Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
+        Uri checksumUri = new Uri("https://downloads.github.test/SHA256SUMS.txt");
+        Uri archiveUri = new Uri("https://downloads.github.test/" + AssetName);
+        RoutingHandler handler = new RoutingHandler();
         handler.Enqueue(
             releaseUri,
             () => JsonResponse(ReleaseJson(checksumUri, archiveUri)));
@@ -669,13 +669,13 @@ public sealed class SquadReleaseClientTests : IDisposable
 
     private static byte[] CreateArchive(params (string Name, string Content)[] entries)
     {
-        using var stream = new MemoryStream();
-        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        using MemoryStream stream = new MemoryStream();
+        using (ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            foreach (var (name, content) in entries)
+            foreach ((string? name, string? content) in entries)
             {
-                var entry = archive.CreateEntry(name);
-                using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                ZipArchiveEntry entry = archive.CreateEntry(name);
+                using StreamWriter writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 writer.Write(content);
             }
         }
@@ -685,12 +685,12 @@ public sealed class SquadReleaseClientTests : IDisposable
 
     private static byte[] CreateArchiveWithSymlink(string name, string target)
     {
-        using var stream = new MemoryStream();
-        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        using MemoryStream stream = new MemoryStream();
+        using (ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            var entry = archive.CreateEntry(name);
+            ZipArchiveEntry entry = archive.CreateEntry(name);
             entry.ExternalAttributes = (0xA000 | 0x1FF) << 16;
-            using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            using StreamWriter writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             writer.Write(target);
         }
 
@@ -708,7 +708,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         public void Enqueue(Uri uri, Func<HttpResponseMessage> responseFactory)
         {
-            if (!_responses.TryGetValue(uri, out var queue))
+            if (!_responses.TryGetValue(uri, out Queue<Func<HttpResponseMessage>>? queue))
             {
                 queue = new Queue<Func<HttpResponseMessage>>();
                 _responses.Add(uri, queue);
@@ -723,7 +723,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         {
             Assert.NotNull(request.RequestUri);
             Requests.Add(request.RequestUri);
-            if (!_responses.TryGetValue(request.RequestUri, out var queue) || queue.Count == 0)
+            if (!_responses.TryGetValue(request.RequestUri, out Queue<Func<HttpResponseMessage>>? queue) || queue.Count == 0)
                 throw new Xunit.Sdk.XunitException($"Unexpected HTTP request: {request.RequestUri}");
 
             return Task.FromResult(queue.Dequeue()());

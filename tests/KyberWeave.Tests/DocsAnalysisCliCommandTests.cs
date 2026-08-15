@@ -21,9 +21,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     [Fact]
-    public void Program_RegistersAnalyzeReviewAndGlossaryCommands()
+    public void ProgramRegistersAnalyzeReviewAndGlossaryCommands()
     {
-        var program = File.ReadAllText(Path.Combine(
+        string program = File.ReadAllText(Path.Combine(
             RepositoryRoot(),
             "src",
             "KyberWeave.Cli",
@@ -38,9 +38,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void AnalyzeSettings_DefaultToAdvisoryAndRetainEveryExistingFormat()
+    public void AnalyzeSettingsDefaultToAdvisoryAndRetainEveryExistingFormat()
     {
-        var settings = new DocsIntegrityCheckSettings();
+        DocsIntegrityCheckSettings settings = new DocsIntegrityCheckSettings();
 
         Assert.Equal("none", settings.FailOn);
         Assert.Equal("table", settings.Format);
@@ -61,18 +61,18 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [InlineData("error", Severity.Warning, 0)]
     [InlineData("error", Severity.Error, 1)]
     [InlineData("error", Severity.Critical, 1)]
-    public void Analyze_FindingExitGateHonorsFailOn(
+    public void AnalyzeFindingExitGateHonorsFailOn(
         string failOn,
         Severity severity,
         int expectedExitCode)
     {
-        var service = new RecordingCommandService
+        RecordingCommandService service = new RecordingCommandService
         {
             AnalysisResult = AnalysisResult(Finding(severity))
         };
-        var command = new DocsIntegrityCheckCommand(service);
+        DocsIntegrityCheckCommand command = new DocsIntegrityCheckCommand(service);
 
-        var execution = Capture(() => command.Execute(
+        CommandExecution execution = Capture(() => command.Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
@@ -86,15 +86,15 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Analyze_OperationalFailureIsNonzeroEvenWhenFailOnNone()
+    public void AnalyzeOperationalFailureIsNonzeroEvenWhenFailOnNone()
     {
-        var service = new RecordingCommandService
+        RecordingCommandService service = new RecordingCommandService
         {
             AnalysisException = new InvalidDataException(
                 "KW-DOC-ANALYSIS-004: malformed ignore markup")
         };
 
-        var execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
@@ -111,17 +111,17 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [Theory]
     [InlineData(DocumentationAnalyzer.IgnoreMarkupRuleCode)]
     [InlineData(DocumentationAnalyzer.EmbeddingUnavailableRuleCode)]
-    public void Analyze_OperationalErrorDiagnosticIsNonzeroEvenWhenFailOnNone(string ruleCode)
+    public void AnalyzeOperationalErrorDiagnosticIsNonzeroEvenWhenFailOnNone(string ruleCode)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         report.Add(new Diagnostic(
             ruleCode,
             Severity.Error,
             "Operational analysis failure.",
             "docs analysis"));
-        var service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
+        RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        var execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
@@ -139,17 +139,17 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [InlineData("json", "docs/related.md")]
     [InlineData("sarif", "docs/related.md")]
     [InlineData("markdown", "docs/related.md")]
-    public void Analyze_EveryFormatReportsRelatedLocationsAndMetrics(
+    public void AnalyzeEveryFormatReportsRelatedLocationsAndMetrics(
         string format,
         string relatedMarker)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         report.Add(FindingDiagnostic(Severity.Warning));
         report.AddMetric("extractedClaims", 17);
         report.AddMetric("truncated", false);
-        var service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
+        RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        var execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
@@ -166,12 +166,12 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void ReviewExport_WritesTheCompleteBundleToTheRequestedPath()
+    public void ReviewExportWritesTheCompleteBundleToTheRequestedPath()
     {
-        var output = Path.Combine(_temp.Path, "review", "candidates.json");
-        var service = new RecordingCommandService { ExportResult = ExportResult("{\"schema\":\"candidates/v1\"}") };
+        string output = Path.Combine(_temp.Path, "review", "candidates.json");
+        RecordingCommandService service = new RecordingCommandService { ExportResult = ExportResult("{\"schema\":\"candidates/v1\"}") };
 
-        var execution = Capture(() => new DocsReviewExportCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service).Execute(
             null!,
             new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output }));
 
@@ -180,17 +180,17 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void ReviewExport_OperationalFailureLeavesAnExistingOutputByteForByteUnchanged()
+    public void ReviewExportOperationalFailureLeavesAnExistingOutputByteForByteUnchanged()
     {
-        var output = Path.Combine(_temp.Path, "candidates.json");
+        string output = Path.Combine(_temp.Path, "candidates.json");
         const string sentinel = "operator-owned output";
         File.WriteAllText(output, sentinel);
-        var service = new RecordingCommandService
+        RecordingCommandService service = new RecordingCommandService
         {
             ExportException = new IOException("candidate export failed")
         };
 
-        var execution = Capture(() => new DocsReviewExportCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service).Execute(
             null!,
             new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output }));
 
@@ -199,23 +199,23 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void ReviewImport_ReadsTheRequestedBundleAndReturnsFailureWithoutPartialWrites()
+    public void ReviewImportReadsTheRequestedBundleAndReturnsFailureWithoutPartialWrites()
     {
-        var input = Path.Combine(_temp.Path, "verdicts.json");
+        string input = Path.Combine(_temp.Path, "verdicts.json");
         const string verdicts = "{\"schema\":\"kyber-weave.docs-review.verdicts/v1\"}";
         File.WriteAllText(input, verdicts);
-        var diagnostics = new DiagnosticReport();
+        DiagnosticReport diagnostics = new DiagnosticReport();
         diagnostics.Add(new Diagnostic(
             DocumentationReviewExchange.ReviewRuleCode,
             Severity.Error,
             "The verdict bundle is stale.",
             "docs review import"));
-        var service = new RecordingCommandService
+        RecordingCommandService service = new RecordingCommandService
         {
             ImportResult = new ReviewImportResult(false, 0, diagnostics)
         };
 
-        var execution = Capture(() => new DocsReviewImportCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsReviewImportCommand(service).Execute(
             null!,
             new DocsReviewImportSettings
             {
@@ -233,10 +233,10 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void Glossary_PreviewAndWritePassTheExplicitMutationChoice(bool write)
+    public void GlossaryPreviewAndWritePassTheExplicitMutationChoice(bool write)
     {
         const string markdown = "## loop\n\n| Sense ID | Status | Definition | Scope | Aliases |";
-        var service = new RecordingCommandService
+        RecordingCommandService service = new RecordingCommandService
         {
             GlossaryResult = new GlossaryUpdateResult(
                 "docs/glossary.md",
@@ -246,7 +246,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        var execution = Capture(() => new DocsGlossaryCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service).Execute(
             null!,
             new DocsGlossarySettings { Path = _temp.Path, Write = write }));
 
@@ -262,10 +262,10 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [Theory]
     [InlineData("json")]
     [InlineData("sarif")]
-    public void Glossary_MachineFormatsEmitOneParseablePayloadWithoutMarkdownPrefix(string format)
+    public void GlossaryMachineFormatsEmitOneParseablePayloadWithoutMarkdownPrefix(string format)
     {
         const string markdown = "---\nid: reference/glossary\n---\n\n## loop\n";
-        var service = new RecordingCommandService
+        RecordingCommandService service = new RecordingCommandService
         {
             GlossaryResult = new GlossaryUpdateResult(
                 "docs/glossary.md",
@@ -275,12 +275,12 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        var execution = Capture(() => new DocsGlossaryCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service).Execute(
             null!,
             new DocsGlossarySettings { Path = _temp.Path, Format = format }));
 
         Assert.Equal(0, execution.ExitCode);
-        using var payload = JsonDocument.Parse(execution.Output);
+        using JsonDocument payload = JsonDocument.Parse(execution.Output);
         Assert.DoesNotContain("---\n", execution.Output[..Math.Min(20, execution.Output.Length)], StringComparison.Ordinal);
         Assert.Contains("glossaryPreview", execution.Output, StringComparison.Ordinal);
         Assert.Contains("reference/glossary", execution.Output, StringComparison.Ordinal);
@@ -290,10 +290,10 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [Theory]
     [InlineData("table")]
     [InlineData("markdown")]
-    public void Glossary_HumanFormatsRenderPreviewInsideTheSelectedReport(string format)
+    public void GlossaryHumanFormatsRenderPreviewInsideTheSelectedReport(string format)
     {
         const string markdown = "## loop\n\n| Sense ID | Status | Definition | Scope | Aliases |";
-        var service = new RecordingCommandService
+        RecordingCommandService service = new RecordingCommandService
         {
             GlossaryResult = new GlossaryUpdateResult(
                 "docs/glossary.md",
@@ -303,7 +303,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        var execution = Capture(() => new DocsGlossaryCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service).Execute(
             null!,
             new DocsGlossarySettings { Path = _temp.Path, Format = format }));
 
@@ -314,9 +314,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void DocsSettings_DescribePathAsRepositoryDocumentationRatherThanSkillInput()
+    public void DocsSettingsDescribePathAsRepositoryDocumentationRatherThanSkillInput()
     {
-        var description = typeof(DocsSettings)
+        string description = typeof(DocsSettings)
             .GetProperty(nameof(DocsSettings.Path))!
             .GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), inherit: true)
             .Cast<System.ComponentModel.DescriptionAttribute>()
@@ -330,7 +330,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
 
     private static DiagnosticReport Finding(Severity severity)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         report.Add(FindingDiagnostic(severity));
         return report;
     }
@@ -371,7 +371,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
 
     private static CommandExecution Capture(Func<int> execute)
     {
-        var execution = ProcessConsoleCapture.Run(execute);
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
         return new CommandExecution(execution.Result, execution.Output);
     }
 

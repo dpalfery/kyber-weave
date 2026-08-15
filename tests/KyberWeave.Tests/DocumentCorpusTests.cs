@@ -56,17 +56,17 @@ public sealed class DocumentCorpusTests : IDisposable
     /// documents dense in shared vocabulary won every query.
     /// </summary>
     [Fact]
-    public void A_Rare_Term_Outweighs_A_Ubiquitous_One()
+    public void ARareTermOutweighsAUbiquitousOne()
     {
-        var corpus = Build();
+        DocumentCorpus corpus = Build();
 
         Assert.True(corpus.InverseDocumentFrequency("kerberos") > corpus.InverseDocumentFrequency("session"));
     }
 
     [Fact]
-    public void A_Term_In_Most_Documents_Is_Treated_As_Carrying_No_Information()
+    public void ATermInMostDocumentsIsTreatedAsCarryingNoInformation()
     {
-        var corpus = Build();
+        DocumentCorpus corpus = Build();
 
         Assert.False(corpus.IsInformative("session"));
         Assert.True(corpus.IsInformative("kerberos"));
@@ -82,7 +82,7 @@ public sealed class DocumentCorpusTests : IDisposable
     [InlineData("getting")]
     [InlineData("keep")]
     [InlineData("tell")]
-    public void Question_Scaffolding_Is_Never_Informative(string word)
+    public void QuestionScaffoldingIsNeverInformative(string word)
     {
         Assert.False(Build().IsInformative(word));
     }
@@ -92,23 +92,23 @@ public sealed class DocumentCorpusTests : IDisposable
     /// in patagonia" score 0.42 and return three confident results.
     /// </summary>
     [Fact]
-    public void A_Query_Mostly_Absent_From_A_Document_Scores_Far_Below_One_Fully_Present()
+    public void AQueryMostlyAbsentFromADocumentScoresFarBelowOneFullyPresent()
     {
-        var corpus = Build();
-        var zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
+        DocumentCorpus corpus = Build();
+        DocumentModel zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
 
-        var onTopic = Score(corpus, zeta, "kerberos ticket renewal");
-        var offTopic = Score(corpus, zeta, "kerberos snorkelling parade marmalade");
+        double onTopic = Score(corpus, zeta, "kerberos ticket renewal");
+        double offTopic = Score(corpus, zeta, "kerberos snorkelling parade marmalade");
 
         Assert.True(onTopic > offTopic * 2,
             $"on-topic {onTopic:0.000} should dominate mostly-absent {offTopic:0.000}");
     }
 
     [Fact]
-    public void A_Query_With_No_Informative_Terms_Scores_Zero()
+    public void AQueryWithNoInformativeTermsScoresZero()
     {
-        var corpus = Build();
-        var zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
+        DocumentCorpus corpus = Build();
+        DocumentModel zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
 
         Assert.Equal(0, Score(corpus, zeta, "why do we keep getting session"));
     }
@@ -156,9 +156,9 @@ public sealed class DocumentIndexHostTests : IDisposable
     }
 
     [Fact]
-    public void An_Unchanged_Repository_Rebuilds_Nothing()
+    public void AnUnchangedRepositoryRebuildsNothing()
     {
-        var host = NewHost();
+        DocumentIndexHost host = NewHost();
 
         host.Current();
         host.Current();
@@ -173,12 +173,12 @@ public sealed class DocumentIndexHostTests : IDisposable
     /// document. That is the expensive half, and it is the half that did not change.
     /// </summary>
     [Fact]
-    public void A_CodeGraph_Change_Rebuilds_Only_The_Joins()
+    public void ACodeGraphChangeRebuildsOnlyTheJoins()
     {
-        var host = NewHost();
+        DocumentIndexHost host = NewHost();
         host.Current();
 
-        var db = Path.Combine(_fixture.Root, ".codegraph");
+        string db = Path.Combine(_fixture.Root, ".codegraph");
         Directory.CreateDirectory(db);
         File.WriteAllText(Path.Combine(db, "codegraph.db"), "not a real database");
 
@@ -189,12 +189,12 @@ public sealed class DocumentIndexHostTests : IDisposable
     }
 
     [Fact]
-    public void A_Documentation_Change_Rebuilds_The_Corpus()
+    public void ADocumentationChangeRebuildsTheCorpus()
     {
-        var host = NewHost();
+        DocumentIndexHost host = NewHost();
         host.Current();
 
-        var doc = Path.Combine(_fixture.Root, "6-Docs", "thing.md");
+        string doc = Path.Combine(_fixture.Root, "6-Docs", "thing.md");
         File.WriteAllText(doc, File.ReadAllText(doc) + "\n\n## More\n\nExtra prose.\n");
         File.SetLastWriteTimeUtc(doc, DateTime.UtcNow.AddMinutes(1));
 
@@ -208,7 +208,7 @@ public sealed class DocumentIndexHostTests : IDisposable
     /// catalog that already lives inside a root must not inflate the count.
     /// </summary>
     [Fact]
-    public void The_Docs_Stamp_Counts_Each_Document_Once()
+    public void TheDocsStampCountsEachDocumentOnce()
     {
         _fixture.WithCatalog().Write("6-Docs/nested/guide.md", """
             ---
@@ -230,8 +230,8 @@ public sealed class DocumentIndexHostTests : IDisposable
             roots,
             "6-Docs/catalog.md");
 
-        var single = Host("6-Docs").ComputeDocsStamp();
-        var overlapping = Host("6-Docs", "6-Docs/nested").ComputeDocsStamp();
+        long single = Host("6-Docs").ComputeDocsStamp();
+        long overlapping = Host("6-Docs", "6-Docs/nested").ComputeDocsStamp();
 
         Assert.Equal(single, overlapping);
         Assert.NotEqual(0L, single);

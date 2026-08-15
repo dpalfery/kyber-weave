@@ -5,7 +5,7 @@ using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Update;
 using Spectre.Console.Cli;
 
-var app = new CommandApp();
+CommandApp app = new CommandApp();
 app.Configure(config =>
 {
     config.SetApplicationName("kyber-weave");
@@ -133,14 +133,14 @@ return app.Run(args);
 
 static string GetVersion()
 {
-    var assembly = typeof(Program).Assembly;
-    var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    Assembly assembly = typeof(Program).Assembly;
+    string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
     if (!string.IsNullOrWhiteSpace(infoVersion))
     {
         return infoVersion;
     }
 
-    var nameVersion = assembly.GetName().Version;
+    Version? nameVersion = assembly.GetName().Version;
     if (nameVersion is not null)
     {
         return nameVersion.ToString();

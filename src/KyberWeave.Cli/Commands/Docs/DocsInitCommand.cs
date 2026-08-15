@@ -23,15 +23,15 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
     public override int Execute(CommandContext context, DocsInitSettings settings)
     {
-        var attempt = TryScaffold(settings);
+        (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(settings);
         if (attempt.ExitCode != 0)
         {
             AnsiConsole.MarkupLine($"[red]Could not scaffold: {Markup.Escape(attempt.Error!)}[/]");
             return attempt.ExitCode;
         }
 
-        var result = attempt.Result!;
-        var rootNote = result.DocsRootSource switch
+        ScaffoldResult result = attempt.Result!;
+        string rootNote = result.DocsRootSource switch
         {
             DocsRootSource.Configuration => " [grey](configured)[/]",
             DocsRootSource.Convention => " [grey](detected)[/]",
@@ -42,7 +42,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         AnsiConsole.MarkupLine($"Documentation root: [bold]{Markup.Escape(result.DocsRoot)}[/]{rootNote}");
         AnsiConsole.WriteLine();
 
-        foreach (var file in result.Files)
+        foreach (ScaffoldedFile file in result.Files)
         {
             AnsiConsole.MarkupLine($"  {Label(file.Outcome)} {Markup.Escape(file.RelativePath)}{Note(file)}");
         }
@@ -68,7 +68,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     {
         try
         {
-            var result = DocsScaffolder.Scaffold(
+            ScaffoldResult result = DocsScaffolder.Scaffold(
                 settings.Path, settings.DocsRoot, settings.Owner, settings.Force);
             return (0, result, null);
         }
@@ -92,7 +92,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
     private static string Note(ScaffoldedFile file)
     {
-        var note = file.Note ?? (file.Outcome == ScaffoldOutcome.Skipped
+        string? note = file.Note ?? (file.Outcome == ScaffoldOutcome.Skipped
             ? "left alone; --force to overwrite"
             : null);
 
@@ -101,7 +101,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
     private static void DeploySkill(DocsInitSettings settings)
     {
-        var startInfo = new ProcessStartInfo("apm")
+        ProcessStartInfo startInfo = new ProcessStartInfo("apm")
         {
             WorkingDirectory = Path.GetFullPath(settings.Path),
             RedirectStandardOutput = true,
@@ -116,18 +116,18 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         startInfo.ArgumentList.Add("--target");
         startInfo.ArgumentList.Add(settings.Target);
 
-        var command = $"apm install {SkillPackage} --target {settings.Target}";
+        string command = $"apm install {SkillPackage} --target {settings.Target}";
 
         try
         {
-            using var process = Process.Start(startInfo);
+            using Process? process = Process.Start(startInfo);
             if (process is null)
             {
                 SkillUnavailable(command, "the 'apm' process could not be started");
                 return;
             }
 
-            var result = ProcessRunner.ReadToEnd(process);
+            ProcessResult result = ProcessRunner.ReadToEnd(process);
 
             if (result.ExitCode == 0)
             {
@@ -136,8 +136,8 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 return;
             }
 
-            var error = result.StandardError.Trim();
-            var detail = error.Length > 0 ? error : result.StandardOutput.Trim();
+            string error = result.StandardError.Trim();
+            string detail = error.Length > 0 ? error : result.StandardOutput.Trim();
             SkillUnavailable(command, $"apm exited {result.ExitCode}: {detail}");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException)

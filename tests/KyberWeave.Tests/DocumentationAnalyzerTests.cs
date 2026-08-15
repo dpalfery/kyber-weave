@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Reflection;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
@@ -20,67 +21,67 @@ namespace KyberWeave.Tests;
 public sealed class DocumentationAnalyzerTests
 {
     [Fact]
-    public void Analyze_FiltersConfiguredStatusesAndGlossaryBeforeExtractingClaims()
+    public void AnalyzeFiltersConfiguredStatusesAndGlossaryBeforeExtractingClaims()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("current", "docs/current.md", Status.Current, "Shared claim with enough useful words."),
             Document("draft", "docs/draft.md", Status.Draft, "Shared claim with enough useful words."),
             Document("glossary", "docs/glossary.md", Status.Current, "Shared claim with enough useful words."));
-        var config = Config(statuses: ["current"], glossaryPath: "docs/glossary.md");
+        DocsAnalysisConfig config = Config(statuses: ["current"], glossaryPath: "docs/glossary.md");
 
-        var result = Analyzer().Analyze(documents, Graph(documents), config);
+        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), config);
 
         Assert.Equal(1, result.Metrics.ExtractedClaims);
         Assert.Empty(result.Candidates);
     }
 
     [Fact]
-    public void Analyze_DefaultResolvedGlossaryPathWithNoncanonicalIdentity_ExcludesGlossary()
+    public void AnalyzeDefaultResolvedGlossaryPathWithNoncanonicalIdentityExcludesGlossary()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("current", "docs/current.md", Status.Current, "One current claim with enough useful words."),
             Document("custom-terms", "docs/glossary.md", Status.Current, "Glossary prose must never become an analysis claim."));
-        var config = KyberWeaveConfigLoader.LoadFromYaml("""
+        DocsAnalysisConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
             ontology:
               docs-root: docs
             """).DocsAnalysis;
 
-        var result = Analyzer().Analyze(documents, Graph(documents), config);
+        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), config);
 
         Assert.Equal(1, result.Metrics.ExtractedClaims);
     }
 
     [Fact]
-    public void Analyze_ExactDuplicateClaimsAcrossUnrelatedDocuments_ReturnsOneGlobalCluster()
+    public void AnalyzeExactDuplicateClaimsAcrossUnrelatedDocumentsReturnsOneGlobalCluster()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("first", "docs/first.md", Status.Current, "The processor must retain every approved verdict."),
             Document("second", "docs/second.md", Status.Current, "THE processor must retain every approved verdict!"),
             Document("third", "docs/third.md", Status.Current, "The processor must retain every approved verdict."));
 
-        var result = Analyzer().Analyze(documents, Graph(documents), Config(mode: DocsAnalysisSearchMode.Graph));
+        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), Config(mode: DocsAnalysisSearchMode.Graph));
 
-        var candidate = Assert.Single(result.Candidates);
+        AnalysisCandidate candidate = Assert.Single(result.Candidates);
         Assert.Equal(AnalysisRuleKind.Duplicate, candidate.Kind);
         Assert.True(candidate.IsExact);
         Assert.Equal(3, candidate.Claims.Count);
-        var finding = Assert.Single(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.DuplicateRuleCode);
+        Diagnostic finding = Assert.Single(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.DuplicateRuleCode);
         Assert.Equal(Severity.Warning, finding.Severity);
         Assert.Equal(2, finding.RelatedLocations.Count);
     }
 
     [Fact]
-    public void GraphCandidateSource_RelatedDocuments_ReturnsGraphWeightedLexicalEvidence()
+    public void GraphCandidateSourceRelatedDocumentsReturnsGraphWeightedLexicalEvidence()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, "The runner records model token usage for automation.", component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, "Automation runners record model token consumption.", component: "Runtime"));
-        var claims = Extract(documents);
-        var request = new ClaimCandidateSourceRequest(claims, Graph(documents), Config().Search);
+        IReadOnlyList<Claim> claims = Extract(documents);
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, Graph(documents), Config().Search);
 
-        var result = new GraphClaimCandidateSource().FindCandidates(request);
+        ClaimCandidateSourceResult result = new GraphClaimCandidateSource().FindCandidates(request);
 
-        var pair = Assert.Single(result.Pairs);
+        ClaimPairCandidate pair = Assert.Single(result.Pairs);
         Assert.Equal(CandidateSourceKind.Graph, pair.Source);
         Assert.Equal(1, pair.Score.Graph);
         Assert.True(pair.Score.Lexical >= Config().Search.LexicalCandidateThreshold);
@@ -88,20 +89,20 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void SparseLexicalCandidateSource_HybridSearchIsTopKBoundedWithoutAllPairs()
+    public void SparseLexicalCandidateSourceHybridSearchIsTopKBoundedWithoutAllPairs()
     {
-        var documents = Set(Enumerable.Range(0, 100)
+        DocumentSet documents = Set(Enumerable.Range(0, 100)
             .Select(index => Document(
                 $"doc-{index}",
                 $"docs/doc-{index}.md",
                 Status.Current,
                 $"Shared retrieval term group {index % 10} has unique value {index}."))
             .ToArray());
-        var claims = Extract(documents);
-        var config = Config(maxNeighbors: 2, lexicalCandidateThreshold: 0.10);
-        var request = new ClaimCandidateSourceRequest(claims, Graph(documents), config.Search);
+        IReadOnlyList<Claim> claims = Extract(documents);
+        DocsAnalysisConfig config = Config(maxNeighbors: 2, lexicalCandidateThreshold: 0.10);
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, Graph(documents), config.Search);
 
-        var result = new SparseLexicalCandidateSource().FindCandidates(request);
+        ClaimCandidateSourceResult result = new SparseLexicalCandidateSource().FindCandidates(request);
 
         Assert.True(result.ComparisonCount < claims.Count * (claims.Count - 1) / 2);
         Assert.True(result.Pairs.Count <= claims.Count * config.Search.MaxNeighborsPerClaim);
@@ -112,16 +113,16 @@ public sealed class DocumentationAnalyzerTests
     [InlineData(DocsAnalysisSearchMode.Graph, 1, 0)]
     [InlineData(DocsAnalysisSearchMode.Hybrid, 1, 1)]
     [InlineData(DocsAnalysisSearchMode.HighRecall, 1, 1)]
-    public void Analyze_SearchModeSelectsGraphAndLexicalCandidateSources(
+    public void AnalyzeSearchModeSelectsGraphAndLexicalCandidateSources(
         DocsAnalysisSearchMode mode,
         int expectedGraphCalls,
         int expectedLexicalCalls)
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, "The runtime wrapper measures elapsed execution time."),
             Document("right", "docs/right.md", Status.Current, "The execution wrapper measures elapsed runtime."));
-        var graph = new RecordingCandidateSource(CandidateSourceKind.Graph);
-        var lexical = new RecordingCandidateSource(CandidateSourceKind.Lexical);
+        RecordingCandidateSource graph = new RecordingCandidateSource(CandidateSourceKind.Graph);
+        RecordingCandidateSource lexical = new RecordingCandidateSource(CandidateSourceKind.Lexical);
 
         Analyzer([graph, lexical]).Analyze(documents, Graph(documents), Config(mode: mode));
 
@@ -138,41 +139,41 @@ public sealed class DocumentationAnalyzerTests
     [InlineData("Send requests to /api/v1/report.", "Send requests to /api/v2/report.")]
     [InlineData("Run `dotnet test` before review.", "Run `npm test` before review.")]
     [InlineData("Set `ExecutionMode.Local` for analysis.", "Set `ExecutionMode.Remote` for analysis.")]
-    public void Analyze_GraphRelatedClaimsWithConflictSignals_ReturnsPendingConflict(
+    public void AnalyzeGraphRelatedClaimsWithConflictSignalsReturnsPendingConflict(
         string leftText,
         string rightText)
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, leftText, component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, rightText, component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.60, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.60, graph: 1);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
 
-        var conflict = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
+        AnalysisCandidate conflict = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
         Assert.False(conflict.IsExact);
-        var finding = Assert.Single(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.ConflictRuleCode);
+        Diagnostic finding = Assert.Single(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.ConflictRuleCode);
         Assert.Equal(Severity.Info, finding.Severity);
     }
 
     [Fact]
-    public void Analyze_FencedCodeClaimsWithDifferentCommands_ReturnsPendingConflict()
+    public void AnalyzeFencedCodeClaimsWithDifferentCommandsReturnsPendingConflict()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, "```sh\ndotnet test\n```", component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, "```sh\nnpm test\n```", component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config(minClaimTokens: 1));
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(minClaimTokens: 1));
 
-        var conflict = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
+        AnalysisCandidate conflict = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
         Assert.All(conflict.Claims, claim => Assert.Equal(ClaimKind.CodeBlock, claim.Kind));
     }
 
     [Fact]
-    public void Analyze_InformativeTermInDivergentDocumentContexts_ReturnsTerminologyCandidate()
+    public void AnalyzeInformativeTermInDivergentDocumentContextsReturnsTerminologyCandidate()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document(
                 "gameplay-loop",
                 "docs/gameplay.md",
@@ -187,11 +188,11 @@ public sealed class DocumentationAnalyzerTests
                 "The Codex loop repeatedly churns autonomous tasks and consumes model tokens.",
                 component: "Automation",
                 section: "Agent execution"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.20, graph: 0);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.20, graph: 0);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
 
-        var terminology = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Terminology);
+        AnalysisCandidate terminology = Assert.Single(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.Equal("loop", terminology.Term);
         Assert.Equal(2, terminology.Claims.Count);
         Assert.Contains(
@@ -200,42 +201,42 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_HighConfidenceDuplicateVerdictPromotesNearDuplicateToWarning()
+    public void AnalyzeHighConfidenceDuplicateVerdictPromotesNearDuplicateToWarning()
     {
-        var documents = NearDuplicateDocuments();
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
-        var pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
-        var candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Duplicate);
-        var persistence = new StubPersistence(new AnalysisVerdict(
+        DocumentSet documents = NearDuplicateDocuments();
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
+        DocumentationAnalysisResult pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        AnalysisCandidate candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Duplicate);
+        StubPersistence persistence = new StubPersistence(new AnalysisVerdict(
             candidate.Id,
             AnalysisVerdictLabel.Duplicate,
             0.90,
             "Both claims impose the same requirement."));
 
-        var reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
 
-        var finding = Assert.Single(reviewed.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.DuplicateRuleCode);
+        Diagnostic finding = Assert.Single(reviewed.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.DuplicateRuleCode);
         Assert.Equal(Severity.Warning, finding.Severity);
     }
 
     [Fact]
-    public void Analyze_HighConfidenceConflictVerdictPromotesConflictToError()
+    public void AnalyzeHighConfidenceConflictVerdictPromotesConflictToError()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, "The runner must emit token usage.", component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, "The runner must not emit token usage.", component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.70, graph: 1);
-        var pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
-        var candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Conflict);
-        var persistence = new StubPersistence(new AnalysisVerdict(
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.70, graph: 1);
+        DocumentationAnalysisResult pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        AnalysisCandidate candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Conflict);
+        StubPersistence persistence = new StubPersistence(new AnalysisVerdict(
             candidate.Id,
             AnalysisVerdictLabel.Conflict,
             0.90,
             "The obligations cannot both hold in the same runtime scope."));
 
-        var reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
 
-        var finding = Assert.Single(reviewed.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.ConflictRuleCode);
+        Diagnostic finding = Assert.Single(reviewed.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.ConflictRuleCode);
         Assert.Equal(Severity.Error, finding.Severity);
     }
 
@@ -243,34 +244,34 @@ public sealed class DocumentationAnalyzerTests
     [InlineData(AnalysisVerdictLabel.Benign, 0.90, 0)]
     [InlineData(AnalysisVerdictLabel.Benign, 0.79, 1)]
     [InlineData(AnalysisVerdictLabel.Uncertain, 0.95, 1)]
-    public void Analyze_VerdictLabelAndConfidenceControlCandidateSuppression(
+    public void AnalyzeVerdictLabelAndConfidenceControlCandidateSuppression(
         AnalysisVerdictLabel label,
         double confidence,
         int expectedCandidates)
     {
-        var documents = NearDuplicateDocuments();
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
-        var pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
-        var candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Duplicate);
-        var persistence = new StubPersistence(new AnalysisVerdict(
+        DocumentSet documents = NearDuplicateDocuments();
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
+        DocumentationAnalysisResult pending = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        AnalysisCandidate candidate = Assert.Single(pending.Candidates, item => item.Kind == AnalysisRuleKind.Duplicate);
+        StubPersistence persistence = new StubPersistence(new AnalysisVerdict(
             candidate.Id,
             label,
             confidence,
             "Review disposition."));
 
-        var reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult reviewed = Analyzer([source], persistence).Analyze(documents, Graph(documents), Config());
 
         Assert.Equal(expectedCandidates, reviewed.Candidates.Count);
     }
 
     [Fact]
-    public void Analyze_ApprovedScopedGlossarySensesCoverEveryOccurrence_SuppressesTerminologyWarning()
+    public void AnalyzeApprovedScopedGlossarySensesCoverEveryOccurrenceSuppressesTerminologyWarning()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop measures live-test runtime.", component: "Gameplay"),
             Document("automation", "docs/automation.md", Status.Current, "The Codex loop consumes model tokens.", component: "Automation"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
-        var glossary = new AnalysisGlossary(
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
+        AnalysisGlossary glossary = new AnalysisGlossary(
         [
             new ApprovedGlossarySense(
                 "loop-gameplay",
@@ -286,20 +287,20 @@ public sealed class DocumentationAnalyzerTests
                 ["Codex loop"])
         ]);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
 
         Assert.DoesNotContain(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.DoesNotContain(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.TerminologyRuleCode);
     }
 
     [Fact]
-    public void Analyze_ApprovedComponentScopeIgnoresCase_SuppressesTerminologyWarning()
+    public void AnalyzeApprovedComponentScopeIgnoresCaseSuppressesTerminologyWarning()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop measures live-test runtime.", component: "Gameplay"),
             Document("live-test", "docs/live-test.md", Status.Current, "The loop records live-test runtime samples.", component: "Gameplay"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
-        var glossary = new AnalysisGlossary(
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
+        AnalysisGlossary glossary = new AnalysisGlossary(
         [
             new ApprovedGlossarySense(
                 "loop-gameplay",
@@ -309,7 +310,7 @@ public sealed class DocumentationAnalyzerTests
                 ["gameplay loop"])
         ]);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
 
         Assert.DoesNotContain(
             result.Candidates,
@@ -318,9 +319,9 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_ApprovedCodeRefScopedSensesCoverEveryOccurrence_SuppressesTerminologyWarning()
+    public void AnalyzeApprovedCodeRefScopedSensesCoverEveryOccurrenceSuppressesTerminologyWarning()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document(
                 "gameplay",
                 "docs/gameplay.md",
@@ -335,8 +336,8 @@ public sealed class DocumentationAnalyzerTests
                 "The Codex loop consumes model tokens.",
                 component: "Runtime",
                 codeRefs: ["Agent.Run"]));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
-        var glossary = new AnalysisGlossary(
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
+        AnalysisGlossary glossary = new AnalysisGlossary(
         [
             new ApprovedGlossarySense(
                 "loop-gameplay",
@@ -352,22 +353,22 @@ public sealed class DocumentationAnalyzerTests
                 ["Codex loop"])
         ]);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config(), glossary);
 
         Assert.DoesNotContain(result.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.DoesNotContain(result.Diagnostics.Items, item => item.Code == DocumentationAnalyzer.TerminologyRuleCode);
     }
 
     [Fact]
-    public void CandidateId_UsesKindTermSortedContentHashesAndAnalyzerRubricVersions()
+    public void CandidateIdUsesKindTermSortedContentHashesAndAnalyzerRubricVersions()
     {
-        var first = AnalysisCandidateId.Compute(
+        string first = AnalysisCandidateId.Compute(
             AnalysisRuleKind.Terminology,
             "loop",
             ["hash-b", "hash-a"],
             "analyzer/v1",
             "rubric/v1");
-        var reordered = AnalysisCandidateId.Compute(
+        string reordered = AnalysisCandidateId.Compute(
             AnalysisRuleKind.Terminology,
             "loop",
             ["hash-a", "hash-b"],
@@ -397,15 +398,15 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_InvalidIgnoreMarkupPropagatesOperationalRule004()
+    public void AnalyzeInvalidIgnoreMarkupPropagatesOperationalRule004()
     {
-        var documents = Set(Document(
+        DocumentSet documents = Set(Document(
             "invalid",
             "docs/invalid.md",
             Status.Current,
             "<kyber-ignore rule=\"unknown\">Claim text.</kyber-ignore>"));
 
-        var result = Analyzer().Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = Analyzer().Analyze(documents, Graph(documents), Config());
 
         Assert.Contains(
             result.Diagnostics.Items,
@@ -413,7 +414,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void DocumentationAnalyzer_ReservesPermanentAnalysisRuleIds()
+    public void DocumentationAnalyzerReservesPermanentAnalysisRuleIds()
     {
         Assert.Equal("KW-DOC-ANALYSIS-001", DocumentationAnalyzer.DuplicateRuleCode);
         Assert.Equal("KW-DOC-ANALYSIS-002", DocumentationAnalyzer.ConflictRuleCode);
@@ -424,19 +425,19 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_ReportsCandidateSourceMetricsAndAppliesGlobalCandidateCap()
+    public void AnalyzeReportsCandidateSourceMetricsAndAppliesGlobalCandidateCap()
     {
-        var documents = Set(Enumerable.Range(0, 6)
+        DocumentSet documents = Set(Enumerable.Range(0, 6)
             .Select(index => Document(
                 $"doc-{index}",
                 $"docs/doc-{index}.md",
                 Status.Current,
                 $"The runner records token usage for execution variant {index}."))
             .ToArray());
-        var graph = new AdjacentPairCandidateSource(CandidateSourceKind.Graph, comparisonCount: 5);
-        var lexical = new AdjacentPairCandidateSource(CandidateSourceKind.Lexical, comparisonCount: 7);
+        AdjacentPairCandidateSource graph = new AdjacentPairCandidateSource(CandidateSourceKind.Graph, comparisonCount: 5);
+        AdjacentPairCandidateSource lexical = new AdjacentPairCandidateSource(CandidateSourceKind.Lexical, comparisonCount: 7);
 
-        var result = Analyzer([graph, lexical]).Analyze(
+        DocumentationAnalysisResult result = Analyzer([graph, lexical]).Analyze(
             documents,
             Graph(documents),
             Config(maxCandidates: 2, lexicalDuplicateThreshold: 0.90));
@@ -453,9 +454,9 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_WhenEmbeddingsAreEnabled_GeneratesCachesAndSuppliesSemanticCandidates()
+    public void AnalyzeWhenEmbeddingsAreEnabledGeneratesCachesAndSuppliesSemanticCandidates()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document(
                 "first",
                 "docs/first.md",
@@ -466,14 +467,14 @@ public sealed class DocumentationAnalyzerTests
                 "docs/second.md",
                 Status.Current,
                 "The service retains approved review verdicts durably."));
-        var lexical = new FirstPairCandidateSource(
+        FirstPairCandidateSource lexical = new FirstPairCandidateSource(
             CandidateSourceKind.Lexical,
             lexical: 0.10,
             graph: 0);
-        var generator = new SemanticMatchGenerator();
-        var persistence = new EmbeddingPersistence();
+        SemanticMatchGenerator generator = new SemanticMatchGenerator();
+        EmbeddingPersistence persistence = new EmbeddingPersistence();
 
-        var result = Analyzer([lexical], persistence, generator).Analyze(
+        DocumentationAnalysisResult result = Analyzer([lexical], persistence, generator).Analyze(
             documents,
             Graph(documents),
             Config(embeddings: new DocsAnalysisEmbeddingConfig
@@ -484,7 +485,7 @@ public sealed class DocumentationAnalyzerTests
                 Dimensions = 2
             }));
 
-        var candidate = Assert.Single(
+        AnalysisCandidate candidate = Assert.Single(
             result.Candidates,
             item => item.Kind == AnalysisRuleKind.Duplicate && !item.IsExact);
         Assert.Contains(CandidateSourceKind.Embedding, candidate.Sources);
@@ -498,7 +499,7 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void AnalyzerPorts_ArePublicAndInfrastructureNeutral()
+    public void AnalyzerPortsArePublicAndInfrastructureNeutral()
     {
         Assert.True(typeof(IClaimCandidateSource).IsInterface);
         Assert.True(typeof(IEmbeddingGenerator).IsInterface);
@@ -509,9 +510,9 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_DefaultSources_SurfaceDivergentTerminologyBelowDuplicateCandidateThreshold()
+    public void AnalyzeDefaultSourcesSurfaceDivergentTerminologyBelowDuplicateCandidateThreshold()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document(
                 "gameplay",
                 "docs/gameplay.md",
@@ -525,21 +526,21 @@ public sealed class DocumentationAnalyzerTests
                 "The Codex loop churns autonomous tasks and consumes model tokens.",
                 section: "Agent automation"));
 
-        var result = Analyzer().Analyze(
+        DocumentationAnalysisResult result = Analyzer().Analyze(
             documents,
             Graph(documents),
             Config(lexicalCandidateThreshold: 0.80));
 
-        var terminology = Assert.Single(
+        AnalysisCandidate terminology = Assert.Single(
             result.Candidates,
             candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.Equal("loop", terminology.Term);
     }
 
     [Fact]
-    public void DocGraphProjection_ExposesIndexedRelatedDocumentNeighborhoods()
+    public void DocGraphProjectionExposesIndexedRelatedDocumentNeighborhoods()
     {
-        var method = typeof(DocGraphProjection).GetMethod(
+        MethodInfo? method = typeof(DocGraphProjection).GetMethod(
             "GetRelatedDocumentIds",
             System.Reflection.BindingFlags.Instance
             | System.Reflection.BindingFlags.Public
@@ -552,20 +553,20 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void GraphCandidateSource_ScoresEveryIndexedNeighborThenSelectsHighestTopK()
+    public void GraphCandidateSourceScoresEveryIndexedNeighborThenSelectsHighestTopK()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, "Alpha beta gamma delta epsilon requirement.", component: "Runtime"),
             Document("early", "docs/early.md", Status.Current, "Alpha beta unrelated early candidate text.", component: "Runtime"),
             Document("middle", "docs/middle.md", Status.Current, "Alpha beta another candidate with noise.", component: "Runtime"),
             Document("best", "docs/best.md", Status.Current, "Alpha beta gamma delta epsilon guarantee.", component: "Runtime"));
-        var claims = Extract(documents);
-        var request = new ClaimCandidateSourceRequest(
+        IReadOnlyList<Claim> claims = Extract(documents);
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(
             claims,
             Graph(documents),
             Config(maxNeighbors: 1, lexicalCandidateThreshold: 0.10).Search);
 
-        var result = new GraphClaimCandidateSource().FindCandidates(request);
+        ClaimCandidateSourceResult result = new GraphClaimCandidateSource().FindCandidates(request);
 
         Assert.True(result.ComparisonCount <= claims.Count);
         Assert.Contains(result.Pairs, pair =>
@@ -573,15 +574,15 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_InlineCodeLiteralDifferencesRemainDetectableConflictEvidence()
+    public void AnalyzeInlineCodeLiteralDifferencesRemainDetectableConflictEvidence()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("local", "docs/local.md", Status.Current, "The analysis mode is `ExecutionMode.Local` for requests.", component: "Runtime"),
             Document("remote", "docs/remote.md", Status.Current, "The analysis mode is `ExecutionMode.Remote` for requests.", component: "Runtime"));
-        var claims = Extract(documents);
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.70, graph: 1);
+        IReadOnlyList<Claim> claims = Extract(documents);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.70, graph: 1);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
 
         Assert.Contains("ExecutionMode.Local", claims[0].Text, StringComparison.Ordinal);
         Assert.Contains("ExecutionMode.Remote", claims[1].ContextualText, StringComparison.Ordinal);
@@ -589,18 +590,18 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_SameContentPairAcrossLocations_MergesEveryDistinctEvidenceClaim()
+    public void AnalyzeSameContentPairAcrossLocationsMergesEveryDistinctEvidenceClaim()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left-one", "docs/left-one.md", Status.Current, "The processor retains every imported approved verdict."),
             Document("left-two", "docs/left-two.md", Status.Current, "The processor retains every imported approved verdict."),
             Document("right-one", "docs/right-one.md", Status.Current, "The processor must retain all approved imported verdicts."),
             Document("right-two", "docs/right-two.md", Status.Current, "The processor must retain all approved imported verdicts."));
-        var source = new AllPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
+        AllPairCandidateSource source = new AllPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.95, graph: 1);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
 
-        var nearDuplicate = Assert.Single(
+        AnalysisCandidate nearDuplicate = Assert.Single(
             result.Candidates,
             candidate => candidate.Kind == AnalysisRuleKind.Duplicate && !candidate.IsExact);
         Assert.Equal(4, nearDuplicate.Claims.Count);
@@ -608,9 +609,9 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void SparseLexicalCandidateSource_HighRecallBroadensHybridPoolAndReportsComparisons()
+    public void SparseLexicalCandidateSourceHighRecallBroadensHybridPoolAndReportsComparisons()
     {
-        var documents = Set(Enumerable.Range(0, 20)
+        DocumentSet documents = Set(Enumerable.Range(0, 20)
             .Select(index => Document(
                 $"doc-{index}",
                 $"docs/doc-{index}.md",
@@ -619,16 +620,16 @@ public sealed class DocumentationAnalyzerTests
                     ? $"Alpha beta gamma critical-token-{index} governs runtime behavior."
                     : $"Alpha beta gamma filler-token-{index} documents unrelated behavior."))
             .ToArray());
-        var claims = Extract(documents);
-        var source = new SparseLexicalCandidateSource();
-        var hybrid = source.FindCandidates(new ClaimCandidateSourceRequest(
+        IReadOnlyList<Claim> claims = Extract(documents);
+        SparseLexicalCandidateSource source = new SparseLexicalCandidateSource();
+        ClaimCandidateSourceResult hybrid = source.FindCandidates(new ClaimCandidateSourceRequest(
             claims,
             Graph(documents),
             Config(
                 mode: DocsAnalysisSearchMode.Hybrid,
                 maxNeighbors: 1,
                 lexicalCandidateThreshold: 0.40).Search));
-        var highRecall = source.FindCandidates(new ClaimCandidateSourceRequest(
+        ClaimCandidateSourceResult highRecall = source.FindCandidates(new ClaimCandidateSourceRequest(
             claims,
             Graph(documents),
             Config(
@@ -641,17 +642,17 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_TerminologyClustersOneInformativeTermAcrossAllDivergentContexts()
+    public void AnalyzeTerminologyClustersOneInformativeTermAcrossAllDivergentContexts()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("gameplay", "docs/gameplay.md", Status.Current, "The gameplay loop wraps live testing documentation.", section: "Gameplay"),
             Document("automation", "docs/automation.md", Status.Current, "The autonomous loop churns agent tasks documentation.", section: "Automation"),
             Document("desktop", "docs/desktop.md", Status.Current, "The event loop schedules UI callbacks documentation.", section: "Desktop"));
-        var source = new AllPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
+        AllPairCandidateSource source = new AllPairCandidateSource(CandidateSourceKind.Lexical, lexical: 0.10, graph: 0);
 
-        var result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(documents, Graph(documents), Config());
 
-        var terminology = Assert.Single(
+        AnalysisCandidate terminology = Assert.Single(
             result.Candidates,
             candidate => candidate.Kind == AnalysisRuleKind.Terminology);
         Assert.Equal("loop", terminology.Term);
@@ -659,16 +660,16 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void SparseLexicalCandidateSource_AppliesGlobalCandidateCapDuringGeneration()
+    public void SparseLexicalCandidateSourceAppliesGlobalCandidateCapDuringGeneration()
     {
-        var documents = Set(Enumerable.Range(0, 12)
+        DocumentSet documents = Set(Enumerable.Range(0, 12)
             .Select(index => Document(
                 $"doc-{index}",
                 $"docs/doc-{index}.md",
                 Status.Current,
                 $"Shared analysis runtime behavior variant {index} is documented here."))
             .ToArray());
-        var request = new ClaimCandidateSourceRequest(
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(
             Extract(documents),
             Graph(documents),
             Config(
@@ -676,20 +677,20 @@ public sealed class DocumentationAnalyzerTests
                 maxNeighbors: 10,
                 maxCandidates: 3).Search);
 
-        var result = new SparseLexicalCandidateSource().FindCandidates(request);
+        ClaimCandidateSourceResult result = new SparseLexicalCandidateSource().FindCandidates(request);
 
         Assert.True(result.Pairs.Count <= request.Search.MaxCandidates);
     }
 
     [Fact]
-    public void SparseLexicalCandidateSource_GlobalCandidateCapKeepsHighestScoringPairs()
+    public void SparseLexicalCandidateSourceGlobalCandidateCapKeepsHighestScoringPairs()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("low-a", "docs/00-low-a.md", Status.Current, "unrelated copper material"),
             Document("low-b", "docs/01-low-b.md", Status.Current, "distinct silver mineral"),
             Document("high-a", "docs/02-high-a.md", Status.Current, "shared analysis runtime behavior is documented here"),
             Document("high-b", "docs/03-high-b.md", Status.Current, "shared analysis runtime behavior is documented there"));
-        var request = new ClaimCandidateSourceRequest(
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(
             Extract(documents),
             Graph(documents),
             Config(
@@ -698,38 +699,38 @@ public sealed class DocumentationAnalyzerTests
                 maxNeighbors: 10,
                 maxCandidates: 1).Search);
 
-        var result = new SparseLexicalCandidateSource().FindCandidates(request);
+        ClaimCandidateSourceResult result = new SparseLexicalCandidateSource().FindCandidates(request);
 
-        var pair = Assert.Single(result.Pairs);
+        ClaimPairCandidate pair = Assert.Single(result.Pairs);
         Assert.True(PairIdentities(pair).SetEquals(["high-a", "high-b"]));
     }
 
     [Fact]
-    public void GraphCandidateSource_IdLessDocuments_StillFindSharedComponentPairs()
+    public void GraphCandidateSourceIdLessDocumentsStillFindSharedComponentPairs()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("", "docs/left.md", Status.Current, "The runner records model token usage for automation.", component: "Runtime"),
             Document("", "docs/right.md", Status.Current, "Automation runners record model token consumption.", component: "Runtime"));
-        var claims = Extract(documents);
-        var request = new ClaimCandidateSourceRequest(claims, Graph(documents), Config().Search);
+        IReadOnlyList<Claim> claims = Extract(documents);
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, Graph(documents), Config().Search);
 
-        var result = new GraphClaimCandidateSource().FindCandidates(request);
+        ClaimCandidateSourceResult result = new GraphClaimCandidateSource().FindCandidates(request);
 
-        var pair = Assert.Single(result.Pairs);
+        ClaimPairCandidate pair = Assert.Single(result.Pairs);
         Assert.Equal(CandidateSourceKind.Graph, pair.Source);
         Assert.Equal(1, pair.Score.Graph);
         Assert.True(pair.Score.Lexical >= Config().Search.LexicalCandidateThreshold);
     }
 
     [Fact]
-    public void Analyze_NonidenticalCodeBlocksWithoutSubstantiveDisagreement_AreNotConflicts()
+    public void AnalyzeNonidenticalCodeBlocksWithoutSubstantiveDisagreementAreNotConflicts()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("debug", "docs/debug.md", Status.Current, "```csharp\nlogger.Debug(message);\n```", component: "Runtime"),
             Document("info", "docs/info.md", Status.Current, "```csharp\nlogger.Info(message);\n```", component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        var result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -738,11 +739,11 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void GraphCandidateSource_DenseGraphBoundsScoringBeforeSelectingCorrectPerClaimTopK()
+    public void GraphCandidateSourceDenseGraphBoundsScoringBeforeSelectingCorrectPerClaimTopK()
     {
         const int documentCount = 40;
         const int maximumNeighbors = 2;
-        var documents = Set(Enumerable.Range(0, documentCount)
+        DocumentSet documents = Set(Enumerable.Range(0, documentCount)
             .Select(index => Document(
                 $"dense-{index}",
                 $"docs/dense-{index}.md",
@@ -755,15 +756,15 @@ public sealed class DocumentationAnalyzerTests
                 },
                 component: "DenseRuntime"))
             .ToArray());
-        var claims = Extract(documents);
-        var request = new ClaimCandidateSourceRequest(
+        IReadOnlyList<Claim> claims = Extract(documents);
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(
             claims,
             Graph(documents),
             Config(
                 maxNeighbors: maximumNeighbors,
                 lexicalCandidateThreshold: 0.10).Search);
 
-        var result = new GraphClaimCandidateSource().FindCandidates(request);
+        ClaimCandidateSourceResult result = new GraphClaimCandidateSource().FindCandidates(request);
 
         Assert.True(
             result.ComparisonCount <= claims.Count * maximumNeighbors,
@@ -777,22 +778,22 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_LexicalCandidateThresholdGatesDuplicateAndConflictButNotTerminologyDivergence()
+    public void AnalyzeLexicalCandidateThresholdGatesDuplicateAndConflictButNotTerminologyDivergence()
     {
-        var ordinaryDocuments = Set(
+        DocumentSet ordinaryDocuments = Set(
             Document("duplicate-a", "docs/duplicate-a.md", Status.Current, "The processor securely retains approved imported verdict records."),
             Document("duplicate-b", "docs/duplicate-b.md", Status.Current, "The service safely preserves reviewed verdict records from imports."),
             Document("conflict-a", "docs/conflict-a.md", Status.Current, "The runtime runner must emit token usage reports.", component: "Runtime"),
             Document("conflict-b", "docs/conflict-b.md", Status.Current, "The runtime exporter must not publish model accounting summaries.", component: "Runtime"));
-        var terminologyDocuments = Set(
+        DocumentSet terminologyDocuments = Set(
             Document("gameplay", "docs/gameplay.md", Status.Current, "Gameplay loop wraps live testing while measuring elapsed duration.", section: "Gameplay"),
             Document("automation", "docs/automation.md", Status.Current, "Autonomous Codex loop churns agent tasks while consuming model tokens.", section: "Automation"));
-        var config = Config(
+        DocsAnalysisConfig config = Config(
             lexicalCandidateThreshold: 0.80,
             lexicalDuplicateThreshold: 0.30);
 
-        var ordinary = Analyzer().Analyze(ordinaryDocuments, Graph(ordinaryDocuments), config);
-        var terminology = Analyzer().Analyze(terminologyDocuments, Graph(terminologyDocuments), config);
+        DocumentationAnalysisResult ordinary = Analyzer().Analyze(ordinaryDocuments, Graph(ordinaryDocuments), config);
+        DocumentationAnalysisResult terminology = Analyzer().Analyze(terminologyDocuments, Graph(terminologyDocuments), config);
 
         Assert.DoesNotContain(ordinary.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Duplicate);
         Assert.DoesNotContain(ordinary.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
@@ -802,16 +803,16 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void ClaimExtractor_FencedCodeRetainsLanguageAndInfoOnClaimMetadata()
+    public void ClaimExtractorFencedCodeRetainsLanguageAndInfoOnClaimMetadata()
     {
-        var document = Document(
+        DocumentModel document = Document(
             "shell",
             "docs/shell.md",
             Status.Current,
             "```bash title=\"verification\"\ndotnet test\n```");
 
-        var claim = Assert.Single(Extract(Set(document)));
-        var fenceInfo = typeof(Claim).GetProperty("FenceInfo");
+        Claim claim = Assert.Single(Extract(Set(document)));
+        PropertyInfo? fenceInfo = typeof(Claim).GetProperty("FenceInfo");
 
         Assert.NotNull(fenceInfo);
         Assert.Equal("bash title=\"verification\"", fenceInfo.GetValue(claim));
@@ -820,17 +821,17 @@ public sealed class DocumentationAnalyzerTests
     [Theory]
     [InlineData("yaml", "mode: local", "mode: remote")]
     [InlineData("", "plain documentation example", "another documentation example")]
-    public void Analyze_NonShellFencedBlocksAreNotShellCommandConflicts(
+    public void AnalyzeNonShellFencedBlocksAreNotShellCommandConflicts(
         string fenceInfo,
         string leftText,
         string rightText)
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, Fence(fenceInfo, leftText), component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, Fence(fenceInfo, rightText), component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        var result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -842,17 +843,17 @@ public sealed class DocumentationAnalyzerTests
     [InlineData("bash", "MODE=local dotnet test", "MODE=remote dotnet test")]
     [InlineData("sh", "dotnet test && echo local", "dotnet test && echo remote")]
     [InlineData("bash", "cp /src/v1/report /dest", "cp /src/v2/report /dest")]
-    public void Analyze_ShellFencesRecognizeAssignmentsAndCompoundCommandsAsConflictEligible(
+    public void AnalyzeShellFencesRecognizeAssignmentsAndCompoundCommandsAsConflictEligible(
         string fenceInfo,
         string leftCommand,
         string rightCommand)
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, Fence(fenceInfo, leftCommand), component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, Fence(fenceInfo, rightCommand), component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        var result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -861,11 +862,11 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void GraphCandidateSource_DenseSmallCorpusStillBoundsScoringToClaimsTimesTopK()
+    public void GraphCandidateSourceDenseSmallCorpusStillBoundsScoringToClaimsTimesTopK()
     {
         const int documentCount = 8;
         const int maximumNeighbors = 2;
-        var documents = Set(Enumerable.Range(0, documentCount)
+        DocumentSet documents = Set(Enumerable.Range(0, documentCount)
             .Select(index => Document(
                 $"small-dense-{index}",
                 $"docs/small-dense-{index}.md",
@@ -873,9 +874,9 @@ public sealed class DocumentationAnalyzerTests
                 $"Shared dense runtime behavior has variant {index} documentation.",
                 component: "DenseRuntime"))
             .ToArray());
-        var claims = Extract(documents);
+        IReadOnlyList<Claim> claims = Extract(documents);
 
-        var result = new GraphClaimCandidateSource().FindCandidates(new ClaimCandidateSourceRequest(
+        ClaimCandidateSourceResult result = new GraphClaimCandidateSource().FindCandidates(new ClaimCandidateSourceRequest(
             claims,
             Graph(documents),
             Config(maxNeighbors: maximumNeighbors, lexicalCandidateThreshold: 0.10).Search));
@@ -886,18 +887,18 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void GraphCandidateSource_SparseRankingKeepsShortPerfectLexicalMatch()
+    public void GraphCandidateSourceSparseRankingKeepsShortPerfectLexicalMatch()
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("short", "docs/00-short.md", Status.Current, "alpha beta", component: "Runtime", section: "Short"),
             Document("short-decoy", "docs/01-short-decoy.md", Status.Current, "alpha beta theta", component: "Runtime", section: "Decoy"),
             Document("filler-a", "docs/02-filler.md", Status.Current, "unrelated copper material", component: "Runtime", section: "Filler"),
             Document("filler-b", "docs/03-filler.md", Status.Current, "unrelated silver material", component: "Runtime", section: "Filler"),
             Document("long-decoy", "docs/04-long-decoy.md", Status.Current, "alpha beta gamma delta copper silver bronze quartz", component: "Runtime", section: "Long"),
             Document("anchor", "docs/05-anchor.md", Status.Current, "alpha beta gamma delta epsilon zeta", component: "Runtime", section: "Short"));
-        var claims = Extract(documents);
+        IReadOnlyList<Claim> claims = Extract(documents);
 
-        var result = new GraphClaimCandidateSource().FindCandidates(new ClaimCandidateSourceRequest(
+        ClaimCandidateSourceResult result = new GraphClaimCandidateSource().FindCandidates(new ClaimCandidateSourceRequest(
             claims,
             Graph(documents),
             Config(maxNeighbors: 1, lexicalCandidateThreshold: 0.10).Search));
@@ -909,17 +910,17 @@ public sealed class DocumentationAnalyzerTests
     [Theory]
     [InlineData("yaml", "version: 1", "version: 2")]
     [InlineData("text", "Endpoint is /api/v1/report", "Endpoint is /api/v2/report")]
-    public void Analyze_NonShellFencesRemainEligibleForSubstantiveValueConflicts(
+    public void AnalyzeNonShellFencesRemainEligibleForSubstantiveValueConflicts(
         string fenceInfo,
         string leftValue,
         string rightValue)
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document("left", "docs/left.md", Status.Current, Fence(fenceInfo, leftValue), component: "Runtime"),
             Document("right", "docs/right.md", Status.Current, Fence(fenceInfo, rightValue), component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        var result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -928,21 +929,21 @@ public sealed class DocumentationAnalyzerTests
     }
 
     [Fact]
-    public void Analyze_ShellFencesCompareMeaningfulCommandsBeyondComments()
+    public void AnalyzeShellFencesCompareMeaningfulCommandsBeyondComments()
     {
-        var differingAssignments = Set(
+        DocumentSet differingAssignments = Set(
             Document("local", "docs/local.md", Status.Current, Fence("bash", "# shared setup\nMODE=local dotnet test"), component: "Runtime"),
             Document("remote", "docs/remote.md", Status.Current, Fence("bash", "# shared setup\nMODE=remote dotnet test"), component: "Runtime"));
-        var commentsOnly = Set(
+        DocumentSet commentsOnly = Set(
             Document("comment-a", "docs/comment-a.md", Status.Current, Fence("bash", "# local note\ndotnet test"), component: "Runtime"),
             Document("comment-b", "docs/comment-b.md", Status.Current, Fence("bash", "# remote note\ndotnet test"), component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        var assignmentsResult = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult assignmentsResult = Analyzer([source]).Analyze(
             differingAssignments,
             Graph(differingAssignments),
             Config(minClaimTokens: 1));
-        var commentsResult = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult commentsResult = Analyzer([source]).Analyze(
             commentsOnly,
             Graph(commentsOnly),
             Config(minClaimTokens: 1));
@@ -956,11 +957,11 @@ public sealed class DocumentationAnalyzerTests
     [InlineData("powershell", "# ")]
     [InlineData("cmd", "REM ")]
     [InlineData("bat", "::")]
-    public void Analyze_RecognizedShellFenceIgnoresNumericAndNegationDifferencesInComments(
+    public void AnalyzeRecognizedShellFenceIgnoresNumericAndNegationDifferencesInComments(
         string fenceInfo,
         string commentPrefix)
     {
-        var documents = Set(
+        DocumentSet documents = Set(
             Document(
                 "left",
                 "docs/left.md",
@@ -973,9 +974,9 @@ public sealed class DocumentationAnalyzerTests
                 Status.Current,
                 Fence(fenceInfo, $"{commentPrefix}use version 2\ndotnet test"),
                 component: "Runtime"));
-        var source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
+        FirstPairCandidateSource source = new FirstPairCandidateSource(CandidateSourceKind.Graph, lexical: 0.50, graph: 1);
 
-        var result = Analyzer([source]).Analyze(
+        DocumentationAnalysisResult result = Analyzer([source]).Analyze(
             documents,
             Graph(documents),
             Config(minClaimTokens: 1));
@@ -1015,7 +1016,7 @@ public sealed class DocumentationAnalyzerTests
         string section = "Behavior",
         IReadOnlyList<string>? codeRefs = null)
     {
-        var body = $"## {section}\n\n{claim}\n";
+        string body = $"## {section}\n\n{claim}\n";
         return new DocumentModel
         {
             RelativePath = path,
@@ -1116,7 +1117,7 @@ public sealed class DocumentationAnalyzerTests
 
         public ClaimCandidateSourceResult FindCandidates(ClaimCandidateSourceRequest request)
         {
-            var pairs = request.Claims.Zip(request.Claims.Skip(1))
+            ClaimPairCandidate[] pairs = request.Claims.Zip(request.Claims.Skip(1))
                 .Select(pair => new ClaimPairCandidate(
                     pair.First,
                     pair.Second,
@@ -1136,10 +1137,10 @@ public sealed class DocumentationAnalyzerTests
 
         public ClaimCandidateSourceResult FindCandidates(ClaimCandidateSourceRequest request)
         {
-            var pairs = new List<ClaimPairCandidate>();
-            for (var left = 0; left < request.Claims.Count; left++)
+            List<ClaimPairCandidate> pairs = new List<ClaimPairCandidate>();
+            for (int left = 0; left < request.Claims.Count; left++)
             {
-                for (var right = left + 1; right < request.Claims.Count; right++)
+                for (int right = left + 1; right < request.Claims.Count; right++)
                 {
                     pairs.Add(new ClaimPairCandidate(
                         request.Claims[left],
@@ -1211,7 +1212,7 @@ public sealed class DocumentationAnalyzerTests
 
         public void SaveEmbeddings(IReadOnlyCollection<StoredEmbedding> embeddings)
         {
-            foreach (var embedding in embeddings)
+            foreach (StoredEmbedding embedding in embeddings)
             {
                 SavedEmbeddings.Add(embedding);
                 _embeddings[embedding.Key] = embedding;

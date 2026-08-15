@@ -5,6 +5,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Export;
+using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using Xunit;
 
@@ -17,20 +18,20 @@ namespace KyberWeave.Tests;
 public sealed class GlossaryGraphExportTests
 {
     [Fact]
-    public void Export_ApprovedManagedSenses_EmitsTermSenseAliasScopeAndEvidenceGraph()
+    public void ExportApprovedManagedSensesEmitsTermSenseAliasScopeAndEvidenceGraph()
     {
-        using var repository = GlossaryRepository();
-        using var firstOutput = new TempDirectory();
-        using var secondOutput = new TempDirectory();
-        var glossary = GlossaryService(repository.Path).Load();
-        var resolver = Resolver();
-        var contributor = new ManagedGlossaryGraphContributor(glossary);
-        var exporter = new DocGraphExporter(resolver);
+        using TempDirectory repository = GlossaryRepository();
+        using TempDirectory firstOutput = new TempDirectory();
+        using TempDirectory secondOutput = new TempDirectory();
+        ManagedGlossaryLoadResult glossary = GlossaryService(repository.Path).Load();
+        FakeCodeGraphResolver resolver = Resolver();
+        ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(glossary);
+        DocGraphExporter exporter = new DocGraphExporter(resolver);
 
-        var first = exporter.Export(Documents(), firstOutput.Path, contributors: [contributor]);
-        var second = exporter.Export(Documents(), secondOutput.Path, contributors: [contributor]);
-        var nodes = File.ReadAllLines(first.NodesPath).Select(Parse).ToArray();
-        var edges = File.ReadAllLines(first.EdgesPath).Select(Parse).ToArray();
+        DocGraphExportResult first = exporter.Export(Documents(), firstOutput.Path, contributors: [contributor]);
+        DocGraphExportResult second = exporter.Export(Documents(), secondOutput.Path, contributors: [contributor]);
+        JsonElement[] nodes = File.ReadAllLines(first.NodesPath).Select(Parse).ToArray();
+        JsonElement[] edges = File.ReadAllLines(first.EdgesPath).Select(Parse).ToArray();
 
         Assert.Contains(nodes, node => IsNode(node, "term:loop", "Term")
             && node.GetProperty("name").GetString() == "loop");
@@ -63,17 +64,17 @@ public sealed class GlossaryGraphExportTests
     }
 
     [Fact]
-    public void Export_ProposedAndRejectedSenses_ExcludesTheirNodesAndEveryDerivedEdge()
+    public void ExportProposedAndRejectedSensesExcludesTheirNodesAndEveryDerivedEdge()
     {
-        using var repository = GlossaryRepository();
-        using var output = new TempDirectory();
-        var contributor = new ManagedGlossaryGraphContributor(GlossaryService(repository.Path).Load());
+        using TempDirectory repository = GlossaryRepository();
+        using TempDirectory output = new TempDirectory();
+        ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(GlossaryService(repository.Path).Load());
 
-        var result = new DocGraphExporter(Resolver()).Export(
+        DocGraphExportResult result = new DocGraphExporter(Resolver()).Export(
             Documents(),
             output.Path,
             contributors: [contributor]);
-        var allLines = File.ReadAllText(result.NodesPath) + File.ReadAllText(result.EdgesPath);
+        string allLines = File.ReadAllText(result.NodesPath) + File.ReadAllText(result.EdgesPath);
 
         Assert.DoesNotContain("loop-agent", allLines, StringComparison.Ordinal);
         Assert.DoesNotContain("churn loop", allLines, StringComparison.Ordinal);
@@ -85,10 +86,10 @@ public sealed class GlossaryGraphExportTests
 
     [Theory]
     [MemberData(nameof(CollidingGlossaries))]
-    public void Constructor_DistinctGlossaryIdentityWouldShareGraphId_FailsClosed(
+    public void ConstructorDistinctGlossaryIdentityWouldShareGraphIdFailsClosed(
         ManagedGlossaryLoadResult glossary)
     {
-        var exception = Assert.Throws<InvalidDataException>(() =>
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
             new ManagedGlossaryGraphContributor(glossary));
 
         Assert.Contains("collision", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -108,12 +109,12 @@ public sealed class GlossaryGraphExportTests
     };
 
     [Fact]
-    public void Constructor_SnapshotsOuterAndNestedGlossaryCollections()
+    public void ConstructorSnapshotsOuterAndNestedGlossaryCollections()
     {
-        var scopes = new List<string> { "component:Gameplay" };
-        var aliases = new List<string> { "gameplay loop" };
-        var evidence = new List<string> { "claim-gameplay" };
-        var senses = new List<GlossarySense>
+        List<string> scopes = new List<string> { "component:Gameplay" };
+        List<string> aliases = new List<string> { "gameplay loop" };
+        List<string> evidence = new List<string> { "claim-gameplay" };
+        List<GlossarySense> senses = new List<GlossarySense>
         {
             new(
                 "loop-gameplay",
@@ -123,8 +124,8 @@ public sealed class GlossaryGraphExportTests
                 aliases,
                 evidence)
         };
-        var terms = new List<GlossaryLookupResult> { new("loop", senses) };
-        var contributor = new ManagedGlossaryGraphContributor(
+        List<GlossaryLookupResult> terms = new List<GlossaryLookupResult> { new("loop", senses) };
+        ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(
             new ManagedGlossaryLoadResult(new AnalysisGlossary([]), terms));
 
         scopes.Clear();
@@ -137,7 +138,7 @@ public sealed class GlossaryGraphExportTests
         terms.Clear();
         terms.Add(Term("mutated", Sense("mutated-sense")));
 
-        var contribution = contributor.Contribute(Documents(), Resolver());
+        DocGraphContribution contribution = contributor.Contribute(Documents(), Resolver());
 
         Assert.Contains(contribution.Nodes, node => node.Id == "term:loop");
         Assert.Contains(contribution.Nodes, node => node.Id == "sense:loop-gameplay"
@@ -188,8 +189,8 @@ public sealed class GlossaryGraphExportTests
 
     private static TempDirectory GlossaryRepository()
     {
-        var repository = new TempDirectory();
-        var docs = Path.Combine(repository.Path, "docs");
+        TempDirectory repository = new TempDirectory();
+        string docs = Path.Combine(repository.Path, "docs");
         Directory.CreateDirectory(docs);
         File.WriteAllText(Path.Combine(docs, "catalog.md"), """
             | Component | Type | Source root | Overview | Detailed documentation | Owner | Last reviewed | Status |

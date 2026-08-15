@@ -16,10 +16,10 @@ public static class CommandHelpers
     /// </summary>
     public static SkillSet? LoadOrReport(string path, DiagnosticReport report)
     {
-        var results = SkillLoader.Load(path);
-        var skills = new List<Skill>();
+        IReadOnlyList<SkillLoadResult> results = SkillLoader.Load(path);
+        List<Skill> skills = new List<Skill>();
 
-        foreach (var r in results)
+        foreach (SkillLoadResult r in results)
         {
             if (r.Success) skills.Add(r.Skill!);
             else report.Add(new Diagnostic("KW-PARSE-000", Severity.Error,
@@ -43,7 +43,7 @@ public static class CommandHelpers
         DiagnosticReport report,
         out KyberWeaveConfig config)
     {
-        var result = KyberWeaveConfigLoader.TryLoad(repoRoot, configPath);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repoRoot, configPath);
         if (!result.Success)
         {
             report.Add(new Diagnostic(
@@ -64,9 +64,9 @@ public static class CommandHelpers
     {
         if (settings.NoInfo)
         {
-            var filtered = new DiagnosticReport();
+            DiagnosticReport filtered = new DiagnosticReport();
             filtered.AddRange(report.Items.Where(i => i.Severity != Severity.Info));
-            foreach (var metric in report.Metrics)
+            foreach (KeyValuePair<string, object?> metric in report.Metrics)
             {
                 filtered.AddMetric(metric.Key, metric.Value);
             }

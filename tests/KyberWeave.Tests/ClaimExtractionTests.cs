@@ -12,7 +12,7 @@ namespace KyberWeave.Tests;
 public sealed class ClaimExtractionTests
 {
     [Fact]
-    public void Extract_WithSupportedMarkdownBlocks_ReturnsLineAddressableClaimsInSourceOrder()
+    public void ExtractWithSupportedMarkdownBlocksReturnsLineAddressableClaimsInSourceOrder()
     {
         const string body = """
             # Claim extraction
@@ -36,9 +36,9 @@ public sealed class ClaimExtractionTests
             {"loop":"codex"}
             ~~~
             """;
-        var document = Document(body);
+        DocumentModel document = Document(body);
 
-        var result = new ClaimExtractor().Extract(document);
+        ClaimExtractionResult result = new ClaimExtractor().Extract(document);
 
         Assert.Empty(result.Diagnostics.Items);
         Assert.Collection(
@@ -69,7 +69,7 @@ public sealed class ClaimExtractionTests
     }
 
     [Fact]
-    public void Extract_WithSameProseUnderDifferentSections_SeparatesContentAndContextHashes()
+    public void ExtractWithSameProseUnderDifferentSectionsSeparatesContentAndContextHashes()
     {
         const string body = """
             # Hashes
@@ -83,7 +83,7 @@ public sealed class ClaimExtractionTests
             run the loop now
             """;
 
-        var claims = new ClaimExtractor().Extract(Document(body)).Claims;
+        IReadOnlyList<Claim> claims = new ClaimExtractor().Extract(Document(body)).Claims;
 
         Assert.Equal(2, claims.Count);
         Assert.Equal(claims[0].ContentHash, claims[1].ContentHash);
@@ -93,7 +93,7 @@ public sealed class ClaimExtractionTests
     }
 
     [Fact]
-    public void Extract_WithCaseDistinctCode_DoesNotApplyEnglishProseNormalizationToCode()
+    public void ExtractWithCaseDistinctCodeDoesNotApplyEnglishProseNormalizationToCode()
     {
         const string body = """
             # Hashes
@@ -109,7 +109,7 @@ public sealed class ClaimExtractionTests
             ```
             """;
 
-        var claims = new ClaimExtractor().Extract(Document(body)).Claims;
+        IReadOnlyList<Claim> claims = new ClaimExtractor().Extract(Document(body)).Claims;
 
         Assert.Equal(2, claims.Count);
         Assert.All(claims, claim => Assert.Equal(ClaimKind.CodeBlock, claim.Kind));
@@ -117,7 +117,7 @@ public sealed class ClaimExtractionTests
     }
 
     [Fact]
-    public void Extract_WithInlineCodeAndLiteralPlaceholderText_RestoresFenceWithoutColliding()
+    public void ExtractWithInlineCodeAndLiteralPlaceholderTextRestoresFenceWithoutColliding()
     {
         const string body = """
             # Claims
@@ -127,7 +127,7 @@ public sealed class ClaimExtractionTests
             Run `dotnet test` even if the prose mentions KYBERINLINELITERAL0END.
             """;
 
-        var claim = Assert.Single(new ClaimExtractor().Extract(Document(body)).Claims);
+        Claim claim = Assert.Single(new ClaimExtractor().Extract(Document(body)).Claims);
 
         Assert.Contains("`dotnet test`", claim.ContextualText, StringComparison.Ordinal);
         Assert.Contains("KYBERINLINELITERAL0END", claim.ContextualText, StringComparison.Ordinal);

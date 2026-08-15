@@ -8,22 +8,22 @@ namespace KyberWeave.Tests;
 public sealed class DiagnosticLocationRenderingTests
 {
     [Fact]
-    public void Diagnostic_WithOptionalRangesAndRelatedLocations_PreservesExistingConstructors()
+    public void DiagnosticWithOptionalRangesAndRelatedLocationsPreservesExistingConstructors()
     {
-        var legacy = new Diagnostic(
+        Diagnostic legacy = new Diagnostic(
             "KW-LEGACY-001",
             Severity.Info,
             "Legacy diagnostic",
             "legacy-subject",
             "docs/legacy.md",
             "Legacy hint");
-        var related = new DiagnosticLocation(
+        DiagnosticLocation related = new DiagnosticLocation(
             "docs/related.md",
             StartLine: 21,
             EndLine: 23,
             Message: "Matching claim");
 
-        var ranged = new Diagnostic(
+        Diagnostic ranged = new Diagnostic(
             "KW-DOC-ANALYSIS-001",
             Severity.Warning,
             "Duplicate claim",
@@ -42,9 +42,9 @@ public sealed class DiagnosticLocationRenderingTests
     }
 
     [Fact]
-    public void DiagnosticReport_WithScalarMetrics_PreservesInsertionOrderAndValues()
+    public void DiagnosticReportWithScalarMetricsPreservesInsertionOrderAndValues()
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
 
         report.AddMetric("extractedClaims", 42);
         report.AddMetric("candidateRatio", 0.25);
@@ -67,28 +67,28 @@ public sealed class DiagnosticLocationRenderingTests
     [InlineData(float.NaN)]
     [InlineData(float.PositiveInfinity)]
     [InlineData(float.NegativeInfinity)]
-    public void DiagnosticReport_WithNonFiniteFloatingPointMetric_RejectsAtAddMetric(object value)
+    public void DiagnosticReportWithNonFiniteFloatingPointMetricRejectsAtAddMetric(object value)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
 
-        var exception = Assert.Throws<ArgumentException>(() => report.AddMetric("score", value));
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => report.AddMetric("score", value));
 
         Assert.Equal("value", exception.ParamName);
         Assert.Empty(report.Metrics);
     }
 
     [Fact]
-    public void Render_WithFiniteFloatingPointMetrics_WritesJsonAndSarifNumbers()
+    public void RenderWithFiniteFloatingPointMetricsWritesJsonAndSarifNumbers()
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         report.AddMetric("floatScore", 0.5f);
         report.AddMetric("doubleScore", 0.25d);
 
-        using var json = JsonDocument.Parse(Render(OutputFormat.Json, report));
-        using var sarif = JsonDocument.Parse(Render(OutputFormat.Sarif, report));
+        using JsonDocument json = JsonDocument.Parse(Render(OutputFormat.Json, report));
+        using JsonDocument sarif = JsonDocument.Parse(Render(OutputFormat.Sarif, report));
 
-        var jsonMetrics = json.RootElement.GetProperty("metrics");
-        var sarifMetrics = sarif.RootElement
+        JsonElement jsonMetrics = json.RootElement.GetProperty("metrics");
+        JsonElement sarifMetrics = sarif.RootElement
             .GetProperty("runs")[0]
             .GetProperty("properties")
             .GetProperty("metrics");
@@ -99,12 +99,12 @@ public sealed class DiagnosticLocationRenderingTests
     }
 
     [Fact]
-    public void Render_Json_IncludesRangesRelatedLocationsAndOrderedMetrics()
+    public void RenderJsonIncludesRangesRelatedLocationsAndOrderedMetrics()
     {
-        using var document = JsonDocument.Parse(Render(OutputFormat.Json));
-        var root = document.RootElement;
-        var finding = root.GetProperty("findings")[0];
-        var related = finding.GetProperty("relatedLocations")[0];
+        using JsonDocument document = JsonDocument.Parse(Render(OutputFormat.Json));
+        JsonElement root = document.RootElement;
+        JsonElement finding = root.GetProperty("findings")[0];
+        JsonElement related = finding.GetProperty("relatedLocations")[0];
 
         Assert.Equal(10, finding.GetProperty("startLine").GetInt32());
         Assert.Equal(12, finding.GetProperty("endLine").GetInt32());
@@ -118,9 +118,9 @@ public sealed class DiagnosticLocationRenderingTests
     }
 
     [Fact]
-    public void Render_Table_UsesCompactPrimaryLocationAndReportsMetrics()
+    public void RenderTableUsesCompactPrimaryLocationAndReportsMetrics()
     {
-        var output = Render(OutputFormat.Table);
+        string output = Render(OutputFormat.Table);
 
         Assert.Contains("docs/primary.md:10-12 (+1 related)", output, StringComparison.Ordinal);
         Assert.Contains("Warning", output, StringComparison.Ordinal);
@@ -129,9 +129,9 @@ public sealed class DiagnosticLocationRenderingTests
     }
 
     [Fact]
-    public void Render_Table_OmitsInfoRowsWhenWarningsExistSoTheyStayVisible()
+    public void RenderTableOmitsInfoRowsWhenWarningsExistSoTheyStayVisible()
     {
-        var report = CreateReport();
+        DiagnosticReport report = CreateReport();
         report.Add(new Diagnostic(
             "KW-DOC-ANALYSIS-002",
             Severity.Info,
@@ -140,8 +140,8 @@ public sealed class DiagnosticLocationRenderingTests
             "docs/other.md",
             StartLine: 4));
 
-        var table = Render(OutputFormat.Table, report);
-        var json = Render(OutputFormat.Json, report);
+        string table = Render(OutputFormat.Table, report);
+        string json = Render(OutputFormat.Json, report);
 
         Assert.Contains("1 informational findings omitted from the table", table, StringComparison.Ordinal);
         Assert.Contains("Warning", table, StringComparison.Ordinal);
@@ -151,10 +151,10 @@ public sealed class DiagnosticLocationRenderingTests
     }
 
     [Fact]
-    public void Render_Table_RelativizesAbsolutePathsUnderTheCurrentDirectory()
+    public void RenderTableRelativizesAbsolutePathsUnderTheCurrentDirectory()
     {
-        var absolute = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "docs", "primary.md"));
-        var report = new DiagnosticReport();
+        string absolute = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "docs", "primary.md"));
+        DiagnosticReport report = new DiagnosticReport();
         report.Add(new Diagnostic(
             "KW-DOC-ANALYSIS-001",
             Severity.Warning,
@@ -164,16 +164,16 @@ public sealed class DiagnosticLocationRenderingTests
             StartLine: 10,
             EndLine: 12));
 
-        var output = Render(OutputFormat.Table, report);
+        string output = Render(OutputFormat.Table, report);
 
         Assert.Contains("docs/primary.md:10-12", output, StringComparison.Ordinal);
         Assert.DoesNotContain(absolute, output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Render_Markdown_IncludesRangesRelatedLocationsAndMetrics()
+    public void RenderMarkdownIncludesRangesRelatedLocationsAndMetrics()
     {
-        var output = Render(OutputFormat.Markdown);
+        string output = Render(OutputFormat.Markdown);
 
         Assert.Contains("docs/primary.md:10-12", output, StringComparison.Ordinal);
         Assert.Contains("docs/related.md:21-23", output, StringComparison.Ordinal);
@@ -182,17 +182,17 @@ public sealed class DiagnosticLocationRenderingTests
     }
 
     [Fact]
-    public void Render_Sarif_UsesRegionsRelatedLocationsAndRunMetrics()
+    public void RenderSarifUsesRegionsRelatedLocationsAndRunMetrics()
     {
-        using var document = JsonDocument.Parse(Render(OutputFormat.Sarif));
-        var run = document.RootElement.GetProperty("runs")[0];
-        var result = run.GetProperty("results")[0];
-        var primaryRegion = result
+        using JsonDocument document = JsonDocument.Parse(Render(OutputFormat.Sarif));
+        JsonElement run = document.RootElement.GetProperty("runs")[0];
+        JsonElement result = run.GetProperty("results")[0];
+        JsonElement primaryRegion = result
             .GetProperty("locations")[0]
             .GetProperty("physicalLocation")
             .GetProperty("region");
-        var related = result.GetProperty("relatedLocations")[0];
-        var relatedRegion = related
+        JsonElement related = result.GetProperty("relatedLocations")[0];
+        JsonElement relatedRegion = related
             .GetProperty("physicalLocation")
             .GetProperty("region");
 
@@ -217,7 +217,7 @@ public sealed class DiagnosticLocationRenderingTests
 
     private static DiagnosticReport CreateReport()
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         report.Add(new Diagnostic(
             "KW-DOC-ANALYSIS-001",
             Severity.Warning,
@@ -242,7 +242,7 @@ public sealed class DiagnosticLocationRenderingTests
 
     private static string Render(OutputFormat format, DiagnosticReport? report = null)
     {
-        var execution = ProcessConsoleCapture.Run(() =>
+        CapturedConsoleExecution<bool> execution = ProcessConsoleCapture.Run(() =>
         {
             ReportRenderer.Render(report ?? CreateReport(), format, "docs integrity-check", "Claim");
             return true;
@@ -252,8 +252,8 @@ public sealed class DiagnosticLocationRenderingTests
 
     private static void AssertMetricsRenderedInOrder(string output)
     {
-        var claimsIndex = output.IndexOf("extractedClaims", StringComparison.Ordinal);
-        var truncatedIndex = output.IndexOf("truncated", StringComparison.Ordinal);
+        int claimsIndex = output.IndexOf("extractedClaims", StringComparison.Ordinal);
+        int truncatedIndex = output.IndexOf("truncated", StringComparison.Ordinal);
 
         Assert.True(claimsIndex >= 0, $"Expected extractedClaims metric in output:{Environment.NewLine}{output}");
         Assert.True(truncatedIndex > claimsIndex, $"Expected ordered metrics in output:{Environment.NewLine}{output}");

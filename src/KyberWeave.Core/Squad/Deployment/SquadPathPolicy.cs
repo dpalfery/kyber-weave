@@ -9,9 +9,9 @@ internal static class SquadPathPolicy
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
-        var portablePath = NormalizeRelativePath(relativePath);
-        var root = Path.GetFullPath(rootPath);
-        var candidate = Path.GetFullPath(Path.Combine(
+        string portablePath = NormalizeRelativePath(relativePath);
+        string root = Path.GetFullPath(rootPath);
+        string candidate = Path.GetFullPath(Path.Combine(
             root,
             portablePath.Replace('/', Path.DirectorySeparatorChar)));
 
@@ -34,7 +34,7 @@ internal static class SquadPathPolicy
             throw NonPortable(relativePath);
         }
 
-        var segments = relativePath.Split('/');
+        string[] segments = relativePath.Split('/');
         if (segments.Any(segment => segment is "." or ".."))
             throw OutsideRoot(relativePath);
 
@@ -60,11 +60,11 @@ internal static class SquadPathPolicy
     /// </summary>
     public static string GetPortableIdentity(string relativePath)
     {
-        var normalized = NormalizeRelativePath(relativePath);
-        var segments = normalized.Split('/');
-        for (var index = 0; index < segments.Length; index++)
+        string normalized = NormalizeRelativePath(relativePath);
+        string[] segments = normalized.Split('/');
+        for (int index = 0; index < segments.Length; index++)
         {
-            var portableSegment = segments[index].TrimEnd(' ', '.');
+            string portableSegment = segments[index].TrimEnd(' ', '.');
             if (portableSegment.Length == 0)
             {
                 throw new SquadDeploymentConflictException(
@@ -88,14 +88,14 @@ internal static class SquadPathPolicy
             return false;
         }
 
-        var dot = segment.IndexOf('.', StringComparison.Ordinal);
-        var baseName = dot >= 0 ? segment[..dot] : segment;
+        int dot = segment.IndexOf('.', StringComparison.Ordinal);
+        string baseName = dot >= 0 ? segment[..dot] : segment;
         return !IsReservedWindowsName(baseName);
     }
 
     private static bool IsReservedWindowsName(string baseName)
     {
-        var normalized = baseName
+        string normalized = baseName
             .Replace('\u00b9', '1')
             .Replace('\u00b2', '2')
             .Replace('\u00b3', '3')

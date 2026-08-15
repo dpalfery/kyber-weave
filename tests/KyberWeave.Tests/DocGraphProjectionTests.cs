@@ -18,14 +18,14 @@ public sealed class DocGraphProjectionTests
         ["contains", "calls", "references", "instantiates", "extends", "implements"];
 
     [Fact]
-    public void Build_Projects_Exporter_Compatible_Document_Concept_And_Join_Relationships()
+    public void BuildProjectsExporterCompatibleDocumentConceptAndJoinRelationships()
     {
-        var resolver = new NeighborhoodResolver()
+        NeighborhoodResolver resolver = new NeighborhoodResolver()
             .WithSymbol("BillingService", Node("code:billing", "BillingService"))
             .WithRoute("GET /billing", Node("route:billing", "GET /billing", "route"));
-        var set = FullRelationshipSet();
+        DocumentSet set = FullRelationshipSet();
 
-        var projection = DocGraphProjection.Build(set, resolver);
+        DocGraphProjection projection = DocGraphProjection.Build(set, resolver);
 
         Assert.Contains(projection.Nodes, n => n.Id == "doc:architecture/billing" && n.Label == "Document");
         Assert.Contains(projection.Nodes, n => n.Id == "component:Billing" && n.Label == "Component");
@@ -41,20 +41,20 @@ public sealed class DocGraphProjectionTests
     }
 
     [Fact]
-    public void Build_Copies_Contributor_Output_Into_An_Immutable_Snapshot()
+    public void BuildCopiesContributorOutputIntoAnImmutableSnapshot()
     {
-        var nodes = new List<DocGraphNode>
+        List<DocGraphNode> nodes = new List<DocGraphNode>
         {
             new("term:loop", "Term", new ReadOnlyDictionary<string, string?>(
                 new Dictionary<string, string?> { ["name"] = "loop" }))
         };
-        var edges = new List<DocGraphEdge>
+        List<DocGraphEdge> edges = new List<DocGraphEdge>
         {
             new("EVIDENCED_BY", "term:loop", "doc:reference/billing")
         };
-        var contributor = new StubContributor(nodes, edges);
+        StubContributor contributor = new StubContributor(nodes, edges);
 
-        var projection = DocGraphProjection.Build(
+        DocGraphProjection projection = DocGraphProjection.Build(
             new DocumentSet { Documents = [] },
             FakeCodeGraphResolver.WithSymbols(),
             contributors: [contributor]);
@@ -66,9 +66,9 @@ public sealed class DocGraphProjectionTests
     }
 
     [Fact]
-    public void AreDocumentsRelated_Treats_Overlapping_Source_Roots_As_Graph_Neighbors()
+    public void AreDocumentsRelatedTreatsOverlappingSourceRootsAsGraphNeighbors()
     {
-        var set = new DocumentSet
+        DocumentSet set = new DocumentSet
         {
             Documents =
             [
@@ -77,15 +77,15 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        var projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.True(projection.AreDocumentsRelated("doc:architecture/parent", "doc:reference/child"));
     }
 
     [Fact]
-    public void Build_IdLessDocuments_RegisterFallbackPathNodesAndSharedComponentRelatedness()
+    public void BuildIdLessDocumentsRegisterFallbackPathNodesAndSharedComponentRelatedness()
     {
-        var set = new DocumentSet
+        DocumentSet set = new DocumentSet
         {
             Documents =
             [
@@ -94,7 +94,7 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        var projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.Contains(projection.Nodes, node => node.Id == "doc:docs/left.md" && node.Label == "Document");
         Assert.Contains(projection.Nodes, node => node.Id == "doc:docs/right.md" && node.Label == "Document");
@@ -103,15 +103,15 @@ public sealed class DocGraphProjectionTests
 
     [Theory]
     [MemberData(nameof(ApprovedCodeEdgeKinds))]
-    public void AreDocumentsRelated_Traverses_Approved_OneHop_CodeGraph_Edges(string kind)
+    public void AreDocumentsRelatedTraversesApprovedOneHopCodeGraphEdges(string kind)
     {
-        var resolver = new NeighborhoodResolver()
+        NeighborhoodResolver resolver = new NeighborhoodResolver()
             .WithSymbol("Left", Node("code:left", "Left"))
             .WithSymbol("Right", Node("code:right", "Right"))
             .WithEdge(new CodeGraphEdge("code:left", "code:right", kind));
-        var set = TwoCodeReferenceDocuments();
+        DocumentSet set = TwoCodeReferenceDocuments();
 
-        var projection = DocGraphProjection.Build(set, resolver);
+        DocGraphProjection projection = DocGraphProjection.Build(set, resolver);
 
         Assert.True(projection.AreDocumentsRelated("doc:left", "doc:right"));
         Assert.Equal(1, resolver.NeighborhoodRequestCount);
@@ -119,28 +119,28 @@ public sealed class DocGraphProjectionTests
     }
 
     [Fact]
-    public void AreDocumentsRelated_Does_Not_Traverse_Imports()
+    public void AreDocumentsRelatedDoesNotTraverseImports()
     {
-        var resolver = new NeighborhoodResolver()
+        NeighborhoodResolver resolver = new NeighborhoodResolver()
             .WithSymbol("Left", Node("code:left", "Left"))
             .WithSymbol("Right", Node("code:right", "Right"))
             .WithEdge(new CodeGraphEdge("code:left", "code:right", "imports"));
 
-        var projection = DocGraphProjection.Build(TwoCodeReferenceDocuments(), resolver);
+        DocGraphProjection projection = DocGraphProjection.Build(TwoCodeReferenceDocuments(), resolver);
 
         Assert.False(projection.AreDocumentsRelated("doc:left", "doc:right"));
     }
 
     [Fact]
-    public void Build_Skips_Code_Nodes_Whose_Degree_Exceeds_The_Cap()
+    public void BuildSkipsCodeNodesWhoseDegreeExceedsTheCap()
     {
-        var resolver = new NeighborhoodResolver()
+        NeighborhoodResolver resolver = new NeighborhoodResolver()
             .WithSymbol("Left", Node("code:hub", "Left"))
             .WithSymbol("Right", Node("code:right", "Right"))
             .WithEdge(new CodeGraphEdge("code:hub", "code:right", "calls"))
             .WithEdge(new CodeGraphEdge("code:hub", "code:third", "calls"));
 
-        var projection = DocGraphProjection.Build(
+        DocGraphProjection projection = DocGraphProjection.Build(
             TwoCodeReferenceDocuments(), resolver, maxCodeNeighbors: 1);
 
         Assert.False(projection.AreDocumentsRelated("doc:left", "doc:right"));
@@ -148,9 +148,9 @@ public sealed class DocGraphProjectionTests
     }
 
     [Fact]
-    public void Build_When_Resolver_Has_No_Neighborhood_Port_Preserves_Document_Relationships()
+    public void BuildWhenResolverHasNoNeighborhoodPortPreservesDocumentRelationships()
     {
-        var set = new DocumentSet
+        DocumentSet set = new DocumentSet
         {
             Documents =
             [
@@ -159,15 +159,15 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        var projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.True(projection.AreDocumentsRelated("doc:first", "doc:second"));
     }
 
     [Fact]
-    public void AreDocumentsRelated_Does_Not_Relate_Documents_Only_Because_They_Share_An_Owner()
+    public void AreDocumentsRelatedDoesNotRelateDocumentsOnlyBecauseTheyShareAnOwner()
     {
-        var set = new DocumentSet
+        DocumentSet set = new DocumentSet
         {
             Documents =
             [
@@ -176,22 +176,22 @@ public sealed class DocGraphProjectionTests
             ]
         };
 
-        var projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
+        DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
 
         Assert.False(projection.AreDocumentsRelated("doc:first", "doc:second"));
     }
 
     [Fact]
-    public void DocGraphExporter_Output_Remains_Compatible_With_The_V1_Jsonl_Schema()
+    public void DocGraphExporterOutputRemainsCompatibleWithTheV1JsonlSchema()
     {
-        var resolver = new NeighborhoodResolver()
+        NeighborhoodResolver resolver = new NeighborhoodResolver()
             .WithSymbol("BillingService", Node("code:billing", "BillingService"))
             .WithRoute("GET /billing", Node("route:billing", "GET /billing", "route"));
-        using var output = new TempDirectory();
+        using TempDirectory output = new TempDirectory();
 
-        var result = new DocGraphExporter(resolver).Export(FullRelationshipSet(), output.Path);
-        var nodes = File.ReadAllLines(result.NodesPath).Select(Parse).ToList();
-        var edges = File.ReadAllLines(result.EdgesPath).Select(Parse).ToList();
+        DocGraphExportResult result = new DocGraphExporter(resolver).Export(FullRelationshipSet(), output.Path);
+        List<JsonElement> nodes = File.ReadAllLines(result.NodesPath).Select(Parse).ToList();
+        List<JsonElement> edges = File.ReadAllLines(result.EdgesPath).Select(Parse).ToList();
 
         Assert.All(nodes, node => Assert.Equal("node", node.GetProperty("type").GetString()));
         Assert.All(edges, edge => Assert.Equal("edge", edge.GetProperty("type").GetString()));
@@ -206,8 +206,8 @@ public sealed class DocGraphProjectionTests
 
     public static TheoryData<string> ApprovedCodeEdgeKinds()
     {
-        var data = new TheoryData<string>();
-        foreach (var kind in TraversedCodeEdgeKinds)
+        TheoryData<string> data = new TheoryData<string>();
+        foreach (string kind in TraversedCodeEdgeKinds)
             data.Add(kind);
         return data;
     }
@@ -323,10 +323,10 @@ public sealed class DocGraphProjectionTests
         }
 
         public IReadOnlyList<CodeGraphNode> ResolveSymbol(string name) =>
-            _symbols.TryGetValue(name, out var node) ? [node] : [];
+            _symbols.TryGetValue(name, out CodeGraphNode? node) ? [node] : [];
 
         public IReadOnlyList<CodeGraphNode> ResolveRoute(string route) =>
-            _routes.TryGetValue(route, out var node) ? [node] : [];
+            _routes.TryGetValue(route, out CodeGraphNode? node) ? [node] : [];
 
         public IReadOnlyList<CodeGraphEdge> GetEdges(IReadOnlyCollection<string> nodeIds, int maxDegree)
         {

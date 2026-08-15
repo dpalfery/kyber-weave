@@ -92,7 +92,7 @@ public static class SquadTargetResolver
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.RootPath);
 
-        var (targets, source) = SelectTargets(request);
+        (IReadOnlyList<SquadTarget>? targets, SquadTargetResolutionSource source) = SelectTargets(request);
         if (targets.Count > 0 && request.Operation == SquadTargetOperation.Install)
             targets = ApplyExclusions(targets, request);
 
@@ -132,7 +132,7 @@ public static class SquadTargetResolver
         if (request.ConfiguredTargets.Count > 0)
             return (OrderedSet(request.ConfiguredTargets), SquadTargetResolutionSource.Configuration);
 
-        var detected = DetectMarkers(request.RootPath);
+        IReadOnlyList<SquadTarget> detected = DetectMarkers(request.RootPath);
         return detected.Count > 0
             ? (detected, SquadTargetResolutionSource.Markers)
             : (Array.Empty<SquadTarget>(), SquadTargetResolutionSource.None);
@@ -142,18 +142,18 @@ public static class SquadTargetResolver
         IReadOnlyList<SquadTarget> targets,
         SquadTargetResolutionRequest request)
     {
-        var excluded = new HashSet<SquadTarget>(request.ConfiguredExclusions);
+        HashSet<SquadTarget> excluded = new HashSet<SquadTarget>(request.ConfiguredExclusions);
         excluded.UnionWith(SquadTargetCatalog.Parse(request.ExplicitExclusions));
         return targets.Where(target => !excluded.Contains(target)).ToArray();
     }
 
     private static IReadOnlyList<SquadTarget> DetectMarkers(string rootPath)
     {
-        var root = Path.GetFullPath(rootPath);
-        var detected = new List<SquadTarget>();
-        foreach (var target in SquadTargetCatalog.All)
+        string root = Path.GetFullPath(rootPath);
+        List<SquadTarget> detected = new List<SquadTarget>();
+        foreach (SquadTarget target in SquadTargetCatalog.All)
         {
-            if (!Markers.TryGetValue(target, out var markers))
+            if (!Markers.TryGetValue(target, out IReadOnlyList<StrongMarker>? markers))
                 continue;
 
             if (markers.Any(marker => marker.ExistsUnder(root)))
@@ -165,7 +165,7 @@ public static class SquadTargetResolver
 
     private static IReadOnlyList<SquadTarget> OrderedSet(IEnumerable<SquadTarget> targets)
     {
-        var seen = new HashSet<SquadTarget>();
+        HashSet<SquadTarget> seen = new HashSet<SquadTarget>();
         return targets.Where(seen.Add).ToArray();
     }
 
@@ -183,7 +183,7 @@ public static class SquadTargetResolver
     {
         public bool ExistsUnder(string rootPath)
         {
-            var path = Path.Combine(
+            string path = Path.Combine(
                 rootPath,
                 RelativePath.Replace('/', Path.DirectorySeparatorChar));
             return IsDirectory ? Directory.Exists(path) : File.Exists(path);

@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using KyberWeave.Core.Processes;
+
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -9,7 +12,7 @@ internal sealed class CodeGraphFixtureDb : IDisposable
 
     public CodeGraphFixtureDb()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "kw-codegraph-" + Guid.NewGuid().ToString("N"));
+        string dir = Path.Combine(Path.GetTempPath(), "kw-codegraph-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         DatabasePath = Path.Combine(dir, "codegraph.db");
         RunSqlite(
@@ -34,7 +37,7 @@ internal sealed class CodeGraphFixtureDb : IDisposable
 
     private void RunSqlite(string sql)
     {
-        var startInfo = new System.Diagnostics.ProcessStartInfo("sqlite3")
+        ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo("sqlite3")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -43,19 +46,19 @@ internal sealed class CodeGraphFixtureDb : IDisposable
         startInfo.ArgumentList.Add(DatabasePath);
         startInfo.ArgumentList.Add(sql);
 
-        using var process = System.Diagnostics.Process.Start(startInfo)
+        using Process process = System.Diagnostics.Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite3.");
 
         // Drain before waiting: WaitForExit with undrained redirected pipes deadlocks as
         // soon as the child writes more than the pipe buffer holds.
-        var result = KyberWeave.Core.Processes.ProcessRunner.ReadToEnd(process);
+        ProcessResult result = KyberWeave.Core.Processes.ProcessRunner.ReadToEnd(process);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(result.StandardError);
     }
 
     public void Dispose()
     {
-        var dir = Path.GetDirectoryName(DatabasePath);
+        string? dir = Path.GetDirectoryName(DatabasePath);
         if (dir is not null && Directory.Exists(dir))
             Directory.Delete(dir, recursive: true);
     }

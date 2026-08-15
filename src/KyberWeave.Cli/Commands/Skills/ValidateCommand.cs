@@ -1,4 +1,5 @@
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
 using Spectre.Console.Cli;
 
@@ -8,11 +9,11 @@ public sealed class ValidateCommand : Command<AnalysisSettings>
 {
     public override int Execute(CommandContext context, AnalysisSettings settings)
     {
-        var report = new DiagnosticReport();
-        var set = CommandHelpers.LoadOrReport(settings.Path, report);
+        DiagnosticReport report = new DiagnosticReport();
+        SkillSet? set = CommandHelpers.LoadOrReport(settings.Path, report);
 
         if (set is not null)
-            foreach (var skill in set.Skills)
+            foreach (Skill skill in set.Skills)
                 report.AddRange(SpecValidator.Validate(skill));
 
         CommandHelpers.Finish(report, settings, "skill validate", "Skill");

@@ -26,11 +26,11 @@ public sealed class AgentSet
     /// </summary>
     public IReadOnlyDictionary<string, Dictionary<HarnessKind, AgentModel>> GetRoleHarnessMatrix()
     {
-        var matrix = new Dictionary<string, Dictionary<HarnessKind, AgentModel>>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, Dictionary<HarnessKind, AgentModel>> matrix = new Dictionary<string, Dictionary<HarnessKind, AgentModel>>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var agent in _agents)
+        foreach (AgentModel agent in _agents)
         {
-            if (!matrix.TryGetValue(agent.RoleName, out var harnessMap))
+            if (!matrix.TryGetValue(agent.RoleName, out Dictionary<HarnessKind, AgentModel>? harnessMap))
             {
                 harnessMap = new Dictionary<HarnessKind, AgentModel>();
                 matrix[agent.RoleName] = harnessMap;

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO.Compression;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Validation;
 using Spectre.Console;
@@ -27,18 +28,18 @@ public sealed class PackCommand : Command<PackSettings>
 {
     public override int Execute(CommandContext context, PackSettings settings)
     {
-        var skillFile = System.IO.Path.Combine(settings.Path, "SKILL.md");
+        string skillFile = System.IO.Path.Combine(settings.Path, "SKILL.md");
         if (!File.Exists(skillFile))
         {
             AnsiConsole.MarkupLine($"[red]No SKILL.md in '{Markup.Escape(settings.Path)}'.[/]");
             return 2;
         }
 
-        var skill = SkillParser.ParseFile(skillFile);
+        Skill skill = SkillParser.ParseFile(skillFile);
 
         if (!settings.SkipValidation)
         {
-            var report = new DiagnosticReport();
+            DiagnosticReport report = new DiagnosticReport();
             report.AddRange(SpecValidator.Validate(skill));
             if (report.HasErrors)
             {
@@ -48,16 +49,16 @@ public sealed class PackCommand : Command<PackSettings>
             }
         }
 
-        var name = skill.Frontmatter.Name ?? skill.DirectoryName;
-        var output = settings.Output ?? $"{name}.zip";
+        string name = skill.Frontmatter.Name ?? skill.DirectoryName;
+        string output = settings.Output ?? $"{name}.zip";
         if (File.Exists(output)) File.Delete(output);
 
         // Bundle the SKILL.md at the archive root plus scripts/, references/, assets/ — the
         // shape Copilot Studio accepts for an uploaded Skill .zip.
-        using (var zip = ZipFile.Open(output, ZipArchiveMode.Create))
+        using (ZipArchive zip = ZipFile.Open(output, ZipArchiveMode.Create))
         {
             zip.CreateEntryFromFile(skill.SkillFilePath, "SKILL.md");
-            foreach (var res in skill.Resources)
+            foreach (SkillResource res in skill.Resources)
                 zip.CreateEntryFromFile(res.AbsolutePath, res.RelativePath);
         }
 
@@ -67,7 +68,7 @@ public sealed class PackCommand : Command<PackSettings>
 
     private static void ReportRenderer_RenderErrors(DiagnosticReport report)
     {
-        foreach (var d in report.Items.Where(i => i.Severity is Severity.Error or Severity.Critical))
+        foreach (Diagnostic? d in report.Items.Where(i => i.Severity is Severity.Error or Severity.Critical))
             AnsiConsole.MarkupLine($"  [red]{Markup.Escape(d.Code)}[/] {Markup.Escape(d.Message)}");
     }
 }

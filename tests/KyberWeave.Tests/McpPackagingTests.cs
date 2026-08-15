@@ -15,9 +15,9 @@ namespace KyberWeave.Tests;
 public class McpPackagingTests
 {
     [Fact]
-    public void McpProject_Is_Packable_As_Dotnet_Tool_With_Kyber_Weave_Mcp_Command()
+    public void McpProjectIsPackableAsDotnetToolWithKyberWeaveMcpCommand()
     {
-        var doc = XDocument.Load(KyberWeaveTestPaths.McpProjectPath);
+        XDocument doc = XDocument.Load(KyberWeaveTestPaths.McpProjectPath);
         XNamespace ns = doc.Root!.Name.Namespace;
 
         Assert.Equal("true", PropertyValue(doc, ns, "PackAsTool"));
@@ -26,17 +26,17 @@ public class McpPackagingTests
     }
 
     [Fact]
-    public void McpTool_Descriptions_Do_Not_Hard_Require_MotorcycleRAG()
+    public void McpToolDescriptionsDoNotHardRequireMotorcycleRAG()
     {
-        var source = File.ReadAllText(KyberWeaveTestPaths.McpDocsToolsSourcePath);
+        string source = File.ReadAllText(KyberWeaveTestPaths.McpDocsToolsSourcePath);
 
         Assert.DoesNotContain("MotorcycleRAG", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void McpTool_Descriptions_Use_Generic_Repository_Documentation_Wording()
+    public void McpToolDescriptionsUseGenericRepositoryDocumentationWording()
     {
-        var source = File.ReadAllText(KyberWeaveTestPaths.McpDocsToolsSourcePath);
+        string source = File.ReadAllText(KyberWeaveTestPaths.McpDocsToolsSourcePath);
 
         Assert.Contains("repository documentation", source, StringComparison.OrdinalIgnoreCase);
     }
@@ -60,9 +60,9 @@ public class McpPackagingTests
     [InlineData(nameof(DocsTools.ForSymbol), "docs_for_symbol")]
     [InlineData(nameof(DocsTools.AnalysisCandidates), "docs_analysis_candidates")]
     [InlineData(nameof(DocsTools.Glossary), "docs_glossary")]
-    public void McpTool_Descriptions_ScoreAsRoutingMetadata(string method, string toolName)
+    public void McpToolDescriptionsScoreAsRoutingMetadata(string method, string toolName)
     {
-        var score = ScoreDescription(method, toolName);
+        DescriptionScore score = ScoreDescription(method, toolName);
 
         Assert.Equal(35, score.Components.Single(c => c.Name == "Trigger clause").Points);
         Assert.Equal(15, score.Components.Single(c => c.Name == "Specific opening").Points);
@@ -76,7 +76,7 @@ public class McpPackagingTests
     /// <c>docs_explore</c>, the broadest of the four, carries a negative boundary.
     /// </summary>
     [Fact]
-    public void Only_The_Broadest_Mcp_Tool_Carries_A_Negative_Boundary()
+    public void OnlyTheBroadestMcpToolCarriesANegativeBoundary()
     {
         static int Boundary(string method, string toolName) =>
             ScoreDescription(method, toolName).Components.Single(c => c.Name == "Negative boundary").Points;
@@ -97,9 +97,9 @@ public class McpPackagingTests
     [InlineData(nameof(DocsTools.ForSymbol))]
     [InlineData(nameof(DocsTools.AnalysisCandidates))]
     [InlineData(nameof(DocsTools.Glossary))]
-    public void McpTools_Declare_ReadOnly_And_Closed_World_Annotations(string method)
+    public void McpToolsDeclareReadOnlyAndClosedWorldAnnotations(string method)
     {
-        var attribute = typeof(DocsTools).GetMethod(method)!.GetCustomAttribute<McpServerToolAttribute>()!;
+        McpServerToolAttribute attribute = typeof(DocsTools).GetMethod(method)!.GetCustomAttribute<McpServerToolAttribute>()!;
 
         Assert.True(attribute.ReadOnly, $"{method} must declare ReadOnly so clients see readOnlyHint.");
         Assert.False(attribute.OpenWorld, $"{method} queries a local corpus and must not claim an open world.");
@@ -107,7 +107,7 @@ public class McpPackagingTests
 
     private static DescriptionScore ScoreDescription(string method, string toolName)
     {
-        var description = typeof(DocsTools)
+        string description = typeof(DocsTools)
             .GetMethod(method)!
             .GetCustomAttribute<DescriptionAttribute>()!
             .Description;

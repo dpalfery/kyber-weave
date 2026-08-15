@@ -1,5 +1,6 @@
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -10,30 +11,30 @@ public sealed class DocsCatalogCommand : Command<DocsSettings>
 {
     public override int Execute(CommandContext context, DocsSettings settings)
     {
-        var report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryCreateLoader(settings, report, out var loader))
+        DiagnosticReport report = new DiagnosticReport();
+        if (!DocsCommandComposition.TryCreateLoader(settings, report, out DocumentLoader? loader))
         {
             CommandHelpers.Finish(report, settings, "docs catalog", "Document");
             return 1;
         }
 
-        var set = loader!.Load();
+        DocumentSet set = loader!.Load();
 
-        var table = new Table().Border(TableBorder.Rounded).Expand();
+        Table table = new Table().Border(TableBorder.Rounded).Expand();
         table.AddColumn("Component");
         table.AddColumn("Documents");
         table.AddColumn("Doc types");
         table.AddColumn("Missing frontmatter");
 
-        foreach (var (component, documents) in set.ByComponent().OrderBy(k => k.Key, StringComparer.Ordinal))
+        foreach ((string? component, IReadOnlyList<DocumentModel>? documents) in set.ByComponent().OrderBy(k => k.Key, StringComparer.Ordinal))
         {
-            var types = documents
+            IOrderedEnumerable<string> types = documents
                 .Where(d => d.DocType != DocType.Unknown)
                 .Select(d => d.DocType.ToString().ToLowerInvariant())
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(t => t, StringComparer.Ordinal);
 
-            var missing = documents.Count(d => !d.HasFrontmatter);
+            int missing = documents.Count(d => !d.HasFrontmatter);
 
             table.AddRow(
                 new Markup(Markup.Escape(component)),

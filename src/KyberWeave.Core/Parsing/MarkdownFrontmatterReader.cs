@@ -50,15 +50,15 @@ public static class MarkdownFrontmatterReader
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        var document = Markdown.Parse(content, Pipeline);
-        var block = document.Descendants<YamlFrontMatterBlock>().FirstOrDefault();
+        MarkdownDocument document = Markdown.Parse(content, Pipeline);
+        YamlFrontMatterBlock? block = document.Descendants<YamlFrontMatterBlock>().FirstOrDefault();
 
         if (block is null)
         {
             return new FrontmatterReadResult(false, string.Empty, content);
         }
 
-        var (body, bodyStartLine) = ExtractBody(content, block);
+        (string? body, int bodyStartLine) = ExtractBody(content, block);
         return new FrontmatterReadResult(true, ExtractYaml(content, block), body, bodyStartLine);
     }
 
@@ -68,8 +68,8 @@ public static class MarkdownFrontmatterReader
 
     private static string ExtractYaml(string content, YamlFrontMatterBlock block)
     {
-        var slice = content.Substring(block.Span.Start, block.Span.Length);
-        var lines = slice.Replace("\r\n", "\n").Split('\n').ToList();
+        string slice = content.Substring(block.Span.Start, block.Span.Length);
+        List<string> lines = slice.Replace("\r\n", "\n").Split('\n').ToList();
         if (lines.Count > 0 && lines[0].TrimStart().StartsWith("---", StringComparison.Ordinal)) lines.RemoveAt(0);
         if (lines.Count > 0 && lines[^1].TrimStart().StartsWith("---", StringComparison.Ordinal)) lines.RemoveAt(lines.Count - 1);
         return string.Join("\n", lines);
@@ -77,13 +77,13 @@ public static class MarkdownFrontmatterReader
 
     private static (string Body, int StartLine) ExtractBody(string content, YamlFrontMatterBlock block)
     {
-        var afterIndex = block.Span.End + 1;
+        int afterIndex = block.Span.End + 1;
         while (afterIndex < content.Length && content[afterIndex] is '\r' or '\n')
         {
             afterIndex++;
         }
 
-        var startLine = SourceLineAt(content, afterIndex);
+        int startLine = SourceLineAt(content, afterIndex);
         return afterIndex >= content.Length
             ? (string.Empty, startLine)
             : (content[afterIndex..], startLine);
@@ -91,8 +91,8 @@ public static class MarkdownFrontmatterReader
 
     private static int SourceLineAt(string content, int position)
     {
-        var line = 1;
-        for (var index = 0; index < position; index++)
+        int line = 1;
+        for (int index = 0; index < position; index++)
         {
             if (content[index] == '\n' ||
                 content[index] == '\r' && (index + 1 >= position || content[index + 1] != '\n'))

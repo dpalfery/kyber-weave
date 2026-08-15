@@ -21,9 +21,9 @@ public static partial class SpecValidator
 
     public static IEnumerable<Diagnostic> Validate(Skill skill)
     {
-        var name = skill.Frontmatter.Name;
-        var skillId = string.IsNullOrWhiteSpace(name) ? skill.DirectoryName : name!;
-        var file = skill.SkillFilePath;
+        string? name = skill.Frontmatter.Name;
+        string skillId = string.IsNullOrWhiteSpace(name) ? skill.DirectoryName : name!;
+        string file = skill.SkillFilePath;
 
         // ---- name ----
         if (string.IsNullOrWhiteSpace(name))
@@ -54,7 +54,7 @@ public static partial class SpecValidator
         }
 
         // ---- description ----
-        var description = skill.Frontmatter.Description;
+        string? description = skill.Frontmatter.Description;
         if (string.IsNullOrWhiteSpace(description))
         {
             yield return new Diagnostic("KW-SKILL-SPEC-005", Severity.Error,
@@ -85,7 +85,7 @@ public static partial class SpecValidator
         }
 
         // ---- unknown keys ----
-        foreach (var unknown in skill.Frontmatter.UnknownKeys.Keys)
+        foreach (string unknown in skill.Frontmatter.UnknownKeys.Keys)
         {
             yield return new Diagnostic("KW-SKILL-SPEC-009", Severity.Warning,
                 $"Front matter contains unrecognized key '{unknown}'. Compliant runtimes ignore it; confirm it is intentional.",
@@ -101,7 +101,7 @@ public static partial class SpecValidator
         }
 
         // ---- file reference integrity ----
-        foreach (var link in skill.ReferenceLinks)
+        foreach (SkillReferenceLink link in skill.ReferenceLinks)
         {
             if (link.Target.Contains(".."))
             {
