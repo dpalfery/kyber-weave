@@ -1,0 +1,47 @@
+{
+  "name": "@dpalfery/kyber-weave",
+  "version": "0.1.0",
+  "description": "Kyber-Weave governance CLI and MCP server — self-contained binaries (no .NET runtime required).",
+  "license": "MIT",
+  "author": "David Palfery",
+  "homepage": "https://github.com/dpalfery/kyber-weave#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dpalfery/kyber-weave.git",
+    "directory": "npm"
+  },
+  "bugs": {
+    "url": "https://github.com/dpalfery/kyber-weave/issues"
+  },
+  "keywords": [
+    "kyber-weave",
+    "governance",
+    "skills",
+    "agents",
+    "documentation",
+    "mcp",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "kyber-weave": "bin/kyber-weave.js",
+    "kyber-weave-mcp": "bin/kyber-weave-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "install-binaries": "node scripts/postinstall.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
