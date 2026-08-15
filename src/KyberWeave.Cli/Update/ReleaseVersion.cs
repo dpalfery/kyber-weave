@@ -20,7 +20,8 @@ internal static class ReleaseVersion
 
         if (trimmed.Contains('/', StringComparison.Ordinal)
             || trimmed.Contains('\\', StringComparison.Ordinal)
-            || trimmed.Contains("..", StringComparison.Ordinal))
+            || trimmed.Contains("..", StringComparison.Ordinal)
+            || !trimmed.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-'))
         {
             throw new SelfUpdateException($"refusing version '{version}': it is not a Release tag.");
         }

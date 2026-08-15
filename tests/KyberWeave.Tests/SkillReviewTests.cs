@@ -140,17 +140,17 @@ public sealed class SkillReviewTests
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
                 {
-                    "candidate_id": "sql-generator",
-                    "is_trigger_oriented": false,
+                    "candidateId": "sql-generator",
+                    "isTriggerOriented": false,
                     "confidence": 0.95,
-                    "suggested_trigger_description": "Use when writing or optimizing PostgreSQL queries.",
+                    "suggestedTriggerDescription": "Use when writing or optimizing PostgreSQL queries.",
                     "rationale": "Description was an action summary without trigger framing."
                 },
                 {
-                    "candidate_id": "schema-architect",
-                    "is_trigger_oriented": true,
+                    "candidateId": "schema-architect",
+                    "isTriggerOriented": true,
                     "confidence": 0.90,
-                    "suggested_trigger_description": null,
+                    "suggestedTriggerDescription": null,
                     "rationale": "Already states trigger conditions clearly."
                 }
             ]
@@ -209,10 +209,10 @@ public sealed class SkillReviewTests
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
                 {
-                    "candidate_id": "non-existent-candidate",
-                    "is_trigger_oriented": false,
+                    "candidateId": "non-existent-candidate",
+                    "isTriggerOriented": false,
                     "confidence": 0.95,
-                    "suggested_trigger_description": "Use when..."
+                    "suggestedTriggerDescription": "Use when..."
                 }
             ]
         }
@@ -236,15 +236,16 @@ public sealed class SkillReviewTests
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
         };
 
+        string formattedConfidence = invalidConfidence.ToString(System.Globalization.CultureInfo.InvariantCulture);
         string json = $$"""
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
                 {
-                    "candidate_id": "sql-generator",
-                    "is_trigger_oriented": false,
-                    "confidence": {{invalidConfidence}},
-                    "suggested_trigger_description": "Use when..."
+                    "candidateId": "sql-generator",
+                    "isTriggerOriented": false,
+                    "confidence": {{formattedConfidence}},
+                    "suggestedTriggerDescription": "Use when..."
                 }
             ]
         }
@@ -271,10 +272,10 @@ public sealed class SkillReviewTests
             "schema": "kyber-weave.skill-review.verdicts/v999",
             "verdicts": [
                 {
-                    "candidate_id": "sql-generator",
-                    "is_trigger_oriented": false,
+                    "candidateId": "sql-generator",
+                    "isTriggerOriented": false,
                     "confidence": 0.9,
-                    "suggested_trigger_description": "Use when..."
+                    "suggestedTriggerDescription": "Use when..."
                 }
             ]
         }
@@ -301,16 +302,16 @@ public sealed class SkillReviewTests
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
                 {
-                    "candidate_id": "sql-generator",
-                    "is_trigger_oriented": false,
+                    "candidateId": "sql-generator",
+                    "isTriggerOriented": false,
                     "confidence": 0.9,
-                    "suggested_trigger_description": "Use when..."
+                    "suggestedTriggerDescription": "Use when..."
                 },
                 {
-                    "candidate_id": "sql-generator",
-                    "is_trigger_oriented": true,
+                    "candidateId": "sql-generator",
+                    "isTriggerOriented": true,
                     "confidence": 0.85,
-                    "suggested_trigger_description": null
+                    "suggestedTriggerDescription": null
                 }
             ]
         }
@@ -382,10 +383,10 @@ public sealed class SkillReviewTests
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
                 {
-                    "candidate_id": "sql-generator",
-                    "is_trigger_oriented": false,
+                    "candidateId": "sql-generator",
+                    "isTriggerOriented": false,
                     "confidence": 0.95,
-                    "suggested_trigger_description": "Use when writing or optimizing PostgreSQL queries."
+                    "suggestedTriggerDescription": "Use when writing or optimizing PostgreSQL queries."
                 }
             ]
         }
@@ -419,16 +420,16 @@ public sealed class SkillReviewTests
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
                 {
-                    "candidate_id": "Claude:schema-architect",
-                    "is_trigger_oriented": true,
+                    "candidateId": "Claude:schema-architect",
+                    "isTriggerOriented": true,
                     "confidence": 0.9,
-                    "suggested_trigger_description": null
+                    "suggestedTriggerDescription": null
                 },
                 {
-                    "candidate_id": "Cursor:schema-architect",
-                    "is_trigger_oriented": true,
+                    "candidateId": "Cursor:schema-architect",
+                    "isTriggerOriented": true,
                     "confidence": 0.8,
-                    "suggested_trigger_description": null
+                    "suggestedTriggerDescription": null
                 }
             ]
         }

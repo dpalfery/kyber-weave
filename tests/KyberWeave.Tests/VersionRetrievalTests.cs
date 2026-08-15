@@ -6,7 +6,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Unit tests verifying version retrieval from assembly attributes and execution output for CLI and MCP.
+/// Verifies version retrieval from application execution output for CLI and MCP.
 /// </summary>
 public class VersionRetrievalTests
 {
@@ -65,7 +65,6 @@ public class VersionRetrievalTests
         // Assert
         Assert.Equal("0.0.0", dummyVersion);
     }
-
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
@@ -121,7 +120,6 @@ public class VersionRetrievalTests
 
         return "0.0.0";
     }
-
     private static ProcessResult RunAssembly(Assembly assembly, params string[] args)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("dotnet")

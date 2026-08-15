@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Validation;
 using KyberWeave.Core.Diagnostics;
@@ -22,10 +21,6 @@ public static partial class SkillReviewExchange
         WriteIndented = true,
         PropertyNameCaseInsensitive = true
     };
-
-    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
-        RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
-    private static partial Regex TriggerClauseRegex();
 
     public static SkillReviewExportResult ExportCandidates(
         SkillSet? skills = null,
@@ -87,7 +82,7 @@ public static partial class SkillReviewExchange
                 string trimmedDesc = description.Trim();
                 if (!string.IsNullOrWhiteSpace(trimmedDesc))
                 {
-                    if (!TriggerClauseRegex().IsMatch(trimmedDesc))
+                    if (!RoutingLinter.TriggerClauseRegex().IsMatch(trimmedDesc))
                     {
                         flags.Add(AgentSyncLinter.RuleMissingTriggerPhrasing);
                     }

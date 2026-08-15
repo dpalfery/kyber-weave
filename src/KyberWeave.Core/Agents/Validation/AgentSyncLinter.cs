@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -17,10 +16,6 @@ public static partial class AgentSyncLinter
     public const string RuleInstructionDrift = "KW-AGENT-SYNC-002";
     public const string RuleLowRoutingScore = "KW-AGENT-LINT-001";
     public const string RuleMissingTriggerPhrasing = "KW-AGENT-LINT-002";
-
-    [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
-        RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
-    private static partial Regex TriggerClauseRegex();
 
     public static DiagnosticReport LintSet(AgentSet agentSet, string rootDirectoryPath) =>
         LintSet(agentSet, rootDirectoryPath, HarnessProfileConfig.ProductDefaults);
@@ -100,7 +95,7 @@ public static partial class AgentSyncLinter
                 if (!string.IsNullOrWhiteSpace(agent.Description))
                 {
                     string desc = agent.Description.Trim();
-                    if (!TriggerClauseRegex().IsMatch(desc))
+                    if (!RoutingLinter.TriggerClauseRegex().IsMatch(desc))
                     {
                         report.Add(new Diagnostic(RuleMissingTriggerPhrasing, Severity.Warning,
                             $"Agent '{agent.RoleName}' in '{agent.Harness}' description is an action summary or lacks trigger phrasing. Frame when the orchestrator should invoke this agent (e.g. 'Use when...', 'Invoke when...', 'Trigger when...').",

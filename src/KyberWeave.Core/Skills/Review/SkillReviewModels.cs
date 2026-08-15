@@ -41,10 +41,10 @@ public sealed record SkillReviewExportResult(
 
 /// <summary>One reviewer verdict on a skill or agent description.</summary>
 public sealed record SkillReviewVerdict(
-    [property: JsonPropertyName("candidate_id")] string CandidateId,
-    [property: JsonPropertyName("is_trigger_oriented")] bool? IsTriggerOriented,
+    [property: JsonPropertyName("candidateId")] string CandidateId,
+    [property: JsonPropertyName("isTriggerOriented")] bool? IsTriggerOriented,
     [property: JsonPropertyName("confidence")] double? Confidence,
-    [property: JsonPropertyName("suggested_trigger_description")] string? SuggestedTriggerDescription,
+    [property: JsonPropertyName("suggestedTriggerDescription")] string? SuggestedTriggerDescription,
     [property: JsonPropertyName("rationale")] string? Rationale = null);
 
 /// <summary>Versioned reviewer verdict exchange document.</summary>

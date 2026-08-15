@@ -540,16 +540,12 @@ public sealed class DocumentationAnalyzerTests
     [Fact]
     public void DocGraphProjectionExposesIndexedRelatedDocumentNeighborhoods()
     {
-        MethodInfo? method = typeof(DocGraphProjection).GetMethod(
-            "GetRelatedDocumentIds",
-            System.Reflection.BindingFlags.Instance
-            | System.Reflection.BindingFlags.Public
-            | System.Reflection.BindingFlags.NonPublic,
-            binder: null,
-            types: [typeof(string)],
-            modifiers: null);
+        DocGraphProjection projection = DocGraphProjection.Build(
+            Set(Document("doc1", "docs/doc1.md", Status.Current, "content")),
+            new FakeCodeGraphResolver());
 
-        Assert.NotNull(method);
+        IReadOnlyCollection<string> related = projection.GetRelatedDocumentIds("doc1");
+        Assert.NotNull(related);
     }
 
     [Fact]
@@ -812,10 +808,7 @@ public sealed class DocumentationAnalyzerTests
             "```bash title=\"verification\"\ndotnet test\n```");
 
         Claim claim = Assert.Single(Extract(Set(document)));
-        PropertyInfo? fenceInfo = typeof(Claim).GetProperty("FenceInfo");
-
-        Assert.NotNull(fenceInfo);
-        Assert.Equal("bash title=\"verification\"", fenceInfo.GetValue(claim));
+        Assert.Equal("bash title=\"verification\"", claim.FenceInfo);
     }
 
     [Theory]

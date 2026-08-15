@@ -381,7 +381,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
         DocumentationAnalysisResult result,
         IReadOnlyDictionary<string, GlossaryLookupResult>? glossary = null) : IDocsAnalysisReader
     {
-        public DocumentationAnalysisResult Analyze() => result;
+        public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default) => result;
 
         public GlossaryLookupResult LookupGlossary(string term) =>
             glossary?.GetValueOrDefault(term)

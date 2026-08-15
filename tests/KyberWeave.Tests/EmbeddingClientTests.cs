@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Configuration;
@@ -120,12 +119,14 @@ public sealed class EmbeddingClientTests
             ResolveTo(IPAddress.Loopback),
             _ => null);
 
-        HttpClient? client = typeof(OpenAiCompatibleEmbeddingGenerator)
-            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?.GetValue(generator) as HttpClient;
+        EmbeddingGenerationResult result = generator.Generate(
+            [Key("k1")],
+            ["input text"],
+            Config());
 
-        Assert.NotNull(client);
-        Assert.Equal(Timeout.InfiniteTimeSpan, client.Timeout);
+        Assert.Single(result.Embeddings);
+        CapturedRequest request = Assert.Single(handler.Requests);
+        Assert.True(request.CanBeCanceled);
     }
 
     [Fact]

@@ -349,7 +349,7 @@ public static class ReportRenderer
         float item => JsonValue.Create(item),
         double item => JsonValue.Create(item),
         decimal item => JsonValue.Create(item),
-        _ => throw new InvalidOperationException("Diagnostic metrics must be JSON scalar values.")
+        _ => JsonValue.Create(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty)
     };
 
     private static void AddRange(JsonObject target, int? startLine, int? endLine)

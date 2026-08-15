@@ -148,13 +148,17 @@ public sealed class ManagedGlossaryService
     }
 
     /// <summary>Returns all senses for a term using case-insensitive term matching.</summary>
-    public GlossaryLookupResult Lookup(string term)
+    public GlossaryLookupResult Lookup(string term) => Lookup(term, Load());
+
+    /// <summary>Returns all senses for a term from preloaded glossary data using case-insensitive term matching.</summary>
+    public static GlossaryLookupResult Lookup(string term, ManagedGlossaryLoadResult loaded)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
-        string normalized = term.Trim().ToLowerInvariant();
-        return Load().Terms.FirstOrDefault(candidate =>
-                   StringComparer.OrdinalIgnoreCase.Equals(candidate.Term, normalized))
-               ?? new GlossaryLookupResult(normalized, []);
+        ArgumentNullException.ThrowIfNull(loaded);
+        string trimmed = term.Trim();
+        return loaded.Terms.FirstOrDefault(candidate =>
+                   StringComparer.OrdinalIgnoreCase.Equals(candidate.Term, trimmed))
+               ?? new GlossaryLookupResult(trimmed, []);
     }
 
     private GlossaryUpdateResult Merge(IReadOnlyList<GlossaryProposal> proposals, bool write)

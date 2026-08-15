@@ -130,10 +130,11 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new DiagnosticReport(),
             factories.Factories,
             out DocsAnalysisRuntime? runtime);
+
+        Assert.True(success);
         runtime!.Dispose();
         runtime.Dispose();
 
-        Assert.True(success);
         Assert.Equal(1, persistence.DisposeCount);
         Assert.Equal(1, embedding.DisposeCount);
     }
@@ -178,9 +179,10 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new DiagnosticReport(),
             factories.Factories,
             out DocsAnalysisRuntime? runtime);
-        runtime!.Dispose();
 
         Assert.True(success);
+        runtime!.Dispose();
+
         Assert.Equal(before, Files());
         Assert.False(Directory.Exists(Path.Combine(_temp.Path, ".kyber-weave", "cache")));
         Assert.Equal(0, factories.PersistenceConstructions);

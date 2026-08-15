@@ -30,7 +30,7 @@ public sealed partial class RoutingLinter
 
     [GeneratedRegex(@"\b((use|uses)\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for)|(apply|applies|invoke|invokes|trigger|triggers)\s+when)\b",
         RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
-    private static partial Regex TriggerClauseRegex();
+    internal static partial Regex TriggerClauseRegex();
 
     [GeneratedRegex(@"^\s*(generat|creat|validat|triag|classif|rout|calculat|comput|look\s*up|retriev|summari|draft|review|extract|analy|check|process|handl|resolv|onboard|document|format|convert|pars|fetch|quer|escalat|approv|reset|enrich|map|build|execut|perform|manag|sync|scan|transform|updat|deploy|evaluat|track|monitor|filter|publish|writ|read|provid|assist|help|enabl|implement|automat|integrat|orchestrat|compil|modif|inspect|run|send|collect|aggregat)\w*\b",
         RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]

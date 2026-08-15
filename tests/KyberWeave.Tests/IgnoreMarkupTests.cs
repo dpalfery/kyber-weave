@@ -32,15 +32,16 @@ public sealed class IgnoreMarkupTests
             The Codex loop consumes model tokens.
             """;
         string originalBody = body;
+        DocumentModel document = ClaimExtractionTests.Document(body);
 
-        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(document);
 
         Assert.Empty(result.Diagnostics.Items);
         Assert.Equal(2, result.Claims.Count);
         Assert.Equal(expectedRule, result.Claims[0].IgnoreRules);
         Assert.Equal(IgnoreRule.None, result.Claims[1].IgnoreRules);
         Assert.Equal("The gameplay loop runs live tests.", result.Claims[0].Text);
-        Assert.Equal(originalBody, ClaimExtractionTests.Document(body).Body);
+        Assert.Equal(originalBody, document.Body);
     }
 
     [Theory]

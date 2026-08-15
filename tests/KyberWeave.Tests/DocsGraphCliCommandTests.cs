@@ -24,12 +24,12 @@ public sealed class DocsGraphCliCommandTests : IDisposable
             null!,
             new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path }));
         int exitCode = execution.Result;
+        Assert.Equal(0, exitCode);
+
         JsonElement[] nodes = ReadJsonLines(Path.Combine(_output.Path, "nodes.jsonl"));
         JsonElement[] edges = ReadJsonLines(Path.Combine(_output.Path, "edges.jsonl"));
         string allOutput = File.ReadAllText(Path.Combine(_output.Path, "nodes.jsonl"))
             + File.ReadAllText(Path.Combine(_output.Path, "edges.jsonl"));
-
-        Assert.Equal(0, exitCode);
         Assert.Contains(nodes, node => IsNode(node, "doc:reference/gameplay", "Document"));
         Assert.Contains(nodes, node => IsNode(node, "term:loop", "Term"));
         Assert.Contains(nodes, node => IsNode(node, "sense:loop-gameplay", "Sense"));

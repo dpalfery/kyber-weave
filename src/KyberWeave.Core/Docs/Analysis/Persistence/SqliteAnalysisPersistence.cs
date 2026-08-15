@@ -59,10 +59,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         if (!IsAvailable || claimIds.Count == 0)
             return new Dictionary<string, PersistedClaim>(StringComparer.Ordinal);
 
-        HashSet<string> requested = new HashSet<string>(claimIds, StringComparer.Ordinal);
-        return ReadPayloadRows<PersistedClaim>("analysis_claims", "id")
-            .Where(pair => requested.Contains(pair.Key))
-            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        return ReadPayloadRows<PersistedClaim>("analysis_claims", "id", claimIds);
     }
 
     public void SaveClaims(IReadOnlyCollection<PersistedClaim> claims)
@@ -81,10 +78,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         if (!IsAvailable || candidateIds.Count == 0)
             return new Dictionary<string, PersistedCandidateFingerprint>(StringComparer.Ordinal);
 
-        HashSet<string> requested = new HashSet<string>(candidateIds, StringComparer.Ordinal);
-        return ReadPayloadRows<PersistedCandidateFingerprint>("analysis_candidates", "candidate_id")
-            .Where(pair => requested.Contains(pair.Key))
-            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        return ReadPayloadRows<PersistedCandidateFingerprint>("analysis_candidates", "candidate_id", candidateIds);
     }
 
     public void SaveCandidateFingerprints(
@@ -104,10 +98,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         if (!IsAvailable || candidateIds.Count == 0)
             return new Dictionary<string, AnalysisVerdict>(StringComparer.Ordinal);
 
-        HashSet<string> requested = new HashSet<string>(candidateIds, StringComparer.Ordinal);
-        return ReadPayloadRows<AnalysisVerdict>("analysis_verdicts", "candidate_id")
-            .Where(pair => requested.Contains(pair.Key))
-            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        return ReadPayloadRows<AnalysisVerdict>("analysis_verdicts", "candidate_id", candidateIds);
     }
 
     public void SaveVerdicts(IReadOnlyCollection<AnalysisVerdict> verdicts)
@@ -155,39 +146,48 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
             return new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
 
         HashSet<EmbeddingCacheKey> requested = new HashSet<EmbeddingCacheKey>(keys);
-        string output = ExecuteSqlite(
-            ".mode tabs\n" +
-            ".headers off\n" +
-            "SELECT hex(contextual_hash), hex(provider_fingerprint), hex(model), " +
-            "dimensions, hex(encoding), hex(vector) FROM analysis_embeddings;");
+        string[] contextualHashes = keys.Select(k => k.ContextualHash).Distinct(StringComparer.Ordinal).ToArray();
         Dictionary<EmbeddingCacheKey, StoredEmbedding> loaded = new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
-        foreach (string line in Lines(output))
+
+        const int batchSize = 500;
+        for (int i = 0; i < contextualHashes.Length; i += batchSize)
         {
-            try
+            string[] chunk = contextualHashes.Skip(i).Take(batchSize).ToArray();
+            string inClause = string.Join(", ", chunk.Select(Blob));
+            string output = ExecuteSqlite(
+                ".mode tabs\n" +
+                ".headers off\n" +
+                "SELECT hex(contextual_hash), hex(provider_fingerprint), hex(model), " +
+                $"dimensions, hex(encoding), hex(vector) FROM analysis_embeddings WHERE contextual_hash IN ({inClause});");
+
+            foreach (string line in Lines(output))
             {
-                string[] fields = line.Split('\t');
-                if (fields.Length != 6
-                    || !int.TryParse(fields[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int storedDimensions))
+                try
                 {
-                    throw new InvalidDataException("An embedding row has an invalid shape.");
+                    string[] fields = line.Split('\t');
+                    if (fields.Length != 6
+                        || !int.TryParse(fields[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int storedDimensions))
+                    {
+                        throw new InvalidDataException("An embedding row has an invalid shape.");
+                    }
+
+                    EmbeddingCacheKey key = new EmbeddingCacheKey(
+                        Text(fields[0]),
+                        Text(fields[1]),
+                        Text(fields[2]),
+                        storedDimensions < 0 ? null : storedDimensions,
+                        Text(fields[4]));
+                    if (!requested.Contains(key)) continue;
+
+                    IReadOnlyList<float> vector = DecodeVector(fields[5]);
+                    Validate(new StoredEmbedding(key, vector));
+                    loaded[key] = new StoredEmbedding(key, vector);
                 }
-
-                EmbeddingCacheKey key = new EmbeddingCacheKey(
-                    Text(fields[0]),
-                    Text(fields[1]),
-                    Text(fields[2]),
-                    storedDimensions < 0 ? null : storedDimensions,
-                    Text(fields[4]));
-                if (!requested.Contains(key)) continue;
-
-                IReadOnlyList<float> vector = DecodeVector(fields[5]);
-                Validate(new StoredEmbedding(key, vector));
-                loaded[key] = new StoredEmbedding(key, vector);
-            }
-            catch (Exception exception) when (
-                exception is FormatException or ArgumentException or InvalidDataException)
-            {
-                throw CorruptCache("An embedding row is invalid.", exception);
+                catch (Exception exception) when (
+                    exception is FormatException or ArgumentException or InvalidDataException)
+                {
+                    throw CorruptCache("An embedding row is invalid.", exception);
+                }
             }
         }
 
@@ -258,30 +258,47 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         "SELECT contextual_hash, provider_fingerprint, model, dimensions, encoding, vector " +
         "FROM analysis_embeddings LIMIT 0;\n";
 
-    private IReadOnlyDictionary<string, T> ReadPayloadRows<T>(string table, string keyColumn)
+    private IReadOnlyDictionary<string, T> ReadPayloadRows<T>(
+        string table,
+        string keyColumn,
+        IReadOnlyCollection<string> requestedKeys)
     {
-        string output = ExecuteSqlite(
-            ".mode tabs\n" +
-            ".headers off\n" +
-            $"SELECT hex({keyColumn}), hex(payload) FROM {table};");
-        Dictionary<string, T> loaded = new Dictionary<string, T>(StringComparer.Ordinal);
-        foreach (string line in Lines(output))
+        if (requestedKeys.Count == 0)
         {
-            string[] fields = line.Split('\t');
-            if (fields.Length != 2) throw CorruptCache($"Table '{table}' contains an invalid row.");
+            return new Dictionary<string, T>(StringComparer.Ordinal);
+        }
 
-            try
+        Dictionary<string, T> loaded = new Dictionary<string, T>(StringComparer.Ordinal);
+        const int batchSize = 500;
+        string[] distinctKeys = requestedKeys.Distinct(StringComparer.Ordinal).ToArray();
+
+        for (int i = 0; i < distinctKeys.Length; i += batchSize)
+        {
+            string[] chunk = distinctKeys.Skip(i).Take(batchSize).ToArray();
+            string inClause = string.Join(", ", chunk.Select(Blob));
+            string output = ExecuteSqlite(
+                ".mode tabs\n" +
+                ".headers off\n" +
+                $"SELECT hex({keyColumn}), hex(payload) FROM {table} WHERE {keyColumn} IN ({inClause});");
+
+            foreach (string line in Lines(output))
             {
-                string key = Text(fields[0]);
-                T value = JsonSerializer.Deserialize<T>(Convert.FromHexString(fields[1]), SerializerOptions)
-                    ?? throw CorruptCache($"Table '{table}' contains an empty payload.");
-                ValidateLoadedPayload(table, key, value);
-                loaded[key] = value;
-            }
-            catch (Exception exception) when (
-                exception is FormatException or JsonException or NotSupportedException or ArgumentException)
-            {
-                throw CorruptCache($"Table '{table}' contains an invalid payload.", exception);
+                string[] fields = line.Split('\t');
+                if (fields.Length != 2) throw CorruptCache($"Table '{table}' contains an invalid row.");
+
+                try
+                {
+                    string key = Text(fields[0]);
+                    T value = JsonSerializer.Deserialize<T>(Convert.FromHexString(fields[1]), SerializerOptions)
+                        ?? throw CorruptCache($"Table '{table}' contains an empty payload.");
+                    ValidateLoadedPayload(table, key, value);
+                    loaded[key] = value;
+                }
+                catch (Exception exception) when (
+                    exception is FormatException or JsonException or NotSupportedException or ArgumentException)
+                {
+                    throw CorruptCache($"Table '{table}' contains an invalid payload.", exception);
+                }
             }
         }
 

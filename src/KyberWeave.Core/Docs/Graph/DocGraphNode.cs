@@ -26,4 +26,49 @@ public sealed record DocGraphNode
     public string Label { get; }
 
     public IReadOnlyDictionary<string, string?> Properties { get; }
+
+    public bool Equals(DocGraphNode? other)
+    {
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (!string.Equals(Id, other.Id, StringComparison.Ordinal) ||
+            !string.Equals(Label, other.Label, StringComparison.Ordinal) ||
+            Properties.Count != other.Properties.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, value) in Properties)
+        {
+            if (!other.Properties.TryGetValue(key, out var otherValue) ||
+                !string.Equals(value, otherValue, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Id, StringComparer.Ordinal);
+        hash.Add(Label, StringComparer.Ordinal);
+        foreach (var (key, value) in Properties.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            hash.Add(key, StringComparer.Ordinal);
+            hash.Add(value, StringComparer.Ordinal);
+        }
+
+        return hash.ToHashCode();
+    }
 }

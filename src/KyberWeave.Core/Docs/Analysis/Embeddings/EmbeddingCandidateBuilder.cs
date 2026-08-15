@@ -33,6 +33,16 @@ internal static class EmbeddingCandidateBuilder
                 embeddings[pair.Right].Vector)))
             .ToArray();
 
+        Dictionary<IndexPair, ClaimPairCandidate> seedMap = new Dictionary<IndexPair, ClaimPairCandidate>();
+        foreach (ClaimPairCandidate seed in seedPairs)
+        {
+            if (claimIndexes.TryGetValue(seed.Left, out int leftIdx) &&
+                claimIndexes.TryGetValue(seed.Right, out int rightIdx))
+            {
+                seedMap.TryAdd(IndexPair.Create(leftIdx, rightIdx), seed);
+            }
+        }
+
         IReadOnlyList<ScoredPair> selected = search.Mode == DocsAnalysisSearchMode.HighRecall
             ? SelectTopNeighbors(scored, claims.Count, search.MaxNeighborsPerClaim)
             : scored;
@@ -43,7 +53,7 @@ internal static class EmbeddingCandidateBuilder
             .Take(search.MaxCandidates)
             .Select(item =>
             {
-                ClaimPairCandidate? seed = FindSeed(seedPairs, claims[item.Pair.Left], claims[item.Pair.Right]);
+                seedMap.TryGetValue(item.Pair, out ClaimPairCandidate? seed);
                 return new ClaimPairCandidate(
                     claims[item.Pair.Left],
                     claims[item.Pair.Right],
@@ -108,14 +118,6 @@ internal static class EmbeddingCandidateBuilder
             .Select(seed => IndexPair.Create(indexes[seed.Left], indexes[seed.Right]))
             .Distinct()
             .ToArray();
-
-    private static ClaimPairCandidate? FindSeed(
-        IEnumerable<ClaimPairCandidate> seeds,
-        Claim left,
-        Claim right) =>
-        seeds.FirstOrDefault(seed =>
-            (seed.Left == left && seed.Right == right)
-            || (seed.Left == right && seed.Right == left));
 
     private static double Cosine(IReadOnlyList<float> left, IReadOnlyList<float> right)
     {

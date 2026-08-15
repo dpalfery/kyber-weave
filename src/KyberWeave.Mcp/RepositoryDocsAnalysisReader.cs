@@ -33,15 +33,18 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     }
 
     /// <inheritdoc />
-    public DocumentationAnalysisResult Analyze()
+    public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         KyberWeaveConfig config = LoadConfig();
         DocumentSet documents = new DocumentLoader(_repositoryRoot, config.Ontology).Load();
+        cancellationToken.ThrowIfCancellationRequested();
         CodeGraphResolverAdapter codeGraph = CodeGraphResolverAdapter.ForRepository(_repositoryRoot);
         DocGraphProjection graph = DocGraphProjection.Build(
             documents,
             codeGraph,
             config.DocsAnalysis.Search.MaxCodeNeighbors);
+        cancellationToken.ThrowIfCancellationRequested();
         SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(_repositoryRoot);
         using OpenAiCompatibleEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
             ? null

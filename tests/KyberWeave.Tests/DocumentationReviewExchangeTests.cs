@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -501,53 +500,19 @@ public sealed class DocumentationReviewExchangeTests
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
-    private static TempDirectory SafeRepository()
-    {
-        TempDirectory repository = new TempDirectory();
-        string stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
-        Directory.CreateDirectory(stateDirectory);
-        File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), "cache/\n");
-        return repository;
-    }
+    private static TempDirectory SafeRepository() => SqliteTestFixture.SafeRepository();
 
-    private static void RequireSqlite()
-    {
-        ProcessStartInfo startInfo = SqliteStartInfo();
-        startInfo.ArgumentList.Add("--version");
-        try
-        {
-            if (ProcessRunner.Run(startInfo, string.Empty).ExitCode != 0)
-                throw SkipException.ForSkip("sqlite3 is unavailable; SQLite review import parity was not run.");
-        }
-        catch (Win32Exception)
-        {
-            throw SkipException.ForSkip("sqlite3 is unavailable; SQLite review import parity was not run.");
-        }
-    }
+    private static void RequireSqlite() =>
+        SqliteTestFixture.RequireSqlite("sqlite3 is unavailable; SQLite review import parity was not run.");
 
-    private static string QuerySqlite(string databasePath, string sql)
-    {
-        ProcessResult result = RunSqlite(databasePath, sql);
-        Assert.Equal(0, result.ExitCode);
-        return result.StandardOutput;
-    }
+    private static string QuerySqlite(string databasePath, string sql) =>
+        SqliteTestFixture.QuerySqlite(databasePath, sql);
 
-    private static ProcessResult RunSqlite(string databasePath, string sql)
-    {
-        ProcessStartInfo startInfo = SqliteStartInfo();
-        startInfo.ArgumentList.Add("-batch");
-        startInfo.ArgumentList.Add("-bail");
-        startInfo.ArgumentList.Add(databasePath);
-        return ProcessRunner.Run(startInfo, sql);
-    }
+    private static ProcessResult RunSqlite(string databasePath, string sql) =>
+        SqliteTestFixture.RunSqlite(databasePath, sql);
 
-    private static ProcessStartInfo SqliteStartInfo() => new("sqlite3")
-    {
-        RedirectStandardInput = true,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false
-    };
+    private static ProcessStartInfo SqliteStartInfo() =>
+        SqliteTestFixture.SqliteStartInfo();
 
     private static JsonSerializerOptions CreateJsonOptions()
     {

@@ -166,6 +166,7 @@ resolve_latest_version() {
             | tr -d '\r\n' \
             | tr '}' '\n' \
             | grep -v '"draft"[[:space:]]*:[[:space:]]*true' \
+            | grep '"prerelease"[[:space:]]*:[[:space:]]*true' \
             | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
             | head -n 1
     else
