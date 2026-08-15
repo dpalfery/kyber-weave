@@ -5,12 +5,8 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Release;
-using Spectre.Console.Cli;
 using Xunit;
 
 namespace KyberWeave.Tests;
