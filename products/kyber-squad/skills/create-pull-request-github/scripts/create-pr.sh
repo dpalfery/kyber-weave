@@ -27,13 +27,33 @@ fi
 
 git fetch --prune --no-tags origin
 
-COMMITS=$(git log --no-merges --pretty=format:"- [%h] %s (%an)" origin/${TB}..${SB})
-FILES=$(git diff --name-only origin/${TB}..${SB} | sed -n '1,20p')
 SUMMARY=$(git log --no-merges --pretty=format:"%s" -n1 origin/${TB}..${SB})
 
 # Clean title from branch name
-BRANCH_STEM="${SB##*/}"
+if [[ "${SB}" =~ ^(feature|bugfix|hotfix|chore|task)/(.*)$ ]]; then
+  BRANCH_STEM="${BASH_REMATCH[2]}"
+else
+  BRANCH_STEM="${SB}"
+fi
 TITLE=$(echo "${BRANCH_STEM}" | sed -E 's/[-_/]+/ /g' | awk '{for(i=1;i<=NF;i++)sub(/./,toupper(substr($i,1,1)),$i)}1')
+
+TICKET=""
+if [[ "${BRANCH_STEM}" =~ ^([0-9]+)([-_/]|$) ]]; then
+  TICKET="#${BASH_REMATCH[1]}"
+elif [[ "${BRANCH_STEM}" =~ ([A-Za-z]+-[0-9]+) ]]; then
+  TICKET="${BASH_REMATCH[1]}"
+fi
+
+RELATED_ISSUE=""
+if [ -n "${TICKET}" ]; then
+  RELATED_ISSUE=$(cat <<EOF
+
+## Related Issue / Ticket
+
+Closes ${TICKET}
+EOF
+)
+fi
 
 DESCRIPTION_FILE=$(mktemp)
 cat > "${DESCRIPTION_FILE}" <<EOF
@@ -46,14 +66,11 @@ ${SUMMARY}
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Refactor (code change that neither fixes a bug nor adds a feature)
+- [ ] Refactor (code change that neither fixes a bug nor adds a feature)${RELATED_ISSUE}
 
 ## Proposed Changes
 
-${COMMITS}
-
-### Files Changed:
-${FILES}
+- Summarized implementation details...
 EOF
 
 # Check for existing PR

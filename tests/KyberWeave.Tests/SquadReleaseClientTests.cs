@@ -303,7 +303,11 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Fact]
     public async Task DownloadAndExtractAsyncWhenExistingDestinationDirectoryIsSymlinkRejectsEscapeWithoutFollowingIt()
     {
-        if (OperatingSystem.IsWindows()) return; // CI runs Linux; the containment rule is platform-independent.
+        if (OperatingSystem.IsWindows())
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "Directory symbolic links are not creatable on the Windows CI agent.");
+        }
 
         string destination = Path.Combine(_temp.Path, "destination");
         string outside = Path.Combine(_temp.Path, "outside");

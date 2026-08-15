@@ -26,10 +26,8 @@ if ([string]::IsNullOrWhiteSpace($Owner) -or [string]::IsNullOrWhiteSpace($Repo)
 
 git fetch --prune --no-tags origin
 $summary = git log --no-merges --pretty=format:"%s" -n 1 "origin/$TB..$SB"
-$commits = git log --no-merges --pretty=format:"- [%h] %s (%an)" "origin/$TB..$SB"
-$files = git diff --name-only "origin/$TB..$SB" | Select-Object -First 20
 
-$branchStem = $SB -replace '^(feature/|bugfix/|hotfix/|task/)', ''
+$branchStem = $SB -replace '^(feature/|bugfix/|hotfix/|chore/|task/)', ''
 $titleParts = ($branchStem -split '[-_/]+' | Where-Object { $_ }) | ForEach-Object {
     if ($_ -match '^\d+$') { $_ }
     else { [System.Globalization.CultureInfo]::InvariantCulture.TextInfo.ToTitleCase($_.ToLowerInvariant()) }
@@ -39,6 +37,18 @@ $title = [string]::Join(' ', $titleParts)
 if ($branchStem -match '^(\d+)(?:[-_/]|$)') { $ticket = "#$($Matches[1])" }
 elseif ($branchStem -match '([A-Z]+-\d+)') { $ticket = $Matches[1] }
 else { $ticket = '' }
+
+$relatedIssueSection = if ($ticket) {
+@"
+
+## Related Issue / Ticket
+
+Closes $ticket
+"@
+}
+else {
+    ""
+}
 
 $description = @"
 ## Summary
@@ -50,18 +60,11 @@ $summary
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Refactor (code change that neither fixes a bug nor adds a feature)
-
-## Related Issue / Ticket
-
-Closes $ticket
+- [ ] Refactor (code change that neither fixes a bug nor adds a feature)$relatedIssueSection
 
 ## Proposed Changes
 
-$commits
-
-### Files Changed:
-$($files -join "`r`n")
+- Summarized implementation details...
 "@
 
 $descriptionFile = Join-Path $env:TEMP 'create-pr-description.md'

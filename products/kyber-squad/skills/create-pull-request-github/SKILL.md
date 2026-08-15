@@ -129,10 +129,31 @@ TB=main # replace with the explicitly chosen or conclusively resolved parent bra
 OWNER="my-org" # or auto-detect from git remote
 REPO="my-repo" # or auto-detect from git remote
 
-COMMITS=$(git log --no-merges --pretty=format:"- [%h] %s (%an)" origin/${TB}..${SB})
-FILES=$(git diff --name-only origin/${TB}..${SB} | sed -n '1,20p')
 SUMMARY=$(git log --no-merges --pretty=format:"%s" -n1 origin/${TB}..${SB})
-TITLE="${SB##*/}" # simple fallback
+if [[ "${SB}" =~ ^(feature|bugfix|hotfix|chore|task)/(.*)$ ]]; then
+  BRANCH_STEM="${BASH_REMATCH[2]}"
+else
+  BRANCH_STEM="${SB}"
+fi
+TITLE=$(echo "${BRANCH_STEM}" | sed -E 's/[-_/]+/ /g' | awk '{for(i=1;i<=NF;i++)sub(/./,toupper(substr($i,1,1)),$i)}1')
+
+TICKET=""
+if [[ "${BRANCH_STEM}" =~ ^([0-9]+)([-_/]|$) ]]; then
+  TICKET="#${BASH_REMATCH[1]}"
+elif [[ "${BRANCH_STEM}" =~ ([A-Za-z]+-[0-9]+) ]]; then
+  TICKET="${BASH_REMATCH[1]}"
+fi
+
+RELATED_ISSUE=""
+if [ -n "${TICKET}" ]; then
+  RELATED_ISSUE=$(cat <<EOF
+
+## Related Issue / Ticket
+
+Closes ${TICKET}
+EOF
+)
+fi
 
 DESCRIPTION_FILE=$(mktemp)
 cat > "${DESCRIPTION_FILE}" <<EOF
@@ -145,7 +166,7 @@ ${SUMMARY}
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Refactor (code change that neither fixes a bug nor adds a feature)
+- [ ] Refactor (code change that neither fixes a bug nor adds a feature)${RELATED_ISSUE}
 
 ## Proposed Changes
 
@@ -170,7 +191,7 @@ $TB = 'main' # replace with the explicitly chosen or conclusively resolved paren
 $owner = 'my-org' # or auto-detect from git remote
 $repo = 'my-repo' # or auto-detect from git remote
 $summary = git log --no-merges --pretty=format:"%s" -n 1 "origin/$TB..$SB"
-$branchStem = $SB -replace '^(feature/|bugfix/|hotfix/|task/)', ''
+$branchStem = $SB -replace '^(feature/|bugfix/|hotfix/|chore/|task/)', ''
 $titleParts = ($branchStem -split '[-_/]+' | Where-Object { $_ }) | ForEach-Object {
   if ($_ -match '^\d+$') { $_ }
   else { [System.Globalization.CultureInfo]::InvariantCulture.TextInfo.ToTitleCase($_.ToLowerInvariant()) }
@@ -179,6 +200,18 @@ $title = [string]::Join(' ', $titleParts)
 if ($branchStem -match '^(\d+)(?:[-_/]|$)') { $ticket = "#$($Matches[1])" }
 elseif ($branchStem -match '([A-Z]+-\d+)') { $ticket = $Matches[1] }
 else { $ticket = '' }
+
+$relatedIssueSection = if ($ticket) {
+@"
+
+## Related Issue / Ticket
+
+Closes $ticket
+"@
+}
+else {
+  ""
+}
 
 $description = @"
 ## Summary
@@ -190,11 +223,7 @@ $summary
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Refactor (code change that neither fixes a bug nor adds a feature)
-
-## Related Issue / Ticket
-
-Closes $ticket
+- [ ] Refactor (code change that neither fixes a bug nor adds a feature)$relatedIssueSection
 
 ## Proposed Changes
 
@@ -226,7 +255,7 @@ else {
 
 ## Next steps / suggested automation
 
-- Provide a small cross-platform script (`scripts/create-pr.sh` and `scripts/create-pr.ps1`) that implements the command flow above and is callable by the skill.
+- Maintain and validate the existing cross-platform helper scripts (`scripts/create-pr.sh` and `scripts/create-pr.ps1`) that implement the command flow above and are callable by the skill.
 - Optionally add parsing for issue IDs in branch names and auto-link those issues in the PR (e.g., `Closes #42`).
 
 ## Notes for implementers

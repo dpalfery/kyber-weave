@@ -63,9 +63,9 @@ If a test sets up `apiClient.SearchAsync(...)` but also seeds `cache.GetAsync(..
 
 For each mock setup, ask:
 1. Can the SUT reach the line that calls this member in this test's scenario? → If no: **Unreachable**
-2. Is the mock called during the test but never asserted? → **Dead** (unless it's a dependency that must exist to avoid NullReferenceException — then it's *structural*, which is fine)
-3. Does another mock/real-object already cover this? → **Redundant**
-4. Is it called AND either `Received()` is asserted OR its return value affects observable output? → **Used**
+2. Does another mock/real-object already cover this? → **Redundant**
+3. Is it called AND either `Received()` is asserted OR its return value affects observable output? → **Used**
+4. Is the mock called during the test without an assertion and without affecting observable output? → **Dead** (unless it's a dependency that must exist to avoid NullReferenceException — then it's *structural*, which is fine)
 
 ### Step 4 — Report Findings
 

@@ -32,11 +32,11 @@ public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
             table.AddColumn(new TableColumn($"[bold]{harnessKind}[/]").Centered());
         }
 
-        foreach ((string? role, Dictionary<HarnessKind, AgentModel>? harnessMap) in matrix.OrderBy(m => m.Key))
+        foreach ((string role, Dictionary<HarnessKind, AgentModel> harnessMap) in matrix.OrderBy(m => m.Key))
         {
             List<string> row = new List<string> { $"[bold]{Markup.Escape(role)}[/]" };
 
-            foreach ((HarnessKind harnessKind, HarnessCapabilityProfile? profile) in profiles)
+            foreach ((HarnessKind harnessKind, HarnessCapabilityProfile profile) in profiles)
             {
                 if (harnessMap.ContainsKey(harnessKind))
                 {

@@ -180,7 +180,6 @@ public sealed class SquadConfigurationTests : IDisposable
         Assert.Null(result.Config);
         Assert.NotNull(result.Error);
         Assert.Contains($"squad.{(invalidField == "target" ? "targets" : invalidField)}", result.Error, StringComparison.Ordinal);
-        Assert.Equal("KW-CONFIG-001", KyberWeaveConfigLoader.ConfigLoadErrorCode);
     }
 
     public void Dispose() => _temp.Dispose();

@@ -37,7 +37,7 @@ Spawn `bug-crusher-investigator` with everything the human gave you: the failing
 
 The investigator is read-only and returns a structured verdict:
 
-```
+```text
 REPRODUCED:        yes | no — <exact command run and observed output>
 ROOT CAUSE:        <one or two sentences, or UNKNOWN>
 EVIDENCE:          <file:line references>

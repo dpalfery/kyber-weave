@@ -19,10 +19,10 @@ public static class HarnessProfileConfigLoader
             return defaults;
 
         Dictionary<HarnessKind, HarnessCapabilityProfile> merged = new Dictionary<HarnessKind, HarnessCapabilityProfile>();
-        foreach ((HarnessKind kind, HarnessCapabilityProfile? profile) in defaults.Profiles)
+        foreach ((HarnessKind kind, HarnessCapabilityProfile profile) in defaults.Profiles)
             merged[kind] = CloneProfile(profile);
 
-        foreach ((string? name, HarnessProfileYamlSection? overrideSection) in section.Profiles)
+        foreach ((string name, HarnessProfileYamlSection? overrideSection) in section.Profiles)
         {
             if (!TryParseHarnessKind(name, out HarnessKind kind))
             {

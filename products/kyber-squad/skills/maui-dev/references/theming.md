@@ -12,11 +12,22 @@ Apply different values per OS theme in XAML without code:
 
 ```xml
 <ContentPage
-    BackgroundColor="{AppThemeBinding Light={StaticResource White}, Dark={StaticResource DarkBackground}}">
+    BackgroundColor="{AppThemeBinding Light={StaticResource PageBackgroundLight}, Dark={StaticResource PageBackgroundDark}}">
+
+    <ContentPage.Resources>
+        <ResourceDictionary>
+            <Color x:Key="PageBackgroundLight">#FFFFFF</Color>
+            <Color x:Key="PageBackgroundDark">#121212</Color>
+            <Color x:Key="TextLight">#1C1C1C</Color>
+            <Color x:Key="TextDark">#FAFAFA</Color>
+            <Color x:Key="CardLight">#F5F5F5</Color>
+            <Color x:Key="CardDark">#1E1E1E</Color>
+        </ResourceDictionary>
+    </ContentPage.Resources>
 
     <Label Text="Hello"
-           TextColor="{AppThemeBinding Light=Black, Dark=White}"
-           BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#1E1E1E}" />
+           TextColor="{AppThemeBinding Light={StaticResource TextLight}, Dark={StaticResource TextDark}}"
+           BackgroundColor="{AppThemeBinding Light={StaticResource CardLight}, Dark={StaticResource CardDark}}" />
 </ContentPage>
 ```
 

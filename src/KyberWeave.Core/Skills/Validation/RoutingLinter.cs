@@ -128,7 +128,7 @@ public sealed partial class RoutingLinter
             .GroupBy(s => s.Frontmatter.Name!, StringComparer.Ordinal)
             .Where(g => g.Count() > 1);
 
-        foreach (IGrouping<string, Skill>? group in byName)
+        foreach (IGrouping<string, Skill> group in byName)
         {
             yield return new Diagnostic("KW-SKILL-LINT-010", Severity.Error,
                 $"{group.Count()} skills share the name '{group.Key}'. Names must be unique so the orchestrator can disambiguate.",

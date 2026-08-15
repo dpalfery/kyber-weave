@@ -43,16 +43,16 @@ Windows-specific checks:
 
 ```powershell
 winget --version
-where git
-where dotnet
-where node
-where npm
-where python
-where py
-where cargo
-where docker
-where gh
-where az
+Get-Command git
+Get-Command dotnet
+Get-Command node
+Get-Command npm
+Get-Command python
+Get-Command py
+Get-Command cargo
+Get-Command docker
+Get-Command gh
+Get-Command az
 ```
 
-For Azure CLI, use `command -v az` or `where az` to check install presence. Do not run any `az` command until the active subscription can be verified against the allowlist in the Developer Setup Standard's Guardrails.
+For Azure CLI, use `Get-Command az` or `where.exe az` to check install presence. Do not run any `az` command until the active subscription can be verified against the allowlist in the Developer Setup Standard's Guardrails.

@@ -9,7 +9,7 @@ sources:
   .cursor/agents/architect-v3.agent.md: 6fbb40364b86fb88043145e3b9f9c895803b1bc0eabbe4e0cc57aaa5c328da7f
   .github/agents/architect-v3.agent.md: c973df5e8d283f7b5d9b36b95c583d9fb29e3d3633bf318603d2c4ba4ddc8208
   .opencode/agents/architect-v3.md: 5b35cc86188a35bb2a1d4edd8ed1fd8788ca7b5df772bc197defdfe3f53b93e6
-final-body-sha256: 69acc4d2b5019a211692e0421880fc59bdc778ad153405484f4cd7efb6ebe828
+final-body-sha256: 578e1f88a0299c02bd13ccdc82cc31fc89942d596d23ffee35c419b7649ff741
 ---
 # architect-v3 migration
 

@@ -17,7 +17,7 @@ You author the **requirements** artifact for a single feature spec. You are one 
 
 ## Required document format
 
-```
+```markdown
 # Requirements Document
 
 ## Introduction
@@ -29,14 +29,14 @@ You author the **requirements** artifact for a single feature spec. You are one 
 **User Story:** As a [role], I want [feature], so that [benefit]
 
 #### Acceptance Criteria
-1. WHEN [event] THEN [system] SHALL [response]
-2. IF [precondition] THEN [system] SHALL [response]
+1.1. WHEN [event] THEN [system] SHALL [response]
+1.2. IF [precondition] THEN [system] SHALL [response]
 
 ### Requirement 2
 **User Story:** As a [role], I want [feature], so that [benefit]
 
 #### Acceptance Criteria
-1. WHEN [event] AND [condition] THEN [system] SHALL [response]
+2.1. WHEN [event] AND [condition] THEN [system] SHALL [response]
 ```
 
 Rules for the format:
@@ -48,7 +48,7 @@ Rules for the format:
 
 You do **not** run the approval gate. When the file is written, return exactly:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACT: 6-Docs/specs/{feature_name}/requirements.md
 SUMMARY: <2–4 sentences on what the requirements cover>

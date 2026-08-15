@@ -9,7 +9,7 @@ sources:
   .cursor/agents/tauri-dev.agent.md: 956b9e594dd5de07d600240de3987fb396a6c038c65d8a54e326a7471cff543d
   .github/agents/tauri-dev.agent.md: 9c633575014701180012aaa839c4d0e7a79540627b398be81c9844d76bac8535
   .opencode/agents/tauri-dev.md: dfc067c2aa69313d06b30bcba7c0605266b64dfe5b251a811ab64a4253c8f3a1
-final-body-sha256: fce161e5ff1ea81480bdfe63e28ac9b123c42d2a2ad67cd44418256b2fb295fc
+final-body-sha256: a78492389b3a5d7f6561ab21b38deb300914318331396afb8d7a33b919624da1
 ---
 # tauri-dev migration
 

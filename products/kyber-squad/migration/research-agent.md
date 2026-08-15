@@ -9,7 +9,7 @@ sources:
   .cursor/agents/research-agent.agent.md: e431eba99ecdcdbb4daf648a3cfaf9c3ebf4189e056d9b0daf9e408963965dcd
   .github/agents/research-agent.agent.md: 1f9a585bd02881b9f502c54704dda05baa4cb9e9cde9b410f11c9caef4a1002b
   .opencode/agents/research-agent.md: 7991063e7b5ede195f7a9ac74526a0e773d435facbe57fe3b207b0f317aada39
-final-body-sha256: 857c3fa1027977668cea8436703cd15e19d4fb77ddb8713535fd0ccc16168c4c
+final-body-sha256: 68ae251723de616a6afeb6e1ca4657d79365ae9e63e691cd47bab96e562c1101
 ---
 # research-agent migration
 

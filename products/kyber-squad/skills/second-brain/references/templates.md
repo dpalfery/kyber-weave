@@ -23,6 +23,18 @@ Canonical home for detailed [Project] documentation. Start with system docs, the
 - [Archived material](archive/) — historical only, never current guidance.
 ```
 
+## 6-Docs/system/architecture.md
+
+```markdown
+# [Project] Architecture
+
+## Overview
+[High-level summary of the system architecture, boundaries, and key design principles]
+
+## Components
+[Core subsystems and their interactions]
+```
+
 ## 6-Docs/documentation-standard.md
 
 ```markdown

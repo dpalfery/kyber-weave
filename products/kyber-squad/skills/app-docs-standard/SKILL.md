@@ -13,8 +13,8 @@ Use this skill for documentation changes that affect an application, runnable se
 
 ## Required workflow
 
-1. Read `6-Docs/documentation-standard.md` in full.
-2. Read `6-Docs/catalog.md` and identify the owning component and canonical documents.
+1. Locate the repository's documentation root from the configured `ontology.docs-root` (e.g. `docs/` or `6-Docs/`) and read the canonical documentation standard (e.g. `docs/documentation-ontology.md` or `<docs-root>/README.md`) in full.
+2. Read `<docs-root>/catalog.md` and identify the owning component and canonical documents.
 3. Inspect the source-root README and detailed documentation before drafting changes. Ground claims in the current implementation.
 4. Apply the required documentation shape from the standard:
    - source-root README for the concise overview;

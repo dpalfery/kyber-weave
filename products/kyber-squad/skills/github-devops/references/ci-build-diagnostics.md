@@ -2,7 +2,6 @@
 name: github-devops/ci-build-diagnostics
 description: Capture and analyze MSBuild binary logs (binlog) in GitHub Actions — generation, fallback text replay, and MCP server analysis.
 source: https://github.com/dotnet/skills/tree/main/plugins/dotnet-msbuild/skills/binlog-generation
-       https://github.com/dotnet/skills/tree/main/plugins/dotnet-msbuild/skills/binlog-failure-analysis
 ---
 
 # CI Build Diagnostics — MSBuild Binary Logs
@@ -138,4 +137,5 @@ Isolating to one project reduces binlog size and makes error tracing faster.
 ## References
 
 - [MSBuild binary log](https://learn.microsoft.com/visualstudio/msbuild/obtaining-build-logs-with-msbuild#save-a-binary-log)
+- [MSBuild binlog failure analysis](https://github.com/dotnet/skills/tree/main/plugins/dotnet-msbuild/skills/binlog-failure-analysis)
 - [Structured log viewer](https://msbuildlog.com/) — open source GUI for `.binlog` files

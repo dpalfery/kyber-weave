@@ -45,7 +45,7 @@ builder.Services.AddOpenTelemetry()
 
 ## Custom ActivitySource
 
-The `AddSource` name must **exactly match** the `ActivitySource` name — including casing and wildcards:
+Register the `ActivitySource` name with `AddSource`. `AddSource` matching is case-insensitive and supports wildcard patterns (e.g., `"MotorcycleRAG.*"` or `"*"`):
 
 ```csharp
 // Define once — typically as a static on the service class
@@ -61,7 +61,7 @@ activity?.SetTag("query.text", searchQuery);
 activity?.SetTag("results.count", results.Count);
 ```
 
-If `AddSource("MotorcycleRAG.*")` is registered but the `ActivitySource` is named `"motorcyclerag.application"` (wrong case), **no spans are emitted** — the SDK silently drops them. Always match case exactly or use `"*"` during development to confirm spans flow.
+Ensure `AddSource` includes the `ActivitySource` name or a matching wildcard pattern (such as `"MotorcycleRAG.*"`). Matching is case-insensitive, but maintaining consistent naming across your codebase is recommended.
 
 ---
 
@@ -161,7 +161,7 @@ builder.Services.AddOpenTelemetry()
 ```
 
 If no spans appear, check:
-1. `AddSource` name matches `ActivitySource` name exactly
+1. `AddSource` matches `ActivitySource` name (matching is case-insensitive and supports wildcards)
 2. OTLP endpoint is reachable (`curl <endpoint>/v1/traces`)
 3. Sampling is not filtering them out (`AlwaysOnSampler` for verification)
 

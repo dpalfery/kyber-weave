@@ -238,6 +238,30 @@ public sealed class SquadTargetResolutionTests : IDisposable
         Assert.Equal("kyber-weave squad install --target <target>", decision.RecoveryCommand);
     }
 
+    [Theory]
+    [InlineData(SquadTargetOperation.Install, "kyber-weave squad install --target <target>")]
+    [InlineData(SquadTargetOperation.Update, "kyber-weave squad update --target <target>")]
+    [InlineData(SquadTargetOperation.Uninstall, "kyber-weave squad uninstall --target <target>")]
+    public void NonInteractiveNoTargetReturnsExitTwoAndOperationSpecificRecoveryCommand(
+        SquadTargetOperation operation,
+        string expectedCommand)
+    {
+        SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
+        {
+            RootPath = _temp.Path,
+            Operation = operation,
+            IsInteractive = false
+        };
+
+        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+
+        Assert.Equal(SquadTargetResolutionKind.Failure, decision.Kind);
+        Assert.Empty(decision.Targets);
+        Assert.Equal(SquadTargetResolutionSource.None, decision.Source);
+        Assert.Equal(2, decision.ExitCode);
+        Assert.Equal(expectedCommand, decision.RecoveryCommand);
+    }
+
     public void Dispose() => _temp.Dispose();
 
     private SquadTargetResolutionDecision ResolveInstall(

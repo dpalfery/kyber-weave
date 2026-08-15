@@ -13,7 +13,7 @@ Convert the design into a series of discrete coding steps for a code-generation 
 ## Required format
 A numbered checkbox list, **maximum two levels** of hierarchy, decimal notation for sub-tasks. Each item is a checkbox. Each task must include: a clear objective that involves writing, modifying, or testing code; sub-bullets with specifics (which files/components); and an explicit reference to the granular requirement IDs it satisfies.
 
-```
+```markdown
 # Implementation Plan
 
 - [ ] 1. Set up project structure and core interfaces
@@ -59,7 +59,7 @@ If the design is missing pieces needed to plan implementation, do not invent des
 
 You do **not** run the approval gate. When done, return exactly one of:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACT: 6-Docs/specs/{feature_name}/tasks.md
 SUMMARY: <2–4 sentences: task count, sequencing approach, coverage>
@@ -69,7 +69,7 @@ COVERAGE: <confirm every requirement ID is referenced by at least one task, or l
 
 or, if the design needs to change:
 
-```
+```text
 STATUS: DESIGN_GAP
 ARTIFACT: 6-Docs/specs/{feature_name}/tasks.md
 SUMMARY: <what you were able to plan>

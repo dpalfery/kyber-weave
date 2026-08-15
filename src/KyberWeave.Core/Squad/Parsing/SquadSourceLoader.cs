@@ -764,7 +764,7 @@ public static class SquadSourceLoader
         }
 
         return new Frontmatter(
-            file.Content[4..closingDelimiter],
+            file.Content[..closingDelimiter],
             file.Content[(closingDelimiter + 5)..]);
     }
 

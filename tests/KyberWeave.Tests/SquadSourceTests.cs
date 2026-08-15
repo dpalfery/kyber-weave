@@ -257,7 +257,15 @@ public sealed class SquadSourceTests
         File.WriteAllText(outsideAgent, SquadFixture.ArchitectAgentLf, new UTF8Encoding(false));
         string linkedAgent = fixture.AbsolutePath("agents/architect.md");
         File.Delete(linkedAgent);
-        File.CreateSymbolicLink(linkedAgent, outsideAgent);
+        try
+        {
+            File.CreateSymbolicLink(linkedAgent, outsideAgent);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw Xunit.Sdk.SkipException.ForSkip(
+                "Creating symbolic links requires elevated privileges on this host.");
+        }
 
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "symbolic link");
 
@@ -454,6 +462,50 @@ public sealed class SquadSourceTests
         Assert.Equal(NormalizedArchitectBody, crlfAgent.InstructionBody);
         Assert.Equal(NormalizedArchitectBodySha256, lfAgent.BodyDigest);
         Assert.Equal(lfAgent.BodyDigest, crlfAgent.BodyDigest);
+    }
+
+    [Fact]
+    public void LoadAgentWithUnknownFrontmatterFieldReportsMatchingMarkdownLineNumber()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        string invalidAgent =
+            "---\n" +
+            "schema: kyber-squad.agent/v1\n" +
+            "name: architect\n" +
+            "unknown-field: value\n" +
+            "description: Use when planning.\n" +
+            "invocation: subagent\n" +
+            "model-profile: deep-planning\n" +
+            "capability-profile: architect\n" +
+            "delegates-to: [dotnet-dev]\n" +
+            "fallback: role-skill\n" +
+            "aliases: []\n" +
+            "---\n" +
+            "You are an architect.\n";
+
+        fixture.Write("agents/architect.md", invalidAgent);
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "unknown-field");
+        Assert.Equal(4, diagnostic.StartLine);
+    }
+
+    [Fact]
+    public void LoadSkillWithUnknownFrontmatterFieldReportsMatchingMarkdownLineNumber()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        string invalidSkill =
+            "---\n" +
+            "name: test-dev\n" +
+            "unexpected: field\n" +
+            "description: Use when writing tests.\n" +
+            "license: MIT\n" +
+            "---\n" +
+            "# test-dev\n";
+
+        fixture.Write("skills/test-dev/SKILL.md", invalidSkill);
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "skills/test-dev/SKILL.md", "unexpected");
+        Assert.Equal(3, diagnostic.StartLine);
     }
 
     private static Diagnostic AssertInvalid(

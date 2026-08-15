@@ -72,12 +72,13 @@ sdkmanager --licenses
 ```
 
 **JDK requirements:**
-- Use **Microsoft OpenJDK** (installed by Visual Studio / `maui-check`) — not Oracle JDK, not AdoptOpenJDK
-- **Never set `JAVA_HOME` to a non-Microsoft JDK** for MAUI builds; it will cause class file version mismatches
+- Validate the JDK version required by your target .NET MAUI framework and Android toolchain (e.g., Microsoft OpenJDK 17 for .NET MAUI 10).
+- Verify both your selected JDK version and `JAVA_HOME` match the version expected by the Android toolchain to avoid class file version mismatches.
 
 ```bash
-# Verify the correct JDK is in use
-java -version   # should say "Microsoft" in the output
+# Verify the correct JDK is in use and JAVA_HOME is set
+java -version
+echo $JAVA_HOME
 which java
 ```
 
@@ -137,10 +138,10 @@ If no devices appear: restart ADB with `adb kill-server && adb start-server`.
 
 ---
 
-## Step 8 — VS / Rider: Reload Project
+## Step 8 — VS Code / Rider: Reload Project
 
 After workload/SDK changes, IDEs cache stale data:
-- **Visual Studio for Mac / VS Code**: Reload window / close and reopen solution
+- **VS Code** (with C# Dev Kit and .NET MAUI extensions): Reload window / close and reopen solution
 - **Rider**: File → Reload All Projects
 
 ---
@@ -173,7 +174,7 @@ File issues at: https://github.com/dotnet/maui/issues — include `dotnet --info
 | Symptom | First command |
 |---|---|
 | "MAUI workload not found" | `dotnet workload restore` |
-| "JDK version mismatch" | Verify `java -version` says Microsoft; never set `JAVA_HOME` to other JDK |
+| "JDK version mismatch" | Verify JDK version matches target .NET MAUI framework and check `JAVA_HOME` |
 | "Android SDK not found" | Check `ANDROID_SDK_ROOT`; run `sdkmanager --licenses` |
 | "Xcode incompatible" | Update Xcode; `sudo xcodebuild -license accept` |
 | "No devices found" | `adb kill-server && adb start-server`; check emulator started |

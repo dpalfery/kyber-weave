@@ -63,8 +63,6 @@ public sealed class SquadTargetResolutionDecision
 /// <summary>Resolves Squad targets without prompting or writing global console state.</summary>
 public static class SquadTargetResolver
 {
-    private const string InstallRecoveryCommand = "kyber-weave squad install --target <target>";
-
     private static readonly IReadOnlyDictionary<SquadTarget, IReadOnlyList<StrongMarker>> Markers =
         new Dictionary<SquadTarget, IReadOnlyList<StrongMarker>>
         {
@@ -112,9 +110,16 @@ public static class SquadTargetResolver
                 Targets = Array.Empty<SquadTarget>(),
                 Source = SquadTargetResolutionSource.None,
                 ExitCode = 2,
-                RecoveryCommand = InstallRecoveryCommand
+                RecoveryCommand = GetRecoveryCommand(request.Operation)
             };
     }
+
+    private static string GetRecoveryCommand(SquadTargetOperation operation) => operation switch
+    {
+        SquadTargetOperation.Update => "kyber-weave squad update --target <target>",
+        SquadTargetOperation.Uninstall => "kyber-weave squad uninstall --target <target>",
+        _ => "kyber-weave squad install --target <target>"
+    };
 
     private static (IReadOnlyList<SquadTarget> Targets, SquadTargetResolutionSource Source)
         SelectTargets(SquadTargetResolutionRequest request)

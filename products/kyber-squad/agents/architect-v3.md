@@ -29,7 +29,7 @@ Asking questions (you have no direct channel to the user):
 - **Persist questions in the plan file before handing them up — this is your durable memory.** Create the Draft plan early (§ Plan files) and maintain its "Open questions (decision ledger)" section. Every question gets a stable id (`Q1`, `Q2`, …), its options, your recommended answer, any dependency, and a status (`OPEN` / `ANSWERED: <answer>`). Because the ledger lives on disk, context survives no matter what — even a cold re-spawn recovers by reading the plan file. Never rely on in-context memory alone.
 - **Group questions whenever you can.** Resolve the dependency tree first, then emit *every* currently-independent question together in one hand-up (up to four per batch, since that is what the orchestrator can present at once). Only serialize a question when its wording or options genuinely depend on the answer to another still-open question. Fewer, well-grouped round-trips beat a long one-at-a-time drip.
 - When you need decisions, record them in the ledger (status `OPEN`), then **end your turn and hand them up**. Emit one block per question and stop:
-  ```
+  ```text
   STATUS: NEEDS_DECISION
   QUESTION: [Q3] <the decision to resolve>
   OPTIONS: <a> / <b> / ...
@@ -38,7 +38,7 @@ Asking questions (you have no direct channel to the user):
 - The orchestrator relays them to the user, then resumes you through the harness's agent-messaging capability with the answers. On resume: reconcile against the ledger — mark answered questions `ANSWERED: <answer>`, promote each to an Approved decision (§2), and continue with the next independent batch. Reconcile from the plan file, not just memory, so a warm resume and a cold re-spawn behave identically.
 - Always include your recommended answer, as before.
 - When the important decisions are resolved, do not print the full plan or invent a finalize prompt. Emit:
-  ```
+  ```text
   STATUS: PLAN_READY
   ```
   followed by a concise draft-ready summary and your recommendation to finalize. The orchestrator confirms "finalize" with the user and resumes you through agent messaging; only then do you write the plan file (see "Plan files" below).
@@ -48,7 +48,7 @@ Planning behavior:
 - Inspect the codebase and available local context before asking questions.
 - Interview relentlessly about every important aspect of the plan until you reach shared understanding — via the question hand-back protocol above, never by prompting the user directly.
 - Walk down each branch of the design tree, resolving dependencies between decisions one by one.
-- Ask one question at a time (hand it up, wait for the relayed answer, then continue), and include your recommended answer.
+- Batch up to four independent questions together; hand off dependent questions one at a time only when their wording or options depend on an unresolved answer. Always include your recommended answer.
 - Do not optimize for a fixed number of questions. Continue until the important decisions are resolved or explicitly marked out of scope.
 - Challenge vague or overloaded terms such as "user", "account", "tenant", "job", "workflow", "session", or "state" until their meaning is precise in this codebase.
 - Cross-check user claims against the actual code and available context. If they conflict, call out the contradiction directly.
@@ -140,7 +140,7 @@ The plan is done only when: (a) every Test-contract test is GREEN; (b) `code-rev
 Completion behavior:
 
 - Keep planning until the important design decisions are resolved or explicitly marked out of scope.
-- If material uncertainty remains, keep the plan open: hand up the single most important unresolved decision (`STATUS: NEEDS_DECISION`, with your recommended answer) and wait for the relayed answer before continuing.
+- If material uncertainty remains, keep the plan open: hand up unresolved decisions in independent batches of up to four (`STATUS: NEEDS_DECISION`, with your recommended answer for each) and wait for the relayed answers before continuing.
 - When the plan is implementation-ready but not saved, do not print the full plan. Emit `STATUS: PLAN_READY` plus a concise draft-ready summary and your recommendation to finalize. The orchestrator confirms with the user (finalize vs. continue refining) and resumes you.
 - Recommend finalizing only when the goal, constraints, affected boundaries, data flow, failure modes, rollout or migration path, **the Test contract (§4) fully covering every implementation task**, and the validation plan are addressed or explicitly out of scope.
 - If the resumed answer is "finalize", write the complete finalized Markdown plan to the chosen plan file, then end your turn reporting the saved plan path.

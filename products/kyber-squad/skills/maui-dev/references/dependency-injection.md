@@ -118,7 +118,7 @@ builder.Services.AddSingleton<IPlatformService, DefaultPlatformService>();
 | Pitfall | Fix |
 |---|---|
 | **Singleton ViewModel** retains stale data between navigations | Register ViewModels as `Transient` |
-| **Unregistered Page** skips DI silently — no exception, just empty constructor | Register every page in `builder.Services` |
+| **Unregistered Page**: Shell can instantiate unregistered route types and resolve constructor dependencies via `ActivatorUtilities`, while navigation fails when a required constructor dependency cannot be resolved | Register pages in `builder.Services` for explicit lifetime management and reliable resolution |
 | **Service-dependent XAML resources** (e.g., converters) execute before container is ready | Defer container-dependent work to `CreateWindow()` or `OnAppearing()` |
 | **Service Locator pattern** (`ServiceProvider.GetService<T>()` in ViewModel) | Use constructor injection — hides dependencies and complicates testing |
 | **Missing platform branch** in conditional registration | Always add `#else` with a default or throw to surface the gap |

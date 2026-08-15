@@ -44,7 +44,7 @@ Stop when you can state the cause in one or two sentences with file:line evidenc
 
 End your turn with exactly this block and nothing after it:
 
-```
+```text
 REPRODUCED:        yes | no — <exact command run and observed output>
 ROOT CAUSE:        <one or two sentences, or UNKNOWN>
 EVIDENCE:          <file:line references>

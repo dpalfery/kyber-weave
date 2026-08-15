@@ -37,7 +37,7 @@ public partial class App : Application
         window.Created  += (s, e) => { /* first-time setup */ };
         window.Resumed  += (s, e) => { /* re-fetch stale data, restart timers */ };
         window.Deactivated += (s, e) => { /* pause non-critical work */ };
-        window.Stopped  += (s, e) => SaveStateAsync(); // see below
+        window.Stopped  += (s, e) => SaveState(); // see below
         window.Destroying += (s, e) => { /* release unmanaged resources */ };
 
         return window;
@@ -76,7 +76,7 @@ protected override void OnDisappearing()
 Save UI state before `Stopped`; restore in `Resumed`:
 
 ```csharp
-private async void SaveStateAsync()
+private void SaveState()
 {
     // Use Preferences for lightweight key-value state
     Preferences.Set("last_search", ViewModel.SearchTerm);

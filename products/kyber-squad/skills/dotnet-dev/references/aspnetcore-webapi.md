@@ -35,7 +35,7 @@ public sealed record ManualResponse(
 ```csharp
 [HttpGet("{id:guid}")]
 [ProducesResponseType<ManualResponse>(StatusCodes.Status200OK)]
-[ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+[ProducesResponseType(StatusCodes.Status404NotFound)]
 public async Task<Results<Ok<ManualResponse>, NotFound>> GetAsync(Guid id)
 {
     var manual = await _service.GetByIdAsync(id);
@@ -56,13 +56,14 @@ Reject invalid input with structured `ProblemDetails`, not bare strings:
 ```csharp
 [HttpPost]
 public async Task<Results<Created<ManualResponse>, ValidationProblem>> CreateAsync(
-    CreateManualRequest request)
+    CreateManualRequest request,
+    CancellationToken cancellationToken)
 {
     var validationErrors = Validate(request);
     if (validationErrors.Any())
         return TypedResults.ValidationProblem(validationErrors);
 
-    var manual = await _service.CreateAsync(request);
+    var manual = await _service.CreateAsync(request, cancellationToken);
     return TypedResults.Created($"/api/manuals/{manual.Id}", Map(manual));
 }
 ```

@@ -54,7 +54,8 @@ internal static class DocsCommandComposition
             {
                 Ontology = ontology,
                 Harness = config.Harness,
-                DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology)
+                DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology),
+                Squad = config.Squad
             };
             return true;
         }

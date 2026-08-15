@@ -51,7 +51,7 @@ from a generic web search.
 Always hand back findings in this shape so downstream agents can parse them
 consistently:
 
-```
+```markdown
 ## Research: <topic>
 **Question:** <one line>
 **Findings:**

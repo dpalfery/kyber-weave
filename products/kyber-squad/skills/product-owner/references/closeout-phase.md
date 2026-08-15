@@ -44,7 +44,7 @@ Migrate first, archive second. Archiving a specification before its durable cont
 
 ## Completion digest — return this; do not ask the user anything
 
-```
+```text
 STATUS: ARCHIVED
 SPECIFICATION: {feature-name}
 REQUIREMENTS VERIFIED: <count verified / total, and any that could not be>
@@ -55,7 +55,7 @@ VALIDATION: <result of the documentation validation and drift checks>
 
 or, when a precondition fails:
 
-```
+```text
 STATUS: NOT_READY
 SPECIFICATION: {feature-name}
 BLOCKER: <which precondition failed and the evidence>

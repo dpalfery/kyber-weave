@@ -31,7 +31,7 @@ If, while designing, you find the requirements are incomplete or contradictory s
 
 You do **not** run the approval gate. When done, return exactly one of:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACT: 6-Docs/specs/{feature_name}/design.md
 SUMMARY: <2–4 sentences on the design approach and key decisions>
@@ -41,7 +41,7 @@ OPEN_QUESTIONS: <bullets, or "none">
 
 or, if the requirements need to change:
 
-```
+```text
 STATUS: REQUIREMENTS_GAP
 ARTIFACT: 6-Docs/specs/{feature_name}/design.md
 SUMMARY: <what you were able to design>

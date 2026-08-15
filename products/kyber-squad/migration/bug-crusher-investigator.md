@@ -9,7 +9,7 @@ sources:
   .cursor/agents/bug-crusher-investigator.agent.md: c60bbeb8c849d58db3bca7eb7f9bc5027cbb35b61e23c0fa7f22bf4d1258d606
   .github/agents/bug-crusher-investigator.agent.md: d1d2eccd8cf6b08c1d53b05a7c7bd339f6ca50005f796142ae75b2ee54fad6e2
   .opencode/agents/bug-crusher-investigator.md: 534c307e6fa95588e63185b43f4b60e15b33552ca3e5a220c234268a3e9a5b81
-final-body-sha256: 7b17bced55fed0a5aea4e543899bcdee24dfcb6c20947777f288bf9dadfe1c91
+final-body-sha256: 02c17ab003b7c3855652f6bb89020ed6d4db73c017be646851a3b271c5e56dfa
 ---
 # bug-crusher-investigator migration
 

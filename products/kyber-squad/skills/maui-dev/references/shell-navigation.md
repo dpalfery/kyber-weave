@@ -8,7 +8,7 @@ source: https://github.com/dotnet/skills/tree/main/plugins/dotnet-maui/skills/ma
 
 ## Visual Hierarchy
 
-```
+```text
 Shell
 └── FlyoutItem / TabBar
     └── Tab
