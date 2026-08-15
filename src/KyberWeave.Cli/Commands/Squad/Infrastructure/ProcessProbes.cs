@@ -24,7 +24,9 @@ public sealed partial class ApmProcessProbe
         ApmVersionRegex());
 
     [GeneratedRegex(
-        "\\Aapm, version (?<version>" + SemanticVersionPattern.Value + ")(?:\\r?\\n)?\\z",
+        "\\A(?:Agent Package Manager \\(APM\\)(?: CLI)? version|apm,? version) " +
+        "(?<version>" + SemanticVersionPattern.Value + ")" +
+        "(?: \\([^)]+\\))?(?:\\r?\\n)?\\z",
         RegexOptions.CultureInvariant)]
     private static partial Regex ApmVersionRegex();
 }

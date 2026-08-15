@@ -412,6 +412,11 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Theory]
     [InlineData("apm, version 1.2.3", "1.2.3")]
     [InlineData("apm, version 1.2.3-beta.2+build.7", "1.2.3-beta.2+build.7")]
+    [InlineData("Agent Package Manager (APM) CLI version 0.28.0 (e041462)", "0.28.0")]
+    [InlineData("Agent Package Manager (APM) CLI version 1.2.3", "1.2.3")]
+    [InlineData("Agent Package Manager (APM) version 1.2.3-beta.1 (d1d926d)", "1.2.3-beta.1")]
+    [InlineData("apm version 1.2.3", "1.2.3")]
+    [InlineData("apm, version 1.2.3 (abcdef0)", "1.2.3")]
     public void ApmProcessProbeWithExactSemanticVersionUsesBarePathExecutableAndReturnsExactVersion(
         string standardOutput,
         string expectedVersion)
