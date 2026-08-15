@@ -8,6 +8,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Release;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -305,8 +306,8 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         if (OperatingSystem.IsWindows())
         {
-            throw Xunit.Sdk.SkipException.ForSkip(
-                "Directory symbolic links are not creatable on the Windows CI agent.");
+            throw SkipException.ForSkip(
+                "Symbolic links require elevated privileges on Windows.");
         }
 
         string destination = Path.Combine(_temp.Path, "destination");

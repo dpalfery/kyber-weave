@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -251,6 +252,12 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadReferencedSymlinkEscapesProductRootRejectsResolvedTarget()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            throw SkipException.ForSkip(
+                "Symbolic links require elevated privileges on Windows.");
+        }
+
         using SquadFixture fixture = SquadFixture.CreateValid();
         using TempDirectory outside = new TempDirectory();
         string outsideAgent = System.IO.Path.Combine(outside.Path, "architect.md");
@@ -263,7 +270,7 @@ public sealed class SquadSourceTests
         }
         catch (UnauthorizedAccessException)
         {
-            throw Xunit.Sdk.SkipException.ForSkip(
+            throw SkipException.ForSkip(
                 "Creating symbolic links requires elevated privileges on this host.");
         }
 
@@ -505,6 +512,24 @@ public sealed class SquadSourceTests
         fixture.Write("skills/test-dev/SKILL.md", invalidSkill);
 
         Diagnostic diagnostic = AssertInvalid(fixture, "skills/test-dev/SKILL.md", "unexpected");
+        Assert.Equal(3, diagnostic.StartLine);
+    }
+
+    [Fact]
+    public void LoadAgentWithInvalidYamlSyntaxReportsMatchingMarkdownLineNumber()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        string invalidAgent =
+            "---\n" +
+            "schema: kyber-squad.agent/v1\n" +
+            "name: \"unclosed\n" +
+            "description: Use when planning.\n" +
+            "---\n" +
+            "You are an architect.\n";
+
+        fixture.Write("agents/architect.md", invalidAgent);
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "YAML source is invalid");
         Assert.Equal(3, diagnostic.StartLine);
     }
 

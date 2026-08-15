@@ -57,7 +57,7 @@ Reject invalid input with structured `ProblemDetails`, not bare strings:
 [HttpPost]
 public async Task<Results<Created<ManualResponse>, ValidationProblem>> CreateAsync(
     CreateManualRequest request,
-    CancellationToken cancellationToken)
+    CancellationToken cancellationToken = default)
 {
     var validationErrors = Validate(request);
     if (validationErrors.Any())
