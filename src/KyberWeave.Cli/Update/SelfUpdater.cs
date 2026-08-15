@@ -53,6 +53,12 @@ internal sealed class SelfUpdater : IDisposable
         {
             return new SelfUpdateOutcome(1, ex.Message);
         }
+        catch (OperationCanceledException)
+        {
+            return new SelfUpdateOutcome(
+                1,
+                "the GitHub request timed out. Check the network connection and retry.");
+        }
         catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
             return new SelfUpdateOutcome(1, ex.Message);
