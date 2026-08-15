@@ -43,8 +43,8 @@ artifact as current guidance, and returns budgeted excerpts that name what they 
 kyber-weave docs init .        # scaffold config/catalog/ontology, protect local cache, deploy the skill
 kyber-weave docs validate .
 kyber-weave docs drift .
-kyber-weave docs analyze .     # advisory duplicate/conflict/terminology findings
-kyber-weave docs graph . --out ./build/doc-graph
+kyber-weave docs integrity-check .     # advisory duplicate/conflict/terminology findings
+kyber-weave docs export-graph . --out ./build/doc-graph
 ```
 
 ### Adopting an existing tree
@@ -78,14 +78,14 @@ impossible. [MCP runbook →](docs/docgraph/mcp-runbook.md)
 
 ### Documentation analysis and terminology
 
-`docs analyze` extracts line-addressable claims from paragraphs, list items, table rows,
+`docs integrity-check` extracts line-addressable claims from paragraphs, list items, table rows,
 and code fences, then uses DocGraph and one-hop CodeGraph relationships before bounded
 lexical search. Exact duplicates are deterministic; potential conflicts and distinct term
 senses can be exported for agent review and imported as reusable, content-addressed
 verdicts. Source documents are never rewritten.
 
 ```bash
-kyber-weave docs analyze .
+kyber-weave docs integrity-check .
 kyber-weave docs review export . --out candidates.json
 kyber-weave docs review import . --in verdicts.json
 kyber-weave docs glossary .          # preview
@@ -100,7 +100,7 @@ quadratic first pass outside the default latency target.
 
 ### One external dependency, and it's optional
 
-`docs drift` and `docs graph` resolve symbols against a **CodeGraph** index at
+`docs drift` and `docs export-graph` resolve symbols against a **CodeGraph** index at
 `.codegraph/codegraph.db`. CodeGraph is a separate, host-owned tool — Kyber-Weave opens
 that index read-only and never writes to it. Without an index, retrieval and `docs validate`
 work completely; only the code-join features degrade. [Architecture →](docs/docgraph/architecture.md)

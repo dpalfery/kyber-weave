@@ -89,18 +89,18 @@ app.Configure(config =>
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")
             .WithExample("docs", "drift", ".");
 
-        docs.AddCommand<DocsGraphCommand>("graph")
+        docs.AddCommand<DocsExportGraphCommand>("export-graph")
             .WithDescription("Export the documentation graph as nodes.jsonl and edges.jsonl.")
-            .WithExample("docs", "graph", ".", "--out", "./build/doc-graph");
+            .WithExample("docs", "export-graph", ".", "--out", "./build/doc-graph");
 
         docs.AddCommand<DocsCatalogCommand>("catalog")
             .WithDescription("Display doc-type coverage by component.")
             .WithExample("docs", "catalog", ".");
 
-        docs.AddCommand<DocsAnalyzeCommand>("analyze")
+        docs.AddCommand<DocsIntegrityCheckCommand>("integrity-check")
             .WithDescription("Find duplicate claims, potential conflicts, and ambiguous terminology.")
-            .WithExample("docs", "analyze", ".", "--format", "sarif")
-            .WithExample("docs", "analyze", ".", "--fail-on", "warning");
+            .WithExample("docs", "integrity-check", ".", "--format", "sarif")
+            .WithExample("docs", "integrity-check", ".", "--fail-on", "warning");
 
         docs.AddBranch("review", review =>
         {

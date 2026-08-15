@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-14
 ---
 
 # Installing Kyber-Weave
@@ -125,7 +125,7 @@ installed on your machine behind your back.
 | Tool | Needed by | Without it |
 |---|---|---|
 | [APM](https://microsoft.github.io/apm) | `docs init` deploying the authoring skill | The corpus is still scaffolded; the command prints the `apm install` line to run later |
-| CodeGraph + `sqlite3` | `docs drift`, `docs graph` | Everything else works, including all of [retrieval](docgraph/retrieval.md) |
+| CodeGraph + `sqlite3` | `docs drift`, `docs export-graph` | Everything else works, including all of [retrieval](docgraph/retrieval.md) |
 
 ### APM
 

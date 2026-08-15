@@ -194,7 +194,7 @@ When the repository supports documentation analysis, run it only after `docs val
 and `docs drift` are clean:
 
 ```bash
-kyber-weave docs analyze .
+kyber-weave docs integrity-check .
 ```
 
 Treat duplicate, conflict, and terminology findings as evidence to review. Never merge,

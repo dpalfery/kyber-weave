@@ -46,7 +46,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         var report = new DiagnosticReport();
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
             out var runtime);
@@ -92,7 +92,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         var report = new DiagnosticReport();
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
             out var runtime);
@@ -124,7 +124,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         var factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,
             out var runtime);
@@ -148,7 +148,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new UnavailableResolver());
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
             out var runtime);
@@ -172,7 +172,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new AvailableResolver());
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,
             out var runtime);

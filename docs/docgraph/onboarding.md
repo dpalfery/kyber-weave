@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-14
 ---
 
 # Adopting DocGraph in an existing repository
@@ -139,7 +139,7 @@ Once the corpus is valid, analysis can surface duplicated claims, potential conf
 and overloaded terms without editing any source document:
 
 ```bash
-kyber-weave docs analyze .
+kyber-weave docs integrity-check .
 kyber-weave docs review export . --out candidates.json
 kyber-weave docs glossary .
 ```

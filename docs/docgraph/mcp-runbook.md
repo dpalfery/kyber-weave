@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-15
 code-refs:
   - DocsTools
 ---
@@ -236,6 +236,35 @@ until the invalid config is fixed; they do not analyze on defaults.
 
 ## The tools
 
+All four are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
+protocol's `readOnlyHint` and `openWorldHint`. A client can act on an annotation; it cannot
+act on a sentence claiming the same thing, which is why that claim is no longer prose.
+
+### How the descriptions are written
+
+Every description is **routing metadata plus a calling contract**, not documentation. A
+capability clause states what comes back, the trigger clause — the longest part — names the
+conditions that should fire it, and the response semantics say what an empty result means.
+
+Two rules are worth stating because breaking them is subtle and the damage shows up far
+away:
+
+**A description claims no authority over other tools.** `Call this instead of Grep` is a
+global directive arriving through a routing hint, competing with the harness's own
+tool-selection rules. It is replaced by the condition that wins the same decision on
+merit — superseded documents are outside the corpus, so a match is current guidance.
+
+**Exclusions are properties, never noun lists.** `Do not use for source code, tests, CI
+logs` puts those nouns in permanently resident text held back only by a negation, and
+negation is the first thing to degrade when a model scans many tools at once. Read out of
+context it becomes a prohibition on reading tests. Only `docs_explore` carries an
+exclusion, because it is the broadest of the four; the narrower three state their territory
+positively so no request falls between them.
+
+Where a constraint can live on a parameter it goes there instead — how `maxDocs` and
+`charBudget` interact sits on those parameters, because a property description binds at the
+point of use.
+
 ### `docs_explore(query, maxDocs = 5, charBudget = 12000)`
 
 Ranked documents for a question, symbol, route, component, or document id. Each hit
@@ -253,8 +282,11 @@ component, doc-id, or symbol instead. Treat that as permission to fall back to g
 ### `docs_for_symbol(symbol)`
 
 The documents whose `code-refs` **formally claim** a symbol — not those that mention it in
-prose, which is exactly the distinction grep cannot make. Run it before renaming anything
-to find the documentation that must change with it.
+prose, which is exactly the distinction grep cannot make. Run it before renaming, moving,
+or deleting anything to find the documentation that must change with it.
+
+An empty result distinguishes the two cases the caller cares about: the symbol is
+undocumented, or it is discussed in prose that never claimed ownership of it.
 
 ### `docs_analysis_candidates(kind?, cursor?, limit = 20, charBudget = 12000)`
 
@@ -275,7 +307,7 @@ Looks up one managed glossary term case-insensitively and returns its proposed, 
 and rejected senses, definitions, scopes, and aliases. An unknown term is an ordinary
 empty result, not an error. Output is capped at 20 senses and 12,000 characters.
 
-Both analysis tools are read-only. They accept no write parameter and cannot import a
+Neither analysis tool accepts a write parameter, so neither can import a
 verdict or change the glossary. Reusable decisions enter through `docs review import`, and
 glossary proposals enter through `docs glossary --write` at the CLI. The MCP reader reloads
 the current config and corpus for each call; embeddings remain loopback-only and are not
