@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 ```
 
 Installs the latest release as self-contained binaries in `~/.local/bin` — no .NET runtime,
-no sudo, checksum-verified. [Install details →](docs/install.md)
+no sudo, checksum-verified. Already installed? `kyber-weave update`. [Install details →](docs/install.md)
 
 > **This repository governs its own documentation.** Everything under [`docs/`](docs/)
 > carries conformant frontmatter and passes `kyber-weave docs validate` and `docs drift`
@@ -154,7 +154,7 @@ src/
     Diagnostics/            Feature 3 — rule ids, severities, reports
     CodeGraph/              read-only port over the CodeGraph index
     Configuration/ Text/ Parsing/
-  KyberWeave.Cli/         kyber-weave — skill | agent | docs
+  KyberWeave.Cli/         kyber-weave — skill | agent | docs | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 tests/KyberWeave.Tests/
 .apm/skills/              kyber-weave-docs — the authoring skill, shipped as an APM package

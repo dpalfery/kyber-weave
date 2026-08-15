@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 ---
 
 # Installing Kyber-Weave
@@ -77,7 +77,7 @@ default location.
 Windows binaries (`win-x64`) are published on the release, but the install script does not
 handle `.zip` extraction — download the asset from
 [Releases](https://github.com/dpalfery/kyber-weave/releases) and place it on your PATH
-manually.
+manually. After that, `kyber-weave update` replaces the Windows binaries in place.
 
 ## Verify
 
@@ -104,6 +104,27 @@ View CLI general help:
 ```bash
 kyber-weave --help
 ```
+
+## Updating
+
+`kyber-weave update` replaces the running CLI and the sibling `kyber-weave-mcp` in the
+same directory from GitHub Release assets, after verifying SHA-256 against
+`SHA256SUMS.txt`. It is the self-update path for binaries installed by this script (or
+placed from a Release by hand). It refuses `dotnet run` and `dotnet tool` installs.
+
+```bash
+kyber-weave update                    # latest stable Release
+kyber-weave update --release-candidate  # newest listed Release, including -rc and -dev
+kyber-weave update 0.2.0              # pin a tag (leading v is optional)
+kyber-weave update --no-mcp           # CLI only
+```
+
+`--release-candidate` matches `install.sh --prerelease`: it reads the GitHub Releases
+list (not `/releases/latest`) and takes the newest non-draft tag. Do not combine it with
+a pinned version — pin the candidate tag instead (`kyber-weave update 0.2.0-rc.1`).
+
+Global `kyber-weave --version` still prints the running binary; pinning is a positional
+argument so the two do not collide.
 
 ## Then initialize your repository
 

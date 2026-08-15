@@ -2,6 +2,7 @@ using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Skills;
+using KyberWeave.Cli.Commands.Update;
 using Spectre.Console.Cli;
 
 var app = new CommandApp();
@@ -118,6 +119,14 @@ app.Configure(config =>
             .WithExample("docs", "glossary", ".")
             .WithExample("docs", "glossary", ".", "--write");
     });
+
+    // Distribution: replace the running Release binaries. Not an artifact-class branch.
+    config.AddCommand<UpdateCommand>("update")
+        .WithDescription("Replace the installed CLI and MCP binaries from a GitHub Release.")
+        .WithExample("update")
+        .WithExample("update", "--release-candidate")
+        .WithExample("update", "0.2.0")
+        .WithExample("update", "--no-mcp");
 });
 
 return app.Run(args);
