@@ -1,12 +1,15 @@
+using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Skills;
+using KyberWeave.Cli.Commands.Update;
 using Spectre.Console.Cli;
 
 var app = new CommandApp();
 app.Configure(config =>
 {
     config.SetApplicationName("kyber-weave");
+    config.SetApplicationVersion($"kyber-weave {GetVersion()}");
 
     // Every artifact that shapes agent behaviour is governed the same way, so the three
     // branches are deliberately symmetric: one per artifact class.
@@ -87,14 +90,62 @@ app.Configure(config =>
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")
             .WithExample("docs", "drift", ".");
 
-        docs.AddCommand<DocsGraphCommand>("graph")
+        docs.AddCommand<DocsExportGraphCommand>("export-graph")
             .WithDescription("Export the documentation graph as nodes.jsonl and edges.jsonl.")
-            .WithExample("docs", "graph", ".", "--out", "./build/doc-graph");
+            .WithExample("docs", "export-graph", ".", "--out", "./build/doc-graph");
 
         docs.AddCommand<DocsCatalogCommand>("catalog")
             .WithDescription("Display doc-type coverage by component.")
             .WithExample("docs", "catalog", ".");
+
+        docs.AddCommand<DocsIntegrityCheckCommand>("integrity-check")
+            .WithDescription("Find duplicate claims, potential conflicts, and ambiguous terminology.")
+            .WithExample("docs", "integrity-check", ".", "--format", "sarif")
+            .WithExample("docs", "integrity-check", ".", "--fail-on", "warning");
+
+        docs.AddBranch("review", review =>
+        {
+            review.SetDescription("Exchange bounded documentation candidates and reusable verdicts.");
+            review.AddCommand<DocsReviewExportCommand>("export")
+                .WithDescription("Export pending documentation analysis candidates for agent review.")
+                .WithExample("docs", "review", "export", ".", "--out", "candidates.json");
+            review.AddCommand<DocsReviewImportCommand>("import")
+                .WithDescription("Validate and atomically cache an agent verdict bundle.")
+                .WithExample("docs", "review", "import", ".", "--in", "verdicts.json");
+        });
+
+        docs.AddCommand<DocsGlossaryCommand>("glossary")
+            .WithDescription("Preview or merge managed glossary proposals from terminology analysis.")
+            .WithExample("docs", "glossary", ".")
+            .WithExample("docs", "glossary", ".", "--write");
     });
+
+    // Distribution: replace the running Release binaries. Not an artifact-class branch.
+    config.AddCommand<UpdateCommand>("update")
+        .WithDescription("Replace the installed CLI and MCP binaries from a GitHub Release.")
+        .WithExample("update")
+        .WithExample("update", "--release-candidate")
+        .WithExample("update", "0.2.0")
+        .WithExample("update", "--no-mcp");
 });
 
 return app.Run(args);
+
+static string GetVersion()
+{
+    var assembly = typeof(Program).Assembly;
+    var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    if (!string.IsNullOrWhiteSpace(infoVersion))
+    {
+        var plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
+        return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
+    }
+
+    var nameVersion = assembly.GetName().Version;
+    if (nameVersion is not null)
+    {
+        return nameVersion.ToString();
+    }
+
+    return "0.0.0";
+}

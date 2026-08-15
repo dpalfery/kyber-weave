@@ -20,22 +20,27 @@ namespace KyberWeave.Core.CodeGraph;
 /// than the <c>Microsoft.Data.Sqlite</c> package. That package's native dependency,
 /// <c>SQLitePCLRaw.lib.e_sqlite3</c>, carries advisory GHSA-2m69-gcr7-jv3q at every
 /// published version with no patched release available, and this repository runs
-/// blocking dependency scanning. One subprocess call loads the whole node table into
-/// memory, after which every lookup is in-process — so this is also faster than
-/// per-symbol querying would have been.
+/// blocking dependency scanning. One subprocess call loads the node table and approved
+/// neighborhood edges into memory, after which every lookup is in-process — so this is
+/// also faster than per-symbol querying would have been.
 /// </para>
 /// </remarks>
-public sealed class CodeGraphResolverAdapter : ICodeGraphResolver
+public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNeighborhoodProvider
 {
     private const char FieldSeparator = '\u001f';
 
     private static readonly string[] SymbolKinds =
         ["class", "interface", "method", "function", "struct", "enum", "type_alias"];
 
+    private static readonly HashSet<string> NeighborhoodEdgeKinds =
+        ["contains", "calls", "references", "instantiates", "extends", "implements"];
+
     private readonly Dictionary<string, List<CodeGraphNode>> _byName = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<CodeGraphNode>> _byQualifiedName = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CodeGraphNode> _routes = new(StringComparer.Ordinal);
     private readonly List<string> _filePaths = [];
+    private readonly List<CodeGraphEdge> _edges = [];
+    private readonly Dictionary<string, int> _edgeDegree = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
     public bool IsAvailable { get; }
@@ -86,21 +91,42 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver
 
     private void Load()
     {
-        // One pass over the node table. 'import' rows are excluded: they are module
-        // references, never a documentable symbol.
+        // Nodes and the bounded neighborhood surface are loaded in the same sqlite3
+        // process. Aside from avoiding per-node subprocess cost, this makes the adapter
+        // a stable snapshot even when CodeGraph replaces its index after construction.
+        // 'import' nodes and edges are excluded: module imports are too broad to be a
+        // useful documentation relationship.
         const string sql = """
-            SELECT id, kind, name, qualified_name, file_path, language, start_line
+            SELECT 'node', id, kind, name, qualified_name, file_path, language, start_line
             FROM nodes
             WHERE kind <> 'import'
+            UNION ALL
+            SELECT 'edge', source, target, kind, '', '', '', ''
+            FROM edges
+            WHERE kind IN ('contains', 'calls', 'references', 'instantiates', 'extends', 'implements')
             """;
 
         foreach (var line in RunSqlite(sql))
         {
             var parts = line.Split(FieldSeparator);
-            if (parts.Length < 7) continue;
+            if (parts.Length < 8) continue;
 
-            _ = int.TryParse(parts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out var startLine);
-            var node = new CodeGraphNode(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], startLine);
+            if (parts[0] == "edge")
+            {
+                var edge = new CodeGraphEdge(parts[1], parts[2], parts[3]);
+                if (!NeighborhoodEdgeKinds.Contains(edge.Kind)) continue;
+
+                _edges.Add(edge);
+                IncrementDegree(edge.SourceId);
+                if (!StringComparer.Ordinal.Equals(edge.SourceId, edge.TargetId))
+                    IncrementDegree(edge.TargetId);
+                continue;
+            }
+
+            if (parts[0] != "node") continue;
+
+            _ = int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out var startLine);
+            var node = new CodeGraphNode(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], startLine);
 
             Index(_byName, node.Name, node);
             Index(_byQualifiedName, node.QualifiedName, node);
@@ -115,6 +141,12 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver
                 _filePaths.Add(node.FilePath);
             }
         }
+    }
+
+    private void IncrementDegree(string nodeId)
+    {
+        _edgeDegree.TryGetValue(nodeId, out var degree);
+        _edgeDegree[nodeId] = degree + 1;
     }
 
     private static void Index(Dictionary<string, List<CodeGraphNode>> map, string key, CodeGraphNode node)
@@ -217,4 +249,24 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver
 
     /// <inheritdoc />
     public IReadOnlyList<string> AllRoutes() => IsAvailable ? _routes.Keys.ToList() : [];
+
+    /// <inheritdoc />
+    public IReadOnlyList<CodeGraphEdge> GetEdges(
+        IReadOnlyCollection<string> nodeIds,
+        int maxDegree)
+    {
+        ArgumentNullException.ThrowIfNull(nodeIds);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxDegree);
+
+        if (!IsAvailable || nodeIds.Count == 0) return [];
+
+        var requested = nodeIds.ToHashSet(StringComparer.Ordinal);
+        return _edges
+            .Where(edge =>
+                requested.Contains(edge.SourceId)
+                && requested.Contains(edge.TargetId)
+                && _edgeDegree.GetValueOrDefault(edge.SourceId) <= maxDegree
+                && _edgeDegree.GetValueOrDefault(edge.TargetId) <= maxDegree)
+            .ToArray();
+    }
 }

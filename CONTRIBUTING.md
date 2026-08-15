@@ -17,11 +17,22 @@ Security vulnerabilities: see [SECURITY.md](SECURITY.md) — do not file a publi
 2. Create a branch from `develop` for work intended for the next integration line, or from `main` for hotfixes
 3. Make focused commits with clear messages
 4. Open a pull request against `develop` (or `main` for hotfixes)
-5. Ensure CI passes (`Build and test`)
+5. Ensure the required `CI Summary` check passes. It aggregates build and test, publish smoke, CodeQL, Trivy, Semgrep, gitleaks, and the skill/docs gate.
 6. Address review feedback
 
-Pull requests require one approving review, including a code owner review.
-Maintainers may override protection on a PR when needed.
+Pull requests require at least one approving review, and that approval must include a
+code-owner review. New commits dismiss stale approvals, and all review conversations
+must be resolved before merging. Protected branches require a pull request, so ordinary
+contributors cannot push directly to `main` or `develop`; the branch must also be
+up to date with its base before merging.
+
+This repository currently has one maintainer and the repository-wide owner in
+`.github/CODEOWNERS` is `@dpalfery`. GitHub does not count a pull request author's own
+approval, so a solo-maintainer pull request cannot satisfy the code-owner rule through
+review alone. Until an independent maintainer or reviewer is added, the repository
+administrator may use the protected-branch bypass only for a necessary hotfix or
+emergency, and must record the reason in the pull request. This is an exception to the
+normal review policy, not a substitute for adding a second reviewer.
 
 Default merge method is **squash**.
 

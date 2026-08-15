@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-14
 ---
 
 # Rule reference
@@ -34,14 +34,39 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-DOC-DRIFT-002` | Error | `api-endpoints` route matches no indexed route |
 | `KW-DOC-DRIFT-003` | Warning | `source-root` exists but nothing beneath it is indexed |
 
+### Analysis — `docs integrity-check`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-ANALYSIS-001` | Info / Warning | Duplicate cluster. Pending near duplicates inform; exact or high-confidence confirmed duplicates warn. |
+| `KW-DOC-ANALYSIS-002` | Info / Error | Potential conflict. Only a high-confidence imported conflict verdict errors. |
+| `KW-DOC-ANALYSIS-003` | Warning | Ambiguous terminology not fully explained by approved scoped senses. |
+| `KW-DOC-ANALYSIS-004` | Operational Error | Malformed, nested, unknown, or cross-boundary ignore markup. |
+| `KW-DOC-ANALYSIS-005` | Warning | CodeGraph unavailable; document relationships and bounded lexical search continue. |
+| `KW-DOC-ANALYSIS-006` | Warning / Operational Error | Embeddings unavailable: warning in `prefer`, error in `required`. |
+
+### Review and managed glossary
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-DOC-REVIEW-001` | Operational Error | Verdict bundle is invalid/stale, or safe atomic persistence is unavailable. |
+| `KW-DOC-GLOSSARY-001` | Operational Error | Configured managed glossary has invalid structure, status, definition, or scope. |
+
+Analysis findings respect `docs integrity-check --fail-on`; operational errors always return
+non-zero. See [analysis and review](../docgraph/analysis.md) for classifier and lifecycle
+details.
+
 ## Skills — [Skill governance](../context-hygiene/skills.md)
 
 | Id range | Tier | Meaning |
 |---|---|---|
 | `KW-SKILL-SPEC-001`…`-012` | Spec | Agent Skills open-format conformance. Mostly errors; `-007` and `-009` warn, `-010` informs. |
 | `KW-SKILL-LINT-001`…`-006` | Routing | Description quality dimensions that reduce routing reliability |
+| `KW-SKILL-LINT-007` | Routing | Description is an action summary rather than a trigger specification (Warning) |
+| `KW-SKILL-LINT-008` | Routing | Description contains excessive filler phrases or unrouted verbosity (Warning) |
 | `KW-SKILL-LINT-010` | Routing | **Name collision** — the only error in this tier |
 | `KW-SKILL-LINT-011` | Routing | Description overlap between two skills |
+| `KW-SKILL-REVIEW-001` | Review | Skill/agent review verdict payload is malformed or invalid (Error) |
 
 ### Skill security — `skill scan`
 
@@ -79,7 +104,8 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-AGENT-SPEC-004` | Error | Broken file reference |
 | `KW-AGENT-SYNC-001` | Error | Role not present in every harness |
 | `KW-AGENT-SYNC-002` | Error | Instruction drift between harness copies |
-| `KW-AGENT-LINT-001` | Warning | Routing score too low |
+| `KW-AGENT-LINT-001` | Info | Routing score too low (< 50/100) |
+| `KW-AGENT-LINT-002` | Warning | Agent description is an action summary or lacks trigger conditions |
 
 ### Agent security — `agent scan`
 

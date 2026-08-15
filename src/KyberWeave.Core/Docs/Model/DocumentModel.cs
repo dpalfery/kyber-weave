@@ -92,6 +92,16 @@ public sealed class DocumentModel
     public string Body { get; init; } = string.Empty;
 
     /// <summary>
+    /// The source Markdown exactly as read from disk. Analysis uses this to keep source
+    /// locations and frontmatter boundaries while retrieval continues to consume
+    /// <see cref="Body"/>.
+    /// </summary>
+    public string RawMarkdown { get; init; } = string.Empty;
+
+    /// <summary>1-based source line on which <see cref="Body"/> begins.</summary>
+    public int BodyStartLine { get; init; } = 1;
+
+    /// <summary>
     /// The body split on <c>##</c> headings. Retrieval returns the one relevant section
     /// rather than the whole file, which is the difference between an answer and a dump.
     /// </summary>

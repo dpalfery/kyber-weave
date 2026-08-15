@@ -60,6 +60,9 @@ separate times in this repository before being centralised.
 
 `Processes/ProcessRunner.ReadToEnd` starts both reads before awaiting either. Use it for
 anything with `RedirectStandardOutput` or `RedirectStandardError`.
+`ProcessRunner.Run` additionally rebuilds the start info: `UseShellExecute` stays off and
+arguments go through `ArgumentList`, never the concatenated `Arguments` string, so a
+caller cannot re-enable the shell or smuggle metacharacters into argv.
 `ProcessRunnerTests` reintroduces the deadlock against a child that writes 300 KB to each
 stream and fails on a timeout, so a regression is caught rather than hanging CI.
 

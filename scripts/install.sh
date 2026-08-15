@@ -9,6 +9,7 @@
 #
 # Options (flags, or the matching env vars):
 #   --version <v>       KYBER_WEAVE_VERSION      release to install (default: latest)
+#   --prerelease        KYBER_WEAVE_PRERELEASE=1 include pre-release versions
 #   --install-dir <d>   KYBER_WEAVE_INSTALL_DIR  where to put binaries (default: ~/.local/bin)
 #   --no-mcp            KYBER_WEAVE_NO_MCP=1     install only the CLI, skip the MCP server
 #   --help
@@ -22,10 +23,12 @@ OWNER="dpalfery"
 REPO="kyber-weave"
 RELEASE_BASE="https://github.com/${OWNER}/${REPO}/releases/download"
 LATEST_API="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
+RELEASES_API="https://api.github.com/repos/${OWNER}/${REPO}/releases"
 
 VERSION="${KYBER_WEAVE_VERSION:-}"
 INSTALL_DIR="${KYBER_WEAVE_INSTALL_DIR:-}"
 NO_MCP="${KYBER_WEAVE_NO_MCP:-}"
+PRERELEASE="${KYBER_WEAVE_PRERELEASE:-}"
 TMPDIR_KW=""
 
 log() { printf 'kyber-weave: %s\n' "$1" >&2; }
@@ -49,6 +52,7 @@ SHA256SUMS.txt. No .NET runtime, no sudo, no compiler required.
 
 Options (flags, or the matching env vars):
   --version <v>       KYBER_WEAVE_VERSION      release to install (default: latest)
+  --prerelease        KYBER_WEAVE_PRERELEASE=1 include pre-release versions
   --install-dir <d>   KYBER_WEAVE_INSTALL_DIR  where to put binaries (default: ~/.local/bin)
   --no-mcp            KYBER_WEAVE_NO_MCP=1     install only the CLI, skip the MCP server
   --help
@@ -69,6 +73,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --version)      [ $# -ge 2 ] || die "--version needs a value"; VERSION="$2"; shift 2 ;;
         --version=*)    VERSION="${1#*=}"; shift ;;
+        --prerelease)   PRERELEASE=1; shift ;;
         --install-dir)  [ $# -ge 2 ] || die "--install-dir needs a value"; INSTALL_DIR="$2"; shift 2 ;;
         --install-dir=*) INSTALL_DIR="${1#*=}"; shift ;;
         --no-mcp)       NO_MCP=1; shift ;;
@@ -156,15 +161,29 @@ fetch_stdout() {
 }
 
 resolve_latest_version() {
-    # Parse "tag_name": "v0.1.0" without requiring jq.
-    fetch_stdout "$LATEST_API" \
-        | tr ',' '\n' \
-        | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
-        | head -n 1
+    if [ "$PRERELEASE" = "1" ]; then
+        fetch_stdout "$RELEASES_API" \
+            | tr -d '\r\n' \
+            | tr '}' '\n' \
+            | grep -v '"draft"[[:space:]]*:[[:space:]]*true' \
+            | grep '"prerelease"[[:space:]]*:[[:space:]]*true' \
+            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
+            | head -n 1
+    else
+        # Parse "tag_name": "v0.1.0" without requiring jq.
+        fetch_stdout "$LATEST_API" \
+            | tr ',' '\n' \
+            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
+            | head -n 1
+    fi
 }
 
 if [ -z "$VERSION" ]; then
-    log "resolving latest release…"
+    if [ "$PRERELEASE" = "1" ]; then
+        log "resolving latest pre-release…"
+    else
+        log "resolving latest release…"
+    fi
     VERSION="$(resolve_latest_version || true)"
     [ -n "$VERSION" ] || die "could not resolve the latest release. Pass --version <x.y.z> explicitly."
 fi

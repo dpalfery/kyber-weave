@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-12
 ---
 
 # The documentation ontology
@@ -70,6 +70,11 @@ Adding a member is a change to the ontology, made in
 [`.kyber-weave/kyber-weave.yml`](../.kyber-weave/kyber-weave.yml) — not an authoring
 decision made mid-document.
 
+The managed glossary introduced by documentation analysis conforms to this ontology. It
+is a `reference` document whose lifecycle uses the existing `needs-review` and `current`
+statuses; `proposed`, `approved`, and `rejected` describe sense rows, not document status.
+No glossary-specific document type or ontology widening is required.
+
 ## The required-key matrix
 
 Requirements vary by doc-type, because what makes an architecture document complete does
@@ -128,5 +133,6 @@ diagnostic names. See [adoption](docgraph/onboarding.md).
 ## Related
 
 - [DocGraph architecture](docgraph/architecture.md) — how the corpus becomes a graph
+- [Documentation analysis and review](docgraph/analysis.md) — how claims and terminology are compared
 - [Documentation governance](docgraph/governance.md) — the gates that enforce this file
 - [Component and owner catalog](catalog.md) — the vocabulary this file defers to

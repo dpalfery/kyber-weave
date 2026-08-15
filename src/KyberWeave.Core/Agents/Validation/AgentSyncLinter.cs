@@ -10,11 +10,12 @@ namespace KyberWeave.Core.Agents.Validation;
 /// <summary>
 /// Linter for evaluating cross-harness role parity, instruction drift, and routing readiness.
 /// </summary>
-public static class AgentSyncLinter
+public static partial class AgentSyncLinter
 {
     public const string RuleUnsatisfiedRole = "KW-AGENT-SYNC-001";
     public const string RuleInstructionDrift = "KW-AGENT-SYNC-002";
     public const string RuleLowRoutingScore = "KW-AGENT-LINT-001";
+    public const string RuleMissingTriggerPhrasing = "KW-AGENT-LINT-002";
 
     public static DiagnosticReport LintSet(AgentSet agentSet, string rootDirectoryPath) =>
         LintSet(agentSet, rootDirectoryPath, HarnessProfileConfig.ProductDefaults);
@@ -88,11 +89,20 @@ public static class AgentSyncLinter
                 }
             }
 
-            // 3. Routing Description Score for each agent instance
+            // 3. Routing Description Score and Trigger Quality for each agent instance
             foreach (var agent in roleAgents)
             {
                 if (!string.IsNullOrWhiteSpace(agent.Description))
                 {
+                    var desc = agent.Description.Trim();
+                    if (!RoutingLinter.TriggerClauseRegex().IsMatch(desc))
+                    {
+                        report.Add(new Diagnostic(RuleMissingTriggerPhrasing, Severity.Warning,
+                            $"Agent '{agent.RoleName}' in '{agent.Harness}' description is an action summary or lacks trigger phrasing. Frame when the orchestrator should invoke this agent (e.g. 'Use when...', 'Invoke when...', 'Trigger when...').",
+                            agent.RoleName, agent.FilePath,
+                            "Add an explicit 'Use when...' or 'Invoke when...' trigger clause to clarify activation intent."));
+                    }
+
                     var dummySkill = new Skill
                     {
                         SkillFilePath = agent.FilePath,

@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-15
 ---
 
 # Installing Kyber-Weave
@@ -17,7 +17,7 @@ install and no SDK requirement.
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
 ```
 
-This installs the **latest release tag** to `~/.local/bin` without sudo, placing two
+This installs the **latest stable release tag** to `~/.local/bin` without sudo, placing two
 binaries on your PATH:
 
 | Binary | Purpose |
@@ -35,19 +35,34 @@ export PATH="$HOME/.local/bin:$PATH"
 
 | Flag | Environment variable | Effect |
 |---|---|---|
-| `--version <v>` | `KYBER_WEAVE_VERSION` | Install a specific release instead of latest |
+| `--version <v>` | `KYBER_WEAVE_VERSION` | Install a specific release (e.g. `0.1.1` or `0.2.0-rc.1`) instead of latest |
+| `--prerelease` | `KYBER_WEAVE_PRERELEASE=1` | Resolve and install candidate/pre-release builds (e.g. `v*-rc.*`, `v*-dev.*`) |
 | `--install-dir <d>` | `KYBER_WEAVE_INSTALL_DIR` | Target directory (default `~/.local/bin`) |
 | `--no-mcp` | `KYBER_WEAVE_NO_MCP=1` | CLI only; skip the MCP server |
+
+Pinning a specific version or install directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
   | sh -s -- --version 0.1.1 --install-dir /usr/local/bin
 ```
 
+Installing the latest pre-release (Release Candidate or development build):
+
+```bash
+# Using CLI flag
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+  | sh -s -- --prerelease
+
+# Using environment variable
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+  | KYBER_WEAVE_PRERELEASE=1 sh
+```
+
 ## What the script does
 
 1. Detects your OS and architecture and picks the matching RID
-2. Resolves the latest release tag, unless `--version` pinned one
+2. Resolves the latest stable release tag (or newest pre-release tag when `--prerelease` is active), unless `--version` pinned an explicit version
 3. Downloads `SHA256SUMS.txt` and each binary archive over HTTPS, following HTTPS-only redirects
 4. **Verifies every binary against its published checksum** before installing
 5. Extracts into the install directory
@@ -62,13 +77,54 @@ default location.
 Windows binaries (`win-x64`) are published on the release, but the install script does not
 handle `.zip` extraction — download the asset from
 [Releases](https://github.com/dpalfery/kyber-weave/releases) and place it on your PATH
-manually.
+manually. After that, `kyber-weave update` replaces the Windows binaries in place.
 
 ## Verify
+
+Verify the installation and output the build-stamped binary version:
+
+```bash
+kyber-weave --version
+# or short flag
+kyber-weave -v
+```
+
+Output example: `kyber-weave 0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f` or `kyber-weave 0.2.0-rc.1`.
+
+Verify the MCP server binary version:
+
+```bash
+kyber-weave-mcp --version
+# or short flag
+kyber-weave-mcp -v
+```
+
+View CLI general help:
 
 ```bash
 kyber-weave --help
 ```
+
+## Updating
+
+`kyber-weave update` replaces the running CLI and the sibling `kyber-weave-mcp` in the
+same directory from GitHub Release assets, after verifying SHA-256 against
+`SHA256SUMS.txt`. It is the self-update path for binaries installed by this script (or
+placed from a Release by hand). It refuses `dotnet run` and `dotnet tool` installs.
+
+```bash
+kyber-weave update                    # latest stable Release
+kyber-weave update --release-candidate  # newest listed Release, including -rc and -dev
+kyber-weave update 0.2.0              # pin a tag (leading v is optional)
+kyber-weave update --no-mcp           # CLI only
+```
+
+`--release-candidate` matches `install.sh --prerelease`: it reads the GitHub Releases
+list (not `/releases/latest`) and takes the newest non-draft tag. Do not combine it with
+a pinned version — pin the candidate tag instead (`kyber-weave update 0.2.0-rc.1`).
+
+Global `kyber-weave --version` still prints the running binary; pinning is a positional
+argument so the two do not collide.
 
 ## Then initialize your repository
 
@@ -76,8 +132,9 @@ kyber-weave --help
 kyber-weave docs init .
 ```
 
-This scaffolds host config, the catalog, and the ontology reference, and deploys the
-`kyber-weave-docs` authoring skill via APM. See
+This scaffolds host config, the catalog, and the ontology reference; safely merges the
+narrow `.kyber-weave/.gitignore` entry for local analysis cache state; and deploys the
+`kyber-weave-docs` authoring skill via APM. It does not create an empty glossary. See
 [Adopting DocGraph](docgraph/onboarding.md) for the whole path.
 
 ## External dependencies
@@ -89,7 +146,7 @@ installed on your machine behind your back.
 | Tool | Needed by | Without it |
 |---|---|---|
 | [APM](https://microsoft.github.io/apm) | `docs init` deploying the authoring skill | The corpus is still scaffolded; the command prints the `apm install` line to run later |
-| CodeGraph + `sqlite3` | `docs drift`, `docs graph` | Everything else works, including all of [retrieval](docgraph/retrieval.md) |
+| CodeGraph + `sqlite3` | `docs drift`, `docs export-graph` | Everything else works, including all of [retrieval](docgraph/retrieval.md) |
 
 ### APM
 

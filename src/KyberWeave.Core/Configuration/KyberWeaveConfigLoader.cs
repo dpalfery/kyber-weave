@@ -105,10 +105,17 @@ public static class KyberWeaveConfigLoader
         return explicitPath;
     }
 
-    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document) =>
-        new()
+    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document)
+    {
+        var ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
+        return new KyberWeaveConfig
         {
-            Ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology),
-            Harness = HarnessProfileConfigLoader.Merge(HarnessProfileConfig.ProductDefaults, document.Harness)
+            Ontology = ontology,
+            Harness = HarnessProfileConfigLoader.Merge(HarnessProfileConfig.ProductDefaults, document.Harness),
+            DocsAnalysis = DocsAnalysisConfigLoader.Merge(
+                DocsAnalysisConfig.ProductDefaults,
+                document.DocsAnalysis,
+                ontology)
         };
+    }
 }

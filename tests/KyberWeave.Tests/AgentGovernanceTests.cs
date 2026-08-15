@@ -261,3 +261,115 @@ public class AgentGovernanceTests
         Assert.Equal("dotnet-dev", result.SelectedRole);
     }
 }
+
+public class AgentSyncLinterTests
+{
+    private static AgentModel CreateAgent(string description, string role = "data-engineer", HarnessKind harness = HarnessKind.Claude)
+    {
+        return new AgentModel
+        {
+            RoleName = role,
+            Harness = harness,
+            FilePath = $"/tmp/.claude/agents/{role}.md",
+            DirectoryPath = "/tmp/.claude/agents",
+            Description = description,
+            InstructionsBody = "You are a data engineer."
+        };
+    }
+
+    [Theory]
+    [InlineData("Designs database schemas and generates migrations.")]
+    [InlineData("Generates SQL queries, validates schema syntax, and connects to Postgres database.")]
+    [InlineData("Handles user data synchronization across external CRM services.")]
+    [InlineData("Processes incoming events from Kafka topics and writes aggregates.")]
+    [InlineData("Calculates metrics for weekly developer velocity reports.")]
+    [InlineData("Creates Kubernetes deployment manifests and Helm charts.")]
+    [InlineData("Validates authentication tokens and manages OAuth session lifecycles.")]
+    public void LintSet_WhenAgentDescriptionIsActionOnly_EmitsKwAgentLint002Warning(string description)
+    {
+        var agent = CreateAgent(description, "data-engineer");
+        var agentSet = new AgentSet(new[] { agent });
+
+        var report = AgentSyncLinter.LintSet(agentSet, "/tmp");
+
+        var diagnostic = report.Items.FirstOrDefault(d => d.Code == "KW-AGENT-LINT-002");
+        Assert.NotNull(diagnostic);
+        Assert.Equal(Severity.Warning, diagnostic.Severity);
+        Assert.Equal("data-engineer", diagnostic.Subject);
+    }
+
+    [Theory]
+    [InlineData("Use when designing SQL schemas, writing migrations, or optimizing database queries.")]
+    [InlineData("Use when querying PostgreSQL databases.")]
+    [InlineData("Use for triaging high-severity production alerts and incident response.")]
+    [InlineData("Invoke when an automated security scan reports critical vulnerabilities.")]
+    [InlineData("Trigger when pull request validation fails on CI pipeline steps.")]
+    [InlineData("Apply when formatting markdown tables according to repo standards.")]
+    [InlineData("Use this agent when analyzing memory leaks in .NET applications.")]
+    public void LintSet_WhenAgentDescriptionHasTriggerPhrasing_DoesNotEmitKwAgentLint002(string description)
+    {
+        var agent = CreateAgent(description, "data-engineer");
+        var agentSet = new AgentSet(new[] { agent });
+
+        var report = AgentSyncLinter.LintSet(agentSet, "/tmp");
+
+        Assert.DoesNotContain(report.Items, d => d.Code == "KW-AGENT-LINT-002");
+    }
+}
+
+public class AgentSpecValidatorTests
+{
+    [Fact]
+    public void Validate_WhenNameMissing_EmitsKwAgentSpec001()
+    {
+        var agent = new AgentModel
+        {
+            RoleName = "",
+            Harness = HarnessKind.Claude,
+            FilePath = "/tmp/test.md",
+            DirectoryPath = "/tmp",
+            Description = "Use when querying databases.",
+            InstructionsBody = "Instructions"
+        };
+
+        var report = AgentSpecValidator.Validate(agent);
+
+        Assert.Contains(report.Items, d => d.Code == AgentSpecValidator.RuleMissingName && d.Severity == Severity.Error);
+    }
+
+    [Fact]
+    public void Validate_WhenDescriptionMissing_EmitsKwAgentSpec002()
+    {
+        var agent = new AgentModel
+        {
+            RoleName = "test-agent",
+            Harness = HarnessKind.Claude,
+            FilePath = "/tmp/test.md",
+            DirectoryPath = "/tmp",
+            Description = "",
+            InstructionsBody = "Instructions"
+        };
+
+        var report = AgentSpecValidator.Validate(agent);
+
+        Assert.Contains(report.Items, d => d.Code == AgentSpecValidator.RuleMissingDescription && d.Severity == Severity.Warning);
+    }
+
+    [Fact]
+    public void Validate_WhenInstructionsMissing_EmitsKwAgentSpec003()
+    {
+        var agent = new AgentModel
+        {
+            RoleName = "test-agent",
+            Harness = HarnessKind.Claude,
+            FilePath = "/tmp/test.md",
+            DirectoryPath = "/tmp",
+            Description = "Use when querying databases.",
+            InstructionsBody = ""
+        };
+
+        var report = AgentSpecValidator.Validate(agent);
+
+        Assert.Contains(report.Items, d => d.Code == AgentSpecValidator.RuleMissingInstructions && d.Severity == Severity.Error);
+    }
+}

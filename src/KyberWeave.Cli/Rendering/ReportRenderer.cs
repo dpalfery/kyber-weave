@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -48,26 +49,47 @@ public static class ReportRenderer
         if (report.Items.Count == 0)
         {
             AnsiConsole.MarkupLine("[green]No findings.[/]");
+            RenderMetricsTable(report);
             return;
+        }
+
+        // A finding the reader has to scroll past hundreds of Info rows to reach is not
+        // reported. When anything actionable exists, Info is counted rather than listed;
+        // --format json remains the complete record.
+        var actionable = report.Items
+            .Where(item => item.Severity >= Severity.Warning)
+            .OrderByDescending(item => item.Severity)
+            .ToList();
+        var rows = actionable.Count > 0
+            ? actionable
+            : report.Items.OrderByDescending(item => item.Severity).ToList();
+        var omitted = report.Items.Count - rows.Count;
+        if (omitted > 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]{omitted.ToString(CultureInfo.InvariantCulture)} informational findings omitted from the table. Use --format json to list them.[/]");
         }
 
         var table = new Table().Border(TableBorder.Rounded).Expand();
         table.AddColumn("Severity");
         table.AddColumn("Code");
         table.AddColumn(subjectLabel);
+        table.AddColumn(new TableColumn("Location").NoWrap());
         table.AddColumn("Message");
 
-        foreach (var d in report.Items.OrderByDescending(i => i.Severity))
+        foreach (var d in rows)
         {
             var color = ColorFor(d.Severity);
             table.AddRow(
                 new Markup($"[{color.ToMarkup()}]{Glyph(d.Severity)} {d.Severity}[/]"),
                 new Markup(Markup.Escape(d.Code)),
                 new Markup(Markup.Escape(d.Subject)),
+                new Markup(Markup.Escape(FormatLocation(d))),
                 new Markup(Markup.Escape(d.Message) + (d.Hint is null ? "" : $"\n[grey]→ {Markup.Escape(d.Hint)}[/]")));
         }
 
         AnsiConsole.Write(table);
+        RenderMetricsTable(report);
     }
 
     public static void RenderSummary(DiagnosticReport report)
@@ -83,7 +105,8 @@ public static class ReportRenderer
     {
         var arr = new JsonArray();
         foreach (var d in report.Items)
-            arr.Add(new JsonObject
+        {
+            var finding = new JsonObject
             {
                 ["code"] = d.Code,
                 ["severity"] = d.Severity.ToString().ToLowerInvariant(),
@@ -91,7 +114,28 @@ public static class ReportRenderer
                 ["message"] = d.Message,
                 ["file"] = d.FilePath,
                 ["hint"] = d.Hint
-            });
+            };
+            AddRange(finding, d.StartLine, d.EndLine);
+            if (d.RelatedLocations is { Count: > 0 })
+            {
+                var relatedLocations = new JsonArray();
+                foreach (var related in d.RelatedLocations)
+                {
+                    var location = new JsonObject
+                    {
+                        ["file"] = related.FilePath,
+                        ["message"] = related.Message
+                    };
+                    AddRange(location, related.StartLine, related.EndLine);
+                    relatedLocations.Add(location);
+                }
+
+                finding["relatedLocations"] = relatedLocations;
+            }
+
+            arr.Add(finding);
+        }
+
         var root = new JsonObject
         {
             ["summary"] = new JsonObject
@@ -103,6 +147,7 @@ public static class ReportRenderer
             },
             ["findings"] = arr
         };
+        AddMetrics(root, report);
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
 
@@ -113,11 +158,31 @@ public static class ReportRenderer
         sb.AppendLine();
         sb.AppendLine($"**{report.Count(Severity.Critical)} critical · {report.Count(Severity.Error)} error · {report.Warnings} warning · {report.Infos} info**");
         sb.AppendLine();
-        if (report.Items.Count == 0) { sb.AppendLine("_No findings._"); return sb.ToString(); }
-        sb.AppendLine($"| Severity | Code | {subjectLabel} | Message |");
-        sb.AppendLine("|---|---|---|---|");
-        foreach (var d in report.Items.OrderByDescending(i => i.Severity))
-            sb.AppendLine($"| {d.Severity} | {d.Code} | {d.Subject} | {d.Message.Replace("|", "\\|")} |");
+        if (report.Items.Count == 0)
+        {
+            sb.AppendLine("_No findings._");
+        }
+        else
+        {
+            sb.AppendLine($"| Severity | Code | {subjectLabel} | Location | Message |");
+            sb.AppendLine("|---|---|---|---|---|");
+            foreach (var d in report.Items.OrderByDescending(i => i.Severity))
+            {
+                sb.AppendLine($"| {d.Severity} | {EscapeMarkdown(d.Code)} | {EscapeMarkdown(d.Subject)} | {EscapeMarkdown(FormatLocation(d, includeRelatedCount: false))} | {EscapeMarkdown(d.Message)} |");
+                if (d.RelatedLocations is not { Count: > 0 })
+                {
+                    continue;
+                }
+
+                foreach (var related in d.RelatedLocations)
+                {
+                    var message = related.Message is null ? "Related location" : related.Message;
+                    sb.AppendLine($"|  |  |  | {EscapeMarkdown(FormatLocation(related))} | {EscapeMarkdown(message)} |");
+                }
+            }
+        }
+
+        AppendMarkdownMetrics(sb, report);
         return sb.ToString();
     }
 
@@ -146,18 +211,60 @@ public static class ReportRenderer
             };
             if (!string.IsNullOrEmpty(d.FilePath))
             {
+                var physicalLocation = CreateSarifPhysicalLocation(d.FilePath, d.StartLine, d.EndLine);
                 result["locations"] = new JsonArray
                 {
                     new JsonObject
                     {
-                        ["physicalLocation"] = new JsonObject
-                        {
-                            ["artifactLocation"] = new JsonObject { ["uri"] = d.FilePath }
-                        }
+                        ["physicalLocation"] = physicalLocation
                     }
                 };
             }
+
+            if (d.RelatedLocations is { Count: > 0 })
+            {
+                var relatedLocations = new JsonArray();
+                foreach (var related in d.RelatedLocations)
+                {
+                    var location = new JsonObject
+                    {
+                        ["physicalLocation"] = CreateSarifPhysicalLocation(
+                            related.FilePath,
+                            related.StartLine,
+                            related.EndLine)
+                    };
+                    if (related.Message is not null)
+                    {
+                        location["message"] = new JsonObject { ["text"] = related.Message };
+                    }
+
+                    relatedLocations.Add(location);
+                }
+
+                result["relatedLocations"] = relatedLocations;
+            }
+
             results.Add(result);
+        }
+
+        var run = new JsonObject
+        {
+            ["tool"] = new JsonObject
+            {
+                ["driver"] = new JsonObject
+                {
+                    ["name"] = "Kyber-Weave",
+                    ["version"] = "0.1.0",
+                    ["rules"] = rules
+                }
+            },
+            ["results"] = results
+        };
+        if (report.Metrics.Count > 0)
+        {
+            var properties = new JsonObject();
+            AddMetrics(properties, report);
+            run["properties"] = properties;
         }
 
         var sarif = new JsonObject
@@ -166,21 +273,190 @@ public static class ReportRenderer
             ["version"] = "2.1.0",
             ["runs"] = new JsonArray
             {
-                new JsonObject
-                {
-                    ["tool"] = new JsonObject
-                    {
-                        ["driver"] = new JsonObject
-                        {
-                            ["name"] = "Kyber-Weave",
-                            ["version"] = "0.1.0",
-                            ["rules"] = rules
-                        }
-                    },
-                    ["results"] = results
-                }
+                run
             }
         };
         return sarif.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }
+
+    private static void RenderMetricsTable(DiagnosticReport report)
+    {
+        if (report.Metrics.Count == 0)
+        {
+            return;
+        }
+
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Metric");
+        table.AddColumn("Value");
+        foreach (var metric in report.Metrics)
+        {
+            table.AddRow(
+                new Markup(Markup.Escape(metric.Key)),
+                new Markup(Markup.Escape(FormatMetric(metric.Value))));
+        }
+
+        AnsiConsole.Write(table);
+    }
+
+    private static void AppendMarkdownMetrics(StringBuilder sb, DiagnosticReport report)
+    {
+        if (report.Metrics.Count == 0)
+        {
+            return;
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("#### Metrics");
+        sb.AppendLine();
+        sb.AppendLine("| Metric | Value |");
+        sb.AppendLine("|---|---|");
+        foreach (var metric in report.Metrics)
+        {
+            sb.AppendLine($"| {EscapeMarkdown(metric.Key)} | {EscapeMarkdown(FormatMetric(metric.Value))} |");
+        }
+    }
+
+    private static void AddMetrics(JsonObject parent, DiagnosticReport report)
+    {
+        if (report.Metrics.Count == 0)
+        {
+            return;
+        }
+
+        var metrics = new JsonObject();
+        foreach (var metric in report.Metrics)
+        {
+            metrics[metric.Key] = ToJsonScalar(metric.Value);
+        }
+
+        parent["metrics"] = metrics;
+    }
+
+    private static JsonNode? ToJsonScalar(object? value) => value switch
+    {
+        null => null,
+        string item => JsonValue.Create(item),
+        bool item => JsonValue.Create(item),
+        byte item => JsonValue.Create(item),
+        sbyte item => JsonValue.Create(item),
+        short item => JsonValue.Create(item),
+        ushort item => JsonValue.Create(item),
+        int item => JsonValue.Create(item),
+        uint item => JsonValue.Create(item),
+        long item => JsonValue.Create(item),
+        ulong item => JsonValue.Create(item),
+        float item => JsonValue.Create(item),
+        double item => JsonValue.Create(item),
+        decimal item => JsonValue.Create(item),
+        _ => JsonValue.Create(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty)
+    };
+
+    private static void AddRange(JsonObject target, int? startLine, int? endLine)
+    {
+        if (startLine is not null)
+        {
+            target["startLine"] = startLine.Value;
+        }
+
+        if (endLine is not null)
+        {
+            target["endLine"] = endLine.Value;
+        }
+    }
+
+    private static JsonObject CreateSarifPhysicalLocation(string filePath, int? startLine, int? endLine)
+    {
+        var physicalLocation = new JsonObject
+        {
+            ["artifactLocation"] = new JsonObject { ["uri"] = filePath }
+        };
+        if (startLine is not null)
+        {
+            var region = new JsonObject { ["startLine"] = startLine.Value };
+            if (endLine is not null)
+            {
+                region["endLine"] = endLine.Value;
+            }
+
+            physicalLocation["region"] = region;
+        }
+
+        return physicalLocation;
+    }
+
+    private static string FormatLocation(Diagnostic diagnostic, bool includeRelatedCount = true)
+    {
+        var formatted = FormatLocation(diagnostic.FilePath, diagnostic.StartLine, diagnostic.EndLine);
+        if (includeRelatedCount && diagnostic.RelatedLocations is { Count: > 0 })
+        {
+            formatted += $" (+{diagnostic.RelatedLocations.Count.ToString(CultureInfo.InvariantCulture)} related)";
+        }
+
+        return formatted;
+    }
+
+    private static string FormatLocation(DiagnosticLocation location) =>
+        FormatLocation(location.FilePath, location.StartLine, location.EndLine);
+
+    private static string FormatLocation(string? filePath, int? startLine, int? endLine)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return string.Empty;
+        }
+
+        var displayPath = DisplayPath(filePath);
+        if (startLine is null)
+        {
+            return displayPath;
+        }
+
+        var start = startLine.Value.ToString(CultureInfo.InvariantCulture);
+        return endLine is null || endLine == startLine
+            ? $"{displayPath}:{start}"
+            : $"{displayPath}:{start}-{endLine.Value.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>
+    /// Absolute paths under the current directory become repo-relative so the Location
+    /// column does not consume the row. JSON and SARIF keep the original path.
+    /// </summary>
+    private static string DisplayPath(string filePath)
+    {
+        if (!Path.IsPathRooted(filePath))
+        {
+            return filePath;
+        }
+
+        try
+        {
+            var relative = Path.GetRelativePath(Environment.CurrentDirectory, filePath);
+            if (string.IsNullOrEmpty(relative)
+                || relative.StartsWith("..", StringComparison.Ordinal))
+            {
+                return filePath;
+            }
+
+            return relative.Replace('\\', '/');
+        }
+        catch (ArgumentException)
+        {
+            return filePath;
+        }
+    }
+
+    private static string FormatMetric(object? value) => value switch
+    {
+        null => "null",
+        bool boolean => boolean ? "true" : "false",
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? string.Empty
+    };
+
+    private static string EscapeMarkdown(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("|", "\\|", StringComparison.Ordinal)
+        .Replace("\r", string.Empty, StringComparison.Ordinal)
+        .Replace("\n", "<br>", StringComparison.Ordinal);
 }

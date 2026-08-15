@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-02
+last-reviewed: 2026-08-11
 ---
 
 # Wiring Kyber-Weave into CI
@@ -15,8 +15,8 @@ This runbook explains what they do and what to change.
 
 ## Installing in a runner
 
-The install script is served from the default branch and installs the **latest release
-tag**. It only ever reads Release assets, so it stays compatible with older tags and a
+The install script is served from the default branch and installs the **latest stable release
+tag** by default. It only ever reads Release assets, so it stays compatible with older tags and a
 script fix never requires a re-release ([distribution.md](../distribution.md)).
 
 ```yaml
@@ -35,10 +35,42 @@ steps:
 `--no-mcp` skips the MCP server, which a CI gate never needs. Every binary is verified
 against the release's `SHA256SUMS.txt` over HTTPS.
 
-Tracking latest means a new release reaches your gates without a code change — which is
+Tracking latest stable means a new release reaches your gates without a code change — which is
 the intent, and also means a release can change gate behaviour on a build that touched
-nothing. Where a job must be reproducible, add `--version 0.1.1` to pin it. See
-[install.md](../install.md) for the full option set.
+nothing. Where a job must be reproducible, add `--version 0.1.1` to pin it.
+
+### Testing pre-release and development tags in CI
+
+Kyber-Weave uses tag conventions to distinguish stable releases from pre-release candidates:
+
+- **Release Candidates:** `v*-rc.*` (e.g. `v0.2.0-rc.1`)
+- **Development Builds:** `v*-dev.*` (e.g. `v0.2.0-dev.1`)
+
+To install the latest candidate release in a staging or integration CI runner, pass `--prerelease` (or set `KYBER_WEAVE_PRERELEASE=1`):
+
+```yaml
+steps:
+  - name: Install Kyber-Weave Candidate
+    run: |
+      set -euo pipefail
+      curl -fsSL -o "${RUNNER_TEMP}/kyber-weave-install.sh" \
+        https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh
+      sh "${RUNNER_TEMP}/kyber-weave-install.sh" --no-mcp --prerelease
+      echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+```
+
+To pin a specific candidate tag in CI, pass `--version 0.2.0-rc.1`.
+
+### Verifying installed version in CI logs
+
+To log and verify the exact Kyber-Weave version used during pipeline execution:
+
+```yaml
+  - name: Log installed version
+    run: kyber-weave --version
+```
+
+Running `kyber-weave --version` (or `kyber-weave -v`) outputs `kyber-weave <version>` (e.g. `kyber-weave 0.1.0+commit_sha`), ensuring full auditability in CI job logs. See [install.md](../install.md) for the full option set.
 
 ## The three gates
 
