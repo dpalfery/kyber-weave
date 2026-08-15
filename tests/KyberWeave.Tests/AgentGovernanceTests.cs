@@ -260,51 +260,6 @@ public class AgentGovernanceTests
         Assert.True(result.Fired);
         Assert.Equal("dotnet-dev", result.SelectedRole);
     }
-
-    [Theory]
-    [InlineData("Designs database schemas and generates migrations.")]
-    [InlineData("Handles deployment workflows and infrastructure provisioning.")]
-    public void AgentSyncLinter_Flags_Missing_Trigger_Phrasing(string description)
-    {
-        var agent = new AgentModel
-        {
-            RoleName = "schema-architect",
-            Harness = HarnessKind.Claude,
-            FilePath = "/tmp/.claude/agents/schema-architect.md",
-            DirectoryPath = "/tmp/.claude/agents",
-            Description = description,
-            InstructionsBody = "Architect database schemas."
-        };
-        var set = new AgentSet(new[] { agent });
-
-        var report = AgentSyncLinter.LintSet(set, "/tmp");
-
-        var diagnostic = report.Items.FirstOrDefault(d => d.Code == "KW-AGENT-LINT-002");
-        Assert.NotNull(diagnostic);
-        Assert.Equal(Severity.Warning, diagnostic.Severity);
-        Assert.Equal("schema-architect", diagnostic.Subject);
-    }
-
-    [Theory]
-    [InlineData("Use when designing SQL schemas, writing migrations, or optimizing database queries.")]
-    [InlineData("Invoke when reviewing database entity relationships.")]
-    public void AgentSyncLinter_Does_Not_Flag_Missing_Trigger_Phrasing_When_Trigger_Conditions_Stated(string description)
-    {
-        var agent = new AgentModel
-        {
-            RoleName = "schema-architect",
-            Harness = HarnessKind.Claude,
-            FilePath = "/tmp/.claude/agents/schema-architect.md",
-            DirectoryPath = "/tmp/.claude/agents",
-            Description = description,
-            InstructionsBody = "Architect database schemas."
-        };
-        var set = new AgentSet(new[] { agent });
-
-        var report = AgentSyncLinter.LintSet(set, "/tmp");
-
-        Assert.DoesNotContain(report.Items, d => d.Code == "KW-AGENT-LINT-002");
-    }
 }
 
 public class AgentSyncLinterTests

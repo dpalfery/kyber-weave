@@ -104,9 +104,15 @@ internal sealed class SelfUpdater : IDisposable
         {
             _log($"installing {tag} ({_host.Rid}) → {_host.InstallDirectory}");
             var sums = _releases.DownloadChecksums(tag);
-            InstallBinary(CliBaseName, tag, windows, sums, work.FullName);
+            var staged = new List<(string BaseName, string ExtractedPath, string Destination)>
+            {
+                StageBinary(CliBaseName, tag, windows, sums, work.FullName)
+            };
             if (!options.NoMcp)
-                InstallBinary(McpBaseName, tag, windows, sums, work.FullName);
+                staged.Add(StageBinary(McpBaseName, tag, windows, sums, work.FullName));
+
+            foreach (var item in staged)
+                CommitBinary(item.BaseName, tag, windows, item.ExtractedPath, item.Destination);
         }
         finally
         {
@@ -126,7 +132,7 @@ internal sealed class SelfUpdater : IDisposable
         return new SelfUpdateOutcome(0, $"updated kyber-weave {version} → {installed}");
     }
 
-    private void InstallBinary(
+    private (string BaseName, string ExtractedPath, string Destination) StageBinary(
         string baseName,
         string tag,
         bool windows,
@@ -150,6 +156,16 @@ internal sealed class SelfUpdater : IDisposable
         var extractedName = BinaryInstaller.InstalledFileName(baseName, windows);
         var extractedPath = FindExtractedBinary(extractDir, extractedName);
         var destination = Path.Combine(_host.InstallDirectory, extractedName);
+        return (baseName, extractedPath, destination);
+    }
+
+    private void CommitBinary(
+        string baseName,
+        string tag,
+        bool windows,
+        string extractedPath,
+        string destination)
+    {
         BinaryInstaller.Replace(extractedPath, destination, windows);
         if (_host.IsMacOs)
             BinaryInstaller.ClearMacQuarantine(destination);

@@ -7,7 +7,7 @@ namespace KyberWeave.Mcp;
 public interface IDocsAnalysisReader
 {
     /// <summary>Runs bounded analysis over the repository's current configured corpus.</summary>
-    DocumentationAnalysisResult Analyze();
+    DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default);
 
     /// <summary>Looks up every managed glossary sense for one term.</summary>
     GlossaryLookupResult LookupGlossary(string term);

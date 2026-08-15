@@ -56,13 +56,14 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
                              .Distinct(StringComparer.Ordinal)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
-                    AddScopeEdges(edges, senseId, scope, codeGraph);
+                    AddScopeEdges(nodes, emittedNodeIds, edges, senseId, scope, codeGraph);
                 }
 
                 foreach (var evidenceId in sense.EvidenceIds
                              .Distinct(StringComparer.Ordinal)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
+                    AddEvidenceNode(nodes, emittedNodeIds, evidenceId);
                     edges.Add(new DocGraphEdge("EVIDENCED_BY", senseId, evidenceId));
                 }
             }
@@ -131,6 +132,8 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
     }
 
     private static void AddScopeEdges(
+        ICollection<DocGraphNode> nodes,
+        ISet<string> emittedNodeIds,
         ICollection<DocGraphEdge> edges,
         string senseId,
         string scope,
@@ -142,7 +145,14 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
         {
             var component = scope[componentPrefix.Length..];
             if (component.Length > 0)
-                edges.Add(new DocGraphEdge("SCOPED_TO", senseId, componentPrefix + component));
+            {
+                var componentId = componentPrefix + component;
+                AddNode(nodes, emittedNodeIds, new DocGraphNode(
+                    componentId,
+                    "Component",
+                    new Dictionary<string, string?>(StringComparer.Ordinal) { ["name"] = component }));
+                edges.Add(new DocGraphEdge("SCOPED_TO", senseId, componentId));
+            }
             return;
         }
 
@@ -150,6 +160,18 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
         var symbol = scope[codePrefix.Length..];
         foreach (var node in codeGraph.ResolveSymbol(symbol).OrderBy(node => node.Id, StringComparer.Ordinal))
             edges.Add(new DocGraphEdge("SCOPED_TO", senseId, node.Id));
+    }
+
+    private static void AddEvidenceNode(
+        ICollection<DocGraphNode> nodes,
+        ISet<string> emittedNodeIds,
+        string evidenceId)
+    {
+        if (string.IsNullOrWhiteSpace(evidenceId)) return;
+        AddNode(nodes, emittedNodeIds, new DocGraphNode(
+            evidenceId,
+            "Claim",
+            new Dictionary<string, string?>(StringComparer.Ordinal) { ["id"] = evidenceId }));
     }
 
     private static void AddTermNode(

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -34,7 +35,10 @@ public sealed class ProcessRunnerInputTests
     [Fact]
     public async Task Run_WithLargeInputAndOutput_TransfersAllStreamsWithoutDeadlock()
     {
-        if (OperatingSystem.IsWindows()) return; // CI runs Linux; the contract is platform-independent.
+        if (OperatingSystem.IsWindows())
+        {
+            throw SkipException.ForSkip("POSIX shell process execution tests are not run on Windows.");
+        }
 
         var input = new string('i', BytesPerStream);
         var startInfo = CreateShellStartInfo(
@@ -54,7 +58,10 @@ public sealed class ProcessRunnerInputTests
     [Fact]
     public void Run_PreservesCallerEnvironmentOverrides()
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows())
+        {
+            throw SkipException.ForSkip("POSIX shell process execution tests are not run on Windows.");
+        }
 
         var startInfo = CreateShellStartInfo("printf '%s' \"$KYBER_WEAVE_PROCESS_MARKER\"");
         startInfo.Environment["KYBER_WEAVE_PROCESS_MARKER"] = "from-caller";
@@ -124,7 +131,10 @@ public sealed class ProcessRunnerInputTests
     [Fact]
     public async Task Run_WhenChildClosesStdin_PropagatesTheWriteFailure()
     {
-        if (OperatingSystem.IsWindows()) return; // CI runs Linux; the contract is platform-independent.
+        if (OperatingSystem.IsWindows())
+        {
+            throw SkipException.ForSkip("POSIX shell process execution tests are not run on Windows.");
+        }
 
         var startInfo = CreateShellStartInfo("exec 0<&-; exit 0");
         var input = new string('i', BytesPerStream * 4);

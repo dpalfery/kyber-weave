@@ -377,9 +377,9 @@ public sealed partial class UpdateCommandTests : IDisposable
         Assert.False(SelfUpdater.IsDotnetToolInstall("/Users/x/.local/bin/kyber-weave"));
     }
 
-    [LibraryImport("libc", EntryPoint = "geteuid")]
+    [DllImport("libc", EntryPoint = "geteuid")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static partial uint GetEffectiveUserId();
+    private static extern uint GetEffectiveUserId();
 
     private SelfUpdateOutcome Run(
         HttpMessageHandler handler,

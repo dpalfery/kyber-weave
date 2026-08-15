@@ -60,8 +60,10 @@ public sealed class CodeGraphNeighborhoodPortTests
             new CodeGraphResolverAdapter(fixture.DatabasePath));
 
         var capped = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 1);
-
         Assert.Empty(capped);
+
+        var inclusive = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 2);
+        Assert.Equal(2, inclusive.Count);
     }
 
     private static CodeGraphNode Node(string id, string name) =>

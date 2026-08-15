@@ -109,7 +109,7 @@ public static class AnalysisCacheSafety
             var result = ProcessRunner.Run(startInfo, string.Empty);
             return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
         }
-        catch (Win32Exception)
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
             // Without git, persistence cannot prove that the cache is outside the index.
             return true;

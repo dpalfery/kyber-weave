@@ -345,7 +345,7 @@ public sealed class DocGraphProjection
     }
 
     private static DocGraphNode Copy(DocGraphNode node) =>
-        new(node.Id, node.Label, node.Properties);
+        new(node.Id, node.Label, new Dictionary<string, string?>(node.Properties, StringComparer.Ordinal));
 
     internal static string DocId(string id) => $"doc:{id}";
 

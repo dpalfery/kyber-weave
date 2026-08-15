@@ -33,6 +33,16 @@ internal static class EmbeddingCandidateBuilder
                 embeddings[pair.Right].Vector)))
             .ToArray();
 
+        var seedMap = new Dictionary<IndexPair, ClaimPairCandidate>();
+        foreach (var seed in seedPairs)
+        {
+            if (claimIndexes.TryGetValue(seed.Left, out var leftIdx) &&
+                claimIndexes.TryGetValue(seed.Right, out var rightIdx))
+            {
+                seedMap.TryAdd(IndexPair.Create(leftIdx, rightIdx), seed);
+            }
+        }
+
         var selected = search.Mode == DocsAnalysisSearchMode.HighRecall
             ? SelectTopNeighbors(scored, claims.Count, search.MaxNeighborsPerClaim)
             : scored;
@@ -43,7 +53,7 @@ internal static class EmbeddingCandidateBuilder
             .Take(search.MaxCandidates)
             .Select(item =>
             {
-                var seed = FindSeed(seedPairs, claims[item.Pair.Left], claims[item.Pair.Right]);
+                seedMap.TryGetValue(item.Pair, out var seed);
                 return new ClaimPairCandidate(
                     claims[item.Pair.Left],
                     claims[item.Pair.Right],

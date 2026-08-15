@@ -120,12 +120,14 @@ public sealed class EmbeddingClientTests
             ResolveTo(IPAddress.Loopback),
             _ => null);
 
-        var client = typeof(OpenAiCompatibleEmbeddingGenerator)
-            .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?.GetValue(generator) as HttpClient;
+        var result = generator.Generate(
+            [Key("k1")],
+            ["input text"],
+            Config());
 
-        Assert.NotNull(client);
-        Assert.Equal(Timeout.InfiniteTimeSpan, client.Timeout);
+        Assert.Single(result.Embeddings);
+        var request = Assert.Single(handler.Requests);
+        Assert.True(request.CanBeCanceled);
     }
 
     [Fact]

@@ -14,7 +14,7 @@ public sealed class DocsAnalysisConfig
     public string? GlossaryPath { get; init; }
 
     /// <summary>Effective path including the primary-root default resolved at config load.</summary>
-    public string ResolvedGlossaryPath { get; init; } = "6-Docs/glossary.md";
+    public string ResolvedGlossaryPath { get; init; } = "glossary.md";
 
     /// <summary>Resolves an omitted path to the primary documentation root.</summary>
     public string ResolveGlossaryPath(OntologyConfig ontology)

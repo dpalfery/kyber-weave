@@ -113,7 +113,8 @@ static string GetVersion()
     var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
     if (!string.IsNullOrWhiteSpace(infoVersion))
     {
-        return infoVersion;
+        var plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
+        return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
     }
 
     var nameVersion = assembly.GetName().Version;

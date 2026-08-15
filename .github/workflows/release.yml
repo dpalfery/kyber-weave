@@ -5,7 +5,7 @@
 # 2. Actions → Release → Run workflow, enter a version (creates the tag + Release)
 #
 # Builds the RID matrix, stamps Version from the tag, attaches archives +
-# SHA256SUMS.txt to a GitHub Release (passing --prerelease=auto for pre-releases),
+# SHA256SUMS.txt to a GitHub Release (passing --prerelease for hyphenated pre-releases),
 # and publishes PackAsTool packages (including pre-releases) to GitHub Packages.
 #
 # npm and Homebrew are not published from this workflow. nuget.org is forbidden.

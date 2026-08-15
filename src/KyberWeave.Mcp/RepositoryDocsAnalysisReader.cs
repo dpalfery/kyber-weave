@@ -32,15 +32,18 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     }
 
     /// <inheritdoc />
-    public DocumentationAnalysisResult Analyze()
+    public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var config = LoadConfig();
         var documents = new DocumentLoader(_repositoryRoot, config.Ontology).Load();
+        cancellationToken.ThrowIfCancellationRequested();
         var codeGraph = CodeGraphResolverAdapter.ForRepository(_repositoryRoot);
         var graph = DocGraphProjection.Build(
             documents,
             codeGraph,
             config.DocsAnalysis.Search.MaxCodeNeighbors);
+        cancellationToken.ThrowIfCancellationRequested();
         var persistence = new SqliteAnalysisPersistence(_repositoryRoot);
         using var embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
             ? null

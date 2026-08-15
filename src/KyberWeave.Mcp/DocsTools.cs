@@ -472,9 +472,7 @@ public sealed class DocsTools
     private static bool IsExpectedReadFailure(Exception exception) =>
         exception is IOException
             or UnauthorizedAccessException
-            or InvalidDataException
-            or InvalidOperationException
-            or ArgumentException;
+            or InvalidDataException;
 
     private static string CapToBudget(string text, int cap) =>
         text.Length <= cap ? text : text[..cap];

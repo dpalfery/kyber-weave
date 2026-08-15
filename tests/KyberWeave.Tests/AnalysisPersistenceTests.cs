@@ -530,21 +530,8 @@ public sealed class AnalysisPersistenceTests
 
     private static StoredEmbedding Embedding(EmbeddingCacheKey key) => new(key, [0.6f, 0.8f]);
 
-    private static void RequireSqlite()
-    {
-        var startInfo = SqliteStartInfo();
-        startInfo.ArgumentList.Add("--version");
-        try
-        {
-            var result = ProcessRunner.Run(startInfo, string.Empty);
-            if (result.ExitCode != 0)
-                throw SkipException.ForSkip("sqlite3 is unavailable; SQLite adapter parity was not run.");
-        }
-        catch (Win32Exception)
-        {
-            throw SkipException.ForSkip("sqlite3 is unavailable; SQLite adapter parity was not run.");
-        }
-    }
+    private static void RequireSqlite() =>
+        SqliteTestFixture.RequireSqlite("sqlite3 is unavailable; SQLite adapter parity was not run.");
 
     private static void RequireGit()
     {
