@@ -13,9 +13,9 @@ if ([string]::IsNullOrWhiteSpace($TB)) {
 # Auto-detect owner and repo if not provided
 if ([string]::IsNullOrWhiteSpace($Owner) -or [string]::IsNullOrWhiteSpace($Repo)) {
     $remoteUrl = git remote get-url origin 2>$null
-    if ($remoteUrl -match 'github\.com[:/]([^/]+)/([^.]+)(\.git)?') {
+    if ($remoteUrl -match 'github\.com[:/]([^/]+)/([^/]+)') {
         if ([string]::IsNullOrWhiteSpace($Owner)) { $Owner = $Matches[1] }
-        if ([string]::IsNullOrWhiteSpace($Repo)) { $Repo = $Matches[2] }
+        if ([string]::IsNullOrWhiteSpace($Repo)) { $Repo = $Matches[2] -replace '\.git$', '' }
     }
 }
 
@@ -39,11 +39,14 @@ elseif ($branchStem -match '([A-Z]+-\d+)') { $ticket = $Matches[1] }
 else { $ticket = '' }
 
 $relatedIssueSection = if ($ticket) {
+    $defaultBranch = (gh repo view "$Owner/$Repo" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>$null)
+    if (-not $defaultBranch) { $defaultBranch = 'main' }
+    $directive = if ($TB -eq $defaultBranch -and $ticket -match '^#\d+$') { "Closes $ticket" } else { "Relates to $ticket" }
 @"
 
 ## Related Issue / Ticket
 
-Closes $ticket
+$directive
 "@
 }
 else {

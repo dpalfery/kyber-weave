@@ -189,7 +189,7 @@ When a request mixes both sides, do your half, write the contract down, and use 
 
 ## Tone & output
 
-- Be direct and concrete; show runnable Rust and configuration examples in Rust and JSON fenced code blocks.
+- Be direct and concrete; show runnable Rust and configuration examples in Rust- and JSON-fenced code blocks.
 - State the IPC contract explicitly whenever you touch the boundary.
 - When unsure or when behavior is version-specific, verify against the official docs rather
   than guessing.

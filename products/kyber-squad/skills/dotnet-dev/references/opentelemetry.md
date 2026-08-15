@@ -9,10 +9,10 @@ source: https://github.com/dotnet/skills/tree/main/plugins/aspnetcore/skills/con
 ## Packages
 
 ```xml
-<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.*" />
-<PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.*" />
-<PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.*" />
-<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.*" />
+<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.10.0" />
+<PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.10.0-beta.1" />
+<PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.10.0-beta.1" />
+<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.10.0" />
 ```
 
 ---
@@ -20,23 +20,29 @@ source: https://github.com/dotnet/skills/tree/main/plugins/aspnetcore/skills/con
 ## Setup in Program.cs
 
 ```csharp
+var otelEndpointStr = builder.Configuration["Otel:Endpoint"];
+var otelEndpoint = !string.IsNullOrWhiteSpace(otelEndpointStr) && Uri.TryCreate(otelEndpointStr, UriKind.Absolute, out var uri)
+    ? uri
+    : new Uri("http://localhost:4317");
+
+var resourceBuilder = ResourceBuilder.CreateDefault()
+    .AddService("MotorcycleRAG.API");
+
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
-        .SetResourceBuilder(ResourceBuilder.CreateDefault()
-            .AddService("MotorcycleRAG.API"))
+        .SetResourceBuilder(resourceBuilder)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
         .AddSource("MotorcycleRAG.*")      // register custom ActivitySources
-        .AddOtlpExporter(opts =>
-        {
-            opts.Endpoint = new Uri(builder.Configuration["Otel:Endpoint"]!);
-        }))
+        .AddOtlpExporter(opts => opts.Endpoint = otelEndpoint))
     .WithMetrics(metrics => metrics
+        .SetResourceBuilder(resourceBuilder)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
-        .AddOtlpExporter())
+        .AddOtlpExporter(opts => opts.Endpoint = otelEndpoint))
     .WithLogging(logging => logging
-        .AddOtlpExporter());
+        .SetResourceBuilder(resourceBuilder)
+        .AddOtlpExporter(opts => opts.Endpoint = otelEndpoint));
 ```
 
 **Never hardcode the OTLP endpoint or API key** — read from environment/configuration.
@@ -93,9 +99,9 @@ In structured log backends (Application Insights, Grafana Loki), filter by `Trac
 Use tags for searchable metadata. Follow OpenTelemetry semantic conventions for well-known fields:
 
 ```csharp
-activity?.SetTag("http.method", "GET");              // OTel semantic convention
+activity?.SetTag("http.method", "GET");                 // OTel semantic convention
 activity?.SetTag("db.system", "mssql");
-activity?.SetTag("user.id", userId.ToString());      // custom tag
+activity?.SetTag("user.pseudonym", userPseudonym);      // pseudonymous / policy-approved tag
 ```
 
 **Do NOT add high-cardinality values as tags** — tag values are indexed by every backend. Use `AddEvent` for values that vary per request:
@@ -123,7 +129,7 @@ For production, use probabilistic or parent-based sampling to reduce export volu
 )
 ```
 
-During development use `AlwaysOnSampler` (default) to see all traces.
+The default sampler in OpenTelemetry .NET is `ParentBased(AlwaysOn)`, which honors upstream parent sampling decisions and records all root spans. During development, configure `AlwaysOnSampler` explicitly if you want to record all spans and ignore parent decisions.
 
 ---
 
@@ -132,7 +138,7 @@ During development use `AlwaysOnSampler` (default) to see all traces.
 For Application Insights / Azure Monitor instead of OTLP:
 
 ```xml
-<PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.*" />
+<PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.2.0" />
 ```
 
 ```csharp

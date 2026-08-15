@@ -146,11 +146,17 @@ fi
 
 RELATED_ISSUE=""
 if [ -n "${TICKET}" ]; then
+  DEFAULT_BRANCH=$(gh repo view "${OWNER}/${REPO}" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo "main")
+  if [ "${TB}" = "${DEFAULT_BRANCH}" ] && [[ "${TICKET}" =~ ^#[0-9]+$ ]]; then
+    DIRECTIVE="Closes ${TICKET}"
+  else
+    DIRECTIVE="Relates to ${TICKET}"
+  fi
   RELATED_ISSUE=$(cat <<EOF
 
 ## Related Issue / Ticket
 
-Closes ${TICKET}
+${DIRECTIVE}
 EOF
 )
 fi
@@ -202,11 +208,14 @@ elseif ($branchStem -match '([A-Z]+-\d+)') { $ticket = $Matches[1] }
 else { $ticket = '' }
 
 $relatedIssueSection = if ($ticket) {
+    $defaultBranch = (gh repo view "$owner/$repo" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>$null)
+    if (-not $defaultBranch) { $defaultBranch = 'main' }
+    $directive = if ($TB -eq $defaultBranch -and $ticket -match '^#\d+$') { "Closes $ticket" } else { "Relates to $ticket" }
 @"
 
 ## Related Issue / Ticket
 
-Closes $ticket
+$directive
 "@
 }
 else {

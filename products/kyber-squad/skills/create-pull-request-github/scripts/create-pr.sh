@@ -13,10 +13,10 @@ fi
 
 # Auto-detect owner and repo if not provided
 if [ -z "${OWNER}" ] || [ -z "${REPO}" ]; then
-  REMOTE_URL=$(git remote get-url origin || echo "")
-  if [[ $REMOTE_URL =~ github\.com[:/]([^/]+)/([^.]+)(\.git)? ]]; then
+  REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+  if [[ $REMOTE_URL =~ github\.com[:/]([^/]+)/([^/]+) ]]; then
     [ -z "${OWNER}" ] && OWNER="${BASH_REMATCH[1]}"
-    [ -z "${REPO}" ] && REPO="${BASH_REMATCH[2]}"
+    [ -z "${REPO}" ] && REPO="${BASH_REMATCH[2]%.git}"
   fi
 fi
 
@@ -46,16 +46,24 @@ fi
 
 RELATED_ISSUE=""
 if [ -n "${TICKET}" ]; then
+  DEFAULT_BRANCH=$(gh repo view "${OWNER}/${REPO}" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo "main")
+  if [ "${TB}" = "${DEFAULT_BRANCH}" ] && [[ "${TICKET}" =~ ^#[0-9]+$ ]]; then
+    DIRECTIVE="Closes ${TICKET}"
+  else
+    DIRECTIVE="Relates to ${TICKET}"
+  fi
   RELATED_ISSUE=$(cat <<EOF
 
 ## Related Issue / Ticket
 
-Closes ${TICKET}
+${DIRECTIVE}
 EOF
 )
 fi
 
 DESCRIPTION_FILE=$(mktemp)
+trap 'rm -f "${DESCRIPTION_FILE}"' EXIT
+
 cat > "${DESCRIPTION_FILE}" <<EOF
 ## Summary
 
@@ -80,5 +88,3 @@ if [ -n "${EXISTING}" ]; then
 else
   gh pr create --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --title "${TITLE}" --body-file "${DESCRIPTION_FILE}"
 fi
-
-rm -f "${DESCRIPTION_FILE}"
