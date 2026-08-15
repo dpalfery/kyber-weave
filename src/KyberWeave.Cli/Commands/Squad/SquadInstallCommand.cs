@@ -1,0 +1,96 @@
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Squad.Deployment;
+using Spectre.Console;
+using Spectre.Console.Cli;
+
+namespace KyberWeave.Cli.Commands.Squad;
+
+/// <summary>
+/// Deploys canonical agents and skills to coding harness directories.
+/// </summary>
+public sealed class SquadInstallCommand : Command<SquadInstallSettings>
+{
+    private readonly IProcessExecutor? _executor;
+    private readonly ISquadUserPaths? _userPaths;
+    private readonly SquadStateStore? _stateStore;
+
+    /// <summary>Creates a new install command using default dependencies.</summary>
+    public SquadInstallCommand()
+    {
+    }
+
+    /// <summary>Creates a new install command using injectable dependencies.</summary>
+    public SquadInstallCommand(
+        IProcessExecutor? executor = null,
+        ISquadUserPaths? userPaths = null,
+        SquadStateStore? stateStore = null)
+    {
+        _executor = executor;
+        _userPaths = userPaths;
+        _stateStore = stateStore;
+    }
+
+    /// <inheritdoc />
+    public override int Execute(CommandContext context, SquadInstallSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
+        string targetRoot = SquadCommandComposition.ResolveTargetRoot(settings.Path);
+
+        // Validate explicit targets and exclusions; invalid tokens return exit code 2
+        try
+        {
+            if (settings.Targets.Length > 0)
+                _ = SquadTargetCatalog.Parse(settings.Targets);
+
+            if (settings.Exclusions.Length > 0)
+                _ = SquadTargetCatalog.Parse(settings.Exclusions);
+        }
+        catch (ArgumentException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            return 2;
+        }
+
+        // Load configuration if present
+        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot, null);
+        if (!configResult.Success)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(configResult.Error ?? "Failed to load configuration.")}[/]");
+            return 1;
+        }
+
+        SquadConfig squadConfig = configResult.Config?.Squad ?? SquadConfig.ProductDefaults;
+
+        // Perform target resolution
+        SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
+        {
+            RootPath = targetRoot,
+            Operation = SquadTargetOperation.Install,
+            ExplicitTargets = settings.Targets,
+            ConfiguredTargets = squadConfig.Targets,
+            ExplicitExclusions = settings.Exclusions,
+            ConfiguredExclusions = squadConfig.Exclusions,
+            IsInteractive = SquadCommandComposition.IsInteractiveConsole()
+        };
+
+        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+        if (decision.Kind == SquadTargetResolutionKind.Failure)
+        {
+            AnsiConsole.MarkupLine("[red]No deployment targets specified or detected.[/]");
+            if (decision.RecoveryCommand is not null)
+            {
+                AnsiConsole.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
+            }
+
+            return decision.ExitCode ?? 2;
+        }
+
+        // Fails closed before writes due to Wave-A unreleased upstream APM compiler / toolchain
+        AnsiConsole.MarkupLine("[red]kyber-weave: error: Gate G1: qualified upstream APM toolchain is required for installation.[/]");
+        AnsiConsole.MarkupLine("Upstream toolchain qualification is pending. Install fails closed before writing target files.");
+        return 1;
+    }
+}
