@@ -4,7 +4,7 @@ using Xunit;
 
 namespace KyberWeave.Tests;
 
-/// <summary>Pins managed-glossary contribution at the public docs graph command boundary.</summary>
+/// <summary>Pins managed-glossary contribution at the public docs export-graph command boundary.</summary>
 public sealed class DocsGraphCliCommandTests : IDisposable
 {
     private readonly TempDirectory _repository = new();
@@ -20,9 +20,9 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        var execution = ProcessConsoleCapture.Run(() => new DocsGraphCommand().Execute(
+        var execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
             null!,
-            new DocsGraphSettings { Path = _repository.Path, Out = _output.Path }));
+            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path }));
         var exitCode = execution.Result;
         var nodes = ReadJsonLines(Path.Combine(_output.Path, "nodes.jsonl"));
         var edges = ReadJsonLines(Path.Combine(_output.Path, "edges.jsonl"));
@@ -73,9 +73,9 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        var execution = ProcessConsoleCapture.Run(() => new DocsGraphCommand().Execute(
+        var execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
             null!,
-            new DocsGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" }));
+            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" }));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("KW-DOC-GLOSSARY-001", execution.Output, StringComparison.Ordinal);

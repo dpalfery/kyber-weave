@@ -3,7 +3,7 @@ using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
-public sealed class DocsGraphSettings : DocsSettings
+public sealed class DocsExportGraphSettings : DocsSettings
 {
     [CommandOption("-o|--out <DIR>")]
     [Description("Output directory for nodes.jsonl and edges.jsonl.")]

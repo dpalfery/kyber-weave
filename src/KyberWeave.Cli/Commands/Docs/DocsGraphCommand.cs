@@ -7,9 +7,9 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Emits the documentation graph as newline-delimited JSON.</summary>
-public sealed class DocsGraphCommand : Command<DocsGraphSettings>
+public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
 {
-    public override int Execute(CommandContext context, DocsGraphSettings settings)
+    public override int Execute(CommandContext context, DocsExportGraphSettings settings)
     {
         var report = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateLoader(
@@ -19,7 +19,7 @@ public sealed class DocsGraphCommand : Command<DocsGraphSettings>
                 out _,
                 out var config))
         {
-            CommandHelpers.Finish(report, settings, "docs graph", "Document");
+            CommandHelpers.Finish(report, settings, "docs export-graph", "Document");
             return 1;
         }
 
@@ -49,7 +49,7 @@ public sealed class DocsGraphCommand : Command<DocsGraphSettings>
             DocsAnalysisCommandErrors.Render(
                 exception,
                 settings,
-                "docs graph",
+                "docs export-graph",
                 ManagedGlossaryService.ValidationRuleCode);
             return 1;
         }

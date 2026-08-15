@@ -46,8 +46,9 @@ unresolvable code join prints `(unresolved)`. An ambiguous one is annotated
 dropped-for-space from dropped-for-irrelevance — only the former makes asking again with a
 larger budget worthwhile.
 
-Adding a tool means adding an `[McpServerTool]` method with a `[Description]` written for
-a model deciding whether to call it: say when to use it, and when not to.
+Adding a tool means adding an `[McpServerTool]` method with a `[Description]` written as
+routing metadata: a capability clause, then the conditions that should fire it. Only the
+broadest tool in the set carries an exclusion; the rest state their territory positively.
 
 ## Staleness is handled for you
 

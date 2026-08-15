@@ -3,7 +3,7 @@ using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
-public sealed class DocsAnalyzeSettings : DocsSettings
+public sealed class DocsIntegrityCheckSettings : DocsSettings
 {
     [CommandOption("--fail-on <SEVERITY>")]
     [Description("Finding severity that returns nonzero: none | warning | error.")]

@@ -97,7 +97,7 @@ not fail the build.
 gate. `--no-info` hides informational findings; `--format sarif` emits SARIF for code
 scanning.
 
-## Analysis — `docs analyze`
+## Analysis — `docs integrity-check`
 
 Analysis is advisory by default and never edits source documentation.
 
@@ -148,5 +148,5 @@ Operational Error. Keep the document a conformant `reference`; use only `propose
 `approved`, or `rejected` row status. Approved senses require a definition and at least
 one valid `component:<catalog value>` or `code-ref:<symbol>` scope.
 
-`docs analyze --fail-on none|warning|error` controls finding gating. Operational errors
+`docs integrity-check --fail-on none|warning|error` controls finding gating. Operational errors
 always return non-zero.

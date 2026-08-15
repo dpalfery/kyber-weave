@@ -5,7 +5,7 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-14
 code-refs:
   - DocSpecValidator
   - DocDriftLinter
@@ -21,7 +21,7 @@ code is still true.
 kyber-weave docs validate .
 kyber-weave docs drift .
 kyber-weave docs catalog .
-kyber-weave docs analyze .
+kyber-weave docs integrity-check .
 ```
 
 Starting from an ungoverned tree? Run [`docs init`](onboarding.md) first — these gates
@@ -80,15 +80,15 @@ mention cannot be checked. A claim can.
 Reports doc-type coverage by component: which components have architecture documents,
 which have runbooks, and which have nothing. Advisory; it gates nothing.
 
-## Analysis — `docs analyze`, `docs review`, and `docs glossary`
+## Analysis — `docs integrity-check`, `docs review`, and `docs glossary`
 
 Analysis identifies evidence; it never edits source documentation. Exact duplicates are
 deterministic, while near duplicates, conflicts, and divergent term senses can be exported
 for bounded agent review and imported as content-addressed verdicts.
 
 ```bash
-kyber-weave docs analyze .                         # advisory by default
-kyber-weave docs analyze . --fail-on warning       # gate warnings and errors
+kyber-weave docs integrity-check .                         # advisory by default
+kyber-weave docs integrity-check . --fail-on warning       # gate warnings and errors
 kyber-weave docs review export . --out candidates.json
 kyber-weave docs review import . --in verdicts.json
 kyber-weave docs glossary .                        # preview

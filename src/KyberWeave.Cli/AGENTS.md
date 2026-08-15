@@ -1,7 +1,8 @@
 # KyberWeave.Cli
 
 The `kyber-weave` binary. Spectre.Console.Cli, three symmetric branches — `skill`,
-`agent`, `docs` — registered in `Program.cs`.
+`agent`, `docs` — registered in `Program.cs`, plus a top-level `update` verb that
+replaces the running Release binaries.
 
 Read [`/AGENTS.md`](../../AGENTS.md) first for repository-wide rules.
 
@@ -57,7 +58,11 @@ library that writes to stdout. See [`../KyberWeave.Mcp/AGENTS.md`](../KyberWeave
 `DocsInitCommand` invokes `apm`. Two rules held there and worth holding again: pass
 arguments through `ArgumentList` and never a shell string, and treat an absent tool as a
 degraded path with a printed manual command rather than a failure. **Kyber-Weave never
-installs software as a side effect** — external tools are expected dependencies.
+installs external software as a side effect** — APM and CodeGraph are expected
+dependencies. The exception is `kyber-weave update`, which replaces this process's own
+Release binaries (and the sibling `kyber-weave-mcp`) from GitHub Release assets after
+SHA-256 verification. It does not wrap `install.sh`, and it refuses `dotnet run` and
+`dotnet tool` installs rather than trying to convert them.
 
 ## Documented behaviour
 

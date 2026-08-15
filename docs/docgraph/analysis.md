@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-14
 ---
 
 # Documentation analysis and review
@@ -16,7 +16,7 @@ shortlists evidence for a human or reviewing agent, but never rewrites, merges, 
 source documentation.
 
 ```bash
-kyber-weave docs analyze .
+kyber-weave docs integrity-check .
 kyber-weave docs review export . --out candidates.json
 kyber-weave docs review import . --in verdicts.json
 kyber-weave docs glossary .
@@ -101,11 +101,13 @@ the claim or rubric does.
 ## CLI and exit behavior
 
 ```bash
-kyber-weave docs analyze . [--fail-on none|warning|error]
+kyber-weave docs integrity-check . [--fail-on none|warning|error]
 ```
 
 JSON, SARIF, and Markdown output include related locations for clustered evidence; table
-output shows the primary location and a related-location count. Every format includes
+output shows the primary location and a related-location count. When the table would bury
+warnings under informational rows, Info is omitted from the table and counted in the
+summary — use `--format json` to list every finding. Every format includes
 local cost metrics: extracted claims, comparisons and candidates by source, truncation,
 embedding cache hits/misses, and provider usage when returned. `none` is the default.
 `warning` gates Warning and Error findings; `error` gates Error findings. Operational
@@ -177,7 +179,7 @@ return the document to `current` when review is complete.
 and the existing review date. It adds or refreshes proposals, demotes the document to
 `needs-review` when proposals change, and removes only untouched generated proposals whose
 evidence disappeared. `docs validate` checks the managed shape as
-`KW-DOC-GLOSSARY-001`. `docs graph` exports approved Term/Sense nodes and `HAS_SENSE`,
+`KW-DOC-GLOSSARY-001`. `docs export-graph` exports approved Term/Sense nodes and `HAS_SENSE`,
 `ALIAS_OF`, `SCOPED_TO`, and `EVIDENCED_BY` edges; proposed and rejected senses do not
 enter the exported graph.
 

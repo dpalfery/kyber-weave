@@ -20,7 +20,7 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
     internal RepositoryDocsAnalysisCommandService(DocsAnalysisCompositionFactories factories) =>
         _factories = factories ?? throw new ArgumentNullException(nameof(factories));
 
-    public DocumentationAnalysisResult Analyze(DocsAnalyzeSettings settings)
+    public DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings)
     {
         using var execution = RunAnalysis(settings);
         return execution.Result;
