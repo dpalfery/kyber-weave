@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-14
 code-refs:
   - DocumentLoader
   - DocumentCorpus
@@ -57,7 +57,7 @@ is roughly 600 KB of prose for a repository of this size, and parsing plus vecto
 costs milliseconds — cheap enough that a persistence tier would buy latency at the cost of
 a cache-invalidation problem.
 
-The optional `nodes.jsonl` / `edges.jsonl` export from `docs graph` is written for external
+The optional `nodes.jsonl` / `edges.jsonl` export from `docs export-graph` is written for external
 consumers and never read back. Documentation analysis has a separate local cache at
 `.kyber-weave/cache/docs-analysis.sqlite3` for reusable vectors and agent verdicts. It is
 not a retrieval database or a source of documentation, and deterministic analysis runs
@@ -111,7 +111,7 @@ useful evidence.
 **The index is optional.** Without it, `IsAvailable` is false, joins come back empty,
 retrieval still works completely, and analysis continues with document relationships and
 bounded lexical search after one warning. Only [`docs drift`](governance.md) and
-`docs graph` hard-require it.
+`docs export-graph` hard-require it.
 
 ## Why sqlite3 and not a library
 

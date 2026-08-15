@@ -29,7 +29,8 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             "KyberWeave.Cli",
             "Program.cs"));
 
-        Assert.Contains("AddCommand<DocsAnalyzeCommand>(\"analyze\")", program, StringComparison.Ordinal);
+        Assert.Contains("AddCommand<DocsIntegrityCheckCommand>(\"integrity-check\")", program, StringComparison.Ordinal);
+        Assert.Contains("AddCommand<DocsExportGraphCommand>(\"export-graph\")", program, StringComparison.Ordinal);
         Assert.Contains("AddBranch(\"review\"", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<DocsReviewExportCommand>(\"export\")", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<DocsReviewImportCommand>(\"import\")", program, StringComparison.Ordinal);
@@ -39,16 +40,16 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
     [Fact]
     public void AnalyzeSettings_DefaultToAdvisoryAndRetainEveryExistingFormat()
     {
-        var settings = new DocsAnalyzeSettings();
+        var settings = new DocsIntegrityCheckSettings();
 
         Assert.Equal("none", settings.FailOn);
         Assert.Equal("table", settings.Format);
         Assert.Equal(KyberWeave.Cli.Rendering.OutputFormat.Json,
-            new DocsAnalyzeSettings { Format = "json" }.ParsedFormat);
+            new DocsIntegrityCheckSettings { Format = "json" }.ParsedFormat);
         Assert.Equal(KyberWeave.Cli.Rendering.OutputFormat.Sarif,
-            new DocsAnalyzeSettings { Format = "sarif" }.ParsedFormat);
+            new DocsIntegrityCheckSettings { Format = "sarif" }.ParsedFormat);
         Assert.Equal(KyberWeave.Cli.Rendering.OutputFormat.Markdown,
-            new DocsAnalyzeSettings { Format = "markdown" }.ParsedFormat);
+            new DocsIntegrityCheckSettings { Format = "markdown" }.ParsedFormat);
     }
 
     [Theory]
@@ -69,11 +70,11 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         {
             AnalysisResult = AnalysisResult(Finding(severity))
         };
-        var command = new DocsAnalyzeCommand(service);
+        var command = new DocsIntegrityCheckCommand(service);
 
         var execution = Capture(() => command.Execute(
             null!,
-            new DocsAnalyzeSettings
+            new DocsIntegrityCheckSettings
             {
                 Path = _temp.Path,
                 FailOn = failOn,
@@ -93,9 +94,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 "KW-DOC-ANALYSIS-004: malformed ignore markup")
         };
 
-        var execution = Capture(() => new DocsAnalyzeCommand(service).Execute(
+        var execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
             null!,
-            new DocsAnalyzeSettings
+            new DocsIntegrityCheckSettings
             {
                 Path = _temp.Path,
                 FailOn = "none",
@@ -120,9 +121,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             "docs analysis"));
         var service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        var execution = Capture(() => new DocsAnalyzeCommand(service).Execute(
+        var execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
             null!,
-            new DocsAnalyzeSettings
+            new DocsIntegrityCheckSettings
             {
                 Path = _temp.Path,
                 FailOn = "none",
@@ -148,9 +149,9 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         report.AddMetric("truncated", false);
         var service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        var execution = Capture(() => new DocsAnalyzeCommand(service).Execute(
+        var execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
             null!,
-            new DocsAnalyzeSettings
+            new DocsIntegrityCheckSettings
             {
                 Path = _temp.Path,
                 FailOn = "none",
@@ -395,7 +396,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         public int PersistedVerdictCount { get; private set; }
         public bool GlossaryWriteRequested { get; private set; }
 
-        public DocumentationAnalysisResult Analyze(DocsAnalyzeSettings settings)
+        public DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings)
         {
             if (AnalysisException is not null) throw AnalysisException;
             return AnalysisResult;

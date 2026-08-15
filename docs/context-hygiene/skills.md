@@ -41,6 +41,9 @@ cannot make — whether a skill will actually be selected, and whether it is saf
 | `skill pack` | Bundle into a Copilot Studio–compatible `.zip` | — |
 | `skill new` | Scaffold a spec-correct skill | — |
 
+Agent candidates use `{Harness}:{RoleName}` as `id` so the same role in two harnesses
+stays distinct. Import requires exactly one verdict for every exported candidate.
+
 ## Spec conformance — `KW-SKILL-SPEC-001`…`-012`
 
 Structural checks against the open format: required frontmatter, name and description
@@ -77,7 +80,7 @@ boundaries**:
 `DescriptionScorer` operationalizes this guidance into an auditable 0–100 score across
 five dimensions:
 
-```
+```text
 password-reset — routing score 100/100
   Dimension          Score   Detail
   Trigger clause     35/35   States when to use the skill.
@@ -104,7 +107,7 @@ password-reset — routing score 100/100
 - `KW-SKILL-LINT-008` (Warning): Description contains excessive filler phrases (`"This skill is designed to..."`, `"allows the user to..."`).
 - `KW-SKILL-LINT-010` (Error): **Name collision** — two skills cannot share a name and both be selectable.
 - `KW-SKILL-LINT-011` (Warning): Description overlap between two skills.
-- `KW-SKILL-REVIEW-001` (Operational Error): Review verdict payload is malformed or invalid during `skill review import`.
+- `KW-SKILL-REVIEW-001` (Error): Review verdict payload is malformed or invalid during `skill review import`.
 
 ## Routing simulation — `skill route`
 

@@ -11,7 +11,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// T11 RED — docs graph exports only approved managed-glossary knowledge while
+/// T11 RED — docs export-graph exports only approved managed-glossary knowledge while
 /// preserving the existing deterministic JSONL contract.
 /// </summary>
 public sealed class GlossaryGraphExportTests

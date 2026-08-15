@@ -78,12 +78,13 @@ public static class AnalysisCacheSafety
         }
 
         // SimpleExpression covers the glob forms used by gitignore for this fixed target.
-        // Character classes are treated conservatively because accepting an uncertain
-        // negation would make a cache appear safer than it is.
-        return pattern.Contains('[')
-            ? pattern.StartsWith("cache/", StringComparison.Ordinal)
+        // Character classes and `**` are treated conservatively because collapsing `**` to
+        // `*` under-matches git's recursive semantics, and accepting an uncertain negation
+        // would make a cache appear safer than it is.
+        return pattern.Contains('[') || pattern.Contains("**", StringComparison.Ordinal)
+            ? pattern.Contains("cache", StringComparison.Ordinal)
             : FileSystemName.MatchesSimpleExpression(
-                pattern.Replace("**", "*", StringComparison.Ordinal),
+                pattern,
                 databaseRelativePath,
                 ignoreCase: OperatingSystem.IsWindows());
     }

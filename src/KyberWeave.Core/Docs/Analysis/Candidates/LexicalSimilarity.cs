@@ -24,10 +24,11 @@ internal static partial class LexicalSimilarity
         return tokens;
     }
 
-    internal static double Score(string left, string right)
+    internal static double Score(string left, string right) =>
+        Score(Tokens(left), Tokens(right));
+
+    internal static double Score(IReadOnlySet<string> leftTokens, IReadOnlySet<string> rightTokens)
     {
-        var leftTokens = Tokens(left);
-        var rightTokens = Tokens(right);
         if (leftTokens.Count == 0 || rightTokens.Count == 0) return 0;
 
         var overlap = leftTokens.Count(token => rightTokens.Contains(token));

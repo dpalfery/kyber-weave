@@ -123,7 +123,51 @@ public sealed class DiagnosticLocationRenderingTests
         var output = Render(OutputFormat.Table);
 
         Assert.Contains("docs/primary.md:10-12 (+1 related)", output, StringComparison.Ordinal);
+        Assert.Contains("Warning", output, StringComparison.Ordinal);
+        Assert.Contains("claim-a", output, StringComparison.Ordinal);
         AssertMetricsRenderedInOrder(output);
+    }
+
+    [Fact]
+    public void Render_Table_OmitsInfoRowsWhenWarningsExistSoTheyStayVisible()
+    {
+        var report = CreateReport();
+        report.Add(new Diagnostic(
+            "KW-DOC-ANALYSIS-002",
+            Severity.Info,
+            "These related documentation claims contain potentially incompatible values or obligations.",
+            "claim-b",
+            "docs/other.md",
+            StartLine: 4));
+
+        var table = Render(OutputFormat.Table, report);
+        var json = Render(OutputFormat.Json, report);
+
+        Assert.Contains("1 informational findings omitted from the table", table, StringComparison.Ordinal);
+        Assert.Contains("Warning", table, StringComparison.Ordinal);
+        Assert.Contains("claim-a", table, StringComparison.Ordinal);
+        Assert.DoesNotContain("claim-b", table, StringComparison.Ordinal);
+        Assert.Contains("claim-b", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_Table_RelativizesAbsolutePathsUnderTheCurrentDirectory()
+    {
+        var absolute = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "docs", "primary.md"));
+        var report = new DiagnosticReport();
+        report.Add(new Diagnostic(
+            "KW-DOC-ANALYSIS-001",
+            Severity.Warning,
+            "Duplicate claim",
+            "claim-a",
+            absolute,
+            StartLine: 10,
+            EndLine: 12));
+
+        var output = Render(OutputFormat.Table, report);
+
+        Assert.Contains("docs/primary.md:10-12", output, StringComparison.Ordinal);
+        Assert.DoesNotContain(absolute, output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -200,7 +244,7 @@ public sealed class DiagnosticLocationRenderingTests
     {
         var execution = ProcessConsoleCapture.Run(() =>
         {
-            ReportRenderer.Render(report ?? CreateReport(), format, "docs analyze", "Claim");
+            ReportRenderer.Render(report ?? CreateReport(), format, "docs integrity-check", "Claim");
             return true;
         });
         return execution.Output;

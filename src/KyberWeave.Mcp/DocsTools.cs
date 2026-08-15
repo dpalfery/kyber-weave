@@ -28,6 +28,13 @@ public sealed class DocsTools
     private const int AnalysisCharCap = 12000;
     private const int AnalysisEvidenceCap = 8;
 
+    private static readonly HashSet<string> AnalysisKindNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        nameof(AnalysisRuleKind.Duplicate),
+        nameof(AnalysisRuleKind.Conflict),
+        nameof(AnalysisRuleKind.Terminology)
+    };
+
     private readonly DocumentIndexHost _host;
     private readonly IDocsAnalysisReader? _analysisReader;
 
@@ -42,25 +49,38 @@ public sealed class DocsTools
         _analysisReader = analysisReader ?? throw new ArgumentNullException(nameof(analysisReader));
     }
 
-    [McpServerTool(Name = "docs_explore")]
+    [McpServerTool(Name = "docs_explore", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Retrieve repository documentation for a question, symbol, route, component or
-        document id. Returns ranked documents with their frontmatter identity, their most
-        relevant '##' sections, and that document's resolved joins to the code graph as
-        symbol -> file:line. Prefer this over grepping the docs tree: ranking uses declared
-        frontmatter identity, which prose does not carry, and the corpus excludes the
-        archive, which must never be cited as current guidance.
+        Searches the governed repository documentation corpus. Returns ranked documents
+        with their frontmatter identity, the most relevant '##' sections, and each
+        document's resolved code joins as symbol -> file:line.
 
-        charBudget is shared across the returned documents, so lowering maxDocs deepens
-        each result instead of merely shortening the list. For a single document the whole
-        file usually fits — prefer maxDocs=1 with the default budget over falling back to
-        reading the file. Any sections that did not fit are named in the response, so ask
-        again with a larger budget rather than opening the file.
+        Use when a question is about this repository's own documented behaviour: how a
+        feature or subsystem works, what a CLI command, flag, or rule id means, how to run
+        or configure something, or whether a subject is documented at all. Use also when
+        starting a task that a design document, runbook, or governance page would inform, and
+        when an answer must reflect current guidance, since superseded documents are
+        outside the corpus.
+
+        A miss is reported explicitly with the number of documents considered, indicating
+        the subject is likely undocumented.
+
+        Do not use when the answer must come from what the code currently does rather than
+        from what the documentation claims about it.
         """)]
     public string Explore(
-        [Description("Free text, or a symbol, route, component or document-id name.")] string query,
-        [Description("Maximum documents to return (1-20). Defaults to 5.")] int maxDocs = 5,
-        [Description("Total characters of prose across all returned documents (1000-120000). Defaults to 12000.")]
+        [Description("A question, or a command, rule id, feature name, component, or document id.")] string query,
+        [Description("""
+            Maximum documents to return (1-20). Defaults to 5. Lowering this deepens each
+            result rather than merely shortening the list, because charBudget is shared
+            across the documents returned; maxDocs=1 usually fits a whole document.
+            """)]
+        int maxDocs = 5,
+        [Description("""
+            Total characters of prose across all returned documents (1000-120000). Defaults
+            to 12000. Sections that did not fit are named in the response; re-query with a
+            larger budget to retrieve them.
+            """)]
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
         var index = _host.Current();
@@ -104,16 +124,23 @@ public sealed class DocsTools
         return sb.ToString();
     }
 
-    [McpServerTool(Name = "docs_for_symbol")]
+    [McpServerTool(Name = "docs_for_symbol", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Reverse lookup: the documents whose 'code-refs' frontmatter formally claims a code
-        symbol. This is a claim of ownership, not a textual occurrence, so it excludes the
-        documents that merely mention the name in prose — which is exactly what grep
-        cannot distinguish. Use before changing or renaming a symbol to find the
-        documentation that must change with it.
+        Finds the documents that formally claim a code symbol in their 'code-refs'
+        frontmatter, and returns each document's identity and resolved code joins.
+
+        Use when a class, method, property, or endpoint is about to be renamed, moved,
+        deleted, or have its signature changed, to find the documentation that must change
+        with it. Use also when a symbol change is already made and its documentation impact
+        is unknown, when deciding whether a symbol is documented anywhere, and when a
+        rename may have left documentation that still reads correctly but names something
+        that no longer exists.
+
+        An empty result means no document declares the symbol: it is either undocumented,
+        or mentioned in prose without any document claiming ownership of it.
         """)]
     public string ForSymbol(
-        [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck'.")] string symbol)
+        [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
     {
         var index = _host.Current();
         var hits = index.ForSymbol(symbol);
@@ -138,18 +165,25 @@ public sealed class DocsTools
         return sb.ToString();
     }
 
-    [McpServerTool(Name = "docs_analysis_candidates")]
+    [McpServerTool(Name = "docs_analysis_candidates", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Read bounded documentation-analysis candidates for agent review. Use kind to limit
-        results to duplicate, conflict, or terminology findings, and pass the returned
-        cursor to continue stable paging. This tool is read-only; import reusable verdicts
-        through the Kyber-Weave CLI rather than returning them here.
+        Returns repeated claims, potential contradictions, and ambiguous terminology found
+        across the repository documentation, as a stable paged list of candidates with
+        line-addressable evidence and local cost metrics.
+
+        Use when documentation may contradict itself or state the same requirement in
+        several places, when consolidating or deduplicating pages, when deciding which of
+        two competing statements should be canonical, and when auditing documentation
+        quality before a release or a large edit.
+
+        Candidates are evidence for review and are never applied automatically. An empty
+        result means nothing is currently pending for the requested kind.
         """)]
     public string AnalysisCandidates(
-        [Description("Optional candidate kind: duplicate, conflict, or terminology.")] string? kind = null,
-        [Description("Opaque candidate id returned as the next cursor by the previous page.")] string? cursor = null,
-        [Description("Maximum candidates to return (1-20). Defaults to 20.")] int limit = 20,
-        [Description("Maximum response characters (up to 12000). Defaults to 12000.")] int charBudget = 12000)
+        [Description("Limits results to one kind of finding: 'duplicate', 'conflict', or 'terminology'. Omit to return every kind.")] string? kind = null,
+        [Description("Opaque candidate id taken from the 'next cursor' line of a previous response, to continue after that item. Omit for the first page.")] string? cursor = null,
+        [Description("Maximum candidates to return (1-20). Defaults to 20; larger values are capped at 20.")] int limit = 20,
+        [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000)
     {
         if (_analysisReader is null)
             return "Documentation analysis is unavailable in this host.";
@@ -232,14 +266,22 @@ public sealed class DocsTools
         return CapToBudget(sb.ToString(), effectiveBudget);
     }
 
-    [McpServerTool(Name = "docs_glossary")]
+    [McpServerTool(Name = "docs_glossary", ReadOnly = true, OpenWorld = false)]
     [Description("""
-        Look up the managed documentation glossary for a term. Returns proposed, approved,
-        and rejected senses with their scopes and aliases so an agent can disambiguate
-        repository vocabulary. This tool is read-only and never changes glossary status.
+        Looks up one term in the repository's managed glossary and returns its proposed,
+        approved, and rejected senses with their definitions, scopes, and aliases.
+
+        Use when a term is overloaded or its meaning in this codebase is not obvious, when
+        the same word appears to mean different things in different components, before
+        naming a new component or introducing vocabulary, and when writing documentation
+        that must match established wording. Use also when a request uses a domain word
+        that could denote more than one concept.
+
+        An unknown term is an ordinary empty result rather than an error, meaning no sense
+        has been declared for it.
         """)]
     public string Glossary(
-        [Description("The exact glossary term to look up, matched case-insensitively.")] string term)
+        [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term)
     {
         if (_analysisReader is null)
             return "The managed documentation glossary is unavailable in this host.";
@@ -268,7 +310,7 @@ public sealed class DocsTools
         var sb = new StringBuilder();
         sb.Append(result.Senses.Count)
           .Append(result.Senses.Count == 1 ? " glossary sense for '" : " glossary senses for '")
-          .Append(result.Term)
+          .Append(result.Term.ReplaceLineEndings(" "))
           .AppendLine("'.");
         foreach (var sense in result.Senses
                      .OrderBy(sense => sense.Status)
@@ -309,7 +351,9 @@ public sealed class DocsTools
             return true;
         }
 
-        if (Enum.TryParse<AnalysisRuleKind>(kind.Trim(), ignoreCase: true, out var parsed))
+        var trimmed = kind.Trim();
+        if (AnalysisKindNames.Contains(trimmed)
+            && Enum.TryParse<AnalysisRuleKind>(trimmed, ignoreCase: true, out var parsed))
         {
             parsedKind = parsed;
             return true;
@@ -378,7 +422,8 @@ public sealed class DocsTools
         var sb = new StringBuilder();
         sb.Append("candidate: ").AppendLine(candidate.Id);
         sb.Append("kind: ").AppendLine(candidate.Kind.ToString().ToLowerInvariant());
-        if (!string.IsNullOrWhiteSpace(candidate.Term)) sb.Append("term: ").AppendLine(candidate.Term);
+        if (!string.IsNullOrWhiteSpace(candidate.Term))
+            sb.Append("term: ").AppendLine(Truncate(candidate.Term.ReplaceLineEndings(" "), 240));
         sb.Append("evidence: ").AppendLine(string.Join(
             "; ",
             candidate.Claims

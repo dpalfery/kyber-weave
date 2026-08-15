@@ -53,6 +53,23 @@ public static class ReportRenderer
             return;
         }
 
+        // A finding the reader has to scroll past hundreds of Info rows to reach is not
+        // reported. When anything actionable exists, Info is counted rather than listed;
+        // --format json remains the complete record.
+        var actionable = report.Items
+            .Where(item => item.Severity >= Severity.Warning)
+            .OrderByDescending(item => item.Severity)
+            .ToList();
+        var rows = actionable.Count > 0
+            ? actionable
+            : report.Items.OrderByDescending(item => item.Severity).ToList();
+        var omitted = report.Items.Count - rows.Count;
+        if (omitted > 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]{omitted.ToString(CultureInfo.InvariantCulture)} informational findings omitted from the table. Use --format json to list them.[/]");
+        }
+
         var table = new Table().Border(TableBorder.Rounded).Expand();
         table.AddColumn("Severity");
         table.AddColumn("Code");
@@ -60,7 +77,7 @@ public static class ReportRenderer
         table.AddColumn(new TableColumn("Location").NoWrap());
         table.AddColumn("Message");
 
-        foreach (var d in report.Items.OrderByDescending(i => i.Severity))
+        foreach (var d in rows)
         {
             var color = ColorFor(d.Severity);
             table.AddRow(
@@ -389,15 +406,44 @@ public static class ReportRenderer
             return string.Empty;
         }
 
+        var displayPath = DisplayPath(filePath);
         if (startLine is null)
         {
-            return filePath;
+            return displayPath;
         }
 
         var start = startLine.Value.ToString(CultureInfo.InvariantCulture);
         return endLine is null || endLine == startLine
-            ? $"{filePath}:{start}"
-            : $"{filePath}:{start}-{endLine.Value.ToString(CultureInfo.InvariantCulture)}";
+            ? $"{displayPath}:{start}"
+            : $"{displayPath}:{start}-{endLine.Value.ToString(CultureInfo.InvariantCulture)}";
+    }
+
+    /// <summary>
+    /// Absolute paths under the current directory become repo-relative so the Location
+    /// column does not consume the row. JSON and SARIF keep the original path.
+    /// </summary>
+    private static string DisplayPath(string filePath)
+    {
+        if (!Path.IsPathRooted(filePath))
+        {
+            return filePath;
+        }
+
+        try
+        {
+            var relative = Path.GetRelativePath(Environment.CurrentDirectory, filePath);
+            if (string.IsNullOrEmpty(relative)
+                || relative.StartsWith("..", StringComparison.Ordinal))
+            {
+                return filePath;
+            }
+
+            return relative.Replace('\\', '/');
+        }
+        catch (ArgumentException)
+        {
+            return filePath;
+        }
     }
 
     private static string FormatMetric(object? value) => value switch

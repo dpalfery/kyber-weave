@@ -46,7 +46,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         var report = new DiagnosticReport();
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
             out var runtime);
@@ -92,7 +92,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         var report = new DiagnosticReport();
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
             out var runtime);
@@ -124,7 +124,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         var factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,
             out var runtime);
@@ -148,7 +148,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new UnavailableResolver());
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
             out var runtime);
@@ -172,7 +172,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new AvailableResolver());
 
         var success = DocsCommandComposition.TryCreateAnalysisRuntime(
-            new DocsAnalyzeSettings { Path = _temp.Path },
+            new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,
             out var runtime);
@@ -203,7 +203,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         var input = Path.Combine(_temp.Path, "verdicts.json");
         File.WriteAllText(input, "{}");
 
-        var exitCode = operation switch
+        var exitCode = ProcessConsoleCapture.Run(() => operation switch
         {
             "export" => new DocsReviewExportCommand(service).Execute(
                 null!,
@@ -215,7 +215,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
                 null!,
                 new DocsGlossarySettings { Path = _temp.Path, Write = true, Format = "json" }),
             _ => throw new InvalidOperationException("Unknown operation.")
-        };
+        }).Result;
 
         Assert.Equal(1, exitCode);
         Assert.False(File.Exists(output));

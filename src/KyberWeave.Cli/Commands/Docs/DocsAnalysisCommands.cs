@@ -11,34 +11,34 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Injectable command boundary over repository analysis and its review artifacts.</summary>
 public interface IDocsAnalysisCommandService
 {
-    DocumentationAnalysisResult Analyze(DocsAnalyzeSettings settings);
+    DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings);
     ReviewExportResult ExportReview(DocsReviewExportSettings settings);
     ReviewImportResult ImportReview(DocsReviewImportSettings settings, string json);
     GlossaryUpdateResult UpdateGlossary(DocsGlossarySettings settings);
 }
 
-public sealed class DocsAnalyzeCommand : Command<DocsAnalyzeSettings>
+public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
-    public DocsAnalyzeCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
+    public DocsIntegrityCheckCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
-    internal DocsAnalyzeCommand(IDocsAnalysisCommandService service) =>
+    internal DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    public override int Execute(CommandContext context, DocsAnalyzeSettings settings)
+    public override int Execute(CommandContext context, DocsIntegrityCheckSettings settings)
     {
         try
         {
             var result = _service.Analyze(settings);
-            CommandHelpers.Finish(result.Diagnostics, settings, "docs analyze", "Claim");
+            CommandHelpers.Finish(result.Diagnostics, settings, "docs integrity-check", "Claim");
             if (HasOperationalErrors(result.Diagnostics)) return 1;
             return FindingExitCode(result.Diagnostics, settings.FailOn);
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
             var report = DocsAnalysisCommandErrors.Report(exception, DocumentationAnalyzer.IgnoreMarkupRuleCode);
-            CommandHelpers.Finish(report, settings, "docs analyze", "Claim");
+            CommandHelpers.Finish(report, settings, "docs integrity-check", "Claim");
             return 1;
         }
     }

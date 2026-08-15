@@ -68,7 +68,7 @@ narrow to one.
 | `KW-AGENT-LINT-001` | An agent's description routing score is below threshold (< 50/100) |
 | `KW-AGENT-LINT-002` | An agent's description is an action summary or lacks trigger phrasing |
 
-`-002` is the one that pays for itself. Two copies of a role that diverged through
+`KW-AGENT-SYNC-002` is the one that pays for itself. Two copies of a role that diverged through
 independent edits still both look fine in isolation; only comparing them surfaces it.
 
 ### Agent description trigger quality
@@ -88,6 +88,8 @@ should lead with explicit trigger framing and negative boundaries:
   below 50 on the [DescriptionScorer rubric](skills.md#descriptionscorer-rubric).
 - **Review exchange**: Agent descriptions can be exported alongside skills via
   `kyber-weave skill review export` for LLM/agent-assisted semantic trigger review.
+  Candidate ids are `{Harness}:{RoleName}` so a role present in multiple harnesses is
+  not collapsed.
 
 ## Capability profiles
 

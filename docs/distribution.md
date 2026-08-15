@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-11
+last-reviewed: 2026-08-15
 ---
 
 # Distribution and release flow
@@ -22,17 +22,25 @@ reads from them.
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
 ```
 
-`scripts/install.sh` is the one install channel Kyber-Weave documents. It resolves the
+`scripts/install.sh` is the one first-install channel Kyber-Weave documents. It resolves the
 latest release tag (or pre-release tags when `--prerelease` / `KYBER_WEAVE_PRERELEASE=1`
 is set, or a specific release via `--version`), verifies SHA-256 against `SHA256SUMS.txt`,
 follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo.
+
+Once those binaries are on PATH, `kyber-weave update` reads the same Release assets and
+checksums and replaces the running CLI plus sibling MCP in place. `--release-candidate`
+is the CLI name for the script's `--prerelease` behaviour (newest non-draft tag from the
+Releases list). A positional version pins a tag without colliding with global
+`kyber-weave --version`.
 
 The script is served from the **default branch**, not versioned with a release. It only
 ever reads Release assets, so it stays backward-compatible with older tags and a script
 fix never requires a re-release. Keep it that way when editing it.
 
-It covers `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`. Windows is out of scope — no
-`.zip` handling — so Windows users take the Release asset directly.
+It covers `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`. Windows is out of scope for
+the script — no `.zip` handling — so Windows users take the Release asset directly.
+`kyber-weave update` does extract `win-x64` `.zip` assets when replacing an existing
+install.
 
 ## Other published artifacts
 

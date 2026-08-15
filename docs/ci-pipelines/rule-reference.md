@@ -34,7 +34,7 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-DOC-DRIFT-002` | Error | `api-endpoints` route matches no indexed route |
 | `KW-DOC-DRIFT-003` | Warning | `source-root` exists but nothing beneath it is indexed |
 
-### Analysis — `docs analyze`
+### Analysis — `docs integrity-check`
 
 | Id | Severity | Meaning |
 |---|---|---|
@@ -52,7 +52,7 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-DOC-REVIEW-001` | Operational Error | Verdict bundle is invalid/stale, or safe atomic persistence is unavailable. |
 | `KW-DOC-GLOSSARY-001` | Operational Error | Configured managed glossary has invalid structure, status, definition, or scope. |
 
-Analysis findings respect `docs analyze --fail-on`; operational errors always return
+Analysis findings respect `docs integrity-check --fail-on`; operational errors always return
 non-zero. See [analysis and review](../docgraph/analysis.md) for classifier and lifecycle
 details.
 

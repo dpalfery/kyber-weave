@@ -4,7 +4,7 @@ using Xunit;
 
 namespace KyberWeave.Tests;
 
-/// <summary>Pins managed-glossary contribution at the public docs graph command boundary.</summary>
+/// <summary>Pins managed-glossary contribution at the public docs export-graph command boundary.</summary>
 public sealed class DocsGraphCliCommandTests : IDisposable
 {
     private readonly TempDirectory _repository = new();
@@ -20,9 +20,9 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        var execution = ProcessConsoleCapture.Run(() => new DocsGraphCommand().Execute(
+        var execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
             null!,
-            new DocsGraphSettings { Path = _repository.Path, Out = _output.Path }));
+            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path }));
         var exitCode = execution.Result;
         var nodes = ReadJsonLines(Path.Combine(_output.Path, "nodes.jsonl"));
         var edges = ReadJsonLines(Path.Combine(_output.Path, "edges.jsonl"));
@@ -43,6 +43,42 @@ public sealed class DocsGraphCliCommandTests : IDisposable
         Assert.DoesNotContain("loop-rejected", allOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("agent loop", allOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("legacy loop", allOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Execute_InvalidGlossary_ReturnsOperationalFailureInsteadOfThrowing()
+    {
+        WriteRepository();
+        Write("docs/glossary.md", """
+            ---
+            id: reference/glossary
+            title: Glossary
+            doc-type: reference
+            status: current
+            owner: Gameplay maintainers
+            last-reviewed: 2026-08-12
+            ---
+
+            # Glossary
+
+            ## loop
+
+            | Sense ID | Status | Definition | Scope | Aliases |
+            |---|---|---|---|---|
+            | loop-gameplay | CURRENT | The gameplay update cycle. | component:Gameplay | gameplay loop |
+            """);
+        using var codeGraph = new CodeGraphFixtureDb();
+        codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
+        var codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
+        Directory.CreateDirectory(codeGraphDirectory);
+        File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
+
+        var execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
+            null!,
+            new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("KW-DOC-GLOSSARY-001", execution.Output, StringComparison.Ordinal);
     }
 
     public void Dispose()

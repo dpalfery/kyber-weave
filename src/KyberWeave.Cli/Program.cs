@@ -2,6 +2,7 @@ using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Skills;
+using KyberWeave.Cli.Commands.Update;
 using Spectre.Console.Cli;
 
 var app = new CommandApp();
@@ -89,18 +90,18 @@ app.Configure(config =>
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")
             .WithExample("docs", "drift", ".");
 
-        docs.AddCommand<DocsGraphCommand>("graph")
+        docs.AddCommand<DocsExportGraphCommand>("export-graph")
             .WithDescription("Export the documentation graph as nodes.jsonl and edges.jsonl.")
-            .WithExample("docs", "graph", ".", "--out", "./build/doc-graph");
+            .WithExample("docs", "export-graph", ".", "--out", "./build/doc-graph");
 
         docs.AddCommand<DocsCatalogCommand>("catalog")
             .WithDescription("Display doc-type coverage by component.")
             .WithExample("docs", "catalog", ".");
 
-        docs.AddCommand<DocsAnalyzeCommand>("analyze")
+        docs.AddCommand<DocsIntegrityCheckCommand>("integrity-check")
             .WithDescription("Find duplicate claims, potential conflicts, and ambiguous terminology.")
-            .WithExample("docs", "analyze", ".", "--format", "sarif")
-            .WithExample("docs", "analyze", ".", "--fail-on", "warning");
+            .WithExample("docs", "integrity-check", ".", "--format", "sarif")
+            .WithExample("docs", "integrity-check", ".", "--fail-on", "warning");
 
         docs.AddBranch("review", review =>
         {
@@ -118,6 +119,14 @@ app.Configure(config =>
             .WithExample("docs", "glossary", ".")
             .WithExample("docs", "glossary", ".", "--write");
     });
+
+    // Distribution: replace the running Release binaries. Not an artifact-class branch.
+    config.AddCommand<UpdateCommand>("update")
+        .WithDescription("Replace the installed CLI and MCP binaries from a GitHub Release.")
+        .WithExample("update")
+        .WithExample("update", "--release-candidate")
+        .WithExample("update", "0.2.0")
+        .WithExample("update", "--no-mcp");
 });
 
 return app.Run(args);

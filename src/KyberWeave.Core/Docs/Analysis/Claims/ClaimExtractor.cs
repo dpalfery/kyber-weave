@@ -17,6 +17,9 @@ public sealed partial class ClaimExtractor
         .UsePreciseSourceLocation()
         .Build();
 
+    private const char InlineLiteralStart = '\uE000';
+    private const char InlineLiteralEnd = '\uE001';
+
     /// <summary>Extracts claims without changing the document body used by retrieval.</summary>
     public ClaimExtractionResult Extract(DocumentModel document)
     {
@@ -208,19 +211,21 @@ public sealed partial class ClaimExtractor
 
     // Markdig's plain-text renderer deliberately omits inline code. Analysis retains the
     // literal because commands, paths, and enum values are important conflict evidence.
+    // Private-use sentinels avoid colliding with source text that happens to contain a
+    // printable placeholder such as KYBERINLINELITERAL0END.
     private static string PlainText(string markdown)
     {
         var literals = new List<string>();
         var withPlaceholders = InlineCodePattern().Replace(markdown, match =>
         {
             literals.Add(match.Groups[1].Value);
-            return $"KYBERINLINELITERAL{literals.Count - 1}END";
+            return $"{InlineLiteralStart}{literals.Count - 1}{InlineLiteralEnd}";
         });
         var plain = Markdown.ToPlainText(withPlaceholders, Pipeline);
         for (var index = 0; index < literals.Count; index++)
         {
             plain = plain.Replace(
-                $"KYBERINLINELITERAL{index}END",
+                $"{InlineLiteralStart}{index}{InlineLiteralEnd}",
                 $"`{literals[index]}`",
                 StringComparison.Ordinal);
         }

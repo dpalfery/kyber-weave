@@ -64,11 +64,19 @@ internal static class EmbeddingCandidateBuilder
         int claimCount,
         int maximumNeighbors)
     {
+        var neighbors = Enumerable.Range(0, claimCount)
+            .Select(_ => new List<ScoredPair>())
+            .ToArray();
+        foreach (var item in scored)
+        {
+            neighbors[item.Pair.Left].Add(item);
+            neighbors[item.Pair.Right].Add(item);
+        }
+
         var selected = new HashSet<IndexPair>();
         for (var claimIndex = 0; claimIndex < claimCount; claimIndex++)
         {
-            foreach (var item in scored
-                         .Where(item => item.Pair.Left == claimIndex || item.Pair.Right == claimIndex)
+            foreach (var item in neighbors[claimIndex]
                          .OrderByDescending(item => item.Score)
                          .ThenBy(item => item.Pair.Left)
                          .ThenBy(item => item.Pair.Right)

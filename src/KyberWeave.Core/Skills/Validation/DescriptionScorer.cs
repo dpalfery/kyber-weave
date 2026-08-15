@@ -34,7 +34,8 @@ public sealed record DescriptionScore(int Total, IReadOnlyList<ScoreComponent> C
 /// <description>
 /// <b>Explicit Activation Trigger Phrasing ("Use when...", "Apply when...", "Invoke when..."):</b>
 /// Allocates the highest score weight (35 points) to explicit triggering clauses that specify
-/// precise caller conditions under which the skill should activate.
+/// precise caller conditions under which the skill should activate. "Use this to …" names a
+/// purpose rather than an activation condition, so it is not scored as a trigger clause.
 /// </description>
 /// </item>
 /// <item>
@@ -56,7 +57,7 @@ public sealed record DescriptionScore(int Total, IReadOnlyList<ScoreComponent> C
 /// </remarks>
 public static partial class DescriptionScorer
 {
-    [GeneratedRegex(@"\b(use\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for|to)|apply\s+when|invoke\s+when|trigger\s+when)\b",
+    [GeneratedRegex(@"\b(use\s+(this\s+)?(skill\s+|agent\s+|tool\s+)?(when|for)|apply\s+when|invoke\s+when|trigger\s+when)\b",
         RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 2000)]
     private static partial Regex UseWhen();
 

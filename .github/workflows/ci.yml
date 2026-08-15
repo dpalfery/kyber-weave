@@ -214,9 +214,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Intentional github/codeql-action v4 pin (v4.37.1)
+      # Intentional github/codeql-action v4 pin (v4.37.6)
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
@@ -234,9 +234,9 @@ jobs:
           dotnet restore KyberWeave.sln
           dotnet build KyberWeave.sln --configuration Release --no-restore
 
-      # Intentional github/codeql-action v4 pin (v4.37.1)
+      # Intentional github/codeql-action v4 pin (v4.37.6)
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           category: "/language:${{ matrix.language }}"
 
