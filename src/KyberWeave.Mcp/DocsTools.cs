@@ -58,7 +58,7 @@ public sealed class DocsTools
         Use when a question is about this repository's own documented behaviour: how a
         feature or subsystem works, what a CLI command, flag, or rule id means, how to run
         or configure something, or whether a subject is documented at all. Use also when
-        starting a task a design document, runbook, or governance page would inform, and
+        starting a task that a design document, runbook, or governance page would inform, and
         when an answer must reflect current guidance, since superseded documents are
         outside the corpus.
 

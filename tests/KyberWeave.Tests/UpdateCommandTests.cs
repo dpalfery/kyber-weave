@@ -7,10 +7,11 @@ using System.Text;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Update;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
-public sealed class UpdateCommandTests : IDisposable
+public sealed partial class UpdateCommandTests : IDisposable
 {
     private readonly TempDirectory _install = new();
     private readonly TempDirectory _assets = new();
@@ -302,7 +303,10 @@ public sealed class UpdateCommandTests : IDisposable
     public void Run_ReadOnlyInstallDirectory_IsRefused()
     {
         if (OperatingSystem.IsWindows())
-            return;
+            throw SkipException.ForSkip("Read-only POSIX file mode permissions are not supported on Windows.");
+
+        if (GetEffectiveUserId() == 0)
+            throw SkipException.ForSkip("Executing as root bypasses read-only POSIX directory permissions.");
 
         var host = CreateHost("0.1.0", "osx-arm64");
         File.SetUnixFileMode(
@@ -372,6 +376,10 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.True(SelfUpdater.IsDotnetToolInstall(@"C:\Users\x\.dotnet\tools\kyber-weave.exe"));
         Assert.False(SelfUpdater.IsDotnetToolInstall("/Users/x/.local/bin/kyber-weave"));
     }
+
+    [LibraryImport("libc", EntryPoint = "geteuid")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial uint GetEffectiveUserId();
 
     private SelfUpdateOutcome Run(
         HttpMessageHandler handler,
