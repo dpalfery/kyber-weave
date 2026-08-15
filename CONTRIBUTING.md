@@ -14,16 +14,16 @@ Security vulnerabilities: see [SECURITY.md](SECURITY.md) — do not file a publi
 ## Workflow
 
 1. Fork the repository (or use a branch if you have write access)
-2. Create a branch from `develop` for work intended for the next integration line, or from `main` for hotfixes
+2. Create a feature branch from `main`
 3. Make focused commits with clear messages
-4. Open a pull request against `develop` (or `main` for hotfixes)
+4. Open a pull request against `main`
 5. Ensure the required `CI Summary` check passes. It aggregates build and test, publish smoke, CodeQL, Trivy, Semgrep, gitleaks, and the skill/docs gate.
 6. Address review feedback
 
 Pull requests require at least one approving review, and that approval must include a
 code-owner review. New commits dismiss stale approvals, and all review conversations
 must be resolved before merging. Protected branches require a pull request, so ordinary
-contributors cannot push directly to `main` or `develop`; the branch must also be
+contributors cannot push directly to `main`; the branch must also be
 up to date with its base before merging.
 
 This repository currently has one maintainer and the repository-wide owner in

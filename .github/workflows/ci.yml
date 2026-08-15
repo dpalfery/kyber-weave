@@ -10,7 +10,7 @@ name: CI
 
 "on":
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
   schedule:
     # Weekly CodeQL / dependency scan fallback when the tree is quiet
