@@ -30,14 +30,14 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
     {
         try
         {
-            var result = _service.Analyze(settings);
+            DocumentationAnalysisResult result = _service.Analyze(settings);
             CommandHelpers.Finish(result.Diagnostics, settings, "docs integrity-check", "Claim");
             if (HasOperationalErrors(result.Diagnostics)) return 1;
             return FindingExitCode(result.Diagnostics, settings.FailOn);
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
-            var report = DocsAnalysisCommandErrors.Report(exception, DocumentationAnalyzer.IgnoreMarkupRuleCode);
+            DiagnosticReport report = DocsAnalysisCommandErrors.Report(exception, DocumentationAnalyzer.IgnoreMarkupRuleCode);
             CommandHelpers.Finish(report, settings, "docs integrity-check", "Claim");
             return 1;
         }
@@ -74,9 +74,9 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.OutputPath);
-            var result = _service.ExportReview(settings);
+            ReviewExportResult result = _service.ExportReview(settings);
             AtomicTextFile.Write(settings.OutputPath, result.Json);
-            var report = result.Diagnostics;
+            DiagnosticReport report = result.Diagnostics;
             report.AddMetric("exportedReviewCharacters", result.ExportedExcerptCharacters);
             report.AddMetric("reviewCandidates", result.Bundle.Candidates.Count);
             report.AddMetric("truncated", result.Truncated);
@@ -111,7 +111,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
         try
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.InputPath);
-            var result = _service.ImportReview(settings, File.ReadAllText(settings.InputPath));
+            ReviewImportResult result = _service.ImportReview(settings, File.ReadAllText(settings.InputPath));
             CommandHelpers.Finish(result.Diagnostics, settings, "docs review import", "Candidate");
             return result.Success ? 0 : 1;
         }
@@ -140,7 +140,7 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
     {
         try
         {
-            var result = _service.UpdateGlossary(settings);
+            GlossaryUpdateResult result = _service.UpdateGlossary(settings);
             result.Diagnostics.AddMetric("glossaryPath", result.RelativePath);
             result.Diagnostics.AddMetric("glossaryChanged", result.Changed);
             result.Diagnostics.AddMetric("glossaryWritten", result.Written);
@@ -168,7 +168,7 @@ internal static class DocsAnalysisCommandErrors
 
     public static DiagnosticReport Report(Exception exception, string code)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         report.Add(new Diagnostic(CodeFrom(exception.Message) ?? code, Severity.Error, exception.Message, "docs analysis"));
         return report;
     }
@@ -176,7 +176,7 @@ internal static class DocsAnalysisCommandErrors
     private static string? CodeFrom(string message)
     {
         if (!message.StartsWith("KW-", StringComparison.Ordinal)) return null;
-        var separator = message.IndexOf(':', StringComparison.Ordinal);
+        int separator = message.IndexOf(':', StringComparison.Ordinal);
         return separator > 0 ? message[..separator] : null;
     }
 
@@ -192,11 +192,11 @@ internal static class AtomicTextFile
 {
     public static void Write(string path, string content)
     {
-        var absolute = Path.GetFullPath(path);
-        var directory = Path.GetDirectoryName(absolute)
+        string absolute = Path.GetFullPath(path);
+        string directory = Path.GetDirectoryName(absolute)
             ?? throw new ArgumentException("The output path has no parent directory.", nameof(path));
         Directory.CreateDirectory(directory);
-        var temporary = Path.Combine(directory, $".{Path.GetFileName(absolute)}.{Guid.NewGuid():N}.tmp");
+        string temporary = Path.Combine(directory, $".{Path.GetFileName(absolute)}.{Guid.NewGuid():N}.tmp");
         try
         {
             File.WriteAllText(temporary, content);

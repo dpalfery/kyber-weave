@@ -13,14 +13,12 @@ namespace KyberWeave.Core.Agents.Parsing;
 /// skills, agent definitions and documentation all resolve a frontmatter block the same
 /// way. A second pipeline here would drift from the shared one silently.
 /// </remarks>
-public sealed class MarkdownAgentParser : IAgentParser
+public sealed partial class MarkdownAgentParser : IAgentParser
 {
     // Top-level scalar keys used for identity, routing, and provenance. Applied as a
     // line-based overlay so an otherwise-invalid YAML block (unquoted colon in description,
     // free-form tools lists) still surfaces author/version/license and description.
-    private static readonly Regex TopLevelScalarRegex = new(
-        @"^(?<key>name|description|model|author|version|license)\s*:\s*(?<val>.+?)\s*$",
-        RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.IgnoreCase);
+    private static readonly Regex TopLevelScalarRegex = MyRegex();
 
     public bool CanParse(string filePath) =>
         filePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
@@ -28,33 +26,33 @@ public sealed class MarkdownAgentParser : IAgentParser
 
     public AgentModel Parse(string filePath, HarnessKind harness)
     {
-        var raw = File.ReadAllText(filePath);
-        var dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
-        var fileName = Path.GetFileName(filePath);
+        string raw = File.ReadAllText(filePath);
+        string dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
+        string fileName = Path.GetFileName(filePath);
 
         // Standardize role name from file name (e.g. architect.agent.md -> architect, dotnet-dev.md -> dotnet-dev)
-        var roleName = fileName.Replace(".agent.md", "", StringComparison.OrdinalIgnoreCase)
+        string roleName = fileName.Replace(".agent.md", "", StringComparison.OrdinalIgnoreCase)
                                  .Replace(".md", "", StringComparison.OrdinalIgnoreCase);
 
-        var read = MarkdownFrontmatterReader.Read(raw);
+        FrontmatterReadResult read = MarkdownFrontmatterReader.Read(raw);
 
-        var description = string.Empty;
-        var model = string.Empty;
-        var body = read.HasFrontmatter ? read.Body : raw;
-        var tools = new Collection<string>();
-        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string description = string.Empty;
+        string model = string.Empty;
+        string body = read.HasFrontmatter ? read.Body : raw;
+        Collection<string> tools = new Collection<string>();
+        Dictionary<string, string> metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (read.HasFrontmatter)
         {
             try
             {
-                var dict = MarkdownFrontmatterReader.Deserializer
+                Dictionary<string, object>? dict = MarkdownFrontmatterReader.Deserializer
                     .Deserialize<Dictionary<string, object>>(read.Yaml);
                 if (dict is not null)
                 {
-                    foreach (var (k, v) in dict)
+                    foreach ((string? k, object? v) in dict)
                     {
-                        var valStr = v?.ToString() ?? string.Empty;
+                        string valStr = v?.ToString() ?? string.Empty;
                         metadata[k] = valStr;
 
                         if (k.Equals("name", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(valStr))
@@ -97,8 +95,8 @@ public sealed class MarkdownAgentParser : IAgentParser
     {
         foreach (Match match in TopLevelScalarRegex.Matches(yaml))
         {
-            var key = match.Groups["key"].Value;
-            var val = Unquote(match.Groups["val"].Value.Trim());
+            string key = match.Groups["key"].Value;
+            string val = Unquote(match.Groups["val"].Value.Trim());
             if (string.IsNullOrWhiteSpace(val))
                 continue;
 
@@ -123,4 +121,7 @@ public sealed class MarkdownAgentParser : IAgentParser
 
         return value;
     }
+
+    [GeneratedRegex(@"^(?<key>name|description|model|author|version|license)\s*:\s*(?<val>.+?)\s*$", RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled, "en-US")]
+    private static partial Regex MyRegex();
 }

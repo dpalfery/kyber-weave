@@ -1,3 +1,4 @@
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -133,9 +134,9 @@ public sealed class SquadCanonicalContentTests
             StringComparer.Ordinal);
 
     [Fact]
-    public void Load_FullProductTree_ContainsExactlyApprovedAgentIdentities()
+    public void LoadFullProductTreeContainsExactlyApprovedAgentIdentities()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
         Assert.Equal(ExpectedAgents, source.Agents.Select(agent => agent.Name));
         Assert.Equal(ExpectedAgents, source.Bundle.AgentNames.Order(StringComparer.Ordinal));
@@ -145,9 +146,9 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_FullProductTree_ContainsExactlyApprovedSkillIdentities()
+    public void LoadFullProductTreeContainsExactlyApprovedSkillIdentities()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
         Assert.Equal(ExpectedSkills, source.Skills.Select(skill => skill.Name));
         Assert.Equal(ExpectedSkills, source.Bundle.SkillNames.Order(StringComparer.Ordinal));
@@ -157,18 +158,18 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_FullProductTree_ExcludesKyberWeaveDocsSkill()
+    public void LoadFullProductTreeExcludesKyberWeaveDocsSkill()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "kyber-weave-docs");
         Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "kyber-weave-docs")));
     }
 
     [Fact]
-    public void Load_RoleSkillFallbackProfile_DeclaresGlobalBodyAndIdentityProjection()
+    public void LoadRoleSkillFallbackProfileDeclaresGlobalBodyAndIdentityProjection()
     {
-        var profile = ReadRoleSkillProfile();
+        RoleSkillProfile profile = ReadRoleSkillProfile();
 
         Assert.Equal("skill", profile.NoPrimaryAgent);
         Assert.Equal("skill", profile.NoAgentPrimitive);
@@ -181,21 +182,21 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_AgentSkillIntersection_HasPinnedSharedAndPrefixedFallbackIdentities()
+    public void LoadAgentSkillIntersectionHasPinnedSharedAndPrefixedFallbackIdentities()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
-        var skillsByName = source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
-        var intersections = source.Agents
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        Dictionary<string, SquadSkill> skillsByName = source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
+        string[] intersections = source.Agents
             .Where(agent => skillsByName.ContainsKey(agent.Name))
             .Select(agent => agent.Name)
             .ToArray();
-        var unexpectedlySharedBodies = DistinctBodyAgentSkillCollisions
+        string[] unexpectedlySharedBodies = DistinctBodyAgentSkillCollisions
             .Where(name => string.Equals(
                 Assert.Single(source.Agents, agent => agent.Name == name).InstructionBody,
                 skillsByName[name].InstructionBody,
                 StringComparison.Ordinal))
             .ToArray();
-        var generatedProjectionNames = DistinctBodyAgentSkillCollisions
+        string[] generatedProjectionNames = DistinctBodyAgentSkillCollisions
             .Select(name => $"role-{name}")
             .ToArray();
 
@@ -208,12 +209,12 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_SharedConductorIdentities_CanSelectAgentOrSkillWithoutChangingCanonicalBody()
+    public void LoadSharedConductorIdentitiesCanSelectAgentOrSkillWithoutChangingCanonicalBody()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
-        var agentsByName = source.Agents.ToDictionary(agent => agent.Name, StringComparer.Ordinal);
-        var skillsByName = source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
-        var mismatches = SharedAgentSkillIdentities
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(agent => agent.Name, StringComparer.Ordinal);
+        Dictionary<string, SquadSkill> skillsByName = source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
+        string[] mismatches = SharedAgentSkillIdentities
             .Where(name => !string.Equals(
                 agentsByName[name].InstructionBody,
                 skillsByName[name].InstructionBody,
@@ -227,10 +228,10 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_ConductorV2MigrationName_ResolvesOnlyToConductorAlias()
+    public void LoadConductorV2MigrationNameResolvesOnlyToConductorAlias()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
-        var aliases = source.Agents
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        (string Alias, string Canonical)[] aliases = source.Agents
             .SelectMany(agent => agent.Aliases.Select(alias => (Alias: alias, Canonical: agent.Name)))
             .OrderBy(pair => pair.Alias, StringComparer.Ordinal)
             .ToArray();
@@ -240,10 +241,10 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_CanonicalAgentBodies_HaveNoDuplicateDigest()
+    public void LoadCanonicalAgentBodiesHaveNoDuplicateDigest()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
-        var duplicateBodies = source.Agents
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] duplicateBodies = source.Agents
             .GroupBy(agent => agent.BodyDigest, StringComparer.Ordinal)
             .Where(group => group.Count() > 1)
             .Select(group => $"{group.Key}: {string.Join(", ", group.Select(agent => agent.Name))}")
@@ -255,16 +256,16 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_PrimaryOrchestrators_DeclareOneGeneralDefaultAndExplicitTestFirstAlternative()
+    public void LoadPrimaryOrchestratorsDeclareOneGeneralDefaultAndExplicitTestFirstAlternative()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
-        var defaultAgents = source.Agents
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] defaultAgents = source.Agents
             .Where(agent => agent.Description.Contains(
                 DefaultOrchestrationTrigger,
                 StringComparison.OrdinalIgnoreCase))
             .Select(agent => agent.Name)
             .ToArray();
-        var testFirst = Assert.Single(source.Agents, agent => agent.Name == "conductor-v3");
+        SquadAgent testFirst = Assert.Single(source.Agents, agent => agent.Name == "conductor-v3");
 
         Assert.Equal(["conductor"], defaultAgents);
         Assert.Contains(
@@ -278,10 +279,10 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_CanonicalAgentBodies_ContainNoHarnessSpecificConfigurationTokens()
+    public void LoadCanonicalAgentBodiesContainNoHarnessSpecificConfigurationTokens()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
-        var findings = source.Agents
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] findings = source.Agents
             .SelectMany(agent => HarnessSpecificConfigurationTokens
                 .Where(token => agent.InstructionBody.Contains(token, StringComparison.OrdinalIgnoreCase))
                 .Select(token => $"{agent.SourcePath}: {token}"))
@@ -294,25 +295,25 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void Load_MigrationReports_DeclareLockedSourcesAndActualCanonicalDigest()
+    public void LoadMigrationReportsDeclareLockedSourcesAndActualCanonicalDigest()
     {
-        var source = SquadSourceLoader.Load(ProductRoot);
-        var migrationRoot = Path.Combine(ProductRoot, "migration");
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string migrationRoot = Path.Combine(ProductRoot, "migration");
         Assert.True(
             Directory.Exists(migrationRoot),
             $"K2 canonical migration directory is missing: {migrationRoot}");
 
-        var reportNames = Directory.EnumerateFiles(migrationRoot, "*.md", SearchOption.TopDirectoryOnly)
+        string?[] reportNames = Directory.EnumerateFiles(migrationRoot, "*.md", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFileNameWithoutExtension)
             .Order(StringComparer.Ordinal)
             .ToArray();
         Assert.Equal(ExpectedAgents, reportNames);
 
-        var expectedSources = ParseExpectedSourceHashes();
-        foreach (var agent in source.Agents)
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> expectedSources = ParseExpectedSourceHashes();
+        foreach (SquadAgent agent in source.Agents)
         {
-            var reportPath = Path.Combine(migrationRoot, $"{agent.Name}.md");
-            var report = ReadMigrationReport(reportPath);
+            string reportPath = Path.Combine(migrationRoot, $"{agent.Name}.md");
+            MigrationReport report = ReadMigrationReport(reportPath);
 
             Assert.Equal(MigrationSchema, report.Schema);
             Assert.Equal(agent.Name, report.Agent);
@@ -334,17 +335,17 @@ public sealed class SquadCanonicalContentTests
 
     private static RoleSkillProfile ReadRoleSkillProfile()
     {
-        var path = Path.Combine(ProductRoot, "profiles", "fallbacks.yml");
-        var yaml = new YamlStream();
+        string path = Path.Combine(ProductRoot, "profiles", "fallbacks.yml");
+        YamlStream yaml = new YamlStream();
         yaml.Load(new StringReader(File.ReadAllText(path)));
-        var root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
-        var profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
-        var roleSkill = RequireMapping(RequireNode(profiles, "role-skill", path), "role-skill", path);
-        var outputIdentity = RequireMapping(
+        YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
+        YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
+        YamlMappingNode roleSkill = RequireMapping(RequireNode(profiles, "role-skill", path), "role-skill", path);
+        YamlMappingNode outputIdentity = RequireMapping(
             RequireNode(roleSkill, "output-identity", path),
             "output-identity",
             path);
-        var sharedIdentities = RequireSequence(
+        YamlSequenceNode sharedIdentities = RequireSequence(
             RequireNode(roleSkill, "shared-identities", path),
             "shared-identities",
             path);
@@ -364,15 +365,14 @@ public sealed class SquadCanonicalContentTests
 
     private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> ParseExpectedSourceHashes()
     {
-        var entries = ExpectedSourceHashManifest
+        IEnumerable<(string Agent, string Path, string Hash)> entries = ExpectedSourceHashManifest
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Split('|'))
-            .Select(parts => new
-            {
-                Agent = SourceAgentName(parts[0]),
-                Path = parts[0],
-                Hash = parts[1]
-            });
+            .Select(parts => (
+                Agent: SourceAgentName(parts[0]),
+                Path: parts[0],
+                Hash: parts[1]
+            ));
 
         return entries
             .GroupBy(entry => entry.Agent, StringComparer.Ordinal)
@@ -387,8 +387,8 @@ public sealed class SquadCanonicalContentTests
 
     private static string SourceAgentName(string sourcePath)
     {
-        var fileName = Path.GetFileName(sourcePath);
-        var name = fileName.EndsWith(".agent.md", StringComparison.Ordinal)
+        string fileName = Path.GetFileName(sourcePath);
+        string name = fileName.EndsWith(".agent.md", StringComparison.Ordinal)
             ? fileName[..^".agent.md".Length]
             : Path.GetFileNameWithoutExtension(fileName);
         return name == "conductor-v2" ? "conductor" : name;
@@ -396,22 +396,22 @@ public sealed class SquadCanonicalContentTests
 
     private static MigrationReport ReadMigrationReport(string path)
     {
-        var content = File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
+        string content = File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
         if (!content.StartsWith("---\n", StringComparison.Ordinal))
         {
             throw new InvalidDataException($"Migration report '{path}' has no YAML frontmatter.");
         }
 
-        var end = content.IndexOf("\n---\n", 4, StringComparison.Ordinal);
+        int end = content.IndexOf("\n---\n", 4, StringComparison.Ordinal);
         if (end < 0)
         {
             throw new InvalidDataException($"Migration report '{path}' has unterminated YAML frontmatter.");
         }
 
-        var yaml = new YamlStream();
+        YamlStream yaml = new YamlStream();
         yaml.Load(new StringReader(content[4..end]));
-        var root = RequireMapping(yaml.Documents.Single().RootNode, "frontmatter", path);
-        var sources = RequireMapping(RequireNode(root, "sources", path), "sources", path)
+        YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "frontmatter", path);
+        Dictionary<string, string> sources = RequireMapping(RequireNode(root, "sources", path), "sources", path)
             .Children
             .ToDictionary(
                 pair => RequireScalar(pair.Key, "source path", path),
@@ -429,7 +429,7 @@ public sealed class SquadCanonicalContentTests
 
     private static YamlNode RequireNode(YamlMappingNode mapping, string key, string path)
     {
-        foreach (var pair in mapping.Children)
+        foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
         {
             if (pair.Key is YamlScalarNode scalar &&
                 string.Equals(scalar.Value, key, StringComparison.Ordinal))

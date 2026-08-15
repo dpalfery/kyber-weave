@@ -76,14 +76,14 @@ public static class SquadTargetCatalog
     {
         ArgumentNullException.ThrowIfNull(values);
 
-        var parsed = new List<SquadTarget>();
-        var seen = new HashSet<SquadTarget>();
-        foreach (var value in values)
+        List<SquadTarget> parsed = new List<SquadTarget>();
+        HashSet<SquadTarget> seen = new HashSet<SquadTarget>();
+        foreach (string? value in values)
         {
             if (value is null)
                 throw UnknownTarget(string.Empty);
 
-            foreach (var segment in value.Split(',', StringSplitOptions.TrimEntries))
+            foreach (string segment in value.Split(',', StringSplitOptions.TrimEntries))
             {
                 if (string.Equals(segment, "all", StringComparison.OrdinalIgnoreCase))
                 {
@@ -91,7 +91,7 @@ public static class SquadTargetCatalog
                     continue;
                 }
 
-                if (!TargetsByToken.TryGetValue(segment, out var target))
+                if (!TargetsByToken.TryGetValue(segment, out SquadTarget target))
                     throw UnknownTarget(segment);
 
                 AddUnique([target], parsed, seen);
@@ -106,7 +106,7 @@ public static class SquadTargetCatalog
         ICollection<SquadTarget> parsed,
         ISet<SquadTarget> seen)
     {
-        foreach (var candidate in candidates)
+        foreach (SquadTarget candidate in candidates)
         {
             if (seen.Add(candidate))
                 parsed.Add(candidate);

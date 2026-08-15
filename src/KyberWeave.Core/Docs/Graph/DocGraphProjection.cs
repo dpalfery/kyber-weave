@@ -54,21 +54,21 @@ public sealed class DocGraphProjection
         ArgumentNullException.ThrowIfNull(codeGraph);
         ArgumentOutOfRangeException.ThrowIfNegative(maxCodeNeighbors);
 
-        var nodes = new List<DocGraphNode>();
-        var edges = new List<DocGraphEdge>();
-        var emittedNodeIds = new HashSet<string>(StringComparer.Ordinal);
-        var documentIds = new HashSet<string>(StringComparer.Ordinal);
-        var pathToId = new Dictionary<string, string>(StringComparer.Ordinal);
+        List<DocGraphNode> nodes = new List<DocGraphNode>();
+        List<DocGraphEdge> edges = new List<DocGraphEdge>();
+        HashSet<string> emittedNodeIds = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> documentIds = new HashSet<string>(StringComparer.Ordinal);
+        Dictionary<string, string> pathToId = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (var document in documents.Documents)
+        foreach (DocumentModel document in documents.Documents)
             pathToId.TryAdd(document.RelativePath, DocId(document.Subject));
 
-        foreach (var document in documents.Documents)
+        foreach (DocumentModel document in documents.Documents)
         {
             // Claim.DocumentIdentity is document.Subject, which falls back to RelativePath
             // when frontmatter has no id. Register the same node so graph candidacy can
             // find intra-document and shared-concept pairs instead of querying a missing id.
-            var documentId = DocId(document.Subject);
+            string documentId = DocId(document.Subject);
             documentIds.Add(documentId);
 
             AddNode(nodes, emittedNodeIds, new DocGraphNode(
@@ -94,25 +94,25 @@ public sealed class DocGraphProjection
                 edges.Add(new DocGraphEdge(
                     "DESCRIBES", documentId, $"path:{document.Frontmatter.SourceRoot}"));
 
-            foreach (var symbol in document.CodeRefs)
-                foreach (var node in codeGraph.ResolveSymbol(symbol))
+            foreach (string symbol in document.CodeRefs)
+                foreach (CodeGraphNode node in codeGraph.ResolveSymbol(symbol))
                     edges.Add(new DocGraphEdge("REFERENCES", documentId, node.Id));
 
-            foreach (var endpoint in document.ApiEndpoints)
-                foreach (var node in codeGraph.ResolveRoute(endpoint))
+            foreach (string endpoint in document.ApiEndpoints)
+                foreach (CodeGraphNode node in codeGraph.ResolveRoute(endpoint))
                     edges.Add(new DocGraphEdge("EXPOSES", documentId, node.Id));
 
-            foreach (var adr in document.DecidedBy)
+            foreach (string adr in document.DecidedBy)
                 edges.Add(new DocGraphEdge("DECIDED_BY", documentId, DocId(adr)));
 
-            foreach (var superseded in document.Supersedes)
+            foreach (string superseded in document.Supersedes)
                 edges.Add(new DocGraphEdge("SUPERSEDES", documentId, DocId(superseded)));
 
-            foreach (var link in document.BodyLinks)
+            foreach (string link in document.BodyLinks)
             {
-                var target = ResolveLink(document.RelativePath, link);
+                string? target = ResolveLink(document.RelativePath, link);
                 if (target is not null
-                    && pathToId.TryGetValue(target, out var targetId)
+                    && pathToId.TryGetValue(target, out string? targetId)
                     && !StringComparer.Ordinal.Equals(targetId, documentId))
                 {
                     edges.Add(new DocGraphEdge("LINKS_TO", documentId, targetId));
@@ -122,21 +122,21 @@ public sealed class DocGraphProjection
 
         if (contributors is not null)
         {
-            foreach (var contributor in contributors)
+            foreach (IDocGraphContributor contributor in contributors)
             {
                 ArgumentNullException.ThrowIfNull(contributor);
-                var contribution = contributor.Contribute(documents, codeGraph)
+                DocGraphContribution contribution = contributor.Contribute(documents, codeGraph)
                     ?? throw new InvalidOperationException("A DocGraph contributor returned null.");
 
-                foreach (var node in contribution.Nodes)
+                foreach (DocGraphNode node in contribution.Nodes)
                     AddNode(nodes, emittedNodeIds, Copy(node));
-                foreach (var edge in contribution.Edges)
+                foreach (DocGraphEdge edge in contribution.Edges)
                     edges.Add(edge with { });
             }
         }
 
-        var distinctEdges = edges.Distinct().ToArray();
-        var related = BuildDocumentRelationships(
+        DocGraphEdge[] distinctEdges = edges.Distinct().ToArray();
+        IReadOnlySet<DocumentPair> related = BuildDocumentRelationships(
             documentIds,
             distinctEdges,
             codeGraph,
@@ -168,7 +168,7 @@ public sealed class DocGraphProjection
     public IReadOnlySet<string> GetRelatedDocumentIds(string documentId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(documentId);
-        return _relatedDocumentIds.TryGetValue(documentId, out var related)
+        return _relatedDocumentIds.TryGetValue(documentId, out IReadOnlySet<string>? related)
             ? related
             : new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal));
     }
@@ -177,11 +177,11 @@ public sealed class DocGraphProjection
         IReadOnlySet<string> documentIds,
         IReadOnlySet<DocumentPair> relationships)
     {
-        var index = documentIds.ToDictionary(
+        Dictionary<string, HashSet<string>> index = documentIds.ToDictionary(
             documentId => documentId,
             _ => new HashSet<string>(StringComparer.Ordinal),
             StringComparer.Ordinal);
-        foreach (var relationship in relationships)
+        foreach (DocumentPair relationship in relationships)
         {
             index[relationship.Left].Add(relationship.Right);
             index[relationship.Right].Add(relationship.Left);
@@ -200,9 +200,9 @@ public sealed class DocGraphProjection
         ICodeGraphResolver codeGraph,
         int maxCodeNeighbors)
     {
-        var related = new HashSet<DocumentPair>();
+        HashSet<DocumentPair> related = new HashSet<DocumentPair>();
 
-        foreach (var group in edges
+        foreach (IGrouping<string, DocGraphEdge> group in edges
                      .Where(edge => SharedTargetLabels.Contains(edge.Label)
                          && documentIds.Contains(edge.From))
                      .GroupBy(edge => edge.To, StringComparer.Ordinal))
@@ -210,13 +210,13 @@ public sealed class DocGraphProjection
             RelateEveryPair(group.Select(edge => edge.From), related);
         }
 
-        foreach (var edge in edges.Where(edge => DirectDocumentLabels.Contains(edge.Label)))
+        foreach (DocGraphEdge? edge in edges.Where(edge => DirectDocumentLabels.Contains(edge.Label)))
         {
             if (documentIds.Contains(edge.From) && documentIds.Contains(edge.To))
                 related.Add(DocumentPair.Create(edge.From, edge.To));
         }
 
-        var sourceRoots = edges
+        (string DocumentId, string Path)[] sourceRoots = edges
             .Where(edge => edge.Label == "DESCRIBES"
                 && documentIds.Contains(edge.From)
                 && edge.To.StartsWith("path:", StringComparison.Ordinal))
@@ -224,9 +224,9 @@ public sealed class DocGraphProjection
             .Where(item => item.Path.Length > 0)
             .ToArray();
 
-        for (var left = 0; left < sourceRoots.Length; left++)
+        for (int left = 0; left < sourceRoots.Length; left++)
         {
-            for (var right = left + 1; right < sourceRoots.Length; right++)
+            for (int right = left + 1; right < sourceRoots.Length; right++)
             {
                 if (PathsOverlap(sourceRoots[left].Path, sourceRoots[right].Path))
                     related.Add(DocumentPair.Create(
@@ -238,7 +238,7 @@ public sealed class DocGraphProjection
         if (codeGraph is not ICodeGraphNeighborhoodProvider neighborhoods)
             return related;
 
-        var codeToDocuments = edges
+        Dictionary<string, string[]> codeToDocuments = edges
             .Where(edge => edge.Label is "REFERENCES" or "EXPOSES"
                 && documentIds.Contains(edge.From))
             .GroupBy(edge => edge.To, StringComparer.Ordinal)
@@ -249,33 +249,33 @@ public sealed class DocGraphProjection
 
         if (codeToDocuments.Count == 0) return related;
 
-        var codeEdges = neighborhoods.GetEdges(codeToDocuments.Keys.ToArray(), maxCodeNeighbors)
+        CodeGraphEdge[] codeEdges = neighborhoods.GetEdges(codeToDocuments.Keys.ToArray(), maxCodeNeighbors)
             .Where(edge => TraversedCodeEdgeKinds.Contains(edge.Kind))
             .Distinct()
             .ToArray();
 
         // Providers enforce the cap against the full index. Enforcing it again makes the
         // optional port safe for simpler fakes and alternative providers as well.
-        var returnedDegree = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var edge in codeEdges)
+        Dictionary<string, int> returnedDegree = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (CodeGraphEdge? edge in codeEdges)
         {
             IncrementDegree(returnedDegree, edge.SourceId);
             if (!StringComparer.Ordinal.Equals(edge.SourceId, edge.TargetId))
                 IncrementDegree(returnedDegree, edge.TargetId);
         }
 
-        foreach (var edge in codeEdges)
+        foreach (CodeGraphEdge? edge in codeEdges)
         {
             if (returnedDegree[edge.SourceId] > maxCodeNeighbors
                 || returnedDegree[edge.TargetId] > maxCodeNeighbors
-                || !codeToDocuments.TryGetValue(edge.SourceId, out var sources)
-                || !codeToDocuments.TryGetValue(edge.TargetId, out var targets))
+                || !codeToDocuments.TryGetValue(edge.SourceId, out string[]? sources)
+                || !codeToDocuments.TryGetValue(edge.TargetId, out string[]? targets))
             {
                 continue;
             }
 
-            foreach (var source in sources)
-                foreach (var target in targets)
+            foreach (string source in sources)
+                foreach (string target in targets)
                 {
                     if (!StringComparer.Ordinal.Equals(source, target))
                         related.Add(DocumentPair.Create(source, target));
@@ -287,7 +287,7 @@ public sealed class DocGraphProjection
 
     private static void IncrementDegree(IDictionary<string, int> degrees, string nodeId)
     {
-        degrees.TryGetValue(nodeId, out var degree);
+        degrees.TryGetValue(nodeId, out int degree);
         degrees[nodeId] = degree + 1;
     }
 
@@ -295,9 +295,9 @@ public sealed class DocGraphProjection
         IEnumerable<string> documentIds,
         ISet<DocumentPair> related)
     {
-        var ids = documentIds.Distinct(StringComparer.Ordinal).ToArray();
-        for (var left = 0; left < ids.Length; left++)
-            for (var right = left + 1; right < ids.Length; right++)
+        string[] ids = documentIds.Distinct(StringComparer.Ordinal).ToArray();
+        for (int left = 0; left < ids.Length; left++)
+            for (int right = left + 1; right < ids.Length; right++)
                 related.Add(DocumentPair.Create(ids[left], ids[right]));
     }
 
@@ -310,7 +310,7 @@ public sealed class DocGraphProjection
 
     private static string NormalizePath(string path)
     {
-        var normalized = path.Replace('\\', '/').Trim().TrimEnd('/');
+        string normalized = path.Replace('\\', '/').Trim().TrimEnd('/');
         return normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
     }
 
@@ -355,11 +355,11 @@ public sealed class DocGraphProjection
     /// <summary>Resolves a relative link against the linking document's directory.</summary>
     internal static string? ResolveLink(string fromRelativePath, string link)
     {
-        var directory = Path.GetDirectoryName(fromRelativePath)?.Replace('\\', '/') ?? string.Empty;
-        var combined = string.IsNullOrEmpty(directory) ? link : $"{directory}/{link}";
+        string directory = Path.GetDirectoryName(fromRelativePath)?.Replace('\\', '/') ?? string.Empty;
+        string combined = string.IsNullOrEmpty(directory) ? link : $"{directory}/{link}";
 
-        var parts = new List<string>();
-        foreach (var segment in combined.Split('/'))
+        List<string> parts = new List<string>();
+        foreach (string segment in combined.Split('/'))
         {
             if (segment is "." or "") continue;
             if (segment == "..")

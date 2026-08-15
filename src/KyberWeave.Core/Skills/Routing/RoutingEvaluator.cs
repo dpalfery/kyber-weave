@@ -25,7 +25,7 @@ public sealed class RoutingEvalFile
 
     public static RoutingEvalFile Load(string path)
     {
-        var deserializer = new DeserializerBuilder()
+        IDeserializer deserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
             .Build();
@@ -54,11 +54,11 @@ public sealed class RoutingEvaluator
 
     public RoutingEvalSummary Evaluate(RoutingEvalFile evalFile, SkillSet skills)
     {
-        var results = new List<RoutingCaseResult>();
-        foreach (var c in evalFile.Cases)
+        List<RoutingCaseResult> results = new List<RoutingCaseResult>();
+        foreach (RoutingEvalCase c in evalFile.Cases)
         {
-            var result = _strategy.Route(c.Prompt, skills);
-            var passed = c.ExpectsNoFire
+            RoutingResult result = _strategy.Route(c.Prompt, skills);
+            bool passed = c.ExpectsNoFire
                 ? !result.Fired
                 : result.Fired && string.Equals(result.SelectedSkill, c.Expected, StringComparison.OrdinalIgnoreCase);
             results.Add(new RoutingCaseResult(c, result, passed));

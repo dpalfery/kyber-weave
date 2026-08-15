@@ -48,7 +48,7 @@ public static class SquadSourceLoader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
-        var logicalRoot = Path.GetFullPath(root);
+        string logicalRoot = Path.GetFullPath(root);
         if (!Directory.Exists(logicalRoot))
         {
             SquadSourceValidator.Throw(
@@ -58,18 +58,18 @@ public static class SquadSourceLoader
                 "Provide a directory containing squad.yml.");
         }
 
-        var resolvedRoot = ResolveExistingPath(logicalRoot).FullPath;
-        var manifestFile = ReadSourceFile(
+        string resolvedRoot = ResolveExistingPath(logicalRoot).FullPath;
+        SourceFile manifestFile = ReadSourceFile(
             logicalRoot,
             resolvedRoot,
             "squad.yml",
             "squad.yml",
             "kyber-squad");
-        var manifest = ParseManifest(manifestFile);
+        SquadManifest manifest = ParseManifest(manifestFile);
 
         ValidateSchemaDocuments(logicalRoot, resolvedRoot);
 
-        if (!manifest.Bundles.TryGetValue(manifest.DefaultBundle, out var bundlePath))
+        if (!manifest.Bundles.TryGetValue(manifest.DefaultBundle, out string? bundlePath))
         {
             SquadSourceValidator.Throw(
                 $"Default bundle '{manifest.DefaultBundle}' is not declared in bundles.",
@@ -78,7 +78,7 @@ public static class SquadSourceLoader
                 "Add the default-bundle key to bundles or choose a declared bundle.");
         }
 
-        var bundle = ParseBundle(ReadSourceFile(
+        SquadBundle bundle = ParseBundle(ReadSourceFile(
             logicalRoot,
             resolvedRoot,
             bundlePath,
@@ -93,39 +93,39 @@ public static class SquadSourceLoader
                 "Make the bundle name match its canonical manifest key.");
         }
 
-        var models = ParseModelProfiles(ReadSourceFile(
+        SquadModelProfiles models = ParseModelProfiles(ReadSourceFile(
             logicalRoot,
             resolvedRoot,
             manifest.Profiles.Models,
             manifest.SourcePath,
             manifest.Name));
-        var capabilities = ParseCapabilityProfiles(ReadSourceFile(
+        SquadCapabilityProfiles capabilities = ParseCapabilityProfiles(ReadSourceFile(
             logicalRoot,
             resolvedRoot,
             manifest.Profiles.Capabilities,
             manifest.SourcePath,
             manifest.Name));
-        var fallbacks = ParseFallbackProfiles(ReadSourceFile(
+        SquadFallbackProfiles fallbacks = ParseFallbackProfiles(ReadSourceFile(
             logicalRoot,
             resolvedRoot,
             manifest.Profiles.Fallbacks,
             manifest.SourcePath,
             manifest.Name));
-        var toolchain = ParseToolchain(ReadSourceFile(
+        SquadToolchain toolchain = ParseToolchain(ReadSourceFile(
             logicalRoot,
             resolvedRoot,
             manifest.ToolchainPath,
             manifest.SourcePath,
             manifest.Name));
-        var mcp = ParseMcp(ReadSourceFile(
+        JsonElement mcp = ParseMcp(ReadSourceFile(
             logicalRoot,
             resolvedRoot,
             manifest.McpPath,
             manifest.SourcePath,
             manifest.Name));
 
-        var agents = LoadAgents(logicalRoot, resolvedRoot);
-        var skills = LoadSkills(logicalRoot, resolvedRoot);
+        IReadOnlyList<SquadAgent> agents = LoadAgents(logicalRoot, resolvedRoot);
+        IReadOnlyList<SquadSkill> skills = LoadSkills(logicalRoot, resolvedRoot);
         SquadSourceValidator.Validate(bundle, agents, skills, models, capabilities, fallbacks);
 
         return new SquadSource(
@@ -143,15 +143,15 @@ public static class SquadSourceLoader
 
     private static SquadManifest ParseManifest(SourceFile file)
     {
-        var root = ParseYamlMapping(file);
+        YamlMappingNode root = ParseYamlMapping(file);
         EnsureOnlyFields(
             root,
             ["schema", "name", "version-source", "default-bundle", "bundles", "profiles", "toolchain", "mcp"],
             file.RelativePath);
-        var schema = RequireSchema(root, "schema", ManifestSchema, file.RelativePath);
-        var name = RequireScalar(root, "name", file.RelativePath);
-        var versionSourceNode = RequireNode(root, "version-source", file.RelativePath);
-        var versionSource = RequireScalar(
+        string schema = RequireSchema(root, "schema", ManifestSchema, file.RelativePath);
+        string name = RequireScalar(root, "name", file.RelativePath);
+        YamlNode versionSourceNode = RequireNode(root, "version-source", file.RelativePath);
+        string versionSource = RequireScalar(
             versionSourceNode,
             "version-source",
             file.RelativePath,
@@ -166,11 +166,11 @@ public static class SquadSourceLoader
                 StartLine(versionSourceNode));
         }
 
-        var defaultBundle = RequireScalar(root, "default-bundle", file.RelativePath);
-        var bundles = RequireStringMap(root, "bundles", file.RelativePath);
-        var profileNode = RequireMapping(root, "profiles", file.RelativePath);
+        string defaultBundle = RequireScalar(root, "default-bundle", file.RelativePath);
+        IReadOnlyDictionary<string, string> bundles = RequireStringMap(root, "bundles", file.RelativePath);
+        YamlMappingNode profileNode = RequireMapping(root, "profiles", file.RelativePath);
         EnsureOnlyFields(profileNode, ["models", "capabilities", "fallbacks"], file.RelativePath);
-        var profiles = new SquadProfilePaths(
+        SquadProfilePaths profiles = new SquadProfilePaths(
             RequireScalar(profileNode, "models", file.RelativePath),
             RequireScalar(profileNode, "capabilities", file.RelativePath),
             RequireScalar(profileNode, "fallbacks", file.RelativePath));
@@ -189,7 +189,7 @@ public static class SquadSourceLoader
 
     private static SquadBundle ParseBundle(SourceFile file)
     {
-        var root = ParseYamlMapping(file);
+        YamlMappingNode root = ParseYamlMapping(file);
         EnsureOnlyFields(root, ["schema", "name", "agents", "skills"], file.RelativePath);
         return new SquadBundle(
             RequireSchema(root, "schema", BundleSchema, file.RelativePath),
@@ -201,24 +201,24 @@ public static class SquadSourceLoader
 
     private static SquadModelProfiles ParseModelProfiles(SourceFile file)
     {
-        var root = ParseYamlMapping(file);
+        YamlMappingNode root = ParseYamlMapping(file);
         EnsureOnlyFields(root, ["schema", "profiles"], file.RelativePath);
-        var schema = RequireSchema(root, "schema", ModelProfilesSchema, file.RelativePath);
-        var profilesNode = RequireMapping(root, "profiles", file.RelativePath);
-        var profiles = new SortedDictionary<string, SquadModelProfile>(StringComparer.Ordinal);
+        string schema = RequireSchema(root, "schema", ModelProfilesSchema, file.RelativePath);
+        YamlMappingNode profilesNode = RequireMapping(root, "profiles", file.RelativePath);
+        SortedDictionary<string, SquadModelProfile> profiles = new SortedDictionary<string, SquadModelProfile>(StringComparer.Ordinal);
 
-        foreach (var (name, node) in MappingEntries(profilesNode, file.RelativePath))
+        foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
             if (profiles.ContainsKey(name))
             {
                 ThrowDuplicateKey(name, file.RelativePath);
             }
 
-            var profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
+            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
             EnsureOnlyFields(profile, ModelProfileFields, file.RelativePath);
-            var defaultModel = RequireScalar(profile, "default", file.RelativePath);
-            var harnessModels = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            foreach (var (key, value) in MappingEntries(profile, file.RelativePath))
+            string defaultModel = RequireScalar(profile, "default", file.RelativePath);
+            SortedDictionary<string, string> harnessModels = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            foreach ((string? key, YamlNode? value) in MappingEntries(profile, file.RelativePath))
             {
                 if (!string.Equals(key, "default", StringComparison.Ordinal))
                 {
@@ -234,23 +234,23 @@ public static class SquadSourceLoader
 
     private static SquadCapabilityProfiles ParseCapabilityProfiles(SourceFile file)
     {
-        var root = ParseYamlMapping(file);
+        YamlMappingNode root = ParseYamlMapping(file);
         EnsureOnlyFields(root, ["schema", "capabilities", "profiles"], file.RelativePath);
-        var schema = RequireSchema(root, "schema", CapabilityProfilesSchema, file.RelativePath);
-        var vocabulary = RequireStringSequence(root, "capabilities", file.RelativePath);
+        string schema = RequireSchema(root, "schema", CapabilityProfilesSchema, file.RelativePath);
+        IReadOnlyList<string> vocabulary = RequireStringSequence(root, "capabilities", file.RelativePath);
         EnsureDistinct(vocabulary, "capability", file.RelativePath);
-        var known = vocabulary.ToHashSet(StringComparer.Ordinal);
-        var profilesNode = RequireMapping(root, "profiles", file.RelativePath);
-        var profiles = new SortedDictionary<string, SquadCapabilityProfile>(StringComparer.Ordinal);
+        HashSet<string> known = vocabulary.ToHashSet(StringComparer.Ordinal);
+        YamlMappingNode profilesNode = RequireMapping(root, "profiles", file.RelativePath);
+        SortedDictionary<string, SquadCapabilityProfile> profiles = new SortedDictionary<string, SquadCapabilityProfile>(StringComparer.Ordinal);
 
-        foreach (var (name, node) in MappingEntries(profilesNode, file.RelativePath))
+        foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
-            var profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
+            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
             EnsureOnlyFields(profile, ["permissions"], file.RelativePath);
-            var permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);
-            var permissions = new SortedDictionary<string, SquadPermissionDecision>(StringComparer.Ordinal);
+            YamlMappingNode permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);
+            SortedDictionary<string, SquadPermissionDecision> permissions = new SortedDictionary<string, SquadPermissionDecision>(StringComparer.Ordinal);
 
-            foreach (var (capability, decisionNode) in MappingEntries(permissionsNode, file.RelativePath))
+            foreach ((string? capability, YamlNode? decisionNode) in MappingEntries(permissionsNode, file.RelativePath))
             {
                 if (!known.Contains(capability))
                 {
@@ -262,12 +262,12 @@ public static class SquadSourceLoader
                         StartLine(decisionNode));
                 }
 
-                var decisionText = RequireScalar(
+                string decisionText = RequireScalar(
                     decisionNode,
                     capability,
                     file.RelativePath,
                     nodeIsValue: true);
-                var decision = decisionText switch
+                SquadPermissionDecision decision = decisionText switch
                 {
                     "deny" => SquadPermissionDecision.Deny,
                     "ask" => SquadPermissionDecision.Ask,
@@ -277,7 +277,7 @@ public static class SquadSourceLoader
                 permissions.Add(capability, decision);
             }
 
-            var missingCapability = vocabulary.FirstOrDefault(capability => !permissions.ContainsKey(capability));
+            string? missingCapability = vocabulary.FirstOrDefault(capability => !permissions.ContainsKey(capability));
             if (missingCapability is not null)
             {
                 SquadSourceValidator.Throw(
@@ -296,21 +296,21 @@ public static class SquadSourceLoader
 
     private static SquadFallbackProfiles ParseFallbackProfiles(SourceFile file)
     {
-        var root = ParseYamlMapping(file);
+        YamlMappingNode root = ParseYamlMapping(file);
         EnsureOnlyFields(root, ["schema", "profiles"], file.RelativePath);
-        var schema = RequireSchema(root, "schema", FallbackProfilesSchema, file.RelativePath);
-        var profilesNode = RequireMapping(root, "profiles", file.RelativePath);
-        var profiles = new SortedDictionary<string, SquadFallbackProfile>(StringComparer.Ordinal);
+        string schema = RequireSchema(root, "schema", FallbackProfilesSchema, file.RelativePath);
+        YamlMappingNode profilesNode = RequireMapping(root, "profiles", file.RelativePath);
+        SortedDictionary<string, SquadFallbackProfile> profiles = new SortedDictionary<string, SquadFallbackProfile>(StringComparer.Ordinal);
 
-        foreach (var (name, node) in MappingEntries(profilesNode, file.RelativePath))
+        foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
-            var profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
+            YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
             EnsureOnlyFields(
                 profile,
                 ["no-primary-agent", "no-agent-primitive", "body-source", "output-identity", "shared-identities"],
                 file.RelativePath);
-            var outputIdentity = TryGetMapping(profile, "output-identity", file.RelativePath);
-            var bodySource = TryGetScalar(profile, "body-source", file.RelativePath) ?? "agent";
+            YamlMappingNode? outputIdentity = TryGetMapping(profile, "output-identity", file.RelativePath);
+            string bodySource = TryGetScalar(profile, "body-source", file.RelativePath) ?? "agent";
             RequireLiteral(
                 bodySource,
                 "body-source",
@@ -339,7 +339,7 @@ public static class SquadSourceLoader
         string sourcePath)
     {
         EnsureOnlyFields(mapping, ["unoccupied", "shared", "collision", "prefix"], sourcePath);
-        var identity = new SquadFallbackOutputIdentity(
+        SquadFallbackOutputIdentity identity = new SquadFallbackOutputIdentity(
             RequireScalar(mapping, "unoccupied", sourcePath),
             RequireScalar(mapping, "shared", sourcePath),
             RequireScalar(mapping, "collision", sourcePath),
@@ -373,12 +373,12 @@ public static class SquadSourceLoader
 
     private static SquadToolchain ParseToolchain(SourceFile file)
     {
-        var root = ParseYamlMapping(file);
+        YamlMappingNode root = ParseYamlMapping(file);
         EnsureOnlyFields(root, ["schema", "required-features", "validated-release"], file.RelativePath);
-        var schema = RequireSchema(root, "schema", ToolchainSchema, file.RelativePath);
-        var requiredFeatures = RequireStringSequence(root, "required-features", file.RelativePath);
+        string schema = RequireSchema(root, "schema", ToolchainSchema, file.RelativePath);
+        IReadOnlyList<string> requiredFeatures = RequireStringSequence(root, "required-features", file.RelativePath);
         EnsureDistinct(requiredFeatures, "required feature", file.RelativePath);
-        var releaseNode = RequireNode(root, "validated-release", file.RelativePath);
+        YamlNode releaseNode = RequireNode(root, "validated-release", file.RelativePath);
         JsonElement? release = IsYamlNull(releaseNode)
             ? null
             : JsonSerializer.SerializeToElement(ToPlainValue(releaseNode));
@@ -389,14 +389,14 @@ public static class SquadSourceLoader
     {
         try
         {
-            using var document = JsonDocument.Parse(file.Content);
-            var root = document.RootElement;
+            using JsonDocument document = JsonDocument.Parse(file.Content);
+            JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
                 ThrowJson(file.RelativePath, "MCP configuration must be a JSON object.");
             }
 
-            foreach (var property in root.EnumerateObject())
+            foreach (JsonProperty property in root.EnumerateObject())
             {
                 if (!string.Equals(property.Name, "mcpServers", StringComparison.Ordinal))
                 {
@@ -406,13 +406,13 @@ public static class SquadSourceLoader
                 }
             }
 
-            if (!root.TryGetProperty("mcpServers", out var servers) ||
+            if (!root.TryGetProperty("mcpServers", out JsonElement servers) ||
                 servers.ValueKind != JsonValueKind.Object)
             {
                 ThrowJson(file.RelativePath, "MCP configuration requires an object field 'mcpServers'.");
             }
 
-            foreach (var server in servers.EnumerateObject())
+            foreach (JsonProperty server in servers.EnumerateObject())
             {
                 ValidateMcpServer(server, file.RelativePath);
             }
@@ -434,7 +434,7 @@ public static class SquadSourceLoader
     private static IReadOnlyList<SquadAgent> LoadAgents(string logicalRoot, string resolvedRoot)
     {
         const string directory = "agents";
-        var logicalDirectory = Path.Combine(logicalRoot, directory);
+        string logicalDirectory = Path.Combine(logicalRoot, directory);
         if (!Directory.Exists(logicalDirectory))
         {
             return [];
@@ -458,22 +458,22 @@ public static class SquadSourceLoader
 
     private static SquadAgent ParseAgent(SourceFile file)
     {
-        var frontmatter = ParseFrontmatter(file);
-        var root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml));
+        Frontmatter frontmatter = ParseFrontmatter(file);
+        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml));
         EnsureOnlyFields(
             root,
             ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "delegates-to", "fallback", "aliases"],
             file.RelativePath);
 
-        var invocationText = RequireScalar(root, "invocation", file.RelativePath);
-        var invocation = invocationText switch
+        string invocationText = RequireScalar(root, "invocation", file.RelativePath);
+        SquadInvocation invocation = invocationText switch
         {
             "primary" => SquadInvocation.Primary,
             "subagent" => SquadInvocation.Subagent,
             _ => ThrowInvalidInvocation(invocationText, file.RelativePath)
         };
-        var delegates = RequireStringSequence(root, "delegates-to", file.RelativePath);
-        var aliases = RequireStringSequence(root, "aliases", file.RelativePath);
+        IReadOnlyList<string> delegates = RequireStringSequence(root, "delegates-to", file.RelativePath);
+        IReadOnlyList<string> aliases = RequireStringSequence(root, "aliases", file.RelativePath);
         EnsureDistinct(delegates, "delegated agent", file.RelativePath);
         EnsureDistinct(aliases, "alias", file.RelativePath);
 
@@ -504,25 +504,25 @@ public static class SquadSourceLoader
     private static IReadOnlyList<SquadSkill> LoadSkills(string logicalRoot, string resolvedRoot)
     {
         const string directory = "skills";
-        var logicalDirectory = Path.Combine(logicalRoot, directory);
+        string logicalDirectory = Path.Combine(logicalRoot, directory);
         if (!Directory.Exists(logicalDirectory))
         {
             return [];
         }
 
         EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, isDirectory: true);
-        var skills = new List<SquadSkill>();
-        foreach (var skillDirectory in Directory.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
+        List<SquadSkill> skills = new List<SquadSkill>();
+        foreach (string? skillDirectory in Directory.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
         {
-            var relativeDirectory = ToRelativePath(logicalRoot, skillDirectory);
+            string relativeDirectory = ToRelativePath(logicalRoot, skillDirectory);
             EnsureDiscoveredPath(logicalRoot, resolvedRoot, relativeDirectory, isDirectory: true);
-            var skillPath = Path.Combine(skillDirectory, "SKILL.md");
+            string skillPath = Path.Combine(skillDirectory, "SKILL.md");
             if (!File.Exists(skillPath))
             {
                 continue;
             }
 
-            var relativePath = ToRelativePath(logicalRoot, skillPath);
+            string relativePath = ToRelativePath(logicalRoot, skillPath);
             skills.Add(ParseSkill(ReadSourceFile(
                 logicalRoot,
                 resolvedRoot,
@@ -540,8 +540,8 @@ public static class SquadSourceLoader
 
     private static SquadSkill ParseSkill(SourceFile file)
     {
-        var frontmatter = ParseFrontmatter(file);
-        var root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml));
+        Frontmatter frontmatter = ParseFrontmatter(file);
+        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml));
         EnsureOnlyFields(
             root,
             ["name", "description", "license", "compatibility", "metadata", "allowed-tools"],
@@ -555,9 +555,9 @@ public static class SquadSourceLoader
 
     private static void ValidateSchemaDocuments(string logicalRoot, string resolvedRoot)
     {
-        foreach (var relativePath in RequiredSchemaFiles)
+        foreach (string relativePath in RequiredSchemaFiles)
         {
-            var file = ReadSourceFile(
+            SourceFile file = ReadSourceFile(
                 logicalRoot,
                 resolvedRoot,
                 relativePath,
@@ -565,7 +565,7 @@ public static class SquadSourceLoader
                 relativePath);
             try
             {
-                using var document = JsonDocument.Parse(file.Content);
+                using JsonDocument document = JsonDocument.Parse(file.Content);
                 if (document.RootElement.ValueKind != JsonValueKind.Object)
                 {
                     SquadSourceValidator.Throw(
@@ -594,11 +594,11 @@ public static class SquadSourceLoader
 
     private static void ValidateFallbackProfilesSchemaIdentity(JsonElement root, string relativePath)
     {
-        if (!root.TryGetProperty("$id", out var idElement) ||
+        if (!root.TryGetProperty("$id", out JsonElement idElement) ||
             idElement.ValueKind != JsonValueKind.String ||
             !string.Equals(idElement.GetString(), FallbackProfilesSchemaId, StringComparison.Ordinal))
         {
-            var actual = idElement.ValueKind == JsonValueKind.String
+            string actual = idElement.ValueKind == JsonValueKind.String
                 ? idElement.GetString() ?? "null"
                 : "missing or non-string";
             SquadSourceValidator.Throw(
@@ -625,10 +625,10 @@ public static class SquadSourceLoader
                 "Use a relative path that stays inside the Squad product root.");
         }
 
-        var platformPath = relativePath
+        string platformPath = relativePath
             .Replace('/', Path.DirectorySeparatorChar)
             .Replace('\\', Path.DirectorySeparatorChar);
-        var logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, platformPath));
+        string logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, platformPath));
         if (!IsWithin(logicalRoot, logicalPath))
         {
             SquadSourceValidator.Throw(
@@ -640,7 +640,7 @@ public static class SquadSourceLoader
 
         if (!File.Exists(logicalPath))
         {
-            var hint = relativePath.StartsWith("schemas/", StringComparison.Ordinal)
+            string hint = relativePath.StartsWith("schemas/", StringComparison.Ordinal)
                 ? "Ensure the required schema file exists inside the Squad product root."
                 : "Ensure the referenced file exists inside the Squad product root.";
             SquadSourceValidator.Throw(
@@ -650,10 +650,10 @@ public static class SquadSourceLoader
                 hint);
         }
 
-        var resolved = ResolveExistingPath(logicalPath);
+        ResolvedPath resolved = ResolveExistingPath(logicalPath);
         if (!IsWithin(resolvedRoot, resolved.FullPath))
         {
-            var mechanism = resolved.EncounteredSymbolicLink ? "symbolic link" : "resolved path";
+            string mechanism = resolved.EncounteredSymbolicLink ? "symbolic link" : "resolved path";
             SquadSourceValidator.Throw(
                 $"Source path '{relativePath}' uses a {mechanism} whose target is outside the Squad product root.",
                 subject,
@@ -661,11 +661,11 @@ public static class SquadSourceLoader
                 "Keep every source and symbolic-link target inside the Squad product root.");
         }
 
-        var portablePath = ToPortablePath(Path.GetRelativePath(logicalRoot, logicalPath));
+        string portablePath = ToPortablePath(Path.GetRelativePath(logicalRoot, logicalPath));
         try
         {
-            var bytes = File.ReadAllBytes(logicalPath);
-            var content = StrictUtf8.GetString(bytes);
+            byte[] bytes = File.ReadAllBytes(logicalPath);
+            string content = StrictUtf8.GetString(bytes);
             if (content.Length > 0 && content[0] == '\uFEFF')
             {
                 content = content[1..];
@@ -690,16 +690,16 @@ public static class SquadSourceLoader
         string relativePath,
         bool isDirectory)
     {
-        var logicalPath = Path.Combine(
+        string logicalPath = Path.Combine(
             logicalRoot,
             relativePath.Replace('/', Path.DirectorySeparatorChar));
-        var exists = isDirectory ? Directory.Exists(logicalPath) : File.Exists(logicalPath);
+        bool exists = isDirectory ? Directory.Exists(logicalPath) : File.Exists(logicalPath);
         if (!exists)
         {
             return;
         }
 
-        var resolved = ResolveExistingPath(logicalPath);
+        ResolvedPath resolved = ResolveExistingPath(logicalPath);
         if (!IsWithin(resolvedRoot, resolved.FullPath))
         {
             SquadSourceValidator.Throw(
@@ -712,15 +712,15 @@ public static class SquadSourceLoader
 
     private static ResolvedPath ResolveExistingPath(string path)
     {
-        var fullPath = Path.GetFullPath(path);
-        var root = Path.GetPathRoot(fullPath)
+        string fullPath = Path.GetFullPath(path);
+        string root = Path.GetPathRoot(fullPath)
                    ?? throw new InvalidOperationException($"Path '{path}' has no filesystem root.");
-        var current = root;
-        var encounteredLink = false;
-        var segments = fullPath[root.Length..]
+        string current = root;
+        bool encounteredLink = false;
+        string[] segments = fullPath[root.Length..]
             .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
-        foreach (var segment in segments)
+        foreach (string segment in segments)
         {
             current = Path.Combine(current, segment);
             FileSystemInfo info = Directory.Exists(current)
@@ -731,7 +731,7 @@ public static class SquadSourceLoader
                 continue;
             }
 
-            var target = info.ResolveLinkTarget(returnFinalTarget: true);
+            FileSystemInfo? target = info.ResolveLinkTarget(returnFinalTarget: true);
             if (target is not null)
             {
                 encounteredLink = true;
@@ -753,7 +753,7 @@ public static class SquadSourceLoader
                 "Add a YAML frontmatter block delimited by '---' lines.");
         }
 
-        var closingDelimiter = file.Content.IndexOf("\n---\n", 4, StringComparison.Ordinal);
+        int closingDelimiter = file.Content.IndexOf("\n---\n", 4, StringComparison.Ordinal);
         if (closingDelimiter < 0)
         {
             SquadSourceValidator.Throw(
@@ -772,7 +772,7 @@ public static class SquadSourceLoader
     {
         try
         {
-            var stream = new YamlStream();
+            YamlStream stream = new YamlStream();
             stream.Load(new StringReader(file.Content));
             if (stream.Documents.Count != 1 || stream.Documents[0].RootNode is not YamlMappingNode)
             {
@@ -803,7 +803,7 @@ public static class SquadSourceLoader
         string expected,
         string sourcePath)
     {
-        var actual = RequireScalar(mapping, field, sourcePath);
+        string actual = RequireScalar(mapping, field, sourcePath);
         if (!string.Equals(actual, expected, StringComparison.Ordinal))
         {
             SquadSourceValidator.Throw(
@@ -870,8 +870,8 @@ public static class SquadSourceLoader
 
     private static YamlNode RequireNode(YamlMappingNode mapping, string field, string sourcePath)
     {
-        var key = new YamlScalarNode(field);
-        if (!mapping.Children.TryGetValue(key, out var node))
+        YamlScalarNode key = new YamlScalarNode(field);
+        if (!mapping.Children.TryGetValue(key, out YamlNode? node))
         {
             SquadSourceValidator.Throw(
                 $"Required field '{field}' is missing.",
@@ -887,7 +887,7 @@ public static class SquadSourceLoader
         YamlMappingNode mapping,
         string field,
         string sourcePath) =>
-        mapping.Children.TryGetValue(new YamlScalarNode(field), out var node)
+        mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
             ? RequireScalar(node, field, sourcePath, nodeIsValue: true)
             : null;
 
@@ -895,7 +895,7 @@ public static class SquadSourceLoader
         YamlMappingNode mapping,
         string field,
         string sourcePath) =>
-        mapping.Children.TryGetValue(new YamlScalarNode(field), out var node)
+        mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
             ? RequireMapping(node, field, sourcePath, nodeIsValue: true)
             : null;
 
@@ -904,7 +904,7 @@ public static class SquadSourceLoader
         string field,
         string sourcePath)
     {
-        if (!mapping.Children.TryGetValue(new YamlScalarNode(field), out var node))
+        if (!mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node))
         {
             return null;
         }
@@ -919,7 +919,7 @@ public static class SquadSourceLoader
                 StartLine(node));
         }
 
-        var values = ((YamlSequenceNode)node).Children
+        string[] values = ((YamlSequenceNode)node).Children
             .Select(item => RequireScalar(item, field, sourcePath, nodeIsValue: true))
             .ToArray();
         EnsureDistinct(values, field, sourcePath);
@@ -931,7 +931,7 @@ public static class SquadSourceLoader
         string field,
         string sourcePath)
     {
-        var node = RequireNode(mapping, field, sourcePath);
+        YamlNode node = RequireNode(mapping, field, sourcePath);
         if (node is not YamlSequenceNode)
         {
             SquadSourceValidator.Throw(
@@ -952,9 +952,9 @@ public static class SquadSourceLoader
         string field,
         string sourcePath)
     {
-        var child = RequireMapping(mapping, field, sourcePath);
-        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, node) in MappingEntries(child, sourcePath))
+        YamlMappingNode child = RequireMapping(mapping, field, sourcePath);
+        SortedDictionary<string, string> result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string? key, YamlNode? node) in MappingEntries(child, sourcePath))
         {
             result.Add(key, RequireScalar(node, key, sourcePath, nodeIsValue: true));
         }
@@ -966,7 +966,7 @@ public static class SquadSourceLoader
         YamlMappingNode mapping,
         string sourcePath)
     {
-        foreach (var pair in mapping.Children)
+        foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
         {
             if (pair.Key is not YamlScalarNode keyNode || string.IsNullOrWhiteSpace(keyNode.Value))
             {
@@ -987,8 +987,8 @@ public static class SquadSourceLoader
         IEnumerable<string> allowed,
         string sourcePath)
     {
-        var allowedSet = allowed.ToHashSet(StringComparer.Ordinal);
-        foreach (var (field, node) in MappingEntries(mapping, sourcePath))
+        HashSet<string> allowedSet = allowed.ToHashSet(StringComparer.Ordinal);
+        foreach ((string? field, YamlNode? node) in MappingEntries(mapping, sourcePath))
         {
             if (!allowedSet.Contains(field))
             {
@@ -1007,8 +1007,8 @@ public static class SquadSourceLoader
         string kind,
         string sourcePath)
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var value in values)
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string value in values)
         {
             if (!seen.Add(value))
             {
@@ -1026,7 +1026,7 @@ public static class SquadSourceLoader
         string field,
         string sourcePath)
     {
-        var decision = RequireScalar(mapping, field, sourcePath);
+        string decision = RequireScalar(mapping, field, sourcePath);
         if (decision is not ("skill" or "omit"))
         {
             SquadSourceValidator.Throw(
@@ -1102,7 +1102,7 @@ public static class SquadSourceLoader
             ThrowJson(sourcePath, $"MCP server '{server.Name}' must be a JSON object.");
         }
 
-        foreach (var property in server.Value.EnumerateObject())
+        foreach (JsonProperty property in server.Value.EnumerateObject())
         {
             if (property.Name is not ("command" or "args"))
             {
@@ -1110,14 +1110,14 @@ public static class SquadSourceLoader
             }
         }
 
-        if (!server.Value.TryGetProperty("command", out var command) ||
+        if (!server.Value.TryGetProperty("command", out JsonElement command) ||
             command.ValueKind != JsonValueKind.String ||
             string.IsNullOrWhiteSpace(command.GetString()))
         {
             ThrowJson(sourcePath, $"MCP server '{server.Name}' requires a non-empty string command.");
         }
 
-        if (!server.Value.TryGetProperty("args", out var args) ||
+        if (!server.Value.TryGetProperty("args", out JsonElement args) ||
             args.ValueKind != JsonValueKind.Array ||
             args.EnumerateArray().Any(item => item.ValueKind != JsonValueKind.String))
         {
@@ -1150,7 +1150,7 @@ public static class SquadSourceLoader
 
     private static bool IsWithin(string root, string candidate)
     {
-        var relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(candidate));
+        string relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(candidate));
         return !Path.IsPathRooted(relative) &&
                !string.Equals(relative, "..", StringComparison.Ordinal) &&
                !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) &&
@@ -1172,8 +1172,8 @@ public static class SquadSourceLoader
 
     private static bool SourceIdentityMatches(string identity, string sourcePath, bool isSkill)
     {
-        var platformPath = sourcePath.Replace('/', Path.DirectorySeparatorChar);
-        var sourceIdentity = isSkill
+        string platformPath = sourcePath.Replace('/', Path.DirectorySeparatorChar);
+        string? sourceIdentity = isSkill
             ? Path.GetFileName(Path.GetDirectoryName(platformPath))
             : Path.GetFileNameWithoutExtension(platformPath);
         return string.Equals(identity, sourceIdentity, StringComparison.Ordinal);

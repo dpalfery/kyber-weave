@@ -18,7 +18,7 @@ public static class AnalysisCacheSafety
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        var ignorePath = Path.Combine(
+        string ignorePath = Path.Combine(
             Path.GetFullPath(repositoryRoot),
             ".kyber-weave",
             ".gitignore");
@@ -40,8 +40,8 @@ public static class AnalysisCacheSafety
 
     private static bool HasEffectiveCacheIgnore(string ignorePath)
     {
-        var protectedByExactEntry = false;
-        foreach (var line in File.ReadLines(ignorePath))
+        bool protectedByExactEntry = false;
+        foreach (string line in File.ReadLines(ignorePath))
         {
             if (StringComparer.Ordinal.Equals(line, CacheIgnoreEntry))
             {
@@ -91,7 +91,7 @@ public static class AnalysisCacheSafety
 
     private static bool HasTrackedCacheEntry(string repositoryRoot)
     {
-        var startInfo = new ProcessStartInfo("git")
+        ProcessStartInfo startInfo = new ProcessStartInfo("git")
         {
             WorkingDirectory = repositoryRoot,
             RedirectStandardInput = true,
@@ -106,7 +106,7 @@ public static class AnalysisCacheSafety
 
         try
         {
-            var result = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
             return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
         }
         catch (Win32Exception)

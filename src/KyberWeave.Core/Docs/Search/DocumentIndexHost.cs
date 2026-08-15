@@ -93,12 +93,12 @@ public sealed class DocumentIndexHost
     /// <summary>The current index, rebuilding whichever half has gone stale.</summary>
     public DocumentIndex Current()
     {
-        var docsStamp = ComputeDocsStamp();
-        var codeGraphStamp = ComputeCodeGraphStamp();
+        long docsStamp = ComputeDocsStamp();
+        long codeGraphStamp = ComputeCodeGraphStamp();
 
         lock (_gate)
         {
-            var corpusStale = _corpus is null || docsStamp != _docsStamp;
+            bool corpusStale = _corpus is null || docsStamp != _docsStamp;
 
             if (corpusStale)
             {
@@ -131,35 +131,35 @@ public sealed class DocumentIndexHost
     internal long ComputeDocsStamp()
     {
         long stamp = 17;
-        var count = 0;
+        int count = 0;
         long newest = 0;
-        var visited = new HashSet<string>(DocsRootPath.PathComparer);
+        HashSet<string> visited = new HashSet<string>(DocsRootPath.PathComparer);
 
-        foreach (var relativeRoot in _docsRelativeRoots)
+        foreach (string relativeRoot in _docsRelativeRoots)
         {
-            var docsRoot = relativeRoot == DocsRootPath.RepositoryRoot
+            string docsRoot = relativeRoot == DocsRootPath.RepositoryRoot
                 ? _repoRoot
                 : Path.Combine(_repoRoot, relativeRoot.Replace('/', Path.DirectorySeparatorChar));
             if (!Directory.Exists(docsRoot)) continue;
 
-            foreach (var file in Directory.EnumerateFiles(docsRoot, "*.md", SearchOption.AllDirectories))
+            foreach (string file in Directory.EnumerateFiles(docsRoot, "*.md", SearchOption.AllDirectories))
             {
                 if (!visited.Add(file)) continue;
 
                 count++;
-                var ticks = File.GetLastWriteTimeUtc(file).Ticks;
+                long ticks = File.GetLastWriteTimeUtc(file).Ticks;
                 if (ticks > newest) newest = ticks;
             }
         }
 
         if (_catalogRelativePath is not null)
         {
-            var catalog = Path.Combine(
+            string catalog = Path.Combine(
                 _repoRoot, _catalogRelativePath.Replace('/', Path.DirectorySeparatorChar));
             if (File.Exists(catalog) && visited.Add(catalog))
             {
                 count++;
-                var ticks = File.GetLastWriteTimeUtc(catalog).Ticks;
+                long ticks = File.GetLastWriteTimeUtc(catalog).Ticks;
                 if (ticks > newest) newest = ticks;
             }
         }
@@ -173,10 +173,10 @@ public sealed class DocumentIndexHost
 
     private long ComputeCodeGraphStamp()
     {
-        var db = Path.Combine(_repoRoot, ".codegraph", "codegraph.db");
+        string db = Path.Combine(_repoRoot, ".codegraph", "codegraph.db");
         if (!File.Exists(db)) return 0;
 
-        var info = new FileInfo(db);
+        FileInfo info = new FileInfo(db);
         return (info.LastWriteTimeUtc.Ticks * 31) + info.Length;
     }
 }

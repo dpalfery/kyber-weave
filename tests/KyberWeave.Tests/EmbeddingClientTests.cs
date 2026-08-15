@@ -20,9 +20,9 @@ namespace KyberWeave.Tests;
 public sealed class EmbeddingClientTests
 {
     [Fact]
-    public void Generate_WithOrderedBatchesAndOptionalSettings_MapsByIndexNormalizesAndAggregatesUsage()
+    public void GenerateWithOrderedBatchesAndOptionalSettingsMapsByIndexNormalizesAndAggregatesUsage()
     {
-        using var handler = new RecordingHandler(
+        using RecordingHandler handler = new RecordingHandler(
             JsonResponse("""
                 {
                   "data": [
@@ -40,8 +40,8 @@ public sealed class EmbeddingClientTests
                   "usage": { "prompt_tokens": 5, "total_tokens": 5 }
                 }
                 """));
-        var environmentReads = new List<string>();
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        List<string> environmentReads = new List<string>();
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
             name =>
@@ -49,14 +49,14 @@ public sealed class EmbeddingClientTests
                 environmentReads.Add(name);
                 return "secret-local-token";
             });
-        var config = Config(
+        DocsAnalysisEmbeddingConfig config = Config(
             endpoint: "http://localhost:1234/v1/embeddings",
             batchSize: 2,
             dimensions: 2,
             apiKeyEnv: "LOCAL_EMBEDDING_TOKEN");
-        var keys = new[] { Key("alpha"), Key("beta"), Key("gamma") };
+        EmbeddingCacheKey[] keys = new[] { Key("alpha"), Key("beta"), Key("gamma") };
 
-        var result = generator.Generate(keys, ["first input", "second input", "third input"], config);
+        EmbeddingGenerationResult result = generator.Generate(keys, ["first input", "second input", "third input"], config);
 
         Assert.Equal(2, handler.Requests.Count);
         Assert.Equal(["first input", "second input"], Inputs(handler.Requests[0].Body));
@@ -69,7 +69,7 @@ public sealed class EmbeddingClientTests
             Assert.Equal("Bearer", request.Authorization?.Scheme);
             Assert.Equal("secret-local-token", request.Authorization?.Parameter);
             Assert.True(request.CanBeCanceled);
-            using var json = JsonDocument.Parse(request.Body);
+            using JsonDocument json = JsonDocument.Parse(request.Body);
             Assert.Equal("text-embedding-local", json.RootElement.GetProperty("model").GetString());
             Assert.Equal("float", json.RootElement.GetProperty("encoding_format").GetString());
             Assert.Equal(2, json.RootElement.GetProperty("dimensions").GetInt32());
@@ -88,19 +88,19 @@ public sealed class EmbeddingClientTests
     [InlineData("http://127.9.8.7:1234/v1/embeddings", "127.9.8.7")]
     [InlineData("http://[::1]:1234/v1/embeddings", "::1")]
     [InlineData("http://[::ffff:127.9.8.7]:1234/v1/embeddings", "::ffff:127.9.8.7")]
-    public void Generate_WhenEveryResolvedAddressIsLoopback_AcceptsSupportedLoopbackForms(
+    public void GenerateWhenEveryResolvedAddressIsLoopbackAcceptsSupportedLoopbackForms(
         string endpoint,
         string resolvedAddress)
     {
-        using var handler = new RecordingHandler(JsonResponse("""
+        using RecordingHandler handler = new RecordingHandler(JsonResponse("""
             { "data": [{ "index": 0, "embedding": [1, 0] }] }
             """));
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Parse(resolvedAddress)),
             _ => null);
 
-        var result = generator.Generate(
+        EmbeddingGenerationResult result = generator.Generate(
             [Key("loopback")],
             ["local-only input"],
             Config(endpoint: endpoint));
@@ -110,17 +110,17 @@ public sealed class EmbeddingClientTests
     }
 
     [Fact]
-    public void Constructor_DisablesHttpClientTimeoutSoConfigTimeoutIsAuthoritative()
+    public void ConstructorDisablesHttpClientTimeoutSoConfigTimeoutIsAuthoritative()
     {
-        using var handler = new RecordingHandler(JsonResponse("""
+        using RecordingHandler handler = new RecordingHandler(JsonResponse("""
             { "data": [{ "index": 0, "embedding": [1, 0] }] }
             """));
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
             _ => null);
 
-        var client = typeof(OpenAiCompatibleEmbeddingGenerator)
+        HttpClient? client = typeof(OpenAiCompatibleEmbeddingGenerator)
             .GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.GetValue(generator) as HttpClient;
 
@@ -129,9 +129,9 @@ public sealed class EmbeddingClientTests
     }
 
     [Fact]
-    public void LoadConfig_WhenEndpointIsIpv4Mapped127Slash8_AcceptsItAsLoopback()
+    public void LoadConfigWhenEndpointIsIpv4Mapped127Slash8AcceptsItAsLoopback()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
             docs-analysis:
               embeddings:
                 mode: prefer
@@ -145,40 +145,40 @@ public sealed class EmbeddingClientTests
     }
 
     [Fact]
-    public void Generate_WithoutOptionalDimensionsOrApiKey_OmitsBothFromTheRequest()
+    public void GenerateWithoutOptionalDimensionsOrApiKeyOmitsBothFromTheRequest()
     {
-        using var handler = new RecordingHandler(JsonResponse("""
+        using RecordingHandler handler = new RecordingHandler(JsonResponse("""
             {
               "data": [{ "index": 0, "embedding": [1, 0] }]
             }
             """));
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
             _ => throw new Xunit.Sdk.XunitException("No environment variable should be read."));
-        var config = Config(dimensions: null, apiKeyEnv: null);
+        DocsAnalysisEmbeddingConfig config = Config(dimensions: null, apiKeyEnv: null);
 
-        var result = generator.Generate([Key("only", dimensions: null)], ["only input"], config);
+        EmbeddingGenerationResult result = generator.Generate([Key("only", dimensions: null)], ["only input"], config);
 
-        var request = Assert.Single(handler.Requests);
+        CapturedRequest request = Assert.Single(handler.Requests);
         Assert.Null(request.Authorization);
-        using var json = JsonDocument.Parse(request.Body);
+        using JsonDocument json = JsonDocument.Parse(request.Body);
         Assert.False(json.RootElement.TryGetProperty("dimensions", out _));
         Assert.Equal(0, result.Usage.PromptTokens);
         Assert.Equal(0, result.Usage.TotalTokens);
     }
 
     [Fact]
-    public void Generate_WhenAnyResolvedAddressIsNotLoopback_RejectsBeforeSending()
+    public void GenerateWhenAnyResolvedAddressIsNotLoopbackRejectsBeforeSending()
     {
-        using var handler = new RecordingHandler(JsonResponse("{}"));
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using RecordingHandler handler = new RecordingHandler(JsonResponse("{}"));
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback, IPAddress.Parse("203.0.113.9")),
             _ => null);
-        var config = Config(endpoint: "http://embedding.test:1234/v1/embeddings");
+        DocsAnalysisEmbeddingConfig config = Config(endpoint: "http://embedding.test:1234/v1/embeddings");
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             generator.Generate([Key("unsafe")], ["must stay local"], config));
 
         Assert.Contains("loopback", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -189,16 +189,16 @@ public sealed class EmbeddingClientTests
     [InlineData("/v1/embeddings")]
     [InlineData("ftp://127.0.0.1/v1/embeddings")]
     [InlineData("http://192.0.2.8/v1/embeddings")]
-    public void Generate_WhenEndpointIsNotAbsoluteLoopbackHttp_RejectsBeforeSending(string endpoint)
+    public void GenerateWhenEndpointIsNotAbsoluteLoopbackHttpRejectsBeforeSending(string endpoint)
     {
-        using var handler = new RecordingHandler(JsonResponse("{}"));
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using RecordingHandler handler = new RecordingHandler(JsonResponse("{}"));
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Parse("192.0.2.8")),
             _ => null);
-        var config = Config(new Uri(endpoint, UriKind.RelativeOrAbsolute));
+        DocsAnalysisEmbeddingConfig config = Config(new Uri(endpoint, UriKind.RelativeOrAbsolute));
 
-        var exception = Assert.ThrowsAny<Exception>(() =>
+        Exception exception = Assert.ThrowsAny<Exception>(() =>
             generator.Generate([Key("unsafe")], ["must stay local"], config));
 
         Assert.True(
@@ -208,19 +208,19 @@ public sealed class EmbeddingClientTests
     }
 
     [Fact]
-    public void Generate_WhenEndpointRedirects_RejectsTheRedirectWithoutFollowingIt()
+    public void GenerateWhenEndpointRedirectsRejectsTheRedirectWithoutFollowingIt()
     {
-        using var redirect = new HttpResponseMessage(HttpStatusCode.Redirect)
+        using HttpResponseMessage redirect = new HttpResponseMessage(HttpStatusCode.Redirect)
         {
             Headers = { Location = new Uri("https://example.com/v1/embeddings") }
         };
-        using var handler = new RecordingHandler(redirect);
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using RecordingHandler handler = new RecordingHandler(redirect);
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
             _ => null);
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             generator.Generate([Key("redirect")], ["never forward this text"], Config()));
 
         Assert.Contains("redirect", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -229,17 +229,17 @@ public sealed class EmbeddingClientTests
 
     [Theory]
     [MemberData(nameof(InvalidResponses))]
-    public void Generate_WhenResponseIndicesOrVectorsAreInvalid_RejectsTheWholeBatch(
+    public void GenerateWhenResponseIndicesOrVectorsAreInvalidRejectsTheWholeBatch(
         string response,
         string expectedMessage)
     {
-        using var handler = new RecordingHandler(JsonResponse(response));
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using RecordingHandler handler = new RecordingHandler(JsonResponse(response));
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
             _ => null);
 
-        var exception = Assert.Throws<InvalidDataException>(() =>
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() =>
             generator.Generate(
                 [Key("left"), Key("right")],
                 ["left input", "right input"],
@@ -306,18 +306,18 @@ public sealed class EmbeddingClientTests
     };
 
     [Fact]
-    public void Generate_WhenProviderFails_DoesNotExposeTheBearerToken()
+    public void GenerateWhenProviderFailsDoesNotExposeTheBearerToken()
     {
-        using var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        using RecordingHandler handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.Unauthorized)
         {
             Content = new StringContent("provider rejected credentials", Encoding.UTF8, "text/plain")
         });
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
             _ => "do-not-disclose-this-token");
 
-        var exception = Assert.Throws<InvalidOperationException>(() => generator.Generate(
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => generator.Generate(
             [Key("failure")],
             ["input"],
             Config(apiKeyEnv: "LOCAL_EMBEDDING_TOKEN")));
@@ -330,13 +330,13 @@ public sealed class EmbeddingClientTests
     }
 
     [Fact]
-    public void Resolve_WhenModeIsOff_NeverReadsCacheOrInvokesProvider()
+    public void ResolveWhenModeIsOffNeverReadsCacheOrInvokesProvider()
     {
-        var generator = new RecordingGenerator();
-        var persistence = new RecordingPersistence(isAvailable: true);
-        var coordinator = new EmbeddingCoordinator(generator, persistence);
+        RecordingGenerator generator = new RecordingGenerator();
+        RecordingPersistence persistence = new RecordingPersistence(isAvailable: true);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(generator, persistence);
 
-        var result = coordinator.Resolve(
+        EmbeddingResolutionResult result = coordinator.Resolve(
             [new EmbeddingWorkItem("context", "input")],
             Config(mode: DocsAnalysisEmbeddingMode.Off));
 
@@ -351,19 +351,19 @@ public sealed class EmbeddingClientTests
     [Theory]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, Severity.Warning)]
     [InlineData(DocsAnalysisEmbeddingMode.Required, Severity.Error)]
-    public void Resolve_WhenPersistenceIsUnsafe_ReportsModeSeverityAndNeverInvokesProvider(
+    public void ResolveWhenPersistenceIsUnsafeReportsModeSeverityAndNeverInvokesProvider(
         DocsAnalysisEmbeddingMode mode,
         Severity severity)
     {
-        var generator = new RecordingGenerator();
-        var persistence = new RecordingPersistence(isAvailable: false);
-        var coordinator = new EmbeddingCoordinator(generator, persistence);
+        RecordingGenerator generator = new RecordingGenerator();
+        RecordingPersistence persistence = new RecordingPersistence(isAvailable: false);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(generator, persistence);
 
-        var result = coordinator.Resolve(
+        EmbeddingResolutionResult result = coordinator.Resolve(
             [new EmbeddingWorkItem("context", "input")],
             Config(mode: mode));
 
-        var diagnostic = Assert.Single(result.Diagnostics.Items);
+        Diagnostic diagnostic = Assert.Single(result.Diagnostics.Items);
         Assert.Equal(DocumentationAnalyzer.EmbeddingUnavailableRuleCode, diagnostic.Code);
         Assert.Equal(severity, diagnostic.Severity);
         Assert.Empty(result.Embeddings);
@@ -372,20 +372,20 @@ public sealed class EmbeddingClientTests
     }
 
     [Fact]
-    public void Resolve_WithPartialCacheHit_RequestsOnlyMissesAndPreservesInputOrder()
+    public void ResolveWithPartialCacheHitRequestsOnlyMissesAndPreservesInputOrder()
     {
-        var generator = new RecordingGenerator(providerFingerprint: "provider-a");
-        var config = Config(model: "model-a", dimensions: 2);
-        var hitKey = Key(
+        RecordingGenerator generator = new RecordingGenerator(providerFingerprint: "provider-a");
+        DocsAnalysisEmbeddingConfig config = Config(model: "model-a", dimensions: 2);
+        EmbeddingCacheKey hitKey = Key(
             "context-hit",
             provider: "provider-a",
             model: "model-a",
             dimensions: 2);
-        var cached = new StoredEmbedding(hitKey, [1f, 0f]);
-        var persistence = new RecordingPersistence(isAvailable: true, cached);
-        var coordinator = new EmbeddingCoordinator(generator, persistence);
+        StoredEmbedding cached = new StoredEmbedding(hitKey, [1f, 0f]);
+        RecordingPersistence persistence = new RecordingPersistence(isAvailable: true, cached);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(generator, persistence);
 
-        var result = coordinator.Resolve(
+        EmbeddingResolutionResult result = coordinator.Resolve(
             [
                 new EmbeddingWorkItem("context-miss-a", "first miss"),
                 new EmbeddingWorkItem("context-hit", "cached input"),
@@ -418,19 +418,19 @@ public sealed class EmbeddingClientTests
     [Theory]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, Severity.Warning)]
     [InlineData(DocsAnalysisEmbeddingMode.Required, Severity.Error)]
-    public void Resolve_WhenProviderFails_ReportsModeSeverityAndDoesNotPersistPartialResults(
+    public void ResolveWhenProviderFailsReportsModeSeverityAndDoesNotPersistPartialResults(
         DocsAnalysisEmbeddingMode mode,
         Severity severity)
     {
-        var generator = new RecordingGenerator(failure: new InvalidOperationException("endpoint unavailable"));
-        var persistence = new RecordingPersistence(isAvailable: true);
-        var coordinator = new EmbeddingCoordinator(generator, persistence);
+        RecordingGenerator generator = new RecordingGenerator(failure: new InvalidOperationException("endpoint unavailable"));
+        RecordingPersistence persistence = new RecordingPersistence(isAvailable: true);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(generator, persistence);
 
-        var result = coordinator.Resolve(
+        EmbeddingResolutionResult result = coordinator.Resolve(
             [new EmbeddingWorkItem("context", "input")],
             Config(mode: mode));
 
-        var diagnostic = Assert.Single(result.Diagnostics.Items);
+        Diagnostic diagnostic = Assert.Single(result.Diagnostics.Items);
         Assert.Equal(DocumentationAnalyzer.EmbeddingUnavailableRuleCode, diagnostic.Code);
         Assert.Equal(severity, diagnostic.Severity);
         Assert.Contains("endpoint unavailable", diagnostic.Message, StringComparison.Ordinal);
@@ -443,22 +443,22 @@ public sealed class EmbeddingClientTests
     [InlineData(DocsAnalysisEmbeddingMode.Required, "json")]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, "overflow")]
     [InlineData(DocsAnalysisEmbeddingMode.Required, "overflow")]
-    public void Resolve_WhenProviderPayloadIsMalformed_UsesConfiguredFailurePolicy(
+    public void ResolveWhenProviderPayloadIsMalformedUsesConfiguredFailurePolicy(
         DocsAnalysisEmbeddingMode mode,
         string failureKind)
     {
         Exception failure = failureKind == "json"
             ? new JsonException("malformed provider JSON")
             : new OverflowException("provider usage overflow");
-        var generator = new RecordingGenerator(failure: failure);
-        var persistence = new RecordingPersistence(isAvailable: true);
-        var coordinator = new EmbeddingCoordinator(generator, persistence);
+        RecordingGenerator generator = new RecordingGenerator(failure: failure);
+        RecordingPersistence persistence = new RecordingPersistence(isAvailable: true);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(generator, persistence);
 
-        var result = coordinator.Resolve(
+        EmbeddingResolutionResult result = coordinator.Resolve(
             [new EmbeddingWorkItem("context", "input")],
             Config(mode: mode));
 
-        var diagnostic = Assert.Single(result.Diagnostics.Items);
+        Diagnostic diagnostic = Assert.Single(result.Diagnostics.Items);
         Assert.Equal(DocumentationAnalyzer.EmbeddingUnavailableRuleCode, diagnostic.Code);
         Assert.Equal(
             mode == DocsAnalysisEmbeddingMode.Required ? Severity.Error : Severity.Warning,
@@ -471,24 +471,24 @@ public sealed class EmbeddingClientTests
     [Theory]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, Severity.Warning)]
     [InlineData(DocsAnalysisEmbeddingMode.Required, Severity.Error)]
-    public void Resolve_WhenBearerTokenFormatIsInvalid_ReportsPolicyWithoutDisclosingSecret(
+    public void ResolveWhenBearerTokenFormatIsInvalidReportsPolicyWithoutDisclosingSecret(
         DocsAnalysisEmbeddingMode mode,
         Severity severity)
     {
         const string secret = "secret-token\nwith-invalid-header-content";
-        using var handler = new RecordingHandler(JsonResponse("{}"));
-        using var generator = new OpenAiCompatibleEmbeddingGenerator(
+        using RecordingHandler handler = new RecordingHandler(JsonResponse("{}"));
+        using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,
             ResolveTo(IPAddress.Loopback),
             _ => secret);
-        var persistence = new RecordingPersistence(isAvailable: true);
-        var coordinator = new EmbeddingCoordinator(generator, persistence);
+        RecordingPersistence persistence = new RecordingPersistence(isAvailable: true);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(generator, persistence);
 
-        var result = coordinator.Resolve(
+        EmbeddingResolutionResult result = coordinator.Resolve(
             [new EmbeddingWorkItem("context", "input")],
             Config(mode: mode, apiKeyEnv: "LOCAL_EMBEDDING_TOKEN"));
 
-        var diagnostic = Assert.Single(result.Diagnostics.Items);
+        Diagnostic diagnostic = Assert.Single(result.Diagnostics.Items);
         Assert.Equal(DocumentationAnalyzer.EmbeddingUnavailableRuleCode, diagnostic.Code);
         Assert.Equal(severity, diagnostic.Severity);
         Assert.DoesNotContain(secret, diagnostic.Message, StringComparison.Ordinal);
@@ -543,7 +543,7 @@ public sealed class EmbeddingClientTests
 
     private static string[] Inputs(string body)
     {
-        using var json = JsonDocument.Parse(body);
+        using JsonDocument json = JsonDocument.Parse(body);
         return json.RootElement.GetProperty("input")
             .EnumerateArray()
             .Select(value => value.GetString()!)
@@ -553,7 +553,7 @@ public sealed class EmbeddingClientTests
     private static void AssertVector(IReadOnlyList<float> expected, IReadOnlyList<float> actual)
     {
         Assert.Equal(expected.Count, actual.Count);
-        for (var index = 0; index < expected.Count; index++)
+        for (int index = 0; index < expected.Count; index++)
             Assert.Equal(expected[index], actual[index], precision: 5);
     }
 
@@ -575,7 +575,7 @@ public sealed class EmbeddingClientTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            var body = request.Content is null
+            string body = request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             Requests.Add(new CapturedRequest(
@@ -612,7 +612,7 @@ public sealed class EmbeddingClientTests
             Inputs = inputs.ToArray();
             if (failure is not null) throw failure;
 
-            var embeddings = Keys
+            StoredEmbedding[] embeddings = Keys
                 .Select((key, index) => new StoredEmbedding(
                     key,
                     index % 2 == 0 ? [1f, 0f] : [0f, 1f]))
@@ -649,7 +649,7 @@ public sealed class EmbeddingClientTests
 
         public void SaveEmbeddings(IReadOnlyCollection<StoredEmbedding> embeddingsToSave)
         {
-            foreach (var embedding in embeddingsToSave)
+            foreach (StoredEmbedding embedding in embeddingsToSave)
             {
                 Saved.Add(embedding);
                 _embeddings[embedding.Key] = embedding;

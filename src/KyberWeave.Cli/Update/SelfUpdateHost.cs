@@ -26,12 +26,12 @@ internal sealed record SelfUpdateHost(
 
     internal static string ReadCurrentVersion()
     {
-        var assembly = typeof(SelfUpdateHost).Assembly;
-        var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        Assembly assembly = typeof(SelfUpdateHost).Assembly;
+        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(infoVersion))
             return infoVersion;
 
-        var nameVersion = assembly.GetName().Version;
+        Version? nameVersion = assembly.GetName().Version;
         return nameVersion?.ToString() ?? "0.0.0";
     }
 }

@@ -48,7 +48,7 @@ public sealed class SquadStateStore
         ArgumentNullException.ThrowIfNull(squadLock);
         ValidateLock(squadLock);
 
-        var yaml = new StringBuilder();
+        StringBuilder yaml = new StringBuilder();
         AppendScalar(yaml, "schema", squadLock.Schema);
         AppendScalar(yaml, "squad-version", squadLock.SquadVersion);
         AppendScalar(yaml, "cli-version", squadLock.CliVersion);
@@ -73,7 +73,7 @@ public sealed class SquadStateStore
         try
         {
             RejectYamlIndirection(yaml);
-            var stream = new YamlStream();
+            YamlStream stream = new YamlStream();
             stream.Load(new StringReader(yaml));
             if (stream.Documents.Count != 1 ||
                 stream.Documents[0].RootNode is not YamlMappingNode root)
@@ -90,13 +90,13 @@ public sealed class SquadStateStore
                     "asset-digest", "apm"
                 ],
                 "lock");
-            var apm = RequireYamlMapping(root, "apm", "lock");
+            YamlMappingNode apm = RequireYamlMapping(root, "apm", "lock");
             RequireExactYamlFields(
                 apm,
                 ["version", "tag-commit", "asset-sha256"],
                 "lock apm identity");
 
-            var squadLock = new SquadLock(
+            SquadLock squadLock = new SquadLock(
                 RequireYamlScalar(root, "schema", "lock"),
                 RequireYamlScalar(root, "squad-version", "lock"),
                 RequireYamlScalar(root, "cli-version", "lock"),
@@ -142,7 +142,7 @@ public sealed class SquadStateStore
         try
         {
             ValidateReceiptJsonShape(json);
-            var receipt = JsonSerializer.Deserialize<SquadReceipt>(json, JsonOptions)
+            SquadReceipt receipt = JsonSerializer.Deserialize<SquadReceipt>(json, JsonOptions)
                 ?? throw new InvalidDataException("Squad receipt JSON is empty.");
             ValidateReceipt(receipt);
             return receipt;
@@ -163,7 +163,7 @@ public sealed class SquadStateStore
     /// <summary>Reads the receipt for a deployment, or returns <see langword="null"/> when absent.</summary>
     public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope)
     {
-        var path = ResolveStateFile(targetRoot, scope, ReceiptFileName);
+        string path = ResolveStateFile(targetRoot, scope, ReceiptFileName);
         return File.Exists(path)
             ? DeserializeReceipt(File.ReadAllText(path, Encoding.UTF8))
             : null;
@@ -172,7 +172,7 @@ public sealed class SquadStateStore
     /// <summary>Reads the lock for a deployment, or returns <see langword="null"/> when absent.</summary>
     public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope)
     {
-        var path = ResolveStateFile(targetRoot, scope, LockFileName);
+        string path = ResolveStateFile(targetRoot, scope, LockFileName);
         return File.Exists(path)
             ? DeserializeLock(File.ReadAllText(path, Encoding.UTF8))
             : null;
@@ -215,8 +215,8 @@ public sealed class SquadStateStore
 
     private string ResolveProjectStateDirectory(string targetRoot)
     {
-        var root = SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
-        var sentinel = SquadPathPolicy.ResolveFile(root, ".kyber-weave/.state-sentinel");
+        string root = SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
+        string sentinel = SquadPathPolicy.ResolveFile(root, ".kyber-weave/.state-sentinel");
         return Path.GetDirectoryName(sentinel)
             ?? throw new InvalidOperationException("Could not resolve the project Squad state directory.");
     }
@@ -224,8 +224,8 @@ public sealed class SquadStateStore
     private string ResolveGlobalStateDirectory()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(_userPaths.ApplicationDataDirectory);
-        var root = Path.GetFullPath(_userPaths.ApplicationDataDirectory);
-        var sentinel = SquadPathPolicy.ResolveFile(root, "KyberWeave/squad/.state-sentinel");
+        string root = Path.GetFullPath(_userPaths.ApplicationDataDirectory);
+        string sentinel = SquadPathPolicy.ResolveFile(root, "KyberWeave/squad/.state-sentinel");
         return Path.GetDirectoryName(sentinel)
             ?? throw new InvalidOperationException("Could not resolve the global Squad state directory.");
     }
@@ -274,7 +274,7 @@ public sealed class SquadStateStore
         }
 
         yaml.Append(":\n");
-        foreach (var value in values)
+        foreach (string value in values)
         {
             yaml.Append("  - ");
             yaml.Append(ToYamlScalar(value));
@@ -299,7 +299,7 @@ public sealed class SquadStateStore
 
     private static JsonSerializerOptions CreateJsonOptions()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             WriteIndented = true,
             UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
@@ -327,9 +327,9 @@ public sealed class SquadStateStore
         ValidateRequiredLockValue(squadLock.McpVersion, "MCP version");
         ValidateRequiredLockValue(squadLock.Bundle, "bundle");
         ValidateRequiredLockValue(squadLock.Translation, "translation");
-        foreach (var target in squadLock.Targets)
+        foreach (string target in squadLock.Targets)
             ValidateRequiredLockValue(target, "target");
-        foreach (var exclusion in squadLock.Exclusions)
+        foreach (string exclusion in squadLock.Exclusions)
             ValidateRequiredLockValue(exclusion, "exclusion");
 
         ValidateDigest(squadLock.BundleDigest, "bundle digest");
@@ -371,7 +371,7 @@ public sealed class SquadStateStore
         if (receipt.Degradations is null)
             throw new InvalidDataException("Squad receipt degradations are required.");
 
-        foreach (var degradation in receipt.Degradations)
+        foreach (SquadDegradation? degradation in receipt.Degradations)
         {
             if (degradation is null)
             {
@@ -384,8 +384,8 @@ public sealed class SquadStateStore
             ValidateRequiredReceiptValue(degradation.Code, "degradation code");
         }
 
-        var portablePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in receipt.Files)
+        HashSet<string> portablePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadOwnedFile? file in receipt.Files)
         {
             if (file is null)
                 throw new InvalidDataException("Squad receipt contains an empty file entry.");
@@ -465,8 +465,8 @@ public sealed class SquadStateStore
         IReadOnlyCollection<string> expected,
         string subject)
     {
-        var actual = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var keyNode in mapping.Children.Keys)
+        HashSet<string> actual = new HashSet<string>(StringComparer.Ordinal);
+        foreach (YamlNode keyNode in mapping.Children.Keys)
         {
             if (keyNode is not YamlScalarNode { Value: not null } key ||
                 !actual.Add(key.Value))
@@ -476,8 +476,8 @@ public sealed class SquadStateStore
             }
         }
 
-        var missing = expected.Where(field => !actual.Contains(field)).ToArray();
-        var unknown = actual.Where(field => !expected.Contains(field)).ToArray();
+        string[] missing = expected.Where(field => !actual.Contains(field)).ToArray();
+        string[] unknown = actual.Where(field => !expected.Contains(field)).ToArray();
         if (missing.Length > 0 || unknown.Length > 0)
         {
             throw new InvalidDataException(
@@ -491,7 +491,7 @@ public sealed class SquadStateStore
         string field,
         string subject)
     {
-        if (!mapping.Children.TryGetValue(new YamlScalarNode(field), out var node))
+        if (!mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node))
             throw new InvalidDataException($"Squad {subject} is missing field '{field}'.");
         return node;
     }
@@ -501,7 +501,7 @@ public sealed class SquadStateStore
         string field,
         string subject)
     {
-        var node = RequireYamlNode(mapping, field, subject);
+        YamlNode node = RequireYamlNode(mapping, field, subject);
         if (node is not YamlScalarNode { Value: not null } scalar ||
             string.IsNullOrWhiteSpace(scalar.Value) ||
             scalar.Value is "null" or "Null" or "NULL" or "~")
@@ -547,7 +547,7 @@ public sealed class SquadStateStore
 
     private static void ValidateReceiptJsonShape(string json)
     {
-        using var document = JsonDocument.Parse(json);
+        using JsonDocument document = JsonDocument.Parse(json);
         RequireExactJsonFields(
             document.RootElement,
             ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files"],
@@ -558,10 +558,10 @@ public sealed class SquadStateStore
             ["project", "global"],
             "receipt");
 
-        var degradations = document.RootElement.GetProperty("degradations");
+        JsonElement degradations = document.RootElement.GetProperty("degradations");
         if (degradations.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("Squad receipt degradations must be an array.");
-        foreach (var degradation in degradations.EnumerateArray())
+        foreach (JsonElement degradation in degradations.EnumerateArray())
         {
             RequireExactJsonFields(
                 degradation,
@@ -569,10 +569,10 @@ public sealed class SquadStateStore
                 "receipt degradation");
         }
 
-        var files = document.RootElement.GetProperty("files");
+        JsonElement files = document.RootElement.GetProperty("files");
         if (files.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("Squad receipt files must be an array.");
-        foreach (var file in files.EnumerateArray())
+        foreach (JsonElement file in files.EnumerateArray())
         {
             RequireExactJsonFields(
                 file,
@@ -589,8 +589,8 @@ public sealed class SquadStateStore
         if (element.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException($"Squad {subject} must be an object.");
 
-        var actual = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var property in element.EnumerateObject())
+        HashSet<string> actual = new HashSet<string>(StringComparer.Ordinal);
+        foreach (JsonProperty property in element.EnumerateObject())
         {
             if (!actual.Add(property.Name))
                 throw new InvalidDataException($"Squad {subject} contains duplicate field '{property.Name}'.");
@@ -598,8 +598,8 @@ public sealed class SquadStateStore
                 throw new InvalidDataException($"Squad {subject} field '{property.Name}' cannot be null.");
         }
 
-        var missing = expected.Where(field => !actual.Contains(field)).ToArray();
-        var unknown = actual.Where(field => !expected.Contains(field)).ToArray();
+        string[] missing = expected.Where(field => !actual.Contains(field)).ToArray();
+        string[] unknown = actual.Where(field => !expected.Contains(field)).ToArray();
         if (missing.Length > 0 || unknown.Length > 0)
         {
             throw new InvalidDataException(
@@ -614,7 +614,7 @@ public sealed class SquadStateStore
         IReadOnlyCollection<string> allowedValues,
         string subject)
     {
-        var value = element.GetProperty(propertyName);
+        JsonElement value = element.GetProperty(propertyName);
         if (value.ValueKind != JsonValueKind.String ||
             value.GetString() is not { } token ||
             !allowedValues.Contains(token))
@@ -636,7 +636,7 @@ public sealed class SquadStateStore
             Type typeToConvert,
             JsonSerializerOptions options)
         {
-            var value = reader.GetString()
+            string value = reader.GetString()
                 ?? throw new JsonException("Expected a UTC timestamp string.");
             return DateTimeOffset.Parse(
                 value,

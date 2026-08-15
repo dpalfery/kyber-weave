@@ -21,29 +21,29 @@ internal static class EmbeddingCandidateBuilder
         if (claims.Count != embeddings.Count)
             throw new InvalidDataException("Embedding count must match the analyzed claim count.");
 
-        var claimIndexes = claims
+        Dictionary<Claim, int> claimIndexes = claims
             .Select((claim, index) => new { claim, index })
             .ToDictionary(item => item.claim, item => item.index);
-        var pairs = search.Mode == DocsAnalysisSearchMode.HighRecall
+        IReadOnlyList<IndexPair> pairs = search.Mode == DocsAnalysisSearchMode.HighRecall
             ? AllPairs(claims.Count)
             : SeedPairs(seedPairs, claimIndexes);
-        var scored = pairs
+        ScoredPair[] scored = pairs
             .Select(pair => new ScoredPair(pair, Cosine(
                 embeddings[pair.Left].Vector,
                 embeddings[pair.Right].Vector)))
             .ToArray();
 
-        var selected = search.Mode == DocsAnalysisSearchMode.HighRecall
+        IReadOnlyList<ScoredPair> selected = search.Mode == DocsAnalysisSearchMode.HighRecall
             ? SelectTopNeighbors(scored, claims.Count, search.MaxNeighborsPerClaim)
             : scored;
-        var truncated = selected.Count > search.MaxCandidates;
-        var candidates = selected
+        bool truncated = selected.Count > search.MaxCandidates;
+        ClaimPairCandidate[] candidates = selected
             .OrderBy(item => item.Pair.Left)
             .ThenBy(item => item.Pair.Right)
             .Take(search.MaxCandidates)
             .Select(item =>
             {
-                var seed = FindSeed(seedPairs, claims[item.Pair.Left], claims[item.Pair.Right]);
+                ClaimPairCandidate? seed = FindSeed(seedPairs, claims[item.Pair.Left], claims[item.Pair.Right]);
                 return new ClaimPairCandidate(
                     claims[item.Pair.Left],
                     claims[item.Pair.Right],
@@ -64,19 +64,19 @@ internal static class EmbeddingCandidateBuilder
         int claimCount,
         int maximumNeighbors)
     {
-        var neighbors = Enumerable.Range(0, claimCount)
+        List<ScoredPair>[] neighbors = Enumerable.Range(0, claimCount)
             .Select(_ => new List<ScoredPair>())
             .ToArray();
-        foreach (var item in scored)
+        foreach (ScoredPair item in scored)
         {
             neighbors[item.Pair.Left].Add(item);
             neighbors[item.Pair.Right].Add(item);
         }
 
-        var selected = new HashSet<IndexPair>();
-        for (var claimIndex = 0; claimIndex < claimCount; claimIndex++)
+        HashSet<IndexPair> selected = new HashSet<IndexPair>();
+        for (int claimIndex = 0; claimIndex < claimCount; claimIndex++)
         {
-            foreach (var item in neighbors[claimIndex]
+            foreach (ScoredPair? item in neighbors[claimIndex]
                          .OrderByDescending(item => item.Score)
                          .ThenBy(item => item.Pair.Left)
                          .ThenBy(item => item.Pair.Right)
@@ -91,10 +91,10 @@ internal static class EmbeddingCandidateBuilder
 
     private static IReadOnlyList<IndexPair> AllPairs(int count)
     {
-        var pairs = new List<IndexPair>();
-        for (var left = 0; left < count; left++)
+        List<IndexPair> pairs = new List<IndexPair>();
+        for (int left = 0; left < count; left++)
         {
-            for (var right = left + 1; right < count; right++)
+            for (int right = left + 1; right < count; right++)
                 pairs.Add(new IndexPair(left, right));
         }
         return pairs;
@@ -125,7 +125,7 @@ internal static class EmbeddingCandidateBuilder
         double dot = 0;
         double leftNorm = 0;
         double rightNorm = 0;
-        for (var index = 0; index < left.Count; index++)
+        for (int index = 0; index < left.Count; index++)
         {
             if (!float.IsFinite(left[index]) || !float.IsFinite(right[index]))
                 throw new InvalidDataException("Cached embedding vectors must contain only finite values.");

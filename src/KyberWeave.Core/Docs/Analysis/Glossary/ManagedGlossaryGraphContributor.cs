@@ -21,17 +21,17 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
         ArgumentNullException.ThrowIfNull(documents);
         ArgumentNullException.ThrowIfNull(codeGraph);
 
-        var nodes = new List<DocGraphNode>();
-        var edges = new List<DocGraphEdge>();
-        var emittedNodeIds = new HashSet<string>(StringComparer.Ordinal);
+        List<DocGraphNode> nodes = new List<DocGraphNode>();
+        List<DocGraphEdge> edges = new List<DocGraphEdge>();
+        HashSet<string> emittedNodeIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var term in _terms.OrderBy(item => item.Term, StringComparer.Ordinal))
+        foreach (TermSnapshot? term in _terms.OrderBy(item => item.Term, StringComparer.Ordinal))
         {
-            var termId = TermId(term.Term);
+            string termId = TermId(term.Term);
             AddTermNode(nodes, emittedNodeIds, termId, term.Term);
-            foreach (var sense in term.Senses.OrderBy(item => item.Id, StringComparer.Ordinal))
+            foreach (SenseSnapshot? sense in term.Senses.OrderBy(item => item.Id, StringComparer.Ordinal))
             {
-                var senseId = $"sense:{sense.Id}";
+                string senseId = $"sense:{sense.Id}";
                 AddNode(nodes, emittedNodeIds, new DocGraphNode(
                     senseId,
                     "Sense",
@@ -42,24 +42,24 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
                     }));
                 edges.Add(new DocGraphEdge("HAS_SENSE", termId, senseId));
 
-                foreach (var alias in sense.Aliases
+                foreach (string? alias in sense.Aliases
                              .Distinct(StringComparer.OrdinalIgnoreCase)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
-                    var aliasId = TermId(alias);
+                    string aliasId = TermId(alias);
                     AddTermNode(nodes, emittedNodeIds, aliasId, alias);
                     if (!StringComparer.Ordinal.Equals(aliasId, termId))
                         edges.Add(new DocGraphEdge("ALIAS_OF", aliasId, senseId));
                 }
 
-                foreach (var scope in sense.Scopes
+                foreach (string? scope in sense.Scopes
                              .Distinct(StringComparer.Ordinal)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
                     AddScopeEdges(edges, senseId, scope, codeGraph);
                 }
 
-                foreach (var evidenceId in sense.EvidenceIds
+                foreach (string? evidenceId in sense.EvidenceIds
                              .Distinct(StringComparer.Ordinal)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
@@ -93,22 +93,22 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
 
     private static void ValidateGraphIdentities(IReadOnlyList<TermSnapshot> terms)
     {
-        var termIdentities = new Dictionary<string, string>(StringComparer.Ordinal);
-        var senseIds = new HashSet<string>(StringComparer.Ordinal);
+        Dictionary<string, string> termIdentities = new Dictionary<string, string>(StringComparer.Ordinal);
+        HashSet<string> senseIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var term in terms)
+        foreach (TermSnapshot term in terms)
         {
             RegisterTermIdentity(termIdentities, term.Term);
-            foreach (var sense in term.Senses)
+            foreach (SenseSnapshot sense in term.Senses)
             {
-                var senseId = $"sense:{sense.Id}";
+                string senseId = $"sense:{sense.Id}";
                 if (!senseIds.Add(senseId))
                 {
                     throw new InvalidDataException(
                         $"Managed glossary graph identity collision for sense id '{senseId}'.");
                 }
 
-                foreach (var alias in sense.Aliases)
+                foreach (string alias in sense.Aliases)
                     RegisterTermIdentity(termIdentities, alias);
             }
         }
@@ -118,9 +118,9 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
         IDictionary<string, string> identities,
         string term)
     {
-        var id = TermId(term);
-        var semanticIdentity = term.Trim().ToLowerInvariant();
-        if (identities.TryGetValue(id, out var existing)
+        string id = TermId(term);
+        string semanticIdentity = term.Trim().ToLowerInvariant();
+        if (identities.TryGetValue(id, out string? existing)
             && !StringComparer.Ordinal.Equals(existing, semanticIdentity))
         {
             throw new InvalidDataException(
@@ -140,15 +140,15 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
         const string codePrefix = "code-ref:";
         if (scope.StartsWith(componentPrefix, StringComparison.Ordinal))
         {
-            var component = scope[componentPrefix.Length..];
+            string component = scope[componentPrefix.Length..];
             if (component.Length > 0)
                 edges.Add(new DocGraphEdge("SCOPED_TO", senseId, componentPrefix + component));
             return;
         }
 
         if (!scope.StartsWith(codePrefix, StringComparison.Ordinal)) return;
-        var symbol = scope[codePrefix.Length..];
-        foreach (var node in codeGraph.ResolveSymbol(symbol).OrderBy(node => node.Id, StringComparer.Ordinal))
+        string symbol = scope[codePrefix.Length..];
+        foreach (CodeGraphNode? node in codeGraph.ResolveSymbol(symbol).OrderBy(node => node.Id, StringComparer.Ordinal))
             edges.Add(new DocGraphEdge("SCOPED_TO", senseId, node.Id));
     }
 
@@ -172,7 +172,7 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
 
     private static string TermId(string term)
     {
-        var slug = new string(term.Trim().ToLowerInvariant()
+        string slug = new string(term.Trim().ToLowerInvariant()
             .Select(character => char.IsLetterOrDigit(character) ? character : '-')
             .ToArray());
         while (slug.Contains("--", StringComparison.Ordinal))

@@ -43,7 +43,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     };
 
     [Fact]
-    public void Catalog_ContainsExactlyTenTargetsInStableOrder()
+    public void CatalogContainsExactlyTenTargetsInStableOrder()
     {
         Assert.Equal(TenTargets, SquadTargetCatalog.All);
         Assert.Equal(
@@ -52,9 +52,9 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Parse_RepeatedCommaSeparatedTargetsAndAliasesNormalizeToFirstSeenOrderedSet()
+    public void ParseRepeatedCommaSeparatedTargetsAndAliasesNormalizeToFirstSeenOrderedSet()
     {
-        var targets = SquadTargetCatalog.Parse(
+        IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(
             [" cursor, github-copilot ", "CODEX", "cursor", "factory-droids,opencode"]);
 
         Assert.Equal(
@@ -63,17 +63,17 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Parse_AllExpandsToTheApprovedTenTargetRoster()
+    public void ParseAllExpandsToTheApprovedTenTargetRoster()
     {
-        var targets = SquadTargetCatalog.Parse(["all"]);
+        IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 
         Assert.Equal(TenTargets, targets);
     }
 
     [Fact]
-    public void Parse_UnknownTargetFailsWithKnownTargetHint()
+    public void ParseUnknownTargetFailsWithKnownTargetHint()
     {
-        var exception = Assert.Throws<ArgumentException>(
+        ArgumentException exception = Assert.Throws<ArgumentException>(
             () => SquadTargetCatalog.Parse(["not-a-harness"]));
 
         Assert.Contains("not-a-harness", exception.Message, StringComparison.Ordinal);
@@ -82,11 +82,11 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Install_ExplicitTargetsReplaceConfigurationAndMarkers()
+    public void InstallExplicitTargetsReplaceConfigurationAndMarkers()
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".claude"));
 
-        var decision = ResolveInstall(
+        SquadTargetResolutionDecision decision = ResolveInstall(
             explicitTargets: ["codex"],
             configuredTargets: [SquadTarget.Cursor]);
 
@@ -94,22 +94,22 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Install_ConfiguredTargetsReplaceMarkerDetectionWhenExplicitTargetsAreAbsent()
+    public void InstallConfiguredTargetsReplaceMarkerDetectionWhenExplicitTargetsAreAbsent()
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".claude"));
 
-        var decision = ResolveInstall(configuredTargets: [SquadTarget.Cursor]);
+        SquadTargetResolutionDecision decision = ResolveInstall(configuredTargets: [SquadTarget.Cursor]);
 
         AssertResolved(decision, SquadTargetResolutionSource.Configuration, SquadTarget.Cursor);
     }
 
     [Fact]
-    public void Install_StrongMarkersAreUsedWhenExplicitAndConfiguredTargetsAreAbsent()
+    public void InstallStrongMarkersAreUsedWhenExplicitAndConfiguredTargetsAreAbsent()
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".warp"));
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".codex"));
 
-        var decision = ResolveInstall();
+        SquadTargetResolutionDecision decision = ResolveInstall();
 
         AssertResolved(
             decision,
@@ -119,9 +119,9 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Install_ConfigAndCliExclusionsUnionAfterAllExpansionAndOnlyNarrow()
+    public void InstallConfigAndCliExclusionsUnionAfterAllExpansionAndOnlyNarrow()
     {
-        var decision = ResolveInstall(
+        SquadTargetResolutionDecision decision = ResolveInstall(
             explicitTargets: ["all"],
             explicitExclusions: ["cursor,warp"],
             configuredExclusions: [SquadTarget.Copilot, SquadTarget.Warp]);
@@ -140,14 +140,14 @@ public sealed class SquadTargetResolutionTests : IDisposable
 
     [Theory]
     [MemberData(nameof(PositiveMarkers))]
-    public void Install_EachStrongMarkerSelectsItsTarget(
+    public void InstallEachStrongMarkerSelectsItsTarget(
         string relativePath,
         bool isDirectory,
         SquadTarget expected)
     {
         CreateFixture(relativePath, isDirectory);
 
-        var decision = ResolveInstall();
+        SquadTargetResolutionDecision decision = ResolveInstall();
 
         AssertResolved(decision, SquadTargetResolutionSource.Markers, expected);
     }
@@ -164,13 +164,13 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [InlineData(".cursor", false)]
     [InlineData(".claude", false)]
     [InlineData(".gemini", false)]
-    public void Install_GenericInstructionAndWrongKindFixturesDoNotSelectATarget(
+    public void InstallGenericInstructionAndWrongKindFixturesDoNotSelectATarget(
         string relativePath,
         bool isDirectory)
     {
         CreateFixture(relativePath, isDirectory);
 
-        var decision = ResolveInstall(isInteractive: false);
+        SquadTargetResolutionDecision decision = ResolveInstall(isInteractive: false);
 
         Assert.Equal(SquadTargetResolutionKind.Failure, decision.Kind);
         Assert.Empty(decision.Targets);
@@ -179,12 +179,12 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Install_AntigravityHasNoFilesystemMarkerAndRequiresExplicitOrConfiguredSelection()
+    public void InstallAntigravityHasNoFilesystemMarkerAndRequiresExplicitOrConfiguredSelection()
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".agents"));
 
-        var markerDecision = ResolveInstall(isInteractive: false);
-        var explicitDecision = ResolveInstall(explicitTargets: ["antigravity"]);
+        SquadTargetResolutionDecision markerDecision = ResolveInstall(isInteractive: false);
+        SquadTargetResolutionDecision explicitDecision = ResolveInstall(explicitTargets: ["antigravity"]);
 
         Assert.Equal(SquadTargetResolutionKind.Failure, markerDecision.Kind);
         AssertResolved(explicitDecision, SquadTargetResolutionSource.Explicit, SquadTarget.Antigravity);
@@ -196,7 +196,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     public void LifecycleOperationsUseReceiptAndNeverRedetect(SquadTargetOperation operation)
     {
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".codex"));
-        var request = new SquadTargetResolutionRequest
+        SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
         {
             RootPath = _temp.Path,
             Operation = operation,
@@ -205,7 +205,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
             IsInteractive = true
         };
 
-        var decision = SquadTargetResolver.Resolve(request);
+        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
 
         AssertResolved(
             decision,
@@ -215,9 +215,9 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Install_NoTargetInInteractiveTerminalReturnsChooserDecisionWithoutReadingConsole()
+    public void InstallNoTargetInInteractiveTerminalReturnsChooserDecisionWithoutReadingConsole()
     {
-        var decision = ResolveInstall(isInteractive: true);
+        SquadTargetResolutionDecision decision = ResolveInstall(isInteractive: true);
 
         Assert.Equal(SquadTargetResolutionKind.InteractiveSelectionRequired, decision.Kind);
         Assert.Empty(decision.Targets);
@@ -227,9 +227,9 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Install_NoTargetInNonInteractiveTerminalReturnsExitTwoAndExactRecoveryCommand()
+    public void InstallNoTargetInNonInteractiveTerminalReturnsExitTwoAndExactRecoveryCommand()
     {
-        var decision = ResolveInstall(isInteractive: false);
+        SquadTargetResolutionDecision decision = ResolveInstall(isInteractive: false);
 
         Assert.Equal(SquadTargetResolutionKind.Failure, decision.Kind);
         Assert.Empty(decision.Targets);
@@ -247,7 +247,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
         IReadOnlyList<SquadTarget>? configuredExclusions = null,
         bool isInteractive = false)
     {
-        var request = new SquadTargetResolutionRequest
+        SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
         {
             RootPath = _temp.Path,
             Operation = SquadTargetOperation.Install,
@@ -263,14 +263,14 @@ public sealed class SquadTargetResolutionTests : IDisposable
 
     private void CreateFixture(string relativePath, bool isDirectory)
     {
-        var path = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string path = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
         if (isDirectory)
         {
             Directory.CreateDirectory(path);
             return;
         }
 
-        var parent = Path.GetDirectoryName(path);
+        string? parent = Path.GetDirectoryName(path);
         if (parent is not null)
             Directory.CreateDirectory(parent);
         File.WriteAllText(path, "fixture");

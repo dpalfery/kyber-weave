@@ -55,21 +55,21 @@ public sealed partial class RoutingLinter
     /// <summary>Per-skill lint (no cross-skill checks).</summary>
     public IEnumerable<Diagnostic> LintSkill(Skill skill)
     {
-        var id = skill.Frontmatter.Name ?? skill.DirectoryName;
-        var file = skill.SkillFilePath;
+        string id = skill.Frontmatter.Name ?? skill.DirectoryName;
+        string file = skill.SkillFilePath;
 
         // Description routing-readiness score
-        var score = DescriptionScorer.Score(skill);
+        DescriptionScore score = DescriptionScorer.Score(skill);
         if (score.Total < MinDescriptionScore)
         {
-            var weak = score.Components.Where(c => c.Points < c.MaxPoints).Select(c => c.Name);
+            IEnumerable<string> weak = score.Components.Where(c => c.Points < c.MaxPoints).Select(c => c.Name);
             yield return new Diagnostic("KW-SKILL-LINT-001", Severity.Warning,
                 $"Description routing score {score.Total}/100 is below the {MinDescriptionScore} threshold. Weak dimensions: {string.Join(", ", weak)}.",
                 id, file, "Run 'kyber-weave skill lint --explain' to see the full rubric.");
         }
 
         // Action summary without trigger framing
-        var description = (skill.Frontmatter.Description ?? string.Empty).Trim();
+        string description = (skill.Frontmatter.Description ?? string.Empty).Trim();
         if (!string.IsNullOrWhiteSpace(description))
         {
             if (!TriggerClauseRegex().IsMatch(description) && ActionSummaryRegex().IsMatch(description))
@@ -120,15 +120,15 @@ public sealed partial class RoutingLinter
     /// <summary>Cross-skill checks over a set: name collisions and description overlap.</summary>
     public IEnumerable<Diagnostic> LintSet(SkillSet set)
     {
-        var skills = set.Skills;
+        IReadOnlyList<Skill> skills = set.Skills;
 
         // Exact name collisions
-        var byName = skills
+        IEnumerable<IGrouping<string, Skill>> byName = skills
             .Where(s => !string.IsNullOrWhiteSpace(s.Frontmatter.Name))
             .GroupBy(s => s.Frontmatter.Name!, StringComparer.Ordinal)
             .Where(g => g.Count() > 1);
 
-        foreach (var group in byName)
+        foreach (IGrouping<string, Skill>? group in byName)
         {
             yield return new Diagnostic("KW-SKILL-LINT-010", Severity.Error,
                 $"{group.Count()} skills share the name '{group.Key}'. Names must be unique so the orchestrator can disambiguate.",
@@ -136,20 +136,20 @@ public sealed partial class RoutingLinter
         }
 
         // Description overlap (near-duplicate routing targets)
-        var vectors = skills
+        List<(Skill Skill, Dictionary<string, double> Vec)> vectors = skills
             .Where(s => !string.IsNullOrWhiteSpace(s.Frontmatter.Description))
             .Select(s => (Skill: s, Vec: TextVectorizer.Vectorize(s.Frontmatter.Description!)))
             .ToList();
 
-        for (var i = 0; i < vectors.Count; i++)
+        for (int i = 0; i < vectors.Count; i++)
         {
-            for (var j = i + 1; j < vectors.Count; j++)
+            for (int j = i + 1; j < vectors.Count; j++)
             {
-                var sim = TextVectorizer.CosineSimilarity(vectors[i].Vec, vectors[j].Vec);
+                double sim = TextVectorizer.CosineSimilarity(vectors[i].Vec, vectors[j].Vec);
                 if (sim >= OverlapThreshold)
                 {
-                    var a = vectors[i].Skill.Frontmatter.Name ?? vectors[i].Skill.DirectoryName;
-                    var b = vectors[j].Skill.Frontmatter.Name ?? vectors[j].Skill.DirectoryName;
+                    string a = vectors[i].Skill.Frontmatter.Name ?? vectors[i].Skill.DirectoryName;
+                    string b = vectors[j].Skill.Frontmatter.Name ?? vectors[j].Skill.DirectoryName;
                     yield return new Diagnostic("KW-SKILL-LINT-011", Severity.Warning,
                         $"Descriptions of '{a}' and '{b}' overlap ({sim:P0} lexical similarity). The orchestrator may route ambiguously between them.",
                         $"{a} / {b}", vectors[j].Skill.SkillFilePath,

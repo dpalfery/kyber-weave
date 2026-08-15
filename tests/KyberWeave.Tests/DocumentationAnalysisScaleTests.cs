@@ -4,6 +4,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Candidates;
 using KyberWeave.Core.Docs.Analysis.Claims;
+using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using Xunit;
@@ -27,24 +28,24 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 
     [Fact]
     [Trait("Category", "Scale")]
-    public void Analyze_DefaultHybridTenThousandClaims_RemainsBoundedAndWithinReleaseEnvelope()
+    public void AnalyzeDefaultHybridTenThousandClaimsRemainsBoundedAndWithinReleaseEnvelope()
     {
-        var documents = ScaleCorpus.Create(DocumentCount, ClaimsPerDocument);
-        var graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
-        var config = DefaultHybridConfig();
-        var graphSource = new RecordingCandidateSource(new GraphClaimCandidateSource());
-        var lexicalSource = new RecordingCandidateSource(new SparseLexicalCandidateSource());
-        var analyzer = new DocumentationAnalyzer(
+        DocumentSet documents = ScaleCorpus.Create(DocumentCount, ClaimsPerDocument);
+        DocGraphProjection graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
+        DocsAnalysisConfig config = DefaultHybridConfig();
+        RecordingCandidateSource graphSource = new RecordingCandidateSource(new GraphClaimCandidateSource());
+        RecordingCandidateSource lexicalSource = new RecordingCandidateSource(new SparseLexicalCandidateSource());
+        DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
             new ClaimExtractor(),
             [graphSource, lexicalSource],
             embeddingGenerator: null,
             persistence: null);
 
         WarmCandidateGeneration();
-        var measurement = Measure(() => analyzer.Analyze(documents, graph, config));
-        var result = measurement.Value;
-        var allPairs = (long)ClaimCount * (ClaimCount - 1) / 2;
-        var configuredBound = (long)ClaimCount * config.Search.MaxNeighborsPerClaim;
+        Measurement<DocumentationAnalysisResult> measurement = Measure(() => analyzer.Analyze(documents, graph, config));
+        DocumentationAnalysisResult result = measurement.Value;
+        long allPairs = (long)ClaimCount * (ClaimCount - 1) / 2;
+        long configuredBound = (long)ClaimCount * config.Search.MaxNeighborsPerClaim;
 
         output.WriteLine(
             "Hybrid scale: {0} claims, {1} graph comparisons, {2} lexical comparisons, " +
@@ -101,25 +102,25 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 
     [Fact]
     [Trait("Category", "Scale")]
-    public void HighRecall_ReportsItsExplicitQuadraticFirstPassAndIsOutsideDefaultSla()
+    public void HighRecallReportsItsExplicitQuadraticFirstPassAndIsOutsideDefaultSla()
     {
         const int documentsCount = 160;
-        var documents = ScaleCorpus.Create(documentsCount, claimsPerDocument: 1);
-        var claims = Extract(documents);
-        var graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
-        var source = new SparseLexicalCandidateSource();
-        var hybridRequest = new ClaimCandidateSourceRequest(
+        DocumentSet documents = ScaleCorpus.Create(documentsCount, claimsPerDocument: 1);
+        IReadOnlyList<Claim> claims = Extract(documents);
+        DocGraphProjection graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
+        SparseLexicalCandidateSource source = new SparseLexicalCandidateSource();
+        ClaimCandidateSourceRequest hybridRequest = new ClaimCandidateSourceRequest(
             claims,
             graph,
             Search(DocsAnalysisSearchMode.Hybrid));
-        var highRecallRequest = new ClaimCandidateSourceRequest(
+        ClaimCandidateSourceRequest highRecallRequest = new ClaimCandidateSourceRequest(
             claims,
             graph,
             Search(DocsAnalysisSearchMode.HighRecall));
 
-        var hybrid = source.FindCandidates(hybridRequest);
-        var highRecall = source.FindCandidates(highRecallRequest);
-        var quadraticFirstPass = documentsCount * (documentsCount - 1) / 2;
+        ClaimCandidateSourceResult hybrid = source.FindCandidates(hybridRequest);
+        ClaimCandidateSourceResult highRecall = source.FindCandidates(highRecallRequest);
+        int quadraticFirstPass = documentsCount * (documentsCount - 1) / 2;
 
         output.WriteLine(
             "High-recall first pass: {0:N0} comparisons versus {1:N0} for hybrid; " +
@@ -158,7 +159,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 
     private static IReadOnlyList<Claim> Extract(DocumentSet documents)
     {
-        var extractor = new ClaimExtractor();
+        ClaimExtractor extractor = new ClaimExtractor();
         return documents.Documents
             .SelectMany(document => extractor.Extract(document).Claims)
             .ToArray();
@@ -166,10 +167,10 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 
     private static void WarmCandidateGeneration()
     {
-        var documents = ScaleCorpus.Create(documentCount: 2, claimsPerDocument: 2);
-        var graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
-        var claims = Extract(documents);
-        var request = new ClaimCandidateSourceRequest(
+        DocumentSet documents = ScaleCorpus.Create(documentCount: 2, claimsPerDocument: 2);
+        DocGraphProjection graph = DocGraphProjection.Build(documents, FakeCodeGraphResolver.WithSymbols());
+        IReadOnlyList<Claim> claims = Extract(documents);
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(
             claims,
             graph,
             Search(DocsAnalysisSearchMode.Hybrid));
@@ -182,10 +183,10 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
-        using var process = Process.GetCurrentProcess();
-        var peakWorkingSet = process.WorkingSet64;
-        using var samplingCancellation = new CancellationTokenSource();
-        var sampler = Task.Run(async () =>
+        using Process process = Process.GetCurrentProcess();
+        long peakWorkingSet = process.WorkingSet64;
+        using CancellationTokenSource samplingCancellation = new CancellationTokenSource();
+        Task sampler = Task.Run(async () =>
         {
             try
             {
@@ -202,11 +203,11 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
                 // The measurement completed normally.
             }
         });
-        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        var stopwatch = Stopwatch.StartNew();
-        var value = action();
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        T? value = action();
         stopwatch.Stop();
-        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         samplingCancellation.Cancel();
         sampler.GetAwaiter().GetResult();
         process.Refresh();
@@ -224,10 +225,10 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
     {
         public static void Max(ref long location, long candidate)
         {
-            var current = Volatile.Read(ref location);
+            long current = Volatile.Read(ref location);
             while (candidate > current)
             {
-                var observed = Interlocked.CompareExchange(ref location, candidate, current);
+                long observed = Interlocked.CompareExchange(ref location, candidate, current);
                 if (observed == current) return;
                 current = observed;
             }
@@ -258,11 +259,11 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 
         private static DocumentModel Document(int documentIndex, int claimsPerDocument)
         {
-            var paragraphs = Enumerable.Range(0, claimsPerDocument)
+            IEnumerable<string> paragraphs = Enumerable.Range(0, claimsPerDocument)
                 .Select(claimIndex =>
                     $"Analyzer groupdoc{documentIndex} retains bounded evidence itemclaim{documentIndex * claimsPerDocument + claimIndex} " +
                     "while producing deterministic review candidates.");
-            var body = $"## Behavior\n\n{string.Join("\n\n", paragraphs)}\n";
+            string body = $"## Behavior\n\n{string.Join("\n\n", paragraphs)}\n";
             return new DocumentModel
             {
                 RelativePath = $"docs/scale-{documentIndex:D4}.md",

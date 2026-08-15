@@ -21,7 +21,7 @@ public static class SkillLoader
     /// </summary>
     public static IReadOnlyList<SkillLoadResult> Load(string rootPath)
     {
-        var results = new List<SkillLoadResult>();
+        List<SkillLoadResult> results = new List<SkillLoadResult>();
 
         if (File.Exists(rootPath) && Path.GetFileName(rootPath).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase))
         {
@@ -35,7 +35,7 @@ public static class SkillLoader
             return results;
         }
 
-        var skillFiles = Directory
+        List<string> skillFiles = Directory
             .EnumerateFiles(rootPath, "SKILL.md", SearchOption.AllDirectories)
             .OrderBy(p => p, StringComparer.Ordinal)
             .ToList();
@@ -46,7 +46,7 @@ public static class SkillLoader
             return results;
         }
 
-        foreach (var file in skillFiles)
+        foreach (string file in skillFiles)
             results.Add(LoadOne(file));
 
         return results;
@@ -60,7 +60,7 @@ public static class SkillLoader
     {
         try
         {
-            var skill = SkillParser.ParseFile(skillFilePath);
+            Skill skill = SkillParser.ParseFile(skillFilePath);
             return new SkillLoadResult(skillFilePath, skill, null);
         }
         catch (SkillParseException ex)

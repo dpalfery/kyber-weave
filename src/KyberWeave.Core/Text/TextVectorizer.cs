@@ -8,9 +8,9 @@ namespace KyberWeave.Core.Text;
 /// Deterministic and offline by design — used for description-overlap detection and
 /// the default routing strategy so the toolkit needs no API key in CI.
 /// </summary>
-public static class TextVectorizer
+public static partial class TextVectorizer
 {
-    private static readonly Regex Tokenizer = new(@"[a-z0-9]+", RegexOptions.Compiled);
+    private static readonly Regex Tokenizer = MyRegex();
 
     private static readonly HashSet<string> StopWords = new(StringComparer.Ordinal)
     {
@@ -21,10 +21,10 @@ public static class TextVectorizer
 
     public static Dictionary<string, double> Vectorize(string text)
     {
-        var counts = new Dictionary<string, double>();
-        foreach (var token in Tokenize(text))
+        Dictionary<string, double> counts = new Dictionary<string, double>();
+        foreach (string token in Tokenize(text))
         {
-            counts[token] = counts.TryGetValue(token, out var c) ? c + 1 : 1;
+            counts[token] = counts.TryGetValue(token, out double c) ? c + 1 : 1;
         }
         return counts;
     }
@@ -39,10 +39,10 @@ public static class TextVectorizer
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        var tokens = new List<string>();
+        List<string> tokens = new List<string>();
         foreach (Match m in Tokenizer.Matches(text.ToLowerInvariant()))
         {
-            var token = Normalize(m.Value);
+            string token = Normalize(m.Value);
             if (token.Length < 2 || StopWords.Contains(token)) continue;
             tokens.Add(token);
         }
@@ -60,17 +60,17 @@ public static class TextVectorizer
     /// </remarks>
     public static Dictionary<string, double> VectorizeFused(string text)
     {
-        var tokens = Tokenize(text);
-        var counts = new Dictionary<string, double>();
+        IReadOnlyList<string> tokens = Tokenize(text);
+        Dictionary<string, double> counts = new Dictionary<string, double>();
 
-        for (var i = 0; i < tokens.Count; i++)
+        for (int i = 0; i < tokens.Count; i++)
         {
-            counts[tokens[i]] = counts.TryGetValue(tokens[i], out var c) ? c + 1 : 1;
+            counts[tokens[i]] = counts.TryGetValue(tokens[i], out double c) ? c + 1 : 1;
 
             if (i + 1 >= tokens.Count) continue;
 
-            var fused = tokens[i] + tokens[i + 1];
-            counts[fused] = counts.TryGetValue(fused, out var f) ? f + 0.5 : 0.5;
+            string fused = tokens[i] + tokens[i + 1];
+            counts[fused] = counts.TryGetValue(fused, out double f) ? f + 0.5 : 0.5;
         }
 
         return counts;
@@ -89,14 +89,16 @@ public static class TextVectorizer
     {
         if (a.Count == 0 || b.Count == 0) return 0;
         double dot = 0;
-        foreach (var (k, v) in a)
-            if (b.TryGetValue(k, out var bv)) dot += v * bv;
+        foreach ((string? k, double v) in a)
+            if (b.TryGetValue(k, out double bv)) dot += v * bv;
 
-        var magA = Math.Sqrt(a.Values.Sum(v => v * v));
-        var magB = Math.Sqrt(b.Values.Sum(v => v * v));
+        double magA = Math.Sqrt(a.Values.Sum(v => v * v));
+        double magB = Math.Sqrt(b.Values.Sum(v => v * v));
         return magA == 0 || magB == 0 ? 0 : dot / (magA * magB);
     }
 
     public static double Similarity(string left, string right) =>
         CosineSimilarity(Vectorize(left), Vectorize(right));
+    [GeneratedRegex(@"[a-z0-9]+", RegexOptions.Compiled)]
+    private static partial Regex MyRegex();
 }

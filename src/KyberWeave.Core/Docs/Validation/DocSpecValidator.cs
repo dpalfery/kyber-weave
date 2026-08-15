@@ -38,14 +38,14 @@ public sealed class DocSpecValidator
     {
         ArgumentNullException.ThrowIfNull(set);
 
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
 
-        var idOwners = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        foreach (var doc in set.Documents)
+        Dictionary<string, List<string>> idOwners = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (DocumentModel doc in set.Documents)
         {
-            var id = doc.Frontmatter.Id;
+            string? id = doc.Frontmatter.Id;
             if (string.IsNullOrWhiteSpace(id)) continue;
-            if (!idOwners.TryGetValue(id, out var paths))
+            if (!idOwners.TryGetValue(id, out List<string>? paths))
             {
                 paths = [];
                 idOwners[id] = paths;
@@ -53,9 +53,9 @@ public sealed class DocSpecValidator
             paths.Add(doc.RelativePath);
         }
 
-        var knownIds = new HashSet<string>(idOwners.Keys, StringComparer.Ordinal);
+        HashSet<string> knownIds = new HashSet<string>(idOwners.Keys, StringComparer.Ordinal);
 
-        foreach (var doc in set.Documents)
+        foreach (DocumentModel doc in set.Documents)
         {
             ValidateDocument(doc, set, knownIds, idOwners, report);
         }
@@ -90,10 +90,10 @@ public sealed class DocSpecValidator
             return;
         }
 
-        var fm = doc.Frontmatter;
+        DocumentFrontmatter fm = doc.Frontmatter;
 
         // --- KW-DOC-SPEC-003: base keys -------------------------------------------------
-        foreach (var key in _config.BaseRequiredKeys)
+        foreach (string key in _config.BaseRequiredKeys)
         {
             if (key is "doc-type" or "status")
                 continue; // handled with vocabulary checks below
@@ -173,7 +173,7 @@ public sealed class DocSpecValidator
         // --- KW-DOC-SPEC-005: source-root exists ----------------------------------------
         if (!string.IsNullOrWhiteSpace(fm.SourceRoot))
         {
-            var full = Path.Combine(_repoRoot, fm.SourceRoot.Replace('/', Path.DirectorySeparatorChar));
+            string full = Path.Combine(_repoRoot, fm.SourceRoot.Replace('/', Path.DirectorySeparatorChar));
             if (!Directory.Exists(full) && !File.Exists(full))
             {
                 report.Add(new Diagnostic(
@@ -186,7 +186,7 @@ public sealed class DocSpecValidator
 
         // --- KW-DOC-SPEC-006: identity and cross-references ------------------------------
         if (!string.IsNullOrWhiteSpace(fm.Id) &&
-            idOwners.TryGetValue(fm.Id, out var owners) &&
+            idOwners.TryGetValue(fm.Id, out List<string>? owners) &&
             owners.Count > 1)
         {
             report.Add(new Diagnostic(
@@ -196,7 +196,7 @@ public sealed class DocSpecValidator
                 "Document ids are unique and permanent."));
         }
 
-        foreach (var reference in doc.DecidedBy)
+        foreach (string reference in doc.DecidedBy)
         {
             if (!knownIds.Contains(reference))
             {
@@ -208,7 +208,7 @@ public sealed class DocSpecValidator
             }
         }
 
-        foreach (var reference in doc.Supersedes)
+        foreach (string reference in doc.Supersedes)
         {
             if (!knownIds.Contains(reference))
             {
@@ -223,7 +223,7 @@ public sealed class DocSpecValidator
 
     private void ValidateRequiredForType(DocumentModel doc, DiagnosticReport report)
     {
-        var fm = doc.Frontmatter;
+        DocumentFrontmatter fm = doc.Frontmatter;
 
         if (_config.IsRequired(doc.DocType, "component"))
             RequireValue(fm.Component, "component", doc, report);
@@ -300,11 +300,11 @@ public sealed class DocSpecValidator
     internal static string? Nearest(string value, IEnumerable<string> candidates)
     {
         string? best = null;
-        var bestDistance = int.MaxValue;
+        int bestDistance = int.MaxValue;
 
-        foreach (var candidate in candidates)
+        foreach (string candidate in candidates)
         {
-            var distance = Levenshtein(value, candidate);
+            int distance = Levenshtein(value, candidate);
             if (distance < bestDistance)
             {
                 bestDistance = distance;
@@ -313,7 +313,7 @@ public sealed class DocSpecValidator
         }
 
         if (best is null) return null;
-        var threshold = Math.Max(3, value.Length / 2);
+        int threshold = Math.Max(3, value.Length / 2);
         return bestDistance <= threshold ? best : null;
     }
 
@@ -322,17 +322,17 @@ public sealed class DocSpecValidator
         if (a.Length == 0) return b.Length;
         if (b.Length == 0) return a.Length;
 
-        var previous = new int[b.Length + 1];
-        var current = new int[b.Length + 1];
+        int[] previous = new int[b.Length + 1];
+        int[] current = new int[b.Length + 1];
 
-        for (var j = 0; j <= b.Length; j++) previous[j] = j;
+        for (int j = 0; j <= b.Length; j++) previous[j] = j;
 
-        for (var i = 1; i < a.Length + 1; i++)
+        for (int i = 1; i < a.Length + 1; i++)
         {
             current[0] = i;
-            for (var j = 1; j <= b.Length; j++)
+            for (int j = 1; j <= b.Length; j++)
             {
-                var cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                int cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
                 current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
             }
             (previous, current) = (current, previous);

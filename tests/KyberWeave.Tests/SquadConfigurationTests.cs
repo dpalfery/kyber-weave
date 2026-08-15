@@ -1,7 +1,7 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
-using YamlDotNet.Core;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
@@ -15,9 +15,9 @@ public sealed class SquadConfigurationTests : IDisposable
     private readonly TempDirectory _temp = new();
 
     [Fact]
-    public void ProductDefaults_UseFullBundleAndBestEffortWithoutPinnedTargets()
+    public void ProductDefaultsUseFullBundleAndBestEffortWithoutPinnedTargets()
     {
-        var config = SquadConfig.ProductDefaults;
+        SquadConfig config = SquadConfig.ProductDefaults;
 
         Assert.Equal("full", config.Bundle);
         Assert.Null(config.Version);
@@ -27,9 +27,9 @@ public sealed class SquadConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void CombinedConfigLoader_BindsCompleteSquadSection()
+    public void CombinedConfigLoaderBindsCompleteSquadSection()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
             squad:
               bundle: full
               version: 1.2.3
@@ -48,9 +48,9 @@ public sealed class SquadConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void LoadMerged_OmittedValuesPreserveDefaults()
+    public void LoadMergedOmittedValuesPreserveDefaults()
     {
-        var defaults = new SquadConfig
+        SquadConfig defaults = new SquadConfig
         {
             Bundle = "full",
             Version = "1.2.3",
@@ -58,12 +58,12 @@ public sealed class SquadConfigurationTests : IDisposable
             Exclusions = [SquadTarget.Warp],
             Translation = SquadTranslationMode.BestEffort
         };
-        var path = WriteConfig("""
+        string path = WriteConfig("""
             squad:
               translation: best-effort
             """);
 
-        var config = SquadConfigLoader.LoadMerged(defaults, path);
+        SquadConfig config = SquadConfigLoader.LoadMerged(defaults, path);
 
         Assert.Equal(defaults.Bundle, config.Bundle);
         Assert.Equal(defaults.Version, config.Version);
@@ -73,40 +73,40 @@ public sealed class SquadConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void LoadMerged_PresentListsReplaceDefaultsRatherThanAppend()
+    public void LoadMergedPresentListsReplaceDefaultsRatherThanAppend()
     {
-        var defaults = new SquadConfig
+        SquadConfig defaults = new SquadConfig
         {
             Targets = [SquadTarget.Codex, SquadTarget.Cursor],
             Exclusions = [SquadTarget.Warp]
         };
-        var path = WriteConfig("""
+        string path = WriteConfig("""
             squad:
               targets: [claude]
               exclusions: [kilo, gemini]
             """);
 
-        var config = SquadConfigLoader.LoadMerged(defaults, path);
+        SquadConfig config = SquadConfigLoader.LoadMerged(defaults, path);
 
         Assert.Equal([SquadTarget.Claude], config.Targets);
         Assert.Equal([SquadTarget.Kilo, SquadTarget.Gemini], config.Exclusions);
     }
 
     [Fact]
-    public void LoadMerged_ExplicitEmptyListsClearDefaults()
+    public void LoadMergedExplicitEmptyListsClearDefaults()
     {
-        var defaults = new SquadConfig
+        SquadConfig defaults = new SquadConfig
         {
             Targets = [SquadTarget.Codex],
             Exclusions = [SquadTarget.Warp]
         };
-        var path = WriteConfig("""
+        string path = WriteConfig("""
             squad:
               targets: []
               exclusions: []
             """);
 
-        var config = SquadConfigLoader.LoadMerged(defaults, path);
+        SquadConfig config = SquadConfigLoader.LoadMerged(defaults, path);
 
         Assert.Empty(config.Targets);
         Assert.Empty(config.Exclusions);
@@ -115,24 +115,24 @@ public sealed class SquadConfigurationTests : IDisposable
     [Theory]
     [InlineData(null, "1.2.3+build.42", "1.2.3")]
     [InlineData("1.2.3", "1.2.3+build.42", "1.2.3")]
-    public void ResolveVersion_UsesNormalizedCliVersionAndRequiresAnExactPin(
+    public void ResolveVersionUsesNormalizedCliVersionAndRequiresAnExactPin(
         string? configuredVersion,
         string cliVersion,
         string expected)
     {
-        var config = new SquadConfig { Version = configuredVersion };
+        SquadConfig config = new SquadConfig { Version = configuredVersion };
 
-        var effective = SquadConfigLoader.ResolveVersion(config, cliVersion);
+        string effective = SquadConfigLoader.ResolveVersion(config, cliVersion);
 
         Assert.Equal(expected, effective);
     }
 
     [Fact]
-    public void ResolveVersion_MismatchedConfiguredVersionIsRejected()
+    public void ResolveVersionMismatchedConfiguredVersionIsRejected()
     {
-        var config = new SquadConfig { Version = "1.2.4" };
+        SquadConfig config = new SquadConfig { Version = "1.2.4" };
 
-        var exception = Assert.Throws<YamlException>(
+        YamlException exception = Assert.Throws<YamlException>(
             () => SquadConfigLoader.ResolveVersion(config, "1.2.3+build.42"));
 
         Assert.Contains("squad.version", exception.Message, StringComparison.Ordinal);
@@ -145,11 +145,11 @@ public sealed class SquadConfigurationTests : IDisposable
     [InlineData("1.2.3+.build")]
     [InlineData("1.2.3+build.")]
     [InlineData("1.2.3+build..42")]
-    public void ResolveVersion_BuildMetadataWithEmptyIdentifierIsRejected(string cliVersion)
+    public void ResolveVersionBuildMetadataWithEmptyIdentifierIsRejected(string cliVersion)
     {
-        var config = new SquadConfig();
+        SquadConfig config = new SquadConfig();
 
-        var exception = Assert.Throws<YamlException>(
+        YamlException exception = Assert.Throws<YamlException>(
             () => SquadConfigLoader.ResolveVersion(config, cliVersion));
 
         Assert.Contains("stable X.Y.Z", exception.Message, StringComparison.Ordinal);
@@ -160,11 +160,11 @@ public sealed class SquadConfigurationTests : IDisposable
     [InlineData("translation", "strict")]
     [InlineData("target", "not-a-target")]
     [InlineData("version", "v1.2.3")]
-    public void CombinedTryLoad_InvalidSquadValueReportsKwConfig001(
+    public void CombinedTryLoadInvalidSquadValueReportsKwConfig001(
         string invalidField,
         string invalidValue)
     {
-        var body = invalidField switch
+        string body = invalidField switch
         {
             "bundle" => $"bundle: {invalidValue}",
             "translation" => $"translation: {invalidValue}",
@@ -174,7 +174,7 @@ public sealed class SquadConfigurationTests : IDisposable
         };
         WriteRepositoryConfig($"squad:\n  {body}\n");
 
-        var result = KyberWeaveConfigLoader.TryLoad(_temp.Path);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_temp.Path);
 
         Assert.False(result.Success);
         Assert.Null(result.Config);
@@ -187,14 +187,14 @@ public sealed class SquadConfigurationTests : IDisposable
 
     private string WriteConfig(string yaml)
     {
-        var path = Path.Combine(_temp.Path, "squad-config.yml");
+        string path = Path.Combine(_temp.Path, "squad-config.yml");
         File.WriteAllText(path, yaml);
         return path;
     }
 
     private void WriteRepositoryConfig(string yaml)
     {
-        var directory = Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
+        DirectoryInfo directory = Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
         File.WriteAllText(Path.Combine(directory.FullName, "kyber-weave.yml"), yaml);
     }
 }

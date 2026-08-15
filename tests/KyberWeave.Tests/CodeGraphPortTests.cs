@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
@@ -15,63 +16,63 @@ namespace KyberWeave.Tests;
 public class CodeGraphPortTests
 {
     [Fact]
-    public void DocDriftLinter_Accepts_ICodeGraphResolver_And_Fake_Drives_Drift_Findings()
+    public void DocDriftLinterAcceptsICodeGraphResolverAndFakeDrivesDriftFindings()
     {
-        var resolver = FakeCodeGraphResolver.WithSymbols(
+        FakeCodeGraphResolver resolver = FakeCodeGraphResolver.WithSymbols(
             ("KnownSymbol", Node("KnownSymbol", "1-Presentation/Api/Svc.cs", 10)));
 
-        var set = DocumentSetWithCodeRef("UnknownSymbol");
-        var report = new DocDriftLinter(resolver).Validate(set);
+        DocumentSet set = DocumentSetWithCodeRef("UnknownSymbol");
+        DiagnosticReport report = new DocDriftLinter(resolver).Validate(set);
 
         Assert.Contains(report.Items, i => i.Code == DocDriftLinter.UnresolvedCodeRef);
         Assert.DoesNotContain(report.Items, i => i.Message.Contains("KnownSymbol", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void DocDriftLinter_Fake_Resolver_Reports_Unresolved_Endpoint()
+    public void DocDriftLinterFakeResolverReportsUnresolvedEndpoint()
     {
-        var resolver = FakeCodeGraphResolver.WithRoutes("GET /api/health");
-        var set = DocumentSetWithEndpoint("POST /api/missing");
+        FakeCodeGraphResolver resolver = FakeCodeGraphResolver.WithRoutes("GET /api/health");
+        DocumentSet set = DocumentSetWithEndpoint("POST /api/missing");
 
-        var report = new DocDriftLinter(resolver).Validate(set);
+        DiagnosticReport report = new DocDriftLinter(resolver).Validate(set);
 
         Assert.Contains(report.Items, i => i.Code == DocDriftLinter.UnresolvedEndpoint);
     }
 
     [Fact]
-    public void DocumentIndex_Build_Accepts_ICodeGraphResolver_And_Fake_Drives_Joins()
+    public void DocumentIndexBuildAcceptsICodeGraphResolverAndFakeDrivesJoins()
     {
-        var resolver = FakeCodeGraphResolver.WithSymbols(
+        FakeCodeGraphResolver resolver = FakeCodeGraphResolver.WithSymbols(
             ("BillingService", Node("BillingService", "2-Application/Billing/Svc.cs", 42)));
 
-        var corpus = DocumentCorpus.Build(DocumentSetWithCodeRef("BillingService"));
-        var index = DocumentIndex.Build(corpus, resolver);
+        DocumentCorpus corpus = DocumentCorpus.Build(DocumentSetWithCodeRef("BillingService"));
+        DocumentIndex index = DocumentIndex.Build(corpus, resolver);
 
-        var hits = index.ForSymbol("BillingService");
-        var hit = Assert.Single(hits);
+        IReadOnlyList<DocumentHit> hits = index.ForSymbol("BillingService");
+        DocumentHit hit = Assert.Single(hits);
 
         Assert.Contains(hit.CodeJoins, j => j.Reference == "BillingService" && j.Location.Contains("Svc.cs"));
     }
 
     [Fact]
-    public void DocGraphExporter_Accepts_ICodeGraphResolver_And_Emits_Resolved_Edges()
+    public void DocGraphExporterAcceptsICodeGraphResolverAndEmitsResolvedEdges()
     {
-        var resolver = FakeCodeGraphResolver.WithSymbols(
+        FakeCodeGraphResolver resolver = FakeCodeGraphResolver.WithSymbols(
             ("ExportTarget", Node("ExportTarget", "src/ExportTarget.cs", 1, kind: "class", id: "node-export-1")));
 
-        var set = DocumentSetWithCodeRef("ExportTarget");
-        using var output = new TempDirectory();
+        DocumentSet set = DocumentSetWithCodeRef("ExportTarget");
+        using TempDirectory output = new TempDirectory();
 
-        var result = new DocGraphExporter(resolver).Export(set, output.Path);
-        var edges = File.ReadAllLines(result.EdgesPath);
+        DocGraphExportResult result = new DocGraphExporter(resolver).Export(set, output.Path);
+        string[] edges = File.ReadAllLines(result.EdgesPath);
 
         Assert.Contains(edges, e => e.Contains("REFERENCES", StringComparison.Ordinal) && e.Contains("node-export-1", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void CodeGraphResolver_Adapter_Preserves_Resolve_By_Name_Route_And_HasFilesUnder()
+    public void CodeGraphResolverAdapterPreservesResolveByNameRouteAndHasFilesUnder()
     {
-        using var fixture = new CodeGraphFixtureDb();
+        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
         fixture.IndexSymbol("AdapterSymbol", "3-Domain/Adapter/Symbol.cs", 7);
         fixture.IndexRoute("GET /api/adapter/ping");
         fixture.IndexFile("3-Domain/Adapter/Symbol.cs");

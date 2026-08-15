@@ -19,7 +19,7 @@ public sealed class ProcessRunnerInputTests
 
     private static ProcessStartInfo CreateShellStartInfo(string script)
     {
-        var startInfo = new ProcessStartInfo("/bin/sh")
+        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -32,17 +32,17 @@ public sealed class ProcessRunnerInputTests
     }
 
     [Fact]
-    public async Task Run_WithLargeInputAndOutput_TransfersAllStreamsWithoutDeadlock()
+    public async Task RunWithLargeInputAndOutputTransfersAllStreamsWithoutDeadlock()
     {
         if (OperatingSystem.IsWindows()) return; // CI runs Linux; the contract is platform-independent.
 
-        var input = new string('i', BytesPerStream);
-        var startInfo = CreateShellStartInfo(
+        string input = new string('i', BytesPerStream);
+        ProcessStartInfo startInfo = CreateShellStartInfo(
             $"{Emit(BytesPerStream, 'e', toStandardError: true)}; " +
             $"{Emit(BytesPerStream, 'o', toStandardError: false)}; " +
             "count=$(wc -c | tr -d '[:space:]'); printf '\\nstdin:%s\\n' \"$count\"; exit 11");
 
-        var result = await Task
+        ProcessResult result = await Task
             .Run(() => ProcessRunner.Run(startInfo, input))
             .WaitAsync(TimeSpan.FromSeconds(TimeoutSeconds));
 
@@ -52,14 +52,14 @@ public sealed class ProcessRunnerInputTests
     }
 
     [Fact]
-    public void Run_PreservesCallerEnvironmentOverrides()
+    public void RunPreservesCallerEnvironmentOverrides()
     {
         if (OperatingSystem.IsWindows()) return;
 
-        var startInfo = CreateShellStartInfo("printf '%s' \"$KYBER_WEAVE_PROCESS_MARKER\"");
+        ProcessStartInfo startInfo = CreateShellStartInfo("printf '%s' \"$KYBER_WEAVE_PROCESS_MARKER\"");
         startInfo.Environment["KYBER_WEAVE_PROCESS_MARKER"] = "from-caller";
 
-        var result = ProcessRunner.Run(startInfo, string.Empty);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
 
         Assert.Equal("from-caller", result.StandardOutput);
         Assert.Equal(0, result.ExitCode);
@@ -69,9 +69,9 @@ public sealed class ProcessRunnerInputTests
     [InlineData("stdin")]
     [InlineData("stdout")]
     [InlineData("stderr")]
-    public void Run_WhenARequiredStreamIsNotRedirected_RejectsTheStartInfo(string stream)
+    public void RunWhenARequiredStreamIsNotRedirectedRejectsTheStartInfo(string stream)
     {
-        var startInfo = CreateShellStartInfo("exit 0");
+        ProcessStartInfo startInfo = CreateShellStartInfo("exit 0");
         switch (stream)
         {
             case "stdin":
@@ -89,9 +89,9 @@ public sealed class ProcessRunnerInputTests
     }
 
     [Fact]
-    public void Run_WhenArgumentsIsAConcatenatedString_RejectsTheStartInfo()
+    public void RunWhenArgumentsIsAConcatenatedStringRejectsTheStartInfo()
     {
-        var startInfo = new ProcessStartInfo("sqlite3")
+        ProcessStartInfo startInfo = new ProcessStartInfo("sqlite3")
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -100,17 +100,17 @@ public sealed class ProcessRunnerInputTests
             Arguments = "--version"
         };
 
-        var exception = Assert.Throws<ArgumentException>(() => ProcessRunner.Run(startInfo, string.Empty));
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => ProcessRunner.Run(startInfo, string.Empty));
         Assert.Equal("startInfo", exception.ParamName);
     }
 
     [Fact]
-    public void Run_WhenProcessCannotStart_PropagatesTheStartupFailure()
+    public void RunWhenProcessCannotStartPropagatesTheStartupFailure()
     {
-        var missingExecutable = Path.Combine(
+        string missingExecutable = Path.Combine(
             Path.GetTempPath(),
             $"kyber-weave-missing-{Guid.NewGuid():N}");
-        var startInfo = new ProcessStartInfo(missingExecutable)
+        ProcessStartInfo startInfo = new ProcessStartInfo(missingExecutable)
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -122,12 +122,12 @@ public sealed class ProcessRunnerInputTests
     }
 
     [Fact]
-    public async Task Run_WhenChildClosesStdin_PropagatesTheWriteFailure()
+    public async Task RunWhenChildClosesStdinPropagatesTheWriteFailure()
     {
         if (OperatingSystem.IsWindows()) return; // CI runs Linux; the contract is platform-independent.
 
-        var startInfo = CreateShellStartInfo("exec 0<&-; exit 0");
-        var input = new string('i', BytesPerStream * 4);
+        ProcessStartInfo startInfo = CreateShellStartInfo("exec 0<&-; exit 0");
+        string input = new string('i', BytesPerStream * 4);
 
         await Assert.ThrowsAnyAsync<IOException>(async () =>
             await Task

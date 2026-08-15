@@ -16,9 +16,9 @@ internal static class ProcessConsoleCapture
 
         lock (Gate)
         {
-            using var writer = new StringWriter();
-            var originalOut = Console.Out;
-            var originalAnsiConsole = AnsiConsole.Console;
+            using StringWriter writer = new StringWriter();
+            TextWriter originalOut = Console.Out;
+            IAnsiConsole originalAnsiConsole = AnsiConsole.Console;
             try
             {
                 Console.SetOut(writer);

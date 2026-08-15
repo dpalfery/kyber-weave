@@ -58,7 +58,7 @@ public sealed record AnalysisGlossary(IReadOnlyList<ApprovedGlossarySense> Sense
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
         ArgumentNullException.ThrowIfNull(claims);
 
-        var senses = Senses
+        ApprovedGlossarySense[] senses = Senses
             .Where(sense => StringComparer.OrdinalIgnoreCase.Equals(sense.Term, term))
             .ToArray();
         if (senses.Length == 0) return false;
@@ -119,8 +119,8 @@ public static class AnalysisCandidateId
         ArgumentException.ThrowIfNullOrWhiteSpace(analyzerVersion);
         ArgumentException.ThrowIfNullOrWhiteSpace(rubricVersion);
 
-        var hashes = claimContentHashes.Order(StringComparer.Ordinal);
-        var identity = string.Join('\n',
+        IOrderedEnumerable<string> hashes = claimContentHashes.Order(StringComparer.Ordinal);
+        string identity = string.Join('\n',
             kind.ToString().ToLowerInvariant(),
             normalizedTerm?.Trim().ToLowerInvariant() ?? string.Empty,
             analyzerVersion,

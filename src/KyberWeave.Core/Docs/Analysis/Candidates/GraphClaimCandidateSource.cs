@@ -10,49 +10,49 @@ public sealed class GraphClaimCandidateSource : IClaimCandidateSource
     public ClaimCandidateSourceResult FindCandidates(ClaimCandidateSourceRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var scored = SparseRelatedPairs(request);
-        var selected = new List<ClaimPairCandidate>();
-        using var enumerator = SelectCapacityBoundedTopK(
+        IReadOnlyList<ClaimPairCandidate> scored = SparseRelatedPairs(request);
+        List<ClaimPairCandidate> selected = new List<ClaimPairCandidate>();
+        using IEnumerator<ClaimPairCandidate> enumerator = SelectCapacityBoundedTopK(
                 scored,
                 request.Search.MaxNeighborsPerClaim)
             .GetEnumerator();
         while (selected.Count < request.Search.MaxCandidates && enumerator.MoveNext())
             selected.Add(enumerator.Current);
-        var truncated = enumerator.MoveNext();
+        bool truncated = enumerator.MoveNext();
         return new ClaimCandidateSourceResult(selected, scored.Count, truncated);
     }
 
     private static IReadOnlyList<ClaimPairCandidate> SparseRelatedPairs(ClaimCandidateSourceRequest request)
     {
-        var tokens = request.Claims
+        IReadOnlySet<string>[] tokens = request.Claims
             .Select(claim => LexicalSimilarity.Tokens(claim.ContextualText))
             .ToArray();
-        var postings = BuildPostings(tokens);
-        var postingLimit = Math.Max(8, request.Search.MaxNeighborsPerClaim * 8);
-        var pairs = new Dictionary<ClaimPair, ClaimPairCandidate>();
+        IReadOnlyDictionary<string, IReadOnlyList<int>> postings = BuildPostings(tokens);
+        int postingLimit = Math.Max(8, request.Search.MaxNeighborsPerClaim * 8);
+        Dictionary<ClaimPair, ClaimPairCandidate> pairs = new Dictionary<ClaimPair, ClaimPairCandidate>();
 
-        for (var left = 0; left < request.Claims.Count; left++)
+        for (int left = 0; left < request.Claims.Count; left++)
         {
-            var overlap = new Dictionary<int, int>();
-            foreach (var token in tokens[left])
+            Dictionary<int, int> overlap = new Dictionary<int, int>();
+            foreach (string token in tokens[left])
             {
-                if (!postings.TryGetValue(token, out var indexes) || indexes.Count > postingLimit)
+                if (!postings.TryGetValue(token, out IReadOnlyList<int>? indexes) || indexes.Count > postingLimit)
                     continue;
-                foreach (var right in indexes)
+                foreach (int right in indexes)
                 {
                     if (right == left || !AreRelated(request, request.Claims[left], request.Claims[right]))
                         continue;
-                    overlap.TryGetValue(right, out var count);
+                    overlap.TryGetValue(right, out int count);
                     overlap[right] = count + 1;
                 }
             }
 
-            foreach (var item in overlap
+            foreach (KeyValuePair<int, int> item in overlap
                          .OrderByDescending(item => Score(tokens[left], tokens[item.Key], item.Value))
                          .ThenBy(item => item.Key)
                          .Take(request.Search.MaxNeighborsPerClaim))
             {
-                var identity = ClaimPair.Create(request.Claims[left], request.Claims[item.Key]);
+                ClaimPair identity = ClaimPair.Create(request.Claims[left], request.Claims[item.Key]);
                 pairs.TryAdd(identity, new ClaimPairCandidate(
                     identity.Left,
                     identity.Right,
@@ -79,11 +79,11 @@ public sealed class GraphClaimCandidateSource : IClaimCandidateSource
     private static IReadOnlyDictionary<string, IReadOnlyList<int>> BuildPostings(
         IReadOnlyList<IReadOnlySet<string>> tokenSets)
     {
-        var postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
-        for (var index = 0; index < tokenSets.Count; index++)
-            foreach (var token in tokenSets[index])
+        Dictionary<string, List<int>> postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        for (int index = 0; index < tokenSets.Count; index++)
+            foreach (string token in tokenSets[index])
             {
-                if (!postings.TryGetValue(token, out var indexes))
+                if (!postings.TryGetValue(token, out List<int>? indexes))
                 {
                     indexes = [];
                     postings[token] = indexes;
@@ -102,14 +102,14 @@ public sealed class GraphClaimCandidateSource : IClaimCandidateSource
         IEnumerable<ClaimPairCandidate> pairs,
         int maximumNeighbors)
     {
-        var counts = new Dictionary<Claim, int>();
-        foreach (var pair in pairs
+        Dictionary<Claim, int> counts = new Dictionary<Claim, int>();
+        foreach (ClaimPairCandidate? pair in pairs
                      .OrderByDescending(pair => pair.Score.Lexical)
                      .ThenBy(pair => pair.Left.FilePath, StringComparer.Ordinal)
                      .ThenBy(pair => pair.Right.FilePath, StringComparer.Ordinal))
         {
-            counts.TryGetValue(pair.Left, out var leftCount);
-            counts.TryGetValue(pair.Right, out var rightCount);
+            counts.TryGetValue(pair.Left, out int leftCount);
+            counts.TryGetValue(pair.Right, out int rightCount);
             if (leftCount >= maximumNeighbors || rightCount >= maximumNeighbors) continue;
             counts[pair.Left] = leftCount + 1;
             counts[pair.Right] = rightCount + 1;
@@ -126,9 +126,9 @@ public sealed class GraphClaimCandidateSource : IClaimCandidateSource
 
         private static int Compare(Claim left, Claim right)
         {
-            var path = StringComparer.Ordinal.Compare(left.FilePath, right.FilePath);
+            int path = StringComparer.Ordinal.Compare(left.FilePath, right.FilePath);
             if (path != 0) return path;
-            var line = left.StartLine.CompareTo(right.StartLine);
+            int line = left.StartLine.CompareTo(right.StartLine);
             return line != 0 ? line : StringComparer.Ordinal.Compare(left.ContentHash, right.ContentHash);
         }
     }

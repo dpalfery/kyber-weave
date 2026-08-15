@@ -44,7 +44,7 @@ internal static class DocsRootPath
         // Rootedness is checked before TrimEnd('/') — otherwise '/' collapses to empty and
         // is welcomed as the repository root, and a drive-letter form like 'C:/' can slip
         // past Path.IsPathRooted on non-Windows hosts where drive letters are not special.
-        var path = value.Trim().Replace('\\', '/');
+        string path = value.Trim().Replace('\\', '/');
 
         if (IsAbsolute(path))
         {
@@ -54,7 +54,7 @@ internal static class DocsRootPath
 
         path = path.TrimEnd('/');
 
-        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries)
+        string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(s => s != RepositoryRoot)
             .ToArray();
 
@@ -89,7 +89,7 @@ internal static class DocsRootPath
     /// <summary>Canonicalizes one documentation root, which may be the repository itself.</summary>
     public static string NormalizeRoot(string value, string key)
     {
-        var root = Normalize(value, key);
+        string root = Normalize(value, key);
         return root.Length == 0 ? RepositoryRoot : root;
     }
 
@@ -108,12 +108,12 @@ internal static class DocsRootPath
     {
         ArgumentNullException.ThrowIfNull(values);
 
-        var roots = new List<string>();
-        var seen = new HashSet<string>(PathComparer);
+        List<string> roots = new List<string>();
+        HashSet<string> seen = new HashSet<string>(PathComparer);
 
-        foreach (var value in values)
+        foreach (string value in values)
         {
-            var root = NormalizeRoot(value, key);
+            string root = NormalizeRoot(value, key);
             if (seen.Add(root)) roots.Add(root);
         }
 

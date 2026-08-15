@@ -96,7 +96,7 @@ public sealed class OntologyConfig
     public bool IsRequired(DocType docType, string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        if (!RequiredKeysByType.TryGetValue(docType, out var keys))
+        if (!RequiredKeysByType.TryGetValue(docType, out IReadOnlyList<string>? keys))
             return false;
 
         return keys.Contains(key, StringComparer.Ordinal);

@@ -25,20 +25,20 @@ public sealed partial class ClaimExtractor
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        var diagnostics = new DiagnosticReport();
-        var ignoreRead = IgnoreMarkupReader.Read(document);
+        DiagnosticReport diagnostics = new DiagnosticReport();
+        IgnoreMarkupReadResult ignoreRead = IgnoreMarkupReader.Read(document);
         if (ignoreRead.Diagnostic is not null)
         {
             diagnostics.Add(ignoreRead.Diagnostic);
             return new ClaimExtractionResult([], diagnostics);
         }
 
-        var markdown = ignoreRead.SanitizedBody;
-        var syntax = Markdown.Parse(markdown, Pipeline);
-        var sections = ReadSections(syntax, markdown);
-        var claims = new List<Claim>();
+        string markdown = ignoreRead.SanitizedBody;
+        MarkdownDocument syntax = Markdown.Parse(markdown, Pipeline);
+        IReadOnlyList<SectionAtLine> sections = ReadSections(syntax, markdown);
+        List<Claim> claims = new List<Claim>();
 
-        foreach (var block in syntax.Descendants<Block>())
+        foreach (Block block in syntax.Descendants<Block>())
         {
             switch (block)
             {
@@ -60,7 +60,7 @@ public sealed partial class ClaimExtractor
 
         claims.Sort(static (left, right) =>
         {
-            var line = left.StartLine.CompareTo(right.StartLine);
+            int line = left.StartLine.CompareTo(right.StartLine);
             return line != 0 ? line : left.Kind.CompareTo(right.Kind);
         });
         return new ClaimExtractionResult(claims, diagnostics);
@@ -75,11 +75,11 @@ public sealed partial class ClaimExtractor
         IReadOnlyList<SectionAtLine> sections,
         IReadOnlyList<IgnoreInterval> ignores)
     {
-        var section = SectionFor(block.Line, sections);
+        string section = SectionFor(block.Line, sections);
         if (section.Length == 0) return;
 
-        var source = Slice(markdown, block);
-        var text = DisplayProse(PlainText(source));
+        string source = Slice(markdown, block);
+        string text = DisplayProse(PlainText(source));
         if (text.Length == 0) return;
 
         AddClaim(claims, kind, text, section, text, Source(block), document, markdown, ignores, false);
@@ -93,18 +93,18 @@ public sealed partial class ClaimExtractor
         IReadOnlyList<SectionAtLine> sections,
         IReadOnlyList<IgnoreInterval> ignores)
     {
-        var directParagraphs = item.OfType<ParagraphBlock>().ToList();
+        List<ParagraphBlock> directParagraphs = item.OfType<ParagraphBlock>().ToList();
         if (directParagraphs.Count == 0) return;
 
-        var text = DisplayProse(string.Join(
+        string text = DisplayProse(string.Join(
             " ",
             directParagraphs.Select(paragraph => PlainText(Slice(markdown, paragraph)))));
         if (text.Length == 0) return;
 
-        var first = directParagraphs[0];
-        var last = directParagraphs[^1];
-        var span = new SourceBlock(first.Line, first.Span.Start, last.Span.End);
-        var section = SectionFor(first.Line, sections);
+        ParagraphBlock first = directParagraphs[0];
+        ParagraphBlock last = directParagraphs[^1];
+        SourceBlock span = new SourceBlock(first.Line, first.Span.Start, last.Span.End);
+        string section = SectionFor(first.Line, sections);
         if (section.Length == 0) return;
 
         AddClaim(claims, ClaimKind.ListItem, text, section, text, span, document, markdown, ignores, false);
@@ -119,18 +119,18 @@ public sealed partial class ClaimExtractor
         IReadOnlyList<IgnoreInterval> ignores)
     {
         if (row.Parent is not Table table) return;
-        var header = table.OfType<TableRow>().FirstOrDefault(candidate => candidate.IsHeader);
+        TableRow? header = table.OfType<TableRow>().FirstOrDefault(candidate => candidate.IsHeader);
         if (header is null) return;
 
-        var headers = ReadCells(header, markdown);
-        var values = ReadCells(row, markdown);
+        IReadOnlyList<string> headers = ReadCells(header, markdown);
+        IReadOnlyList<string> values = ReadCells(row, markdown);
         if (values.Count == 0 || values.All(string.IsNullOrWhiteSpace)) return;
 
-        var text = string.Join(" | ", values);
-        var pairs = values.Select((value, index) =>
+        string text = string.Join(" | ", values);
+        IEnumerable<string> pairs = values.Select((value, index) =>
             $"{(index < headers.Count && headers[index].Length > 0 ? headers[index] : $"Column {index + 1}")}: {value}");
-        var context = string.Join("\n", pairs);
-        var section = SectionFor(row.Line, sections);
+        string context = string.Join("\n", pairs);
+        string section = SectionFor(row.Line, sections);
         if (section.Length == 0) return;
 
         AddClaim(claims, ClaimKind.TableRow, text, section, context, Source(row), document, markdown, ignores, false);
@@ -149,18 +149,18 @@ public sealed partial class ClaimExtractor
         IReadOnlyList<SectionAtLine> sections,
         IReadOnlyList<IgnoreInterval> ignores)
     {
-        var section = SectionFor(code.Line, sections);
+        string section = SectionFor(code.Line, sections);
         if (section.Length == 0) return;
 
-        var source = Slice(markdown, code);
-        var lines = source.Split('\n');
-        var contentEnd = code.ClosingFencedCharCount > 0 ? lines.Length - 1 : lines.Length;
-        var text = string.Join("\n", lines.Skip(1).Take(Math.Max(0, contentEnd - 1))).Trim('\n');
+        string source = Slice(markdown, code);
+        string[] lines = source.Split('\n');
+        int contentEnd = code.ClosingFencedCharCount > 0 ? lines.Length - 1 : lines.Length;
+        string text = string.Join("\n", lines.Skip(1).Take(Math.Max(0, contentEnd - 1))).Trim('\n');
         if (text.Length == 0) return;
 
-        var opening = lines[0].TrimStart();
-        var markerLength = opening.TakeWhile(character => character is '`' or '~').Count();
-        var info = markerLength < opening.Length ? opening[markerLength..].Trim() : string.Empty;
+        string opening = lines[0].TrimStart();
+        int markerLength = opening.TakeWhile(character => character is '`' or '~').Count();
+        string info = markerLength < opening.Length ? opening[markerLength..].Trim() : string.Empty;
         AddClaim(claims, ClaimKind.CodeBlock, text, section, info, Source(code), document, markdown, ignores, true);
     }
 
@@ -176,13 +176,13 @@ public sealed partial class ClaimExtractor
         IReadOnlyList<IgnoreInterval> ignores,
         bool code)
     {
-        var startBodyLine = block.Line + 1;
-        var endBodyLine = EndLine(markdown, block);
-        var contextualText = contextDetail.Length == 0
+        int startBodyLine = block.Line + 1;
+        int endBodyLine = EndLine(markdown, block);
+        string contextualText = contextDetail.Length == 0
             ? section + "\n" + text
             : section + "\n" + contextDetail + (contextDetail == text ? string.Empty : "\n" + text);
-        var normalizedContent = code ? NormalizeCode(text) : NormalizeProse(text);
-        var normalizedContext = code ? NormalizeCode(contextualText) : NormalizeProse(contextualText);
+        string normalizedContent = code ? NormalizeCode(text) : NormalizeProse(text);
+        string normalizedContext = code ? NormalizeCode(contextualText) : NormalizeProse(contextualText);
 
         claims.Add(new Claim(
             kind,
@@ -215,14 +215,14 @@ public sealed partial class ClaimExtractor
     // printable placeholder such as KYBERINLINELITERAL0END.
     private static string PlainText(string markdown)
     {
-        var literals = new List<string>();
-        var withPlaceholders = InlineCodePattern().Replace(markdown, match =>
+        List<string> literals = new List<string>();
+        string withPlaceholders = InlineCodePattern().Replace(markdown, match =>
         {
             literals.Add(match.Groups[1].Value);
             return $"{InlineLiteralStart}{literals.Count - 1}{InlineLiteralEnd}";
         });
-        var plain = Markdown.ToPlainText(withPlaceholders, Pipeline);
-        for (var index = 0; index < literals.Count; index++)
+        string plain = Markdown.ToPlainText(withPlaceholders, Pipeline);
+        for (int index = 0; index < literals.Count; index++)
         {
             plain = plain.Replace(
                 $"{InlineLiteralStart}{index}{InlineLiteralEnd}",
@@ -238,7 +238,7 @@ public sealed partial class ClaimExtractor
 
     private static bool HasAncestor<T>(Block block) where T : Block
     {
-        for (var parent = block.Parent; parent is not null; parent = parent.Parent)
+        for (ContainerBlock? parent = block.Parent; parent is not null; parent = parent.Parent)
         {
             if (parent is T) return true;
         }
@@ -253,7 +253,7 @@ public sealed partial class ClaimExtractor
             return string.Empty;
         }
 
-        var length = Math.Min(markdown.Length - block.SpanStart, block.SpanEnd - block.SpanStart + 1);
+        int length = Math.Min(markdown.Length - block.SpanStart, block.SpanEnd - block.SpanStart + 1);
         return markdown.Substring(block.SpanStart, length);
     }
 
@@ -265,9 +265,9 @@ public sealed partial class ClaimExtractor
 
     private static int EndLine(string markdown, ISourceBlock block)
     {
-        var end = Math.Min(markdown.Length, block.SpanEnd + 1);
-        var line = block.Line + 1;
-        for (var index = Math.Max(0, block.SpanStart); index < end; index++)
+        int end = Math.Min(markdown.Length, block.SpanEnd + 1);
+        int line = block.Line + 1;
+        for (int index = Math.Max(0, block.SpanStart); index < end; index++)
         {
             if (markdown[index] == '\n') line++;
         }
@@ -280,8 +280,8 @@ public sealed partial class ClaimExtractor
         int endLine,
         IReadOnlyList<IgnoreInterval> intervals)
     {
-        var result = IgnoreRule.None;
-        foreach (var interval in intervals)
+        IgnoreRule result = IgnoreRule.None;
+        foreach (IgnoreInterval interval in intervals)
         {
             if (startLine <= interval.EndLine && endLine >= interval.StartLine)
             {
@@ -296,8 +296,8 @@ public sealed partial class ClaimExtractor
 
     private static string NormalizeProse(string text)
     {
-        var decomposed = text.Normalize(NormalizationForm.FormKD).ToLowerInvariant();
-        var withoutPunctuation = ProseSeparatorPattern().Replace(decomposed, " ");
+        string decomposed = text.Normalize(NormalizationForm.FormKD).ToLowerInvariant();
+        string withoutPunctuation = ProseSeparatorPattern().Replace(decomposed, " ");
         return WhitespacePattern().Replace(withoutPunctuation, " ").Trim();
     }
 

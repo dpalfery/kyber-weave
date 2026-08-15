@@ -38,7 +38,7 @@ public sealed class ProcessRunnerTests
     {
         if (OperatingSystem.IsWindows()) return null;
 
-        var startInfo = new ProcessStartInfo("/bin/sh")
+        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -57,7 +57,7 @@ public sealed class ProcessRunnerTests
     /// </summary>
     private static ProcessResult CaptureWithinTimeout(Process process)
     {
-        var capture = Task.Run(() => ProcessRunner.ReadToEnd(process));
+        Task<ProcessResult> capture = Task.Run(() => ProcessRunner.ReadToEnd(process));
 
         if (!capture.Wait(TimeSpan.FromSeconds(TimeoutSeconds)))
         {
@@ -75,14 +75,14 @@ public sealed class ProcessRunnerTests
     [Fact]
     public void DrainsBothStreamsWhenEachExceedsThePipeBuffer()
     {
-        using var process = StartTalkativeChild(
+        using Process? process = StartTalkativeChild(
             $"{Emit(BytesPerStream, 'e', toStandardError: true)}; " +
             $"{Emit(BytesPerStream, 'o', toStandardError: false)}; " +
             "exit 3");
 
         if (process is null) return; // Windows
 
-        var result = CaptureWithinTimeout(process);
+        ProcessResult result = CaptureWithinTimeout(process);
 
         // Full length, not merely non-empty: a truncated read would mean a pipe was
         // abandoned rather than drained.
@@ -98,13 +98,13 @@ public sealed class ProcessRunnerTests
     [Fact]
     public void DrainsALargeStdoutAlongsideASmallStderr()
     {
-        using var process = StartTalkativeChild(
+        using Process? process = StartTalkativeChild(
             $"{Emit(BytesPerStream, 'o', toStandardError: false)}; " +
             "echo warning >&2");
 
         if (process is null) return; // Windows
 
-        var result = CaptureWithinTimeout(process);
+        ProcessResult result = CaptureWithinTimeout(process);
 
         Assert.Equal(BytesPerStream, result.StandardOutput.Length);
         Assert.Equal("warning", result.StandardError.Trim());
@@ -114,10 +114,10 @@ public sealed class ProcessRunnerTests
     [Fact]
     public void CapturesExitCodeAndOutputFromAQuietChild()
     {
-        using var process = StartTalkativeChild("echo out; echo err >&2; exit 7");
+        using Process? process = StartTalkativeChild("echo out; echo err >&2; exit 7");
         if (process is null) return; // Windows
 
-        var result = CaptureWithinTimeout(process);
+        ProcessResult result = CaptureWithinTimeout(process);
 
         Assert.Equal("out", result.StandardOutput.Trim());
         Assert.Equal("err", result.StandardError.Trim());

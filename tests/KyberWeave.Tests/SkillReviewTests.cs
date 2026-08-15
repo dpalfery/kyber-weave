@@ -15,7 +15,7 @@ public sealed class SkillReviewTests
 {
     private static Skill MakeSkill(string name, string description, string dir = "/tmp/skills")
     {
-        var content = $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\nBody instructions.";
+        string content = $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\nBody instructions.";
         return SkillParser.Parse(content, $"{dir}/{name}/SKILL.md", $"{dir}/{name}");
     }
 
@@ -33,81 +33,81 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ExportCandidates_FromSkills_ProducesCandidatesWithTriggerScoresAndHeuristicFlags()
+    public void ExportCandidatesFromSkillsProducesCandidatesWithTriggerScoresAndHeuristicFlags()
     {
-        var triggerSkill = MakeSkill(
+        Skill triggerSkill = MakeSkill(
             "postgres-query",
             "Use when querying PostgreSQL databases or troubleshooting SQL syntax. Do NOT use for database migrations.");
-        var actionSkill = MakeSkill(
+        Skill actionSkill = MakeSkill(
             "sql-generator",
             "Generates SQL queries, validates schema syntax, and connects to Postgres database.");
-        var vagueSkill = MakeSkill(
+        Skill vagueSkill = MakeSkill(
             "general-helper",
             "Helps with stuff.");
 
-        var skillSet = new SkillSet([triggerSkill, actionSkill, vagueSkill]);
+        SkillSet skillSet = new SkillSet([triggerSkill, actionSkill, vagueSkill]);
 
-        var result = SkillReviewExchange.ExportCandidates(skills: skillSet);
+        SkillReviewExportResult result = SkillReviewExchange.ExportCandidates(skills: skillSet);
 
         Assert.NotNull(result);
         Assert.Equal("kyber-weave.skill-review.candidates/v1", result.Bundle.Schema);
         Assert.Equal(3, result.Bundle.Candidates.Count);
 
-        var triggerCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "postgres-query");
+        SkillReviewCandidate triggerCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "postgres-query");
         Assert.Equal(SkillReviewCandidateType.Skill, triggerCandidate.Type);
         Assert.Equal(triggerSkill.Frontmatter.Description, triggerCandidate.CurrentDescription);
         Assert.True(triggerCandidate.TriggerScore >= 70, $"Expected trigger score >= 70, was {triggerCandidate.TriggerScore}");
         Assert.DoesNotContain("KW-SKILL-LINT-007", triggerCandidate.HeuristicFlags);
 
-        var actionCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "sql-generator");
+        SkillReviewCandidate actionCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "sql-generator");
         Assert.Equal(SkillReviewCandidateType.Skill, actionCandidate.Type);
         Assert.Equal(actionSkill.Frontmatter.Description, actionCandidate.CurrentDescription);
         Assert.Contains("KW-SKILL-LINT-007", actionCandidate.HeuristicFlags);
 
-        using var parsedJson = JsonDocument.Parse(result.Json);
+        using JsonDocument parsedJson = JsonDocument.Parse(result.Json);
         Assert.Equal("kyber-weave.skill-review.candidates/v1", parsedJson.RootElement.GetProperty("schema").GetString());
-        Assert.True(parsedJson.RootElement.GetProperty("candidates").GetArrayLength() == 3);
+        Assert.Equal(3, parsedJson.RootElement.GetProperty("candidates").GetArrayLength());
     }
 
     [Fact]
-    public void ExportCandidates_FromAgents_ProducesCandidatesWithAgentTypeAndFlags()
+    public void ExportCandidatesFromAgentsProducesCandidatesWithAgentTypeAndFlags()
     {
-        var triggerAgent = MakeAgent(
+        AgentModel triggerAgent = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas, writing migrations, or optimizing database queries.");
-        var actionAgent = MakeAgent(
+        AgentModel actionAgent = MakeAgent(
             "data-engineer",
             "Designs database schemas and generates migrations.");
 
-        var agentSet = new AgentSet([triggerAgent, actionAgent]);
+        AgentSet agentSet = new AgentSet([triggerAgent, actionAgent]);
 
-        var result = SkillReviewExchange.ExportCandidates(agents: agentSet);
+        SkillReviewExportResult result = SkillReviewExchange.ExportCandidates(agents: agentSet);
 
         Assert.NotNull(result);
         Assert.Equal("kyber-weave.skill-review.candidates/v1", result.Bundle.Schema);
         Assert.Equal(2, result.Bundle.Candidates.Count);
 
-        var triggerCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "Claude:schema-architect");
+        SkillReviewCandidate triggerCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "Claude:schema-architect");
         Assert.Equal(SkillReviewCandidateType.Agent, triggerCandidate.Type);
         Assert.Equal(triggerAgent.Description, triggerCandidate.CurrentDescription);
         Assert.DoesNotContain("KW-AGENT-LINT-002", triggerCandidate.HeuristicFlags);
 
-        var actionCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "Claude:data-engineer");
+        SkillReviewCandidate actionCandidate = Assert.Single(result.Bundle.Candidates, c => c.Id == "Claude:data-engineer");
         Assert.Equal(SkillReviewCandidateType.Agent, actionCandidate.Type);
         Assert.Equal(actionAgent.Description, actionCandidate.CurrentDescription);
         Assert.Contains("KW-AGENT-LINT-002", actionCandidate.HeuristicFlags);
     }
 
     [Fact]
-    public void ExportCandidates_CombinedSkillsAndAgents_IncludesBothInSingleBundle()
+    public void ExportCandidatesCombinedSkillsAndAgentsIncludesBothInSingleBundle()
     {
-        var skill = MakeSkill("test-skill", "Use when testing application logic.");
-        var agent = MakeAgent("test-agent", "Use when orchestrating unit tests.");
+        Skill skill = MakeSkill("test-skill", "Use when testing application logic.");
+        AgentModel agent = MakeAgent("test-agent", "Use when orchestrating unit tests.");
 
-        var skillSet = new SkillSet([skill]);
-        var agentSet = new AgentSet([agent]);
+        SkillSet skillSet = new SkillSet([skill]);
+        AgentSet agentSet = new AgentSet([agent]);
 
-        var result = SkillReviewExchange.ExportCandidates(skillSet, agentSet);
+        SkillReviewExportResult result = SkillReviewExchange.ExportCandidates(skillSet, agentSet);
 
         Assert.NotNull(result);
         Assert.Equal("kyber-weave.skill-review.candidates/v1", result.Bundle.Schema);
@@ -117,9 +117,9 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ExportCandidates_EmptyInputs_ReturnsEmptyBundle()
+    public void ExportCandidatesEmptyInputsReturnsEmptyBundle()
     {
-        var result = SkillReviewExchange.ExportCandidates(new SkillSet([]), new AgentSet([]));
+        SkillReviewExportResult result = SkillReviewExchange.ExportCandidates(new SkillSet([]), new AgentSet([]));
 
         Assert.NotNull(result);
         Assert.Equal("kyber-weave.skill-review.candidates/v1", result.Bundle.Schema);
@@ -127,15 +127,15 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_ValidVerdicts_ParsesAndValidatesAllFieldsSuccessfully()
+    public void ImportVerdictsValidVerdictsParsesAndValidatesAllFieldsSuccessfully()
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"]),
             new("schema-architect", SkillReviewCandidateType.Agent, "Use when designing SQL schemas.", 85, [])
         };
 
-        var verdictJson = """
+        string verdictJson = """
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
@@ -157,21 +157,21 @@ public sealed class SkillReviewTests
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(verdictJson, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(verdictJson, candidates);
 
         Assert.NotNull(result);
         Assert.True(result.Success);
         Assert.Equal(2, result.ImportedCount);
         Assert.Equal(2, result.Verdicts.Count);
 
-        var firstVerdict = result.Verdicts[0];
+        SkillReviewVerdict firstVerdict = result.Verdicts[0];
         Assert.Equal("sql-generator", firstVerdict.CandidateId);
         Assert.False(firstVerdict.IsTriggerOriented);
         Assert.Equal(0.95, firstVerdict.Confidence);
         Assert.Equal("Use when writing or optimizing PostgreSQL queries.", firstVerdict.SuggestedTriggerDescription);
         Assert.Equal("Description was an action summary without trigger framing.", firstVerdict.Rationale);
 
-        var secondVerdict = result.Verdicts[1];
+        SkillReviewVerdict secondVerdict = result.Verdicts[1];
         Assert.Equal("schema-architect", secondVerdict.CandidateId);
         Assert.True(secondVerdict.IsTriggerOriented);
         Assert.Equal(0.90, secondVerdict.Confidence);
@@ -179,16 +179,16 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_MalformedJson_FailsWithDiagnosticError()
+    public void ImportVerdictsMalformedJsonFailsWithDiagnosticError()
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
         };
 
-        var malformedJson = "{ \"schema\": \"kyber-weave.skill-review.verdicts/v1\", invalid json syntax";
+        string malformedJson = "{ \"schema\": \"kyber-weave.skill-review.verdicts/v1\", invalid json syntax";
 
-        var result = SkillReviewExchange.ImportVerdicts(malformedJson, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(malformedJson, candidates);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -197,14 +197,14 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_MismatchedCandidateId_RejectsImportWithDiagnosticError()
+    public void ImportVerdictsMismatchedCandidateIdRejectsImportWithDiagnosticError()
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
         };
 
-        var mismatchedJson = """
+        string mismatchedJson = """
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
@@ -218,7 +218,7 @@ public sealed class SkillReviewTests
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(mismatchedJson, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(mismatchedJson, candidates);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -229,14 +229,14 @@ public sealed class SkillReviewTests
     [Theory]
     [InlineData(-0.1)]
     [InlineData(1.5)]
-    public void ImportVerdicts_ConfidenceOutOfRange_RejectsImport(double invalidConfidence)
+    public void ImportVerdictsConfidenceOutOfRangeRejectsImport(double invalidConfidence)
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
         };
 
-        var json = $$"""
+        string json = $$"""
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
@@ -250,7 +250,7 @@ public sealed class SkillReviewTests
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(json, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -259,14 +259,14 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_UnsupportedSchema_RejectsImport()
+    public void ImportVerdictsUnsupportedSchemaRejectsImport()
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
         };
 
-        var json = """
+        string json = """
         {
             "schema": "kyber-weave.skill-review.verdicts/v999",
             "verdicts": [
@@ -280,7 +280,7 @@ public sealed class SkillReviewTests
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(json, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -289,14 +289,14 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_DuplicateCandidateIdsInBundle_RejectsImport()
+    public void ImportVerdictsDuplicateCandidateIdsInBundleRejectsImport()
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
         };
 
-        var json = """
+        string json = """
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
@@ -316,7 +316,7 @@ public sealed class SkillReviewTests
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(json, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -325,21 +325,21 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_EmptyVerdictsList_RejectsImport()
+    public void ImportVerdictsEmptyVerdictsListRejectsImport()
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
         };
 
-        var json = """
+        string json = """
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": []
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(json, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -348,19 +348,19 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ExportCandidates_DuplicateRoleAcrossHarnesses_EmitsDistinctCandidateIds()
+    public void ExportCandidatesDuplicateRoleAcrossHarnessesEmitsDistinctCandidateIds()
     {
-        var claude = MakeAgent(
+        AgentModel claude = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Claude.",
             HarnessKind.Claude);
-        var cursor = MakeAgent(
+        AgentModel cursor = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Cursor.",
             HarnessKind.Cursor);
 
-        var agentSet = new AgentSet([claude, cursor]);
-        var result = SkillReviewExchange.ExportCandidates(agents: agentSet);
+        AgentSet agentSet = new AgentSet([claude, cursor]);
+        SkillReviewExportResult result = SkillReviewExchange.ExportCandidates(agents: agentSet);
 
         Assert.Equal(2, result.Bundle.Candidates.Count);
         Assert.Contains(result.Bundle.Candidates, c => c.Id == "Claude:schema-architect");
@@ -369,15 +369,15 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_OmittedCandidate_RejectsImport()
+    public void ImportVerdictsOmittedCandidateRejectsImport()
     {
-        var candidates = new List<SkillReviewCandidate>
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
         {
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"]),
             new("Claude:schema-architect", SkillReviewCandidateType.Agent, "Use when designing SQL schemas.", 85, [])
         };
 
-        var json = """
+        string json = """
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
@@ -391,7 +391,7 @@ public sealed class SkillReviewTests
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(json, candidates);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
 
         Assert.NotNull(result);
         Assert.False(result.Success);
@@ -402,19 +402,19 @@ public sealed class SkillReviewTests
     }
 
     [Fact]
-    public void ImportVerdicts_CompleteVerdictsForMultiHarnessAgents_Succeeds()
+    public void ImportVerdictsCompleteVerdictsForMultiHarnessAgentsSucceeds()
     {
-        var claude = MakeAgent(
+        AgentModel claude = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Claude.",
             HarnessKind.Claude);
-        var cursor = MakeAgent(
+        AgentModel cursor = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Cursor.",
             HarnessKind.Cursor);
 
-        var exported = SkillReviewExchange.ExportCandidates(agents: new AgentSet([claude, cursor]));
-        var json = """
+        SkillReviewExportResult exported = SkillReviewExchange.ExportCandidates(agents: new AgentSet([claude, cursor]));
+        string json = """
         {
             "schema": "kyber-weave.skill-review.verdicts/v1",
             "verdicts": [
@@ -434,7 +434,7 @@ public sealed class SkillReviewTests
         }
         """;
 
-        var result = SkillReviewExchange.ImportVerdicts(json, exported.Bundle);
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, exported.Bundle);
 
         Assert.True(result.Success);
         Assert.Equal(2, result.ImportedCount);

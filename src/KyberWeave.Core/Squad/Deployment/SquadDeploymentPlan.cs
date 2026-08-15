@@ -65,20 +65,20 @@ public sealed class SquadDeploymentPlan
         TimeProvider timeProvider)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
-        var identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
-        var root = identity.PhysicalPath;
-        var normalizedFiles = NormalizeRenderedFiles(root, renderedFiles);
-        var mutations = new List<SquadFileMutation>();
-        var preconditions = new List<SquadFilePrecondition>();
-        var ownedFiles = new List<SquadOwnedFile>();
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        string root = identity.PhysicalPath;
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(root, renderedFiles);
+        List<SquadFileMutation> mutations = new List<SquadFileMutation>();
+        List<SquadFilePrecondition> preconditions = new List<SquadFilePrecondition>();
+        List<SquadOwnedFile> ownedFiles = new List<SquadOwnedFile>();
 
-        foreach (var rendered in normalizedFiles)
+        foreach (NormalizedDeploymentFile rendered in normalizedFiles)
         {
-            var existsAsFile = File.Exists(rendered.FullPath);
+            bool existsAsFile = File.Exists(rendered.FullPath);
             if (existsAsFile)
             {
-                var currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
-                var renderedDigest = Digest(rendered.File.Content.Span);
+                string currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
+                string renderedDigest = Digest(rendered.File.Content.Span);
                 if (!adopt || !string.Equals(currentDigest, renderedDigest, StringComparison.Ordinal))
                     throw UnmanagedCollision(rendered.File.RelativePath);
 
@@ -107,7 +107,7 @@ public sealed class SquadDeploymentPlan
                 false));
         }
 
-        var receipt = NewReceipt(scope, timeProvider, degradations, ownedFiles);
+        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, ownedFiles);
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
             identity,
@@ -135,21 +135,21 @@ public sealed class SquadDeploymentPlan
         ArgumentNullException.ThrowIfNull(previousReceipt);
         EnsureReceiptScope(previousReceipt, scope);
 
-        var identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
-        var root = identity.PhysicalPath;
-        var normalizedFiles = NormalizeRenderedFiles(root, renderedFiles);
-        var previousByPath = ReceiptFilesByPath(root, previousReceipt);
-        var mutations = new List<SquadFileMutation>();
-        var preconditions = new List<SquadFilePrecondition>();
-        var nextOwnedFiles = new List<SquadOwnedFile>();
-        var renderedPaths = new HashSet<string>(StringComparer.Ordinal);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        string root = identity.PhysicalPath;
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(root, renderedFiles);
+        Dictionary<string, SquadOwnedFile> previousByPath = ReceiptFilesByPath(root, previousReceipt);
+        List<SquadFileMutation> mutations = new List<SquadFileMutation>();
+        List<SquadFilePrecondition> preconditions = new List<SquadFilePrecondition>();
+        List<SquadOwnedFile> nextOwnedFiles = new List<SquadOwnedFile>();
+        HashSet<string> renderedPaths = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var rendered in normalizedFiles)
+        foreach (NormalizedDeploymentFile rendered in normalizedFiles)
         {
-            var relativePath = rendered.File.RelativePath;
+            string relativePath = rendered.File.RelativePath;
             renderedPaths.Add(relativePath);
-            var renderedDigest = Digest(rendered.File.Content.Span);
-            if (!previousByPath.TryGetValue(relativePath, out var previous))
+            string renderedDigest = Digest(rendered.File.Content.Span);
+            if (!previousByPath.TryGetValue(relativePath, out SquadOwnedFile? previous))
             {
                 if (File.Exists(rendered.FullPath) || Directory.Exists(rendered.FullPath))
                     throw UnmanagedCollision(relativePath);
@@ -183,8 +183,8 @@ public sealed class SquadDeploymentPlan
                 continue;
             }
 
-            var currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
-            var isLocallyEdited = !string.Equals(
+            string currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
+            bool isLocallyEdited = !string.Equals(
                 currentDigest,
                 previous.Sha256,
                 StringComparison.Ordinal);
@@ -195,7 +195,7 @@ public sealed class SquadDeploymentPlan
             }
 
             preconditions.Add(SquadFilePrecondition.Exact(relativePath, currentDigest));
-            var fileWillBeWritten = !string.Equals(
+            bool fileWillBeWritten = !string.Equals(
                 currentDigest,
                 renderedDigest,
                 StringComparison.Ordinal);
@@ -209,12 +209,12 @@ public sealed class SquadDeploymentPlan
                 previous.Adopted && !fileWillBeWritten));
         }
 
-        foreach (var previous in previousReceipt.Files)
+        foreach (SquadOwnedFile previous in previousReceipt.Files)
         {
             if (renderedPaths.Contains(previous.RelativePath))
                 continue;
 
-            var fullPath = SquadPathPolicy.ResolveFile(root, previous.RelativePath);
+            string fullPath = SquadPathPolicy.ResolveFile(root, previous.RelativePath);
             if (Directory.Exists(fullPath))
             {
                 nextOwnedFiles.Add(previous);
@@ -224,7 +224,7 @@ public sealed class SquadDeploymentPlan
             if (!File.Exists(fullPath))
                 continue;
 
-            var currentDigest = Digest(File.ReadAllBytes(fullPath));
+            string currentDigest = Digest(File.ReadAllBytes(fullPath));
             if (string.Equals(currentDigest, previous.Sha256, StringComparison.Ordinal))
             {
                 preconditions.Add(SquadFilePrecondition.Exact(
@@ -236,7 +236,7 @@ public sealed class SquadDeploymentPlan
                 nextOwnedFiles.Add(previous);
         }
 
-        var receipt = NewReceipt(scope, timeProvider, degradations, nextOwnedFiles);
+        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, nextOwnedFiles);
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
             identity,
@@ -259,15 +259,15 @@ public sealed class SquadDeploymentPlan
         ArgumentNullException.ThrowIfNull(receipt);
         EnsureReceiptScope(receipt, scope);
 
-        var identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
-        var root = identity.PhysicalPath;
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
+        string root = identity.PhysicalPath;
         _ = ReceiptFilesByPath(root, receipt);
-        var mutations = new List<SquadFileMutation>();
-        var preconditions = new List<SquadFilePrecondition>();
-        var retained = new List<SquadOwnedFile>();
-        foreach (var owned in receipt.Files)
+        List<SquadFileMutation> mutations = new List<SquadFileMutation>();
+        List<SquadFilePrecondition> preconditions = new List<SquadFilePrecondition>();
+        List<SquadOwnedFile> retained = new List<SquadOwnedFile>();
+        foreach (SquadOwnedFile owned in receipt.Files)
         {
-            var fullPath = SquadPathPolicy.ResolveFile(root, owned.RelativePath);
+            string fullPath = SquadPathPolicy.ResolveFile(root, owned.RelativePath);
             if (Directory.Exists(fullPath))
             {
                 retained.Add(owned);
@@ -277,7 +277,7 @@ public sealed class SquadDeploymentPlan
             if (!File.Exists(fullPath))
                 continue;
 
-            var currentDigest = Digest(File.ReadAllBytes(fullPath));
+            string currentDigest = Digest(File.ReadAllBytes(fullPath));
             if (string.Equals(currentDigest, owned.Sha256, StringComparison.Ordinal))
             {
                 preconditions.Add(SquadFilePrecondition.Exact(
@@ -289,8 +289,8 @@ public sealed class SquadDeploymentPlan
                 retained.Add(owned);
         }
 
-        var retainedReceipt = receipt with { Files = retained };
-        var hasRetainedFiles = retained.Count > 0;
+        SquadReceipt retainedReceipt = receipt with { Files = retained };
+        bool hasRetainedFiles = retained.Count > 0;
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
             identity,
@@ -321,13 +321,13 @@ public sealed class SquadDeploymentPlan
         string root,
         IReadOnlyList<SquadDeploymentFile> renderedFiles)
     {
-        var normalized = new List<NormalizedDeploymentFile>(renderedFiles.Count);
-        var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var rendered in renderedFiles)
+        List<NormalizedDeploymentFile> normalized = new List<NormalizedDeploymentFile>(renderedFiles.Count);
+        Dictionary<string, string> seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadDeploymentFile rendered in renderedFiles)
         {
             ArgumentNullException.ThrowIfNull(rendered);
-            var relativePath = SquadPathPolicy.NormalizeRelativePath(rendered.RelativePath);
-            var portableIdentity = SquadPathPolicy.GetPortableIdentity(relativePath);
+            string relativePath = SquadPathPolicy.NormalizeRelativePath(rendered.RelativePath);
+            string portableIdentity = SquadPathPolicy.GetPortableIdentity(relativePath);
             if (!string.Equals(portableIdentity, relativePath, StringComparison.Ordinal))
             {
                 throw new SquadDeploymentConflictException(
@@ -343,7 +343,7 @@ public sealed class SquadDeploymentPlan
             }
 
             seen.Add(portableIdentity, relativePath);
-            var normalizedFile = rendered with { RelativePath = relativePath };
+            SquadDeploymentFile normalizedFile = rendered with { RelativePath = relativePath };
             normalized.Add(new NormalizedDeploymentFile(
                 normalizedFile,
                 SquadPathPolicy.ResolveFile(root, relativePath)));
@@ -356,12 +356,12 @@ public sealed class SquadDeploymentPlan
         string root,
         SquadReceipt receipt)
     {
-        var files = new Dictionary<string, SquadOwnedFile>(StringComparer.Ordinal);
-        var portablePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var owned in receipt.Files)
+        Dictionary<string, SquadOwnedFile> files = new Dictionary<string, SquadOwnedFile>(StringComparer.Ordinal);
+        HashSet<string> portablePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadOwnedFile owned in receipt.Files)
         {
             ArgumentNullException.ThrowIfNull(owned);
-            var normalizedPath = SquadPathPolicy.NormalizeRelativePath(owned.RelativePath);
+            string normalizedPath = SquadPathPolicy.NormalizeRelativePath(owned.RelativePath);
             _ = SquadPathPolicy.ResolveFile(root, normalizedPath);
             if (!string.Equals(normalizedPath, owned.RelativePath, StringComparison.Ordinal))
             {
@@ -369,7 +369,7 @@ public sealed class SquadDeploymentPlan
                     $"Receipt path '{owned.RelativePath}' is not a normalized portable path.");
             }
 
-            var portableIdentity = SquadPathPolicy.GetPortableIdentity(normalizedPath);
+            string portableIdentity = SquadPathPolicy.GetPortableIdentity(normalizedPath);
             if (!string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal))
             {
                 throw new SquadDeploymentConflictException(

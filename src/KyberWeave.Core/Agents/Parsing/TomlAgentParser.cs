@@ -7,37 +7,37 @@ namespace KyberWeave.Core.Agents.Parsing;
 /// <summary>
 /// Parser for TOML-based agent definition files (e.g. Codex .toml files).
 /// </summary>
-public sealed class TomlAgentParser : IAgentParser
+public sealed partial class TomlAgentParser : IAgentParser
 {
     public bool CanParse(string filePath) => filePath.EndsWith(".toml", StringComparison.OrdinalIgnoreCase);
 
     public AgentModel Parse(string filePath, HarnessKind harness)
     {
-        var content = File.ReadAllText(filePath);
-        var dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
-        var fileName = Path.GetFileNameWithoutExtension(filePath);
+        string content = File.ReadAllText(filePath);
+        string dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
+        string fileName = Path.GetFileNameWithoutExtension(filePath);
 
-        var name = fileName;
-        var description = string.Empty;
-        var instructions = string.Empty;
-        var model = string.Empty;
-        var tools = new Collection<string>();
-        var metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string name = fileName;
+        string description = string.Empty;
+        string instructions = string.Empty;
+        string model = string.Empty;
+        Collection<string> tools = new Collection<string>();
+        Dictionary<string, string> metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // Simple TOML line-and-block extractor
-        var lines = content.Replace("\r\n", "\n").Split('\n');
-        for (var i = 0; i < lines.Length; i++)
+        string[] lines = content.Replace("\r\n", "\n").Split('\n');
+        for (int i = 0; i < lines.Length; i++)
         {
-            var line = lines[i].Trim();
+            string line = lines[i].Trim();
             if (string.IsNullOrEmpty(line) || line.StartsWith('#')) continue;
 
             // Multiline string key check (developer_instructions, instructions, system_prompt)
-            var multilineMatch = Regex.Match(line, @"^(?<key>[A-Za-z0-9_\-]+)\s*=\s*(?:''''''|""""""|'''|"""""")$");
+            Match multilineMatch = MyRegex().Match(line);
             if (multilineMatch.Success)
             {
-                var key = multilineMatch.Groups["key"].Value;
-                var quoteSymbol = line.Substring(line.IndexOf('=') + 1).Trim();
-                var blockLines = new List<string>();
+                string key = multilineMatch.Groups["key"].Value;
+                string quoteSymbol = line.Substring(line.IndexOf('=') + 1).Trim();
+                List<string> blockLines = new List<string>();
                 i++;
                 while (i < lines.Length)
                 {
@@ -45,7 +45,7 @@ public sealed class TomlAgentParser : IAgentParser
                     blockLines.Add(lines[i]);
                     i++;
                 }
-                var body = string.Join("\n", blockLines).Trim();
+                string body = string.Join("\n", blockLines).Trim();
                 if (key.Equals("developer_instructions", StringComparison.OrdinalIgnoreCase) ||
                     key.Equals("instructions", StringComparison.OrdinalIgnoreCase) ||
                     key.Equals("system_prompt", StringComparison.OrdinalIgnoreCase))
@@ -60,11 +60,11 @@ public sealed class TomlAgentParser : IAgentParser
             }
 
             // Single line key-value: key = "value"
-            var kvMatch = Regex.Match(line, @"^(?<key>[A-Za-z0-9_\-]+)\s*=\s*(?:\u0022(?<val>.*?)\u0022|'(?<val>.*?)'|(?<val>[^\u0022'].*))$");
+            Match kvMatch = Regex.Match(line, @"^(?<key>[A-Za-z0-9_\-]+)\s*=\s*(?:\u0022(?<val>.*?)\u0022|'(?<val>.*?)'|(?<val>[^\u0022'].*))$");
             if (kvMatch.Success)
             {
-                var key = kvMatch.Groups["key"].Value;
-                var val = kvMatch.Groups["val"].Value.Trim();
+                string key = kvMatch.Groups["key"].Value;
+                string val = kvMatch.Groups["val"].Value.Trim();
 
                 if (key.Equals("name", StringComparison.OrdinalIgnoreCase)) name = val;
                 else if (key.Equals("description", StringComparison.OrdinalIgnoreCase)) description = val;
@@ -95,4 +95,7 @@ public sealed class TomlAgentParser : IAgentParser
             FrontmatterOrMetadata = metadata
         };
     }
+
+    [GeneratedRegex(@"^(?<key>[A-Za-z0-9_\-]+)\s*=\s*(?:''''''|""""""|'''|"""""")$")]
+    private static partial Regex MyRegex();
 }

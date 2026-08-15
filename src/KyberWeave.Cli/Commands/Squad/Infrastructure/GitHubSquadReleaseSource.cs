@@ -71,37 +71,37 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         ValidateRequest(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var extractionRoot = Path.GetFullPath(request.DestinationPath);
+        string extractionRoot = Path.GetFullPath(request.DestinationPath);
         RejectExistingSymbolicLinks(extractionRoot);
 
-        var releaseUri = BuildReleaseUri(request.Repository, request.Version);
-        var release = await ReadReleaseAsync(releaseUri, cancellationToken).ConfigureAwait(false);
+        Uri releaseUri = BuildReleaseUri(request.Repository, request.Version);
+        GitHubRelease release = await ReadReleaseAsync(releaseUri, cancellationToken).ConfigureAwait(false);
         if (!string.Equals(release.TagName, $"v{request.Version}", StringComparison.Ordinal))
         {
             throw new InvalidDataException(
                 $"GitHub returned release tag '{release.TagName}' instead of 'v{request.Version}'.");
         }
 
-        var archiveName = $"kyber-squad-{request.Version}.zip";
-        var archive = SelectAsset(release.Assets, archiveName);
-        var checksumAsset = SelectAsset(release.Assets, ChecksumAssetName);
+        string archiveName = $"kyber-squad-{request.Version}.zip";
+        SquadReleaseAsset archive = SelectAsset(release.Assets, archiveName);
+        SquadReleaseAsset checksumAsset = SelectAsset(release.Assets, ChecksumAssetName);
 
-        var checksumBytes = await DownloadBytesAsync(
+        byte[] checksumBytes = await DownloadBytesAsync(
             checksumAsset.DownloadUri,
             cancellationToken).ConfigureAwait(false);
-        var checksum = ParseChecksum(checksumBytes, archiveName);
+        SquadReleaseChecksum checksum = ParseChecksum(checksumBytes, archiveName);
 
-        var archiveBytes = await DownloadBytesAsync(
+        byte[] archiveBytes = await DownloadBytesAsync(
             archive.DownloadUri,
             cancellationToken).ConfigureAwait(false);
-        var actualDigest = Convert.ToHexStringLower(SHA256.HashData(archiveBytes));
+        string actualDigest = Convert.ToHexStringLower(SHA256.HashData(archiveBytes));
         if (!string.Equals(actualDigest, checksum.Sha256, StringComparison.Ordinal))
         {
             throw new InvalidDataException(
                 $"The checksum for release asset '{archiveName}' does not match SHA256SUMS.txt.");
         }
 
-        var entries = ValidateArchive(archiveBytes, extractionRoot, cancellationToken);
+        IReadOnlyList<ValidatedArchiveEntry> entries = ValidateArchive(archiveBytes, extractionRoot, cancellationToken);
         await ExtractAtomicallyAsync(
             archiveBytes,
             extractionRoot,
@@ -133,7 +133,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Version);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.DestinationPath);
 
-        var repositoryParts = request.Repository.Split('/');
+        string[] repositoryParts = request.Repository.Split('/');
         if (repositoryParts.Length != 2 || repositoryParts.Any(string.IsNullOrWhiteSpace))
         {
             throw new ArgumentException(
@@ -151,7 +151,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
     private static bool IsStableVersion(string version)
     {
-        var parts = version.Split('.', StringSplitOptions.None);
+        string[] parts = version.Split('.', StringSplitOptions.None);
         return parts.Length == 3 && parts.All(part =>
             part.Length > 0 &&
             (part.Length == 1 || part[0] != '0') &&
@@ -160,10 +160,10 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
     private Uri BuildReleaseUri(string repository, string version)
     {
-        var parts = repository.Split('/');
-        var relative = $"repos/{Uri.EscapeDataString(parts[0])}/{Uri.EscapeDataString(parts[1])}" +
+        string[] parts = repository.Split('/');
+        string relative = $"repos/{Uri.EscapeDataString(parts[0])}/{Uri.EscapeDataString(parts[1])}" +
             $"/releases/tags/v{Uri.EscapeDataString(version)}";
-        var releaseUri = new Uri(_apiRoot, relative);
+        Uri releaseUri = new Uri(_apiRoot, relative);
         ValidateHttps(releaseUri, "GitHub release URI");
         return releaseUri;
     }
@@ -172,8 +172,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         Uri releaseUri,
         CancellationToken cancellationToken)
     {
-        using var response = await SendHttpsAsync(releaseUri, cancellationToken).ConfigureAwait(false);
-        var release = await JsonSerializer.DeserializeAsync(
+        using HttpResponseMessage response = await SendHttpsAsync(releaseUri, cancellationToken).ConfigureAwait(false);
+        GitHubRelease? release = await JsonSerializer.DeserializeAsync(
             await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
             ReleaseJsonContext.Default.GitHubRelease,
             cancellationToken).ConfigureAwait(false);
@@ -184,7 +184,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     private async Task<byte[]> DownloadBytesAsync(Uri uri, CancellationToken cancellationToken)
     {
         ValidateHttps(uri, "GitHub release asset URI");
-        using var response = await SendHttpsAsync(uri, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await SendHttpsAsync(uri, cancellationToken).ConfigureAwait(false);
         return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -192,13 +192,13 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         Uri initialUri,
         CancellationToken cancellationToken)
     {
-        var currentUri = initialUri;
-        for (var redirectCount = 0; redirectCount <= MaximumRedirects; redirectCount++)
+        Uri currentUri = initialUri;
+        for (int redirectCount = 0; redirectCount <= MaximumRedirects; redirectCount++)
         {
             ValidateHttps(currentUri, "HTTP request or redirect");
-            using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, currentUri);
             request.Headers.UserAgent.ParseAdd("kyber-weave");
-            var response = await _httpClient.SendAsync(
+            HttpResponseMessage response = await _httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken).ConfigureAwait(false);
@@ -220,7 +220,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 return response;
             }
 
-            var location = response.Headers.Location;
+            Uri? location = response.Headers.Location;
             response.Dispose();
             if (location is null)
                 throw new InvalidDataException("An HTTPS release redirect omitted its Location header.");
@@ -250,16 +250,16 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         IReadOnlyList<GitHubReleaseAsset> assets,
         string assetName)
     {
-        var matches = assets.Where(
+        GitHubReleaseAsset[] matches = assets.Where(
             asset => string.Equals(asset.Name, assetName, StringComparison.Ordinal)).ToArray();
         if (matches.Length != 1)
         {
-            var qualifier = matches.Length == 0 ? "does not contain" : "contains duplicate";
+            string qualifier = matches.Length == 0 ? "does not contain" : "contains duplicate";
             throw new InvalidDataException(
                 $"The GitHub release {qualifier} exact asset '{assetName}'.");
         }
 
-        if (!Uri.TryCreate(matches[0].BrowserDownloadUrl, UriKind.Absolute, out var downloadUri))
+        if (!Uri.TryCreate(matches[0].BrowserDownloadUrl, UriKind.Absolute, out Uri? downloadUri))
             throw new InvalidDataException($"Release asset '{assetName}' has an invalid download URI.");
 
         ValidateHttps(downloadUri, $"Release asset '{assetName}' URI");
@@ -278,10 +278,10 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
             throw new InvalidDataException("The release checksum manifest is not valid UTF-8.", exception);
         }
 
-        var rows = manifest.Split('\n')
+        string[] rows = manifest.Split('\n')
             .Select(line => line.EndsWith('\r') ? line[..^1] : line)
             .ToArray();
-        var candidates = rows.Where(line => HasExactAssetName(line, assetName)).ToArray();
+        string[] candidates = rows.Where(line => HasExactAssetName(line, assetName)).ToArray();
 
         if (candidates.Length == 0)
         {
@@ -295,8 +295,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 $"The release checksum manifest has duplicate checksum rows for '{assetName}'.");
         }
 
-        var suffix = $"  {assetName}";
-        var exactRow = candidates[0];
+        string suffix = $"  {assetName}";
+        string exactRow = candidates[0];
         if (exactRow.Length != 64 + suffix.Length ||
             !exactRow.EndsWith(suffix, StringComparison.Ordinal) ||
             !IsSha256(exactRow.AsSpan(0, 64)))
@@ -315,14 +315,14 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         if (!line.EndsWith(assetName, StringComparison.Ordinal))
             return false;
 
-        var assetNameStart = line.Length - assetName.Length;
+        int assetNameStart = line.Length - assetName.Length;
         return assetNameStart > 0 &&
             (char.IsWhiteSpace(line[assetNameStart - 1]) || line[assetNameStart - 1] == '*');
     }
 
     private static bool IsSha256(ReadOnlySpan<char> value)
     {
-        foreach (var character in value)
+        foreach (char character in value)
         {
             if (!char.IsAsciiHexDigit(character))
                 return false;
@@ -340,17 +340,17 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
         try
         {
-            using var stream = new MemoryStream(archiveBytes, writable: false);
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
-            var comparison = OperatingSystem.IsWindows()
+            using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
+            using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+            StringComparer comparison = OperatingSystem.IsWindows()
                 ? StringComparer.OrdinalIgnoreCase
                 : StringComparer.Ordinal;
-            var seen = new HashSet<string>(comparison);
-            var files = new HashSet<string>(comparison);
-            var requiredDirectories = new HashSet<string>(comparison);
-            var entries = new List<ValidatedArchiveEntry>(archive.Entries.Count);
+            HashSet<string> seen = new HashSet<string>(comparison);
+            HashSet<string> files = new HashSet<string>(comparison);
+            HashSet<string> requiredDirectories = new HashSet<string>(comparison);
+            List<ValidatedArchiveEntry> entries = new List<ValidatedArchiveEntry>(archive.Entries.Count);
 
-            foreach (var entry in archive.Entries)
+            foreach (ZipArchiveEntry entry in archive.Entries)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -360,7 +360,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                         $"The Squad archive contains a symbolic link entry: '{entry.FullName}'.");
                 }
 
-                var validated = ValidateArchivePath(entry.FullName, extractionRoot);
+                ValidatedArchiveEntry validated = ValidateArchivePath(entry.FullName, extractionRoot);
                 if (!seen.Add(validated.RelativePath))
                 {
                     throw new InvalidDataException(
@@ -394,10 +394,10 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 $"The Squad archive contains an invalid rooted path: '{entryName}'.");
         }
 
-        var portablePath = entryName.Replace('\\', '/');
-        var isDirectory = portablePath.EndsWith('/');
-        var segments = portablePath.Split('/', StringSplitOptions.None);
-        var segmentCount = isDirectory ? segments.Length - 1 : segments.Length;
+        string portablePath = entryName.Replace('\\', '/');
+        bool isDirectory = portablePath.EndsWith('/');
+        string[] segments = portablePath.Split('/', StringSplitOptions.None);
+        int segmentCount = isDirectory ? segments.Length - 1 : segments.Length;
         if (segmentCount == 0 || segments.Take(segmentCount).Any(
             segment => segment.Length == 0 || segment is "." or ".."))
         {
@@ -405,13 +405,13 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 $"The Squad archive contains an unsafe path: '{entryName}'.");
         }
 
-        var relativePath = string.Join('/', segments.Take(segmentCount));
-        var platformPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        var candidate = Path.GetFullPath(Path.Combine(extractionRoot, platformPath));
-        var containmentPrefix = extractionRoot.EndsWith(Path.DirectorySeparatorChar)
+        string relativePath = string.Join('/', segments.Take(segmentCount));
+        string platformPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
+        string candidate = Path.GetFullPath(Path.Combine(extractionRoot, platformPath));
+        string containmentPrefix = extractionRoot.EndsWith(Path.DirectorySeparatorChar)
             ? extractionRoot
             : extractionRoot + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows()
+        StringComparison comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         if (!candidate.StartsWith(containmentPrefix, comparison))
@@ -427,8 +427,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     {
         const uint UnixFileTypeMask = 0xF000;
         const uint UnixSymbolicLink = 0xA000;
-        var unixMode = ((uint)entry.ExternalAttributes >> 16) & UnixFileTypeMask;
-        var windowsReparsePoint =
+        uint unixMode = ((uint)entry.ExternalAttributes >> 16) & UnixFileTypeMask;
+        bool windowsReparsePoint =
             (entry.ExternalAttributes & (int)FileAttributes.ReparsePoint) != 0;
         return unixMode == UnixSymbolicLink || windowsReparsePoint;
     }
@@ -438,10 +438,10 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         ISet<string> files,
         ISet<string> requiredDirectories)
     {
-        var segments = entry.RelativePath.Split('/');
-        for (var index = 1; index < segments.Length; index++)
+        string[] segments = entry.RelativePath.Split('/');
+        for (int index = 1; index < segments.Length; index++)
         {
-            var ancestor = string.Join('/', segments.Take(index));
+            string ancestor = string.Join('/', segments.Take(index));
             if (files.Contains(ancestor))
             {
                 throw new InvalidDataException(
@@ -481,14 +481,14 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 $"Squad extraction destination already exists: '{extractionRoot}'.");
         }
 
-        var parent = Path.GetDirectoryName(extractionRoot);
+        string? parent = Path.GetDirectoryName(extractionRoot);
         if (string.IsNullOrEmpty(parent) || !Directory.Exists(parent))
         {
             throw new DirectoryNotFoundException(
                 "The parent directory for the Squad extraction destination must already exist.");
         }
 
-        var stagingRoot = Path.Combine(
+        string stagingRoot = Path.Combine(
             parent,
             $".{Path.GetFileName(extractionRoot)}.kyber-squad-{Guid.NewGuid():N}");
         try
@@ -497,16 +497,16 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
             onStagingCreated?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
 
-            using var stream = new MemoryStream(archiveBytes, writable: false);
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+            using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
+            using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
 
-            for (var index = 0; index < archive.Entries.Count; index++)
+            for (int index = 0; index < archive.Entries.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var entry = archive.Entries[index];
-                var validated = entries[index];
-                var destination = Path.Combine(
+                ZipArchiveEntry entry = archive.Entries[index];
+                ValidatedArchiveEntry validated = entries[index];
+                string destination = Path.Combine(
                     stagingRoot,
                     validated.RelativePath.Replace('/', Path.DirectorySeparatorChar));
                 if (validated.IsDirectory)
@@ -515,11 +515,11 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                     continue;
                 }
 
-                var destinationDirectory = Path.GetDirectoryName(destination)
+                string destinationDirectory = Path.GetDirectoryName(destination)
                     ?? throw new InvalidDataException("The Squad archive contains an invalid file path.");
                 Directory.CreateDirectory(destinationDirectory);
-                await using var source = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
-                await using var target = new FileStream(destination, new FileStreamOptions
+                await using Stream source = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
+                await using FileStream target = new FileStream(destination, new FileStreamOptions
                 {
                     Mode = FileMode.CreateNew,
                     Access = FileAccess.Write,
@@ -561,7 +561,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
     private static void RejectSymbolicLinksBelow(string directory)
     {
-        foreach (var entry in Directory.EnumerateFileSystemEntries(
+        foreach (string entry in Directory.EnumerateFileSystemEntries(
             directory,
             "*",
             SearchOption.TopDirectoryOnly))

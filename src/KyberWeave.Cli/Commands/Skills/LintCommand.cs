@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -23,29 +24,29 @@ public sealed class LintCommand : Command<LintSettings>
 {
     public override int Execute(CommandContext context, LintSettings settings)
     {
-        var report = new DiagnosticReport();
-        var set = CommandHelpers.LoadOrReport(settings.Path, report);
+        DiagnosticReport report = new DiagnosticReport();
+        SkillSet? set = CommandHelpers.LoadOrReport(settings.Path, report);
 
-        var linter = new RoutingLinter { MinDescriptionScore = settings.MinDescriptionScore };
+        RoutingLinter linter = new RoutingLinter { MinDescriptionScore = settings.MinDescriptionScore };
 
         if (set is not null)
         {
-            foreach (var skill in set.Skills)
+            foreach (Skill skill in set.Skills)
                 report.AddRange(linter.LintSkill(skill));
             report.AddRange(linter.LintSet(set));
 
             if (settings.Explain && settings.ParsedFormat == OutputFormat.Table)
             {
                 AnsiConsole.WriteLine();
-                foreach (var skill in set.Skills)
+                foreach (Skill skill in set.Skills)
                 {
-                    var score = DescriptionScorer.Score(skill);
-                    var name = skill.Frontmatter.Name ?? skill.DirectoryName;
-                    var color = score.Total >= settings.MinDescriptionScore ? "green" : "yellow";
+                    DescriptionScore score = DescriptionScorer.Score(skill);
+                    string name = skill.Frontmatter.Name ?? skill.DirectoryName;
+                    string color = score.Total >= settings.MinDescriptionScore ? "green" : "yellow";
                     AnsiConsole.MarkupLine($"[bold]{Markup.Escape(name)}[/] — routing score [{color}]{score.Total}/100[/]");
-                    var t = new Table().Border(TableBorder.Minimal);
+                    Table t = new Table().Border(TableBorder.Minimal);
                     t.AddColumn("Dimension"); t.AddColumn("Score"); t.AddColumn("Detail");
-                    foreach (var c in score.Components)
+                    foreach (ScoreComponent c in score.Components)
                         t.AddRow(Markup.Escape(c.Name), $"{c.Points}/{c.MaxPoints}", Markup.Escape(c.Detail));
                     AnsiConsole.Write(t);
                     AnsiConsole.WriteLine();

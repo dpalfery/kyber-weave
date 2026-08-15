@@ -22,13 +22,13 @@ public class DocumentIndexRankingTests
     /// declared id — which exact-equality scoring never consulted for a free-text query.
     /// </summary>
     [Fact]
-    public void Generic_DocType_Word_Does_Not_Outrank_The_Named_Subject()
+    public void GenericDocTypeWordDoesNotOutrankTheNamedSubject()
     {
-        var query = TextVectorizer.Vectorize("WebUI application overview architecture");
+        Dictionary<string, double> query = TextVectorizer.Vectorize("WebUI application overview architecture");
 
-        var webui = DocumentIndex.Coverage("webui/architecture", query);
-        var api = DocumentIndex.Coverage("api/architecture", query);
-        var system = DocumentIndex.Coverage("system/architecture", query);
+        double webui = DocumentIndex.Coverage("webui/architecture", query);
+        double api = DocumentIndex.Coverage("api/architecture", query);
+        double system = DocumentIndex.Coverage("system/architecture", query);
 
         Assert.Equal(1.0, webui);
         Assert.True(webui > api, $"webui {webui} should outrank api {api}");
@@ -40,17 +40,17 @@ public class DocumentIndexRankingTests
     /// Neighbouring tokens are therefore also matched fused together.
     /// </summary>
     [Fact]
-    public void Component_Matches_When_The_Query_Fuses_Adjacent_Words()
+    public void ComponentMatchesWhenTheQueryFusesAdjacentWords()
     {
-        var query = TextVectorizer.Vectorize("tell me about the WebUI app");
+        Dictionary<string, double> query = TextVectorizer.Vectorize("tell me about the WebUI app");
 
         Assert.Equal(1.0, DocumentIndex.Coverage("Web UI", query));
     }
 
     [Fact]
-    public void An_Unrelated_Query_Covers_No_Identity()
+    public void AnUnrelatedQueryCoversNoIdentity()
     {
-        var query = TextVectorizer.Vectorize("database migration rollback");
+        Dictionary<string, double> query = TextVectorizer.Vectorize("database migration rollback");
 
         Assert.Equal(0.0, DocumentIndex.Coverage("webui/architecture", query));
     }
@@ -65,9 +65,9 @@ public class DocumentSectionTests
     /// was a heading and the caller had to read the whole file anyway.
     /// </summary>
     [Fact]
-    public void A_TitleOnly_Preamble_Is_Not_A_Section()
+    public void ATitleOnlyPreambleIsNotASection()
     {
-        var sections = DocumentLoader.SplitSections("""
+        IReadOnlyList<DocumentSection> sections = DocumentLoader.SplitSections("""
             # MotorcycleRAG Web UI Architecture
 
             ## Overview
@@ -80,9 +80,9 @@ public class DocumentSectionTests
     }
 
     [Fact]
-    public void A_Preamble_With_Real_Prose_Is_Kept()
+    public void APreambleWithRealProseIsKept()
     {
-        var sections = DocumentLoader.SplitSections("""
+        IReadOnlyList<DocumentSection> sections = DocumentLoader.SplitSections("""
             # Title
 
             This intro says something before the first subheading.
@@ -98,9 +98,9 @@ public class DocumentSectionTests
     }
 
     [Fact]
-    public void A_Hash_Inside_A_Fenced_Block_Does_Not_Open_A_Section()
+    public void AHashInsideAFencedBlockDoesNotOpenASection()
     {
-        var sections = DocumentLoader.SplitSections("""
+        IReadOnlyList<DocumentSection> sections = DocumentLoader.SplitSections("""
             ## Commands
 
             ```bash
@@ -145,7 +145,7 @@ public sealed class ExcerptBudgetTests : IDisposable
 
     private DocumentIndex Build(params (string Heading, string Body)[] sections)
     {
-        var text = Frontmatter + string.Join("\n", sections.Select(s => $"## {s.Heading}\n\n{s.Body}\n"));
+        string text = Frontmatter + string.Join("\n", sections.Select(s => $"## {s.Heading}\n\n{s.Body}\n"));
         _fixture.WithCatalog().WithSourceRoot("1-Presentation/Api").Write("6-Docs/webui/architecture.md", text);
         return DocumentIndex.Build(_fixture.Load(), CodeGraphResolverAdapter.ForRepository(_fixture.Root));
     }
@@ -154,14 +154,14 @@ public sealed class ExcerptBudgetTests : IDisposable
         string.Join(' ', Enumerable.Repeat(subject, words));
 
     [Fact]
-    public void A_Generous_Budget_Returns_Every_Section_And_Says_So()
+    public void AGenerousBudgetReturnsEverySectionAndSaysSo()
     {
-        var index = Build(
+        DocumentIndex index = Build(
             ("Overview", Prose("routing", 40)),
             ("Components", Prose("routing", 40)),
             ("Testing", Prose("routing", 40)));
 
-        var hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
+        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
 
         Assert.Equal(3, hit.Excerpt.Sections.Count);
         Assert.True(hit.Excerpt.IsComplete);
@@ -169,14 +169,14 @@ public sealed class ExcerptBudgetTests : IDisposable
     }
 
     [Fact]
-    public void A_Tight_Budget_Names_What_It_Left_Out()
+    public void ATightBudgetNamesWhatItLeftOut()
     {
-        var index = Build(
+        DocumentIndex index = Build(
             ("Overview", Prose("routing", 200)),
             ("Components", Prose("routing", 200)),
             ("Testing", Prose("routing", 200)));
 
-        var hit = index.Explore("routing", maxDocs: 1, charBudget: 1000).Single();
+        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 1000).Single();
 
         Assert.False(hit.Excerpt.IsComplete);
         Assert.True(hit.Excerpt.BudgetExhausted);
@@ -190,13 +190,13 @@ public sealed class ExcerptBudgetTests : IDisposable
     /// retry with a bigger budget would waste a whole round trip.
     /// </summary>
     [Fact]
-    public void An_Irrelevant_Section_Is_Not_Reported_As_A_Budget_Casualty()
+    public void AnIrrelevantSectionIsNotReportedAsABudgetCasualty()
     {
-        var index = Build(
+        DocumentIndex index = Build(
             ("Overview", Prose("routing", 40)),
             ("Unrelated", Prose("kangaroo", 40)));
 
-        var hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
+        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
 
         Assert.Contains("Unrelated", hit.Excerpt.OmittedHeadings, StringComparer.Ordinal);
         Assert.False(hit.Excerpt.BudgetExhausted);
@@ -208,14 +208,14 @@ public sealed class ExcerptBudgetTests : IDisposable
     /// read in sequence is confusing when shuffled.
     /// </summary>
     [Fact]
-    public void Sections_Are_Returned_In_Document_Order()
+    public void SectionsAreReturnedInDocumentOrder()
     {
-        var index = Build(
+        DocumentIndex index = Build(
             ("Alpha", Prose("routing", 30)),
             ("Beta", Prose("routing", 90)),
             ("Gamma", Prose("routing", 30)));
 
-        var hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
+        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 60_000).Single();
 
         Assert.Equal(["Alpha", "Beta", "Gamma"], hit.Excerpt.Sections.Select(s => s.Heading));
     }
@@ -225,11 +225,11 @@ public sealed class ExcerptBudgetTests : IDisposable
     /// tool a directory listing — the exact failure that sent callers to Read.
     /// </summary>
     [Fact]
-    public void The_Top_Section_Survives_A_Budget_Smaller_Than_Itself()
+    public void TheTopSectionSurvivesABudgetSmallerThanItself()
     {
-        var index = Build(("Overview", Prose("routing", 2000)));
+        DocumentIndex index = Build(("Overview", Prose("routing", 2000)));
 
-        var hit = index.Explore("routing", maxDocs: 1, charBudget: 1000).Single();
+        DocumentHit hit = index.Explore("routing", maxDocs: 1, charBudget: 1000).Single();
 
         Assert.Single(hit.Excerpt.Sections);
         Assert.Equal("Overview", hit.Excerpt.Sections[0].Heading);
@@ -237,15 +237,15 @@ public sealed class ExcerptBudgetTests : IDisposable
 
     /// <summary>Narrowing the result set must deepen it, not just shorten the list.</summary>
     [Fact]
-    public void Fewer_Documents_Buys_More_Prose_Per_Document()
+    public void FewerDocumentsBuysMoreProsePerDocument()
     {
-        var index = Build(
+        DocumentIndex index = Build(
             ("Overview", Prose("routing", 300)),
             ("Components", Prose("routing", 300)),
             ("Testing", Prose("routing", 300)));
 
-        var deep = index.Explore("routing", maxDocs: 1, charBudget: 12_000).Single();
-        var shallow = index.Explore("routing", maxDocs: 20, charBudget: 3_000).Single();
+        DocumentHit deep = index.Explore("routing", maxDocs: 1, charBudget: 12_000).Single();
+        DocumentHit shallow = index.Explore("routing", maxDocs: 20, charBudget: 3_000).Single();
 
         Assert.True(deep.Excerpt.Sections.Count > shallow.Excerpt.Sections.Count,
             $"deep {deep.Excerpt.Sections.Count} should exceed shallow {shallow.Excerpt.Sections.Count}");
@@ -274,15 +274,15 @@ public class CodeJoinScopingTests
     /// language; the document's own source-root settles it.
     /// </summary>
     [Fact]
-    public void A_Join_Prefers_A_Symbol_Beneath_The_Documents_SourceRoot()
+    public void AJoinPrefersASymbolBeneathTheDocumentsSourceRoot()
     {
-        var nodes = new[]
+        CodeGraphNode[] nodes = new[]
         {
             Node("property", "1-Presentation/MotorcycleRAG.API/Services/CurrentUserService.cs", "csharp", 42),
             Node("function", "1-Presentation/MotorcycleRag.WebUI/src/contexts/AuthContext.tsx", "typescript", 17)
         };
 
-        var join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
+        CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 
         Assert.Equal("1-Presentation/MotorcycleRag.WebUI/src/contexts/AuthContext.tsx:17", join.Location);
         Assert.Equal("function", join.Kind);
@@ -295,14 +295,14 @@ public class CodeJoinScopingTests
     /// — but flags itself, because that is exactly the weak evidence a reader must check.
     /// </summary>
     [Fact]
-    public void A_Join_Outside_The_SourceRoot_Is_Flagged()
+    public void AJoinOutsideTheSourceRootIsFlagged()
     {
-        var nodes = new[]
+        CodeGraphNode[] nodes = new[]
         {
             Node("property", "1-Presentation/MotorcycleRAG.API/Services/CurrentUserService.cs", "csharp", 42)
         };
 
-        var join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
+        CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 
         Assert.False(join.InSourceRoot);
         Assert.Contains("CurrentUserService.cs", join.Location, StringComparison.Ordinal);
@@ -310,15 +310,15 @@ public class CodeJoinScopingTests
 
     /// <summary>Remaining ambiguity inside the source-root is reported, not hidden.</summary>
     [Fact]
-    public void Remaining_SameNamed_Candidates_Are_Counted()
+    public void RemainingSameNamedCandidatesAreCounted()
     {
-        var nodes = new[]
+        CodeGraphNode[] nodes = new[]
         {
             Node("class", "1-Presentation/MotorcycleRag.WebUI/src/a.tsx", "typescript", 3),
             Node("class", "1-Presentation/MotorcycleRag.WebUI/src/b.tsx", "typescript", 9)
         };
 
-        var join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
+        CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 
         Assert.Equal(1, join.OtherCandidates);
     }
@@ -328,23 +328,23 @@ public class CodeJoinScopingTests
     /// something "X" means the class X far more often than a property that returns X.
     /// </summary>
     [Fact]
-    public void A_Declaration_Outranks_A_SameNamed_Property()
+    public void ADeclarationOutranksASameNamedProperty()
     {
-        var nodes = new[]
+        CodeGraphNode[] nodes = new[]
         {
             Node("property", "1-Presentation/MotorcycleRag.WebUI/src/a.tsx", "typescript", 3),
             Node("class", "1-Presentation/MotorcycleRag.WebUI/src/z.tsx", "typescript", 9)
         };
 
-        var join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
+        CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 
         Assert.Equal("class", join.Kind);
     }
 
     [Fact]
-    public void An_Unresolved_Reference_Reports_Itself_As_Unresolved()
+    public void AnUnresolvedReferenceReportsItselfAsUnresolved()
     {
-        var join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "Gone", []);
+        CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "Gone", []);
 
         Assert.Equal("unresolved", join.Kind);
         Assert.Equal(string.Empty, join.Location);

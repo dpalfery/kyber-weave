@@ -16,9 +16,9 @@ public static class InstructionSurfaceScanner
         InstructionSurfaceRuleCodes codes,
         string artifactLabel)
     {
-        foreach (var (id, rx, label) in InstructionSurfacePatterns.Injection)
+        foreach ((string? id, Regex? rx, string? label) in InstructionSurfacePatterns.Injection)
         {
-            if (!codes.Injection.TryGetValue(id, out var code))
+            if (!codes.Injection.TryGetValue(id, out string? code))
                 continue;
             if (rx.IsMatch(body))
             {
@@ -30,7 +30,7 @@ public static class InstructionSurfaceScanner
 
         foreach (Match m in InstructionSurfacePatterns.HtmlComment.Matches(body))
         {
-            var inner = m.Groups[1].Value;
+            string inner = m.Groups[1].Value;
             if (InstructionSurfacePatterns.HtmlCommentInstructionHints.IsMatch(inner))
             {
                 yield return new Diagnostic(codes.HtmlComment, Severity.Critical,
@@ -47,9 +47,9 @@ public static class InstructionSurfaceScanner
             break;
         }
 
-        foreach (var (id, rx, label) in InstructionSurfacePatterns.Secrets)
+        foreach ((string? id, Regex? rx, string? label) in InstructionSurfacePatterns.Secrets)
         {
-            if (!codes.Secrets.TryGetValue(id, out var code))
+            if (!codes.Secrets.TryGetValue(id, out string? code))
                 continue;
             if (rx.IsMatch(body))
             {
@@ -66,9 +66,9 @@ public static class InstructionSurfaceScanner
         string subject,
         InstructionSurfaceRuleCodes codes)
     {
-        foreach (var (id, rx, label) in InstructionSurfacePatterns.Scripts)
+        foreach ((string? id, Regex? rx, string? label) in InstructionSurfacePatterns.Scripts)
         {
-            if (!codes.Scripts.TryGetValue(id, out var code))
+            if (!codes.Scripts.TryGetValue(id, out string? code))
                 continue;
             if (rx.IsMatch(scriptText))
             {
@@ -77,9 +77,9 @@ public static class InstructionSurfaceScanner
             }
         }
 
-        foreach (var (id, rx, label) in InstructionSurfacePatterns.Secrets)
+        foreach ((string? id, Regex? rx, string? label) in InstructionSurfacePatterns.Secrets)
         {
-            if (!codes.Secrets.TryGetValue(id, out var code))
+            if (!codes.Secrets.TryGetValue(id, out string? code))
                 continue;
             if (rx.IsMatch(scriptText))
             {

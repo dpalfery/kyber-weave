@@ -85,7 +85,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     public static CodeGraphResolverAdapter ForRepository(string repoRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        var databasePath = Path.Combine(Path.GetFullPath(repoRoot), ".codegraph", "codegraph.db");
+        string databasePath = Path.Combine(Path.GetFullPath(repoRoot), ".codegraph", "codegraph.db");
         return new CodeGraphResolverAdapter(databasePath);
     }
 
@@ -106,14 +106,14 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
             WHERE kind IN ('contains', 'calls', 'references', 'instantiates', 'extends', 'implements')
             """;
 
-        foreach (var line in RunSqlite(sql))
+        foreach (string line in RunSqlite(sql))
         {
-            var parts = line.Split(FieldSeparator);
+            string[] parts = line.Split(FieldSeparator);
             if (parts.Length < 8) continue;
 
             if (parts[0] == "edge")
             {
-                var edge = new CodeGraphEdge(parts[1], parts[2], parts[3]);
+                CodeGraphEdge edge = new CodeGraphEdge(parts[1], parts[2], parts[3]);
                 if (!NeighborhoodEdgeKinds.Contains(edge.Kind)) continue;
 
                 _edges.Add(edge);
@@ -125,8 +125,8 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
             if (parts[0] != "node") continue;
 
-            _ = int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out var startLine);
-            var node = new CodeGraphNode(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], startLine);
+            _ = int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out int startLine);
+            CodeGraphNode node = new CodeGraphNode(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], startLine);
 
             Index(_byName, node.Name, node);
             Index(_byQualifiedName, node.QualifiedName, node);
@@ -145,14 +145,14 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
     private void IncrementDegree(string nodeId)
     {
-        _edgeDegree.TryGetValue(nodeId, out var degree);
+        _edgeDegree.TryGetValue(nodeId, out int degree);
         _edgeDegree[nodeId] = degree + 1;
     }
 
     private static void Index(Dictionary<string, List<CodeGraphNode>> map, string key, CodeGraphNode node)
     {
         if (string.IsNullOrEmpty(key)) return;
-        if (!map.TryGetValue(key, out var list))
+        if (!map.TryGetValue(key, out List<CodeGraphNode>? list))
         {
             list = [];
             map[key] = list;
@@ -162,7 +162,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
     private IEnumerable<string> RunSqlite(string sql)
     {
-        var startInfo = new ProcessStartInfo("sqlite3")
+        ProcessStartInfo startInfo = new ProcessStartInfo("sqlite3")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -183,12 +183,12 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         startInfo.ArgumentList.Add(DatabasePath);
         startInfo.ArgumentList.Add(sql);
 
-        using var process = Process.Start(startInfo)
+        using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start the 'sqlite3' process.");
 
         // Both pipes are drained concurrently. This query returns the whole node table, so
         // stdout is large by design and stderr must not be left to fill behind it.
-        var result = ProcessRunner.ReadToEnd(process);
+        ProcessResult result = ProcessRunner.ReadToEnd(process);
 
         if (result.ExitCode != 0)
         {
@@ -204,8 +204,8 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     {
         if (!IsAvailable || string.IsNullOrWhiteSpace(name)) return [];
 
-        if (_byName.TryGetValue(name, out var byName)) return byName;
-        if (_byQualifiedName.TryGetValue(name, out var byQualified)) return byQualified;
+        if (_byName.TryGetValue(name, out List<CodeGraphNode>? byName)) return byName;
+        if (_byQualifiedName.TryGetValue(name, out List<CodeGraphNode>? byQualified)) return byQualified;
         return [];
     }
 
@@ -213,7 +213,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     public IReadOnlyList<CodeGraphNode> ResolveRoute(string route)
     {
         if (!IsAvailable || string.IsNullOrWhiteSpace(route)) return [];
-        return _routes.TryGetValue(route, out var node) ? [node] : [];
+        return _routes.TryGetValue(route, out CodeGraphNode? node) ? [node] : [];
     }
 
     /// <inheritdoc />
@@ -221,7 +221,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     {
         if (!IsAvailable || string.IsNullOrWhiteSpace(relativePathPrefix)) return false;
 
-        var normalized = relativePathPrefix.Replace('\\', '/').TrimEnd('/');
+        string normalized = relativePathPrefix.Replace('\\', '/').TrimEnd('/');
 
         // "." is the repository root: a system-level document legitimately describes the
         // whole tree, so every indexed file is beneath it.
@@ -237,7 +237,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
         // Anchor on a short prefix so the candidate pool stays small; a rename usually
         // preserves a prefix or a suffix, not neither.
-        var prefix = like.Length <= 4 ? like : like[..4];
+        string prefix = like.Length <= 4 ? like : like[..4];
 
         return _byName
             .Where(kv => kv.Value.Exists(n => SymbolKinds.Contains(n.Kind, StringComparer.Ordinal)))
@@ -260,7 +260,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
 
         if (!IsAvailable || nodeIds.Count == 0) return [];
 
-        var requested = nodeIds.ToHashSet(StringComparer.Ordinal);
+        HashSet<string> requested = nodeIds.ToHashSet(StringComparer.Ordinal);
         return _edges
             .Where(edge =>
                 requested.Contains(edge.SourceId)

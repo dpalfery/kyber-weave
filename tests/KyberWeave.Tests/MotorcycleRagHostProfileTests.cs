@@ -56,17 +56,17 @@ public class MotorcycleRagHostProfileTests
         """;
 
     [Fact]
-    public void HostProfile_Restores_Docs_Validate_Exclusion_Expectations()
+    public void HostProfileRestoresDocsValidateExclusionExpectations()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
-        using var fixture = new HostProfileDocFixture(config);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
+        using HostProfileDocFixture fixture = new HostProfileDocFixture(config);
 
         fixture.WithCatalog()
             .Write("6-Docs/archive/old-plan.md", "# archived\n")
             .Write("6-Docs/DevOps/incremental-build.md", "---\nname: upstream/skill\n---\n")
             .Write("6-Docs/reference/current.md", ValidReference);
 
-        var subjects = fixture.LoadSubjects();
+        IReadOnlyList<DocumentModel> subjects = fixture.LoadSubjects();
 
         Assert.Single(subjects);
         Assert.Equal("6-Docs/reference/current.md", subjects[0].RelativePath);
@@ -74,10 +74,10 @@ public class MotorcycleRagHostProfileTests
     }
 
     [Fact]
-    public void HostProfile_Restores_Catalog_Column_Mapping()
+    public void HostProfileRestoresCatalogColumnMapping()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
-        using var fixture = new HostProfileDocFixture(config);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
+        using HostProfileDocFixture fixture = new HostProfileDocFixture(config);
 
         fixture.WithCatalog(
             """
@@ -102,21 +102,21 @@ public class MotorcycleRagHostProfileTests
 
         fixture.WithSourceRoot("1-Presentation/Api");
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.DoesNotContain(report.Items, i => i.Code == DocSpecValidator.UnknownCatalogValue);
     }
 
     [Fact]
-    public void HostProfile_Restores_Conductor_Sync_Check_Expectations()
+    public void HostProfileRestoresConductorSyncCheckExpectations()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
-        using var repo = new HostProfileRepoFixture();
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
+        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
 
         repo.WithConductorSkillDirectory()
             .WithAgent(HarnessKind.Kilo, "conductor");
 
-        foreach (var harness in new[]
+        foreach (HarnessKind harness in new[]
                  {
                      HarnessKind.Codex, HarnessKind.Cursor, HarnessKind.Claude,
                      HarnessKind.GitHubCopilot, HarnessKind.OpenCode, HarnessKind.Kilo
@@ -127,9 +127,9 @@ public class MotorcycleRagHostProfileTests
                 $"Host profile must map conductor for {harness}.");
         }
 
-        var report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config.Harness);
+        DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config.Harness);
 
-        var conductorMissing = report.Items
+        List<Diagnostic> conductorMissing = report.Items
             .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
             .ToList();
 
@@ -154,37 +154,37 @@ public class MotorcycleRagHostProfileTests
     }
 
     [Fact]
-    public void HostProfile_Loads_From_Kyber_Weave_Folder()
+    public void HostProfileLoadsFromKyberWeaveFolder()
     {
-        using var repo = new HostProfileRepoFixture();
+        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
         repo.WriteHostConfig(HostProfileYaml);
 
-        var config = KyberWeaveConfigLoader.Load(repo.Root);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo.Root);
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
         Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
     }
 
     [Fact]
-    public void HostProfile_Loads_From_Legacy_Repo_Root_Kyber_Weave_Yml()
+    public void HostProfileLoadsFromLegacyRepoRootKyberWeaveYml()
     {
-        using var repo = new HostProfileRepoFixture();
+        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
         repo.WriteLegacyRootConfig(HostProfileYaml);
 
-        var config = KyberWeaveConfigLoader.Load(repo.Root);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo.Root);
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
         Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
     }
 
     [Fact]
-    public void HostProfile_In_Kyber_Weave_Folder_Wins_Over_Legacy_Root_File()
+    public void HostProfileInKyberWeaveFolderWinsOverLegacyRootFile()
     {
-        using var repo = new HostProfileRepoFixture();
+        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
         repo.WriteLegacyRootConfig("ontology:\n  docs-root: legacy-docs\n");
         repo.WriteHostConfig(HostProfileYaml);
 
-        var config = KyberWeaveConfigLoader.Load(repo.Root);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo.Root);
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
     }
@@ -248,7 +248,7 @@ public class MotorcycleRagHostProfileTests
 
         public HostProfileDocFixture Write(string relativePath, string content)
         {
-            var full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            string full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
             File.WriteAllText(full, content);
             return this;
@@ -291,7 +291,7 @@ public class MotorcycleRagHostProfileTests
 
         public HostProfileRepoFixture WithAgent(HarnessKind harness, string roleName)
         {
-            var folder = harness switch
+            string folder = harness switch
             {
                 HarnessKind.Kilo => ".kilo/agents",
                 HarnessKind.Codex => ".codex/agents",
@@ -302,7 +302,7 @@ public class MotorcycleRagHostProfileTests
                 _ => throw new ArgumentOutOfRangeException(nameof(harness))
             };
 
-            var dir = Path.Combine(Root, folder.Replace('/', Path.DirectorySeparatorChar));
+            string dir = Path.Combine(Root, folder.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(dir);
             File.WriteAllText(
                 Path.Combine(dir, $"{roleName}.md"),
@@ -318,7 +318,7 @@ public class MotorcycleRagHostProfileTests
 
         public void WriteHostConfig(string yaml)
         {
-            var dir = Path.Combine(Root, ".kyber-weave");
+            string dir = Path.Combine(Root, ".kyber-weave");
             Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, "kyber-weave.yml"), yaml);
         }

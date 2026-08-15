@@ -13,7 +13,7 @@ internal static class KyberWeaveYamlParser
     public static KyberWeaveYamlDocument ParseFile(string yamlPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-        var yaml = File.ReadAllText(yamlPath);
+        string yaml = File.ReadAllText(yamlPath);
         return Parse(yaml);
     }
 

@@ -15,20 +15,20 @@ public static class KyberWeaveConfigLoader
     public static KyberWeaveConfig LoadFromYaml(string yaml)
     {
         ArgumentNullException.ThrowIfNull(yaml);
-        var document = KyberWeaveYamlParser.Parse(yaml);
+        KyberWeaveYamlDocument document = KyberWeaveYamlParser.Parse(yaml);
         return FromDocument(document);
     }
 
     public static KyberWeaveConfig Load(string repoRoot, string? configPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        var root = Path.GetFullPath(repoRoot);
+        string root = Path.GetFullPath(repoRoot);
 
-        var path = ResolveConfigPath(root, configPath);
+        string? path = ResolveConfigPath(root, configPath);
         if (path is null)
             return KyberWeaveConfig.ProductDefaults;
 
-        var document = KyberWeaveYamlParser.ParseFile(path);
+        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(path);
         return FromDocument(document);
     }
 
@@ -40,7 +40,7 @@ public static class KyberWeaveConfigLoader
     public static KyberWeaveConfigLoadResult TryLoad(string repoRoot, string? configPath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        var root = Path.GetFullPath(repoRoot);
+        string root = Path.GetFullPath(repoRoot);
         string? path = null;
 
         try
@@ -49,7 +49,7 @@ public static class KyberWeaveConfigLoader
             if (path is null)
                 return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, null);
 
-            var document = KyberWeaveYamlParser.ParseFile(path);
+            KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(path);
             return KyberWeaveConfigLoadResult.Ok(FromDocument(document), path);
         }
         catch (YamlException ex)
@@ -75,7 +75,7 @@ public static class KyberWeaveConfigLoader
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
 
-        var defaultPath = Path.Combine(
+        string defaultPath = Path.Combine(
             Path.GetFullPath(repoRoot),
             KyberWeaveYamlParser.DefaultDirectoryName,
             KyberWeaveYamlParser.DefaultFileName);
@@ -83,7 +83,7 @@ public static class KyberWeaveConfigLoader
             return defaultPath;
 
         // Legacy location: repo-root kyber-weave.yml, kept working for existing hosts.
-        var legacyPath = Path.Combine(Path.GetFullPath(repoRoot), KyberWeaveYamlParser.DefaultFileName);
+        string legacyPath = Path.Combine(Path.GetFullPath(repoRoot), KyberWeaveYamlParser.DefaultFileName);
         return File.Exists(legacyPath) ? legacyPath : null;
     }
 
@@ -92,7 +92,7 @@ public static class KyberWeaveConfigLoader
         if (string.IsNullOrWhiteSpace(configPath))
             return FindConfigPath(repoRoot);
 
-        var explicitPath = Path.IsPathRooted(configPath)
+        string explicitPath = Path.IsPathRooted(configPath)
             ? configPath
             : Path.Combine(repoRoot, configPath);
         if (!File.Exists(explicitPath))
@@ -107,7 +107,7 @@ public static class KyberWeaveConfigLoader
 
     private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document)
     {
-        var ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
+        OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
         return new KyberWeaveConfig
         {
             Ontology = ontology,

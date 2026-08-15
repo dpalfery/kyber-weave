@@ -1,3 +1,4 @@
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Model;
@@ -60,7 +61,7 @@ internal sealed class DocFixture : IDisposable
 
     public DocFixture Write(string relativePath, string content)
     {
-        var full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         File.WriteAllText(full, content);
         return this;
@@ -92,30 +93,30 @@ public class DocSpecValidatorTests
         """;
 
     [Fact]
-    public void Conforming_Document_Produces_No_Findings()
+    public void ConformingDocumentProducesNoFindings()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", ValidReference);
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", ValidReference);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.False(report.HasErrors);
     }
 
     [Fact]
-    public void Missing_Frontmatter_Is_SPEC_001()
+    public void MissingFrontmatterIsSPEC001()
     {
-        using var fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = new DocFixture().WithCatalog()
             .Write("6-Docs/reference/thing.md", "# Just a heading\n");
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MissingFrontmatter);
     }
 
     [Fact]
-    public void Unknown_DocType_Is_SPEC_002()
+    public void UnknownDocTypeIsSPEC002()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -126,16 +127,16 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.InvalidVocabulary && i.Message.Contains("rumination", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Unknown_Status_Is_SPEC_002()
+    public void UnknownStatusIsSPEC002()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -146,16 +147,16 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.InvalidVocabulary && i.Message.Contains("probably-fine", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void NonIso_LastReviewed_Is_SPEC_002()
+    public void NonIsoLastReviewedIsSPEC002()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -166,16 +167,16 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.InvalidVocabulary && i.Message.Contains("last-reviewed", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Architecture_Without_CodeRefs_Is_SPEC_003()
+    public void ArchitectureWithoutCodeRefsIsSPEC003()
     {
-        using var fixture = new DocFixture().WithCatalog().WithSourceRoot("1-Presentation/Api")
+        using DocFixture fixture = new DocFixture().WithCatalog().WithSourceRoot("1-Presentation/Api")
             .Write("6-Docs/api/architecture.md", """
                 ---
                 id: api/architecture
@@ -190,16 +191,16 @@ public class DocSpecValidatorTests
                 ---
                 """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.MissingRequiredKey && i.Message.Contains("code-refs", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void ProcessOnly_Runbook_Without_SourceRoot_Needs_No_CodeRefs()
+    public void ProcessOnlyRunbookWithoutSourceRootNeedsNoCodeRefs()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/operations/process.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/operations/process.md", """
             ---
             id: operations/process
             title: A Process Runbook
@@ -212,15 +213,15 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.DoesNotContain(report.Items, i => i.Code == DocSpecValidator.MissingRequiredKey);
     }
 
     [Fact]
-    public void Runbook_With_SourceRoot_Requires_CodeRefs()
+    public void RunbookWithSourceRootRequiresCodeRefs()
     {
-        using var fixture = new DocFixture().WithCatalog().WithSourceRoot("1-Presentation/Api")
+        using DocFixture fixture = new DocFixture().WithCatalog().WithSourceRoot("1-Presentation/Api")
             .Write("6-Docs/operations/component.md", """
                 ---
                 id: operations/component
@@ -235,16 +236,16 @@ public class DocSpecValidatorTests
                 ---
                 """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.MissingRequiredKey && i.Message.Contains("code-refs", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Uncataloged_Component_Is_SPEC_004()
+    public void UncatalogedComponentIsSPEC004()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -256,16 +257,16 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.UnknownCatalogValue && i.Message.Contains("component", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Uncataloged_Owner_Is_SPEC_004()
+    public void UncatalogedOwnerIsSPEC004()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -276,16 +277,16 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.UnknownCatalogValue && i.Message.Contains("owner", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Nonexistent_SourceRoot_Is_SPEC_005()
+    public void NonexistentSourceRootIsSPEC005()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/api/onboarding.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/api/onboarding.md", """
             ---
             id: api/onboarding
             title: API Onboarding
@@ -298,28 +299,28 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i => i.Code == DocSpecValidator.SourceRootMissing);
     }
 
     [Fact]
-    public void Duplicate_Id_Is_SPEC_006()
+    public void DuplicateIdIsSPEC006()
     {
-        using var fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = new DocFixture().WithCatalog()
             .Write("6-Docs/reference/one.md", ValidReference)
             .Write("6-Docs/reference/two.md", ValidReference);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.BadReference && i.Message.Contains("is declared by 2 documents", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Unresolvable_DecidedBy_Is_SPEC_006()
+    public void UnresolvableDecidedByIsSPEC006()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -332,34 +333,34 @@ public class DocSpecValidatorTests
             ---
             """);
 
-        var report = fixture.Validate();
+        DiagnosticReport report = fixture.Validate();
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.BadReference && i.Message.Contains("decided-by", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Archived_Documents_Are_Out_Of_Scope()
+    public void ArchivedDocumentsAreOutOfScope()
     {
-        using var fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = new DocFixture().WithCatalog()
             .Write("6-Docs/archive/old.md", "# No frontmatter here\n");
 
         Assert.Empty(fixture.LoadSubjects());
     }
 
     [Fact]
-    public void Vendored_DevOps_Skill_Files_Are_Out_Of_Scope()
+    public void VendoredDevOpsSkillFilesAreOutOfScope()
     {
-        using var fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = new DocFixture().WithCatalog()
             .Write("6-Docs/DevOps/incremental-build.md", "---\nname: upstream/skill\n---\n");
 
         Assert.Empty(fixture.LoadSubjects());
     }
 
     [Fact]
-    public void Hyphenated_Keys_Bind_To_Model()
+    public void HyphenatedKeysBindToModel()
     {
-        using var fixture = new DocFixture().WithCatalog().WithSourceRoot("1-Presentation/Api")
+        using DocFixture fixture = new DocFixture().WithCatalog().WithSourceRoot("1-Presentation/Api")
             .Write("6-Docs/api/architecture.md", """
                 ---
                 id: api/architecture
@@ -377,7 +378,7 @@ public class DocSpecValidatorTests
                 ---
                 """);
 
-        var doc = Assert.Single(fixture.LoadSubjects());
+        DocumentModel doc = Assert.Single(fixture.LoadSubjects());
 
         Assert.Equal(DocType.Architecture, doc.DocType);
         Assert.Equal(DocStatus.Current, doc.Status);
@@ -394,21 +395,21 @@ public class DocLinkAndExportTests
     [InlineData("6-Docs/a/b.md", "../x/y.md", "6-Docs/x/y.md")]
     [InlineData("6-Docs/a/b.md", "./same.md", "6-Docs/a/same.md")]
     [InlineData("6-Docs/a/b.md", "../../root.md", "root.md")]
-    public void ResolveLink_Normalizes_Relative_Targets(string from, string link, string expected)
+    public void ResolveLinkNormalizesRelativeTargets(string from, string link, string expected)
     {
         Assert.Equal(expected, DocGraphExporter.ResolveLink(from, link));
     }
 
     [Fact]
-    public void ResolveLink_Rejects_Escaping_The_Repository()
+    public void ResolveLinkRejectsEscapingTheRepository()
     {
         Assert.Null(DocGraphExporter.ResolveLink("a.md", "../../../etc/passwd"));
     }
 
     [Fact]
-    public void ExtractRelativeLinks_Skips_Absolute_And_External()
+    public void ExtractRelativeLinksSkipsAbsoluteAndExternal()
     {
-        var links = DocumentLoader.ExtractRelativeLinks(
+        IReadOnlyList<string> links = DocumentLoader.ExtractRelativeLinks(
             "[a](x.md) [b](https://example.com) [c](mailto:a@b.c) [d](/abs.md) [e](y.md#frag)");
 
         Assert.Equal(["x.md", "y.md"], links);
@@ -418,9 +419,9 @@ public class DocLinkAndExportTests
 public class DocDriftLinterTests
 {
     [Fact]
-    public void Missing_Index_Is_Reported_As_Critical_Not_Silently_Passed()
+    public void MissingIndexIsReportedAsCriticalNotSilentlyPassed()
     {
-        using var fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = new DocFixture().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -435,8 +436,8 @@ public class DocDriftLinterTests
 
         // No .codegraph/ in the fixture tree: an unverifiable drift check must fail loudly
         // rather than report a clean run.
-        var resolver = Core.CodeGraph.CodeGraphResolverAdapter.ForRepository(fixture.Root);
-        var report = new DocDriftLinter(resolver).Validate(fixture.Load());
+        CodeGraphResolverAdapter resolver = Core.CodeGraph.CodeGraphResolverAdapter.ForRepository(fixture.Root);
+        DiagnosticReport report = new DocDriftLinter(resolver).Validate(fixture.Load());
 
         Assert.False(resolver.IsAvailable);
         Assert.True(report.HasCritical);
@@ -446,9 +447,9 @@ public class DocDriftLinterTests
 public class DiagnosticSubjectTests
 {
     [Fact]
-    public void Subject_Is_The_Only_Name_For_What_A_Finding_Is_About()
+    public void SubjectIsTheOnlyNameForWhatAFindingIsAbout()
     {
-        var diagnostic = new Diagnostic("KW-DOC-SPEC-001", Severity.Error, "message", "subject-value");
+        Diagnostic diagnostic = new Diagnostic("KW-DOC-SPEC-001", Severity.Error, "message", "subject-value");
 
         Assert.Equal("subject-value", diagnostic.Subject);
         Assert.Null(typeof(Diagnostic).GetProperty("SkillName"));

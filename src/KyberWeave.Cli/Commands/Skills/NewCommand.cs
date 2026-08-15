@@ -29,18 +29,18 @@ public sealed class NewSettings : CommandSettings
     public bool NoMetadata { get; set; }
 }
 
-public sealed class NewCommand : Command<NewSettings>
+public sealed partial class NewCommand : Command<NewSettings>
 {
     public override int Execute(CommandContext context, NewSettings settings)
     {
-        var name = settings.Name;
-        if (!System.Text.RegularExpressions.Regex.IsMatch(name, "^[a-z0-9]+(?:-[a-z0-9]+)*$"))
+        string name = settings.Name;
+        if (!MyRegex().IsMatch(name))
         {
             AnsiConsole.MarkupLine($"[red]Invalid name '{Markup.Escape(name)}'. Use lowercase letters, digits and single hyphens.[/]");
             return 2;
         }
 
-        var dir = Path.Combine(settings.Output, name);
+        string dir = Path.Combine(settings.Output, name);
         if (Directory.Exists(dir))
         {
             AnsiConsole.MarkupLine($"[red]Directory already exists: {Markup.Escape(dir)}[/]");
@@ -50,7 +50,7 @@ public sealed class NewCommand : Command<NewSettings>
         Directory.CreateDirectory(dir);
         Directory.CreateDirectory(Path.Combine(dir, "references"));
 
-        var body = Template(settings.Template, name, !settings.NoLicense, !settings.NoMetadata);
+        string body = Template(settings.Template, name, !settings.NoLicense, !settings.NoMetadata);
         File.WriteAllText(Path.Combine(dir, "SKILL.md"), body);
 
         AnsiConsole.MarkupLine($"[green]Created skill[/] [bold]{Markup.Escape(name)}[/] at {Markup.Escape(dir)}");
@@ -60,8 +60,8 @@ public sealed class NewCommand : Command<NewSettings>
 
     private static string Template(string template, string name, bool includeLicense, bool includeMetadata)
     {
-        var title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0]) + w[1..]));
-        var (description, instructions) = template.ToLowerInvariant() switch
+        string title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0]) + w[1..]));
+        (string? description, string? instructions) = template.ToLowerInvariant() switch
         {
             "sop" => (
                 $"Use to perform {title} the same compliant way every time. Use when a request matches this procedure. Do NOT use for unrelated tasks or when approval limits are exceeded.",
@@ -80,8 +80,8 @@ public sealed class NewCommand : Command<NewSettings>
                 "## When to use\n\n## Instructions\n\n## Example\n")
         };
 
-        var licenseBlock = includeLicense ? "license: MIT\n" : string.Empty;
-        var metadataBlock = includeMetadata
+        string licenseBlock = includeLicense ? "license: MIT\n" : string.Empty;
+        string metadataBlock = includeMetadata
             ? """
 metadata:
   author: your-name
@@ -101,4 +101,7 @@ description: {description}
 {instructions}
 """;
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9]+(?:-[a-z0-9]+)*$")]
+    private static partial System.Text.RegularExpressions.Regex MyRegex();
 }
