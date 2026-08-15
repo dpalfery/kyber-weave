@@ -407,10 +407,11 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
         string relativePath = string.Join('/', segments.Take(segmentCount));
         string platformPath = relativePath.Replace('/', Path.DirectorySeparatorChar);
-        string candidate = Path.GetFullPath(Path.Combine(extractionRoot, platformPath));
-        string containmentPrefix = extractionRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? extractionRoot
-            : extractionRoot + Path.DirectorySeparatorChar;
+        string fullExtractionRoot = Path.GetFullPath(extractionRoot);
+        string containmentPrefix = fullExtractionRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? fullExtractionRoot
+            : fullExtractionRoot + Path.DirectorySeparatorChar;
+        string candidate = Path.GetFullPath(Path.Combine(fullExtractionRoot, platformPath));
         StringComparison comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
@@ -491,6 +492,13 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         string stagingRoot = Path.Combine(
             parent,
             $".{Path.GetFileName(extractionRoot)}.kyber-squad-{Guid.NewGuid():N}");
+        string fullStagingRoot = Path.GetFullPath(stagingRoot);
+        string stagingPrefix = fullStagingRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? fullStagingRoot
+            : fullStagingRoot + Path.DirectorySeparatorChar;
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
         try
         {
             Directory.CreateDirectory(stagingRoot);
@@ -506,9 +514,15 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
                 ZipArchiveEntry entry = archive.Entries[index];
                 ValidatedArchiveEntry validated = entries[index];
-                string destination = Path.Combine(
-                    stagingRoot,
-                    validated.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                string destination = Path.GetFullPath(Path.Combine(
+                    fullStagingRoot,
+                    validated.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+                if (!destination.StartsWith(stagingPrefix, comparison))
+                {
+                    throw new InvalidDataException(
+                        $"The Squad archive path escapes its extraction root: '{entry.FullName}'.");
+                }
+
                 if (validated.IsDirectory)
                 {
                     Directory.CreateDirectory(destination);

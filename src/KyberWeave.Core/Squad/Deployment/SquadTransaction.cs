@@ -1005,7 +1005,7 @@ public sealed class SquadTransaction
         MoveEntryNoOverwrite(targetPath, claimPath, currentKind);
         if (resolvedDirectoryLinkTarget is not null)
         {
-            File.Delete(claimPath);
+            DeleteEntry(claimPath, recursiveDirectory: false);
             Directory.CreateSymbolicLink(
                 claimPath,
                 Path.GetRelativePath(
@@ -1944,18 +1944,27 @@ public sealed class SquadTransaction
 
     private static OriginalEntryKind GetEntryKind(string path)
     {
-        DirectoryInfo directory = new DirectoryInfo(path);
-        if (directory.LinkTarget is not null && directory.Exists)
-            return OriginalEntryKind.DirectorySymbolicLink;
-
         FileInfo file = new FileInfo(path);
-        if (file.LinkTarget is not null)
-            return OriginalEntryKind.FileSymbolicLink;
+        DirectoryInfo directory = new DirectoryInfo(path);
+
+        string? linkTarget = file.LinkTarget ?? directory.LinkTarget;
+        if (linkTarget is not null)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return (file.Attributes & FileAttributes.Directory) != 0
+                    ? OriginalEntryKind.DirectorySymbolicLink
+                    : OriginalEntryKind.FileSymbolicLink;
+            }
+
+            return Directory.Exists(path)
+                ? OriginalEntryKind.DirectorySymbolicLink
+                : OriginalEntryKind.FileSymbolicLink;
+        }
+
         if (file.Exists)
             return OriginalEntryKind.File;
 
-        if (directory.LinkTarget is not null)
-            return OriginalEntryKind.DirectorySymbolicLink;
         return directory.Exists
             ? OriginalEntryKind.Directory
             : OriginalEntryKind.Missing;
@@ -3099,6 +3108,7 @@ public sealed class SquadTransaction
         JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             WriteIndented = true,
+            NewLine = "\n",
             UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
         };
         options.Converters.Add(new JsonStringEnumConverter(

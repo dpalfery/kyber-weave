@@ -67,8 +67,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
               tag-commit: 0123456789abcdef
               asset-sha256: {{Digest("apm")}}
 
-            """,
-            lockYaml);
+            """.Replace("\r\n", "\n"),
+            lockYaml.Replace("\r\n", "\n"));
         Assert.Equal(
             $$"""
             {
@@ -99,8 +99,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
               ]
             }
 
-            """,
-            receiptJson);
+            """.Replace("\r\n", "\n"),
+            receiptJson.Replace("\r\n", "\n"));
         Assert.DoesNotContain(fixture.Path, lockYaml, StringComparison.Ordinal);
         Assert.DoesNotContain(fixture.Path, receiptJson, StringComparison.Ordinal);
         Assert.DoesNotContain("TOP-SECRET", lockYaml, StringComparison.Ordinal);
@@ -3287,8 +3287,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         if (string.Equals(artifactRole, "target-link-metadata", StringComparison.Ordinal))
         {
             const string canonicalRelativePath = "canonical/conductor.toml";
+            string canonicalPath = Path.Combine(root, "canonical", "conductor.toml");
             Write(root, canonicalRelativePath, installedBody);
-            File.CreateSymbolicLink(targetPath, "../../canonical/conductor.toml");
+            File.CreateSymbolicLink(
+                targetPath,
+                Path.GetRelativePath(Path.GetDirectoryName(targetPath)!, canonicalPath));
         }
         else
         {
@@ -3535,10 +3538,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             const string installed = "installed link target";
             const string targetRelativePath = "canonical/conductor.toml";
+            string canonicalPath = Path.Combine(root, "canonical", "conductor.toml");
             Write(root, targetRelativePath, installed);
             string fullLinkPath = ToPlatformPath(root, relativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(fullLinkPath)!);
-            File.CreateSymbolicLink(fullLinkPath, "../../canonical/conductor.toml");
+            File.CreateSymbolicLink(
+                fullLinkPath,
+                Path.GetRelativePath(Path.GetDirectoryName(fullLinkPath)!, canonicalPath));
             SquadReceipt receipt = Receipt(new SquadOwnedFile(
                 relativePath,
                 Digest(installed),
@@ -4262,14 +4268,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private static string CorruptReceiptDocument(string json, string corruption)
     {
-        const string schemaProperty = "  \"schema\": \"kyber-squad.receipt/v1\",\n";
         return corruption switch
         {
             "unknown" => InsertBeforeRootClose(json, "  \"unknownField\": true"),
             "duplicate" => InsertBeforeRootClose(
                 json,
                 "  \"schema\": \"kyber-squad.receipt/v1\""),
-            "missing" => json.Replace(schemaProperty, string.Empty, StringComparison.Ordinal),
+            "missing" => json
+                .Replace("  \"schema\": \"kyber-squad.receipt/v1\",\r\n", string.Empty, StringComparison.Ordinal)
+                .Replace("  \"schema\": \"kyber-squad.receipt/v1\",\n", string.Empty, StringComparison.Ordinal),
             "null" => json.Replace(
                 "\"schema\": \"kyber-squad.receipt/v1\"",
                 "\"schema\": null",
@@ -4290,14 +4297,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
     private static string CorruptJournalDocument(string json, string corruption)
     {
-        const string schemaProperty = "  \"schema\": \"kyber-squad.transaction/v1\",\n";
         return corruption switch
         {
             "unknown" => InsertBeforeRootClose(json, "  \"unknownField\": true"),
             "duplicate" => InsertBeforeRootClose(
                 json,
                 "  \"schema\": \"kyber-squad.transaction/v1\""),
-            "missing" => json.Replace(schemaProperty, string.Empty, StringComparison.Ordinal),
+            "missing" => json
+                .Replace("  \"schema\": \"kyber-squad.transaction/v1\",\r\n", string.Empty, StringComparison.Ordinal)
+                .Replace("  \"schema\": \"kyber-squad.transaction/v1\",\n", string.Empty, StringComparison.Ordinal),
             "null" => json.Replace(
                 "\"schema\": \"kyber-squad.transaction/v1\"",
                 "\"schema\": null",
@@ -4310,24 +4318,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         int rootClose = json.LastIndexOf('}');
         Assert.True(rootClose >= 0);
-        return json.Insert(rootClose, $",\n{property}\n");
+        string newline = json.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        return json.Insert(rootClose, $",{newline}{property}{newline}");
     }
 
     private static string InsertDuplicateReceiptFile(string json)
     {
-        const string filesClose = "\n  ]\n}";
-        int insertion = json.LastIndexOf(filesClose, StringComparison.Ordinal);
+        int insertion = json.LastIndexOf("  ]", StringComparison.Ordinal);
         Assert.True(insertion >= 0);
-        string duplicate = $$"""
-        ,
-            {
-              "relativePath": ".codex/agents/Conductor.toml",
-              "sha256": "{{Digest("conductor")}}",
-              "target": "codex",
-              "adopted": false
-            }
-        """;
-        return json.Insert(insertion, duplicate);
+        string newline = json.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        string duplicate = $",{newline}    {{{newline}      \"relativePath\": \".codex/agents/Conductor.toml\",{newline}      \"sha256\": \"{Digest("conductor")}\",{newline}      \"target\": \"codex\",{newline}      \"adopted\": false{newline}    }}";
+        return json.Insert(insertion + 3, duplicate);
     }
 
     private static SquadStateStore Store(string applicationData) =>
@@ -4456,10 +4457,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 .Replace(Path.DirectorySeparatorChar, '/');
             if (entry.LinkTarget is not null)
             {
+                bool isDirectoryLink = OperatingSystem.IsWindows()
+                    ? (entry.Attributes & FileAttributes.Directory) != 0
+                    : Directory.Exists(entry.FullName);
                 snapshot.Add(
                     relativePath,
                     new TreeEntry(
-                        entry is DirectoryInfo
+                        isDirectoryLink
                             ? TreeEntryKind.DirectorySymbolicLink
                             : TreeEntryKind.FileSymbolicLink,
                         null,
@@ -5368,7 +5372,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     File.CreateSymbolicLink(claimPath, "retargeted-file-claim");
                     break;
                 case "retarget-directory-link":
-                    Directory.Delete(claimPath);
+                    DeleteLeafEntry(claimPath);
                     Directory.CreateSymbolicLink(claimPath, "retargeted-directory-claim");
                     break;
                 case "replace-directory":

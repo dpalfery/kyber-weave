@@ -302,6 +302,7 @@ public sealed class SquadStateStore
         JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             WriteIndented = true,
+            NewLine = "\n",
             UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
         };
         options.Converters.Add(new UtcDateTimeOffsetConverter());
