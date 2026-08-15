@@ -72,7 +72,7 @@ sdkmanager --licenses
 ```
 
 **JDK requirements:**
-- Validate the JDK version required by your target .NET MAUI framework and Android toolchain (e.g., Microsoft OpenJDK 17 for .NET MAUI 10).
+- Validate the JDK version required by your target .NET MAUI framework and Android toolchain (JDK 17 for .NET 8/9/10, regardless of vendor distribution).
 - Verify both your selected JDK version and `JAVA_HOME` match the version expected by the Android toolchain to avoid class file version mismatches.
 
 ```bash

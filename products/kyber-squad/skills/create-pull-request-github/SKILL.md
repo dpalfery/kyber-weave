@@ -72,8 +72,9 @@ Note: The agent will auto-detect `owner` and `repo` from the current git remote 
   - [ ] Refactor (code change that neither fixes a bug nor adds a feature)
 - **Related Issue / Ticket**: A direct link to the tracking item (GitHub Issue, Jira, etc.).
   - Prefer deriving the ticket from the branch name when possible.
-  - If the branch contains a leading numeric GitHub issue ID, format it as `Closes #42`.
-  - If the branch contains an alphanumeric issue key such as `ABC-123`, preserve that format.
+  - If the branch contains a leading numeric GitHub issue ID, format it as `Closes #42` only when targeting the default branch; otherwise format as a non-closing reference (e.g., `Related issue: #42`).
+  - If the branch contains an alphanumeric issue key such as `ABC-123`, preserve that format (e.g., `Ticket: ABC-123`).
+  - Omit this section if no ticket is detected.
 - **Proposed Changes**: A bulleted list of the technical implementation details summarized from commit messages and file changes. Keep it short but complete.
 - **How Has This Been Tested?**: Documentation of verification steps:
   - **Unit Tests**: Mention new test coverage or updated suites.
@@ -129,7 +130,11 @@ TB=main # replace with the explicitly chosen or conclusively resolved parent bra
 OWNER="my-org" # or auto-detect from git remote
 REPO="my-repo" # or auto-detect from git remote
 
-SUMMARY=$(git log --no-merges --pretty=format:"%s" -n1 origin/${TB}..${SB})
+SUMMARY=$(git log --no-merges --pretty=format:"%s" -n1 origin/${TB}..${SB} 2>/dev/null || echo "")
+if [ -z "${SUMMARY}" ]; then
+  SUMMARY="Summarize changes here..."
+fi
+
 if [[ "${SB}" =~ ^(feature|bugfix|hotfix|chore|task)/(.*)$ ]]; then
   BRANCH_STEM="${BASH_REMATCH[2]}"
 else
@@ -146,11 +151,14 @@ fi
 
 RELATED_ISSUE=""
 if [ -n "${TICKET}" ]; then
-  DEFAULT_BRANCH=$(gh repo view "${OWNER}/${REPO}" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo "main")
+  DEFAULT_BRANCH=$(gh repo view "${OWNER}/${REPO}" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || echo "main")
+  [ -z "${DEFAULT_BRANCH}" ] && DEFAULT_BRANCH="main"
   if [ "${TB}" = "${DEFAULT_BRANCH}" ] && [[ "${TICKET}" =~ ^#[0-9]+$ ]]; then
     DIRECTIVE="Closes ${TICKET}"
+  elif [[ "${TICKET}" =~ ^#[0-9]+$ ]]; then
+    DIRECTIVE="Related issue: ${TICKET}"
   else
-    DIRECTIVE="Relates to ${TICKET}"
+    DIRECTIVE="Ticket: ${TICKET}"
   fi
   RELATED_ISSUE=$(cat <<EOF
 
@@ -162,6 +170,8 @@ EOF
 fi
 
 DESCRIPTION_FILE=$(mktemp)
+trap 'rm -f "${DESCRIPTION_FILE}"' EXIT
+
 cat > "${DESCRIPTION_FILE}" <<EOF
 ## Summary
 
@@ -176,11 +186,11 @@ ${SUMMARY}
 
 ## Proposed Changes
 
-Summarized implementation detail here...
+- Summarized implementation details...
 EOF
 
 # Check for existing PR
-EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number --jq '.[0].number // empty')
+EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number -q '.[0].number // empty' 2>/dev/null || echo "")
 if [ -n "${EXISTING}" ]; then
   gh pr edit "${EXISTING}" --repo "${OWNER}/${REPO}" --title "${TITLE}" --body-file "${DESCRIPTION_FILE}"
 else
@@ -196,21 +206,32 @@ $SB = 'feature/my-change'
 $TB = 'main' # replace with the explicitly chosen or conclusively resolved parent branch
 $owner = 'my-org' # or auto-detect from git remote
 $repo = 'my-repo' # or auto-detect from git remote
-$summary = git log --no-merges --pretty=format:"%s" -n 1 "origin/$TB..$SB"
-$branchStem = $SB -replace '^(feature/|bugfix/|hotfix/|chore/|task/)', ''
+$summary = git log --no-merges --pretty=format:"%s" -n 1 "origin/$TB..$SB" 2>$null
+if ([string]::IsNullOrWhiteSpace($summary)) {
+  $summary = "Summarize changes here..."
+}
+$branchStem = $SB -replace '^(feature|bugfix|hotfix|chore|task)/', ''
 $titleParts = ($branchStem -split '[-_/]+' | Where-Object { $_ }) | ForEach-Object {
   if ($_ -match '^\d+$') { $_ }
   else { [System.Globalization.CultureInfo]::InvariantCulture.TextInfo.ToTitleCase($_.ToLowerInvariant()) }
 }
 $title = [string]::Join(' ', $titleParts)
 if ($branchStem -match '^(\d+)(?:[-_/]|$)') { $ticket = "#$($Matches[1])" }
-elseif ($branchStem -match '([A-Z]+-\d+)') { $ticket = $Matches[1] }
+elseif ($branchStem -match '([A-Za-z]+-\d+)') { $ticket = $Matches[1] }
 else { $ticket = '' }
 
 $relatedIssueSection = if ($ticket) {
-    $defaultBranch = (gh repo view "$owner/$repo" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>$null)
-    if (-not $defaultBranch) { $defaultBranch = 'main' }
-    $directive = if ($TB -eq $defaultBranch -and $ticket -match '^#\d+$') { "Closes $ticket" } else { "Relates to $ticket" }
+    $defaultBranch = (gh repo view "$owner/$repo" --json defaultBranchRef -q .defaultBranchRef.name 2>$null)
+    if ([string]::IsNullOrWhiteSpace($defaultBranch)) { $defaultBranch = 'main' }
+    $directive = if ($TB -eq $defaultBranch -and $ticket -match '^#\d+$') {
+        "Closes $ticket"
+    }
+    elseif ($ticket -match '^#\d+$') {
+        "Related issue: $ticket"
+    }
+    else {
+        "Ticket: $ticket"
+    }
 @"
 
 ## Related Issue / Ticket
@@ -236,17 +257,24 @@ $summary
 
 ## Proposed Changes
 
-Summarized implementation detail here...
+- Summarized implementation details...
 "@
-$descriptionFile = Join-Path $env:TEMP 'create-pr-description.md'
-Set-Content -Path $descriptionFile -Value $description -Encoding utf8
+$descriptionFile = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName() + '.md')
+try {
+  Set-Content -Path $descriptionFile -Value $description -Encoding utf8
 
-$existing = gh pr list --repo "$owner/$repo" --head $SB --base $TB --state open --json number --jq '.[0].number // empty' 2>$null
-if ($existing) {
-  gh pr edit $existing --repo "$owner/$repo" --title $title --body-file $descriptionFile
+  $existing = gh pr list --repo "$owner/$repo" --head $SB --base $TB --state open --json number -q '.[0].number // empty' 2>$null
+  if ($existing) {
+    gh pr edit $existing --repo "$owner/$repo" --title $title --body-file $descriptionFile
+  }
+  else {
+    gh pr create --repo "$owner/$repo" --head $SB --base $TB --title $title --body-file $descriptionFile
+  }
 }
-else {
-  gh pr create --repo "$owner/$repo" --head $SB --base $TB --title $title --body-file $descriptionFile
+finally {
+  if (Test-Path $descriptionFile) {
+    Remove-Item -Path $descriptionFile -Force -ErrorAction SilentlyContinue
+  }
 }
 ```
 
@@ -265,7 +293,6 @@ else {
 ## Next steps / suggested automation
 
 - Maintain and validate the existing cross-platform helper scripts (`scripts/create-pr.sh` and `scripts/create-pr.ps1`) that implement the command flow above and are callable by the skill.
-- Optionally add parsing for issue IDs in branch names and auto-link those issues in the PR (e.g., `Closes #42`).
 
 ## Notes for implementers
 

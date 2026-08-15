@@ -14,9 +14,16 @@ fi
 # Auto-detect owner and repo if not provided
 if [ -z "${OWNER}" ] || [ -z "${REPO}" ]; then
   REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
-  if [[ $REMOTE_URL =~ github\.com[:/]([^/]+)/([^/]+) ]]; then
-    [ -z "${OWNER}" ] && OWNER="${BASH_REMATCH[1]}"
-    [ -z "${REPO}" ] && REPO="${BASH_REMATCH[2]%.git}"
+  if [ -z "${REMOTE_URL}" ]; then
+    echo "Error: Could not determine git remote URL for origin."
+    exit 1
+  fi
+  if [[ "${REMOTE_URL}" =~ ^(git@github\.com:|https://github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$ ]]; then
+    [ -z "${OWNER}" ] && OWNER="${BASH_REMATCH[2]}"
+    [ -z "${REPO}" ] && REPO="${BASH_REMATCH[3]%.git}"
+  else
+    echo "Error: Remote origin host must be github.com (found: ${REMOTE_URL})."
+    exit 1
   fi
 fi
 
@@ -27,9 +34,12 @@ fi
 
 git fetch --prune --no-tags origin
 
-SUMMARY=$(git log --no-merges --pretty=format:"%s" -n1 origin/${TB}..${SB})
+SUMMARY=$(git log --no-merges --pretty=format:"%s" -n1 origin/${TB}..${SB} 2>/dev/null || echo "")
+if [ -z "${SUMMARY}" ]; then
+  SUMMARY="Summarize changes here..."
+fi
 
-# Clean title from branch name
+# Clean title from branch name (strip category prefix, preserve multi-part branch stem)
 if [[ "${SB}" =~ ^(feature|bugfix|hotfix|chore|task)/(.*)$ ]]; then
   BRANCH_STEM="${BASH_REMATCH[2]}"
 else
@@ -46,11 +56,14 @@ fi
 
 RELATED_ISSUE=""
 if [ -n "${TICKET}" ]; then
-  DEFAULT_BRANCH=$(gh repo view "${OWNER}/${REPO}" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>/dev/null || echo "main")
+  DEFAULT_BRANCH=$(gh repo view "${OWNER}/${REPO}" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null || echo "main")
+  [ -z "${DEFAULT_BRANCH}" ] && DEFAULT_BRANCH="main"
   if [ "${TB}" = "${DEFAULT_BRANCH}" ] && [[ "${TICKET}" =~ ^#[0-9]+$ ]]; then
     DIRECTIVE="Closes ${TICKET}"
+  elif [[ "${TICKET}" =~ ^#[0-9]+$ ]]; then
+    DIRECTIVE="Related issue: ${TICKET}"
   else
-    DIRECTIVE="Relates to ${TICKET}"
+    DIRECTIVE="Ticket: ${TICKET}"
   fi
   RELATED_ISSUE=$(cat <<EOF
 
@@ -61,10 +74,10 @@ EOF
 )
 fi
 
-DESCRIPTION_FILE=$(mktemp)
-trap 'rm -f "${DESCRIPTION_FILE}"' EXIT
+DESC_FILE=$(mktemp)
+trap 'rm -f "${DESC_FILE}"' EXIT
 
-cat > "${DESCRIPTION_FILE}" <<EOF
+cat > "${DESC_FILE}" <<EOF
 ## Summary
 
 ${SUMMARY}
@@ -82,9 +95,9 @@ ${SUMMARY}
 EOF
 
 # Check for existing PR
-EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number --jq '.[0].number // empty')
+EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number -q '.[0].number // empty' 2>/dev/null || echo "")
 if [ -n "${EXISTING}" ]; then
-  gh pr edit "${EXISTING}" --repo "${OWNER}/${REPO}" --title "${TITLE}" --body-file "${DESCRIPTION_FILE}"
+  gh pr edit "${EXISTING}" --repo "${OWNER}/${REPO}" --title "${TITLE}" --body-file "${DESC_FILE}"
 else
-  gh pr create --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --title "${TITLE}" --body-file "${DESCRIPTION_FILE}"
+  gh pr create --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --title "${TITLE}" --body-file "${DESC_FILE}"
 fi

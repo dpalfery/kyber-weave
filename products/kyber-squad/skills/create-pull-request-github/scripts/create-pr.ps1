@@ -13,9 +13,17 @@ if ([string]::IsNullOrWhiteSpace($TB)) {
 # Auto-detect owner and repo if not provided
 if ([string]::IsNullOrWhiteSpace($Owner) -or [string]::IsNullOrWhiteSpace($Repo)) {
     $remoteUrl = git remote get-url origin 2>$null
-    if ($remoteUrl -match 'github\.com[:/]([^/]+)/([^/]+)') {
+    if ([string]::IsNullOrWhiteSpace($remoteUrl)) {
+        Write-Error "Error: Could not determine git remote URL for origin."
+        exit 1
+    }
+    if ($remoteUrl -match '^(?:git@github\.com:|https://github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$') {
         if ([string]::IsNullOrWhiteSpace($Owner)) { $Owner = $Matches[1] }
         if ([string]::IsNullOrWhiteSpace($Repo)) { $Repo = $Matches[2] -replace '\.git$', '' }
+    }
+    else {
+        Write-Error "Error: Remote origin host must be github.com (found: $remoteUrl)."
+        exit 1
     }
 }
 
@@ -25,23 +33,40 @@ if ([string]::IsNullOrWhiteSpace($Owner) -or [string]::IsNullOrWhiteSpace($Repo)
 }
 
 git fetch --prune --no-tags origin
-$summary = git log --no-merges --pretty=format:"%s" -n 1 "origin/$TB..$SB"
+$summary = git log --no-merges --pretty=format:"%s" -n 1 "origin/$TB..$SB" 2>$null
+if ([string]::IsNullOrWhiteSpace($summary)) {
+    $summary = "Summarize changes here..."
+}
 
-$branchStem = $SB -replace '^(feature/|bugfix/|hotfix/|chore/|task/)', ''
+$branchStem = $SB -replace '^(feature|bugfix|hotfix|chore|task)/', ''
 $titleParts = ($branchStem -split '[-_/]+' | Where-Object { $_ }) | ForEach-Object {
     if ($_ -match '^\d+$') { $_ }
     else { [System.Globalization.CultureInfo]::InvariantCulture.TextInfo.ToTitleCase($_.ToLowerInvariant()) }
 }
 $title = [string]::Join(' ', $titleParts)
 
-if ($branchStem -match '^(\d+)(?:[-_/]|$)') { $ticket = "#$($Matches[1])" }
-elseif ($branchStem -match '([A-Z]+-\d+)') { $ticket = $Matches[1] }
-else { $ticket = '' }
+if ($branchStem -match '^(\d+)(?:[-_/]|$)') {
+    $ticket = "#$($Matches[1])"
+}
+elseif ($branchStem -match '([A-Za-z]+-\d+)') {
+    $ticket = $Matches[1]
+}
+else {
+    $ticket = ''
+}
 
 $relatedIssueSection = if ($ticket) {
-    $defaultBranch = (gh repo view "$Owner/$Repo" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>$null)
-    if (-not $defaultBranch) { $defaultBranch = 'main' }
-    $directive = if ($TB -eq $defaultBranch -and $ticket -match '^#\d+$') { "Closes $ticket" } else { "Relates to $ticket" }
+    $defaultBranch = (gh repo view "$Owner/$Repo" --json defaultBranchRef -q .defaultBranchRef.name 2>$null)
+    if ([string]::IsNullOrWhiteSpace($defaultBranch)) { $defaultBranch = 'main' }
+    $directive = if ($TB -eq $defaultBranch -and $ticket -match '^#\d+$') {
+        "Closes $ticket"
+    }
+    elseif ($ticket -match '^#\d+$') {
+        "Related issue: $ticket"
+    }
+    else {
+        "Ticket: $ticket"
+    }
 @"
 
 ## Related Issue / Ticket
@@ -70,15 +95,20 @@ $summary
 - Summarized implementation details...
 "@
 
-$descriptionFile = Join-Path $env:TEMP 'create-pr-description.md'
-Set-Content -Path $descriptionFile -Value $description -Encoding utf8
+$descriptionFile = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName() + '.md')
+try {
+    Set-Content -Path $descriptionFile -Value $description -Encoding utf8
 
-$existing = gh pr list --repo "$Owner/$Repo" --head $SB --base $TB --state open --json number --jq '.[0].number // empty' 2>$null
-if ($existing) {
-    gh pr edit $existing --repo "$Owner/$Repo" --title $title --body-file $descriptionFile
+    $existing = gh pr list --repo "$Owner/$Repo" --head $SB --base $TB --state open --json number -q '.[0].number // empty' 2>$null
+    if ($existing) {
+        gh pr edit $existing --repo "$Owner/$Repo" --title $title --body-file $descriptionFile
+    }
+    else {
+        gh pr create --repo "$Owner/$Repo" --head $SB --base $TB --title $title --body-file $descriptionFile
+    }
 }
-else {
-    gh pr create --repo "$Owner/$Repo" --head $SB --base $TB --title $title --body-file $descriptionFile
+finally {
+    if (Test-Path $descriptionFile) {
+        Remove-Item -Path $descriptionFile -Force -ErrorAction SilentlyContinue
+    }
 }
-
-Remove-Item -Path $descriptionFile -ErrorAction SilentlyContinue

@@ -1,4 +1,6 @@
+using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 using YamlDotNet.Core;
@@ -45,6 +47,48 @@ public sealed class SquadConfigurationTests : IDisposable
             config.Squad.Targets);
         Assert.Equal([SquadTarget.Warp], config.Squad.Exclusions);
         Assert.Equal(SquadTranslationMode.BestEffort, config.Squad.Translation);
+    }
+
+    [Fact]
+    public void BuilderMethodsPreserveSquadConfiguration()
+    {
+        SquadConfig customSquad = new SquadConfig
+        {
+            Bundle = "full",
+            Version = "2.0.0",
+            Targets = [SquadTarget.Claude, SquadTarget.Cursor],
+            Exclusions = [SquadTarget.Warp],
+            Translation = SquadTranslationMode.BestEffort
+        };
+
+        KyberWeaveConfig baseConfig = new KyberWeaveConfig
+        {
+            Squad = customSquad
+        };
+
+        OntologyConfig ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
+        HarnessProfileConfig harness = HarnessProfileConfig.ProductDefaults;
+        DocsAnalysisConfig docsAnalysis = DocsAnalysisConfig.ProductDefaults;
+
+        KyberWeaveConfig withOntology = baseConfig.WithOntology(ontology);
+        Assert.Same(customSquad, withOntology.Squad);
+        Assert.Same(ontology, withOntology.Ontology);
+
+        KyberWeaveConfig withHarness = baseConfig.WithHarness(harness);
+        Assert.Same(customSquad, withHarness.Squad);
+
+        KyberWeaveConfig withProfiles = baseConfig.WithProfiles(harness);
+        Assert.Same(customSquad, withProfiles.Squad);
+
+        KyberWeaveConfig withDocsAnalysis = baseConfig.WithDocsAnalysis(docsAnalysis);
+        Assert.Same(customSquad, withDocsAnalysis.Squad);
+
+        SquadConfig replacementSquad = new SquadConfig { Version = "3.0.0" };
+        KyberWeaveConfig withSquad = baseConfig.WithSquad(replacementSquad);
+        Assert.Same(replacementSquad, withSquad.Squad);
+
+        KyberWeaveConfig cloned = baseConfig.Clone();
+        Assert.Same(customSquad, cloned.Squad);
     }
 
     [Fact]
@@ -172,14 +216,27 @@ public sealed class SquadConfigurationTests : IDisposable
             "version" => $"version: {invalidValue}",
             _ => throw new InvalidOperationException($"Unexpected fixture field '{invalidField}'.")
         };
-        WriteRepositoryConfig($"squad:\n  {body}\n");
+        string configPath = WriteRepositoryConfig($"squad:\n  {body}\n");
 
         KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_temp.Path);
 
         Assert.False(result.Success);
         Assert.Null(result.Config);
         Assert.NotNull(result.Error);
+        Assert.Equal(configPath, result.ConfigPath);
         Assert.Contains($"squad.{(invalidField == "target" ? "targets" : invalidField)}", result.Error, StringComparison.Ordinal);
+
+        DiagnosticReport report = new DiagnosticReport();
+        bool success = CommandHelpers.TryLoadConfig(_temp.Path, null, report, out KyberWeaveConfig config);
+
+        Assert.False(success);
+        Assert.Equal(KyberWeaveConfig.ProductDefaults, config);
+        Diagnostic diagnostic = Assert.Single(report.Items);
+        Assert.Equal(KyberWeaveConfigLoader.ConfigLoadErrorCode, diagnostic.Code);
+        Assert.Equal(Severity.Error, diagnostic.Severity);
+        Assert.Equal("kyber-weave.yml", diagnostic.Subject);
+        Assert.Equal(configPath, diagnostic.FilePath);
+        Assert.Contains($"squad.{(invalidField == "target" ? "targets" : invalidField)}", diagnostic.Message, StringComparison.Ordinal);
     }
 
     public void Dispose() => _temp.Dispose();
@@ -191,9 +248,11 @@ public sealed class SquadConfigurationTests : IDisposable
         return path;
     }
 
-    private void WriteRepositoryConfig(string yaml)
+    private string WriteRepositoryConfig(string yaml)
     {
         DirectoryInfo directory = Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
-        File.WriteAllText(Path.Combine(directory.FullName, "kyber-weave.yml"), yaml);
+        string path = Path.Combine(directory.FullName, "kyber-weave.yml");
+        File.WriteAllText(path, yaml);
+        return path;
     }
 }

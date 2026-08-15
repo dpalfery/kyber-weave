@@ -459,21 +459,22 @@ public static class SquadSourceLoader
     private static SquadAgent ParseAgent(SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
-        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml));
+        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml), frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
             ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "delegates-to", "fallback", "aliases"],
-            file.RelativePath);
+            file.RelativePath,
+            frontmatter.LineOffset);
 
-        string invocationText = RequireScalar(root, "invocation", file.RelativePath);
+        string invocationText = RequireScalar(root, "invocation", file.RelativePath, frontmatter.LineOffset);
         SquadInvocation invocation = invocationText switch
         {
             "primary" => SquadInvocation.Primary,
             "subagent" => SquadInvocation.Subagent,
             _ => ThrowInvalidInvocation(invocationText, file.RelativePath)
         };
-        IReadOnlyList<string> delegates = RequireStringSequence(root, "delegates-to", file.RelativePath);
-        IReadOnlyList<string> aliases = RequireStringSequence(root, "aliases", file.RelativePath);
+        IReadOnlyList<string> delegates = RequireStringSequence(root, "delegates-to", file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> aliases = RequireStringSequence(root, "aliases", file.RelativePath, frontmatter.LineOffset);
         EnsureDistinct(delegates, "delegated agent", file.RelativePath);
         EnsureDistinct(aliases, "alias", file.RelativePath);
 
@@ -487,14 +488,14 @@ public static class SquadSourceLoader
         }
 
         return new SquadAgent(
-            RequireSchema(root, "schema", AgentSchema, file.RelativePath),
-            RequireScalar(root, "name", file.RelativePath),
-            RequireScalar(root, "description", file.RelativePath),
+            RequireSchema(root, "schema", AgentSchema, file.RelativePath, frontmatter.LineOffset),
+            RequireScalar(root, "name", file.RelativePath, frontmatter.LineOffset),
+            RequireScalar(root, "description", file.RelativePath, frontmatter.LineOffset),
             invocation,
-            RequireScalar(root, "model-profile", file.RelativePath),
-            RequireScalar(root, "capability-profile", file.RelativePath),
+            RequireScalar(root, "model-profile", file.RelativePath, frontmatter.LineOffset),
+            RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
             delegates,
-            RequireScalar(root, "fallback", file.RelativePath),
+            RequireScalar(root, "fallback", file.RelativePath, frontmatter.LineOffset),
             aliases,
             frontmatter.Body,
             Sha256(frontmatter.Body),
@@ -541,14 +542,15 @@ public static class SquadSourceLoader
     private static SquadSkill ParseSkill(SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
-        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml));
+        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml), frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
             ["name", "description", "license", "compatibility", "metadata", "allowed-tools"],
-            file.RelativePath);
+            file.RelativePath,
+            frontmatter.LineOffset);
         return new SquadSkill(
-            RequireScalar(root, "name", file.RelativePath),
-            RequireScalar(root, "description", file.RelativePath),
+            RequireScalar(root, "name", file.RelativePath, frontmatter.LineOffset),
+            RequireScalar(root, "description", file.RelativePath, frontmatter.LineOffset),
             frontmatter.Body,
             file.RelativePath);
     }
@@ -764,11 +766,12 @@ public static class SquadSourceLoader
         }
 
         return new Frontmatter(
-            file.Content[..closingDelimiter],
-            file.Content[(closingDelimiter + 5)..]);
+            file.Content[4..closingDelimiter],
+            file.Content[(closingDelimiter + 5)..],
+            LineOffset: 1);
     }
 
-    private static YamlMappingNode ParseYamlMapping(SourceFile file)
+    private static YamlMappingNode ParseYamlMapping(SourceFile file, int lineOffset = 0)
     {
         try
         {
@@ -792,7 +795,7 @@ public static class SquadSourceLoader
                 file.RelativePath,
                 file.RelativePath,
                 "Correct the YAML syntax and remove duplicate mapping keys.",
-                checked((int)exception.Start.Line));
+                checked((int)exception.Start.Line + lineOffset));
             throw;
         }
     }
@@ -801,9 +804,10 @@ public static class SquadSourceLoader
         YamlMappingNode mapping,
         string field,
         string expected,
-        string sourcePath)
+        string sourcePath,
+        int lineOffset = 0)
     {
-        string actual = RequireScalar(mapping, field, sourcePath);
+        string actual = RequireScalar(mapping, field, sourcePath, lineOffset);
         if (!string.Equals(actual, expected, StringComparison.Ordinal))
         {
             SquadSourceValidator.Throw(
@@ -819,14 +823,16 @@ public static class SquadSourceLoader
     private static string RequireScalar(
         YamlMappingNode mapping,
         string field,
-        string sourcePath) =>
-        RequireScalar(RequireNode(mapping, field, sourcePath), field, sourcePath, nodeIsValue: true);
+        string sourcePath,
+        int lineOffset = 0) =>
+        RequireScalar(RequireNode(mapping, field, sourcePath), field, sourcePath, nodeIsValue: true, lineOffset);
 
     private static string RequireScalar(
         YamlNode node,
         string field,
         string sourcePath,
-        bool nodeIsValue)
+        bool nodeIsValue,
+        int lineOffset = 0)
     {
         _ = nodeIsValue;
         if (node is not YamlScalarNode scalarNode || string.IsNullOrWhiteSpace(scalarNode.Value))
@@ -836,7 +842,7 @@ public static class SquadSourceLoader
                 field,
                 sourcePath,
                 $"Add a non-empty string value for '{field}'.",
-                StartLine(node));
+                StartLine(node, lineOffset));
         }
 
         return ((YamlScalarNode)node).Value!;
@@ -845,14 +851,16 @@ public static class SquadSourceLoader
     private static YamlMappingNode RequireMapping(
         YamlMappingNode mapping,
         string field,
-        string sourcePath) =>
-        RequireMapping(RequireNode(mapping, field, sourcePath), field, sourcePath, nodeIsValue: true);
+        string sourcePath,
+        int lineOffset = 0) =>
+        RequireMapping(RequireNode(mapping, field, sourcePath), field, sourcePath, nodeIsValue: true, lineOffset);
 
     private static YamlMappingNode RequireMapping(
         YamlNode node,
         string field,
         string sourcePath,
-        bool nodeIsValue)
+        bool nodeIsValue,
+        int lineOffset = 0)
     {
         _ = nodeIsValue;
         if (node is not YamlMappingNode)
@@ -862,7 +870,7 @@ public static class SquadSourceLoader
                 field,
                 sourcePath,
                 $"Add a YAML mapping for '{field}'.",
-                StartLine(node));
+                StartLine(node, lineOffset));
         }
 
         return (YamlMappingNode)node;
@@ -886,23 +894,26 @@ public static class SquadSourceLoader
     private static string? TryGetScalar(
         YamlMappingNode mapping,
         string field,
-        string sourcePath) =>
+        string sourcePath,
+        int lineOffset = 0) =>
         mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
-            ? RequireScalar(node, field, sourcePath, nodeIsValue: true)
+            ? RequireScalar(node, field, sourcePath, nodeIsValue: true, lineOffset)
             : null;
 
     private static YamlMappingNode? TryGetMapping(
         YamlMappingNode mapping,
         string field,
-        string sourcePath) =>
+        string sourcePath,
+        int lineOffset = 0) =>
         mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node)
-            ? RequireMapping(node, field, sourcePath, nodeIsValue: true)
+            ? RequireMapping(node, field, sourcePath, nodeIsValue: true, lineOffset)
             : null;
 
     private static IReadOnlyList<string>? TryGetStringSequence(
         YamlMappingNode mapping,
         string field,
-        string sourcePath)
+        string sourcePath,
+        int lineOffset = 0)
     {
         if (!mapping.Children.TryGetValue(new YamlScalarNode(field), out YamlNode? node))
         {
@@ -916,11 +927,11 @@ public static class SquadSourceLoader
                 field,
                 sourcePath,
                 $"Add a YAML sequence for '{field}'.",
-                StartLine(node));
+                StartLine(node, lineOffset));
         }
 
         string[] values = ((YamlSequenceNode)node).Children
-            .Select(item => RequireScalar(item, field, sourcePath, nodeIsValue: true))
+            .Select(item => RequireScalar(item, field, sourcePath, nodeIsValue: true, lineOffset))
             .ToArray();
         EnsureDistinct(values, field, sourcePath);
         return values;
@@ -929,7 +940,8 @@ public static class SquadSourceLoader
     private static IReadOnlyList<string> RequireStringSequence(
         YamlMappingNode mapping,
         string field,
-        string sourcePath)
+        string sourcePath,
+        int lineOffset = 0)
     {
         YamlNode node = RequireNode(mapping, field, sourcePath);
         if (node is not YamlSequenceNode)
@@ -939,24 +951,25 @@ public static class SquadSourceLoader
                 field,
                 sourcePath,
                 $"Add a YAML sequence for '{field}'.",
-                StartLine(node));
+                StartLine(node, lineOffset));
         }
 
         return ((YamlSequenceNode)node).Children
-            .Select(item => RequireScalar(item, field, sourcePath, nodeIsValue: true))
+            .Select(item => RequireScalar(item, field, sourcePath, nodeIsValue: true, lineOffset))
             .ToArray();
     }
 
     private static IReadOnlyDictionary<string, string> RequireStringMap(
         YamlMappingNode mapping,
         string field,
-        string sourcePath)
+        string sourcePath,
+        int lineOffset = 0)
     {
-        YamlMappingNode child = RequireMapping(mapping, field, sourcePath);
+        YamlMappingNode child = RequireMapping(mapping, field, sourcePath, lineOffset);
         SortedDictionary<string, string> result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach ((string? key, YamlNode? node) in MappingEntries(child, sourcePath))
+        foreach ((string key, YamlNode node) in MappingEntries(child, sourcePath, lineOffset))
         {
-            result.Add(key, RequireScalar(node, key, sourcePath, nodeIsValue: true));
+            result.Add(key, RequireScalar(node, key, sourcePath, nodeIsValue: true, lineOffset));
         }
 
         return result;
@@ -964,7 +977,8 @@ public static class SquadSourceLoader
 
     private static IEnumerable<KeyValuePair<string, YamlNode>> MappingEntries(
         YamlMappingNode mapping,
-        string sourcePath)
+        string sourcePath,
+        int lineOffset = 0)
     {
         foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
         {
@@ -975,7 +989,7 @@ public static class SquadSourceLoader
                     sourcePath,
                     sourcePath,
                     "Replace the mapping key with a non-empty string.",
-                    StartLine(pair.Key));
+                    StartLine(pair.Key, lineOffset));
             }
 
             yield return new KeyValuePair<string, YamlNode>(((YamlScalarNode)pair.Key).Value!, pair.Value);
@@ -985,10 +999,11 @@ public static class SquadSourceLoader
     private static void EnsureOnlyFields(
         YamlMappingNode mapping,
         IEnumerable<string> allowed,
-        string sourcePath)
+        string sourcePath,
+        int lineOffset = 0)
     {
         HashSet<string> allowedSet = allowed.ToHashSet(StringComparer.Ordinal);
-        foreach ((string? field, YamlNode? node) in MappingEntries(mapping, sourcePath))
+        foreach ((string field, YamlNode node) in MappingEntries(mapping, sourcePath, lineOffset))
         {
             if (!allowedSet.Contains(field))
             {
@@ -997,7 +1012,7 @@ public static class SquadSourceLoader
                     field,
                     sourcePath,
                     $"Remove the unsupported field '{field}'.",
-                    StartLine(node));
+                    StartLine(node, lineOffset));
             }
         }
     }
@@ -1140,8 +1155,8 @@ public static class SquadSourceLoader
         (scalar.Value is null || scalar.Value is "~" ||
          string.Equals(scalar.Value, "null", StringComparison.OrdinalIgnoreCase));
 
-    private static int? StartLine(YamlNode node) =>
-        node.Start.Line > 0 ? checked((int)node.Start.Line) : null;
+    private static int? StartLine(YamlNode node, int lineOffset = 0) =>
+        node.Start.Line > 0 ? checked((int)node.Start.Line + lineOffset) : null;
 
     private static bool HasTraversal(string relativePath) =>
         relativePath.Replace('\\', '/')
@@ -1180,6 +1195,6 @@ public static class SquadSourceLoader
     }
 
     private sealed record SourceFile(string RelativePath, string Content);
-    private sealed record Frontmatter(string Yaml, string Body);
+    private sealed record Frontmatter(string Yaml, string Body, int LineOffset = 1);
     private readonly record struct ResolvedPath(string FullPath, bool EncounteredSymbolicLink);
 }

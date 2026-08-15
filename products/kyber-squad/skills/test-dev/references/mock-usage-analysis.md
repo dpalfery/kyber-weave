@@ -61,7 +61,7 @@ If a test sets up `apiClient.SearchAsync(...)` but also seeds `cache.GetAsync(..
 
 ### Step 3 — Check Each Setup
 
-For each mock setup, ask:
+Evaluate each mock setup against these mutually exclusive rules in order:
 1. Can the SUT reach the line that calls this member in this test's scenario? → If no: **Unreachable**
 2. Does another mock/real-object already cover this? → **Redundant**
 3. Is it called AND either `Received()` is asserted OR its return value affects observable output? → **Used**
@@ -71,7 +71,7 @@ For each mock setup, ask:
 
 Group findings by category with file + line reference:
 
-```
+```text
 DEAD:
   SearchServiceTests.cs:42  — cache.GetAsync setup never called (cache returns null already)
 
