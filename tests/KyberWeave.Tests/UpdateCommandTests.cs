@@ -311,7 +311,7 @@ public sealed class UpdateCommandTests : IDisposable
         try
         {
             using var handler = new MapHandler();
-        var outcome = Run(handler, host, new SelfUpdateOptions());
+            var outcome = Run(handler, host, new SelfUpdateOptions());
             Assert.Equal(1, outcome.ExitCode);
             Assert.Contains("write permission", outcome.Message, StringComparison.Ordinal);
         }
