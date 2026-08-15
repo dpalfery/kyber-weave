@@ -3187,28 +3187,28 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         switch (originalKind)
         {
             case "file-link":
-            {
-                var linkTargetPath = Path.Combine(fixtureDirectory, $"{subject}-file.txt");
-                var content = string.Equals(subject, "target", StringComparison.Ordinal)
-                    ? "installed claim body"
-                    : $"original {subject} state";
-                File.WriteAllText(linkTargetPath, content, new UTF8Encoding(false));
-                Directory.CreateDirectory(Path.GetDirectoryName(livePath)!);
-                File.CreateSymbolicLink(
-                    livePath,
-                    Path.GetRelativePath(Path.GetDirectoryName(livePath)!, linkTargetPath));
-                break;
-            }
+                {
+                    var linkTargetPath = Path.Combine(fixtureDirectory, $"{subject}-file.txt");
+                    var content = string.Equals(subject, "target", StringComparison.Ordinal)
+                        ? "installed claim body"
+                        : $"original {subject} state";
+                    File.WriteAllText(linkTargetPath, content, new UTF8Encoding(false));
+                    Directory.CreateDirectory(Path.GetDirectoryName(livePath)!);
+                    File.CreateSymbolicLink(
+                        livePath,
+                        Path.GetRelativePath(Path.GetDirectoryName(livePath)!, linkTargetPath));
+                    break;
+                }
             case "directory-link":
-            {
-                var linkTargetPath = Path.Combine(fixtureDirectory, $"{subject}-directory");
-                Directory.CreateDirectory(linkTargetPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(livePath)!);
-                Directory.CreateSymbolicLink(
-                    livePath,
-                    Path.GetRelativePath(Path.GetDirectoryName(livePath)!, linkTargetPath));
-                break;
-            }
+                {
+                    var linkTargetPath = Path.Combine(fixtureDirectory, $"{subject}-directory");
+                    Directory.CreateDirectory(linkTargetPath);
+                    Directory.CreateDirectory(Path.GetDirectoryName(livePath)!);
+                    Directory.CreateSymbolicLink(
+                        livePath,
+                        Path.GetRelativePath(Path.GetDirectoryName(livePath)!, linkTargetPath));
+                    break;
+                }
             case "directory":
                 Directory.CreateDirectory(livePath);
                 break;
@@ -4430,7 +4430,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         {
             var relativePath = Path.GetRelativePath(root, path)
                 .Replace(Path.DirectorySeparatorChar, '/');
-            snapshot.Add(relativePath, File.ReadAllBytes(path));
+            snapshot.Add(relativePath, ReadAllBytesAllowingWrites(path));
         }
 
         return snapshot;
@@ -4475,8 +4475,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
             snapshot.Add(
                 relativePath,
-                new TreeEntry(TreeEntryKind.File, File.ReadAllBytes(entry.FullName), null));
+                new TreeEntry(
+                    TreeEntryKind.File,
+                    ReadAllBytesAllowingWrites(entry.FullName),
+                    null));
         }
+    }
+
+    private static byte[] ReadAllBytesAllowingWrites(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
     }
 
     private static void AssertSnapshotsEqual(
@@ -4929,7 +4940,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Assert.Empty(temporaryArtifacts);
 
             var intentPath = Path.Combine(transactionDirectory, "intent.json");
-            using var journal = JsonDocument.Parse(File.ReadAllBytes(intentPath));
+            using var journal = JsonDocument.Parse(ReadAllBytesAllowingWrites(intentPath));
             Assert.Equal("prepared", journal.RootElement.GetProperty("phase").GetString());
             var artifacts = journal.RootElement.GetProperty("artifacts").EnumerateArray().ToArray();
             Assert.NotEmpty(artifacts);
@@ -4940,7 +4951,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 var artifactPath = ToPlatformPath(
                     transactionDirectory,
                     Assert.IsType<string>(relativeArtifactPath));
-                var bytes = File.ReadAllBytes(artifactPath);
+                var bytes = ReadAllBytesAllowingWrites(artifactPath);
                 Assert.Equal(bytes.LongLength, artifact.GetProperty("byteLength").GetInt64());
                 Assert.Equal(Digest(bytes), artifact.GetProperty("sha256").GetString());
             }
@@ -5323,7 +5334,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 return;
 
             SawOriginalClaimed = true;
-            using var intent = JsonDocument.Parse(File.ReadAllBytes(IntentPath));
+            using var intent = JsonDocument.Parse(ReadAllBytesAllowingWrites(IntentPath));
             var activeClaim = intent.RootElement
                 .GetProperty("artifacts")
                 .EnumerateArray()
@@ -5441,10 +5452,12 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             const string obsoleteBody = "installed obsolete";
             Directory.CreateDirectory(System.IO.Path.Combine(Path, ".codex", "agents"));
             Directory.CreateDirectory(System.IO.Path.Combine(Path, ".codex", "preserved-empty"));
+            var canonicalPath = System.IO.Path.Combine(Path, "canonical", "conductor.toml");
             Write(Path, "canonical/conductor.toml", installedBody);
+            var agentDirectory = System.IO.Path.Combine(Path, ".codex", "agents");
             File.CreateSymbolicLink(
-                System.IO.Path.Combine(Path, ".codex", "agents", "conductor.toml"),
-                "../../canonical/conductor.toml");
+                System.IO.Path.Combine(agentDirectory, "conductor.toml"),
+                System.IO.Path.GetRelativePath(agentDirectory, canonicalPath));
             Write(Path, ".cursor/agents/obsolete.md", obsoleteBody);
             Receipt = SquadDeploymentStateTests.Receipt(
                 new SquadOwnedFile(

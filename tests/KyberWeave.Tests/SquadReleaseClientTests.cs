@@ -657,15 +657,15 @@ public sealed class SquadReleaseClientTests : IDisposable
     private static HttpResponseMessage CancellationResponse(
         byte[] bytes,
         CancellationTokenSource cancellation) => new(HttpStatusCode.OK)
-    {
-        Content = new CancelAfterSerializationContent(bytes, cancellation)
         {
-            Headers =
+            Content = new CancelAfterSerializationContent(bytes, cancellation)
+            {
+                Headers =
             {
                 ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/zip")
             }
-        }
-    };
+            }
+        };
 
     private static byte[] CreateArchive(params (string Name, string Content)[] entries)
     {

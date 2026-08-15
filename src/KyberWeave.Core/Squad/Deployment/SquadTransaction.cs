@@ -131,8 +131,8 @@ public sealed class SquadTransaction
                     : workDirectoriesCreated,
                 journalDirectoriesCreated,
                 stateAuthorityRoot);
-        var sequence = 0;
-        var checkpointSequence = 0;
+            var sequence = 0;
+            var checkpointSequence = 0;
             try
             {
                 WriteIntent(intentPath, intent, overwrite: false);
