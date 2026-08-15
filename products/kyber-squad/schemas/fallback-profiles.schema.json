@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profiles"],
+  "properties": {
+    "schema": { "const": "kyber-squad.fallback-profiles/v1" },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["no-primary-agent", "no-agent-primitive"],
+        "properties": {
+          "no-primary-agent": { "enum": ["skill", "omit"] },
+          "no-agent-primitive": { "enum": ["skill", "omit"] },
+          "body-source": { "const": "agent" },
+          "output-identity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["unoccupied", "shared", "collision", "prefix"],
+            "properties": {
+              "unoccupied": { "const": "agent-name" },
+              "shared": { "const": "reuse-skill" },
+              "collision": { "const": "role-prefixed-agent-name" },
+              "prefix": { "const": "role-" }
+            }
+          },
+          "shared-identities": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    }
+  }
+}

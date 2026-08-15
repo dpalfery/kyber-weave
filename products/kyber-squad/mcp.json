@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kyber-weave": {
+      "command": "kyber-weave-mcp",
+      "args": []
+    }
+  }
+}

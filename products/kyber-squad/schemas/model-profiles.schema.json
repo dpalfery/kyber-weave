@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kyber-weave.dev/schemas/kyber-squad/model-profiles/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profiles"],
+  "properties": {
+    "schema": { "const": "kyber-squad.model-profiles/v1" },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["default"],
+        "properties": {
+          "default": { "type": "string", "minLength": 1 },
+          "codex": { "type": "string", "minLength": 1 },
+          "cursor": { "type": "string", "minLength": 1 },
+          "claude": { "type": "string", "minLength": 1 },
+          "copilot": { "type": "string", "minLength": 1 },
+          "opencode": { "type": "string", "minLength": 1 },
+          "kilo": { "type": "string", "minLength": 1 },
+          "gemini": { "type": "string", "minLength": 1 },
+          "antigravity": { "type": "string", "minLength": 1 },
+          "warp": { "type": "string", "minLength": 1 },
+          "factory": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

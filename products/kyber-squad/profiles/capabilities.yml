@@ -1,0 +1,81 @@
+schema: kyber-squad.capability-profiles/v1
+capabilities:
+  - filesystem.read
+  - filesystem.write
+  - process.execute
+  - network.read
+  - network.publish
+  - delegate
+profiles:
+  architect:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: deny
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  documentation:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: allow
+      process.execute: deny
+      network.read: deny
+      network.publish: deny
+      delegate: deny
+  investigator:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: deny
+      process.execute: allow
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  orchestrator:
+    permissions:
+      filesystem.read: ask
+      filesystem.write: deny
+      process.execute: deny
+      network.read: deny
+      network.publish: deny
+      delegate: allow
+  product-planning:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: ask
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: allow
+  publishing-worker:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: allow
+      network.publish: ask
+      delegate: deny
+  read-only:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: deny
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  reviewer:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: deny
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  worker:
+    permissions:
+      filesystem.read: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: deny
+      network.publish: deny
+      delegate: deny

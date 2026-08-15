@@ -9,5 +9,7 @@ public sealed class KyberWeaveConfig
 
     public DocsAnalysisConfig DocsAnalysis { get; init; } = DocsAnalysisConfig.ProductDefaults;
 
+    public SquadConfig Squad { get; init; } = SquadConfig.ProductDefaults;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 }

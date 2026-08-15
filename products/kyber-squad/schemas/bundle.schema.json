@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kyber-weave.dev/schemas/kyber-squad/bundle/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "agents", "skills"],
+  "properties": {
+    "schema": { "const": "kyber-squad.bundle/v1" },
+    "name": { "type": "string", "minLength": 1 },
+    "agents": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "skills": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

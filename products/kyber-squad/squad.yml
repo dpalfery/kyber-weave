@@ -1,0 +1,12 @@
+schema: kyber-squad.squad/v1
+name: kyber-squad
+version-source: kyber-weave-assembly
+default-bundle: full
+bundles:
+  full: bundles/full.yml
+profiles:
+  models: profiles/models.yml
+  capabilities: profiles/capabilities.yml
+  fallbacks: profiles/fallbacks.yml
+toolchain: toolchain.yml
+mcp: mcp.json

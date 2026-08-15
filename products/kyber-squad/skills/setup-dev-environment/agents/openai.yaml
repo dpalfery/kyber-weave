@@ -1,0 +1,6 @@
+interface:
+  display_name: "Setup Dev Environment"
+  short_description: "Bootstrap MotorcycleRAG dev machines."
+  default_prompt: "Use $setup-dev-environment to set up my MotorcycleRAG dev environment on this machine."
+policy:
+  allow_implicit_invocation: true

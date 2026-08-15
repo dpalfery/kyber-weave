@@ -1,0 +1,7 @@
+schema: kyber-squad.toolchain/v1
+required-features:
+  - agent-ir/v1
+  - semantic-permissions/v1
+  - structured-degradation/v1
+  - agent-to-skill-lowering/v1
+validated-release: null

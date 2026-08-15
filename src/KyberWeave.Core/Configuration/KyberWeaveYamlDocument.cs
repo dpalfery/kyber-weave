@@ -8,4 +8,6 @@ internal sealed class KyberWeaveYamlDocument
     public HarnessYamlSection? Harness { get; set; }
 
     public DocsAnalysisYamlSection? DocsAnalysis { get; set; }
+
+    public SquadYamlSection? Squad { get; set; }
 }

@@ -122,6 +122,32 @@ jobs:
         working-directory: npm
         run: KYBER_WEAVE_SKIP_DOWNLOAD=1 npm pack --dry-run
 
+  squad-filesystem-contract:
+    name: Squad filesystem contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore KyberWeave.sln
+
+      - name: Run Squad filesystem contract
+        run: >
+          dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-restore
+          --filter FullyQualifiedName~SquadDeploymentStateTests
+
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
     runs-on: ubuntu-latest
