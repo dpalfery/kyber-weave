@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -58,7 +59,8 @@ internal static class SquadCommandComposition
         TimeProvider? timeProvider = null)
     {
         SquadStateStore resolvedStateStore = stateStore ?? ResolveStateStore(userPaths);
-        ISquadReleaseSource resolvedReleaseSource = releaseSource ?? new GitHubSquadReleaseSource(new Uri("https://api.github.com"));
+        ISquadReleaseSource resolvedReleaseSource = releaseSource
+            ?? new GitHubSquadReleaseSource(ReleaseOrigin.Resolve(Environment.GetEnvironmentVariable).ApiRoot);
         ISquadRenderer resolvedRenderer = renderer ?? ResolveRenderer();
 
         return new SquadLifecycleService(

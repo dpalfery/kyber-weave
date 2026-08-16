@@ -480,7 +480,7 @@ public sealed class SquadLifecycleService
         string toolchainPath = Path.Combine(extractionRoot, "toolchain.yml");
         if (!File.Exists(toolchainPath))
         {
-            return new SquadApmIdentity("unverified", "unverified", "unverified");
+            return SquadApmIdentity.None;
         }
 
         try
@@ -544,7 +544,7 @@ public sealed class SquadLifecycleService
             throw new SquadRenderValidationException($"Failed to parse toolchain file at '{toolchainPath}': {ex.Message}", ex);
         }
 
-        return new SquadApmIdentity("unverified", "unverified", "unverified");
+        return SquadApmIdentity.None;
     }
 
     private static void CleanupTempDirectory(string path)

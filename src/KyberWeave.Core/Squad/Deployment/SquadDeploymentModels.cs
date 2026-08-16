@@ -11,7 +11,21 @@ public enum SquadDeploymentScope
 public sealed record SquadApmIdentity(
     string Version,
     string TagCommit,
-    string AssetSha256);
+    string AssetSha256)
+{
+    /// <summary>The value recorded in every field when no upstream build is pinned.</summary>
+    /// <remarks>
+    /// Canonical <c>toolchain.yml</c> declares <c>validated-release: null</c> since rendering
+    /// stopped shelling out to an external toolchain, so this is the value a real install
+    /// writes today — not an edge case. It is a sentinel rather than a null identity because
+    /// the lock schema carries the three fields unconditionally, and dropping them would be a
+    /// schema bump for a field that is already vestigial.
+    /// </remarks>
+    public const string Unverified = "unverified";
+
+    /// <summary>The identity written when a release pins no upstream build.</summary>
+    public static SquadApmIdentity None { get; } = new(Unverified, Unverified, Unverified);
+}
 
 /// <summary>The reproducible inputs used for a Squad deployment.</summary>
 public sealed record SquadLock(

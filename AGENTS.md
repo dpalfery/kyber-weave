@@ -20,7 +20,31 @@ dotnet run --project src/KyberWeave.Cli -- skill validate .apm/skills/kyber-weav
 dotnet run --project src/KyberWeave.Cli -- skill scan .apm/skills/kyber-weave-docs
 ```
 
+Touching the self-updater, `install.sh`, or the Squad release path also means running the
+local release loop:
+
+```bash
+./scripts/update-loop.sh
+```
+
+It publishes the working tree as a stand-in Release, serves it from loopback, and drives a
+real self-update and a real `squad install` against published single-file binaries. Nothing
+reaches github.com. See [Verifying a release locally](#verifying-a-release-locally).
+
 ## Non-negotiables
+**Kyber-Weave for documentation:** Before grepping or reading files under `docs/` to answer a question, use the Kyber-Weave MCP tool `mcp__kyber-weave__docs_explore`. It ranks on declared frontmatter identity, returns the one relevant `##` section rather than a whole runbook, and carries that document's resolved joins to the code graph. Before renaming, moving, or changing the contract of a code symbol, use `mcp__kyber-weave__docs_for_symbol` to find the documentation that must change with it: a `code-refs` entry is a formal claim of ownership, which grep cannot distinguish from a passing prose mention. There is no CLI equivalent of either tool — if the MCP server is unavailable, fall back to the [documentation index](docs/README.md) and state that the tool was unavailable. The corpus excludes `docs/archive/`, which is historical and is never retrieved as current guidance.
+
+<!-- CODEGRAPH_START -->
+## CodeGraph
+
+In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the repo root), reach for it BEFORE grep/find or reading files when you need to understand or locate code:
+
+- **MCP tool** (when available): `codegraph_explore` answers most code questions in one call — the relevant symbols' verbatim source plus the call paths between them, including dynamic-dispatch hops grep can't follow. Name a file or symbol in the query to read its current line-numbered source. If it's listed but deferred, load it by name via tool search.
+- **Shell** (always works): `codegraph explore "<symbol names or question>"` prints the same output.
+
+If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
+<!-- CODEGRAPH_END -->
+
 **`PlansGoInDocs`**
 Do not store plan files in .folders. Any plan developed for this project will be stored in the `<docs-root>`\plans folder so that it is not lost and stays with the project.
 
@@ -49,6 +73,39 @@ trade, documented where it is made.
 [`docs/todo/`](docs/todo/README.md) rather than letting it evaporate. See
 [`docs/todo/README.md`](docs/todo/README.md) for mechanics and [`docs/README.md`](docs/README.md)
 for the conceptual distinction between specs, plans, and todos.
+
+## Verifying a release locally
+
+A self-updater is always executed by the **old** binary. A fix to the update path therefore
+cannot be proven by the release that contains it — only by updating away from a build that
+predates it. Tag-and-wait cycles get this wrong silently: the release ships, the same failure
+reappears, and the fix looks broken when it was simply never the code that ran.
+
+The loop closes that gap without touching github.com:
+
+```bash
+./scripts/update-loop.sh                  # publish, serve, self-update, squad install
+./scripts/update-loop.sh --keep           # leave the sandbox in place to inspect
+./scripts/update-loop.sh --from <git-ref> # update away from an older build
+```
+
+Three pieces, usable separately:
+
+| Script | Does |
+|---|---|
+| [`scripts/release-local.sh`](scripts/release-local.sh) | Publishes one RID with release.yml's exact flags into `.local-release/v<version>/`, plus Squad archives and `SHA256SUMS.txt`. |
+| [`scripts/local-release-server.py`](scripts/local-release-server.py) | Serves that tree as the GitHub Releases endpoints the CLI reads. Loopback only. |
+| [`scripts/update-loop.sh`](scripts/update-loop.sh) | Drives the two together and asserts the outcome. |
+
+The redirect is `KYBER_WEAVE_RELEASE_ORIGIN`, resolved by
+[`ReleaseOrigin`](src/KyberWeave.Cli/Update/ReleaseOrigin.cs). It accepts **loopback
+authorities only**, and permits plain HTTP only for a loopback URL under an active override —
+a redirect off the local server still has to be HTTPS. Those restrictions are the point of
+the type; `ReleaseOriginTests` pins them, and widening them needs a reason you can state.
+
+Run against a **published single-file binary**, never `dotnet run`. The failure this exists
+to catch — a running image replacing itself and then failing to load an assembly it had not
+yet touched — does not exist in any other shape.
 
 ## Where to go next
 

@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Release;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -28,6 +29,11 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
     private readonly Uri _apiRoot;
     private readonly Action? _onStagingCreated;
 
+    // Derived from the root rather than passed separately: a caller can only reach the
+    // relaxed transport by having already supplied a loopback API root, which
+    // SquadCommandComposition does only for a validated KYBER_WEAVE_RELEASE_ORIGIN.
+    private readonly bool _allowLoopbackHttp;
+
     /// <summary>Creates a source with a transport that exposes every redirect for validation.</summary>
     public GitHubSquadReleaseSource(Uri apiRoot)
     {
@@ -37,6 +43,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         _httpClient = new HttpClient(_handler, disposeHandler: false);
         _apiRoot = apiRoot;
         _onStagingCreated = null;
+        _allowLoopbackHttp = ReleaseOrigin.IsLoopbackAuthority(apiRoot);
     }
 
     /// <summary>Creates a source over an injected handler for deterministic hosting and tests.</summary>
@@ -60,6 +67,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         _httpClient = new HttpClient(_handler, disposeHandler: false);
         _apiRoot = apiRoot;
         _onStagingCreated = onStagingCreated;
+        _allowLoopbackHttp = ReleaseOrigin.IsLoopbackAuthority(apiRoot);
     }
 
     /// <inheritdoc />
@@ -68,7 +76,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ValidateHttps(_apiRoot, "GitHub API origin");
+        ValidateTransport(_apiRoot, "GitHub API origin");
         ValidateRequest(request);
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -91,11 +99,12 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         // packaging was automated is in. Say that, because "not found" alone reads as a
         // network or naming fault the caller could retry their way out of.
         SquadReleaseAsset archive = SelectAsset(
+            _allowLoopbackHttp,
             release.Assets,
             archiveName,
             $"Release '{release.TagName}' ships no Squad bundle. Squad is versioned with the "
                 + "CLI, so move to a release that carries one with 'kyber-weave update'.");
-        SquadReleaseAsset checksumAsset = SelectAsset(release.Assets, ChecksumAssetName);
+        SquadReleaseAsset checksumAsset = SelectAsset(_allowLoopbackHttp, release.Assets, ChecksumAssetName);
 
         byte[] checksumBytes = await DownloadBytesAsync(
             checksumAsset.DownloadUri,
@@ -174,7 +183,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         string relative = $"repos/{Uri.EscapeDataString(parts[0])}/{Uri.EscapeDataString(parts[1])}" +
             $"/releases/tags/v{Uri.EscapeDataString(version)}";
         Uri releaseUri = new Uri(_apiRoot, relative);
-        ValidateHttps(releaseUri, "GitHub release URI");
+        ValidateTransport(releaseUri, "GitHub release URI");
         return releaseUri;
     }
 
@@ -193,7 +202,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
     private async Task<byte[]> DownloadBytesAsync(Uri uri, CancellationToken cancellationToken)
     {
-        ValidateHttps(uri, "GitHub release asset URI");
+        ValidateTransport(uri, "GitHub release asset URI");
         using HttpResponseMessage response = await SendHttpsAsync(uri, cancellationToken).ConfigureAwait(false);
         return await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -205,7 +214,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         Uri currentUri = initialUri;
         for (int redirectCount = 0; redirectCount <= MaximumRedirects; redirectCount++)
         {
-            ValidateHttps(currentUri, "HTTP request or redirect");
+            ValidateTransport(currentUri, "HTTP request or redirect");
             using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, currentUri);
             request.Headers.UserAgent.ParseAdd("kyber-weave");
             HttpResponseMessage response = await _httpClient.SendAsync(
@@ -236,7 +245,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 throw new InvalidDataException("An HTTPS release redirect omitted its Location header.");
 
             currentUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
-            ValidateHttps(currentUri, "HTTP redirect");
+            ValidateTransport(currentUri, "HTTP redirect");
         }
 
         throw new InvalidOperationException(
@@ -250,13 +259,31 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         HttpStatusCode.TemporaryRedirect or
         HttpStatusCode.PermanentRedirect;
 
-    private static void ValidateHttps(Uri uri, string subject)
+    private void ValidateTransport(Uri uri, string subject) =>
+        ValidateTransport(_allowLoopbackHttp, uri, subject);
+
+    /// <summary>Requires HTTPS, except for loopback under an active local-origin override.</summary>
+    /// <remarks>
+    /// The exemption is keyed on the URI's own authority, not on a mode flag, so a redirect
+    /// off the local server still has to be HTTPS even while the override is active.
+    /// </remarks>
+    private static void ValidateTransport(bool allowLoopbackHttp, Uri uri, string subject)
     {
-        if (!uri.IsAbsoluteUri || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
-            throw new InvalidOperationException($"{subject} must use HTTPS.");
+        if (uri.IsAbsoluteUri && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal))
+            return;
+
+        if (allowLoopbackHttp
+            && string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal)
+            && ReleaseOrigin.IsLoopbackAuthority(uri))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"{subject} must use HTTPS.");
     }
 
     private static SquadReleaseAsset SelectAsset(
+        bool allowLoopbackHttp,
         IReadOnlyList<GitHubReleaseAsset> assets,
         string assetName,
         string? missingHint = null)
@@ -276,7 +303,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         if (!Uri.TryCreate(matches[0].BrowserDownloadUrl, UriKind.Absolute, out Uri? downloadUri))
             throw new InvalidDataException($"Release asset '{assetName}' has an invalid download URI.");
 
-        ValidateHttps(downloadUri, $"Release asset '{assetName}' URI");
+        ValidateTransport(allowLoopbackHttp, downloadUri, $"Release asset '{assetName}' URI");
         return new SquadReleaseAsset(assetName, downloadUri, matches[0].Size);
     }
 

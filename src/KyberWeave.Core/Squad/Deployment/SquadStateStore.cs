@@ -343,7 +343,14 @@ public sealed class SquadStateStore
         ValidateRequiredLockValue(squadLock.Apm.Version, "APM version");
         ValidateRequiredLockValue(squadLock.Apm.TagCommit, "APM tag commit");
 
-        ValidateDigest(squadLock.Apm.AssetSha256, "apm digest");
+        // Unlike the bundle and asset digests, this one is optional at the source: canonical
+        // toolchain.yml pins no upstream build, so SquadApmIdentity.None is what a real
+        // install produces. Requiring 64 hex here rejected every such install outright.
+        // Unlike the bundle and asset digests, this one is optional at the source: canonical
+        // toolchain.yml pins no upstream build, so SquadApmIdentity.None is what a real
+        // install produces. Requiring 64 hex here rejected every such install outright.
+        if (!string.Equals(squadLock.Apm.AssetSha256, SquadApmIdentity.Unverified, StringComparison.Ordinal))
+            ValidateDigest(squadLock.Apm.AssetSha256, "apm digest");
     }
 
     private static void ValidateRequiredLockValue(string? value, string fieldName)

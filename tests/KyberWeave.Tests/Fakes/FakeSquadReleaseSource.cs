@@ -89,20 +89,18 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
             await File.WriteAllTextAsync(squadYmlPath, "schema: kyber-squad.squad/v1\nversion-source: kyber-weave-assembly\n", cancellationToken);
             extractedFiles.Add("squad.yml");
 
+            // Mirrors products/kyber-squad/toolchain.yml byte for byte in the shape that
+            // matters: no validated-release. A fake that pinned a fabricated digest here
+            // kept the suite green while every real install failed lock validation, so this
+            // default must keep tracking the canonical file. Tests needing a pinned upstream
+            // build supply their own toolchain.yml through the file map above.
             string toolchainYmlPath = Path.Combine(request.DestinationPath, "toolchain.yml");
             await File.WriteAllTextAsync(
                 toolchainYmlPath,
                 """
                 schema: kyber-squad.toolchain/v1
-                required-features:
-                  - agent-ir/v1
-                  - semantic-permissions/v1
-                  - structured-degradation/v1
-                  - agent-to-skill-lowering/v1
-                validated-release:
-                  version: 0.28.0
-                  tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd
-                  asset-sha256: e041462f4a48086dbee3da145c07d71b8a3b84fde041462f4a48086dbee3da14
+                required-features: []
+                validated-release: null
                 """,
                 cancellationToken);
             extractedFiles.Add("toolchain.yml");
