@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-11
+last-reviewed: 2026-08-15
 ---
 
 # Wiring Kyber-Weave into CI

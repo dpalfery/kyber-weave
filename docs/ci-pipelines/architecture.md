@@ -6,7 +6,7 @@ status: current
 component: CI Pipelines
 source-root: src/KyberWeave.Core/Diagnostics
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-15
 code-refs:
   - Diagnostic
   - DiagnosticReport
@@ -15,8 +15,8 @@ code-refs:
 # CI Pipelines architecture
 
 Every gate in Kyber-Weave — [documentation](../docgraph/governance.md),
-[skills, and agents](../context-hygiene/skills.md) — reports through one diagnostic
-engine. That is what lets three unrelated artifact classes share a single CI story, one
+[skills](../context-hygiene/skills.md), and [agents](../context-hygiene/agents.md) — reports through one diagnostic
+engine. That is what lets multiple artifact classes share a single CI story, one
 SARIF upload, and one suppression mechanism.
 
 ## One diagnostic shape
@@ -79,9 +79,12 @@ different risk:
 | `agent validate`, `agent sync-check` | any error |
 | `skill scan`, `agent scan` | any critical — raise with `--fail-on warning\|error` |
 | `skill route` | accuracy below `--min-accuracy` |
+| `squad install`, `update`, `uninstall`, `doctor`, `pack` | configuration, prerequisite, integrity, transaction, or pack failure (exit code 1 or 2) |
+| `squad status` | deployment absent, partial, or drift detected (exit code 1) |
 
 Scanning defaults to gating on `Critical` alone so that adopting it does not immediately
-break every host build; tighten it deliberately once the baseline is clean.
+break every host build; tighten it deliberately once the baseline is clean. For lifecycle operations,
+Squad exit codes follow deterministic 0/1/2 semantics (see [Kyber-Squad onboarding](../kyber-squad/onboarding.md)).
 
 Configuration failures surface as `KW-CONFIG-001` rather than a stack trace, so a
 malformed `kyber-weave.yml` fails the same structured way everything else does.
@@ -92,3 +95,5 @@ malformed `kyber-weave.yml` fails the same structured way everything else does.
 - [Workflow runbook](workflows-runbook.md) — copy-ready GitHub Actions gates
 - [Documentation governance](../docgraph/governance.md) — the `KW-DOC-*` producers
 - [Skill governance](../context-hygiene/skills.md) — the `KW-SKILL-*` producers
+- [Agent governance](../context-hygiene/agents.md) — the `KW-AGENT-*` producers
+- [Kyber-Squad architecture](../kyber-squad/architecture.md) — multi-harness deployment engine

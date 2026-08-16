@@ -22,7 +22,7 @@ binaries on your PATH:
 
 | Binary | Purpose |
 |---|---|
-| `kyber-weave` | The CLI — [docs](docgraph/governance.md), [skill, and agent](context-hygiene/skills.md) gates |
+| `kyber-weave` | The CLI — [docs](docgraph/governance.md), [skill](context-hygiene/skills.md), [agent](context-hygiene/agents.md), and [squad](kyber-squad/onboarding.md) commands |
 | `kyber-weave-mcp` | The [MCP server](docgraph/mcp-runbook.md) that serves documentation to an agent |
 
 Make sure `~/.local/bin` is on your PATH:
@@ -145,13 +145,14 @@ installed on your machine behind your back.
 
 | Tool | Needed by | Without it |
 |---|---|---|
-| [APM](https://microsoft.github.io/apm) | `docs init` deploying the authoring skill | The corpus is still scaffolded; the command prints the `apm install` line to run later |
+| [APM](https://microsoft.github.io/apm) | `docs init` skill deployment; `squad install` and `squad pack` target compilation | Docs corpus is still scaffolded; Squad commands report missing APM toolchain |
 | CodeGraph + `sqlite3` | `docs drift`, `docs export-graph` | Everything else works, including all of [retrieval](docgraph/retrieval.md) |
 
 ### APM
 
-The Agent Package Manager distributes the `kyber-weave-docs` authoring skill and resolves
-the harness layout for each runtime. Install it once, before `docs init`:
+The Agent Package Manager distributes the `kyber-weave-docs` authoring skill, resolves
+the harness layout for each runtime, and powers target compilation for `kyber-weave squad`.
+Install it once:
 
 ```bash
 curl -sSL https://aka.ms/apm-unix | sh
@@ -160,7 +161,7 @@ curl -sSL https://aka.ms/apm-unix | sh
 Windows PowerShell: `irm https://aka.ms/apm-windows | iex`. Homebrew:
 `brew install microsoft/apm/apm`. Verify with `apm --version`.
 
-If you would rather not install it, run `kyber-weave docs init . --no-skill` — the
+If you would rather not install it for docs, run `kyber-weave docs init . --no-skill` — the
 scaffolding is the part that matters, and the skill can be added at any time.
 
 ### CodeGraph
@@ -187,4 +188,5 @@ dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 ## Related
 
 - [Distribution and release flow](distribution.md) — how binaries are built and published
+- [Deploying Kyber-Squad](kyber-squad/onboarding.md) — installing and managing multi-harness agent squads
 - [Configuration](configuration.md) — adapting Kyber-Weave to your repository

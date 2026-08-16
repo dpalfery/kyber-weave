@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 code-refs:
   - DocumentLoader
   - DocumentCorpus

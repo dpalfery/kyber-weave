@@ -6,7 +6,7 @@ status: current
 approval-status: approved
 component: ContextHygiene
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 ---
 
 # Kyber-Squad: unified agent and skill deployment
@@ -829,7 +829,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, `dotnet-dev`, `github-devops`.
   - **Requirements:** KS-006, KS-007.
 
-- [ ] **K10. Documentation and plan closeout** — depends on K1-K9 all GREEN and APPROVED
+- [x] **K10. Documentation and plan closeout** — depends on K1-K9 all GREEN and APPROVED
   - Assign to the documentation specialist using `app-docs-standard`. Add the Kyber-Squad catalog
     row and source-root README; publish `docs/kyber-squad/onboarding.md`, `architecture.md`, and
     `requirements.md`; update `docs/README.md`, `configuration.md`, `distribution.md`, and the

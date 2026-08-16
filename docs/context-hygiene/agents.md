@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Agents
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 code-refs:
   - AgentLoader
   - AgentSpecValidator
@@ -40,6 +40,15 @@ Agent definitions are discovered as `<harness>/agents` beneath the project root:
 Formats differ — Markdown with YAML frontmatter, TOML — so `AgentLoader` normalises each
 into one `AgentModel` before anything compares them. Every command accepts `--harness` to
 narrow to one.
+
+## Deployment control plane with Kyber-Squad
+
+While `agent validate` and `agent sync-check` audit and lint existing on-disk agent definitions
+across individual harnesses, **[Kyber-Squad](../kyber-squad/architecture.md)** provides the
+authoritative, end-to-end deployment control plane. Kyber-Squad maintains 20 canonical agent
+definitions in `products/kyber-squad/` and compiles them into target-native configurations
+across 10 supported harnesses (including Codex, Cursor, Claude, Copilot, OpenCode, Kilo, Gemini CLI,
+Antigravity, Warp, and Factory Droids) with transactional rollback and state tracking.
 
 ## Commands
 
@@ -107,5 +116,7 @@ branch has all three; the agent branch is deliberately behind, not accidentally.
 ## Related
 
 - [Skill governance](skills.md) — the other half of ContextHygiene
+- [Kyber-Squad architecture](../kyber-squad/architecture.md) — multi-harness deployment control plane
+- [Kyber-Squad onboarding](../kyber-squad/onboarding.md) — deploying canonical agent squads
 - [Instruction-surface scanning](security-scanning.md) — what `agent scan` runs
 - [Configuration](../configuration.md) — overriding harness capability profiles

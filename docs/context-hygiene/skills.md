@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -143,8 +143,18 @@ which is the only honest way to ship a skill from a skill-governance tool.
 It is distributed as an [APM](https://microsoft.github.io/apm) package, so the harness
 layout for each runtime is APM's problem rather than a second copy of that mapping here.
 
+## Deployment control plane with Kyber-Squad
+
+While ContextHygiene validates individual skill specifications, scores routing readiness,
+and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
+unified multi-harness deployment control plane. Kyber-Squad maintains 25 canonical skills
+(alongside 20 canonical agent roles and lowering rules) under `products/kyber-squad/` and
+manages their transactional deployment, drift tracking, and lifecycle across 10 coding harnesses.
+
 ## Related
 
 - [Agent harness governance](agents.md) — the other half of ContextHygiene
+- [Kyber-Squad architecture](../kyber-squad/architecture.md) — multi-harness deployment control plane
+- [Kyber-Squad onboarding](../kyber-squad/onboarding.md) — deploying canonical skills and agent squads
 - [Instruction-surface scanning](security-scanning.md) — the shared security engine
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-*` id

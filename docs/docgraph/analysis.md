@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 ---
 
 # Documentation analysis and review
