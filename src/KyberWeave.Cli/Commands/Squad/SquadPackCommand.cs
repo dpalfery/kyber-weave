@@ -1,5 +1,6 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Parsing;
@@ -30,7 +31,7 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     }
 
     /// <summary>Creates a new pack command using injectable APM runner, process executor, and working directory.</summary>
-    public SquadPackCommand(IApmRunner? apmRunner, IProcessExecutor? executor = null, string? workingDirectory = null)
+    public SquadPackCommand(IApmRunner? apmRunner = null, IProcessExecutor? executor = null, string? workingDirectory = null)
     {
         _apmRunner = apmRunner;
         _executor = executor;
@@ -71,7 +72,9 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             return 1;
         }
 
-        string version = ResolveVersion();
+        string version = !string.IsNullOrWhiteSpace(settings.Version)
+            ? ReleaseVersion.Normalize(settings.Version)
+            : ResolveVersion();
         string outDir = string.IsNullOrWhiteSpace(settings.Out)
             ? Path.Combine(workingDirectory, "artifacts")
             : Path.GetFullPath(settings.Out, workingDirectory);

@@ -144,4 +144,9 @@ public sealed class SquadPackSettings : CommandSettings
     [CommandOption("-o|--out <DIRECTORY>")]
     [Description("Destination directory for the packed archives.")]
     public string Out { get; set; } = string.Empty;
+
+    /// <summary>Explicit version for the package archives.</summary>
+    [CommandOption("-v|--version <VERSION>")]
+    [Description("Explicit version string for package manifests and archives. Defaults to the binary assembly version.")]
+    public string? Version { get; set; }
 }
