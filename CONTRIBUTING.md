@@ -14,7 +14,7 @@ Security vulnerabilities: see [SECURITY.md](SECURITY.md) — do not file a publi
 ## Workflow
 
 1. Fork the repository (or use a branch if you have write access)
-2. Create a branch from `develop` for work intended for the next integration line, or from `main` for hotfixes
+2. Create a feature branch from `main`
 3. Make focused commits with clear messages
 4. Open a pull request against `develop` (or `main` for hotfixes)
 5. Ensure the required `CI Summary` check passes. It aggregates build and test, publish smoke, CodeQL, Trivy, Semgrep, gitleaks, and the skill/docs gate.
