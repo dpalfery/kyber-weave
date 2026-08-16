@@ -99,7 +99,7 @@ internal static class BinaryInstaller
         {
             ProcessRunner.Run(startInfo, string.Empty);
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        catch (Exception)
         {
             // Best-effort: xattr is not required for the binaries to run.
         }
