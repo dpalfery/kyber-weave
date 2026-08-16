@@ -62,7 +62,7 @@ public sealed class CodeGraphNeighborhoodPortTests
         IReadOnlyList<CodeGraphEdge> capped = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 1);
         Assert.Empty(capped);
 
-        var inclusive = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 2);
+        IReadOnlyList<CodeGraphEdge> inclusive = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 2);
         Assert.Equal(2, inclusive.Count);
     }
 

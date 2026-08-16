@@ -11,6 +11,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 {
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
+    private readonly SquadLifecycleService? _lifecycleService;
 
     /// <summary>Creates a new uninstall command using default user paths.</summary>
     public SquadUninstallCommand()
@@ -20,10 +21,12 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     /// <summary>Creates a new uninstall command using injectable dependencies.</summary>
     public SquadUninstallCommand(
         ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null)
+        SquadStateStore? stateStore = null,
+        SquadLifecycleService? lifecycleService = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
+        _lifecycleService = lifecycleService;
     }
 
     /// <inheritdoc />
@@ -35,28 +38,56 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         string targetRoot = SquadCommandComposition.ResolveTargetRoot(settings.Path);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
-        SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
-        if (receipt is null)
-        {
-            AnsiConsole.MarkupLine($"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
-            return 0;
-        }
+        SquadLifecycleService lifecycleService = _lifecycleService ?? SquadCommandComposition.CreateLifecycleService(
+            userPaths: _userPaths,
+            stateStore: stateStore);
 
-        if (settings.DryRun)
+        SquadUninstallRequest uninstallRequest = new(
+            TargetRoot: targetRoot,
+            Scope: scope,
+            DryRun: settings.DryRun);
+
+        try
         {
-            AnsiConsole.MarkupLine($"[bold]Dry-run:[/] would uninstall {receipt.Files.Count} files from [bold]{Markup.Escape(targetRoot)}[/]:");
-            foreach (SquadOwnedFile file in receipt.Files)
+            SquadLifecycleResult result = lifecycleService.UninstallAsync(uninstallRequest).GetAwaiter().GetResult();
+            if (result.Success)
             {
-                AnsiConsole.MarkupLine($"  [red]remove[/] {Markup.Escape(file.RelativePath)}");
+                if (result.Plan is null)
+                {
+                    AnsiConsole.MarkupLine($"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
+                    return 0;
+                }
+
+                if (settings.DryRun)
+                {
+                    int fileCount = result.Plan.Receipt.Files.Count;
+                    AnsiConsole.MarkupLine($"[bold]Dry-run:[/] would uninstall {fileCount} files from [bold]{Markup.Escape(targetRoot)}[/]:");
+                    foreach (SquadOwnedFile file in result.Plan.Receipt.Files)
+                    {
+                        AnsiConsole.MarkupLine($"  [red]remove[/] {Markup.Escape(file.RelativePath)}");
+                    }
+
+                    return 0;
+                }
+
+                AnsiConsole.MarkupLine($"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
+                return 0;
             }
-            return 0;
+
+            if (result.Errors is { Count: > 0 })
+            {
+                foreach (string error in result.Errors)
+                {
+                    AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(error)}[/]");
+                }
+            }
+
+            return 1;
         }
-
-        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(targetRoot, scope, receipt);
-        SquadTransaction transaction = SquadCommandComposition.ResolveTransaction(stateStore, _userPaths);
-        transaction.Execute(plan);
-
-        AnsiConsole.MarkupLine($"[green]Successfully uninstalled Kyber-Squad from [bold]{Markup.Escape(targetRoot)}[/].[/]");
-        return 0;
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
     }
 }

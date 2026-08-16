@@ -111,7 +111,7 @@ internal sealed class SelfUpdater : IDisposable
             if (!options.NoMcp)
                 staged.Add(StageBinary(McpBaseName, tag, windows, sums, work.FullName));
 
-            foreach (var item in staged)
+            foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
                 CommitBinary(item.BaseName, tag, windows, item.ExtractedPath, item.Destination);
         }
         finally

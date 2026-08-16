@@ -1,6 +1,8 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Core.Squad.Release;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -14,6 +16,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly IProcessExecutor? _executor;
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
+    private readonly ISquadReleaseSource? _releaseSource;
+    private readonly IApmRunner? _apmRunner;
 
     /// <summary>Creates a new install command using default dependencies.</summary>
     public SquadInstallCommand()
@@ -24,11 +28,15 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     public SquadInstallCommand(
         IProcessExecutor? executor = null,
         ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null)
+        SquadStateStore? stateStore = null,
+        ISquadReleaseSource? releaseSource = null,
+        IApmRunner? apmRunner = null)
     {
         _executor = executor;
         _userPaths = userPaths;
         _stateStore = stateStore;
+        _releaseSource = releaseSource;
+        _apmRunner = apmRunner;
     }
 
     /// <inheritdoc />
@@ -88,9 +96,59 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return decision.ExitCode ?? 2;
         }
 
-        // Fails closed before writes due to Wave-A unreleased upstream APM compiler / toolchain
-        AnsiConsole.MarkupLine("[red]kyber-weave: error: Gate G1: qualified upstream APM toolchain is required for installation.[/]");
-        AnsiConsole.MarkupLine("Upstream toolchain qualification is pending. Install fails closed before writing target files.");
-        return 1;
+        SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
+        SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
+            executor: _executor,
+            userPaths: _userPaths,
+            stateStore: stateStore,
+            releaseSource: _releaseSource,
+            apmRunner: _apmRunner);
+
+        SquadInstallRequest installRequest = new(
+            TargetRoot: targetRoot,
+            Scope: scope,
+            Targets: decision.Targets,
+            Exclusions: settings.Exclusions,
+            Adopt: settings.Adopt,
+            DryRun: settings.DryRun);
+
+        try
+        {
+            SquadLifecycleResult result = lifecycleService.InstallAsync(installRequest).GetAwaiter().GetResult();
+            if (result.Success)
+            {
+                if (settings.DryRun)
+                {
+                    int fileCount = result.Receipt?.Files.Count ?? 0;
+                    AnsiConsole.MarkupLine($"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(targetRoot)}[/].");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine($"[green]Successfully installed Kyber-Squad to [bold]{Markup.Escape(targetRoot)}[/].[/]");
+                }
+
+                return 0;
+            }
+
+            if (result.Errors is { Count: > 0 })
+            {
+                foreach (string error in result.Errors)
+                {
+                    AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(error)}[/]");
+                }
+            }
+
+            return 1;
+        }
+        catch (SquadDeploymentConflictException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
     }
 }

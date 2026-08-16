@@ -1,12 +1,11 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -568,8 +567,78 @@ public sealed class SquadCliCommandTests : IDisposable
             }));
 
         Assert.Equal(1, execution.ExitCode);
-        Assert.Contains("toolchain", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
         // Ensure no target files or state were written
+        Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+    }
+
+    [Fact]
+    public void Install_WhenCollaboratorsInjected_SucceedsWithExitZero()
+    {
+        string targetDir = Path.Combine(_temp.Path, "install-success-target");
+        Directory.CreateDirectory(targetDir);
+
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeApmRunner apmRunner = new();
+        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+
+        SquadInstallCommand command = new(
+            executor: null,
+            userPaths: userPaths,
+            stateStore: stateStore,
+            releaseSource: releaseSource,
+            apmRunner: apmRunner);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadInstallSettings
+            {
+                Path = targetDir,
+                Targets = ["codex"],
+                Global = false,
+                DryRun = false,
+                Adopt = false
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Successfully installed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.True(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        Assert.True(File.Exists(Path.Combine(targetDir, ".kyber-weave", "squad.lock.yml")));
+        Assert.True(File.Exists(Path.Combine(targetDir, ".kyber-weave", "squad.receipt.json")));
+    }
+
+    [Fact]
+    public void Install_DryRun_ReportsPlannedFilesWithoutModifyingFilesystem()
+    {
+        string targetDir = Path.Combine(_temp.Path, "install-dryrun-target");
+        Directory.CreateDirectory(targetDir);
+
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeApmRunner apmRunner = new();
+        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+
+        SquadInstallCommand command = new(
+            executor: null,
+            userPaths: userPaths,
+            stateStore: stateStore,
+            releaseSource: releaseSource,
+            apmRunner: apmRunner);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadInstallSettings
+            {
+                Path = targetDir,
+                Targets = ["codex"],
+                Global = false,
+                DryRun = true,
+                Adopt = false
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Dry-run", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
     }
 
@@ -673,7 +742,43 @@ public sealed class SquadCliCommandTests : IDisposable
             }));
 
         Assert.Equal(1, execution.ExitCode);
-        Assert.Contains("toolchain", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Update_WhenCollaboratorsInjected_SucceedsWithExitZero()
+    {
+        string targetDir = Path.Combine(_temp.Path, "update-success-target");
+        Directory.CreateDirectory(targetDir);
+
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeApmRunner apmRunner = new();
+        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
+            (".codex/agents/architect.toml", "name = \"architect\"\n"));
+
+        SquadUpdateCommand command = new(
+            executor: null,
+            userPaths: userPaths,
+            stateStore: stateStore,
+            releaseSource: releaseSource,
+            apmRunner: apmRunner);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadUpdateSettings
+            {
+                Path = targetDir,
+                Targets = ["codex"],
+                Global = false,
+                DryRun = false,
+                ReplaceManaged = true
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Successfully updated", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
@@ -956,40 +1061,6 @@ public sealed class SquadCliCommandTests : IDisposable
         }
 
         public string ApplicationDataDirectory { get; }
-    }
-
-    private sealed class FakeProcessExecutor : IProcessExecutor
-    {
-        private readonly Dictionary<string, ProcessResult> _cannedOutputs = new(StringComparer.Ordinal);
-        private readonly Dictionary<string, Exception> _cannedExceptions = new(StringComparer.Ordinal);
-        public List<ProcessStartInfo> Calls { get; } = new();
-
-        public FakeProcessExecutor WithProbeOutput(string command, string stdout, int exitCode = 0)
-        {
-            _cannedOutputs[command] = new ProcessResult(exitCode, stdout, string.Empty);
-            return this;
-        }
-
-        public FakeProcessExecutor WithFailure(string command, string message)
-        {
-            _cannedExceptions[command] = new InvalidOperationException(message);
-            return this;
-        }
-
-        public ProcessResult Run(ProcessStartInfo startInfo, string input = "")
-        {
-            ArgumentNullException.ThrowIfNull(startInfo);
-            Calls.Add(startInfo);
-
-            string executable = Path.GetFileName(startInfo.FileName);
-            if (_cannedExceptions.TryGetValue(executable, out Exception? ex))
-                throw ex;
-
-            if (_cannedOutputs.TryGetValue(executable, out ProcessResult result))
-                return result;
-
-            return new ProcessResult(0, string.Empty, string.Empty);
-        }
     }
 
     private sealed class SquadRepoFixture : IDisposable

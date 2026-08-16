@@ -146,7 +146,7 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
             string component = scope[componentPrefix.Length..];
             if (component.Length > 0)
             {
-                var componentId = componentPrefix + component;
+                string componentId = componentPrefix + component;
                 AddNode(nodes, emittedNodeIds, new DocGraphNode(
                     componentId,
                     "Component",

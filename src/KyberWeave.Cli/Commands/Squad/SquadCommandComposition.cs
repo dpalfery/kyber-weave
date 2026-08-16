@@ -1,5 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Core.Squad.Release;
 using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands.Squad;
@@ -41,6 +44,33 @@ internal static class SquadCommandComposition
         ISquadUserPaths? userPaths = null,
         ISquadTransactionObserver? observer = null) =>
         new(stateStore ?? ResolveStateStore(userPaths), observer);
+
+    /// <summary>Creates a Squad lifecycle service using injected or default collaborators.</summary>
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "Collaborator lifecycles are managed across the command execution.")]
+    public static SquadLifecycleService CreateLifecycleService(
+        IProcessExecutor? executor = null,
+        ISquadUserPaths? userPaths = null,
+        SquadStateStore? stateStore = null,
+        ISquadReleaseSource? releaseSource = null,
+        IApmRunner? apmRunner = null,
+        ISquadTransactionObserver? observer = null,
+        TimeProvider? timeProvider = null)
+    {
+        IProcessExecutor resolvedExecutor = executor ?? ProcessExecutor.Instance;
+        SquadStateStore resolvedStateStore = stateStore ?? ResolveStateStore(userPaths);
+        ISquadReleaseSource resolvedReleaseSource = releaseSource ?? new GitHubSquadReleaseSource(new Uri("https://api.github.com"));
+        IApmRunner resolvedApmRunner = apmRunner ?? new ApmProcessRunner(resolvedExecutor);
+
+        return new SquadLifecycleService(
+            releaseSource: resolvedReleaseSource,
+            apmRunner: resolvedApmRunner,
+            stateStore: resolvedStateStore,
+            timeProvider: timeProvider,
+            observer: observer);
+    }
 
     /// <summary>Resolves the target root directory path.</summary>
     public static string ResolveTargetRoot(string? path) =>

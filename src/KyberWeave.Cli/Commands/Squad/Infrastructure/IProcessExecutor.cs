@@ -16,7 +16,8 @@ public sealed class ProcessExecutor : IProcessExecutor
     /// <summary>The stateless shared executor.</summary>
     public static ProcessExecutor Instance { get; } = new();
 
-    private ProcessExecutor()
+    /// <summary>Initializes a new instance of the <see cref="ProcessExecutor"/> class.</summary>
+    public ProcessExecutor()
     {
     }
 

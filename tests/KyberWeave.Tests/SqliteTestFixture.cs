@@ -13,8 +13,8 @@ internal static class SqliteTestFixture
 {
     public static TempDirectory SafeRepository()
     {
-        var repository = new TempDirectory();
-        var stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
+        TempDirectory repository = new();
+        string stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), "cache/\n");
         return repository;
@@ -22,11 +22,11 @@ internal static class SqliteTestFixture
 
     public static void RequireSqlite(string skipMessage = "sqlite3 is unavailable; SQLite parity was not run.")
     {
-        var startInfo = SqliteStartInfo();
+        ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("--version");
         try
         {
-            var result = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
             if (result.ExitCode != 0)
             {
                 throw SkipException.ForSkip(skipMessage);
@@ -40,14 +40,14 @@ internal static class SqliteTestFixture
 
     public static string QuerySqlite(string databasePath, string sql)
     {
-        var result = RunSqlite(databasePath, sql);
+        ProcessResult result = RunSqlite(databasePath, sql);
         Assert.Equal(0, result.ExitCode);
         return result.StandardOutput;
     }
 
     public static ProcessResult RunSqlite(string databasePath, string sql)
     {
-        var startInfo = SqliteStartInfo();
+        ProcessStartInfo startInfo = SqliteStartInfo();
         startInfo.ArgumentList.Add("-batch");
         startInfo.ArgumentList.Add("-bail");
         startInfo.ArgumentList.Add(databasePath);

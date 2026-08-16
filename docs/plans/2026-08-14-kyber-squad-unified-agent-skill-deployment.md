@@ -649,7 +649,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
 
 ## 5. Kyber-Weave task list
 
-- [ ] **K1. Add the canonical Squad domain and source validation** — implementable now
+- [x] **K1. Add the canonical Squad domain and source validation** — implementable now
   - **RED:** author Test Contract K1.
   - **GREEN scope:** add `src/KyberWeave.Core/Squad/Model/`,
     `src/KyberWeave.Core/Squad/Parsing/SquadSourceLoader.cs`, and
@@ -663,7 +663,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, then `dotnet-dev`.
   - **Requirements:** KS-001, KS-002, KS-005.
 
-- [ ] **K2. Canonicalize the 20 agents and snapshot the 25 skills** — implementable now; depends on K1
+- [x] **K2. Canonicalize the 20 agents and snapshot the 25 skills** — implementable now; depends on K1
   - **RED:** author Test Contract K2, including the exact inventories above.
   - **GREEN scope:** write only `products/kyber-squad/agents/`, `skills/`, `profiles/`,
     `bundles/full.yml`, and `migration/`. Import once from the locked source commit; after import,
@@ -678,7 +678,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, `dotnet-dev`; `security-review` during review.
   - **Requirements:** KS-001, KS-002.
 
-- [ ] **K3. Add Squad configuration and target resolution** — implementable now; depends on K1
+- [x] **K3. Add Squad configuration and target resolution** — implementable now; depends on K1
   - **RED:** author Test Contract K3.
   - **GREEN scope:** extend `KyberWeaveConfig`, `KyberWeaveYamlDocument`, and new
     `SquadConfig`/YAML loader types under `src/KyberWeave.Core/Configuration/`; add
@@ -688,7 +688,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, then `dotnet-dev`.
   - **Requirements:** KS-003.
 
-- [ ] **K4. Implement state, ownership, and the recoverable transaction engine** — implementable now; depends on K1
+- [x] **K4. Implement state, ownership, and the recoverable transaction engine** — implementable now; depends on K1
   - **RED:** author Test Contract K4 with failure injection after every filesystem action.
   - **GREEN scope:** add `SquadLock`, `SquadReceipt`, `SquadOwnedFile`, `SquadDeploymentPlan`,
     `SquadStateStore`, and `SquadTransaction` under `Core/Squad/Deployment/`; add an injectable
@@ -762,7 +762,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
     `security-review` during review.
   - **Requirements:** KS-004.
 
-- [ ] **K5. Implement the verified Squad release client and prerequisite probes** — implementable now; depends on K1
+- [x] **K5. Implement the verified Squad release client and prerequisite probes** — implementable now; depends on K1
   - **RED:** author Test Contract K5 plus version-probe cases from K6.
   - **GREEN scope:** define `ISquadReleaseSource` and release/checksum/archive models in Core;
     implement `GitHubSquadReleaseSource`, `ApmProcessProbe`, and `McpProcessProbe` in
@@ -772,7 +772,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, then `dotnet-dev`; `security-review` during review.
   - **Requirements:** KS-005.
 
-- [ ] **K6. Register the CLI and ship status/doctor plus fail-closed gated verbs** — implementable now; depends on K3, K4, K5
+- [x] **K6. Register the CLI and ship status/doctor plus fail-closed gated verbs** — implementable now; depends on K3, K4, K5
   - **RED:** complete Test Contract K6.
   - **GREEN scope:** add settings and commands under `src/KyberWeave.Cli/Commands/Squad/`,
     `SquadCommandComposition`, and the one `Program.cs` branch. Use Spectre output with
@@ -793,7 +793,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, then `dotnet-dev`.
   - **Requirements:** KS-003, KS-004, KS-005.
 
-- [ ] **K7. Integrate the qualifying official APM compiler and packer** — externally gated; depends on K1, K2 and Gate G1
+- [x] **K7. Integrate the qualifying official APM compiler and packer** — externally gated; depends on K1, K2 and Gate G1
   - **RED:** author Test Contract K7 before implementing the adapter.
   - **GREEN scope:** add `SquadApmSourceWriter`, `IApmRunner`, structured result models in
     `Core/Squad/Packaging/`, and `ApmProcessRunner` in CLI infrastructure. Write APM source only
@@ -804,7 +804,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, then `dotnet-dev`.
   - **Requirements:** KS-002, KS-005, KS-006.
 
-- [ ] **K8. Activate install/update/uninstall orchestration** — externally gated; depends on K4, K5, K6, K7
+- [x] **K8. Activate install/update/uninstall orchestration** — externally gated; depends on K4, K5, K6, K7
   - **RED:** author Test Contract K8.
   - **GREEN scope:** add `SquadLifecycleService` in Core and wire the existing Squad commands.
     Install/update downloads and verifies `kyber-squad-X.Y.Z.zip`, asks APM for an isolated
@@ -817,7 +817,7 @@ checksum recorded in `toolchain.yml`; a fake cannot satisfy that acceptance gate
   - **Skills:** `test-dev`, then `dotnet-dev`; `security-review` during review.
   - **Requirements:** KS-003, KS-004, KS-005.
 
-- [ ] **K9. Add deterministic pack and release integration** — externally gated; depends on K7, K8
+- [x] **K9. Add deterministic pack and release integration** — externally gated; depends on K7, K8
   - **RED:** author Test Contract K9.
   - **GREEN scope:** finish `SquadPackCommand`; update `.github/workflows/release.yml` to install
     the locked APM by verified checksum, run both pack formats and all target contracts, upload the

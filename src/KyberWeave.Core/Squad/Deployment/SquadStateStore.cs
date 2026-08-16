@@ -29,6 +29,8 @@ public sealed class SquadStateStore
         _userPaths = userPaths;
     }
 
+    internal ISquadUserPaths UserPaths => _userPaths;
+
     /// <summary>Returns the state directory for the requested deployment scope.</summary>
     public string ResolveStateDirectory(string targetRoot, SquadDeploymentScope scope)
     {

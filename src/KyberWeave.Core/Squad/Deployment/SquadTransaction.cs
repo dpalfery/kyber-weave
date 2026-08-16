@@ -1180,8 +1180,16 @@ public sealed class SquadTransaction
                 file.AfterSha256,
                 file.RelativePath,
                 conflicts);
+        }
+
+        HashSet<string> seenDirs = new HashSet<string>(StringComparer.Ordinal);
+        foreach (IntentFile? file in intent.Files)
+        {
             foreach (string relativeDirectory in file.MissingParentDirectories)
             {
+                if (!seenDirs.Add(relativeDirectory))
+                    continue;
+
                 string directory = SquadPathPolicy.ResolveFile(targetRoot, relativeDirectory);
                 DeleteEmptyDirectory(directory);
                 if (GetEntryKind(directory) != OriginalEntryKind.Missing)
@@ -2613,14 +2621,16 @@ public sealed class SquadTransaction
             intent.LockKind,
             intent.LockAfterKind,
             intent.LockAfterSha256,
-            workDirectory);
+            workDirectory,
+            intent.Artifacts);
         AddExpectedStateArtifacts(
             expected,
             "receipt",
             intent.ReceiptKind,
             intent.ReceiptAfterKind,
             intent.ReceiptAfterSha256,
-            workDirectory);
+            workDirectory,
+            intent.Artifacts);
 
         HashSet<string> optionalClaims = new HashSet<string>(StringComparer.Ordinal);
         foreach (IntentFile file in intent.Files)
@@ -2677,7 +2687,8 @@ public sealed class SquadTransaction
         OriginalEntryKind originalKind,
         OriginalEntryKind afterKind,
         string afterSha256,
-        string workDirectory)
+        string workDirectory,
+        IReadOnlyList<IntentArtifact> artifacts)
     {
         string originalPath = StateOriginalPath(workDirectory, stateName);
         bool unchangedFile = originalKind == OriginalEntryKind.File &&
@@ -2687,7 +2698,13 @@ public sealed class SquadTransaction
                 Digest(File.ReadAllBytes(originalPath)),
                 afterSha256,
                 StringComparison.Ordinal);
-        if (afterKind == OriginalEntryKind.File && !unchangedFile)
+
+        bool hasStagedArtifact = artifacts.Any(a =>
+            a.Area == ArtifactArea.Journal &&
+            a.Role == ArtifactRole.StateStage &&
+            string.Equals(a.Path, $"state-staging/{stateName}", StringComparison.Ordinal));
+
+        if (afterKind == OriginalEntryKind.File && (hasStagedArtifact || !unchangedFile))
         {
             expected.Add(SemanticArtifactIdentity(
                 ArtifactArea.Journal,

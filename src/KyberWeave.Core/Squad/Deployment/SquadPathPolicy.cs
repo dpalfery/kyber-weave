@@ -3,7 +3,7 @@ using System.Text;
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Resolves portable paths while enforcing both lexical and physical containment.</summary>
-internal static class SquadPathPolicy
+public static class SquadPathPolicy
 {
     public static string ResolveFile(string rootPath, string relativePath)
     {

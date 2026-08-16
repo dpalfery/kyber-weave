@@ -1,5 +1,7 @@
+using System.Reflection;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Parsing;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -12,6 +14,7 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 public sealed class SquadPackCommand : Command<SquadPackSettings>
 {
+    private readonly IApmRunner? _apmRunner;
     private readonly IProcessExecutor? _executor;
     private readonly string? _workingDirectory;
 
@@ -21,8 +24,15 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     }
 
     /// <summary>Creates a new pack command using injectable dependencies.</summary>
-    public SquadPackCommand(IProcessExecutor? executor = null, string? workingDirectory = null)
+    public SquadPackCommand(IProcessExecutor? executor, string? workingDirectory = null)
+        : this(null, executor, workingDirectory)
     {
+    }
+
+    /// <summary>Creates a new pack command using injectable APM runner, process executor, and working directory.</summary>
+    public SquadPackCommand(IApmRunner? apmRunner, IProcessExecutor? executor = null, string? workingDirectory = null)
+    {
+        _apmRunner = apmRunner;
         _executor = executor;
         _workingDirectory = workingDirectory;
     }
@@ -61,6 +71,51 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             return 1;
         }
 
-        return 0;
+        string version = ResolveVersion();
+        string outDir = string.IsNullOrWhiteSpace(settings.Out)
+            ? Path.Combine(workingDirectory, "artifacts")
+            : Path.GetFullPath(settings.Out, workingDirectory);
+
+        try
+        {
+            if (string.Equals(settings.Format, "apm", StringComparison.OrdinalIgnoreCase))
+            {
+                string apmArchive = SquadPacker.PackApm(sourcePath, outDir, version);
+                AnsiConsole.MarkupLine($"[green]Successfully packed APM archive to [bold]{Markup.Escape(apmArchive)}[/].[/]");
+            }
+            else if (string.Equals(settings.Format, "plugins", StringComparison.OrdinalIgnoreCase))
+            {
+                string pluginsArchive = SquadPacker.PackPlugins(sourcePath, outDir, version);
+                AnsiConsole.MarkupLine($"[green]Successfully packed Agent Plugins archive to [bold]{Markup.Escape(pluginsArchive)}[/].[/]");
+            }
+            else
+            {
+                (string? apmArchive, string? pluginsArchive, string? checksumPath) = SquadPacker.PackAll(sourcePath, outDir, version);
+                AnsiConsole.MarkupLine($"[green]Successfully packed APM archive to [bold]{Markup.Escape(apmArchive)}[/].[/]");
+                AnsiConsole.MarkupLine($"[green]Successfully packed Agent Plugins archive to [bold]{Markup.Escape(pluginsArchive)}[/].[/]");
+                AnsiConsole.MarkupLine($"[green]Generated checksums at [bold]{Markup.Escape(checksumPath)}[/].[/]");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            return 1;
+        }
+    }
+
+    private static string ResolveVersion()
+    {
+        System.Reflection.Assembly assembly = typeof(SquadPackCommand).Assembly;
+        string? infoVersion = assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(infoVersion))
+        {
+            int plusIdx = infoVersion.IndexOf('+');
+            return plusIdx > 0 ? infoVersion[..plusIdx] : infoVersion;
+        }
+
+        Version? v = assembly.GetName().Version;
+        return v is not null ? $"{v.Major}.{v.Minor}.{v.Build}" : "0.1.0";
     }
 }
