@@ -84,7 +84,17 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         }
 
         string archiveName = $"kyber-squad-{request.Version}.zip";
-        SquadReleaseAsset archive = SelectAsset(release.Assets, archiveName);
+
+        // A Squad bundle is published by the release that carries the matching CLI, and the
+        // version is not overridable by design. So "asset missing" always means the release
+        // this CLI came from shipped without one — a state every release before Squad
+        // packaging was automated is in. Say that, because "not found" alone reads as a
+        // network or naming fault the caller could retry their way out of.
+        SquadReleaseAsset archive = SelectAsset(
+            release.Assets,
+            archiveName,
+            $"Release '{release.TagName}' ships no Squad bundle. Squad is versioned with the "
+                + "CLI, so move to a release that carries one with 'kyber-weave update'.");
         SquadReleaseAsset checksumAsset = SelectAsset(release.Assets, ChecksumAssetName);
 
         byte[] checksumBytes = await DownloadBytesAsync(
@@ -248,15 +258,19 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
     private static SquadReleaseAsset SelectAsset(
         IReadOnlyList<GitHubReleaseAsset> assets,
-        string assetName)
+        string assetName,
+        string? missingHint = null)
     {
         GitHubReleaseAsset[] matches = assets.Where(
             asset => string.Equals(asset.Name, assetName, StringComparison.Ordinal)).ToArray();
         if (matches.Length != 1)
         {
             string qualifier = matches.Length == 0 ? "does not contain" : "contains duplicate";
+            string hint = matches.Length == 0 && !string.IsNullOrWhiteSpace(missingHint)
+                ? " " + missingHint
+                : string.Empty;
             throw new InvalidDataException(
-                $"The GitHub release {qualifier} exact asset '{assetName}'.");
+                $"The GitHub release {qualifier} exact asset '{assetName}'.{hint}");
         }
 
         if (!Uri.TryCreate(matches[0].BrowserDownloadUrl, UriKind.Absolute, out Uri? downloadUri))

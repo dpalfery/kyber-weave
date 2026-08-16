@@ -437,29 +437,6 @@ public sealed class SquadReleaseClientTests : IDisposable
             SearchOption.TopDirectoryOnly));
     }
 
-    [Theory]
-    [InlineData("apm, version 1.2.3", "1.2.3")]
-    [InlineData("apm, version 1.2.3-beta.2+build.7", "1.2.3-beta.2+build.7")]
-    [InlineData("Agent Package Manager (APM) CLI version 0.28.0 (e041462)", "0.28.0")]
-    [InlineData("Agent Package Manager (APM) CLI version 1.2.3", "1.2.3")]
-    [InlineData("Agent Package Manager (APM) version 1.2.3-beta.1 (d1d926d)", "1.2.3-beta.1")]
-    [InlineData("apm version 1.2.3", "1.2.3")]
-    [InlineData("apm, version 1.2.3 (abcdef0)", "1.2.3")]
-    public void ApmProcessProbeWithExactSemanticVersionUsesBarePathExecutableAndReturnsExactVersion(
-        string standardOutput,
-        string expectedVersion)
-    {
-        RecordingProcessExecutor executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput + "\n", string.Empty));
-        ApmProcessProbe probe = new ApmProcessProbe(executor);
-
-        ToolProbeResult result = probe.Probe();
-
-        Assert.True(result.IsAvailable);
-        Assert.Equal(expectedVersion, result.Version);
-        Assert.Null(result.FailureReason);
-        AssertPathOnlyVersionInvocation(executor, "apm");
-    }
-
     [Fact]
     public void McpProcessProbeWithExactSemanticVersionUsesBarePathExecutableAndReturnsExactVersion()
     {
@@ -473,26 +450,6 @@ public sealed class SquadReleaseClientTests : IDisposable
         Assert.Equal(Version, result.Version);
         Assert.Null(result.FailureReason);
         AssertPathOnlyVersionInvocation(executor, "kyber-weave-mcp");
-    }
-
-    [Theory]
-    [InlineData("apm, version 1.2")]
-    [InlineData("apm, version 1.2.3.4")]
-    [InlineData("apm, version v1.2.3")]
-    [InlineData("apm, version 1.2.3 trailing")]
-    [InlineData("noise\napm, version 1.2.3")]
-    public void ApmProcessProbeWhenOutputIsNotTheExactToolEnvelopeAndSemanticVersionRejectsIt(
-        string standardOutput)
-    {
-        RecordingProcessExecutor executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput, string.Empty));
-        ApmProcessProbe probe = new ApmProcessProbe(executor);
-
-        ToolProbeResult result = probe.Probe();
-
-        Assert.True(result.IsAvailable);
-        Assert.Null(result.Version);
-        Assert.NotNull(result.FailureReason);
-        AssertPathOnlyVersionInvocation(executor, "apm");
     }
 
     [Theory]
@@ -519,7 +476,7 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new Win32Exception($"PATH={Secret}; Authorization=Bearer {Secret}"));
-        ApmProcessProbe probe = new ApmProcessProbe(executor);
+        McpProcessProbe probe = new McpProcessProbe(executor);
 
         ToolProbeResult result = probe.Probe();
 

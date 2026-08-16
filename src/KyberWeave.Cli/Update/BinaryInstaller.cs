@@ -34,7 +34,8 @@ internal static class BinaryInstaller
     internal static void Replace(
         string extractedBinaryPath,
         string destinationPath,
-        bool windows)
+        bool windows,
+        bool macOs)
     {
         if (!File.Exists(extractedBinaryPath))
         {
@@ -50,6 +51,13 @@ internal static class BinaryInstaller
         File.Copy(extractedBinaryPath, staging, overwrite: true);
         if (!windows)
             SetExecutable(staging);
+
+        // Quarantine is cleared on the staging copy, before the move, not on the installed
+        // path afterwards. The move carries extended attributes with the inode, so the
+        // result is the same — but staging is the last point at which the destination is
+        // certainly not this process's own image. See ClearMacQuarantine.
+        if (macOs)
+            ClearMacQuarantine(staging);
 
         if (windows && File.Exists(destinationPath))
         {
@@ -82,6 +90,16 @@ internal static class BinaryInstaller
         File.Move(staging, destinationPath, overwrite: true);
     }
 
+    /// <summary>Strips <c>com.apple.quarantine</c> from a staged binary.</summary>
+    /// <remarks>
+    /// Call this before the staged file is moved over its destination, never after. This is
+    /// the first code in an update to touch <c>System.Diagnostics.Process</c>, and a
+    /// single-file host resolves a bundled assembly by re-opening its own executable by
+    /// path. Once the destination is the running <c>kyber-weave</c>, that path holds the
+    /// newly installed image and the load fails with "Could not load file or assembly
+    /// 'System.Diagnostics.Process'" — aborting an update that had already written the new
+    /// binary. Running before the move also warms the assembly for anything after it.
+    /// </remarks>
     internal static void ClearMacQuarantine(string path)
     {
         try

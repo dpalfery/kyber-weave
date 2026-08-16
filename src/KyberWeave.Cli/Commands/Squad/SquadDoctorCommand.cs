@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -49,21 +50,25 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string cliVersion = GetCliVersion();
         AnsiConsole.MarkupLine($"  [green]ok[/] CLI Version: [bold]{Markup.Escape(cliVersion)}[/]");
 
-        // 2 & 3. APM & MCP Probes
-        SquadCommandComposition.ResolveProbes(_executor, out ApmProcessProbe apmProbe, out McpProcessProbe mcpProbe);
-
-        ToolProbeResult apmResult = apmProbe.Probe();
-        if (apmResult.IsAvailable && apmResult.Version is not null)
+        // 2. Renderer coverage — which of the ten approved targets can actually install today.
+        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        string[] supported = renderer.SupportedTargets
+            .Select(SquadTargetCatalog.GetToken)
+            .OrderBy(token => token, StringComparer.Ordinal)
+            .ToArray();
+        string[] pending = SquadTargetCatalog.All
+            .Select(SquadTargetCatalog.GetToken)
+            .Except(supported, StringComparer.Ordinal)
+            .OrderBy(token => token, StringComparer.Ordinal)
+            .ToArray();
+        AnsiConsole.MarkupLine($"  [green]ok[/] Renderers available: [bold]{Markup.Escape(string.Join(", ", supported))}[/]");
+        if (pending.Length > 0)
         {
-            AnsiConsole.MarkupLine($"  [green]ok[/] APM: [bold]apm, version {Markup.Escape(apmResult.Version)}[/]");
-        }
-        else
-        {
-            string reason = apmResult.FailureReason ?? "The 'apm' executable is not available on PATH.";
-            AnsiConsole.MarkupLine($"  [red]fail[/] APM: {Markup.Escape(reason)}");
-            hasIssues = true;
+            AnsiConsole.MarkupLine($"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
         }
 
+        // 3. MCP Probe
+        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_executor);
         ToolProbeResult mcpResult = mcpProbe.Probe();
         if (mcpResult.IsAvailable && mcpResult.Version is not null)
         {
@@ -85,15 +90,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             {
                 SquadSource source = SquadSourceLoader.Load(canonicalSourcePath);
                 AnsiConsole.MarkupLine($"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
-
-                if (source.Toolchain.ValidatedRelease is not null)
-                {
-                    AnsiConsole.MarkupLine("  [green]ok[/] Toolchain release: qualified");
-                }
-                else
-                {
-                    AnsiConsole.MarkupLine("  [grey]info[/] Toolchain qualification: Gate G1 unreleased (validated-release: null)");
-                }
             }
             catch (SquadSourceValidationException ex)
             {

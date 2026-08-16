@@ -1,10 +1,3 @@
 schema: kyber-squad.toolchain/v1
-required-features:
-  - agent-ir/v1
-  - semantic-permissions/v1
-  - structured-degradation/v1
-  - agent-to-skill-lowering/v1
-validated-release:
-  version: 0.28.0
-  tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd
-  asset-sha256: e041462f4a48086dbee3da145c07d71b8a3b84fde041462f4a48086dbee3da14
+required-features: []
+validated-release: null

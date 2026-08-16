@@ -12,6 +12,9 @@ code-refs:
   - SquadStateStore
   - SquadTargetResolver
   - SquadSourceLoader
+  - ISquadRenderer
+  - SquadRendererRegistry
+  - CopilotRenderer
 ---
 
 # Kyber-Squad architecture
@@ -157,7 +160,7 @@ Squad deployments maintain rigorous state and concurrency boundaries:
 
 ### Lock and Receipt Files
 
-- **`squad.lock.yml`**: Contains bundle metadata, versions, target lists, exclusions, translation mode, bundle digests, and APM toolchain attestations.
+- **`squad.lock.yml`**: Contains bundle metadata, versions, target lists, exclusions, translation mode, and bundle digests. Also carries a vestigial upstream-toolchain identity field, kept for schema stability now that rendering no longer depends on an external toolchain; it reads `unverified` on every install.
 - **`squad.receipt.json`**: Records scope, installation timestamp, structured degradation records, and an ordered manifest of owned files with relative paths and SHA-256 digests.
 
 ---
@@ -230,6 +233,36 @@ Squad exposes two observer interfaces for lifecycle monitoring and deterministic
    - `ActiveTransitionWritten`
    - `OriginalClaimed`
    - `AfterImagePublished`
+
+---
+
+## 8. Rendering
+
+Lowering AgentIR into a harness's native files is native Kyber-Weave code, not a call to an
+external toolchain. `SquadLifecycleService` renders through `ISquadRenderer`, resolved by
+`SquadCommandComposition` to a `SquadRendererRegistry` — the composite that gates, dispatches,
+and validates.
+
+- **Coverage gate first**: before the release is even downloaded, the registry checks every
+  requested target against `ISquadRenderer.SupportedTargets`. Any target with no registered
+  renderer fails the whole request — install and update are all-or-nothing across the
+  requested target set, never a partial render of the targets that happen to be covered.
+- **Dispatch**: each supported target's canonical source goes to the `ISquadRenderer` that
+  owns it (today, only `CopilotRenderer`, for `.github/agents/*.agent.md` and
+  `.github/skills/*/SKILL.md`).
+- **Validate**: the registry re-checks the merged output — portable paths stay inside the
+  extraction root, every file's target was actually requested, the native/fallback
+  single-projection rules from [section 3](#3-role-skill-lowering-and-namespace-resolution)
+  hold, and every structured degradation record's instruction digest matches the canonical
+  agent it names. A violation raises `SquadRenderValidationException` rather than deploying
+  output that failed its own contract.
+- **Degradation is the honest alternative to guessing**: a renderer with no way to express a
+  canonical capability (Copilot's `tools` frontmatter key is a flat, platform-specific
+  allow-list with no published mapping to the semantic capability vocabulary) records a
+  structured degradation instead of a claimed mapping that might silently broaden or narrow
+  what the deployed agent can actually do.
+- **Coverage today**: only `copilot` has a renderer. `kyber-weave squad doctor` reports which
+  targets are covered; `docs/todo/<target>.md` has what implementing the rest needs.
 
 ---
 

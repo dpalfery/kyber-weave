@@ -245,6 +245,7 @@ public sealed partial class DocumentLoader
             "adr" => DocType.Adr,
             "plan" => DocType.Plan,
             "spec" => DocType.Spec,
+            "todo" => DocType.Todo,
             "runbook" => DocType.Runbook,
             "reference" => DocType.Reference,
             "rule" => DocType.Rule,

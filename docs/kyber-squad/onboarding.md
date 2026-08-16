@@ -59,8 +59,15 @@ Kyber-Squad supports 10 coding harnesses:
 | `kilo` | — | `.kilo/` | Native agents |
 | `gemini` | — | `.gemini/` | Role-skill lowering |
 | `antigravity` | — | *Explicit or configured target only* | Role-skill lowering |
-| `warp` | — | `.warp/` | Native agents |
+| `warp` | — | `.warp/` | Role-skill lowering |
 | `factory` | `factory-droids` | `.factory/` | Native agents |
+
+**Renderer coverage today**: this is the approved roster, not the set that currently installs.
+Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
+[architecture.md](architecture.md#8-rendering)) — as of this writing only `copilot` has a
+renderer. Requesting any other target fails before the release is even downloaded, naming
+the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
+implementer needs to add it. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
@@ -149,7 +156,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on toolchain dependencies, APM availability, and platform prerequisites:
+Run diagnostic checks on renderer coverage (which of the ten approved targets can install today) and the Kyber-Weave MCP server:
 
 ```bash
 kyber-weave squad doctor

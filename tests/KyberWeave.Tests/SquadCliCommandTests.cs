@@ -152,11 +152,12 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Pack_RepositoryRoot_UsesTrackedCanonicalSourceThenAppliesToolchainGate()
+    public void Pack_RepositoryRoot_UsesTrackedCanonicalSourceAndSucceeds()
     {
-        // K6c CLI execution: run at a root containing both markers and valid canonical source.
-        // Prove source resolution succeeds and the Wave-A unqualified-toolchain diagnostic is reached;
-        // no output is created and APM is not invoked.
+        // K6c CLI execution: run at a root containing both markers and valid canonical
+        // source. Packing writes the canonical tree deterministically with no external
+        // toolchain in the loop, so a valid source root packs successfully outright —
+        // there is no longer a toolchain-qualification gate to reach.
         using SquadRepoFixture repo = SquadRepoFixture.CreateValid();
         string outDir = Path.Combine(_temp.Path, "pack-output");
 
@@ -171,9 +172,11 @@ public sealed class SquadCliCommandTests : IDisposable
                 Out = outDir
             }));
 
-        Assert.Equal(1, execution.ExitCode);
-        Assert.Contains("toolchain", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(outDir));
+        Assert.Equal(0, execution.ExitCode);
+        Assert.True(Directory.Exists(outDir));
+        Assert.NotEmpty(Directory.GetFiles(outDir, "kyber-squad-*.zip"));
+        Assert.NotEmpty(Directory.GetFiles(outDir, "kyber-squad-plugin-*.zip"));
+        Assert.True(File.Exists(Path.Combine(outDir, "SHA256SUMS.txt")));
         Assert.Empty(executor.Calls);
     }
 
@@ -364,13 +367,12 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Doctor_ReportsToolchainProbeStatus()
+    public void Doctor_ReportsRendererCoverageAndMcpProbeStatus()
     {
         string workingDir = Path.Combine(_temp.Path, "doctor-workdir");
         Directory.CreateDirectory(workingDir);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithProbeOutput("apm", "apm, version 0.28.0\n")
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
@@ -384,22 +386,23 @@ public sealed class SquadCliCommandTests : IDisposable
                 Global = false
             }));
 
-        Assert.Contains("apm", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("0.28.0", execution.Output, StringComparison.Ordinal);
+        // The only renderer implemented today is Copilot; the other nine approved targets
+        // report as not-yet-implemented rather than being silently absent from the roster.
+        Assert.Contains("copilot", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("docs/todo", execution.Output, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-mcp", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("1.2.3", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Doctor_WhenToolProbeFails_ReportsFailureReason()
+    public void Doctor_WhenMcpProbeFails_ReportsFailureReason()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-missing-apm");
+        string workingDir = Path.Combine(_temp.Path, "doctor-missing-mcp");
         Directory.CreateDirectory(workingDir);
 
-        // Fail APM probe
         FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithFailure("apm", "The 'apm' executable is not available on PATH.")
-            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+            .WithFailure("kyber-weave-mcp", "The 'kyber-weave-mcp' executable is not available on PATH.");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
         SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: workingDir);
@@ -412,8 +415,12 @@ public sealed class SquadCliCommandTests : IDisposable
                 Global = false
             }));
 
-        Assert.Contains("apm", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("not available on PATH", execution.Output, StringComparison.OrdinalIgnoreCase);
+        // Two assertions rather than one contiguous phrase: Spectre.Console wraps
+        // MarkupLine output at the console width, and "kyber-weave-mcp ... not
+        // available on PATH." is long enough to wrap mid-phrase.
+        Assert.Contains("kyber-weave-mcp", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not available on", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PATH", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -579,7 +586,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         using FakeSquadReleaseSource releaseSource = new();
-        FakeApmRunner apmRunner = new();
+        FakeSquadRenderer renderer = new();
         FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
@@ -588,7 +595,7 @@ public sealed class SquadCliCommandTests : IDisposable
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
-            apmRunner: apmRunner);
+            renderer: renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -615,7 +622,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         using FakeSquadReleaseSource releaseSource = new();
-        FakeApmRunner apmRunner = new();
+        FakeSquadRenderer renderer = new();
         FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
@@ -624,7 +631,7 @@ public sealed class SquadCliCommandTests : IDisposable
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
-            apmRunner: apmRunner);
+            renderer: renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -752,7 +759,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         using FakeSquadReleaseSource releaseSource = new();
-        FakeApmRunner apmRunner = new();
+        FakeSquadRenderer renderer = new();
         FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
         SquadStateStore stateStore = new(userPaths);
 
@@ -764,7 +771,7 @@ public sealed class SquadCliCommandTests : IDisposable
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
-            apmRunner: apmRunner);
+            renderer: renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -902,15 +909,13 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void SquadCommandComposition_ResolveProbes_ResolvesWithDefaultAndCustomExecutor()
+    public void SquadCommandComposition_ResolveProbe_ResolvesWithDefaultAndCustomExecutor()
     {
-        SquadCommandComposition.ResolveProbes(out ApmProcessProbe defaultApm, out McpProcessProbe defaultMcp);
-        Assert.NotNull(defaultApm);
+        McpProcessProbe defaultMcp = SquadCommandComposition.ResolveProbe();
         Assert.NotNull(defaultMcp);
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadCommandComposition.ResolveProbes(executor, out ApmProcessProbe customApm, out McpProcessProbe customMcp);
-        Assert.NotNull(customApm);
+        McpProcessProbe customMcp = SquadCommandComposition.ResolveProbe(executor);
         Assert.NotNull(customMcp);
     }
 

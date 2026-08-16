@@ -21,6 +21,8 @@ dotnet run --project src/KyberWeave.Cli -- skill scan .apm/skills/kyber-weave-do
 ```
 
 ## Non-negotiables
+**`PlansGoInDocs`**
+Do not store plan files in .folders. Any plan developed for this project will be stored in the `<docs-root>`\plans folder so that it is not lost and stays with the project.
 
 **`TreatWarningsAsErrors` is on, with `AnalysisMode=all`.** A warning fails the build.
 Fix the cause; do not add to the `NoWarn` list in `Directory.Build.props` without a reason
@@ -41,6 +43,12 @@ document.
 CodeGraph index is read through the `sqlite3` CLI rather than `Microsoft.Data.Sqlite`
 because that package's native dependency carries an unresolved advisory — a deliberate
 trade, documented where it is made.
+
+**Capture deferred work as todos.** When an agent or contributor identifies work not done now
+(such as a finding, a deferred fix, or a declined suggestion), add a todo under
+[`docs/todo/`](docs/todo/README.md) rather than letting it evaporate. See
+[`docs/todo/README.md`](docs/todo/README.md) for mechanics and [`docs/README.md`](docs/README.md)
+for the conceptual distinction between specs, plans, and todos.
 
 ## Where to go next
 

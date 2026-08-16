@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-16
 ---
 
 # Kyber-Weave documentation
@@ -31,6 +31,50 @@ than by reading these files.
 - [DocGraph](docgraph/README.md) — Why and how to turn markdown docs into a queryable in-memory graph joined to live code
 - [Kyber-Squad](kyber-squad/README.md) — Why and how to deploy canonical agent squads across 10 IDE harnesses with rollback
 - [KyberDash](dash/README.md) — Why and how to observe and tune agent context with local .NET Aspire OTEL telemetry
+
+---
+
+## Specs, plans, and todos
+
+Not all documentation describes what exists today. Kyber-Weave organizes forward-looking work
+across three categories, each with its own folder and its own place in the governed
+vocabulary (`doc-type: spec` / `plan` / `todo`), so that emerging designs, execution
+sequences, and deferred findings stay structured and discoverable without polluting canonical
+documentation.
+
+- **[`docs/specs/`](specs/README.md) — spec.** Net-new work: no existing architecture to
+  build on. Upfront, spec-driven-development style (the Kiro spec mode / GitHub Spec Kit
+  lineage) — requirements, design, and system boundaries get defined before implementation
+  starts. *This is the same `specs/` workflow the Kyber-Squad product's `product-owner` agent
+  prescribes for every project it's installed into, applied here to Kyber-Weave's own
+  repository — under `docs/`, since this repository overrides the docs-root from the Squad's
+  product default.*
+- **[`docs/plans/`](plans/README.md) — plan.** Work that extends or fits within *existing*
+  architecture — even substantial work, new files, new patterns — as long as there's a
+  precedent it's building on. Lightweight, typically a single file, typically
+  architect-authored, sequencing concrete tasks.
+- **[`docs/todo/`](todo/README.md) — todo.** A reminder of work not done now: a finding, a
+  deferred fix, a suggestion declined rather than acted on. Usually the seed for a future spec
+  or plan — small enough work can just get picked up and fixed directly instead. Whichever
+  successor it becomes is the implementor's call at pickup time, not something decided when
+  the todo is written.
+
+**Choosing spec vs. plan is a human judgment call, not a mechanical rule** — the ontology
+doesn't try to gate it. The test that matters: is there already architecture here to extend,
+or is this genuinely starting from nothing? A large new subsystem built on an existing
+component's established patterns (a new interface implementing an already-designed seam, for
+example) is still a plan; a spec is reserved for when that architectural precedent doesn't
+exist yet.
+
+**All three share one lifecycle, and the same closeout mechanism.** Each stays in its active
+folder while current, then archives to the matching `docs/archive/` folder once done — the
+pattern `docs/plans/README.md`'s inventory already shows. Closeout is always a `docs-dev`
+task: verify the work against evidence, migrate the affected content into canonical
+documentation, then archive. That's identical for a spec and a plan — a spec's closeout is
+"exactly like a plan's." What differs is only what the work actually produced: a spec usually
+creates new or substantially-rewritten architecture/onboarding/requirements pages, since it
+started from nothing; a plan usually updates pages that already existed, since it built on
+architecture already documented. The mechanism is the same either way.
 
 ---
 
@@ -75,6 +119,7 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 | [Adoption & usage guide](kyber-squad/onboarding.md) | `squad install`, `update`, `uninstall`, `status`, `doctor`, `pack`, scopes, target resolution |
 | [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine |
 | [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix |
+| [Renderer coverage — what's left](todo/kyber-squad-renderer-coverage.md) | Which of the 10 harnesses install today, and the per-target context for implementing the rest |
 
 ## Feature 4 — KyberDash (Upcoming)
 

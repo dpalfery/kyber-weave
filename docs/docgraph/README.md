@@ -28,7 +28,7 @@ Documentation that cannot be verified drifts within weeks. In DocGraph, every do
 Traditional RAG requires vector databases, embeddings, and complex synchronization pipelines. DocGraph compiles your Markdown corpus into a typed in-memory graph with **sub-millisecond retrieval** served directly to agents over the Model Context Protocol (MCP via `docs_explore`). Ranking is governed by declared document authority, ontology types, and dynamic CodeGraph hops—not raw keyword matches.
 
 ### 3. Graph-First Claim Analysis & Managed Terminology
-As systems evolve, conflicting assertions and terminology drift proliferate across team docs. DocGraph's analysis engine (`kyber-weave docs analyze`) extracts and compares claims across related components, detecting contradictions, duplicate assertions, and unapproved jargon before they confuse human developers and agents alike.
+As systems evolve, conflicting assertions and terminology drift proliferate across team docs. DocGraph's analysis engine (`kyber-weave docs integrity-check`) extracts and compares claims across related components, detecting contradictions, duplicate assertions, and unapproved jargon before they confuse human developers and agents alike.
 
 ---
 
@@ -40,7 +40,7 @@ As systems evolve, conflicting assertions and terminology drift proliferate acro
 | **Code Join Drift Detection** | Reconciles declared `code-refs` and `source-root` against live CodeGraph SQLite indices. | `kyber-weave docs drift` |
 | **Sub-Millisecond Agent Search** | Serves token-budgeted, rank-boosted document excerpts and live code joins to AI agents via MCP. | `docs_explore` · `docs_for_symbol` |
 | **Managed Glossary & Terminology** | Enforces canonical sense rows, extracts domain concepts, and flags ambiguous aliases across docs. | `kyber-weave docs glossary` |
-| **Claim Conflict & Review** | Employs graph-first extraction to identify duplicates, contradictions, and outdated claims for review. | `kyber-weave docs analyze` |
+| **Claim Conflict & Review** | Employs graph-first extraction to identify duplicates, contradictions, and outdated claims for review. | `kyber-weave docs integrity-check` |
 
 ---
 

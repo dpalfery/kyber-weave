@@ -16,7 +16,7 @@ public class OntologyConfigTests
 {
     private static readonly string[] ExpectedDocTypes =
     [
-        "architecture", "onboarding", "requirements", "adr", "plan", "spec",
+        "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
         "runbook", "reference", "rule", "governance", "index"
     ];
 
@@ -48,6 +48,7 @@ public class OntologyConfigTests
         Assert.True(config.IsRequired(DocType.Runbook, "component"));
         Assert.True(config.IsRequired(DocType.Plan, "component"));
         Assert.True(config.IsRequired(DocType.Spec, "component"));
+        Assert.True(config.IsRequired(DocType.Todo, "component"));
     }
 
     [Fact]

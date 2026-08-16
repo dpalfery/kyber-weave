@@ -1,8 +1,8 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -17,7 +17,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadReleaseSource? _releaseSource;
-    private readonly IApmRunner? _apmRunner;
+    private readonly ISquadRenderer? _renderer;
 
     /// <summary>Creates a new install command using default dependencies.</summary>
     public SquadInstallCommand()
@@ -30,13 +30,13 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
         ISquadReleaseSource? releaseSource = null,
-        IApmRunner? apmRunner = null)
+        ISquadRenderer? renderer = null)
     {
         _executor = executor;
         _userPaths = userPaths;
         _stateStore = stateStore;
         _releaseSource = releaseSource;
-        _apmRunner = apmRunner;
+        _renderer = renderer;
     }
 
     /// <inheritdoc />
@@ -102,7 +102,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             userPaths: _userPaths,
             stateStore: stateStore,
             releaseSource: _releaseSource,
-            apmRunner: _apmRunner);
+            renderer: _renderer);
 
         SquadInstallRequest installRequest = new(
             TargetRoot: targetRoot,

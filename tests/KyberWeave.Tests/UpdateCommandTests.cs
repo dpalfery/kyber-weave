@@ -401,6 +401,66 @@ public sealed partial class UpdateCommandTests : IDisposable
         Assert.Equal("old-cli", File.ReadAllText(host.ProcessPath));
     }
 
+    [Fact]
+    public void RunCommitsTheRunningImageLast()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+
+        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        int mcpIndex = log.FindIndex(line => line.StartsWith("installed kyber-weave-mcp", StringComparison.Ordinal));
+        int cliIndex = log.FindIndex(line => line.StartsWith("installed kyber-weave ", StringComparison.Ordinal));
+        Assert.True(mcpIndex >= 0 && cliIndex >= 0);
+        Assert.True(
+            mcpIndex < cliIndex,
+            "The running kyber-weave image must be replaced after every other binary: "
+                + "overwriting it first leaves the rollback path unable to load assemblies "
+                + "the single-file host has not already read out of the old executable.");
+    }
+
+    [Fact]
+    public void RunWhenMcpCommitFailsLeavesTheRunningImageUntouched()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        // A directory at the MCP destination fails the commit, not the staging that
+        // RunWhenMcpStagingFailsRestoresOriginalCliBinary already covers.
+        Directory.CreateDirectory(Path.Combine(_install.Path, "kyber-weave-mcp"));
+        List<string> log = [];
+
+        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("old-cli", File.ReadAllText(host.ProcessPath));
+        Assert.DoesNotContain(
+            log,
+            line => line.StartsWith("installed kyber-weave ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RunOnMacOsInstallsAfterClearingQuarantine()
+    {
+        // The ordering this pins — xattr runs against the staging copy, before the move —
+        // is only observable in a published single-file binary, where reaching
+        // System.Diagnostics.Process after the swap fails to load. What is checkable here
+        // is that the macOS path still installs, so the quarantine call cannot regress into
+        // something that throws past BinaryInstaller and aborts the update.
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64") with { IsMacOs = true };
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+        Assert.Equal("new-mcp", File.ReadAllText(Path.Combine(_install.Path, "kyber-weave-mcp")));
+    }
+
     [DllImport("libc", EntryPoint = "geteuid")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static extern uint GetEffectiveUserId();

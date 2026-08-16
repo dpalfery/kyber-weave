@@ -54,7 +54,7 @@ public static class OntologyConfigLoader
                 {
                     throw new YamlException(
                         $"Unknown ontology required-keys doc type '{typeName}'. " +
-                        "Known types: architecture, onboarding, requirements, adr, plan, spec, " +
+                        "Known types: architecture, onboarding, requirements, adr, plan, spec, todo, " +
                         "runbook, reference, rule, governance, index.");
                 }
 
@@ -144,6 +144,7 @@ public static class OntologyConfigLoader
             "adr" => DocType.Adr,
             "plan" => DocType.Plan,
             "spec" => DocType.Spec,
+            "todo" => DocType.Todo,
             "runbook" => DocType.Runbook,
             "reference" => DocType.Reference,
             "rule" => DocType.Rule,

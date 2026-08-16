@@ -86,11 +86,10 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Directory.CreateDirectory(outDir1);
         Directory.CreateDirectory(outDir2);
 
-        FakeApmRunner apmRunner = new FakeApmRunner();
         FakeProcessExecutor executor = new FakeProcessExecutor();
 
-        SquadPackCommand command1 = new SquadPackCommand(apmRunner, executor, workingDirectory: repo.Path);
-        SquadPackCommand command2 = new SquadPackCommand(apmRunner, executor, workingDirectory: repo.Path);
+        SquadPackCommand command1 = new SquadPackCommand(executor, workingDirectory: repo.Path);
+        SquadPackCommand command2 = new SquadPackCommand(executor, workingDirectory: repo.Path);
 
         // Act
         int exitCode1 = command1.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir1 });
@@ -179,11 +178,10 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Directory.CreateDirectory(outDir1);
         Directory.CreateDirectory(outDir2);
 
-        FakeApmRunner apmRunner = new FakeApmRunner();
         FakeProcessExecutor executor = new FakeProcessExecutor();
 
-        SquadPackCommand command1 = new SquadPackCommand(apmRunner, executor, workingDirectory: repo.Path);
-        SquadPackCommand command2 = new SquadPackCommand(apmRunner, executor, workingDirectory: repo.Path);
+        SquadPackCommand command1 = new SquadPackCommand(executor, workingDirectory: repo.Path);
+        SquadPackCommand command2 = new SquadPackCommand(executor, workingDirectory: repo.Path);
 
         // Act
         int exitCode1 = command1.Execute(null!, new SquadPackSettings { Format = "plugins", Out = outDir1 });
@@ -325,9 +323,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
         string outDir = Path.Combine(_temp.Path, "release-dist");
 
-        FakeApmRunner apmRunner = new FakeApmRunner();
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(apmRunner, executor, workingDirectory: repo.Path);
+        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repo.Path);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(

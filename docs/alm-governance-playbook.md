@@ -21,7 +21,7 @@ A `SKILL.md` is plain text, which means it belongs in source control and in pull
 
 ## 2. The PR gate
 
-Run four checks on every PR that touches a skill (see [Workflow runbook](ci-pipelines/workflows-runbook.md) and [templates/github-actions/](ci-pipelines/workflows-runbook.md#copy-ready-workflows)):
+Run four checks on every PR that touches a skill (see [Workflow runbook](ci-pipelines/workflows-runbook.md)):
 
 1. `validate` — spec conformance. Catches the silent killers, especially **name ≠ folder name**, which makes runtimes fail to load a skill with no error.
 2. `lint --min-desc-score` — routing readiness. A description is routing metadata; a weak one makes the wrong skill fire or none at all. The gate keeps descriptions routable and catches **collisions/overlap** between skills.

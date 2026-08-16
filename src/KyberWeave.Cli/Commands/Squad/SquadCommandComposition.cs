@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Core.Squad.Rendering;
 using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands.Squad;
@@ -21,22 +21,20 @@ internal static class SquadCommandComposition
     public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null) =>
         new(userPaths ?? SquadUserPaths.Instance);
 
-    /// <summary>Resolves the APM and MCP process probes using the specified process executor.</summary>
-    public static void ResolveProbes(
-        IProcessExecutor? executor,
-        out ApmProcessProbe apmProbe,
-        out McpProcessProbe mcpProbe)
-    {
-        IProcessExecutor resolvedExecutor = executor ?? ProcessExecutor.Instance;
-        apmProbe = new ApmProcessProbe(resolvedExecutor);
-        mcpProbe = new McpProcessProbe(resolvedExecutor);
-    }
+    /// <summary>Resolves the Kyber-Weave MCP process probe using the specified process executor.</summary>
+    public static McpProcessProbe ResolveProbe(IProcessExecutor? executor) =>
+        new(executor ?? ProcessExecutor.Instance);
 
-    /// <summary>Resolves the APM and MCP process probes using the default process executor.</summary>
-    public static void ResolveProbes(
-        out ApmProcessProbe apmProbe,
-        out McpProcessProbe mcpProbe) =>
-        ResolveProbes(null, out apmProbe, out mcpProbe);
+    /// <summary>Resolves the Kyber-Weave MCP process probe using the default process executor.</summary>
+    public static McpProcessProbe ResolveProbe() => ResolveProbe(null);
+
+    /// <summary>
+    /// Resolves the renderer used to lower canonical Squad source into harness-native
+    /// files. Today this registers exactly one renderer (Copilot); every other approved
+    /// target fails closed with a pointer to its <c>docs/todo/</c> entry rather than being
+    /// silently dropped from the roster.
+    /// </summary>
+    public static ISquadRenderer ResolveRenderer() => new SquadRendererRegistry([new CopilotRenderer()]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>
     public static SquadTransaction ResolveTransaction(
@@ -55,18 +53,17 @@ internal static class SquadCommandComposition
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
         ISquadReleaseSource? releaseSource = null,
-        IApmRunner? apmRunner = null,
+        ISquadRenderer? renderer = null,
         ISquadTransactionObserver? observer = null,
         TimeProvider? timeProvider = null)
     {
-        IProcessExecutor resolvedExecutor = executor ?? ProcessExecutor.Instance;
         SquadStateStore resolvedStateStore = stateStore ?? ResolveStateStore(userPaths);
         ISquadReleaseSource resolvedReleaseSource = releaseSource ?? new GitHubSquadReleaseSource(new Uri("https://api.github.com"));
-        IApmRunner resolvedApmRunner = apmRunner ?? new ApmProcessRunner(resolvedExecutor);
+        ISquadRenderer resolvedRenderer = renderer ?? ResolveRenderer();
 
         return new SquadLifecycleService(
             releaseSource: resolvedReleaseSource,
-            apmRunner: resolvedApmRunner,
+            renderer: resolvedRenderer,
             stateStore: resolvedStateStore,
             timeProvider: timeProvider,
             observer: observer);

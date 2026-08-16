@@ -5,32 +5,6 @@ using KyberWeave.Core.Squad.Release;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 
-/// <summary>Checks the PATH-resolved Agent Package Manager version.</summary>
-public sealed partial class ApmProcessProbe
-{
-    private readonly IProcessExecutor _executor;
-
-    /// <summary>Creates an APM probe over an injectable process boundary.</summary>
-    public ApmProcessProbe(IProcessExecutor executor)
-    {
-        ArgumentNullException.ThrowIfNull(executor);
-        _executor = executor;
-    }
-
-    /// <summary>Runs only <c>apm --version</c> and parses its exact output envelope.</summary>
-    public ToolProbeResult Probe() => ProcessProbe.Probe(
-        _executor,
-        "apm",
-        ApmVersionRegex());
-
-    [GeneratedRegex(
-        "\\A(?:Agent Package Manager \\(APM\\)(?: CLI)? version|apm,? version) " +
-        "(?<version>" + SemanticVersionPattern.Value + ")" +
-        "(?: \\([^)]+\\))?(?:\\r?\\n)?\\z",
-        RegexOptions.CultureInvariant)]
-    private static partial Regex ApmVersionRegex();
-}
-
 /// <summary>Checks the PATH-resolved Kyber-Weave MCP version.</summary>
 public sealed partial class McpProcessProbe
 {

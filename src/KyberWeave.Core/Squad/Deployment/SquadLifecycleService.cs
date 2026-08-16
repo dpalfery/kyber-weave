@@ -1,8 +1,8 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
-using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Core.Squad.Rendering;
 using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -57,23 +57,23 @@ public sealed class SquadLifecycleService
     private const string LockSchema = "kyber-squad.lock/v1";
 
     private readonly ISquadReleaseSource _releaseSource;
-    private readonly IApmRunner _apmRunner;
+    private readonly ISquadRenderer _renderer;
     private readonly SquadStateStore _stateStore;
     private readonly TimeProvider _timeProvider;
     private readonly ISquadTransactionObserver? _observer;
 
     public SquadLifecycleService(
         ISquadReleaseSource releaseSource,
-        IApmRunner apmRunner,
+        ISquadRenderer renderer,
         SquadStateStore stateStore,
         TimeProvider? timeProvider = null,
         ISquadTransactionObserver? observer = null)
     {
         ArgumentNullException.ThrowIfNull(releaseSource);
-        ArgumentNullException.ThrowIfNull(apmRunner);
+        ArgumentNullException.ThrowIfNull(renderer);
         ArgumentNullException.ThrowIfNull(stateStore);
         _releaseSource = releaseSource;
-        _apmRunner = apmRunner;
+        _renderer = renderer;
         _stateStore = stateStore;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _observer = observer;
@@ -93,6 +93,8 @@ public sealed class SquadLifecycleService
         {
             throw new ArgumentException("At least one deployment target must be specified.", nameof(request));
         }
+
+        RequireRenderableTargets(request.Targets);
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
         string targetRoot = identity.PhysicalPath;
@@ -131,20 +133,20 @@ public sealed class SquadLifecycleService
                 ? _stateStore.UserPaths.ApplicationDataDirectory
                 : null;
 
-            ApmRenderRequest apmRequest = new(
+            SquadRenderRequest renderRequest = new(
                 SourceDirectory: releaseResult.ExtractionRoot,
                 Targets: request.Targets,
                 Scope: request.Scope,
                 UserScopeDirectory: userScopeDir,
                 TranslationMode: request.Translation);
 
-            ApmRenderResult apmResult = await _apmRunner.RenderAsync(apmRequest, cancellationToken).ConfigureAwait(false);
-            if (!apmResult.Success || apmResult.Errors.Count > 0)
+            SquadRenderResult renderResult = await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
+            if (!renderResult.Success || renderResult.Errors.Count > 0)
             {
-                string error = apmResult.Errors.Count > 0
-                    ? string.Join(Environment.NewLine, apmResult.Errors)
-                    : "APM render failed.";
-                throw new SquadApmValidationException(error);
+                string error = renderResult.Errors.Count > 0
+                    ? string.Join(Environment.NewLine, renderResult.Errors)
+                    : "Squad render failed.";
+                throw new SquadRenderValidationException(error);
             }
 
             SquadLock squadLock = BuildLock(
@@ -156,7 +158,7 @@ public sealed class SquadLifecycleService
                 assetDigest: releaseResult.Checksum.Sha256,
                 extractionRoot: releaseResult.ExtractionRoot);
 
-            IReadOnlyList<SquadDegradation> degradations = apmResult.Degradations
+            IReadOnlyList<SquadDegradation> degradations = renderResult.Degradations
                 .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
                 .ToArray();
 
@@ -167,7 +169,7 @@ public sealed class SquadLifecycleService
                     targetRoot: targetRoot,
                     scope: request.Scope,
                     squadLock: squadLock,
-                    renderedFiles: apmResult.Files,
+                    renderedFiles: renderResult.Files,
                     degradations: degradations,
                     adopt: request.Adopt,
                     timeProvider: _timeProvider);
@@ -178,7 +180,7 @@ public sealed class SquadLifecycleService
                     targetRoot: targetRoot,
                     scope: request.Scope,
                     squadLock: squadLock,
-                    renderedFiles: apmResult.Files,
+                    renderedFiles: renderResult.Files,
                     previousReceipt: existingReceipt,
                     degradations: degradations,
                     replaceManaged: false,
@@ -248,6 +250,8 @@ public sealed class SquadLifecycleService
             }
         }
 
+        RequireRenderableTargets(targets);
+
         string version = request.Version ?? ResolveDefaultVersion();
         string tempExtractDir = Path.Combine(
             Path.GetTempPath(),
@@ -263,20 +267,20 @@ public sealed class SquadLifecycleService
                 ? _stateStore.UserPaths.ApplicationDataDirectory
                 : null;
 
-            ApmRenderRequest apmRequest = new(
+            SquadRenderRequest renderRequest = new(
                 SourceDirectory: releaseResult.ExtractionRoot,
                 Targets: targets,
                 Scope: request.Scope,
                 UserScopeDirectory: userScopeDir,
                 TranslationMode: request.Translation);
 
-            ApmRenderResult apmResult = await _apmRunner.RenderAsync(apmRequest, cancellationToken).ConfigureAwait(false);
-            if (!apmResult.Success || apmResult.Errors.Count > 0)
+            SquadRenderResult renderResult = await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
+            if (!renderResult.Success || renderResult.Errors.Count > 0)
             {
-                string error = apmResult.Errors.Count > 0
-                    ? string.Join(Environment.NewLine, apmResult.Errors)
-                    : "APM render failed.";
-                throw new SquadApmValidationException(error);
+                string error = renderResult.Errors.Count > 0
+                    ? string.Join(Environment.NewLine, renderResult.Errors)
+                    : "Squad render failed.";
+                throw new SquadRenderValidationException(error);
             }
 
             SquadLock squadLock = BuildLock(
@@ -288,7 +292,7 @@ public sealed class SquadLifecycleService
                 assetDigest: releaseResult.Checksum.Sha256,
                 extractionRoot: releaseResult.ExtractionRoot);
 
-            IReadOnlyList<SquadDegradation> degradations = apmResult.Degradations
+            IReadOnlyList<SquadDegradation> degradations = renderResult.Degradations
                 .Select(d => new SquadDegradation(d.Target, d.CanonicalIdentity, d.Code))
                 .ToArray();
 
@@ -296,7 +300,7 @@ public sealed class SquadLifecycleService
                 targetRoot: targetRoot,
                 scope: request.Scope,
                 squadLock: squadLock,
-                renderedFiles: apmResult.Files,
+                renderedFiles: renderResult.Files,
                 previousReceipt: previousReceipt,
                 degradations: degradations,
                 replaceManaged: request.ReplaceManaged,
@@ -380,6 +384,32 @@ public sealed class SquadLifecycleService
             DryRun: false));
     }
 
+    /// <summary>
+    /// Rejects any requested target with no registered renderer before the release is
+    /// downloaded — a target with a renderer already existing per-target on
+    /// <see cref="_renderer"/> is a cheap property read, so there is no reason to spend a
+    /// network round trip on a request that is going to fail regardless.
+    /// </summary>
+    private void RequireRenderableTargets(IReadOnlyList<SquadTarget> targets)
+    {
+        IReadOnlyList<SquadTarget> unsupported = targets
+            .Where(target => !_renderer.SupportedTargets.Contains(target))
+            .ToArray();
+        if (unsupported.Count == 0)
+        {
+            return;
+        }
+
+        string names = string.Join(", ", unsupported.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
+        string supported = string.Join(
+            ", ",
+            _renderer.SupportedTargets.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal));
+        throw new SquadRenderValidationException(
+            $"No renderer is implemented yet for target(s): {names}. " +
+            $"See docs/todo/<target>.md for what is needed to add support. " +
+            $"Targets available today: {supported}.");
+    }
+
     private static SquadLock BuildLock(
         string version,
         string bundle,
@@ -433,6 +463,18 @@ public sealed class SquadLifecycleService
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(bundle)));
     }
 
+    /// <summary>
+    /// Reads the pinned upstream-toolchain identity recorded in a Squad release's
+    /// <c>toolchain.yml</c>, if any.
+    /// </summary>
+    /// <remarks>
+    /// Vestigial since rendering stopped shelling out to an external toolchain: canonical
+    /// <c>toolchain.yml</c> no longer declares a <c>validated-release</c>, so this reads
+    /// "unverified" on every install today. The lock field and this reader stay rather
+    /// than forcing a lock schema bump (and the golden-file churn across
+    /// <c>SquadDeploymentStateTests</c> that implies) for a field that was already
+    /// optional and whose absence this code already handled correctly.
+    /// </remarks>
     private static SquadApmIdentity ReadApmIdentity(string extractionRoot)
     {
         string toolchainPath = Path.Combine(extractionRoot, "toolchain.yml");
@@ -479,7 +521,7 @@ public sealed class SquadLifecycleService
                             apmDigest.Length != 64 ||
                             !apmDigest.All(char.IsAsciiHexDigit))
                         {
-                            throw new SquadApmValidationException(
+                            throw new SquadRenderValidationException(
                                 $"'{toolchainPath}' declares an invalid APM validated-release. A 64-character hex asset-sha256, version, and tag-commit are required.");
                         }
 
@@ -487,19 +529,19 @@ public sealed class SquadLifecycleService
                     }
                     else if (valRelNode is not YamlScalarNode scalar || (scalar.Value is not null && scalar.Value != "null" && scalar.Value != "~" && scalar.Value.Length > 0))
                     {
-                        throw new SquadApmValidationException(
+                        throw new SquadRenderValidationException(
                             $"'{toolchainPath}' declares an invalid APM validated-release shape. A mapping with version, tag-commit, and asset-sha256 (or null) is required.");
                     }
                 }
             }
         }
-        catch (SquadApmValidationException)
+        catch (SquadRenderValidationException)
         {
             throw;
         }
         catch (Exception ex)
         {
-            throw new SquadApmValidationException($"Failed to parse toolchain file at '{toolchainPath}': {ex.Message}", ex);
+            throw new SquadRenderValidationException($"Failed to parse toolchain file at '{toolchainPath}': {ex.Message}", ex);
         }
 
         return new SquadApmIdentity("unverified", "unverified", "unverified");

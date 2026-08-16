@@ -15,7 +15,6 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 public sealed class SquadPackCommand : Command<SquadPackSettings>
 {
-    private readonly IApmRunner? _apmRunner;
     private readonly IProcessExecutor? _executor;
     private readonly string? _workingDirectory;
 
@@ -24,16 +23,9 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     {
     }
 
-    /// <summary>Creates a new pack command using injectable dependencies.</summary>
+    /// <summary>Creates a new pack command using injectable process executor and working directory.</summary>
     public SquadPackCommand(IProcessExecutor? executor, string? workingDirectory = null)
-        : this(null, executor, workingDirectory)
     {
-    }
-
-    /// <summary>Creates a new pack command using injectable APM runner, process executor, and working directory.</summary>
-    public SquadPackCommand(IApmRunner? apmRunner = null, IProcessExecutor? executor = null, string? workingDirectory = null)
-    {
-        _apmRunner = apmRunner;
         _executor = executor;
         _workingDirectory = workingDirectory;
     }
@@ -61,16 +53,11 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             return 1;
         }
 
-        SquadSource source = SquadSourceLoader.Load(sourcePath);
-
-        // Toolchain qualification gate (Gate G1)
-        if (source.Toolchain.ValidatedRelease is null)
-        {
-            AnsiConsole.MarkupLine("[red]kyber-weave: error: Gate G1: toolchain qualification requirement is not met.[/]");
-            AnsiConsole.MarkupLine($"The toolchain definition at [bold]{Markup.Escape(source.Toolchain.SourcePath)}[/] has validated-release set to null.");
-            AnsiConsole.MarkupLine("Packaging requires a validated upstream APM toolchain release.");
-            return 1;
-        }
+        // Packing writes the canonical source tree deterministically (SquadPacker) with no
+        // external toolchain in the loop, so there is nothing left to gate here — loading
+        // still validates the source itself (malformed manifests, profiles, agents, or
+        // skills throw SquadSourceValidationException before anything is packed).
+        _ = SquadSourceLoader.Load(sourcePath);
 
         string version = !string.IsNullOrWhiteSpace(settings.Version)
             ? ReleaseVersion.Normalize(settings.Version)

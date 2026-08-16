@@ -111,6 +111,17 @@ internal sealed class SelfUpdater : IDisposable
             if (!options.NoMcp)
                 staged.Add(StageBinary(McpBaseName, tag, windows, sums, work.FullName));
 
+            // This process's own image is committed last. Overwriting it costs the runtime
+            // the ability to load any assembly it has not already touched, because a
+            // single-file host reads bundled assemblies back out of the executable by path.
+            // Everything downstream — the remaining commits, and the rollback below — then
+            // runs on borrowed code, so the swap belongs after the work that can still fail.
+            staged =
+            [
+                .. staged.Where(item => !IsRunningImage(item.Destination)),
+                .. staged.Where(item => IsRunningImage(item.Destination))
+            ];
+
             DirectoryInfo backupDir = Directory.CreateTempSubdirectory("kyber-weave-backup-");
             try
             {
@@ -218,20 +229,19 @@ internal sealed class SelfUpdater : IDisposable
         string extractedPath,
         string destination)
     {
-        BinaryInstaller.Replace(extractedPath, destination, windows);
-        if (_host.IsMacOs)
-        {
-            try
-            {
-                BinaryInstaller.ClearMacQuarantine(destination);
-            }
-            catch (Exception)
-            {
-                // Non-fatal best-effort
-            }
-        }
-
+        BinaryInstaller.Replace(extractedPath, destination, windows, _host.IsMacOs);
         _log($"installed {baseName} {ReleaseVersion.Normalize(tag)} → {destination}");
+    }
+
+    private bool IsRunningImage(string destination)
+    {
+        if (string.IsNullOrWhiteSpace(_host.ProcessPath))
+            return false;
+
+        return string.Equals(
+            Path.GetFullPath(destination),
+            Path.GetFullPath(_host.ProcessPath),
+            _host.IsWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
     private void EnsureReleaseInstallChannel()
