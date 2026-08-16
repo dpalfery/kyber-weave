@@ -1,7 +1,6 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
-using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Parsing;
 using Spectre.Console;
