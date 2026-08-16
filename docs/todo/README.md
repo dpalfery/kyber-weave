@@ -39,6 +39,9 @@ last-reviewed: YYYY-MM-DD
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
+| [portable-artifacts-carry-project-standards.md](portable-artifacts-carry-project-standards.md) | KyberSquad | draft | Remove project-specific coding standards embedded in the 20 canonical agents and the seven code-review references, now that standards have a home. |
+| [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | draft | The authoring skill states a doc-type vocabulary missing `todo` and `coding-standard`. |
+| [embeddings-endpoint-loopback-check.md](embeddings-endpoint-loopback-check.md) | DocGraph | draft | A non-loopback HTTPS embeddings endpoint is accepted where the test asserts rejection. |
 | [kyber-squad-renderer-coverage.md](kyber-squad-renderer-coverage.md) | KyberSquad | draft | Overview of remaining Kyber-Squad renderer target coverage and CLI gaps. |
 | [antigravity.md](antigravity.md) | KyberSquad | draft | Add a native Antigravity renderer to Kyber-Squad. |
 | [claude-code.md](claude-code.md) | KyberSquad | draft | Add a native Claude Code renderer to Kyber-Squad. |

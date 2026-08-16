@@ -39,15 +39,20 @@ ontology:
   excluded-segments: [archive, node_modules, obj, bin]
   excluded-files: []
   doc-types: [architecture, onboarding, requirements, adr, plan, spec,
-              runbook, reference, rule, governance, index]
+              runbook, reference, rule, governance, index, coding-standard]
   statuses: [current, draft, needs-review, superseded]
+  technologies: [dotnet]
   base-required-keys: [id, title, owner, last-reviewed, doc-type, status]
   required-keys:
     architecture: [component]
     onboarding: [component, source-root]
+    coding-standard: [technology]
   catalog:
     component-column: 1
     owner-column: 6
+
+config-reg:
+  auth-design: docs/reference/auth-design.md
 
 squad:
   bundle: full
@@ -97,8 +102,9 @@ docs-analysis:
 | `catalog-path` | `<first root>/catalog.md` | The one catalog, when it lives somewhere else |
 | `excluded-segments` | `archive, node_modules, obj, bin` | Path segments never scanned |
 | `excluded-files` | five `DevOps/*` paths | Individual files to skip, relative to a docs root |
-| `doc-types` | the 11 defaults | The closed doc-type vocabulary |
+| `doc-types` | the 13 defaults | The closed doc-type vocabulary |
 | `statuses` | the 4 defaults | The closed status vocabulary |
+| `technologies` | empty | The stacks this repository has a coding standard for |
 | `base-required-keys` | 6 keys | Required of every document |
 | `required-keys` | per-type matrix | Extra keys required by doc-type |
 | `catalog.component-column` | `1` | Index of the Component cell in a catalog row |
@@ -120,6 +126,54 @@ Omitting a key entirely leaves the default in place. Under `required-keys`, a do
 mapped to an empty value clears that type's extra requirements; unlisted types keep
 theirs. An unknown doc-type name there is a configuration error, so a typo cannot silently
 disable a requirement.
+
+### Technologies drive three things at once
+
+`technologies` is the list of stacks this repository declares a coding standard for. It is
+empty by default, because no repository has a standard until it says what it writes code in,
+and a seeded list would scaffold standards for stacks a host does not have.
+
+Declaring one and re-running `docs init`:
+
+1. creates `<docs-root>/standards/<technology>/` with a standard to fill in;
+2. publishes `<technology-coding-standard>` in the configuration registry;
+3. legalizes `technology: <technology>` in that standard's frontmatter.
+
+One list, so the three cannot disagree — a standard whose folder, registry property and
+frontmatter came from separate sources is one that drifts the first time a name changes. A
+value is a slug: lowercase letters, digits and single hyphens, because it becomes a directory
+name.
+
+## The configuration registry
+
+`config-reg` publishes repository paths under stable names, rendered by `docs init` into the
+generated block of the repository root `AGENTS.md`. A portable skill resolves
+`<component-catalog>` rather than embedding `../../docs/catalog.md`, so it stays correct in a
+repository that puts its documentation somewhere else.
+
+Everything `docs init` creates is **derived**, not stored: the docs root and the declared
+technologies produce `<docs-root>`, `<documentation-index>`, `<component-catalog>`,
+`<standards-root>`, `<plan-index>`, `<specification-index>`, `<todo-index>`, `<adr-index>`,
+`<rules-index>`, `<reference-index>`, and one property per technology. A stored copy would go
+stale the day `docs-root` moved, and the operator would be repairing values they never wrote.
+
+Name only what is yours:
+
+```yaml
+config-reg:
+  auth-design: docs/reference/auth-design.md
+  azure-naming-standard: docs/reference/azure-naming-standards.md
+```
+
+An addition may reuse a built-in name, which replaces that entry in place — a repository that
+keeps its ADRs elsewhere says so here. What it cannot do is remove a name, because a skill
+resolving properties by name cannot tell a missing one from a typo. Paths are
+repository-relative and must stay inside it; property names are slugs, since a skill types
+them by hand.
+
+`docs validate` reports a property pointing at nothing as `KW-CONFIG-REG-001` and a rendered
+block that no longer matches configuration as `KW-CONFIG-REG-002`, but only once a repository
+has adopted the registry — see [governance](docgraph/governance.md).
 
 ### Several documentation roots
 
@@ -254,10 +308,11 @@ drift.
 
 ## This repository's own config
 
-Kyber-Weave governs its own documentation with exactly two overrides —
+Kyber-Weave governs its own documentation with three overrides —
 [`.kyber-weave/kyber-weave.yml`](../.kyber-weave/kyber-weave.yml). The docs root moves to
-`docs/`, and the inherited exclusions are cleared. Everything else is product default,
-which is the intended shape of a host config.
+`docs/`, the inherited exclusions are cleared, and one technology is declared: this repository
+is C# and nothing else. Everything else is product default, which is the intended shape of a
+host config.
 
 ## Related
 

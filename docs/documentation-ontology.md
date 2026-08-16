@@ -48,6 +48,7 @@ code-refs:
 | `status` | Currency of the document, from the closed set below. |
 | `component` | The unit of the system this document covers. Must exist in [catalog.md](catalog.md). |
 | `source-root` | Repository-relative path to that component's source. Must exist on disk. |
+| `technology` | The stack a coding standard governs. Declared in configuration, and equal to the folder the standard sits in. Rejected on any other doc-type. |
 | `owner` | Who answers for it. Must exist in [catalog.md](catalog.md). |
 | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error, not a warning. |
 | `code-refs` | Symbols this document formally claims to describe. Resolved against the code graph. |
@@ -62,9 +63,19 @@ open vocabulary is not a vocabulary — it is a text field that drifts until two
 of the same kind carry different labels and neither can be found by the other's name.
 
 **Doc types** — `architecture`, `onboarding`, `requirements`, `adr`, `plan`, `spec`, `todo`,
-`runbook`, `reference`, `rule`, `governance`, `index`
+`runbook`, `reference`, `rule`, `governance`, `index`, `coding-standard`
 
 **Statuses** — `current`, `draft`, `needs-review`, `superseded`
+
+**Technologies** — whatever `ontology.technologies` declares. Empty until a repository says
+which stacks it writes code in. That one list creates each standard's folder, publishes its
+property in the [configuration registry](../AGENTS.md), and legalizes the value here, so the
+three cannot disagree.
+
+A `coding-standard` is how one technology's code is written *in this repository*. It is
+distinct from `rule`, which governs the repository as a whole regardless of language, and it
+is what a portable agent resolves when it needs the local answer rather than the default it
+shipped with.
 
 Adding a member is a change to the ontology, made in
 [`.kyber-weave/kyber-weave.yml`](../.kyber-weave/kyber-weave.yml) — not an authoring
@@ -91,7 +102,11 @@ not make a reference document complete.
 | `plan` | `component` |
 | `spec` | `component` |
 | `todo` | `component` |
+| `coding-standard` | `technology` |
 | `adr`, `reference`, `rule`, `governance`, `index` | — base keys only |
+
+A standard takes no `component`: one language's standard governs code in every component the
+catalog lists, so naming one of them would be a false claim about its reach.
 
 ## The pairing invariant
 

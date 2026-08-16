@@ -10,4 +10,11 @@ internal sealed class KyberWeaveYamlDocument
     public DocsAnalysisYamlSection? DocsAnalysis { get; set; }
 
     public SquadYamlSection? Squad { get; set; }
+
+    /// <summary>
+    /// Host additions to the configuration registry, as property name to repository-relative
+    /// path. Bound as a plain map because the property names are the host's vocabulary, not
+    /// a schema this type could enumerate.
+    /// </summary>
+    public Dictionary<string, string>? ConfigReg { get; set; }
 }

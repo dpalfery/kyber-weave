@@ -40,6 +40,14 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-SPEC-004` | `component` or `owner` is not a row in [catalog.md](../catalog.md) |
 | `KW-DOC-SPEC-005` | `source-root` names a path that does not exist |
 | `KW-DOC-SPEC-006` | Duplicate `id`, or `decided-by` / `supersedes` referencing an unknown id |
+| `KW-DOC-SPEC-007` | `technology` declared on a document that is not a coding standard, or naming a technology other than its folder |
+| `KW-CONFIG-REG-001` | A configuration registry property names a path that does not exist |
+| `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
+
+The two `KW-CONFIG-REG` rules fire only once a repository has adopted the registry — its
+`AGENTS.md` carries the generated block, or it declared `config-reg` entries. A corpus that
+predates the registry is silent rather than failing on a structure it never asked for. Both
+are fixed by re-running `docs init`, which regenerates the block.
 
 `KW-DOC-SPEC-004` and `-006` carry a **nearest-match hint** computed by edit distance,
 offered only when the distance is plausibly a typo rather than a different word. A

@@ -18,6 +18,22 @@ public sealed class DocSpecValidator
     public const string SourceRootMissing = "KW-DOC-SPEC-005";
     public const string BadReference = "KW-DOC-SPEC-006";
 
+    /// <summary>
+    /// A <c>technology</c> declaration that does not match its context: carried by a document
+    /// that is not a coding standard, or naming a technology other than the folder it sits in.
+    /// </summary>
+    public const string MisplacedTechnology = "KW-DOC-SPEC-007";
+
+    /// <summary>
+    /// The scalar keys the required-key matrix can demand beyond the base set.
+    /// </summary>
+    /// <remarks>
+    /// Enumerated rather than reflected so that a key a host invents in
+    /// <c>ontology.required-keys</c> keeps being ignored: frontmatter tolerates unknown keys
+    /// by design, and a value this type cannot read is one it cannot honestly say is missing.
+    /// </remarks>
+    private static readonly string[] TypedKeys = ["component", "source-root", "technology"];
+
     private readonly string _repoRoot;
     private readonly OntologyConfig _config;
 
@@ -143,6 +159,9 @@ public sealed class DocSpecValidator
         // --- KW-DOC-SPEC-003: per-doc-type requirements ---------------------------------
         ValidateRequiredForType(doc, report);
 
+        // --- KW-DOC-SPEC-002 / -007: the technology declaration -------------------------
+        ValidateTechnology(doc, report);
+
         // --- KW-DOC-SPEC-004: catalog vocabularies --------------------------------------
         if (!string.IsNullOrWhiteSpace(fm.Component) &&
             set.Components.Count > 0 &&
@@ -225,11 +244,11 @@ public sealed class DocSpecValidator
     {
         DocumentFrontmatter fm = doc.Frontmatter;
 
-        if (_config.IsRequired(doc.DocType, "component"))
-            RequireValue(fm.Component, "component", doc, report);
-
-        if (_config.IsRequired(doc.DocType, "source-root"))
-            RequireValue(fm.SourceRoot, "source-root", doc, report);
+        foreach (string key in TypedKeys)
+        {
+            if (_config.IsRequired(doc.DocType, key))
+                RequireValue(GetFrontmatterValue(fm, key), key, doc, report);
+        }
 
         // Architecture and runbook keep the source-root ↔ code-refs pairing invariant:
         // naming a source root without symbols (or symbols without a root) is incomplete.
@@ -257,6 +276,72 @@ public sealed class DocSpecValidator
         }
     }
 
+    /// <summary>
+    /// Checks the <c>technology</c> declaration against the three things that must agree
+    /// about it: the doc-type that takes the key, the closed vocabulary the host declared,
+    /// and the folder the document sits in.
+    /// </summary>
+    /// <remarks>
+    /// A missing declaration on a standard is left to the required-key matrix, which already
+    /// reports it as <c>KW-DOC-SPEC-003</c>. What is checked here is a declaration that
+    /// exists and disagrees with its surroundings — the case that produces a standard nothing
+    /// can resolve, because the registry publishes a property per declared technology and
+    /// points it at the folder of the same name.
+    /// </remarks>
+    private void ValidateTechnology(DocumentModel doc, DiagnosticReport report)
+    {
+        string? declared = doc.Frontmatter.Technology;
+        if (string.IsNullOrWhiteSpace(declared))
+            return;
+
+        string technology = declared.Trim();
+
+        if (doc.DocType != DocType.CodingStandard)
+        {
+            report.Add(new Diagnostic(
+                MisplacedTechnology, Severity.Error,
+                $"technology '{technology}' is declared on a '{doc.Frontmatter.DocType}' document.",
+                doc.Subject, doc.RelativePath,
+                "Only a coding-standard is scoped by technology. Drop the key, or make the " +
+                "document a coding-standard."));
+            return;
+        }
+
+        if (!_config.Technologies.Contains(technology, StringComparer.Ordinal))
+        {
+            report.Add(new Diagnostic(
+                InvalidVocabulary, Severity.Error,
+                $"technology '{technology}' is not declared by this repository.",
+                doc.Subject, doc.RelativePath,
+                Nearest(technology, _config.Technologies) is { } near
+                    ? $"Closest declared technology: '{near}'."
+                    : "Add it to ontology.technologies in .kyber-weave/kyber-weave.yml and " +
+                      "re-run docs init, which creates its folder and publishes its registry property."));
+            return;
+        }
+
+        string folder = ContainingFolder(doc.RelativePath);
+        if (!string.Equals(folder, technology, StringComparison.Ordinal))
+        {
+            report.Add(new Diagnostic(
+                MisplacedTechnology, Severity.Error,
+                $"technology '{technology}' does not match the containing folder '{folder}'.",
+                doc.Subject, doc.RelativePath,
+                $"A standard for '{technology}' lives in a folder of that name — the registry " +
+                "property points there."));
+        }
+    }
+
+    /// <summary>Name of the directory a repository-relative path sits in, or empty.</summary>
+    private static string ContainingFolder(string relativePath)
+    {
+        int end = relativePath.LastIndexOf('/');
+        if (end <= 0) return string.Empty;
+
+        int start = relativePath.LastIndexOf('/', end - 1);
+        return relativePath[(start + 1)..end];
+    }
+
     private bool IsKnownDocType(string value) =>
         _config.DocTypes.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
 
@@ -274,6 +359,7 @@ public sealed class DocSpecValidator
             "status" => fm.Status,
             "component" => fm.Component,
             "source-root" => fm.SourceRoot,
+            "technology" => fm.Technology,
             _ => null
         };
 

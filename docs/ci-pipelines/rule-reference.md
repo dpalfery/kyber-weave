@@ -25,6 +25,17 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | `KW-DOC-SPEC-004` | Error | `component` or `owner` absent from the catalog |
 | `KW-DOC-SPEC-005` | Error | `source-root` path does not exist |
 | `KW-DOC-SPEC-006` | Error | Duplicate `id`, or reference to an unknown id |
+| `KW-DOC-SPEC-007` | Error | `technology` on a document that is not a coding standard, or naming a different technology than its folder |
+
+### Configuration registry — `docs validate`
+
+Reported only once a repository has adopted the registry: its `AGENTS.md` carries the
+generated block, or it declared `config-reg` entries of its own.
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-CONFIG-REG-001` | Error | A registry property names a path that does not exist |
+| `KW-CONFIG-REG-002` | Error | The rendered `AGENTS.md` block no longer matches configuration |
 
 ### Drift — `docs drift`
 

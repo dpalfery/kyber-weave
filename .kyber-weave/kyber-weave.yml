@@ -9,3 +9,9 @@ ontology:
   # The product defaults exclude five DevOps paths that exist only in the origin
   # repository. An empty list clears them rather than carrying dead exclusions forward.
   excluded-files: []
+
+  # This repository is C# and nothing else, so it declares one technology. The list is what
+  # creates docs/standards/dotnet/, publishes <dotnet-coding-standard> in the registry, and
+  # legalizes 'technology: dotnet' in that standard's frontmatter.
+  technologies:
+    - dotnet

@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Model;
@@ -71,9 +72,114 @@ internal sealed class DocFixture : IDisposable
 
     public DiagnosticReport Validate() => new DocSpecValidator(Root).Validate(Load());
 
+    /// <summary>Validates against a host ontology — the technologies a repository declared.</summary>
+    public DiagnosticReport Validate(OntologyConfig ontology) =>
+        new DocSpecValidator(Root, ontology).Validate(new DocumentLoader(Root, ontology).Load());
+
     public void Dispose()
     {
         if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true);
+    }
+}
+
+/// <summary>
+/// A standard's technology must agree with the vocabulary, the doc-type and the folder,
+/// because the configuration registry publishes one property per declared technology and
+/// points it at the folder of that name. Any disagreement produces a standard that
+/// nothing resolves.
+/// </summary>
+public class TechnologyDeclarationTests
+{
+    private static readonly OntologyConfig DotnetDeclared =
+        new OntologyConfig { Technologies = ["dotnet"] };
+
+    private static string Standard(string technology, string docType = "coding-standard") =>
+        $"""
+        ---
+        id: standards/{technology}
+        title: {technology} coding standard
+        doc-type: {docType}
+        status: current
+        technology: {technology}
+        owner: Maintainers
+        last-reviewed: 2026-07-21
+        ---
+
+        # {technology}
+        """;
+
+    [Fact]
+    public void DeclaredTechnologyInItsOwnFolderHasNoFindings()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/README.md", Standard("dotnet"));
+
+        Assert.False(fixture.Validate(DotnetDeclared).HasErrors);
+    }
+
+    [Fact]
+    public void UndeclaredTechnologyIsSPEC002()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/rust/README.md", Standard("rust"));
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.InvalidVocabulary);
+    }
+
+    [Fact]
+    public void MissingTechnologyOnAStandardIsSPEC003()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/README.md", """
+                ---
+                id: standards/dotnet
+                title: dotnet coding standard
+                doc-type: coding-standard
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-07-21
+                ---
+                """);
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MissingRequiredKey);
+    }
+
+    [Fact]
+    public void TechnologyOnAnotherDocTypeIsSPEC007()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/README.md", Standard("dotnet", docType: "reference"));
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MisplacedTechnology);
+    }
+
+    [Fact]
+    public void TechnologyDisagreeingWithItsFolderIsSPEC007()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/backend/README.md", Standard("dotnet"));
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i => i.Code == DocSpecValidator.MisplacedTechnology);
+    }
+
+    /// <summary>
+    /// A standard covers code in every component, so requiring one would be a false claim
+    /// about its reach — and asserting that here keeps a later "make it consistent with
+    /// the other types" edit from quietly introducing one.
+    /// </summary>
+    [Fact]
+    public void AStandardNeedsNoComponent()
+    {
+        Assert.False(OntologyConfig.ProductDefaults.IsRequired(DocType.CodingStandard, "component"));
+        Assert.True(OntologyConfig.ProductDefaults.IsRequired(DocType.CodingStandard, "technology"));
     }
 }
 

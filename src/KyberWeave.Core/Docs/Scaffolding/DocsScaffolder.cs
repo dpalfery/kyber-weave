@@ -84,6 +84,9 @@ public static class DocsScaffolder
     private const string AnalysisCacheIgnorePath = ".kyber-weave/.gitignore";
     private const string AnalysisCacheIgnoreEntry = "cache/";
 
+    /// <summary>The one file the configuration registry is rendered into.</summary>
+    private const string AgentsFilePath = "AGENTS.md";
+
     /// <summary>Roots checked, in order, when no docs root is supplied.</summary>
     private static readonly string[] ConventionalRoots = ["docs", "6-Docs", "doc", "documentation"];
 
@@ -112,15 +115,40 @@ public static class DocsScaffolder
         // pointing at a docs root that the very next write then rejects.
         RequireContained(root, resolvedDocsRoot, nameof(docsRoot));
 
+        // The registry publishes paths under the root being scaffolded into, which is not
+        // necessarily the one the loaded configuration names — an operator moving the corpus
+        // with --docs-root would otherwise get a registry describing where it used to be.
+        OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults)
+            .Ontology.WithDocsRoot(resolvedDocsRoot);
+
         List<ScaffoldedFile> files = new List<ScaffoldedFile>
         {
             WriteHostConfig(root, resolvedDocsRoot),
             WriteAnalysisCacheIgnore(root),
-            Write(root, $"{resolvedDocsRoot}/documentation-ontology.md",
+            Write(root, DocsLayout.Ontology(resolvedDocsRoot),
                 OntologyReference(resolvedDocsRoot, resolvedOwner), force),
             Write(root, $"{resolvedDocsRoot}/catalog.md",
-                Catalog(resolvedOwner), force)
+                Catalog(resolvedOwner), force),
+            Write(root, DocsLayout.Index(resolvedDocsRoot),
+                DocumentationIndex(resolvedDocsRoot, resolvedOwner), force)
         };
+
+        foreach (string folder in DocsLayout.Folders)
+        {
+            files.Add(Write(root, DocsLayout.FolderIndex(resolvedDocsRoot, folder),
+                FolderIndex(folder, resolvedOwner), force));
+        }
+
+        foreach (string technology in ontology.Technologies)
+        {
+            files.Add(Write(root, DocsLayout.TechnologyStandard(resolvedDocsRoot, technology),
+                TechnologyStandard(technology, resolvedOwner), force));
+        }
+
+        files.Add(WriteConfigReg(
+            root,
+            resolvedDocsRoot,
+            (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg.Resolve(ontology)));
 
         return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files);
     }
@@ -294,6 +322,46 @@ public static class DocsScaffolder
     }
 
     /// <summary>
+    /// Renders the configuration registry into the repository root <c>AGENTS.md</c>, creating
+    /// that file when the repository has none.
+    /// </summary>
+    /// <remarks>
+    /// A repository with no agent instructions file is the one that gains most from a
+    /// registry, so the absent case is created rather than skipped. The generated region is
+    /// rewritten whether or not <c>force</c> was passed — <c>force</c> governs hand-authored
+    /// content, and this block is neither hand-authored nor safe to leave stale.
+    /// </remarks>
+    private static ScaffoldedFile WriteConfigReg(
+        string repoRoot,
+        string docsRoot,
+        IReadOnlyList<ConfigRegEntry> entries)
+    {
+        string absolute = RequireContained(repoRoot, AgentsFilePath, nameof(repoRoot));
+        string block = ConfigRegMarkdown.Render(entries);
+
+        if (!File.Exists(absolute))
+        {
+            File.WriteAllText(absolute, ConfigRegMarkdown.NewAgentsFile(block, docsRoot));
+            return new ScaffoldedFile(
+                AgentsFilePath, ScaffoldOutcome.Created, "Config Reg, and a file to hold it");
+        }
+
+        string existing = File.ReadAllText(absolute);
+        string updated = ConfigRegMarkdown.Splice(existing, block);
+        if (string.Equals(existing, updated, StringComparison.Ordinal))
+        {
+            return new ScaffoldedFile(
+                AgentsFilePath, ScaffoldOutcome.Preserved, "Config Reg already current");
+        }
+
+        File.WriteAllText(absolute, updated);
+        return new ScaffoldedFile(
+            AgentsFilePath,
+            ScaffoldOutcome.Updated,
+            "Config Reg block only; everything outside the markers is untouched");
+    }
+
+    /// <summary>
     /// Establishes the narrow repository-local cache exclusion without regenerating the
     /// operator's other ignore rules.
     /// </summary>
@@ -442,6 +510,16 @@ public static class DocsScaffolder
           # was first built for. An empty list clears them.
           excluded-files: []
 
+          # Technologies this repository declares a coding standard for. Adding one and
+          # re-running 'docs init' creates {docsRoot}/standards/<technology>/, publishes its
+          # registry property, and legalizes that value in the standard's 'technology' key.
+          technologies: []
+
+        # Additions to the configuration registry rendered into AGENTS.md. Everything
+        # 'docs init' creates is already published; name only what is yours.
+        # config-reg:
+        #   auth-design: {docsRoot}/reference/auth-design.md
+
         """;
     }
 
@@ -485,6 +563,162 @@ public static class DocsScaffolder
 
     private static string Today =>
         DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// What each scaffolded folder is for, as the paragraph its README opens with. Wrapped
+    /// here rather than left to the editor, so a generated document matches the width of the
+    /// hand-authored ones beside it.
+    /// </summary>
+    private static (string Title, string Purpose) FolderIdentity(string folder) => folder switch
+    {
+        DocsLayout.Standards => ("Coding standards",
+            "How code is written in this repository, one directory per technology. A standard\n"
+            + "is project-specific; the agents and skills that read it are not, which is why they\n"
+            + "resolve it through the configuration registry rather than carrying their own."),
+        "plans" => ("Plans",
+            "Sequenced implementation work: what will be done, in what order, and how it will be\n"
+            + "verified. A plan is a record of intent rather than current guidance — retrieval\n"
+            + "demotes it accordingly, and it is archived once closed."),
+        "specs" => ("Specifications",
+            "Upfront specification work for a greenfield project or a large feature, written when\n"
+            + "requirements and architecture still need defining before a plan can exist."),
+        "todo" => ("Todos",
+            "Work identified but not done now — a finding, a deferred fix, a declined suggestion.\n"
+            + "Capturing it here is what stops it evaporating between sessions."),
+        "adr" => ("Architecture decision records",
+            "One record per architectural decision: what was decided, the alternatives, and why.\n"
+            + "An ADR is never edited to say something else — it is superseded."),
+        "rules" => ("Rules",
+            "Repository-wide rules that govern how the system is built, independent of any one\n"
+            + "technology. A rule about one language belongs in that technology's coding standard."),
+        "reference" => ("Reference",
+            "Reference material with no other home: environment variables, naming standards, the\n"
+            + "external systems this repository depends on."),
+        _ => throw new InvalidOperationException($"No identity defined for scaffolded folder '{folder}'.")
+    };
+
+    private static string FolderIndex(string folder, string owner)
+    {
+        (string title, string purpose) = FolderIdentity(folder);
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        string body = folder == DocsLayout.Standards
+            ? StandardsRegistry()
+            : $"Add one document per {title.TrimEnd('s').ToLowerInvariant()} and list it here.\n";
+
+        return $"""
+        ---
+        id: {folder}/index
+        title: {title}
+        doc-type: index
+        status: draft
+        owner: {yamlOwner}
+        last-reviewed: {Today}
+        ---
+
+        # {title}
+
+        {purpose}
+
+        {body}
+        """;
+    }
+
+    /// <summary>
+    /// The standards folder's README: how a technology comes to have a standard here.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a table of the declared technologies. This file is scaffolding, which
+    /// means it is written once and never regenerated, so a list inside it would be wrong the
+    /// first time a technology was added. The registry in <c>AGENTS.md</c> is regenerated on
+    /// every run and is therefore the one place that list can be trusted.
+    /// </remarks>
+    private static string StandardsRegistry() =>
+        """
+        ## Declaring a technology
+
+        Add it to `ontology.technologies` in `.kyber-weave/kyber-weave.yml` and re-run
+        `kyber-weave docs init`. That one list creates the technology's folder, publishes its
+        `<name-coding-standard>` property in the Config Reg block of the repository root
+        `AGENTS.md`, and legalizes the `technology` value in the standard's frontmatter — so
+        the three cannot disagree.
+
+        A technology name is a slug: lowercase letters, digits and single hyphens.
+
+        The declared technologies are listed in that registry, which is regenerated on every
+        run. This file is not.
+
+        """;
+
+    private static string TechnologyStandard(string technology, string owner)
+    {
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
+        ---
+        id: standards/{technology}
+        title: {technology} coding standard
+        doc-type: coding-standard
+        status: draft
+        technology: {technology}
+        owner: {yamlOwner}
+        last-reviewed: {Today}
+        ---
+
+        # {technology} coding standard
+
+        How {technology} code is written in this repository. Agents and skills resolve this
+        document as `<{technology}{ConfigRegConfig.CodingStandardSuffix}>` in the repository
+        root `AGENTS.md`, so what it says here outranks whatever defaults a portable agent
+        shipped with.
+
+        Replace this file with the rules that actually apply, and promote `status` to
+        `current`. A standard that restates a language's own documentation is noise; write the
+        decisions this repository has made and would otherwise have to re-argue.
+
+        ## Structure
+
+        ## Naming
+
+        ## Error handling
+
+        ## Testing
+
+        """;
+    }
+
+    private static string DocumentationIndex(string docsRoot, string owner)
+    {
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        return $"""
+        ---
+        id: documentation-index
+        title: Documentation
+        doc-type: index
+        status: draft
+        owner: {yamlOwner}
+        last-reviewed: {Today}
+        ---
+
+        # Documentation
+
+        The governed documentation corpus for this repository. Every document under
+        `{docsRoot}/` conforms to [the documentation ontology](documentation-ontology.md) and is
+        checked by `kyber-weave docs validate` and `kyber-weave docs drift`.
+
+        | Directory | Holds |
+        |---|---|
+        | [standards/](standards/README.md) | Coding standards, one per technology |
+        | [plans/](plans/README.md) | Sequenced implementation work |
+        | [specs/](specs/README.md) | Upfront specification work |
+        | [todo/](todo/README.md) | Work identified but not done now |
+        | [adr/](adr/README.md) | Architecture decision records |
+        | [rules/](rules/README.md) | Repository-wide rules |
+        | [reference/](reference/README.md) | Reference material |
+
+        [`catalog.md`](catalog.md) is the authoritative vocabulary for the `component` and
+        `owner` keys. Start there when adding a document for something new.
+
+        """;
+    }
 
     private static string OntologyReference(string docsRoot, string owner)
     {
@@ -533,6 +767,7 @@ public static class DocsScaffolder
         | `status` | Currency of the document, from the closed set below. |
         | `component` | The unit of the system this covers. Must exist in `catalog.md`. |
         | `source-root` | Repository-relative path to that component's source. Must exist. |
+        | `technology` | The stack a coding standard governs. Declared in configuration; matches its folder. |
         | `owner` | Who answers for it. Must exist in `catalog.md`. |
         | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error. |
         | `code-refs` | Symbols this document formally claims. Resolved against the code graph. |
@@ -543,9 +778,13 @@ public static class DocsScaffolder
         ## Closed vocabularies
 
         **doc-type** — `architecture`, `onboarding`, `requirements`, `adr`, `plan`, `spec`,
-        `runbook`, `reference`, `rule`, `governance`, `index`
+        `todo`, `runbook`, `reference`, `rule`, `governance`, `index`, `coding-standard`
 
         **status** — `current`, `draft`, `needs-review`, `superseded`
+
+        **technology** — whatever `ontology.technologies` declares. Empty until this
+        repository says which stacks it writes code in, which is also what creates each
+        standard's folder and its registry property.
 
         A value outside these sets is an error. An open vocabulary is not a vocabulary — it
         is a text field that drifts until two documents of the same kind carry different
@@ -559,9 +798,13 @@ public static class DocsScaffolder
 
         | Doc type | Additionally required |
         |---|---|
-        | `architecture`, `requirements`, `runbook`, `plan`, `spec` | `component` |
+        | `architecture`, `requirements`, `runbook`, `plan`, `spec`, `todo` | `component` |
         | `onboarding` | `component`, `source-root` |
+        | `coding-standard` | `technology` |
         | `adr`, `reference`, `rule`, `governance`, `index` | — |
+
+        A standard takes no `component`: a language's standard governs code in every component
+        the catalog lists, so naming one of them would be a false claim about its reach.
 
         ## The pairing invariant
 

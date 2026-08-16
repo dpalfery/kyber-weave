@@ -56,6 +56,30 @@ public class DocumentIndexRankingTests
     }
 }
 
+/// <summary>
+/// What each doc-type is worth as current guidance. A coding standard is the answer to "how
+/// should this be written", so it is neither demoted like a record of intent nor boosted
+/// above the architecture document on every question that happens to mention code.
+/// </summary>
+public class DocumentAuthorityTests
+{
+    private static DocumentModel Doc(DocType docType) => new DocumentModel
+    {
+        RelativePath = "6-Docs/x.md",
+        FilePath = "/tmp/6-Docs/x.md",
+        HasFrontmatter = true,
+        DocType = docType,
+        Status = DocStatus.Current
+    };
+
+    [Fact]
+    public void ACodingStandardCarriesUndemotedAuthority()
+    {
+        Assert.Equal(DocumentIndex.Authority(Doc(DocType.Reference)), DocumentIndex.Authority(Doc(DocType.CodingStandard)));
+        Assert.True(DocumentIndex.Authority(Doc(DocType.Plan)) < DocumentIndex.Authority(Doc(DocType.CodingStandard)));
+    }
+}
+
 public class DocumentSectionTests
 {
     /// <summary>

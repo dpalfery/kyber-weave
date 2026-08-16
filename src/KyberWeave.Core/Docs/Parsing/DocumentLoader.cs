@@ -251,6 +251,7 @@ public sealed partial class DocumentLoader
             "rule" => DocType.Rule,
             "governance" => DocType.Governance,
             "index" => DocType.Index,
+            "coding-standard" => DocType.CodingStandard,
             _ => DocType.Unknown
         };
 

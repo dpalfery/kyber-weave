@@ -734,8 +734,121 @@ public sealed class DocsScaffolderTests : IDisposable
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
 
-        Assert.Equal(2, set.Documents.Count);
+        // The ontology reference, the catalog, the corpus index, and one index per
+        // scaffolded folder — every file the command claims to have written is governed.
+        Assert.Equal(3 + DocsLayout.Folders.Count, set.Documents.Count);
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
         Assert.Equal(result.DocsRoot, ontology.DocsRoot);
+    }
+
+    /// <summary>
+    /// Structure is created by code, not left to a skill: a folder that exists only when
+    /// someone remembered to make it is a folder half the repositories will not have.
+    /// </summary>
+    [Fact]
+    public void CreatesEveryCanonicalFolderWithItsOwnIndex()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        foreach (string folder in DocsLayout.Folders)
+        {
+            Assert.Contains($"id: {folder}/index", Read($"docs/{folder}/README.md"), StringComparison.Ordinal);
+            Assert.Contains("doc-type: index", Read($"docs/{folder}/README.md"), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void PublishesTheRegistryInANewAgentsFileWhenTheRepositoryHasNone()
+    {
+        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        string agents = Read("AGENTS.md");
+        Assert.Contains(ConfigRegMarkdown.StartMarker, agents, StringComparison.Ordinal);
+        Assert.Contains("- **<docs-root>**: `docs`", agents, StringComparison.Ordinal);
+        Assert.Contains("- **<component-catalog>**: `docs/catalog.md`", agents, StringComparison.Ordinal);
+        Assert.Contains(result.Files, f => f.RelativePath == "AGENTS.md" && f.Outcome == ScaffoldOutcome.Created);
+    }
+
+    /// <summary>
+    /// The block is generated and the rest of the file is not. A run rewrites the one and
+    /// returns the other byte for byte — including without <c>--force</c>, because a stale
+    /// registry sends agents to paths that moved.
+    /// </summary>
+    [Fact]
+    public void RewritesOnlyTheGeneratedRegionOfAHandAuthoredAgentsFile()
+    {
+        File.WriteAllText(Path.Combine(_temp.Path, "AGENTS.md"),
+            $"""
+            # Working in this repository
+
+            Hand-authored guidance that must survive.
+
+            {ConfigRegMarkdown.StartMarker}
+            - **<docs-root>**: `somewhere-else`
+            {ConfigRegMarkdown.EndMarker}
+
+            ## House style
+
+            Also hand-authored.
+            """);
+
+        DocsScaffolder.Scaffold(_temp.Path, "docs", force: false);
+
+        string agents = Read("AGENTS.md");
+        Assert.Contains("Hand-authored guidance that must survive.", agents, StringComparison.Ordinal);
+        Assert.Contains("Also hand-authored.", agents, StringComparison.Ordinal);
+        Assert.Contains("- **<docs-root>**: `docs`", agents, StringComparison.Ordinal);
+        Assert.DoesNotContain("somewhere-else", agents, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RerunningLeavesAnAlreadyCurrentRegistryAlone()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        string first = Read("AGENTS.md");
+
+        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        Assert.Equal(first, Read("AGENTS.md"));
+        Assert.Contains(second.Files, f => f.RelativePath == "AGENTS.md" && f.Outcome == ScaffoldOutcome.Preserved);
+    }
+
+    /// <summary>
+    /// One declared list creates the folder, publishes the registry property, and legalizes
+    /// the frontmatter value — so a freshly scaffolded standard validates without an edit.
+    /// </summary>
+    [Fact]
+    public void ADeclaredTechnologyIsScaffoldedPublishedAndValid()
+    {
+        WriteHostConfig("ontology:\n  docs-root: docs\n  technologies:\n    - github-actions\n");
+
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        string standard = Read("docs/standards/github-actions/README.md");
+        Assert.Contains("doc-type: coding-standard", standard, StringComparison.Ordinal);
+        Assert.Contains("technology: github-actions", standard, StringComparison.Ordinal);
+        Assert.Contains(
+            "- **<github-actions-coding-standard>**: `docs/standards/github-actions/README.md`",
+            Read("AGENTS.md"),
+            StringComparison.Ordinal);
+
+        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology)
+            .Validate(new DocumentLoader(_temp.Path, ontology).Load());
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+    }
+
+    /// <summary>
+    /// Replacing to the end of the file would delete whatever an operator wrote below an
+    /// unclosed marker, and which content that is cannot be known here.
+    /// </summary>
+    [Fact]
+    public void RefusesToGuessAtAnUnclosedMarker()
+    {
+        File.WriteAllText(Path.Combine(_temp.Path, "AGENTS.md"),
+            $"# Working here\n\n{ConfigRegMarkdown.StartMarker}\n\n## Mine\n\nKeep me.\n");
+
+        Assert.Throws<InvalidDataException>(() => DocsScaffolder.Scaffold(_temp.Path, "docs"));
+        Assert.Contains("Keep me.", Read("AGENTS.md"), StringComparison.Ordinal);
     }
 }

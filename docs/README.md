@@ -24,6 +24,13 @@ than by reading these files.
 - [The documentation ontology](documentation-ontology.md) — the opinion everything rests on
 - [Component and owner catalog](catalog.md) — the authoritative vocabulary
 - [Configuration](configuration.md) — adapting the defaults to your repository
+- [Coding standards](standards/README.md) — how code is written here, one folder per technology
+
+Agents and skills resolve this corpus by name rather than by path: the **Config Reg** block in
+the repository root [`AGENTS.md`](../AGENTS.md) publishes `<component-catalog>`,
+`<dotnet-coding-standard>` and the rest, and `docs init` regenerates it from
+[configuration](configuration.md). A portable instruction file that names a property stays
+correct in a repository that arranges its documentation differently.
 
 ### The 4 Core Pillars
 
@@ -136,6 +143,10 @@ Start at the [KyberDash Overview](dash/README.md) for value proposition and deve
 
 The cross-cutting infrastructure, diagnostic pipeline, and distribution mechanics supporting the core features:
 
+- [Coding standards](standards/README.md) — Per-technology standards, resolved through the Config Reg
+- [Rules](rules/README.md) — Repository-wide rules, independent of any one technology
+- [Architecture decision records](adr/README.md) — What was decided, and what was rejected
+- [Reference](reference/README.md) — Material with no other home
 - [CI Pipelines Architecture](ci-pipelines/architecture.md) — Rule ids, severities, output formats, exit codes
 - [Rule Reference](ci-pipelines/rule-reference.md) — Every `KW-*` id in one table
 - [Workflow Runbook](ci-pipelines/workflows-runbook.md) — Copy-ready GitHub Actions gates
