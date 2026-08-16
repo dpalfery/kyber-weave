@@ -9,7 +9,7 @@ sources:
   .cursor/agents/react-dev.agent.md: c3b779757917432ec8403622d7920578a1b9c47f07e968ff161912eab25cd68b
   .github/agents/react-dev.agent.md: 0b089376574faafc5b3399032705b64e62482efdea6095e3e162e57aaa6b16a5
   .opencode/agents/react-dev.md: e4ce5052baf16b1c3b9aa13b97d5078927c1dc901d959f8643f80bcf7046499f
-final-body-sha256: 6e94b531f0e46d578c07d9a352c033388d3e63b731f0eba99a8c5ac4e5dcd22f
+final-body-sha256: 2522260387df01579a2868f976c642af25cc1c8acf8d8e32b8ac0aea37318831
 ---
 # react-dev migration
 
