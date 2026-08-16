@@ -79,6 +79,8 @@ Use the `code-review` and `dp-code-reviewer` skills when performing reviews.
          - **UNVERIFIED CLAIMS**: Statements made without proof
          - **INCOMPLETE WORK**: Tasks marked done but not actually finished
          - **VIOLATIONS**: Project rules that were broken
+         - **Static Code Analysis**: call `get_errors` against the workspace, report every finding in changed or newly added files, and resolve all such findings before returning a verdict
+         
 
       8. **BE RELENTLESS**:
          - Don't be satisfied with "it should work"

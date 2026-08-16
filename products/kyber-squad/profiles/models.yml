@@ -4,21 +4,21 @@ profiles:
     default: inherit
     claude: opus
     codex: gpt-5.6-sol
-    copilot: GPT-5.4 mini (copilot)
+    copilot: GPT-5.6 Sol (copilot)
     cursor: gpt-5.6-sol[context=272k,reasoning=high,fast=false]
     opencode: zai-coding-plan/glm-5.2
   fast:
     default: inherit
     claude: haiku
     codex: gpt-5.6-luna
-    copilot: GPT-5.4 mini (copilot)
+    copilot: GPT-5.6 Luna (copilot)
     cursor: composer-2.5[]
     opencode: opencode-go/gpt-5.6-luna
   general:
     default: inherit
     claude: sonnet
     codex: gpt-5.6-terra
-    copilot: GPT-5.4 mini (copilot)
+    copilot: Grok 4.5 (copilot)
     cursor: grok-4.5[]
     opencode: zai-coding-plan/glm-5.2
   orchestration:

@@ -166,6 +166,7 @@ fi
 # ------------------------------------------------------------------- serve local
 
 log "starting the loopback release server"
+SERVER_STARTED_AT="$(date +%s)"
 SERVER_OUT="${SANDBOX}/server.port"
 SERVER_LOG="${SANDBOX}/server.log"
 python3 "${REPO_ROOT}/scripts/local-release-server.py" --root "$RELEASE_TREE" --port 0 \
@@ -242,7 +243,12 @@ if [ -z "$READY" ]; then
 fi
 
 export KYBER_WEAVE_RELEASE_ORIGIN="$ORIGIN"
-log "serving ${RELEASE_TREE} at ${ORIGIN}"
+
+# Readiness took ~36s on a macOS runner against a 60s cap, so the headroom is real but
+# not generous. Reporting it means a drift toward the cap shows up as a rising number
+# in a passing run, rather than as a flake with nothing to compare against.
+SERVER_READY_SECONDS=$(( $(date +%s) - SERVER_STARTED_AT ))
+log "serving ${RELEASE_TREE} at ${ORIGIN} (ready in ${SERVER_READY_SECONDS}s of ${SERVER_START_TIMEOUT:-60}s)"
 
 # ------------------------------------------------------------------ self-update
 

@@ -19,16 +19,22 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>.github/skills/&lt;name&gt;/SKILL.md</c> requiring <c>name</c> and <c>description</c>.
 /// </para>
 /// <para>
-/// Copilot's <c>tools</c> frontmatter key is a flat allow-list of platform-specific tool
-/// names ("Tool names vary across GitHub Copilot platforms" — the docs' own words) with no
-/// published mapping to Kyber-Squad's semantic capability vocabulary
-/// (<c>filesystem.write</c>, <c>network.publish</c>, ...). Guessing a mapping would either
-/// under-grant (breaking the agent) or over-grant (a silent permission widening — exactly
-/// what <see cref="SquadRendererRegistry"/> is built to catch). So <c>tools</c> is left
-/// unset — Copilot's documented default is "all available tools" — and every capability
-/// profile that denies or asks for anything is instead recorded as a
-/// <see cref="SquadDegradationRecord"/> with code <c>permission-not-expressible</c>. That
-/// keeps the gap visible in the deployment receipt rather than silently granting it.
+/// Copilot's <c>tools</c> frontmatter key is a closed allow-list drawn from a documented
+/// built-in vocabulary — <c>execute</c>, <c>read</c>, <c>edit</c>, <c>search</c>,
+/// <c>agent</c>, <c>web</c>, <c>todo</c> — so each semantic capability lowers onto it
+/// directly. Naming any tool withholds every tool not named, MCP server tools included,
+/// which is what makes a <c>deny</c> in the capability profile enforced rather than merely
+/// declared. Omitting the key means "all available tools", so an unset <c>tools</c> is a
+/// silent grant of everything — precisely the permission widening
+/// <see cref="SquadRendererRegistry"/> exists to catch.
+/// </para>
+/// <para>
+/// The lattice is three-state and the allow-list is binary, so only <c>allow</c> grants a
+/// tool. <c>ask</c> narrows to <c>deny</c> — Copilot's frontmatter has no per-tool
+/// confirmation gate — and every narrowing is recorded as a
+/// <see cref="SquadDegradationRecord"/> with code <c>safety-narrowed</c>.
+/// <c>network.publish</c> has no built-in tool at all: it is reachable only through MCP
+/// servers, which the closed allow-list already withholds.
 /// </para>
 /// </remarks>
 public sealed class CopilotRenderer : ISquadRenderer
@@ -38,6 +44,36 @@ public sealed class CopilotRenderer : ISquadRenderer
     private const int MaxAgentBodyCharacters = 30_000;
 
     private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
+
+    /// <summary>
+    /// Lowers the semantic capability vocabulary onto Copilot's built-in tool names,
+    /// verified against GitHub's custom-agent configuration reference on 2026-08-16.
+    /// <c>network.publish</c> is absent deliberately: no built-in tool publishes, so it is
+    /// reachable only via MCP servers that a closed allow-list already withholds.
+    /// </summary>
+    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
+    [
+        ("process.execute", ["execute"]),
+        ("filesystem.read", ["read"]),
+        ("filesystem.search", ["search"]),
+        ("filesystem.write", ["edit"]),
+        ("delegate", ["agent"]),
+        ("network.read", ["web"]),
+    ];
+
+    /// <summary>
+    /// <c>todo</c> is an in-session task list that touches no file, process, or network, so
+    /// it lowers from no capability and is granted to every agent. Withholding it would
+    /// restrict nothing the profiles actually govern.
+    /// </summary>
+    private const string UngovernedTool = "todo";
+
+    /// <summary>
+    /// Emission order, fixed to Copilot's own documented table so a rendered agent file is
+    /// byte-stable regardless of how the profile's permissions enumerate.
+    /// </summary>
+    private static readonly string[] ToolOrder =
+        ["execute", "read", "edit", "search", "agent", "web", UngovernedTool];
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -72,7 +108,11 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         foreach (SquadAgent agent in source.Agents)
         {
-            files.Add(RenderAgent(agent, source.ModelProfiles.Profiles, warnings));
+            files.Add(RenderAgent(
+                agent,
+                source.ModelProfiles.Profiles,
+                source.CapabilityProfiles.Profiles,
+                warnings));
 
             SquadDegradationRecord? degradation = BuildPermissionDegradation(agent, source.CapabilityProfiles.Profiles);
             if (degradation is not null)
@@ -100,6 +140,7 @@ public sealed class CopilotRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         List<SquadRenderWarning> warnings)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -113,6 +154,8 @@ public sealed class CopilotRenderer : ISquadRenderer
         {
             frontmatter["model"] = model;
         }
+
+        frontmatter["tools"] = ResolveTools(agent, capabilityProfiles);
 
         if (agent.Invocation == SquadInvocation.Subagent)
         {
@@ -230,6 +273,39 @@ public sealed class CopilotRenderer : ISquadRenderer
             : profile.Default;
     }
 
+    /// <summary>
+    /// Lowers a capability profile onto Copilot's closed tool allow-list. Only
+    /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
+    /// withhold, which keeps the lowering non-broadening by construction.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveTools(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+    {
+        HashSet<string> granted = new(StringComparer.Ordinal) { UngovernedTool };
+
+        // An unresolvable profile grants nothing beyond the ungoverned tool. SquadSourceValidator
+        // already rejects an agent naming an undeclared profile, so this is unreachable in a
+        // validated bundle — but falling back to "grant everything" here would turn a source
+        // error into a silent permission widening.
+        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
+        {
+            foreach ((string capability, string[] tools) in CapabilityTools)
+            {
+                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                    decision == SquadPermissionDecision.Allow)
+                {
+                    foreach (string tool in tools)
+                    {
+                        granted.Add(tool);
+                    }
+                }
+            }
+        }
+
+        return ToolOrder.Where(granted.Contains).ToArray();
+    }
+
     private static SquadDegradationRecord? BuildPermissionDegradation(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
@@ -239,13 +315,16 @@ public sealed class CopilotRenderer : ISquadRenderer
             return null;
         }
 
-        List<string> restricted = profile.Permissions
-            .Where(pair => pair.Value != SquadPermissionDecision.Allow)
-            .Select(pair => $"{pair.Key}: {pair.Value.ToString().ToLowerInvariant()}")
-            .OrderBy(entry => entry, StringComparer.Ordinal)
+        // 'deny' needs no record: the rendered allow-list withholds the tool, so the
+        // decision is enforced exactly as written. Only 'ask' loses meaning, because
+        // Copilot's frontmatter has no per-tool confirmation gate to lower it onto.
+        List<string> narrowed = profile.Permissions
+            .Where(pair => pair.Value == SquadPermissionDecision.Ask)
+            .Select(pair => pair.Key)
+            .OrderBy(capability => capability, StringComparer.Ordinal)
             .ToList();
 
-        if (restricted.Count == 0)
+        if (narrowed.Count == 0)
         {
             return null;
         }
@@ -254,11 +333,11 @@ public sealed class CopilotRenderer : ISquadRenderer
             Target: "copilot",
             CanonicalIdentity: agent.Name,
             OutputIdentity: agent.Name,
-            Code: "permission-not-expressible",
+            Code: "safety-narrowed",
             InstructionDigest: agent.BodyDigest,
-            Details: $"Capability profile '{agent.CapabilityProfile}' restricts " +
-                $"{string.Join(", ", restricted)}, which Copilot's flat tool allow-list " +
-                "cannot enforce. The agent file omits 'tools' (Copilot's all-tools default) " +
-                "rather than claim a mapping that does not exist.");
+            Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+                $"{string.Join(", ", narrowed)}. Copilot's tool allow-list is binary and " +
+                "cannot prompt for confirmation, so these narrow to 'deny' and the " +
+                "corresponding tools are withheld from the agent's 'tools' list.");
     }
 }
