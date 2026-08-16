@@ -84,19 +84,19 @@ internal static class BinaryInstaller
 
     internal static void ClearMacQuarantine(string path)
     {
-        ProcessStartInfo startInfo = new ProcessStartInfo("xattr")
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = true,
-            UseShellExecute = false
-        };
-        startInfo.ArgumentList.Add("-d");
-        startInfo.ArgumentList.Add("com.apple.quarantine");
-        startInfo.ArgumentList.Add(path);
-
         try
         {
+            ProcessStartInfo startInfo = new ProcessStartInfo("xattr")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add("-d");
+            startInfo.ArgumentList.Add("com.apple.quarantine");
+            startInfo.ArgumentList.Add(path);
+
             ProcessRunner.Run(startInfo, string.Empty);
         }
         catch (Exception)

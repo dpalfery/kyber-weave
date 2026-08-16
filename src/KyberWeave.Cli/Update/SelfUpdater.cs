@@ -220,7 +220,16 @@ internal sealed class SelfUpdater : IDisposable
     {
         BinaryInstaller.Replace(extractedPath, destination, windows);
         if (_host.IsMacOs)
-            BinaryInstaller.ClearMacQuarantine(destination);
+        {
+            try
+            {
+                BinaryInstaller.ClearMacQuarantine(destination);
+            }
+            catch (Exception)
+            {
+                // Non-fatal best-effort
+            }
+        }
 
         _log($"installed {baseName} {ReleaseVersion.Normalize(tag)} → {destination}");
     }

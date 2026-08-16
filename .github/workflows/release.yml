@@ -182,9 +182,43 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  pack-squad:
+    name: Package Kyber-Squad
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build CLI
+        run: >
+          dotnet build src/KyberWeave.Cli/KyberWeave.Cli.csproj
+          -c ${{ env.CONFIGURATION }}
+          -p:Version=${{ needs.version.outputs.version }}
+
+      - name: Pack Squad (APM and Plugins)
+        run: >
+          dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --
+          squad pack --format all --out ./dist-squad --version ${{ needs.version.outputs.version }}
+
+      - name: Upload Squad archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: squad-archives
+          path: |
+            dist-squad/kyber-squad-*.zip
+            dist-squad/kyber-squad-plugin-*.zip
+          retention-days: 14
+          if-no-files-found: error
+
   release:
     name: GitHub Release
-    needs: [version, build]
+    needs: [version, build, pack-squad]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
     permissions:
@@ -193,10 +227,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Download all RID archives
+      - name: Download all release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: binaries-*
+          pattern: "*"
           path: release-assets
           merge-multiple: true
 
@@ -230,10 +264,12 @@ jobs:
           Self-contained binaries (no .NET runtime required). Tag \`${TAG}\` stamps
           this Release and the binary Version metadata.
 
-          | Tool | Asset pattern |
+          | Tool / Bundle | Asset pattern |
           | --- | --- |
           | CLI | \`kyber-weave-<rid>.tar.gz\` / \`.zip\` |
           | MCP | \`kyber-weave-mcp-<rid>.tar.gz\` / \`.zip\` |
+          | Squad APM | \`kyber-squad-<version>.zip\` |
+          | Squad Plugins | \`kyber-squad-plugin-<version>.zip\` |
 
           RIDs: \`linux-x64\`, \`linux-arm64\`, \`osx-x64\`, \`osx-arm64\`, \`win-x64\`.
 
