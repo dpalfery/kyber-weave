@@ -79,7 +79,8 @@ different risk:
 | `agent validate`, `agent sync-check` | any error |
 | `skill scan`, `agent scan` | any critical — raise with `--fail-on warning\|error` |
 | `skill route` | accuracy below `--min-accuracy` |
-| `squad install`, `update`, `uninstall`, `doctor`, `pack` | configuration, prerequisite, integrity, transaction, or pack failure (exit code 1 or 2) |
+| `squad install`, `squad update`, `squad pack` | configuration, prerequisite, integrity, transaction, or pack failure (exit code 1 or 2) |
+| `squad uninstall`, `squad doctor` | prerequisite, transaction, or tool failure (exit code 1) |
 | `squad status` | deployment absent, partial, or drift detected (exit code 1) |
 
 Scanning defaults to gating on `Critical` alone so that adopting it does not immediately

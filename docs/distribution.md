@@ -87,7 +87,7 @@ kyber-weave squad pack --format all --out ./artifacts
 
 ### Version lockstep and toolchain validation
 
-- **Exact Version Equality**: The CLI, MCP server, and Squad archive must share the exact same normalized semantic version (`X.Y.Z`).
+- **Version Lockstep**: The CLI, MCP server, and Squad archive must share the same normalized semantic version, including any pre-release identifier.
 - **Toolchain Qualification**: `products/kyber-squad/toolchain.yml` defines the required APM capabilities (`agent-ir/v1`, `semantic-permissions/v1`, `structured-degradation/v1`, `agent-to-skill-lowering/v1`). Release packaging validates against the pinned official APM release and its recorded platform archive SHA-256 hashes.
 - **Checksum Verification**: Squad assets are included in `SHA256SUMS.txt`. Client-side `kyber-weave squad install` and `update` download the asset over HTTPS, verify its SHA-256 against `SHA256SUMS.txt`, and stage it into an isolated temporary location before rendering.
 

@@ -54,6 +54,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
       - name: Derive version
         id: meta
@@ -99,7 +100,13 @@ jobs:
           else
             # Tag push: GITHUB_REF_NAME is the tag
             TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#v}"
+            RAW="${TAG#v}"
+            if [[ ! "${RAW}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+            then
+              echo "::error::tag '${TAG}' is not a valid SemVer (expected vX.Y.Z or vX.Y.Z-prerelease)"
+              exit 1
+            fi
+            VERSION="${RAW}"
             CREATE_RELEASE=true
           fi
 
@@ -124,6 +131,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -131,6 +140,8 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Publish CLI (self-contained single-file)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: >
           dotnet publish src/KyberWeave.Cli/KyberWeave.Cli.csproj
           -c ${{ env.CONFIGURATION }}
@@ -140,10 +151,12 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=None
           -p:DebugSymbols=false
-          -p:Version=${{ needs.version.outputs.version }}
+          -p:Version="${VERSION}"
           -o ./publish/cli/${{ matrix.rid }}
 
       - name: Publish MCP (self-contained single-file)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: >
           dotnet publish src/KyberWeave.Mcp/KyberWeave.Mcp.csproj
           -c ${{ env.CONFIGURATION }}
@@ -153,7 +166,7 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=None
           -p:DebugSymbols=false
-          -p:Version=${{ needs.version.outputs.version }}
+          -p:Version="${VERSION}"
           -o ./publish/mcp/${{ matrix.rid }}
 
       - name: Package archives
@@ -189,6 +202,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -196,15 +211,19 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Build CLI
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: >
           dotnet build src/KyberWeave.Cli/KyberWeave.Cli.csproj
           -c ${{ env.CONFIGURATION }}
-          -p:Version=${{ needs.version.outputs.version }}
+          -p:Version="${VERSION}"
 
       - name: Pack Squad (APM and Plugins)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: >
           dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --
-          squad pack --format all --out ./dist-squad --version ${{ needs.version.outputs.version }}
+          squad pack --format all --out ./dist-squad --version "${VERSION}"
 
       - name: Upload Squad archives
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -226,6 +245,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Download all release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -302,6 +323,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0

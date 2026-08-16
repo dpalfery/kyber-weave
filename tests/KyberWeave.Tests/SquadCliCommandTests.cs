@@ -444,6 +444,7 @@ public sealed class SquadCliCommandTests : IDisposable
             }));
 
         // Inside repo root, doctor validates canonical source
+        Assert.Equal(0, execution.ExitCode);
         Assert.Contains("canonical source", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -543,6 +544,34 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Equal(0, execution.ExitCode);
         Assert.True(File.Exists(deployedFile1));
         Assert.True(File.Exists(receiptPath));
+    }
+
+    [Fact]
+    public void Uninstall_WhenCorruptReceipt_ExitsOne()
+    {
+        string targetDir = Path.Combine(_temp.Path, "corrupt-receipt-uninstall");
+        Directory.CreateDirectory(targetDir);
+
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new SquadStateStore(userPaths);
+
+        string receiptPath = stateStore.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, "invalid json {[[");
+
+        SquadUninstallCommand command = new SquadUninstallCommand(userPaths, stateStore);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadUninstallSettings
+            {
+                Path = targetDir,
+                Global = false,
+                DryRun = false
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion

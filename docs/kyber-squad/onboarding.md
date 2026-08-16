@@ -189,7 +189,7 @@ kyber-weave squad pack --format plugins --out ./artifacts
 kyber-weave squad pack --format all --out ./artifacts
 ```
 
-Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to `squad install`.
+Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
 ---
 

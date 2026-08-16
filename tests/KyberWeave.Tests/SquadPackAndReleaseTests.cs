@@ -92,12 +92,12 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         SquadPackCommand command2 = new SquadPackCommand(executor, workingDirectory: repo.Path);
 
         // Act
-        int exitCode1 = command1.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir1 });
-        int exitCode2 = command2.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir2 });
+        CommandExecution exec1 = Capture(() => command1.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir1 }));
+        CommandExecution exec2 = Capture(() => command2.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir2 }));
 
         // Assert
-        Assert.Equal(0, exitCode1);
-        Assert.Equal(0, exitCode2);
+        Assert.Equal(0, exec1.ExitCode);
+        Assert.Equal(0, exec2.ExitCode);
 
         string[] archives1 = Directory.GetFiles(outDir1, "kyber-squad-*.zip");
         string[] archives2 = Directory.GetFiles(outDir2, "kyber-squad-*.zip");
@@ -184,12 +184,12 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         SquadPackCommand command2 = new SquadPackCommand(executor, workingDirectory: repo.Path);
 
         // Act
-        int exitCode1 = command1.Execute(null!, new SquadPackSettings { Format = "plugins", Out = outDir1 });
-        int exitCode2 = command2.Execute(null!, new SquadPackSettings { Format = "plugins", Out = outDir2 });
+        CommandExecution exec1 = Capture(() => command1.Execute(null!, new SquadPackSettings { Format = "plugins", Out = outDir1 }));
+        CommandExecution exec2 = Capture(() => command2.Execute(null!, new SquadPackSettings { Format = "plugins", Out = outDir2 }));
 
         // Assert
-        Assert.Equal(0, exitCode1);
-        Assert.Equal(0, exitCode2);
+        Assert.Equal(0, exec1.ExitCode);
+        Assert.Equal(0, exec2.ExitCode);
 
         string[] archives1 = Directory.GetFiles(outDir1, "kyber-squad-plugin-*.zip");
         string[] archives2 = Directory.GetFiles(outDir2, "kyber-squad-plugin-*.zip");
