@@ -27,12 +27,12 @@ public class DescriptionScorerTests
     [InlineData("Trigger when pull request validation fails on CI pipeline steps.")]
     [InlineData("Apply when formatting markdown tables according to repo standards.")]
     [InlineData("Use this skill when analyzing memory leaks in .NET applications.")]
-    public void Score_WhenExplicitTriggerClausePresent_AwardsFullTriggerScore(string description)
+    public void ScoreWhenExplicitTriggerClausePresentAwardsFullTriggerScore(string description)
     {
-        var skill = MakeSkill(description);
+        Skill skill = MakeSkill(description);
 
-        var score = DescriptionScorer.Score(skill);
-        var trigger = score.Components.First(c => c.Name == "Trigger clause");
+        DescriptionScore score = DescriptionScorer.Score(skill);
+        ScoreComponent trigger = score.Components.First(c => c.Name == "Trigger clause");
 
         Assert.Equal(35, trigger.MaxPoints);
         Assert.Equal(35, trigger.Points);
@@ -48,12 +48,12 @@ public class DescriptionScorerTests
     [InlineData("Retrieves documents from vector database and reranks query results.")]
     [InlineData("Transforms legacy XML configuration files into modern YAML formats.")]
     [InlineData("Use this to generate architecture diagrams from C# models.")]
-    public void Score_WhenPureActionSummary_AwardsZeroTriggerScore(string description)
+    public void ScoreWhenPureActionSummaryAwardsZeroTriggerScore(string description)
     {
-        var skill = MakeSkill(description);
+        Skill skill = MakeSkill(description);
 
-        var score = DescriptionScorer.Score(skill);
-        var trigger = score.Components.First(c => c.Name == "Trigger clause");
+        DescriptionScore score = DescriptionScorer.Score(skill);
+        ScoreComponent trigger = score.Components.First(c => c.Name == "Trigger clause");
 
         Assert.Equal(35, trigger.MaxPoints);
         Assert.Equal(0, trigger.Points);
@@ -66,12 +66,12 @@ public class DescriptionScorerTests
     [InlineData("Use when generating release notes. Never use for production hotfixes.")]
     [InlineData("Use when reviewing pull requests. Excludes automated dependency updates.")]
     [InlineData("Use when modifying configurations. Don't use for secret rotation.")]
-    public void Score_WhenNegativeBoundaryPresent_AwardsFullBoundaryScore(string description)
+    public void ScoreWhenNegativeBoundaryPresentAwardsFullBoundaryScore(string description)
     {
-        var skill = MakeSkill(description);
+        Skill skill = MakeSkill(description);
 
-        var score = DescriptionScorer.Score(skill);
-        var boundary = score.Components.First(c => c.Name == "Negative boundary");
+        DescriptionScore score = DescriptionScorer.Score(skill);
+        ScoreComponent boundary = score.Components.First(c => c.Name == "Negative boundary");
 
         Assert.Equal(20, boundary.MaxPoints);
         Assert.Equal(20, boundary.Points);
@@ -80,12 +80,12 @@ public class DescriptionScorerTests
     [Theory]
     [InlineData("Use when managing database connections and optimizing query performance.")]
     [InlineData("Use for triaging high-severity production alerts in Kubernetes clusters.")]
-    public void Score_WhenNegativeBoundaryMissing_AwardsZeroBoundaryScore(string description)
+    public void ScoreWhenNegativeBoundaryMissingAwardsZeroBoundaryScore(string description)
     {
-        var skill = MakeSkill(description);
+        Skill skill = MakeSkill(description);
 
-        var score = DescriptionScorer.Score(skill);
-        var boundary = score.Components.First(c => c.Name == "Negative boundary");
+        DescriptionScore score = DescriptionScorer.Score(skill);
+        ScoreComponent boundary = score.Components.First(c => c.Name == "Negative boundary");
 
         Assert.Equal(20, boundary.MaxPoints);
         Assert.Equal(0, boundary.Points);
@@ -98,13 +98,13 @@ public class DescriptionScorerTests
     [InlineData("INVOKE WHEN high-priority bugs are filed. AVOID USING FOR minor doc changes.")]
     [InlineData("TRIGGER WHEN deploy fails. NEVER USE FOR local tests.")]
     [InlineData("APPLY WHEN formatting text. EXCLUDES binary files.")]
-    public void Score_WhenDetectingTriggersAndBoundaries_IsCaseInsensitive(string description)
+    public void ScoreWhenDetectingTriggersAndBoundariesIsCaseInsensitive(string description)
     {
-        var skill = MakeSkill(description);
+        Skill skill = MakeSkill(description);
 
-        var score = DescriptionScorer.Score(skill);
-        var trigger = score.Components.First(c => c.Name == "Trigger clause");
-        var boundary = score.Components.First(c => c.Name == "Negative boundary");
+        DescriptionScore score = DescriptionScorer.Score(skill);
+        ScoreComponent trigger = score.Components.First(c => c.Name == "Trigger clause");
+        ScoreComponent boundary = score.Components.First(c => c.Name == "Negative boundary");
 
         Assert.Equal(35, trigger.MaxPoints);
         Assert.Equal(35, trigger.Points);
@@ -113,23 +113,23 @@ public class DescriptionScorerTests
     }
 
     [Fact]
-    public void Score_PrioritizesTriggerQualityAndSemantics_OverPureWordLength()
+    public void ScorePrioritizesTriggerQualityAndSemanticsOverPureWordLength()
     {
         // Concise, high-quality trigger-oriented description
-        var triggerOriented = MakeSkill(
+        Skill triggerOriented = MakeSkill(
             "Use when resetting corporate passwords. Do NOT use for service accounts or MFA enrollment.",
             "password-reset");
 
         // Long action summary that describes execution details but lacks trigger conditions
-        var actionSummary = MakeSkill(
+        Skill actionSummary = MakeSkill(
             "Generates SQL queries, validates syntax against schema models, creates connection pools, handles network failover, processes incoming database requests, and formats tabular query results into JSON outputs for API consumers.",
             "sql-generator");
 
-        var triggerScore = DescriptionScorer.Score(triggerOriented);
-        var actionScore = DescriptionScorer.Score(actionSummary);
+        DescriptionScore triggerScore = DescriptionScorer.Score(triggerOriented);
+        DescriptionScore actionScore = DescriptionScorer.Score(actionSummary);
 
-        var triggerClause = triggerScore.Components.First(c => c.Name == "Trigger clause");
-        var actionClause = actionScore.Components.First(c => c.Name == "Trigger clause");
+        ScoreComponent triggerClause = triggerScore.Components.First(c => c.Name == "Trigger clause");
+        ScoreComponent actionClause = actionScore.Components.First(c => c.Name == "Trigger clause");
 
         Assert.Equal(35, triggerClause.Points);
         Assert.Equal(0, actionClause.Points);
@@ -141,11 +141,11 @@ public class DescriptionScorerTests
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void Score_WhenEmptyOrWhitespace_AwardsZero(string description)
+    public void ScoreWhenEmptyOrWhitespaceAwardsZero(string description)
     {
-        var skill = MakeSkill(description);
+        Skill skill = MakeSkill(description);
 
-        var score = DescriptionScorer.Score(skill);
+        DescriptionScore score = DescriptionScorer.Score(skill);
 
         Assert.Equal(0, score.Total);
         Assert.All(score.Components, c => Assert.Equal(0, c.Points));

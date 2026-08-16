@@ -16,7 +16,7 @@ public static class OntologyConfigLoader
         ArgumentNullException.ThrowIfNull(defaults);
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
 
-        var document = KyberWeaveYamlParser.ParseFile(yamlPath);
+        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
         return Merge(defaults, document.Ontology);
     }
 
@@ -26,7 +26,7 @@ public static class OntologyConfigLoader
 
         try
         {
-            var document = KyberWeaveYamlParser.ParseFile(yamlPath);
+            KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
             return OntologyConfigLoadResult.Ok(Merge(OntologyConfig.ProductDefaults, document.Ontology));
         }
         catch (YamlException ex)
@@ -47,14 +47,14 @@ public static class OntologyConfigLoader
         IReadOnlyDictionary<DocType, IReadOnlyList<string>>? requiredKeys = null;
         if (section.RequiredKeys is not null)
         {
-            var merged = new Dictionary<DocType, IReadOnlyList<string>>(defaults.RequiredKeysByType);
-            foreach (var (typeName, keys) in section.RequiredKeys)
+            Dictionary<DocType, IReadOnlyList<string>> merged = new Dictionary<DocType, IReadOnlyList<string>>(defaults.RequiredKeysByType);
+            foreach ((string? typeName, List<string>? keys) in section.RequiredKeys)
             {
-                if (!TryParseDocType(typeName, out var docType))
+                if (!TryParseDocType(typeName, out DocType docType))
                 {
                     throw new YamlException(
                         $"Unknown ontology required-keys doc type '{typeName}'. " +
-                        "Known types: architecture, onboarding, requirements, adr, plan, spec, " +
+                        "Known types: architecture, onboarding, requirements, adr, plan, spec, todo, " +
                         "runbook, reference, rule, governance, index.");
                 }
 
@@ -144,6 +144,7 @@ public static class OntologyConfigLoader
             "adr" => DocType.Adr,
             "plan" => DocType.Plan,
             "spec" => DocType.Spec,
+            "todo" => DocType.Todo,
             "runbook" => DocType.Runbook,
             "reference" => DocType.Reference,
             "rule" => DocType.Rule,

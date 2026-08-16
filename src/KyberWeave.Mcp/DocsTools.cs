@@ -2,8 +2,10 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using ModelContextProtocol.Server;
 
@@ -14,7 +16,7 @@ namespace KyberWeave.Mcp;
 /// caps its own: a retrieval tool that returns a whole corpus is a slower grep.
 /// </summary>
 [McpServerToolType]
-public sealed class DocsTools
+public sealed class DocsTools(DocumentIndexHost host)
 {
     /// <summary>Hard ceiling on any single section, so one huge section cannot crowd out
     /// every other document in the response.</summary>
@@ -35,13 +37,8 @@ public sealed class DocsTools
         nameof(AnalysisRuleKind.Terminology)
     };
 
-    private readonly DocumentIndexHost _host;
+    private readonly DocumentIndexHost _host = host ?? throw new ArgumentNullException(nameof(host));
     private readonly IDocsAnalysisReader? _analysisReader;
-
-    public DocsTools(DocumentIndexHost host)
-    {
-        _host = host ?? throw new ArgumentNullException(nameof(host));
-    }
 
     public DocsTools(DocumentIndexHost host, IDocsAnalysisReader analysisReader)
         : this(host)
@@ -83,14 +80,14 @@ public sealed class DocsTools
             """)]
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
-        var index = _host.Current();
-        var hits = index.Explore(query, maxDocs, charBudget);
+        DocumentIndex index = _host.Current();
+        IReadOnlyList<DocumentHit> hits = index.Explore(query, maxDocs, charBudget);
 
         if (hits.Count == 0)
         {
             // Saying so plainly is the whole point of the relevance floor. An agent told
             // to use this before grepping needs an explicit signal that it may now grep.
-            var docsIndex = Path.Combine(_host.DocsRelativeRoot, "README.md").Replace('\\', '/');
+            string docsIndex = Path.Combine(_host.DocsRelativeRoot, "README.md").Replace('\\', '/');
             return $"""
                 No document in the governed corpus scored above the relevance threshold for '{query}'.
                 {index.DocumentCount} documents were considered.
@@ -101,7 +98,7 @@ public sealed class DocsTools
                 """;
         }
 
-        var sb = new StringBuilder();
+        StringBuilder sb = new();
         sb.Append("Top ").Append(hits.Count).Append(" of ").Append(index.DocumentCount)
           .Append(" documents, best first (relevance ")
           .Append(hits[0].Score.ToString("0.00", CultureInfo.InvariantCulture))
@@ -113,7 +110,7 @@ public sealed class DocsTools
             sb.AppendLine("Warning: no CodeGraph index was readable, so code joins are unresolved.");
         }
 
-        foreach (var hit in hits)
+        foreach (DocumentHit hit in hits)
         {
             sb.AppendLine();
             AppendIdentity(sb, hit);
@@ -142,8 +139,8 @@ public sealed class DocsTools
     public string ForSymbol(
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
     {
-        var index = _host.Current();
-        var hits = index.ForSymbol(symbol);
+        DocumentIndex index = _host.Current();
+        IReadOnlyList<DocumentHit> hits = index.ForSymbol(symbol);
 
         if (hits.Count == 0)
         {
@@ -151,11 +148,11 @@ public sealed class DocsTools
                    "It may be undocumented, or documented only in prose.";
         }
 
-        var sb = new StringBuilder();
+        StringBuilder sb = new();
         sb.Append(hits.Count).Append(hits.Count == 1 ? " document declares '" : " documents declare '")
           .Append(symbol).AppendLine("' in code-refs.");
 
-        foreach (var hit in hits)
+        foreach (DocumentHit hit in hits)
         {
             sb.AppendLine();
             AppendIdentity(sb, hit);
@@ -188,7 +185,7 @@ public sealed class DocsTools
         if (_analysisReader is null)
             return "Documentation analysis is unavailable in this host.";
 
-        if (!TryParseKind(kind, out var parsedKind))
+        if (!TryParseKind(kind, out AnalysisRuleKind? parsedKind))
         {
             return CapToBudget(
                 $"Unknown documentation-analysis kind '{kind}'. Use duplicate, conflict, or terminology.",
@@ -207,13 +204,15 @@ public sealed class DocsTools
                 Math.Clamp(charBudget, 0, AnalysisCharCap));
         }
 
-        var ordered = result.Candidates
-            .Where(candidate => parsedKind is null || candidate.Kind == parsedKind)
-            .OrderBy(candidate => candidate.Kind)
-            .ThenBy(candidate => candidate.Term, StringComparer.Ordinal)
-            .ThenBy(candidate => candidate.Id, StringComparer.Ordinal)
-            .ToArray();
-        var start = ResolveCursor(ordered, cursor);
+        AnalysisCandidate[] ordered =
+        [
+            .. result.Candidates
+                .Where(candidate => parsedKind is null || candidate.Kind == parsedKind)
+                .OrderBy(candidate => candidate.Kind)
+                .ThenBy(candidate => candidate.Term, StringComparer.Ordinal)
+                .ThenBy(candidate => candidate.Id, StringComparer.Ordinal)
+        ];
+        int start = ResolveCursor(ordered, cursor);
         if (start < 0)
         {
             return CapToBudget(
@@ -221,9 +220,9 @@ public sealed class DocsTools
                 Math.Clamp(charBudget, 0, AnalysisCharCap));
         }
 
-        var effectiveLimit = Math.Clamp(limit, 1, AnalysisCandidateCap);
-        var effectiveBudget = Math.Clamp(charBudget, 0, AnalysisCharCap);
-        var sb = new StringBuilder(Math.Min(effectiveBudget, 4096));
+        int effectiveLimit = Math.Clamp(limit, 1, AnalysisCandidateCap);
+        int effectiveBudget = Math.Clamp(charBudget, 0, AnalysisCharCap);
+        StringBuilder sb = new(Math.Min(effectiveBudget, 4096));
         AppendAnalysisMetrics(sb, result);
 
         if (start >= ordered.Length)
@@ -234,17 +233,17 @@ public sealed class DocsTools
             return CapToBudget(sb.ToString(), effectiveBudget);
         }
 
-        var emitted = 0;
+        int emitted = 0;
         string? lastCursor = null;
         while (emitted < effectiveLimit && start + emitted < ordered.Length)
         {
-            var candidate = ordered[start + emitted];
-            var moreAfter = start + emitted + 1 < ordered.Length;
-            var cursorFooter = moreAfter ? $"next cursor: {candidate.Id}{Environment.NewLine}" : string.Empty;
-            var available = effectiveBudget - sb.Length - cursorFooter.Length;
+            AnalysisCandidate candidate = ordered[start + emitted];
+            bool moreAfter = start + emitted + 1 < ordered.Length;
+            string cursorFooter = moreAfter ? $"next cursor: {candidate.Id}{Environment.NewLine}" : string.Empty;
+            int available = effectiveBudget - sb.Length - cursorFooter.Length;
             if (available <= 0) break;
 
-            var block = FormatCandidate(candidate);
+            string block = FormatCandidate(candidate);
             sb.Append(CapToBudget(block, available));
             emitted++;
             lastCursor = candidate.Id;
@@ -259,7 +258,7 @@ public sealed class DocsTools
 
         if (start + emitted < ordered.Length && lastCursor is not null)
         {
-            var footer = $"next cursor: {lastCursor}{Environment.NewLine}";
+            string footer = $"next cursor: {lastCursor}{Environment.NewLine}";
             if (sb.Length + footer.Length <= effectiveBudget) sb.Append(footer);
         }
 
@@ -307,12 +306,12 @@ public sealed class DocsTools
                 AnalysisCharCap);
         }
 
-        var sb = new StringBuilder();
+        StringBuilder sb = new();
         sb.Append(result.Senses.Count)
           .Append(result.Senses.Count == 1 ? " glossary sense for '" : " glossary senses for '")
           .Append(result.Term.ReplaceLineEndings(" "))
           .AppendLine("'.");
-        foreach (var sense in result.Senses
+        foreach (GlossarySense sense in result.Senses
                      .OrderBy(sense => sense.Status)
                      .ThenBy(sense => sense.Id, StringComparer.Ordinal)
                      .Take(AnalysisCandidateCap))
@@ -351,9 +350,9 @@ public sealed class DocsTools
             return true;
         }
 
-        var trimmed = kind.Trim();
+        string trimmed = kind.Trim();
         if (AnalysisKindNames.Contains(trimmed)
-            && Enum.TryParse<AnalysisRuleKind>(trimmed, ignoreCase: true, out var parsed))
+            && Enum.TryParse(trimmed, ignoreCase: true, out AnalysisRuleKind parsed))
         {
             parsedKind = parsed;
             return true;
@@ -367,7 +366,7 @@ public sealed class DocsTools
     {
         if (string.IsNullOrWhiteSpace(cursor)) return 0;
 
-        for (var index = 0; index < candidates.Count; index++)
+        for (int index = 0; index < candidates.Count; index++)
         {
             if (StringComparer.Ordinal.Equals(candidates[index].Id, cursor)) return index + 1;
         }
@@ -377,7 +376,7 @@ public sealed class DocsTools
 
     private static void AppendAnalysisMetrics(StringBuilder sb, DocumentationAnalysisResult result)
     {
-        var metrics = result.Metrics;
+        AnalysisMetrics metrics = result.Metrics;
         sb.AppendLine("metrics:");
         sb.Append("  extracted claims: ").AppendLine(metrics.ExtractedClaims.ToString(CultureInfo.InvariantCulture));
         sb.Append("  graph comparisons: ").AppendLine(metrics.GraphComparisons.ToString(CultureInfo.InvariantCulture));
@@ -395,7 +394,7 @@ public sealed class DocsTools
           .Append(result.Diagnostics.Errors.ToString(CultureInfo.InvariantCulture)).Append(" errors, ")
           .Append(result.Diagnostics.Warnings.ToString(CultureInfo.InvariantCulture)).Append(" warnings, ")
           .Append(result.Diagnostics.Infos.ToString(CultureInfo.InvariantCulture)).AppendLine(" info");
-        foreach (var diagnostic in result.Diagnostics.Items
+        foreach (Diagnostic diagnostic in result.Diagnostics.Items
                      .Where(item => item.Severity is Severity.Warning or Severity.Error or Severity.Critical)
                      .Take(3))
         {
@@ -412,14 +411,14 @@ public sealed class DocsTools
         string key,
         string label)
     {
-        if (!result.Diagnostics.Metrics.TryGetValue(key, out var value)) return;
+        if (!result.Diagnostics.Metrics.TryGetValue(key, out object? value)) return;
         sb.Append("  ").Append(label).Append(": ").AppendLine(
             Convert.ToString(value, CultureInfo.InvariantCulture));
     }
 
     private static string FormatCandidate(AnalysisCandidate candidate)
     {
-        var sb = new StringBuilder();
+        StringBuilder sb = new();
         sb.Append("candidate: ").AppendLine(candidate.Id);
         sb.Append("kind: ").AppendLine(candidate.Kind.ToString().ToLowerInvariant());
         if (!string.IsNullOrWhiteSpace(candidate.Term))
@@ -452,7 +451,7 @@ public sealed class DocsTools
               .AppendLine(candidate.Verdict.Confidence.ToString("0.00", CultureInfo.InvariantCulture));
         }
 
-        foreach (var claim in candidate.Claims
+        foreach (Claim claim in candidate.Claims
                      .OrderBy(claim => claim.FilePath, StringComparer.Ordinal)
                      .ThenBy(claim => claim.StartLine)
                      .Take(AnalysisEvidenceCap))
@@ -479,7 +478,7 @@ public sealed class DocsTools
 
     private static void AppendIdentity(StringBuilder sb, DocumentHit hit)
     {
-        var doc = hit.Document;
+        DocumentModel doc = hit.Document;
         sb.Append("### ").AppendLine(doc.Frontmatter.Title ?? doc.RelativePath);
         sb.Append("path: ").AppendLine(doc.RelativePath);
         sb.Append("id: ").AppendLine(doc.Frontmatter.Id ?? "(none)");
@@ -494,7 +493,7 @@ public sealed class DocsTools
     /// </summary>
     private static void AppendExcerpt(StringBuilder sb, DocumentExcerpt excerpt)
     {
-        foreach (var section in excerpt.Sections)
+        foreach (DocumentSection section in excerpt.Sections)
         {
             if (section.Heading.Length > 0) sb.Append("## ").AppendLine(section.Heading);
             sb.AppendLine(Truncate(section.Body, SectionCharCap));
@@ -523,7 +522,7 @@ public sealed class DocsTools
         if (hit.CodeJoins.Count == 0) return;
 
         sb.AppendLine("code joins:");
-        foreach (var join in hit.CodeJoins.Take(JoinCap))
+        foreach (CodeJoin join in hit.CodeJoins.Take(JoinCap))
         {
             sb.Append("  ").Append(join.Reference).Append(" -> ");
 

@@ -15,26 +15,26 @@ internal static partial class IgnoreMarkupReader
 
     internal static IgnoreMarkupReadResult Read(DocumentModel document)
     {
-        var body = NormalizeLineEndings(document.Body);
-        var prefix = FrontmatterPrefix(document);
+        string body = NormalizeLineEndings(document.Body);
+        string prefix = FrontmatterPrefix(document);
         if (ContainsTagLikeText(prefix))
         {
             return Error(document, "Ignore markup is not allowed in YAML frontmatter.");
         }
 
-        var characters = body.ToCharArray();
-        var intervals = new List<IgnoreInterval>();
-        var activeRule = IgnoreRule.None;
-        var activeLine = 0;
-        var fence = new FenceState();
-        var lineStart = 0;
-        var lineNumber = 1;
+        char[] characters = body.ToCharArray();
+        List<IgnoreInterval> intervals = new List<IgnoreInterval>();
+        IgnoreRule activeRule = IgnoreRule.None;
+        int activeLine = 0;
+        FenceState fence = new FenceState();
+        int lineStart = 0;
+        int lineNumber = 1;
 
         while (lineStart <= body.Length)
         {
-            var newline = body.IndexOf('\n', lineStart);
-            var lineEnd = newline < 0 ? body.Length : newline;
-            var line = body[lineStart..lineEnd];
+            int newline = body.IndexOf('\n', lineStart);
+            int lineEnd = newline < 0 ? body.Length : newline;
+            string line = body[lineStart..lineEnd];
 
             if (UpdateFence(line, fence))
             {
@@ -51,8 +51,8 @@ internal static partial class IgnoreMarkupReader
                 return Error(document, "Ignore markup cannot cross a level-two section boundary.");
             }
 
-            var matches = ExactTagPattern().Matches(line);
-            var residue = line;
+            MatchCollection matches = ExactTagPattern().Matches(line);
+            string residue = line;
             foreach (Match match in matches.Cast<Match>().Reverse())
             {
                 residue = residue.Remove(match.Index, match.Length);
@@ -109,9 +109,9 @@ internal static partial class IgnoreMarkupReader
             return string.Empty;
         }
 
-        var raw = NormalizeLineEndings(document.RawMarkdown);
-        var line = 1;
-        var index = 0;
+        string raw = NormalizeLineEndings(document.RawMarkdown);
+        int line = 1;
+        int index = 0;
         while (index < raw.Length && line < document.BodyStartLine)
         {
             if (raw[index++] == '\n') line++;
@@ -124,10 +124,10 @@ internal static partial class IgnoreMarkupReader
 
     private static bool UpdateFence(string line, FenceState fence)
     {
-        var match = FencePattern().Match(line);
+        Match match = FencePattern().Match(line);
         if (!match.Success) return false;
 
-        var marker = match.Groups["marker"].Value;
+        string marker = match.Groups["marker"].Value;
         if (!fence.IsOpen)
         {
             fence.Character = marker[0];

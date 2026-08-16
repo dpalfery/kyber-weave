@@ -6,11 +6,18 @@ using System.Text.Json.Serialization;
 
 namespace KyberWeave.Cli.Update;
 
-/// <summary>Reads GitHub Release metadata and assets over HTTPS only.</summary>
+/// <summary>Reads Release metadata and assets over HTTPS, or from a loopback stand-in.</summary>
+/// <remarks>
+/// Endpoints are resolved once per client through <see cref="ReleaseOrigin"/>. The static
+/// <c>LatestApi</c>/<c>ReleasesApi</c>/<c>ReleaseDownloadBase</c> fields remain the github.com
+/// values an ordinary install uses, and are what tests assert against.
+/// </remarks>
 internal sealed class GitHubReleaseClient : IDisposable
 {
     internal const string Owner = "dpalfery";
     internal const string Repo = "kyber-weave";
+
+    internal static readonly Uri ApiRoot = new("https://api.github.com/");
 
     internal static readonly Uri LatestApi =
         new($"https://api.github.com/repos/{Owner}/{Repo}/releases/latest");
@@ -27,6 +34,9 @@ internal sealed class GitHubReleaseClient : IDisposable
     };
 
     private readonly HttpClient _client;
+    private readonly ReleaseOrigin _origin;
+    private readonly Uri _latestApi;
+    private readonly Uri _releasesApi;
 
     internal GitHubReleaseClient(
         HttpMessageHandler handler,
@@ -35,6 +45,10 @@ internal sealed class GitHubReleaseClient : IDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(readEnvironment);
+
+        _origin = ReleaseOrigin.Resolve(readEnvironment);
+        _latestApi = new Uri(_origin.ApiRoot, $"repos/{Owner}/{Repo}/releases/latest");
+        _releasesApi = new Uri(_origin.ApiRoot, $"repos/{Owner}/{Repo}/releases");
 
         _client = new HttpClient(handler, disposeHandler: true)
         {
@@ -45,14 +59,14 @@ internal sealed class GitHubReleaseClient : IDisposable
         _client.DefaultRequestHeaders.Accept.Add(
             new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
-        var token = readEnvironment("GITHUB_TOKEN") ?? readEnvironment("GH_TOKEN");
+        string? token = readEnvironment("GITHUB_TOKEN") ?? readEnvironment("GH_TOKEN");
         if (!string.IsNullOrWhiteSpace(token))
             _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Trim());
     }
 
     internal string ResolveLatestStable()
     {
-        var json = GetString(LatestApi, "the latest stable release");
+        string json = GetString(_latestApi, "the latest stable release");
         GitHubRelease payload;
         try
         {
@@ -72,7 +86,7 @@ internal sealed class GitHubReleaseClient : IDisposable
 
     internal string ResolveNewestListed()
     {
-        var json = GetString(ReleasesApi, "the GitHub Releases list");
+        string json = GetString(_releasesApi, "the GitHub Releases list");
         GitHubRelease[] payload;
         try
         {
@@ -84,7 +98,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             throw new SelfUpdateException("could not parse the GitHub Releases list.", ex);
         }
 
-        foreach (var release in payload)
+        foreach (GitHubRelease release in payload)
         {
             if (release.Draft || string.IsNullOrWhiteSpace(release.TagName))
                 continue;
@@ -97,14 +111,14 @@ internal sealed class GitHubReleaseClient : IDisposable
 
     internal string DownloadChecksums(string tag)
     {
-        var uri = AssetUri(tag, "SHA256SUMS.txt");
+        Uri uri = AssetUri(_origin, tag, "SHA256SUMS.txt");
         return GetString(uri, $"SHA256SUMS.txt for {tag}");
     }
 
     internal void DownloadAsset(string tag, string archiveName, string destinationPath)
     {
-        var uri = AssetUri(tag, archiveName);
-        using var response = Send(uri);
+        Uri uri = AssetUri(_origin, tag, archiveName);
+        using HttpResponseMessage response = Send(uri);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
             throw new SelfUpdateException(
@@ -112,8 +126,8 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
 
         EnsureSuccess(response, $"download failed: {uri}");
-        using var destination = File.Create(destinationPath);
-        using var stream = response.Content.ReadAsStream();
+        using FileStream destination = File.Create(destinationPath);
+        using Stream stream = response.Content.ReadAsStream();
         stream.CopyTo(destination);
     }
 
@@ -126,21 +140,25 @@ internal sealed class GitHubReleaseClient : IDisposable
             throw new SelfUpdateException($"refusing non-HTTPS URL: {uri}");
     }
 
-    internal static Uri AssetUri(string tag, string fileName)
+    internal static Uri AssetUri(string tag, string fileName) =>
+        AssetUri(ReleaseOrigin.Default, tag, fileName);
+
+    internal static Uri AssetUri(ReleaseOrigin origin, string tag, string fileName)
     {
+        ArgumentNullException.ThrowIfNull(origin);
         ArgumentException.ThrowIfNullOrWhiteSpace(tag);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         if (fileName.Contains('/', StringComparison.Ordinal) || fileName.Contains('\\', StringComparison.Ordinal))
             throw new SelfUpdateException($"refusing asset name '{fileName}'.");
 
-        var uri = new Uri(ReleaseDownloadBase, $"{tag}/{fileName}");
-        EnsureHttps(uri);
+        Uri uri = new Uri(origin.DownloadRoot, $"{tag}/{fileName}");
+        origin.EnsureAllowed(uri, "asset URL");
         return uri;
     }
 
     private string GetString(Uri uri, string what)
     {
-        using var response = Send(uri);
+        using HttpResponseMessage response = Send(uri);
         if (response.StatusCode == HttpStatusCode.NotFound)
             throw new SelfUpdateException($"could not download {what}. Does that release exist?");
 
@@ -154,7 +172,7 @@ internal sealed class GitHubReleaseClient : IDisposable
         Justification = "Disposing the request before the response is fully read closes the download stream.")]
     private HttpResponseMessage Send(Uri uri)
     {
-        EnsureHttps(uri);
+        _origin.EnsureAllowed(uri);
         return _client
             .SendAsync(
                 new HttpRequestMessage(HttpMethod.Get, uri),
@@ -168,7 +186,7 @@ internal sealed class GitHubReleaseClient : IDisposable
         if (response.IsSuccessStatusCode)
             return;
 
-        var status = (int)response.StatusCode;
+        int status = (int)response.StatusCode;
         throw new SelfUpdateException($"{failure} (HTTP {status}).");
     }
 
@@ -176,8 +194,8 @@ internal sealed class GitHubReleaseClient : IDisposable
     {
         try
         {
-            var normalized = ReleaseVersion.Normalize(version);
-            foreach (var c in normalized)
+            string normalized = ReleaseVersion.Normalize(version);
+            foreach (char c in normalized)
             {
                 if (char.IsAsciiLetterOrDigit(c) || c is '.' or '-')
                     continue;

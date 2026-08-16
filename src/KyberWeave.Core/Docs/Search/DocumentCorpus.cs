@@ -69,19 +69,19 @@ public sealed class DocumentCorpus
     {
         ArgumentNullException.ThrowIfNull(set);
 
-        var documentFrequency = new Dictionary<string, double>(StringComparer.Ordinal);
-        var bodyVectors = new Dictionary<string, Dictionary<string, double>>(StringComparer.Ordinal);
-        var bodyLengths = new Dictionary<string, double>(StringComparer.Ordinal);
+        Dictionary<string, double> documentFrequency = new Dictionary<string, double>(StringComparer.Ordinal);
+        Dictionary<string, Dictionary<string, double>> bodyVectors = new Dictionary<string, Dictionary<string, double>>(StringComparer.Ordinal);
+        Dictionary<string, double> bodyLengths = new Dictionary<string, double>(StringComparer.Ordinal);
 
-        foreach (var doc in set.Documents)
+        foreach (DocumentModel doc in set.Documents)
         {
-            var vector = TextVectorizer.VectorizeFused(doc.Body);
+            Dictionary<string, double> vector = TextVectorizer.VectorizeFused(doc.Body);
             bodyVectors[doc.RelativePath] = vector;
             bodyLengths[doc.RelativePath] = vector.Values.Sum();
 
-            foreach (var term in vector.Keys)
+            foreach (string term in vector.Keys)
             {
-                documentFrequency[term] = documentFrequency.TryGetValue(term, out var n) ? n + 1 : 1;
+                documentFrequency[term] = documentFrequency.TryGetValue(term, out double n) ? n + 1 : 1;
             }
         }
 
@@ -138,7 +138,7 @@ public sealed class DocumentCorpus
         if (QuestionWords.Contains(term)) return false;
         if (_documentCount < 4) return true;
 
-        var n = _documentFrequency.TryGetValue(term, out var df) ? df : 0;
+        double n = _documentFrequency.TryGetValue(term, out double df) ? df : 0;
         return n <= _documentCount * UninformativeDocumentShare;
     }
 
@@ -148,7 +148,7 @@ public sealed class DocumentCorpus
     /// </summary>
     public double InverseDocumentFrequency(string term)
     {
-        var n = _documentFrequency.TryGetValue(term, out var df) ? df : 0;
+        double n = _documentFrequency.TryGetValue(term, out double df) ? df : 0;
         return Math.Log(1 + ((_documentCount - n + 0.5) / (n + 0.5)));
     }
 
@@ -161,8 +161,8 @@ public sealed class DocumentCorpus
     {
         ArgumentNullException.ThrowIfNull(queryVector);
 
-        var weighted = new Dictionary<string, double>(StringComparer.Ordinal);
-        foreach (var (term, count) in queryVector)
+        Dictionary<string, double> weighted = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach ((string? term, double count) in queryVector)
         {
             if (!IsInformative(term)) continue;
             weighted[term] = count * InverseDocumentFrequency(term);
@@ -197,28 +197,28 @@ public sealed class DocumentCorpus
         ArgumentNullException.ThrowIfNull(queryTerms);
         ArgumentNullException.ThrowIfNull(coverageTerms);
 
-        if (!_bodyVectors.TryGetValue(document.RelativePath, out var body)) return 0;
+        if (!_bodyVectors.TryGetValue(document.RelativePath, out Dictionary<string, double>? body)) return 0;
 
-        var length = _bodyLengths[document.RelativePath];
+        double length = _bodyLengths[document.RelativePath];
         double score = 0;
 
-        foreach (var term in queryTerms.Keys)
+        foreach (string term in queryTerms.Keys)
         {
             if (!IsInformative(term)) continue;
-            if (!body.TryGetValue(term, out var frequency)) continue;
+            if (!body.TryGetValue(term, out double frequency)) continue;
 
-            var denominator = frequency + (K1 * (1 - B + (B * length / _averageLength)));
+            double denominator = frequency + (K1 * (1 - B + (B * length / _averageLength)));
             score += InverseDocumentFrequency(term) * frequency * (K1 + 1) / denominator;
         }
 
         double askedFor = 0;
         double answered = 0;
 
-        foreach (var term in coverageTerms)
+        foreach (string term in coverageTerms)
         {
             if (!IsInformative(term)) continue;
 
-            var idf = InverseDocumentFrequency(term);
+            double idf = InverseDocumentFrequency(term);
             askedFor += idf;
             if (body.ContainsKey(term)) answered += idf;
         }
@@ -236,5 +236,5 @@ public sealed class DocumentCorpus
 
     /// <summary>The body vector of one document, for callers doing their own comparison.</summary>
     public IReadOnlyDictionary<string, double> BodyVector(string relativePath) =>
-        _bodyVectors.TryGetValue(relativePath, out var v) ? v : new Dictionary<string, double>(StringComparer.Ordinal);
+        _bodyVectors.TryGetValue(relativePath, out Dictionary<string, double>? v) ? v : new Dictionary<string, double>(StringComparer.Ordinal);
 }

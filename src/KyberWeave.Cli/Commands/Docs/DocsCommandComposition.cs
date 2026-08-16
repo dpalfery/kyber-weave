@@ -40,7 +40,7 @@ internal static class DocsCommandComposition
         // An unsupplied option leaves the configured roots alone; a supplied one replaces
         // them outright. The flag has no default of its own, so it cannot be confused with
         // the product default and silently ignored on a repository configured otherwise.
-        var loaded = config.Ontology;
+        OntologyConfig loaded = config.Ontology;
         if (settings.DocsRoots.Length == 0)
         {
             ontology = loaded;
@@ -54,7 +54,8 @@ internal static class DocsCommandComposition
             {
                 Ontology = ontology,
                 Harness = config.Harness,
-                DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology)
+                DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology),
+                Squad = config.Squad
             };
             return true;
         }
@@ -116,9 +117,9 @@ internal static class DocsCommandComposition
         ArgumentNullException.ThrowIfNull(factories);
 
         runtime = null;
-        if (!TryResolveConfig(settings, report, out var config, out var ontology)) return false;
+        if (!TryResolveConfig(settings, report, out KyberWeaveConfig? config, out OntologyConfig? ontology)) return false;
 
-        var resolver = factories.CreateResolver(settings.Path);
+        ICodeGraphResolver resolver = factories.CreateResolver(settings.Path);
         if (!resolver.IsAvailable)
         {
             report.Add(new Diagnostic(
@@ -130,8 +131,8 @@ internal static class DocsCommandComposition
                 "Analysis continues with document relationships and bounded lexical search."));
         }
 
-        var mode = config.DocsAnalysis.Embeddings.Mode;
-        var cacheSafe = factories.IsCacheSafe(settings.Path);
+        DocsAnalysisEmbeddingMode mode = config.DocsAnalysis.Embeddings.Mode;
+        bool cacheSafe = factories.IsCacheSafe(settings.Path);
         if (!cacheSafe && mode != DocsAnalysisEmbeddingMode.Off)
         {
             AddEmbeddingAvailability(

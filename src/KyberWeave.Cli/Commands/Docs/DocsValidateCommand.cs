@@ -1,5 +1,7 @@
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;
@@ -11,14 +13,14 @@ public sealed class DocsValidateCommand : Command<DocsSettings>
 {
     public override int Execute(CommandContext context, DocsSettings settings)
     {
-        var report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryResolveConfig(settings, report, out var config, out var ontology))
+        DiagnosticReport report = new DiagnosticReport();
+        if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig? config, out OntologyConfig? ontology))
         {
             CommandHelpers.Finish(report, settings, "docs validate", "Document");
             return 1;
         }
 
-        var set = new DocumentLoader(settings.Path, ontology).Load();
+        DocumentSet set = new DocumentLoader(settings.Path, ontology).Load();
         report.AddRange(new DocSpecValidator(settings.Path, ontology).Validate(set).Items);
         try
         {

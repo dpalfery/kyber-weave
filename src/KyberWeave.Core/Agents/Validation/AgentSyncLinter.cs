@@ -29,27 +29,27 @@ public static partial class AgentSyncLinter
         ArgumentNullException.ThrowIfNull(harnessConfig);
         ArgumentException.ThrowIfNullOrWhiteSpace(rootDirectoryPath);
 
-        var report = new DiagnosticReport();
-        var matrix = agentSet.GetRoleHarnessMatrix();
-        var allRoles = agentSet.GetAllRoleNames();
-        var profiles = harnessConfig.Profiles;
+        DiagnosticReport report = new DiagnosticReport();
+        IReadOnlyDictionary<string, Dictionary<HarnessKind, AgentModel>> matrix = agentSet.GetRoleHarnessMatrix();
+        IEnumerable<string> allRoles = agentSet.GetAllRoleNames();
+        IReadOnlyDictionary<HarnessKind, HarnessCapabilityProfile> profiles = harnessConfig.Profiles;
 
         // 1. Cross-Harness Role Parity Check with Role Satisfaction Engine
-        foreach (var role in allRoles)
+        foreach (string role in allRoles)
         {
-            matrix.TryGetValue(role, out var harnessMap);
+            matrix.TryGetValue(role, out Dictionary<HarnessKind, AgentModel>? harnessMap);
             harnessMap ??= new Dictionary<HarnessKind, AgentModel>();
 
-            foreach (var (harnessKind, profile) in profiles)
+            foreach ((HarnessKind harnessKind, HarnessCapabilityProfile? profile) in profiles)
             {
-                var satisfied = harnessMap.ContainsKey(harnessKind);
+                bool satisfied = harnessMap.ContainsKey(harnessKind);
 
                 // If not satisfied natively in the harness folder, check if it's satisfied via skill mapping or skill directory
                 if (!satisfied)
                 {
-                    if (profile.MappedRoleSkillOverrides.TryGetValue(role, out var skillName))
+                    if (profile.MappedRoleSkillOverrides.TryGetValue(role, out string? skillName))
                     {
-                        var skillDir = Path.Combine(rootDirectoryPath, ".agents", "skills", skillName);
+                        string skillDir = Path.Combine(rootDirectoryPath, ".agents", "skills", skillName);
                         // Require the canonical SKILL.md inside the mapped skill folder —
                         // a root-level SKILL.md must not falsely satisfy the role.
                         if (File.Exists(Path.Combine(skillDir, "SKILL.md")))
@@ -68,17 +68,17 @@ public static partial class AgentSyncLinter
             }
 
             // 2. Instruction Drift Detection across existing harness implementations of this role
-            var roleAgents = harnessMap.Values.ToList();
+            List<AgentModel> roleAgents = harnessMap.Values.ToList();
             if (roleAgents.Count >= 2)
             {
-                var baseAgent = roleAgents[0];
-                var baseVec = TextVectorizer.Vectorize(baseAgent.InstructionsBody);
+                AgentModel baseAgent = roleAgents[0];
+                Dictionary<string, double> baseVec = TextVectorizer.Vectorize(baseAgent.InstructionsBody);
 
-                for (var i = 1; i < roleAgents.Count; i++)
+                for (int i = 1; i < roleAgents.Count; i++)
                 {
-                    var compareAgent = roleAgents[i];
-                    var compareVec = TextVectorizer.Vectorize(compareAgent.InstructionsBody);
-                    var similarity = TextVectorizer.CosineSimilarity(baseVec, compareVec);
+                    AgentModel compareAgent = roleAgents[i];
+                    Dictionary<string, double> compareVec = TextVectorizer.Vectorize(compareAgent.InstructionsBody);
+                    double similarity = TextVectorizer.CosineSimilarity(baseVec, compareVec);
 
                     if (similarity < 0.70)
                     {
@@ -90,11 +90,11 @@ public static partial class AgentSyncLinter
             }
 
             // 3. Routing Description Score and Trigger Quality for each agent instance
-            foreach (var agent in roleAgents)
+            foreach (AgentModel? agent in roleAgents)
             {
                 if (!string.IsNullOrWhiteSpace(agent.Description))
                 {
-                    var desc = agent.Description.Trim();
+                    string desc = agent.Description.Trim();
                     if (!RoutingLinter.TriggerClauseRegex().IsMatch(desc))
                     {
                         report.Add(new Diagnostic(RuleMissingTriggerPhrasing, Severity.Warning,
@@ -103,7 +103,7 @@ public static partial class AgentSyncLinter
                             "Add an explicit 'Use when...' or 'Invoke when...' trigger clause to clarify activation intent."));
                     }
 
-                    var dummySkill = new Skill
+                    Skill dummySkill = new Skill
                     {
                         SkillFilePath = agent.FilePath,
                         DirectoryPath = agent.DirectoryPath,
@@ -116,7 +116,7 @@ public static partial class AgentSyncLinter
                         }
                     };
 
-                    var score = DescriptionScorer.Score(dummySkill);
+                    DescriptionScore score = DescriptionScorer.Score(dummySkill);
                     if (score.Total < 50)
                     {
                         report.Add(new Diagnostic(RuleLowRoutingScore, Severity.Info,

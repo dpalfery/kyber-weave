@@ -66,7 +66,7 @@ public sealed class ManagedGlossaryService
     /// <summary>Validates the configured glossary's managed structure and approved scopes.</summary>
     public DiagnosticReport Validate()
     {
-        var diagnostics = new DiagnosticReport();
+        DiagnosticReport diagnostics = new DiagnosticReport();
         if (!File.Exists(_filePath)) return diagnostics;
 
         string markdown;
@@ -80,11 +80,11 @@ public sealed class ManagedGlossaryService
             return diagnostics;
         }
 
-        var document = Parse(markdown);
+        ParsedDocument document = Parse(markdown);
         ValidateFrontmatter(document, diagnostics);
-        var catalog = ReadCatalog();
+        CatalogData catalog = ReadCatalog();
 
-        foreach (var section in document.Sections)
+        foreach (ParsedSection section in document.Sections)
         {
             ValidateSectionStructure(section, diagnostics);
             if (!section.HasTable)
@@ -93,9 +93,9 @@ public sealed class ManagedGlossaryService
                 continue;
             }
 
-            foreach (var row in section.Rows)
+            foreach (ParsedRow row in section.Rows)
             {
-                if (!TryParseStatus(row.StatusText, out var status))
+                if (!TryParseStatus(row.StatusText, out GlossarySenseStatus status))
                 {
                     diagnostics.Add(Error(
                         $"Glossary sense '{row.Id}' has unknown status '{row.StatusText}'. " +
@@ -121,7 +121,7 @@ public sealed class ManagedGlossaryService
             return new ManagedGlossaryLoadResult(new AnalysisGlossary([]), []);
         }
 
-        var diagnostics = Validate();
+        DiagnosticReport diagnostics = Validate();
         if (diagnostics.HasErrors)
         {
             throw new InvalidDataException(
@@ -129,13 +129,13 @@ public sealed class ManagedGlossaryService
                 string.Join(" ", diagnostics.Items.Select(item => item.Message)));
         }
 
-        var document = Parse(File.ReadAllText(_filePath));
-        var terms = document.Sections.Select(section => new GlossaryLookupResult(
+        ParsedDocument document = Parse(File.ReadAllText(_filePath));
+        GlossaryLookupResult[] terms = document.Sections.Select(section => new GlossaryLookupResult(
             section.Term,
             section.Rows.Select(row => ToSense(row, section.Evidence)).ToArray())).ToArray();
-        var approved = document.Sections
+        ApprovedGlossarySense[] approved = document.Sections
             .SelectMany(section => section.Rows.Select(row => (section.Term, Row: row)))
-            .Where(item => TryParseStatus(item.Row.StatusText, out var status)
+            .Where(item => TryParseStatus(item.Row.StatusText, out GlossarySenseStatus status)
                 && status == GlossarySenseStatus.Approved)
             .Select(item => new ApprovedGlossarySense(
                 item.Row.Id,
@@ -155,7 +155,7 @@ public sealed class ManagedGlossaryService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
         ArgumentNullException.ThrowIfNull(loaded);
-        var trimmed = term.Trim();
+        string trimmed = term.Trim();
         return loaded.Terms.FirstOrDefault(candidate =>
                    StringComparer.OrdinalIgnoreCase.Equals(candidate.Term, trimmed))
                ?? new GlossaryLookupResult(trimmed, []);
@@ -166,22 +166,22 @@ public sealed class ManagedGlossaryService
         ArgumentNullException.ThrowIfNull(proposals);
         ValidateProposals(proposals);
 
-        var exists = File.Exists(_filePath);
-        var original = exists ? File.ReadAllText(_filePath) : string.Empty;
+        bool exists = File.Exists(_filePath);
+        string original = exists ? File.ReadAllText(_filePath) : string.Empty;
         if (!exists && proposals.Count == 0)
         {
             return new GlossaryUpdateResult(_relativePath, string.Empty, false, false, new DiagnosticReport());
         }
 
-        var initial = exists ? original : CreateDocument(FirstCatalogOwner());
-        var merged = MergeDocument(initial, proposals);
-        var changed = !StringComparer.Ordinal.Equals(original, merged);
+        string initial = exists ? original : CreateDocument(FirstCatalogOwner());
+        string merged = MergeDocument(initial, proposals);
+        bool changed = !StringComparer.Ordinal.Equals(original, merged);
         if (exists && changed)
         {
             merged = DemoteToNeedsReview(merged);
         }
 
-        var diagnostics = ValidateMarkdown(merged);
+        DiagnosticReport diagnostics = ValidateMarkdown(merged);
         if (diagnostics.HasErrors)
         {
             throw new InvalidDataException(
@@ -189,7 +189,7 @@ public sealed class ManagedGlossaryService
                 string.Join(" ", diagnostics.Items.Select(item => item.Message)));
         }
 
-        var written = false;
+        bool written = false;
         if (write && changed)
         {
             AtomicWrite(merged);
@@ -201,18 +201,18 @@ public sealed class ManagedGlossaryService
 
     private string MergeDocument(string markdown, IReadOnlyList<GlossaryProposal> proposals)
     {
-        var newline = markdown.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var hadFinalNewline = markdown.EndsWith(newline, StringComparison.Ordinal);
-        var lines = SplitLines(markdown);
-        var document = Parse(markdown);
-        var proposalsByTerm = proposals
+        string newline = markdown.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        bool hadFinalNewline = markdown.EndsWith(newline, StringComparison.Ordinal);
+        List<string> lines = SplitLines(markdown);
+        ParsedDocument document = Parse(markdown);
+        Dictionary<string, GlossaryProposal[]> proposalsByTerm = proposals
             .GroupBy(proposal => proposal.Term.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var section in document.Sections.OrderByDescending(section => section.StartLine))
+        foreach (ParsedSection? section in document.Sections.OrderByDescending(section => section.StartLine))
         {
-            proposalsByTerm.Remove(section.Term, out var termProposals);
-            var replacement = MergeSection(
+            proposalsByTerm.Remove(section.Term, out GlossaryProposal[]? termProposals);
+            List<string> replacement = MergeSection(
                 lines.GetRange(section.StartLine, section.EndLine - section.StartLine),
                 section.Term,
                 termProposals ?? []);
@@ -220,13 +220,13 @@ public sealed class ManagedGlossaryService
             lines.InsertRange(section.StartLine, replacement);
         }
 
-        foreach (var entry in proposalsByTerm.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (KeyValuePair<string, GlossaryProposal[]> entry in proposalsByTerm.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
         {
             if (lines.Count > 0 && lines[^1].Length != 0) lines.Add(string.Empty);
             lines.AddRange(NewTermSection(entry.Key, entry.Value));
         }
 
-        var result = string.Join(newline, lines);
+        string result = string.Join(newline, lines);
         return hadFinalNewline || result.Length > 0 ? result + newline : result;
     }
 
@@ -235,16 +235,16 @@ public sealed class ManagedGlossaryService
         string term,
         IReadOnlyList<GlossaryProposal> proposals)
     {
-        var section = ParseSection(term, sectionLines, 0, sectionLines.Count);
+        ParsedSection section = ParseSection(term, sectionLines, 0, sectionLines.Count);
         if (!section.HasTable)
         {
             if (proposals.Count == 0) return sectionLines;
             if (sectionLines.Count > 0 && sectionLines[^1].Length != 0) sectionLines.Add(string.Empty);
             sectionLines.Add(Header);
             sectionLines.Add(Separator);
-            foreach (var proposal in proposals)
+            foreach (GlossaryProposal proposal in proposals)
             {
-                var id = SenseId(proposal);
+                string id = SenseId(proposal);
                 sectionLines.Add(RowMarkdown(id, proposal));
                 sectionLines.Add(string.Empty);
                 sectionLines.AddRange(EvidenceLines(id, proposal));
@@ -253,52 +253,52 @@ public sealed class ManagedGlossaryService
             return sectionLines;
         }
 
-        var removals = new HashSet<int>();
-        var replacements = new Dictionary<int, string>();
-        var evidenceToAppend = new List<string>();
-        var used = new HashSet<GlossaryProposal>();
+        HashSet<int> removals = new HashSet<int>();
+        Dictionary<int, string> replacements = new Dictionary<int, string>();
+        List<string> evidenceToAppend = new List<string>();
+        HashSet<GlossaryProposal> used = new HashSet<GlossaryProposal>();
 
-        foreach (var row in section.Rows)
+        foreach (ParsedRow row in section.Rows)
         {
             if (!StringComparer.Ordinal.Equals(row.StatusText, "proposed")
-                || !section.Evidence.TryGetValue(row.Id, out var evidence))
+                || !section.Evidence.TryGetValue(row.Id, out ParsedEvidence? evidence))
             {
                 continue;
             }
 
-            var untouched = IsUntouchedGenerated(row, evidence);
-            var proposal = proposals.FirstOrDefault(candidate =>
+            bool untouched = IsUntouchedGenerated(row, evidence);
+            GlossaryProposal? proposal = proposals.FirstOrDefault(candidate =>
                 !used.Contains(candidate) && SameScopes(row.Scopes, candidate.Scopes));
             if (proposal is not null && untouched)
             {
                 replacements[row.LineIndex] = RowMarkdown(row.Id, proposal);
-                for (var index = evidence.StartLine; index < evidence.EndLine; index++) removals.Add(index);
+                for (int index = evidence.StartLine; index < evidence.EndLine; index++) removals.Add(index);
                 evidenceToAppend.AddRange(EvidenceLines(row.Id, proposal));
                 used.Add(proposal);
             }
             else if (proposal is null && untouched)
             {
                 removals.Add(row.LineIndex);
-                for (var index = evidence.StartLine; index < evidence.EndLine; index++) removals.Add(index);
+                for (int index = evidence.StartLine; index < evidence.EndLine; index++) removals.Add(index);
             }
         }
 
-        var insertAt = section.Rows.Count > 0
+        int insertAt = section.Rows.Count > 0
             ? section.Rows.Max(row => row.LineIndex) + 1
             : section.TableSeparatorLine + 1;
-        var newRows = proposals.Where(proposal => !used.Contains(proposal)).Select(proposal =>
+        string[] newRows = proposals.Where(proposal => !used.Contains(proposal)).Select(proposal =>
         {
-            var id = SenseId(proposal);
+            string id = SenseId(proposal);
             evidenceToAppend.AddRange(EvidenceLines(id, proposal));
             return RowMarkdown(id, proposal);
         }).ToArray();
 
-        var merged = new List<string>();
-        for (var index = 0; index < sectionLines.Count; index++)
+        List<string> merged = new List<string>();
+        for (int index = 0; index < sectionLines.Count; index++)
         {
             if (index == insertAt) merged.AddRange(newRows);
             if (removals.Contains(index)) continue;
-            merged.Add(replacements.TryGetValue(index, out var replacement)
+            merged.Add(replacements.TryGetValue(index, out string? replacement)
                 ? replacement
                 : sectionLines[index]);
         }
@@ -307,7 +307,7 @@ public sealed class ManagedGlossaryService
         if (evidenceToAppend.Count > 0)
         {
             if (merged.Count > 0 && merged[^1].Length != 0) merged.Add(string.Empty);
-            foreach (var evidence in ChunkEvidence(evidenceToAppend))
+            foreach (IReadOnlyList<string> evidence in ChunkEvidence(evidenceToAppend))
             {
                 merged.AddRange(evidence);
                 merged.Add(string.Empty);
@@ -321,10 +321,10 @@ public sealed class ManagedGlossaryService
 
     private static IEnumerable<IReadOnlyList<string>> ChunkEvidence(IReadOnlyList<string> lines)
     {
-        var start = 0;
+        int start = 0;
         while (start < lines.Count)
         {
-            var end = start;
+            int end = start;
             while (end < lines.Count && !StringComparer.Ordinal.Equals(lines[end], EvidenceEnd)) end++;
             if (end < lines.Count) end++;
             yield return lines.Skip(start).Take(end - start).ToArray();
@@ -334,14 +334,14 @@ public sealed class ManagedGlossaryService
 
     private static IReadOnlyList<string> NewTermSection(string term, IReadOnlyList<GlossaryProposal> proposals)
     {
-        var lines = new List<string> { $"## {term}", string.Empty, Header, Separator };
-        foreach (var proposal in proposals)
+        List<string> lines = new List<string> { $"## {term}", string.Empty, Header, Separator };
+        foreach (GlossaryProposal proposal in proposals)
         {
-            var id = SenseId(proposal);
+            string id = SenseId(proposal);
             lines.Add(RowMarkdown(id, proposal));
         }
 
-        foreach (var proposal in proposals)
+        foreach (GlossaryProposal proposal in proposals)
         {
             lines.Add(string.Empty);
             lines.AddRange(EvidenceLines(SenseId(proposal), proposal));
@@ -352,9 +352,9 @@ public sealed class ManagedGlossaryService
 
     private string CreateDocument(string owner)
     {
-        var today = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime)
+        string today = DateOnly.FromDateTime(_timeProvider.GetUtcNow().UtcDateTime)
             .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        var safeOwner = FrontmatterSerializer.Serialize(owner).TrimEnd();
+        string safeOwner = FrontmatterSerializer.Serialize(owner).TrimEnd();
         return $"""
             ---
             id: reference/glossary
@@ -372,36 +372,36 @@ public sealed class ManagedGlossaryService
 
     private string FirstCatalogOwner()
     {
-        var catalog = ReadCatalog();
+        CatalogData catalog = ReadCatalog();
         return catalog.FirstOwner ?? throw new InvalidOperationException(
             "The catalog has no data-row owner; a managed glossary cannot be created without an owner.");
     }
 
     private CatalogData ReadCatalog()
     {
-        var catalogPath = ResolveContainedPath(_repositoryRoot, _config.Ontology.ResolvedCatalogPath);
+        string catalogPath = ResolveContainedPath(_repositoryRoot, _config.Ontology.ResolvedCatalogPath);
         if (!File.Exists(catalogPath))
         {
             return new CatalogData(null, new HashSet<string>(StringComparer.Ordinal));
         }
 
         string? firstOwner = null;
-        var components = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var line in File.ReadLines(catalogPath))
+        HashSet<string> components = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string line in File.ReadLines(catalogPath))
         {
             if (!line.StartsWith('|')) continue;
             // Catalog column configuration intentionally uses the raw pipe-split indices,
             // including the empty cell before a leading pipe, matching DocumentLoader.
-            var cells = line.Split('|', StringSplitOptions.None)
+            string[] cells = line.Split('|', StringSplitOptions.None)
                 .Select(cell => cell.Trim())
                 .ToArray();
-            var maxColumn = Math.Max(
+            int maxColumn = Math.Max(
                 _config.Ontology.CatalogComponentColumn,
                 _config.Ontology.CatalogOwnerColumn);
             if (cells.Length <= maxColumn) continue;
 
-            var component = cells[_config.Ontology.CatalogComponentColumn];
-            var owner = cells[_config.Ontology.CatalogOwnerColumn];
+            string component = cells[_config.Ontology.CatalogComponentColumn];
+            string owner = cells[_config.Ontology.CatalogOwnerColumn];
             if (component.Length == 0
                 || component.StartsWith("---", StringComparison.Ordinal)
                 || StringComparer.Ordinal.Equals(component, "Component"))
@@ -421,11 +421,11 @@ public sealed class ManagedGlossaryService
 
     private DiagnosticReport ValidateMarkdown(string markdown)
     {
-        var document = Parse(markdown);
-        var diagnostics = new DiagnosticReport();
+        ParsedDocument document = Parse(markdown);
+        DiagnosticReport diagnostics = new DiagnosticReport();
         ValidateFrontmatter(document, diagnostics);
-        var catalog = ReadCatalog();
-        foreach (var section in document.Sections)
+        CatalogData catalog = ReadCatalog();
+        foreach (ParsedSection section in document.Sections)
         {
             ValidateSectionStructure(section, diagnostics);
             if (!section.HasTable)
@@ -434,9 +434,9 @@ public sealed class ManagedGlossaryService
                 continue;
             }
 
-            foreach (var row in section.Rows)
+            foreach (ParsedRow row in section.Rows)
             {
-                if (!TryParseStatus(row.StatusText, out var status))
+                if (!TryParseStatus(row.StatusText, out GlossarySenseStatus status))
                 {
                     diagnostics.Add(Error($"Glossary sense '{row.Id}' has unknown status '{row.StatusText}'."));
                 }
@@ -481,7 +481,7 @@ public sealed class ManagedGlossaryService
             diagnostics.Add(Error("The managed glossary must declare an owner."));
         }
 
-        if (!document.Frontmatter.TryGetValue("last-reviewed", out var lastReviewed)
+        if (!document.Frontmatter.TryGetValue("last-reviewed", out string? lastReviewed)
             || !DateOnly.TryParseExact(
                 lastReviewed,
                 "yyyy-MM-dd",
@@ -493,7 +493,7 @@ public sealed class ManagedGlossaryService
                 "The managed glossary must preserve an ISO yyyy-MM-dd last-reviewed date."));
         }
 
-        var status = document.Frontmatter.GetValueOrDefault("status");
+        string? status = document.Frontmatter.GetValueOrDefault("status");
         if (status is not ("current" or "needs-review"))
         {
             diagnostics.Add(Error(
@@ -515,8 +515,8 @@ public sealed class ManagedGlossaryService
                 $"Glossary term '{section.Term}' contains malformed or unbalanced generated evidence markup."));
         }
 
-        var rowIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var row in section.Rows)
+        HashSet<string> rowIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (ParsedRow row in section.Rows)
         {
             if (string.IsNullOrWhiteSpace(row.Id))
             {
@@ -528,7 +528,7 @@ public sealed class ManagedGlossaryService
             }
         }
 
-        foreach (var evidenceId in section.Evidence.Keys)
+        foreach (string evidenceId in section.Evidence.Keys)
         {
             if (!rowIds.Contains(evidenceId))
             {
@@ -554,11 +554,11 @@ public sealed class ManagedGlossaryService
             return;
         }
 
-        foreach (var scope in row.Scopes)
+        foreach (string scope in row.Scopes)
         {
             if (scope.StartsWith("component:", StringComparison.Ordinal))
             {
-                var component = scope["component:".Length..];
+                string component = scope["component:".Length..];
                 if (component.Length == 0 || !components.Contains(component))
                 {
                     diagnostics.Add(Error(
@@ -591,10 +591,10 @@ public sealed class ManagedGlossaryService
 
     private static ParsedDocument Parse(string markdown)
     {
-        var frontmatter = new Dictionary<string, string>(StringComparer.Ordinal);
-        var frontmatterValid = true;
+        Dictionary<string, string> frontmatter = new Dictionary<string, string>(StringComparer.Ordinal);
+        bool frontmatterValid = true;
         string? frontmatterError = null;
-        var read = MarkdownFrontmatterReader.Read(markdown);
+        FrontmatterReadResult read = MarkdownFrontmatterReader.Read(markdown);
         if (!read.HasFrontmatter)
         {
             frontmatterValid = false;
@@ -615,8 +615,8 @@ public sealed class ManagedGlossaryService
             }
         }
 
-        var lines = SplitLines(markdown);
-        var bodyStart = read.HasFrontmatter ? Math.Max(0, read.BodyStartLine - 1) : 0;
+        List<string> lines = SplitLines(markdown);
+        int bodyStart = read.HasFrontmatter ? Math.Max(0, read.BodyStartLine - 1) : 0;
         return new ParsedDocument(
             frontmatter,
             ParseSections(lines, bodyStart),
@@ -632,23 +632,23 @@ public sealed class ManagedGlossaryService
 
     private static IReadOnlyList<ParsedSection> ParseSections(List<string> lines, int bodyStart)
     {
-        var body = string.Join('\n', lines.Skip(bodyStart));
-        var syntax = Markdown.Parse(body, MarkdownPipeline);
-        var headings = syntax.Descendants<HeadingBlock>()
+        string body = string.Join('\n', lines.Skip(bodyStart));
+        MarkdownDocument syntax = Markdown.Parse(body, MarkdownPipeline);
+        List<(int Line, string Term)> headings = syntax.Descendants<HeadingBlock>()
             .Where(heading => heading.Level == 2)
             .Select(heading =>
             {
-                var line = heading.Line + bodyStart;
-                var term = HeadingTerm(lines[line]);
+                int line = heading.Line + bodyStart;
+                string term = HeadingTerm(lines[line]);
                 return (Line: line, Term: term);
             })
             .ToList();
 
-        var sections = new List<ParsedSection>();
-        for (var index = 0; index < headings.Count; index++)
+        List<ParsedSection> sections = new List<ParsedSection>();
+        for (int index = 0; index < headings.Count; index++)
         {
-            var start = headings[index].Line;
-            var end = index + 1 < headings.Count ? headings[index + 1].Line : lines.Count;
+            int start = headings[index].Line;
+            int end = index + 1 < headings.Count ? headings[index + 1].Line : lines.Count;
             sections.Add(ParseSection(headings[index].Term, lines, start, end));
         }
 
@@ -657,9 +657,9 @@ public sealed class ManagedGlossaryService
 
     private static ParsedSection ParseSection(string term, IReadOnlyList<string> lines, int start, int end)
     {
-        var fencedLines = FencedLineIndexes(lines, start, end);
-        var headerLine = -1;
-        for (var index = start; index < end; index++)
+        IReadOnlySet<int> fencedLines = FencedLineIndexes(lines, start, end);
+        int headerLine = -1;
+        for (int index = start; index < end; index++)
         {
             if (!fencedLines.Contains(index)
                 && StringComparer.Ordinal.Equals(lines[index].Trim(), Header))
@@ -669,12 +669,12 @@ public sealed class ManagedGlossaryService
             }
         }
 
-        var separatorLine = headerLine >= 0 && headerLine + 1 < end ? headerLine + 1 : -1;
-        var rows = new List<ParsedRow>();
-        var malformedRows = 0;
+        int separatorLine = headerLine >= 0 && headerLine + 1 < end ? headerLine + 1 : -1;
+        List<ParsedRow> rows = new List<ParsedRow>();
+        int malformedRows = 0;
         if (separatorLine >= 0 && IsTableSeparator(lines[separatorLine]))
         {
-            for (var index = separatorLine + 1; index < end; index++)
+            for (int index = separatorLine + 1; index < end; index++)
             {
                 if (fencedLines.Contains(index))
                 {
@@ -690,7 +690,7 @@ public sealed class ManagedGlossaryService
                     break;
                 }
 
-                var cells = SplitTableRow(lines[index]);
+                List<string> cells = SplitTableRow(lines[index]);
                 if (cells.Count == 5)
                 {
                     rows.Add(new ParsedRow(
@@ -709,20 +709,20 @@ public sealed class ManagedGlossaryService
             }
         }
 
-        var evidence = new Dictionary<string, ParsedEvidence>(StringComparer.Ordinal);
-        var malformedEvidence = false;
-        for (var index = start; index < end; index++)
+        Dictionary<string, ParsedEvidence> evidence = new Dictionary<string, ParsedEvidence>(StringComparer.Ordinal);
+        bool malformedEvidence = false;
+        for (int index = start; index < end; index++)
         {
             if (fencedLines.Contains(index)) continue;
-            var trimmed = lines[index].Trim();
+            string trimmed = lines[index].Trim();
             if (!trimmed.StartsWith(EvidenceStart, StringComparison.Ordinal)) continue;
-            var id = Attribute(trimmed, "sense");
+            string? id = Attribute(trimmed, "sense");
             if (id is null)
             {
                 malformedEvidence = true;
                 continue;
             }
-            var blockEnd = index + 1;
+            int blockEnd = index + 1;
             while (blockEnd < end && !StringComparer.Ordinal.Equals(lines[blockEnd].Trim(), EvidenceEnd)) blockEnd++;
             if (blockEnd < end)
             {
@@ -734,7 +734,7 @@ public sealed class ManagedGlossaryService
             }
 
             if (evidence.ContainsKey(id)) malformedEvidence = true;
-            var evidenceIds = lines
+            string[] evidenceIds = lines
                 .Skip(index + 1)
                 .Take(Math.Max(0, blockEnd - index - 1))
                 .Select(line => line.Trim())
@@ -743,7 +743,7 @@ public sealed class ManagedGlossaryService
                 .Where(idValue => idValue.Length > 0)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
-            var evidenceLines = lines
+            string[] evidenceLines = lines
                 .Skip(index + 1)
                 .Take(Math.Max(0, blockEnd - index - 2))
                 .ToArray();
@@ -773,17 +773,17 @@ public sealed class ManagedGlossaryService
         int start,
         int end)
     {
-        var fenced = new HashSet<int>();
+        HashSet<int> fenced = new HashSet<int>();
         char? marker = null;
-        var openingLength = 0;
+        int openingLength = 0;
 
-        for (var index = start; index < end; index++)
+        for (int index = start; index < end; index++)
         {
-            var trimmed = lines[index].TrimStart();
+            string trimmed = lines[index].TrimStart();
             if (marker is not null)
             {
                 fenced.Add(index);
-                var length = MarkerLength(trimmed, marker.Value);
+                int length = MarkerLength(trimmed, marker.Value);
                 if (length >= openingLength && trimmed[length..].Trim().Length == 0)
                 {
                     marker = null;
@@ -793,9 +793,9 @@ public sealed class ManagedGlossaryService
                 continue;
             }
 
-            var candidate = trimmed.Length > 0 ? trimmed[0] : '\0';
+            char candidate = trimmed.Length > 0 ? trimmed[0] : '\0';
             if (candidate is not ('`' or '~')) continue;
-            var candidateLength = MarkerLength(trimmed, candidate);
+            int candidateLength = MarkerLength(trimmed, candidate);
             if (candidateLength < 3) continue;
 
             marker = candidate;
@@ -808,7 +808,7 @@ public sealed class ManagedGlossaryService
 
     private static int MarkerLength(string line, char marker)
     {
-        var length = 0;
+        int length = 0;
         while (length < line.Length && line[length] == marker) length++;
         return length;
     }
@@ -817,14 +817,14 @@ public sealed class ManagedGlossaryService
         ParsedRow row,
         IReadOnlyDictionary<string, ParsedEvidence> evidence)
     {
-        _ = TryParseStatus(row.StatusText, out var status);
+        _ = TryParseStatus(row.StatusText, out GlossarySenseStatus status);
         return new GlossarySense(
             row.Id,
             status,
             row.Definition,
             row.Scopes,
             row.Aliases,
-            evidence.TryGetValue(row.Id, out var block) ? block.EvidenceIds : []);
+            evidence.TryGetValue(row.Id, out ParsedEvidence? block) ? block.EvidenceIds : []);
     }
 
     private static bool IsUntouchedGenerated(ParsedRow row, ParsedEvidence evidence)
@@ -841,13 +841,13 @@ public sealed class ManagedGlossaryService
 
     private static IReadOnlyList<string> EvidenceLines(string id, GlossaryProposal proposal)
     {
-        var row = RowMarkdown(id, proposal);
-        var evidenceLines = proposal.EvidenceIds
+        string row = RowMarkdown(id, proposal);
+        string[] evidenceLines = proposal.EvidenceIds
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .Select(evidenceId => $"- {EscapeEvidence(evidenceId)}")
             .ToArray();
-        var lines = new List<string>
+        List<string> lines = new List<string>
         {
             $"{EvidenceStart} sense=\"{EscapeAttribute(id)}\" fingerprint=\"{OwnershipFingerprint(row, evidenceLines)}\" -->"
         };
@@ -858,21 +858,21 @@ public sealed class ManagedGlossaryService
 
     private static string SenseId(GlossaryProposal proposal)
     {
-        var slug = new string(proposal.Term.Trim().ToLowerInvariant()
+        string slug = new string(proposal.Term.Trim().ToLowerInvariant()
             .Select(character => char.IsLetterOrDigit(character) ? character : '-')
             .ToArray()).Trim('-');
         if (slug.Length == 0) slug = "term";
-        var identity = string.Join('\n',
+        string identity = string.Join('\n',
             proposal.Term.Trim().ToLowerInvariant(),
             string.Join(';', proposal.Scopes.Order(StringComparer.Ordinal)),
             string.Join(';', proposal.Aliases.Order(StringComparer.Ordinal)));
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..8];
+        string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..8];
         return $"{slug}-{hash}";
     }
 
     private static string OwnershipFingerprint(string row, IReadOnlyList<string> evidenceLines)
     {
-        var content = string.Join('\n',
+        string content = string.Join('\n',
             row,
             string.Join("\n", evidenceLines));
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
@@ -880,12 +880,12 @@ public sealed class ManagedGlossaryService
 
     private static string DemoteToNeedsReview(string markdown)
     {
-        var newline = markdown.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var lines = SplitLines(markdown);
-        var frontmatterEnd = lines.Count > 0 && StringComparer.Ordinal.Equals(lines[0], "---")
+        string newline = markdown.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        List<string> lines = SplitLines(markdown);
+        int frontmatterEnd = lines.Count > 0 && StringComparer.Ordinal.Equals(lines[0], "---")
             ? lines.FindIndex(1, line => StringComparer.Ordinal.Equals(line, "---"))
             : -1;
-        for (var index = 1; index < frontmatterEnd; index++)
+        for (int index = 1; index < frontmatterEnd; index++)
         {
             if (lines[index].StartsWith("status:", StringComparison.Ordinal))
             {
@@ -899,10 +899,10 @@ public sealed class ManagedGlossaryService
 
     private void AtomicWrite(string markdown)
     {
-        var directory = Path.GetDirectoryName(_filePath)
+        string directory = Path.GetDirectoryName(_filePath)
             ?? throw new InvalidOperationException("The glossary path has no parent directory.");
         Directory.CreateDirectory(directory);
-        var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(_filePath)}.{Guid.NewGuid():N}.tmp");
+        string temporaryPath = Path.Combine(directory, $".{Path.GetFileName(_filePath)}.{Guid.NewGuid():N}.tmp");
         try
         {
             File.WriteAllText(temporaryPath, markdown);
@@ -916,7 +916,7 @@ public sealed class ManagedGlossaryService
 
     private static void ValidateProposals(IReadOnlyList<GlossaryProposal> proposals)
     {
-        foreach (var proposal in proposals)
+        foreach (GlossaryProposal proposal in proposals)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(proposal.Term);
             ArgumentNullException.ThrowIfNull(proposal.Scopes);
@@ -929,7 +929,7 @@ public sealed class ManagedGlossaryService
 
             RequireSingleLine(proposal.Term, "term", proposals);
             RequireSingleLine(proposal.Definition, "definition", proposals);
-            foreach (var scope in proposal.Scopes)
+            foreach (string scope in proposal.Scopes)
             {
                 RequireSingleLine(scope, "scope", proposals);
                 if (scope.Contains(';', StringComparison.Ordinal))
@@ -940,7 +940,7 @@ public sealed class ManagedGlossaryService
                 }
             }
 
-            foreach (var alias in proposal.Aliases)
+            foreach (string alias in proposal.Aliases)
             {
                 RequireSingleLine(alias, "alias", proposals);
                 if (alias.Contains(';', StringComparison.Ordinal))
@@ -990,10 +990,10 @@ public sealed class ManagedGlossaryService
             throw new ArgumentException("The glossary path must be repository-relative.", nameof(relativePath));
         }
 
-        var resolved = Path.GetFullPath(
+        string resolved = Path.GetFullPath(
             relativePath.Replace('/', Path.DirectorySeparatorChar),
             repositoryRoot);
-        var prefix = repositoryRoot.EndsWith(Path.DirectorySeparatorChar)
+        string prefix = repositoryRoot.EndsWith(Path.DirectorySeparatorChar)
             ? repositoryRoot
             : repositoryRoot + Path.DirectorySeparatorChar;
         if (!resolved.StartsWith(prefix, OperatingSystem.IsWindows()
@@ -1008,16 +1008,16 @@ public sealed class ManagedGlossaryService
 
     private static void RejectLinkedPath(string repositoryRoot, string targetPath)
     {
-        var relative = Path.GetRelativePath(repositoryRoot, targetPath);
-        var current = repositoryRoot;
-        foreach (var segment in relative.Split(
+        string relative = Path.GetRelativePath(repositoryRoot, targetPath);
+        string current = repositoryRoot;
+        foreach (string segment in relative.Split(
                      [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                      StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
             if (!File.Exists(current) && !Directory.Exists(current)) continue;
 
-            var attributes = File.GetAttributes(current);
+            FileAttributes attributes = File.GetAttributes(current);
             if ((attributes & FileAttributes.ReparsePoint) != 0
                 || new FileInfo(current).LinkTarget is not null
                 || new DirectoryInfo(current).LinkTarget is not null)
@@ -1030,18 +1030,18 @@ public sealed class ManagedGlossaryService
 
     private static bool IsTableSeparator(string line)
     {
-        var cells = SplitTableRow(line);
+        List<string> cells = SplitTableRow(line);
         return cells.Count == 5 && cells.All(cell => cell.Length >= 3 && cell.All(character => character == '-'));
     }
 
     private static List<string> SplitTableRow(string line)
     {
-        var cells = new List<string>();
-        var current = new StringBuilder();
-        var trimmed = line.Trim();
-        for (var index = 0; index < trimmed.Length; index++)
+        List<string> cells = new List<string>();
+        StringBuilder current = new StringBuilder();
+        string trimmed = line.Trim();
+        for (int index = 0; index < trimmed.Length; index++)
         {
-            var character = trimmed[index];
+            char character = trimmed[index];
             if (character == '\\' && index + 1 < trimmed.Length && trimmed[index + 1] == '|')
             {
                 current.Append('|');
@@ -1065,8 +1065,8 @@ public sealed class ManagedGlossaryService
 
     private static string HeadingTerm(string line)
     {
-        var trimmed = line.TrimStart();
-        var hashes = 0;
+        string trimmed = line.TrimStart();
+        int hashes = 0;
         while (hashes < trimmed.Length && trimmed[hashes] == '#') hashes++;
         return trimmed[hashes..].Trim().TrimEnd('#').TrimEnd();
     }
@@ -1076,17 +1076,17 @@ public sealed class ManagedGlossaryService
 
     private static string? Attribute(string marker, string name)
     {
-        var prefix = name + "=\"";
-        var start = marker.IndexOf(prefix, StringComparison.Ordinal);
+        string prefix = name + "=\"";
+        int start = marker.IndexOf(prefix, StringComparison.Ordinal);
         if (start < 0) return null;
         start += prefix.Length;
-        var end = marker.IndexOf('"', start);
+        int end = marker.IndexOf('"', start);
         return end < 0 ? null : marker[start..end];
     }
 
     private static List<string> SplitLines(string markdown)
     {
-        var lines = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').ToList();
+        List<string> lines = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').ToList();
         if (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
         return lines;
     }

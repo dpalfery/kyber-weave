@@ -1,3 +1,4 @@
+using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Security;
 using KyberWeave.Core.Diagnostics;
@@ -12,18 +13,18 @@ public sealed class AgentScanCommand : Command<AgentScanSettings>
 {
     public override int Execute(CommandContext context, AgentScanSettings settings)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
 
-        if (!AgentLoader.TryParseHarnessFilter(settings.Harness, out var harnessFilter, out var error))
+        if (!AgentLoader.TryParseHarnessFilter(settings.Harness, out HarnessKind? harnessFilter, out string? error))
         {
             report.Add(new Diagnostic("KW-PARSE-000", Severity.Error, error!, "agent", settings.Path));
             CommandHelpers.Finish(report, settings, "agent scan", "Agent");
             return 1;
         }
 
-        var agentSet = AgentLoader.LoadAll(settings.Path, harnessFilter);
+        AgentSet agentSet = AgentLoader.LoadAll(settings.Path, harnessFilter);
 
-        foreach (var agent in agentSet.Agents)
+        foreach (AgentModel agent in agentSet.Agents)
             report.AddRange(AgentPromptScanner.Scan(agent).Items);
 
         CommandHelpers.Finish(report, settings, "agent scan", "Agent");

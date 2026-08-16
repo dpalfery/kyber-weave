@@ -1,0 +1,100 @@
+schema: kyber-squad.capability-profiles/v1
+capabilities:
+  - filesystem.read
+  # Opening a named file and sweeping the tree for matches are different grants: a role
+  # can be entitled to read documents it is pointed at without being entitled to go
+  # looking. Splitting them lets the orchestrator profile hold the first and refuse the
+  # second, which a single filesystem.read could not express.
+  - filesystem.search
+  - filesystem.write
+  - process.execute
+  - network.read
+  - network.publish
+  - delegate
+profiles:
+  architect:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: deny
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  documentation:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: deny
+      network.read: deny
+      network.publish: deny
+      delegate: deny
+  investigator:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: deny
+      process.execute: allow
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  orchestrator:
+    permissions:
+      # Conductors open the plan, spec, and todo documents they route and sequence work
+      # from. They do not go looking: both conductor bodies route discovery and searching
+      # to architect, and filesystem.search: deny makes that boundary enforced rather than
+      # merely asked for. The folder restriction itself is instruction-only — no target
+      # expresses path scoping in its permission model.
+      filesystem.read: allow
+      filesystem.search: deny
+      filesystem.write: deny
+      process.execute: deny
+      network.read: deny
+      network.publish: deny
+      delegate: allow
+  product-planning:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: ask
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: allow
+  publishing-worker:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: allow
+      network.publish: ask
+      delegate: deny
+  read-only:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: deny
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  reviewer:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: deny
+      process.execute: deny
+      network.read: allow
+      network.publish: deny
+      delegate: deny
+  worker:
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: deny
+      network.publish: deny
+      delegate: deny

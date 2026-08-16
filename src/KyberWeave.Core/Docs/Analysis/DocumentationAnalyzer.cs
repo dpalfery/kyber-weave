@@ -54,35 +54,39 @@ public sealed partial class DocumentationAnalyzer
         DocumentSet documents,
         DocGraphProjection graph,
         DocsAnalysisConfig config,
-        AnalysisGlossary? glossary = null)
+        AnalysisGlossary? glossary = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(documents);
         ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(config);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var diagnostics = new DiagnosticReport();
-        var claims = ExtractEligibleClaims(documents, config, diagnostics);
-        var candidates = new Dictionary<string, AnalysisCandidate>(StringComparer.Ordinal);
+        DiagnosticReport diagnostics = new DiagnosticReport();
+        IReadOnlyList<Claim> claims = ExtractEligibleClaims(documents, config, diagnostics);
+        cancellationToken.ThrowIfCancellationRequested();
+        Dictionary<string, AnalysisCandidate> candidates = new Dictionary<string, AnalysisCandidate>(StringComparer.Ordinal);
 
         AddExactDuplicateClusters(claims, candidates);
 
-        var graphComparisons = 0;
-        var lexicalComparisons = 0;
-        var embeddingComparisons = 0;
-        var graphCandidates = 0;
-        var lexicalCandidates = 0;
-        var embeddingCandidates = 0;
-        var embeddingCacheHits = 0;
-        var embeddingCacheMisses = 0;
-        var embeddingPromptTokens = 0;
-        var embeddingTotalTokens = 0;
-        var sourceTruncated = false;
-        var semanticSeedPairs = new List<ClaimPairCandidate>();
+        int graphComparisons = 0;
+        int lexicalComparisons = 0;
+        int embeddingComparisons = 0;
+        int graphCandidates = 0;
+        int lexicalCandidates = 0;
+        int embeddingCandidates = 0;
+        int embeddingCacheHits = 0;
+        int embeddingCacheMisses = 0;
+        int embeddingPromptTokens = 0;
+        int embeddingTotalTokens = 0;
+        bool sourceTruncated = false;
+        List<ClaimPairCandidate> semanticSeedPairs = new List<ClaimPairCandidate>();
 
-        var request = new ClaimCandidateSourceRequest(claims, graph, config.Search);
-        foreach (var source in _candidateSources.Where(source => ShouldRun(source.Kind, config)))
+        ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, graph, config.Search);
+        foreach (IClaimCandidateSource? source in _candidateSources.Where(source => ShouldRun(source.Kind, config)))
         {
-            var result = source.FindCandidates(request)
+            cancellationToken.ThrowIfCancellationRequested();
+            ClaimCandidateSourceResult result = source.FindCandidates(request)
                 ?? throw new InvalidOperationException("A claim candidate source returned null.");
             sourceTruncated |= result.Truncated;
             switch (source.Kind)
@@ -103,8 +107,9 @@ public sealed partial class DocumentationAnalyzer
                     throw new InvalidOperationException($"Unknown candidate source kind '{source.Kind}'.");
             }
 
-            foreach (var pair in result.Pairs)
+            foreach (ClaimPairCandidate pair in result.Pairs)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (source.Kind != CandidateSourceKind.Embedding)
                     semanticSeedPairs.Add(pair);
                 ClassifyPair(pair, config.Search, glossary, candidates);
@@ -113,7 +118,8 @@ public sealed partial class DocumentationAnalyzer
 
         if (config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off)
         {
-            var resolution = ResolveEmbeddings(claims, config.Embeddings);
+            cancellationToken.ThrowIfCancellationRequested();
+            EmbeddingResolutionResult resolution = ResolveEmbeddings(claims, config.Embeddings);
             diagnostics.AddRange(resolution.Diagnostics.Items);
             embeddingCacheHits = resolution.CacheHits;
             embeddingCacheMisses = resolution.CacheMisses;
@@ -122,7 +128,8 @@ public sealed partial class DocumentationAnalyzer
 
             if (resolution.Embeddings.Count == claims.Count)
             {
-                var result = EmbeddingCandidateBuilder.Build(
+                cancellationToken.ThrowIfCancellationRequested();
+                ClaimCandidateSourceResult result = EmbeddingCandidateBuilder.Build(
                     claims,
                     resolution.Embeddings,
                     semanticSeedPairs,
@@ -130,25 +137,29 @@ public sealed partial class DocumentationAnalyzer
                 sourceTruncated |= result.Truncated;
                 embeddingComparisons += result.ComparisonCount;
                 embeddingCandidates += result.Pairs.Count;
-                foreach (var pair in result.Pairs)
+                foreach (ClaimPairCandidate pair in result.Pairs)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
                     ClassifyPair(pair, config.Search, glossary, candidates);
+                }
             }
         }
 
-        var consolidated = ConsolidateTerminology(candidates.Values);
-        var reviewed = ApplyVerdicts(consolidated, config.VerdictConfidence);
-        var ordered = reviewed
+        cancellationToken.ThrowIfCancellationRequested();
+        IReadOnlyList<AnalysisCandidate> consolidated = ConsolidateTerminology(candidates.Values);
+        IReadOnlyList<AnalysisCandidate> reviewed = ApplyVerdicts(consolidated, config.VerdictConfidence);
+        AnalysisCandidate[] ordered = reviewed
             .OrderBy(candidate => candidate.Kind)
             .ThenBy(candidate => candidate.Term, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.Id, StringComparer.Ordinal)
             .ToArray();
-        var truncated = sourceTruncated || ordered.Length > config.Search.MaxCandidates;
-        var visible = ordered.Take(config.Search.MaxCandidates).ToArray();
+        bool truncated = sourceTruncated || ordered.Length > config.Search.MaxCandidates;
+        AnalysisCandidate[] visible = ordered.Take(config.Search.MaxCandidates).ToArray();
 
-        foreach (var candidate in visible)
+        foreach (AnalysisCandidate? candidate in visible)
             diagnostics.Add(ToDiagnostic(candidate, config.VerdictConfidence));
 
-        var metrics = new AnalysisMetrics(
+        AnalysisMetrics metrics = new AnalysisMetrics(
             claims.Count,
             graphComparisons,
             lexicalComparisons,
@@ -182,7 +193,7 @@ public sealed partial class DocumentationAnalyzer
                 "No safe analysis persistence provider is configured in this host.");
         }
 
-        var coordinator = new EmbeddingCoordinator(_embeddingGenerator, _persistence);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(_embeddingGenerator, _persistence);
         return coordinator.Resolve(
             claims.Select(claim => new EmbeddingWorkItem(
                 claim.ContextualHash,
@@ -195,11 +206,11 @@ public sealed partial class DocumentationAnalyzer
         DocsAnalysisConfig config,
         DiagnosticReport diagnostics)
     {
-        var statuses = new HashSet<string>(config.Statuses, StringComparer.OrdinalIgnoreCase);
-        var glossaryPath = NormalizePath(config.GlossaryPath ?? config.ResolvedGlossaryPath);
-        var claims = new List<Claim>();
+        HashSet<string> statuses = new HashSet<string>(config.Statuses, StringComparer.OrdinalIgnoreCase);
+        string? glossaryPath = NormalizePath(config.GlossaryPath ?? config.ResolvedGlossaryPath);
+        List<Claim> claims = new List<Claim>();
 
-        foreach (var document in documents.Documents)
+        foreach (DocumentModel document in documents.Documents)
         {
             if (!statuses.Contains(document.Frontmatter.Status ?? string.Empty)) continue;
             if (glossaryPath is not null
@@ -210,7 +221,7 @@ public sealed partial class DocumentationAnalyzer
                 continue;
             }
 
-            var extraction = _extractor.Extract(document);
+            ClaimExtractionResult extraction = _extractor.Extract(document);
             diagnostics.AddRange(extraction.Diagnostics.Items);
             claims.AddRange(extraction.Claims.Where(claim =>
                 TokenPattern().Count(claim.Text) >= config.Search.MinClaimTokens));
@@ -223,16 +234,16 @@ public sealed partial class DocumentationAnalyzer
         IReadOnlyList<Claim> claims,
         IDictionary<string, AnalysisCandidate> candidates)
     {
-        foreach (var group in claims
+        foreach (IGrouping<string, Claim>? group in claims
                      .Where(claim => !claim.IgnoreRules.HasFlag(IgnoreRule.Duplicate))
                      .GroupBy(claim => claim.ContentHash, StringComparer.Ordinal)
                      .Where(group => group.Count() > 1))
         {
-            var groupedClaims = group
+            Claim[] groupedClaims = group
                 .OrderBy(claim => claim.FilePath, StringComparer.Ordinal)
                 .ThenBy(claim => claim.StartLine)
                 .ToArray();
-            var id = AnalysisCandidateId.Compute(
+            string id = AnalysisCandidateId.Compute(
                 AnalysisRuleKind.Duplicate,
                 null,
                 groupedClaims.Select(claim => claim.ContentHash),
@@ -255,7 +266,7 @@ public sealed partial class DocumentationAnalyzer
     {
         if (StringComparer.Ordinal.Equals(pair.Left.ContentHash, pair.Right.ContentHash)) return;
 
-        var ordinaryCandidate = IsOrdinaryCandidate(pair.Score, search);
+        bool ordinaryCandidate = IsOrdinaryCandidate(pair.Score, search);
         if (ordinaryCandidate
             && !pair.Left.IgnoreRules.HasFlag(IgnoreRule.Duplicate)
             && !pair.Right.IgnoreRules.HasFlag(IgnoreRule.Duplicate)
@@ -280,9 +291,9 @@ public sealed partial class DocumentationAnalyzer
             return;
         }
 
-        foreach (var term in SharedInformativeTerms(pair.Left.Text, pair.Right.Text))
+        foreach (string term in SharedInformativeTerms(pair.Left.Text, pair.Right.Text))
         {
-            var claims = new[] { pair.Left, pair.Right };
+            Claim[] claims = new[] { pair.Left, pair.Right };
             if (glossary?.Covers(term, claims) == true) continue;
             AddOrMerge(candidates, CreateCandidate(AnalysisRuleKind.Terminology, pair, term));
         }
@@ -301,11 +312,11 @@ public sealed partial class DocumentationAnalyzer
         ClaimPairCandidate pair,
         string? term)
     {
-        var claims = new[] { pair.Left, pair.Right }
+        Claim[] claims = new[] { pair.Left, pair.Right }
             .OrderBy(claim => claim.FilePath, StringComparer.Ordinal)
             .ThenBy(claim => claim.StartLine)
             .ToArray();
-        var id = AnalysisCandidateId.Compute(
+        string id = AnalysisCandidateId.Compute(
             kind,
             term,
             claims.Select(claim => claim.ContentHash),
@@ -324,7 +335,7 @@ public sealed partial class DocumentationAnalyzer
         IDictionary<string, AnalysisCandidate> candidates,
         AnalysisCandidate candidate)
     {
-        if (!candidates.TryGetValue(candidate.Id, out var existing))
+        if (!candidates.TryGetValue(candidate.Id, out AnalysisCandidate? existing))
         {
             candidates[candidate.Id] = candidate;
             return;
@@ -348,21 +359,21 @@ public sealed partial class DocumentationAnalyzer
     private static IReadOnlyList<AnalysisCandidate> ConsolidateTerminology(
         IEnumerable<AnalysisCandidate> candidates)
     {
-        var materialized = candidates.ToArray();
-        var result = materialized
+        AnalysisCandidate[] materialized = candidates.ToArray();
+        List<AnalysisCandidate> result = materialized
             .Where(candidate => candidate.Kind != AnalysisRuleKind.Terminology)
             .ToList();
-        foreach (var group in materialized
+        foreach (IGrouping<string, AnalysisCandidate> group in materialized
                      .Where(candidate => candidate.Kind == AnalysisRuleKind.Terminology)
                      .GroupBy(candidate => candidate.Term!, StringComparer.Ordinal))
         {
-            var claims = group.SelectMany(candidate => candidate.Claims)
+            Claim[] claims = group.SelectMany(candidate => candidate.Claims)
                 .Distinct()
                 .OrderBy(claim => claim.FilePath, StringComparer.Ordinal)
                 .ThenBy(claim => claim.StartLine)
                 .ToArray();
-            var first = group.First();
-            var id = AnalysisCandidateId.Compute(
+            AnalysisCandidate first = group.First();
+            string id = AnalysisCandidateId.Compute(
                 AnalysisRuleKind.Terminology,
                 group.Key,
                 claims.Select(claim => claim.ContentHash),
@@ -385,7 +396,7 @@ public sealed partial class DocumentationAnalyzer
 
     private static double? MaximumSemantic(IEnumerable<AnalysisCandidate> candidates)
     {
-        var scores = candidates
+        double[] scores = candidates
             .Select(candidate => candidate.Score.Semantic)
             .Where(score => score.HasValue)
             .Select(score => score!.Value)
@@ -397,13 +408,13 @@ public sealed partial class DocumentationAnalyzer
         IEnumerable<AnalysisCandidate> candidates,
         double confidenceThreshold)
     {
-        var materialized = candidates.ToArray();
+        AnalysisCandidate[] materialized = candidates.ToArray();
         if (_persistence?.IsAvailable != true || materialized.Length == 0) return materialized;
 
-        var verdicts = _persistence.LoadVerdicts(materialized.Select(candidate => candidate.Id).ToArray());
+        IReadOnlyDictionary<string, AnalysisVerdict> verdicts = _persistence.LoadVerdicts(materialized.Select(candidate => candidate.Id).ToArray());
         return materialized
             .Where(candidate => !IsSuppressed(candidate, verdicts, confidenceThreshold))
-            .Select(candidate => verdicts.TryGetValue(candidate.Id, out var verdict)
+            .Select(candidate => verdicts.TryGetValue(candidate.Id, out AnalysisVerdict? verdict)
                 ? candidate with { Verdict = verdict }
                 : candidate)
             .ToArray();
@@ -413,14 +424,14 @@ public sealed partial class DocumentationAnalyzer
         AnalysisCandidate candidate,
         IReadOnlyDictionary<string, AnalysisVerdict> verdicts,
         double confidenceThreshold) =>
-        verdicts.TryGetValue(candidate.Id, out var verdict)
+        verdicts.TryGetValue(candidate.Id, out AnalysisVerdict? verdict)
         && verdict.Confidence >= confidenceThreshold
         && verdict.Label == AnalysisVerdictLabel.Benign;
 
     private static Diagnostic ToDiagnostic(AnalysisCandidate candidate, double confidenceThreshold)
     {
-        var primary = candidate.Claims[0];
-        var related = candidate.Claims.Skip(1)
+        Claim primary = candidate.Claims[0];
+        DiagnosticLocation[] related = candidate.Claims.Skip(1)
             .Select(claim => new DiagnosticLocation(
                 claim.FilePath,
                 claim.StartLine,
@@ -428,7 +439,7 @@ public sealed partial class DocumentationAnalyzer
                 "Related analysis evidence."))
             .ToArray();
 
-        var (code, severity, message, hint) = candidate.Kind switch
+        (string? code, Severity severity, string? message, string? hint) = candidate.Kind switch
         {
             AnalysisRuleKind.Duplicate => (
                 DuplicateRuleCode,
@@ -487,8 +498,8 @@ public sealed partial class DocumentationAnalyzer
 
         if (NegationPattern().IsMatch(left.Text) != NegationPattern().IsMatch(right.Text)) return true;
 
-        var leftModal = ModalPattern().Matches(left.Text).Select(match => match.Value.ToLowerInvariant()).ToHashSet();
-        var rightModal = ModalPattern().Matches(right.Text).Select(match => match.Value.ToLowerInvariant()).ToHashSet();
+        HashSet<string> leftModal = ModalPattern().Matches(left.Text).Select(match => match.Value.ToLowerInvariant()).ToHashSet();
+        HashSet<string> rightModal = ModalPattern().Matches(right.Text).Select(match => match.Value.ToLowerInvariant()).ToHashSet();
         if (leftModal.Count > 0 && rightModal.Count > 0 && !leftModal.SetEquals(rightModal)) return true;
 
         if (DifferentCapturedValues(NumberPattern(), left.Text, right.Text)) return true;
@@ -506,8 +517,8 @@ public sealed partial class DocumentationAnalyzer
 
     private static bool IsDifferentShellCommand(Claim left, Claim right)
     {
-        var leftCommands = MeaningfulShellLines(left);
-        var rightCommands = MeaningfulShellLines(right);
+        IReadOnlyList<string> leftCommands = MeaningfulShellLines(left);
+        IReadOnlyList<string> rightCommands = MeaningfulShellLines(right);
         return leftCommands.Count > 0
             && rightCommands.Count > 0
             && !leftCommands.SequenceEqual(rightCommands, StringComparer.OrdinalIgnoreCase);
@@ -541,14 +552,14 @@ public sealed partial class DocumentationAnalyzer
 
     private static bool DifferentCapturedValues(Regex pattern, string left, string right)
     {
-        var leftValues = pattern.Matches(left).Select(match => match.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var rightValues = pattern.Matches(right).Select(match => match.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> leftValues = pattern.Matches(left).Select(match => match.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> rightValues = pattern.Matches(right).Select(match => match.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
         return leftValues.Count > 0 && rightValues.Count > 0 && !leftValues.SetEquals(rightValues);
     }
 
     private static IReadOnlyList<string> SharedInformativeTerms(string left, string right)
     {
-        var leftTerms = TermPattern().Matches(left.ToLowerInvariant())
+        HashSet<string> leftTerms = TermPattern().Matches(left.ToLowerInvariant())
             .Select(match => match.Value)
             .Where(IsInformativeTerm)
             .ToHashSet(StringComparer.Ordinal);
@@ -584,7 +595,7 @@ public sealed partial class DocumentationAnalyzer
     private static string? NormalizePath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
-        var normalized = path.Replace('\\', '/').Trim().TrimStart('/');
+        string normalized = path.Replace('\\', '/').Trim().TrimStart('/');
         return normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
     }
 

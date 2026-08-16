@@ -62,16 +62,16 @@ public sealed class RetrievalRegressionTests
 
     [Theory]
     [MemberData(nameof(Cases))]
-    public void A_Plainly_Asked_Question_Finds_The_Document_That_Answers_It(string query, string expectedId)
+    public void APlainlyAskedQuestionFindsTheDocumentThatAnswersIt(string query, string expectedId)
     {
-        var root = RepositoryRoot();
+        string? root = RepositoryRoot();
         if (root is null) return;
 
-        var index = DocumentIndex.Build(
+        DocumentIndex index = DocumentIndex.Build(
             new DocumentLoader(root).Load(),
             CodeGraphResolverAdapter.ForRepository(root));
 
-        var ids = index.Explore(query, maxDocs: TopN)
+        List<string> ids = index.Explore(query, maxDocs: TopN)
             .Select(h => h.Document.Frontmatter.Id ?? h.Document.RelativePath)
             .ToList();
 
@@ -92,16 +92,16 @@ public sealed class RetrievalRegressionTests
     [InlineData("who won the 1998 world cup")]
     [InlineData("how do I train for a marathon")]
     [InlineData("tell me a joke")]
-    public void An_Unanswerable_Question_Returns_Nothing(string query)
+    public void AnUnanswerableQuestionReturnsNothing(string query)
     {
-        var root = RepositoryRoot();
+        string? root = RepositoryRoot();
         if (root is null) return;
 
-        var index = DocumentIndex.Build(
+        DocumentIndex index = DocumentIndex.Build(
             new DocumentLoader(root).Load(),
             CodeGraphResolverAdapter.ForRepository(root));
 
-        var hits = index.Explore(query, maxDocs: TopN);
+        IReadOnlyList<DocumentHit> hits = index.Explore(query, maxDocs: TopN);
 
         Assert.True(hits.Count == 0,
             "expected no hits, got: " + string.Join(", ",
@@ -114,7 +114,7 @@ public sealed class RetrievalRegressionTests
     /// </summary>
     private static string? RepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        DirectoryInfo? directory = new DirectoryInfo(AppContext.BaseDirectory);
 
         while (directory is not null)
         {

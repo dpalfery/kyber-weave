@@ -15,6 +15,7 @@ public enum DocType
     Adr,
     Plan,
     Spec,
+    Todo,
     Runbook,
     Reference,
     Rule,

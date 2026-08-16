@@ -93,26 +93,89 @@ internal sealed class SelfUpdater : IDisposable
             version = _releases.ResolveLatestStable();
         }
 
-        var current = ReleaseVersion.Normalize(_host.CurrentVersion);
+        string current = ReleaseVersion.Normalize(_host.CurrentVersion);
         if (string.Equals(current, version, StringComparison.Ordinal))
             return new SelfUpdateOutcome(0, $"already on {version}");
 
-        var tag = ReleaseVersion.Tag(version);
-        var windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
-        var work = Directory.CreateTempSubdirectory("kyber-weave-update-");
+        string tag = ReleaseVersion.Tag(version);
+        bool windows = _host.IsWindows || PlatformRid.IsWindowsRid(_host.Rid);
+        DirectoryInfo work = Directory.CreateTempSubdirectory("kyber-weave-update-");
         try
         {
             _log($"installing {tag} ({_host.Rid}) → {_host.InstallDirectory}");
-            var sums = _releases.DownloadChecksums(tag);
-            var staged = new List<(string BaseName, string ExtractedPath, string Destination)>
-            {
+            string sums = _releases.DownloadChecksums(tag);
+            List<(string BaseName, string ExtractedPath, string Destination)> staged =
+            [
                 StageBinary(CliBaseName, tag, windows, sums, work.FullName)
-            };
+            ];
             if (!options.NoMcp)
                 staged.Add(StageBinary(McpBaseName, tag, windows, sums, work.FullName));
 
-            foreach (var item in staged)
-                CommitBinary(item.BaseName, tag, windows, item.ExtractedPath, item.Destination);
+            // This process's own image is committed last. Overwriting it costs the runtime
+            // the ability to load any assembly it has not already touched, because a
+            // single-file host reads bundled assemblies back out of the executable by path.
+            // Everything downstream — the remaining commits, and the rollback below — then
+            // runs on borrowed code, so the swap belongs after the work that can still fail.
+            staged =
+            [
+                .. staged.Where(item => !IsRunningImage(item.Destination)),
+                .. staged.Where(item => IsRunningImage(item.Destination))
+            ];
+
+            DirectoryInfo backupDir = Directory.CreateTempSubdirectory("kyber-weave-backup-");
+            try
+            {
+                List<(string BackupPath, string Destination, bool Existed)> backups = [];
+                foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
+                {
+                    string backupFile = Path.Combine(backupDir.FullName, item.BaseName + ".bak");
+                    bool existed = File.Exists(item.Destination);
+                    if (existed)
+                    {
+                        File.Copy(item.Destination, backupFile, overwrite: true);
+                    }
+                    backups.Add((backupFile, item.Destination, existed));
+                }
+
+                try
+                {
+                    foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
+                        CommitBinary(item.BaseName, tag, windows, item.ExtractedPath, item.Destination);
+                }
+                catch
+                {
+                    foreach ((string BackupPath, string Destination, bool Existed) backup in backups)
+                    {
+                        try
+                        {
+                            if (backup.Existed && File.Exists(backup.BackupPath))
+                            {
+                                File.Copy(backup.BackupPath, backup.Destination, overwrite: true);
+                            }
+                            else if (!backup.Existed && File.Exists(backup.Destination))
+                            {
+                                File.Delete(backup.Destination);
+                            }
+                        }
+                        catch
+                        {
+                            // Best-effort rollback
+                        }
+                    }
+
+                    throw;
+                }
+            }
+            finally
+            {
+                try
+                {
+                    backupDir.Delete(true);
+                }
+                catch (IOException)
+                {
+                }
+            }
         }
         finally
         {
@@ -126,7 +189,7 @@ internal sealed class SelfUpdater : IDisposable
             }
         }
 
-        var installed = Path.Combine(
+        string installed = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(CliBaseName, windows));
         return new SelfUpdateOutcome(0, $"updated kyber-weave {version} → {installed}");
@@ -139,23 +202,23 @@ internal sealed class SelfUpdater : IDisposable
         string sums,
         string workDirectory)
     {
-        var archiveName = BinaryInstaller.ArchiveName(baseName, _host.Rid);
-        var archivePath = Path.Combine(workDirectory, archiveName);
+        string archiveName = BinaryInstaller.ArchiveName(baseName, _host.Rid);
+        string archivePath = Path.Combine(workDirectory, archiveName);
         _log($"downloading {archiveName}…");
         _releases.DownloadAsset(tag, archiveName, archivePath);
 
-        var expected = ChecksumVerifier.ExpectedHex(sums, archiveName);
+        string expected = ChecksumVerifier.ExpectedHex(sums, archiveName);
         byte[] hash;
-        using (var archive = File.OpenRead(archivePath))
+        using (FileStream archive = File.OpenRead(archivePath))
             hash = SHA256.HashData(archive);
         ChecksumVerifier.Verify(expected, hash, archiveName);
 
-        var extractDir = Path.Combine(workDirectory, baseName + "-extract");
+        string extractDir = Path.Combine(workDirectory, baseName + "-extract");
         BinaryInstaller.ExtractArchive(archivePath, extractDir, windows);
 
-        var extractedName = BinaryInstaller.InstalledFileName(baseName, windows);
-        var extractedPath = FindExtractedBinary(extractDir, extractedName);
-        var destination = Path.Combine(_host.InstallDirectory, extractedName);
+        string extractedName = BinaryInstaller.InstalledFileName(baseName, windows);
+        string extractedPath = FindExtractedBinary(extractDir, extractedName);
+        string destination = Path.Combine(_host.InstallDirectory, extractedName);
         return (baseName, extractedPath, destination);
     }
 
@@ -166,11 +229,19 @@ internal sealed class SelfUpdater : IDisposable
         string extractedPath,
         string destination)
     {
-        BinaryInstaller.Replace(extractedPath, destination, windows);
-        if (_host.IsMacOs)
-            BinaryInstaller.ClearMacQuarantine(destination);
-
+        BinaryInstaller.Replace(extractedPath, destination, windows, _host.IsMacOs);
         _log($"installed {baseName} {ReleaseVersion.Normalize(tag)} → {destination}");
+    }
+
+    private bool IsRunningImage(string destination)
+    {
+        if (string.IsNullOrWhiteSpace(_host.ProcessPath))
+            return false;
+
+        return string.Equals(
+            Path.GetFullPath(destination),
+            Path.GetFullPath(_host.ProcessPath),
+            _host.IsWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
     private void EnsureReleaseInstallChannel()
@@ -178,7 +249,7 @@ internal sealed class SelfUpdater : IDisposable
         if (string.IsNullOrWhiteSpace(_host.ProcessPath))
             throw new SelfUpdateException("could not determine the running executable path.");
 
-        var fileName = Path.GetFileName(_host.ProcessPath);
+        string fileName = Path.GetFileName(_host.ProcessPath);
         if (fileName.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
             || fileName.Equals("dotnet.exe", StringComparison.OrdinalIgnoreCase))
         {
@@ -192,7 +263,7 @@ internal sealed class SelfUpdater : IDisposable
                 "this looks like a `dotnet tool` install. Update that channel with `dotnet tool update`, or install the Release binary with scripts/install.sh.");
         }
 
-        var directory = _host.InstallDirectory;
+        string directory = _host.InstallDirectory;
         if (!Directory.Exists(directory) || !CanWriteDirectory(directory))
         {
             throw new SelfUpdateException(
@@ -202,7 +273,7 @@ internal sealed class SelfUpdater : IDisposable
 
     internal static bool IsDotnetToolInstall(string processPath)
     {
-        var normalized = processPath.Replace('\\', '/');
+        string normalized = processPath.Replace('\\', '/');
         return normalized.Contains("/.dotnet/tools/", StringComparison.OrdinalIgnoreCase)
             || normalized.EndsWith("/.dotnet/tools", StringComparison.OrdinalIgnoreCase);
     }
@@ -211,7 +282,7 @@ internal sealed class SelfUpdater : IDisposable
     {
         try
         {
-            var probe = Path.Combine(directory, ".kyber-weave-update-" + Guid.NewGuid().ToString("N"));
+            string probe = Path.Combine(directory, ".kyber-weave-update-" + Guid.NewGuid().ToString("N"));
             using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose))
             {
             }
@@ -226,11 +297,11 @@ internal sealed class SelfUpdater : IDisposable
 
     private static string FindExtractedBinary(string extractDir, string fileName)
     {
-        var direct = Path.Combine(extractDir, fileName);
+        string direct = Path.Combine(extractDir, fileName);
         if (File.Exists(direct))
             return direct;
 
-        var matches = Directory.GetFiles(extractDir, fileName, SearchOption.AllDirectories);
+        string[] matches = Directory.GetFiles(extractDir, fileName, SearchOption.AllDirectories);
         if (matches.Length == 1)
             return matches[0];
 

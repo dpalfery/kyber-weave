@@ -12,9 +12,9 @@ namespace KyberWeave.Tests;
 public class DocsAnalysisConfigTests
 {
     [Fact]
-    public void ProductDefaults_ExactlyMatchTheBoundedAnalysisPreset()
+    public void ProductDefaultsExactlyMatchTheBoundedAnalysisPreset()
     {
-        var config = DocsAnalysisConfig.ProductDefaults;
+        DocsAnalysisConfig config = DocsAnalysisConfig.ProductDefaults;
 
         Assert.Equal(["current"], config.Statuses);
         Assert.Null(config.GlossaryPath);
@@ -41,9 +41,9 @@ public class DocsAnalysisConfigTests
     }
 
     [Fact]
-    public void LoadFromYaml_ParsesEveryDocsAnalysisSetting()
+    public void LoadFromYamlParsesEveryDocsAnalysisSetting()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
             ontology:
               docs-root: [docs, components/gameplay/docs]
             docs-analysis:
@@ -71,7 +71,7 @@ public class DocsAnalysisConfigTests
                 api-key-env: LOCAL_EMBEDDING_TOKEN
             """);
 
-        var analysis = config.DocsAnalysis;
+        DocsAnalysisConfig analysis = config.DocsAnalysis;
         Assert.Equal(["draft", "needs-review"], analysis.Statuses);
         Assert.Equal("components/gameplay/docs/terms.md", analysis.GlossaryPath);
         Assert.Equal(0.73, analysis.VerdictConfidence);
@@ -95,9 +95,9 @@ public class DocsAnalysisConfigTests
     }
 
     [Fact]
-    public void LoadFromYaml_ReplacesStatusesAndRetainsUnspecifiedNestedDefaults()
+    public void LoadFromYamlReplacesStatusesAndRetainsUnspecifiedNestedDefaults()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml("""
+        DocsAnalysisConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
             ontology:
               statuses: [current, editorial]
             docs-analysis:
@@ -118,9 +118,9 @@ public class DocsAnalysisConfigTests
     }
 
     [Fact]
-    public void LoadFromYaml_WhenAnalysisStatusIsNotInMergedOntology_RejectsIt()
+    public void LoadFromYamlWhenAnalysisStatusIsNotInMergedOntologyRejectsIt()
     {
-        var exception = AssertInvalid("""
+        YamlException exception = AssertInvalid("""
             ontology:
               statuses: [current, editorial]
             docs-analysis:
@@ -133,24 +133,24 @@ public class DocsAnalysisConfigTests
 
     [Theory]
     [MemberData(nameof(InvalidThresholds))]
-    public void LoadFromYaml_WhenThresholdIsNotFiniteAndBetweenZeroAndOne_RejectsIt(
+    public void LoadFromYamlWhenThresholdIsNotFiniteAndBetweenZeroAndOneRejectsIt(
         string yamlKey,
         bool underSearch,
         string invalidValue)
     {
-        var yaml = underSearch
+        string yaml = underSearch
             ? $"docs-analysis:\n  search:\n    {yamlKey}: {invalidValue}\n"
             : $"docs-analysis:\n  {yamlKey}: {invalidValue}\n";
 
-        var exception = AssertInvalid(yaml);
+        YamlException exception = AssertInvalid(yaml);
 
         Assert.Contains(yamlKey, exception.Message, StringComparison.Ordinal);
     }
 
     public static TheoryData<string, bool, string> InvalidThresholds()
     {
-        var data = new TheoryData<string, bool, string>();
-        foreach (var (key, underSearch) in new[]
+        TheoryData<string, bool, string> data = new TheoryData<string, bool, string>();
+        foreach ((string? key, bool underSearch) in new[]
                  {
                      ("verdict-confidence", false),
                      ("lexical-candidate-threshold", true),
@@ -171,11 +171,11 @@ public class DocsAnalysisConfigTests
 
     [Theory]
     [MemberData(nameof(NonPositiveIntegerSettings))]
-    public void LoadFromYaml_WhenIntegerSettingIsNotPositive_RejectsIt(
+    public void LoadFromYamlWhenIntegerSettingIsNotPositiveRejectsIt(
         string section,
         string yamlKey)
     {
-        var exception = AssertInvalid($"""
+        YamlException exception = AssertInvalid($"""
             docs-analysis:
               {section}:
                 {yamlKey}: 0
@@ -198,9 +198,9 @@ public class DocsAnalysisConfigTests
     [Theory]
     [InlineData("prefer")]
     [InlineData("required")]
-    public void LoadFromYaml_WhenEnabledEmbeddingsOmitEndpoint_RejectsIt(string mode)
+    public void LoadFromYamlWhenEnabledEmbeddingsOmitEndpointRejectsIt(string mode)
     {
-        var exception = AssertInvalid($"""
+        YamlException exception = AssertInvalid($"""
             docs-analysis:
               embeddings:
                 mode: {mode}
@@ -213,9 +213,9 @@ public class DocsAnalysisConfigTests
     [Theory]
     [InlineData("prefer")]
     [InlineData("required")]
-    public void LoadFromYaml_WhenEnabledEmbeddingsOmitModel_RejectsIt(string mode)
+    public void LoadFromYamlWhenEnabledEmbeddingsOmitModelRejectsIt(string mode)
     {
-        var exception = AssertInvalid($"""
+        YamlException exception = AssertInvalid($"""
             docs-analysis:
               embeddings:
                 mode: {mode}
@@ -229,11 +229,11 @@ public class DocsAnalysisConfigTests
     [InlineData("prefer", "/v1/embeddings")]
     [InlineData("required", "ftp://127.0.0.1/embeddings")]
     [InlineData("prefer", "https://example.com/v1/embeddings")]
-    public void LoadFromYaml_WhenEmbeddingEndpointIsNotAbsoluteLoopbackHttp_RejectsIt(
+    public void LoadFromYamlWhenEmbeddingEndpointIsNotAbsoluteLoopbackHttpRejectsIt(
         string mode,
         string endpoint)
     {
-        var exception = AssertInvalid($"""
+        YamlException exception = AssertInvalid($"""
             docs-analysis:
               embeddings:
                 mode: {mode}
@@ -248,9 +248,9 @@ public class DocsAnalysisConfigTests
     [InlineData("/tmp/glossary.md")]
     [InlineData("../glossary.md")]
     [InlineData("other-docs/glossary.md")]
-    public void LoadFromYaml_WhenGlossaryPathIsOutsideConfiguredDocsRoots_RejectsIt(string path)
+    public void LoadFromYamlWhenGlossaryPathIsOutsideConfiguredDocsRootsRejectsIt(string path)
     {
-        var exception = AssertInvalid($"""
+        YamlException exception = AssertInvalid($"""
             ontology:
               docs-root: [docs, components/gameplay/docs]
             docs-analysis:
@@ -261,9 +261,9 @@ public class DocsAnalysisConfigTests
     }
 
     [Fact]
-    public void LoadFromYaml_WhenGlossaryPathIsUnderAnyConfiguredDocsRoot_AcceptsIt()
+    public void LoadFromYamlWhenGlossaryPathIsUnderAnyConfiguredDocsRootAcceptsIt()
     {
-        var config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
             ontology:
               docs-root: [docs, components/gameplay/docs]
             docs-analysis:

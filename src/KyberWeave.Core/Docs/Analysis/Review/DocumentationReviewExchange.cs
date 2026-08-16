@@ -58,17 +58,17 @@ public sealed class DocumentationReviewExchange
         options ??= new ReviewExportOptions();
         Validate(options);
 
-        var pending = PendingCandidates(currentCandidates);
+        IReadOnlyList<AnalysisCandidate> pending = PendingCandidates(currentCandidates);
 
-        var remaining = options.CharacterBudget;
-        var exportedCharacters = 0;
-        var truncated = false;
-        var items = new List<ReviewCandidateItem>(pending.Count);
-        var emittedCandidates = new List<AnalysisCandidate>(pending.Count);
-        foreach (var candidate in pending)
+        int remaining = options.CharacterBudget;
+        int exportedCharacters = 0;
+        bool truncated = false;
+        List<ReviewCandidateItem> items = new List<ReviewCandidateItem>(pending.Count);
+        List<AnalysisCandidate> emittedCandidates = new List<AnalysisCandidate>(pending.Count);
+        foreach (AnalysisCandidate candidate in pending)
         {
-            var orderedClaims = OrderedClaims(candidate.Claims);
-            var requiredCharacters = orderedClaims.Sum(claim =>
+            IReadOnlyList<Claim> orderedClaims = OrderedClaims(candidate.Claims);
+            int requiredCharacters = orderedClaims.Sum(claim =>
                 Math.Min(claim.Text.Length, options.MaxExcerptCharacters));
             if (remaining < orderedClaims.Count
                 || (items.Count > 0 && requiredCharacters > remaining))
@@ -77,19 +77,19 @@ public sealed class DocumentationReviewExchange
                 break;
             }
 
-            var evidence = new List<ReviewEvidenceItem>(orderedClaims.Count);
-            var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
-            for (var index = 0; index < orderedClaims.Count; index++)
+            List<ReviewEvidenceItem> evidence = new List<ReviewEvidenceItem>(orderedClaims.Count);
+            Dictionary<string, int> occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int index = 0; index < orderedClaims.Count; index++)
             {
-                var claim = orderedClaims[index];
-                occurrences.TryGetValue(claim.ContentHash, out var occurrence);
+                Claim claim = orderedClaims[index];
+                occurrences.TryGetValue(claim.ContentHash, out int occurrence);
                 occurrences[claim.ContentHash] = occurrence + 1;
-                var reservedForRemainingEvidence = orderedClaims.Count - index - 1;
-                var maximum = Math.Min(
+                int reservedForRemainingEvidence = orderedClaims.Count - index - 1;
+                int maximum = Math.Min(
                     options.MaxExcerptCharacters,
                     remaining - reservedForRemainingEvidence);
-                var excerptLength = Math.Min(claim.Text.Length, maximum);
-                var excerpt = claim.Text[..excerptLength];
+                int excerptLength = Math.Min(claim.Text.Length, maximum);
+                string excerpt = claim.Text[..excerptLength];
                 truncated |= excerptLength < claim.Text.Length;
                 remaining -= excerptLength;
                 exportedCharacters += excerptLength;
@@ -117,7 +117,7 @@ public sealed class DocumentationReviewExchange
 
         truncated |= emittedCandidates.Count < pending.Count;
 
-        var bundle = new ReviewCandidateBundle(
+        ReviewCandidateBundle bundle = new ReviewCandidateBundle(
             CandidateSchema,
             DocumentationAnalyzer.AnalyzerVersion,
             DocumentationAnalyzer.RubricVersion,
@@ -154,12 +154,12 @@ public sealed class DocumentationReviewExchange
         }
 
         if (bundle is null) return Failure("The verdict bundle is empty.");
-        var pending = PendingCandidates(currentCandidates);
-        var candidatesById = pending.ToDictionary(candidate => candidate.Id, StringComparer.Ordinal);
-        var error = ValidateBundle(bundle, candidatesById);
+        IReadOnlyList<AnalysisCandidate> pending = PendingCandidates(currentCandidates);
+        Dictionary<string, AnalysisCandidate> candidatesById = pending.ToDictionary(candidate => candidate.Id, StringComparer.Ordinal);
+        string? error = ValidateBundle(bundle, candidatesById);
         if (error is not null) return Failure(error);
 
-        var verdicts = bundle.Verdicts.Select(item => new AnalysisVerdict(
+        AnalysisVerdict[] verdicts = bundle.Verdicts.Select(item => new AnalysisVerdict(
             item.CandidateId,
             item.Label!.Value,
             item.Confidence!.Value,
@@ -167,11 +167,11 @@ public sealed class DocumentationReviewExchange
             item.EvidenceIds,
             item.RecommendedCanonicalLocation,
             item.ProposedGlossarySenses)).ToArray();
-        var reviewedCandidates = bundle.Verdicts
+        AnalysisCandidate[] reviewedCandidates = bundle.Verdicts
             .Select(item => candidatesById[item.CandidateId])
             .ToArray();
-        var claims = PersistedClaims(reviewedCandidates);
-        var fingerprints = reviewedCandidates.Select(candidate => new PersistedCandidateFingerprint(
+        IReadOnlyList<PersistedClaim> claims = PersistedClaims(reviewedCandidates);
+        PersistedCandidateFingerprint[] fingerprints = reviewedCandidates.Select(candidate => new PersistedCandidateFingerprint(
             candidate.Id,
             candidate.Kind,
             candidate.Term?.Trim().ToLowerInvariant(),
@@ -196,13 +196,13 @@ public sealed class DocumentationReviewExchange
     private static IReadOnlyList<PersistedClaim> PersistedClaims(
         IReadOnlyList<AnalysisCandidate> candidates)
     {
-        var claims = new List<PersistedClaim>();
-        foreach (var candidate in candidates)
+        List<PersistedClaim> claims = new List<PersistedClaim>();
+        foreach (AnalysisCandidate candidate in candidates)
         {
-            var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
-            foreach (var claim in OrderedClaims(candidate.Claims))
+            Dictionary<string, int> occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (Claim claim in OrderedClaims(candidate.Claims))
             {
-                occurrences.TryGetValue(claim.ContentHash, out var occurrence);
+                occurrences.TryGetValue(claim.ContentHash, out int occurrence);
                 occurrences[claim.ContentHash] = occurrence + 1;
                 claims.Add(new PersistedClaim(
                     EvidenceId(candidate.Id, claim.ContentHash, occurrence),
@@ -232,14 +232,14 @@ public sealed class DocumentationReviewExchange
         if (bundle.Verdicts is null || bundle.Verdicts.Count == 0)
             return "The verdict bundle does not contain any verdicts.";
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var reviewedCandidates = new List<AnalysisCandidate>(bundle.Verdicts.Count);
-        foreach (var verdict in bundle.Verdicts)
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        List<AnalysisCandidate> reviewedCandidates = new List<AnalysisCandidate>(bundle.Verdicts.Count);
+        foreach (ReviewVerdictItem? verdict in bundle.Verdicts)
         {
             if (verdict is null) return "The verdict bundle contains an empty verdict.";
             if (string.IsNullOrWhiteSpace(verdict.CandidateId) || !seen.Add(verdict.CandidateId))
                 return "Verdict candidate ids must be non-empty and unique.";
-            if (!candidates.TryGetValue(verdict.CandidateId, out var candidate))
+            if (!candidates.TryGetValue(verdict.CandidateId, out AnalysisCandidate? candidate))
                 return $"Verdict candidate '{verdict.CandidateId}' is not current.";
             reviewedCandidates.Add(candidate);
         }
@@ -251,9 +251,9 @@ public sealed class DocumentationReviewExchange
             return "The verdict bundle candidate set is stale.";
         }
 
-        foreach (var verdict in bundle.Verdicts)
+        foreach (ReviewVerdictItem verdict in bundle.Verdicts)
         {
-            var candidate = candidates[verdict.CandidateId];
+            AnalysisCandidate candidate = candidates[verdict.CandidateId];
             if (!HashesMatch(verdict.ClaimContentHashes, candidate.Claims))
                 return $"Verdict candidate '{verdict.CandidateId}' has stale claim content.";
             if (verdict.Label is null || !LabelApplies(candidate.Kind, verdict.Label.Value))
@@ -289,8 +289,8 @@ public sealed class DocumentationReviewExchange
     private IReadOnlyList<AnalysisCandidate> PendingCandidates(
         IEnumerable<AnalysisCandidate> candidates)
     {
-        var reviewable = ReviewableCandidates(candidates);
-        var verdicts = _persistence.IsAvailable
+        IReadOnlyList<AnalysisCandidate> reviewable = ReviewableCandidates(candidates);
+        IReadOnlyDictionary<string, AnalysisVerdict> verdicts = _persistence.IsAvailable
             ? _persistence.LoadVerdicts(reviewable.Select(candidate => candidate.Id).ToArray())
             : new Dictionary<string, AnalysisVerdict>(StringComparer.Ordinal);
         return reviewable
@@ -301,7 +301,7 @@ public sealed class DocumentationReviewExchange
     private bool IsPending(
         string candidateId,
         IReadOnlyDictionary<string, AnalysisVerdict> verdicts) =>
-        !verdicts.TryGetValue(candidateId, out var verdict)
+        !verdicts.TryGetValue(candidateId, out AnalysisVerdict? verdict)
         || verdict.Label == AnalysisVerdictLabel.Uncertain
         || verdict.Confidence < _confidenceThreshold;
 
@@ -324,17 +324,17 @@ public sealed class DocumentationReviewExchange
         AnalysisCandidate candidate)
     {
         if (evidenceIds is null || evidenceIds.Count == 0) return false;
-        var expected = ExpectedEvidenceIds(candidate);
+        IReadOnlySet<string> expected = ExpectedEvidenceIds(candidate);
         return evidenceIds.All(expected.Contains);
     }
 
     private static IReadOnlySet<string> ExpectedEvidenceIds(AnalysisCandidate candidate)
     {
-        var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
-        var ids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var claim in OrderedClaims(candidate.Claims))
+        Dictionary<string, int> occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        HashSet<string> ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Claim claim in OrderedClaims(candidate.Claims))
         {
-            occurrences.TryGetValue(claim.ContentHash, out var occurrence);
+            occurrences.TryGetValue(claim.ContentHash, out int occurrence);
             occurrences[claim.ContentHash] = occurrence + 1;
             ids.Add(EvidenceId(candidate.Id, claim.ContentHash, occurrence));
         }
@@ -378,14 +378,14 @@ public sealed class DocumentationReviewExchange
 
     private static string CandidateSetHash(IEnumerable<AnalysisCandidate> candidates)
     {
-        var candidateLines = candidates
+        IOrderedEnumerable<string> candidateLines = candidates
                 .Select(candidate => string.Join('|',
                     candidate.Id,
                     string.Join(',', candidate.Claims
                         .Select(claim => claim.ContentHash)
                         .Order(StringComparer.Ordinal))))
                 .Order(StringComparer.Ordinal);
-        var identity = string.Join('\n',
+        string identity = string.Join('\n',
             new[]
             {
                 DocumentationAnalyzer.AnalyzerVersion,
@@ -408,7 +408,7 @@ public sealed class DocumentationReviewExchange
 
     private static ReviewImportResult Failure(string message)
     {
-        var diagnostics = new DiagnosticReport();
+        DiagnosticReport diagnostics = new DiagnosticReport();
         diagnostics.Add(new Diagnostic(
             ReviewRuleCode,
             Severity.Error,
@@ -426,7 +426,7 @@ public sealed class DocumentationReviewExchange
 
     private static JsonSerializerOptions CreateSerializerOptions()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             WriteIndented = true
         };

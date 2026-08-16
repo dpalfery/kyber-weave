@@ -10,7 +10,7 @@ namespace KyberWeave.Tests;
 public sealed class CodeGraphNeighborhoodPortTests
 {
     [Fact]
-    public void ICodeGraphNeighborhoodProvider_Is_Optional_For_Existing_Resolvers()
+    public void ICodeGraphNeighborhoodProviderIsOptionalForExistingResolvers()
     {
         ICodeGraphResolver resolver = FakeCodeGraphResolver.WithSymbols(
             ("Known", Node("known", "Known")));
@@ -20,23 +20,23 @@ public sealed class CodeGraphNeighborhoodPortTests
     }
 
     [Fact]
-    public void CodeGraphResolverAdapter_Loads_Nodes_And_Edges_Before_The_Index_Is_Removed()
+    public void CodeGraphResolverAdapterLoadsNodesAndEdgesBeforeTheIndexIsRemoved()
     {
-        var fixture = new CodeGraphFixtureDb();
+        CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
         try
         {
             fixture.IndexSymbol("Caller", "src/Caller.cs", 10);
             fixture.IndexSymbol("Callee", "src/Callee.cs", 20);
             fixture.IndexEdge("id-Caller", "id-Callee", "calls");
 
-            var adapter = new CodeGraphResolverAdapter(fixture.DatabasePath);
-            var provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(adapter);
+            CodeGraphResolverAdapter adapter = new CodeGraphResolverAdapter(fixture.DatabasePath);
+            ICodeGraphNeighborhoodProvider provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(adapter);
 
             // A neighborhood lookup must be in-memory. Removing the database after the
             // constructor proves GetEdges does not launch sqlite once per edge or node.
             fixture.Dispose();
 
-            var edge = Assert.Single(provider.GetEdges(["id-Caller", "id-Callee"], maxDegree: 50));
+            CodeGraphEdge edge = Assert.Single(provider.GetEdges(["id-Caller", "id-Callee"], maxDegree: 50));
             Assert.Equal(new CodeGraphEdge("id-Caller", "id-Callee", "calls"), edge);
             Assert.Single(adapter.ResolveSymbol("Caller"));
         }
@@ -47,22 +47,22 @@ public sealed class CodeGraphNeighborhoodPortTests
     }
 
     [Fact]
-    public void CodeGraphResolverAdapter_Neighborhood_Query_Is_Batched_And_Applies_Degree_Cap()
+    public void CodeGraphResolverAdapterNeighborhoodQueryIsBatchedAndAppliesDegreeCap()
     {
-        using var fixture = new CodeGraphFixtureDb();
+        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
         fixture.IndexSymbol("Hub", "src/Hub.cs", 1);
         fixture.IndexSymbol("First", "src/First.cs", 2);
         fixture.IndexSymbol("Second", "src/Second.cs", 3);
         fixture.IndexEdge("id-Hub", "id-First", "calls");
         fixture.IndexEdge("id-Hub", "id-Second", "references");
 
-        var provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(
+        ICodeGraphNeighborhoodProvider provider = Assert.IsAssignableFrom<ICodeGraphNeighborhoodProvider>(
             new CodeGraphResolverAdapter(fixture.DatabasePath));
 
-        var capped = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 1);
+        IReadOnlyList<CodeGraphEdge> capped = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 1);
         Assert.Empty(capped);
 
-        var inclusive = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 2);
+        IReadOnlyList<CodeGraphEdge> inclusive = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 2);
         Assert.Equal(2, inclusive.Count);
     }
 

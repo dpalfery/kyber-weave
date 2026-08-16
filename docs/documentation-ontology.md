@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-15
 ---
 
 # The documentation ontology
@@ -61,7 +61,7 @@ code-refs:
 open vocabulary is not a vocabulary — it is a text field that drifts until two documents
 of the same kind carry different labels and neither can be found by the other's name.
 
-**Doc types** — `architecture`, `onboarding`, `requirements`, `adr`, `plan`, `spec`,
+**Doc types** — `architecture`, `onboarding`, `requirements`, `adr`, `plan`, `spec`, `todo`,
 `runbook`, `reference`, `rule`, `governance`, `index`
 
 **Statuses** — `current`, `draft`, `needs-review`, `superseded`
@@ -90,6 +90,7 @@ not make a reference document complete.
 | `runbook` | `component` |
 | `plan` | `component` |
 | `spec` | `component` |
+| `todo` | `component` |
 | `adr`, `reference`, `rule`, `governance`, `index` | — base keys only |
 
 ## The pairing invariant

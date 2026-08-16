@@ -1,0 +1,14 @@
+schema: kyber-squad.fallback-profiles/v1
+profiles:
+  role-skill:
+    no-primary-agent: skill
+    no-agent-primitive: skill
+    body-source: agent
+    output-identity:
+      unoccupied: agent-name
+      shared: reuse-skill
+      collision: role-prefixed-agent-name
+      prefix: role-
+    shared-identities:
+      - conductor
+      - conductor-v3

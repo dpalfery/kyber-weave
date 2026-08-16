@@ -29,20 +29,20 @@ public static class AgentLoader
 
     public static AgentSet LoadAll(string projectRoot, HarnessKind? harnessFilter = null)
     {
-        var results = LoadResults(projectRoot, harnessFilter);
-        var validAgents = results.Where(r => r.Success && r.Agent is not null).Select(r => r.Agent!).ToList();
+        IReadOnlyList<AgentLoadResult> results = LoadResults(projectRoot, harnessFilter);
+        List<AgentModel> validAgents = results.Where(r => r.Success && r.Agent is not null).Select(r => r.Agent!).ToList();
         return new AgentSet(validAgents);
     }
 
     public static IReadOnlyList<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
     {
-        var results = new List<AgentLoadResult>();
-        var fullRoot = Path.GetFullPath(projectRoot);
+        List<AgentLoadResult> results = new List<AgentLoadResult>();
+        string fullRoot = Path.GetFullPath(projectRoot);
 
         if (!Directory.Exists(fullRoot))
             return results;
 
-        foreach (var (agentsDir, kind, _) in DiscoverHarnessAgentDirs(fullRoot))
+        foreach ((string? agentsDir, HarnessKind kind, string _) in DiscoverHarnessAgentDirs(fullRoot))
         {
             if (harnessFilter is not null && kind != harnessFilter.Value)
                 continue;
@@ -65,7 +65,7 @@ public static class AgentLoader
         if (string.IsNullOrWhiteSpace(value))
             return true;
 
-        var key = value.Trim();
+        string key = value.Trim();
         if (key.StartsWith('.'))
             key = key[1..];
 
@@ -77,7 +77,7 @@ public static class AgentLoader
             return true;
         }
 
-        if (Enum.TryParse<HarnessKind>(key, ignoreCase: true, out var parsed) &&
+        if (Enum.TryParse<HarnessKind>(key, ignoreCase: true, out HarnessKind parsed) &&
             parsed != HarnessKind.Custom)
         {
             filter = parsed;
@@ -95,19 +95,19 @@ public static class AgentLoader
     public static IReadOnlyList<(string AgentsDir, HarnessKind Kind, string HarnessFolder)> DiscoverHarnessAgentDirs(
         string projectRoot)
     {
-        var found = new List<(string, HarnessKind, string)>();
+        List<(string, HarnessKind, string)> found = new List<(string, HarnessKind, string)>();
 
-        foreach (var dir in Directory.EnumerateDirectories(projectRoot))
+        foreach (string dir in Directory.EnumerateDirectories(projectRoot))
         {
-            var folderName = Path.GetFileName(dir);
+            string folderName = Path.GetFileName(dir);
             if (string.IsNullOrEmpty(folderName) || folderName[0] != '.')
                 continue;
 
-            var agentsDir = Path.Combine(dir, "agents");
+            string agentsDir = Path.Combine(dir, "agents");
             if (!Directory.Exists(agentsDir))
                 continue;
 
-            var kind = FolderToHarness.TryGetValue(folderName, out var mapped)
+            HarnessKind kind = FolderToHarness.TryGetValue(folderName, out HarnessKind mapped)
                 ? mapped
                 : HarnessKind.Custom;
 
@@ -124,12 +124,12 @@ public static class AgentLoader
         HarnessKind harness,
         List<AgentLoadResult> results)
     {
-        var files = Directory.GetFiles(harnessDir, "*.*", SearchOption.TopDirectoryOnly)
+        IEnumerable<string> files = Directory.GetFiles(harnessDir, "*.*", SearchOption.TopDirectoryOnly)
             .Where(f => f.EndsWith(".toml", StringComparison.OrdinalIgnoreCase) ||
                         f.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
                         f.EndsWith(".agent.md", StringComparison.OrdinalIgnoreCase));
 
-        foreach (var file in files)
+        foreach (string file in files)
         {
             try
             {

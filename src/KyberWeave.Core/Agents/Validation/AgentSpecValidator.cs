@@ -15,7 +15,7 @@ public static class AgentSpecValidator
 
     public static DiagnosticReport Validate(AgentModel agent)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
 
         // 1. Role Name Check
         if (string.IsNullOrWhiteSpace(agent.RoleName))

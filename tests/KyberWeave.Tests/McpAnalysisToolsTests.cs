@@ -21,21 +21,21 @@ public sealed class McpAnalysisToolsTests : IDisposable
     private readonly TempDirectory _temp = new();
 
     [Fact]
-    public void AnalysisCandidates_KindFilterAndCursor_PageStableOrderedCandidates()
+    public void AnalysisCandidatesKindFilterAndCursorPageStableOrderedCandidates()
     {
-        var reader = new StubAnalysisReader(
+        StubAnalysisReader reader = new StubAnalysisReader(
             Result(
                 Candidate("candidate-c", AnalysisRuleKind.Conflict),
                 Candidate("candidate-b", AnalysisRuleKind.Duplicate),
                 Candidate("candidate-a", AnalysisRuleKind.Duplicate)));
-        var tools = Tools(reader);
+        DocsTools tools = Tools(reader);
 
-        var first = tools.AnalysisCandidates(
+        string first = tools.AnalysisCandidates(
             kind: "duplicate",
             cursor: null,
             limit: 1,
             charBudget: 4_000);
-        var second = tools.AnalysisCandidates(
+        string second = tools.AnalysisCandidates(
             kind: "duplicate",
             cursor: "candidate-a",
             limit: 1,
@@ -51,14 +51,14 @@ public sealed class McpAnalysisToolsTests : IDisposable
     }
 
     [Fact]
-    public void AnalysisCandidates_ExcessiveLimitAndBudget_EnforcesHardConversationalCaps()
+    public void AnalysisCandidatesExcessiveLimitAndBudgetEnforcesHardConversationalCaps()
     {
-        var candidates = Enumerable.Range(0, 40)
+        AnalysisCandidate[] candidates = Enumerable.Range(0, 40)
             .Select(index => Candidate($"candidate-{index:D2}", AnalysisRuleKind.Duplicate))
             .ToArray();
-        var tools = Tools(new StubAnalysisReader(Result(candidates)));
+        DocsTools tools = Tools(new StubAnalysisReader(Result(candidates)));
 
-        var response = tools.AnalysisCandidates(
+        string response = tools.AnalysisCandidates(
             kind: null,
             cursor: null,
             limit: int.MaxValue,
@@ -70,16 +70,16 @@ public sealed class McpAnalysisToolsTests : IDisposable
     }
 
     [Fact]
-    public void AnalysisCandidates_SmallBudget_KeepsMetricsAndLineEvidenceInsideBudget()
+    public void AnalysisCandidatesSmallBudgetKeepsMetricsAndLineEvidenceInsideBudget()
     {
-        var candidate = Candidate(
+        AnalysisCandidate candidate = Candidate(
             "candidate-budget",
             AnalysisRuleKind.Terminology,
             term: "loop",
             claimText: new string('x', 2_000));
-        var tools = Tools(new StubAnalysisReader(Result(candidate)));
+        DocsTools tools = Tools(new StubAnalysisReader(Result(candidate)));
 
-        var response = tools.AnalysisCandidates(
+        string response = tools.AnalysisCandidates(
             kind: "terminology",
             cursor: null,
             limit: 20,
@@ -96,11 +96,11 @@ public sealed class McpAnalysisToolsTests : IDisposable
     [Theory]
     [InlineData("99")]
     [InlineData("duplicate, conflict")]
-    public void AnalysisCandidates_NumericOrCompositeKind_ReturnsUnknownKind(string kind)
+    public void AnalysisCandidatesNumericOrCompositeKindReturnsUnknownKind(string kind)
     {
-        var tools = Tools(new StubAnalysisReader(Result(Candidate("candidate-a", AnalysisRuleKind.Duplicate))));
+        DocsTools tools = Tools(new StubAnalysisReader(Result(Candidate("candidate-a", AnalysisRuleKind.Duplicate))));
 
-        var response = tools.AnalysisCandidates(kind: kind, cursor: null, limit: 20, charBudget: 4_000);
+        string response = tools.AnalysisCandidates(kind: kind, cursor: null, limit: 20, charBudget: 4_000);
 
         Assert.Contains($"Unknown documentation-analysis kind '{kind}'", response, StringComparison.Ordinal);
         Assert.DoesNotContain("No 99 candidates", response, StringComparison.Ordinal);
@@ -108,9 +108,9 @@ public sealed class McpAnalysisToolsTests : IDisposable
     }
 
     [Fact]
-    public void Glossary_KnownAndUnknownTerms_ReturnConversationalReadOnlyResults()
+    public void GlossaryKnownAndUnknownTermsReturnConversationalReadOnlyResults()
     {
-        var reader = new StubAnalysisReader(
+        StubAnalysisReader reader = new StubAnalysisReader(
             Result(),
             new Dictionary<string, GlossaryLookupResult>(StringComparer.OrdinalIgnoreCase)
             {
@@ -124,10 +124,10 @@ public sealed class McpAnalysisToolsTests : IDisposable
                         ["gameplay loop"],
                         ["claim-gameplay"])])
             });
-        var tools = Tools(reader);
+        DocsTools tools = Tools(reader);
 
-        var known = tools.Glossary("LOOP");
-        var unknown = tools.Glossary("missing-term");
+        string known = tools.Glossary("LOOP");
+        string unknown = tools.Glossary("missing-term");
 
         Assert.Contains("loop-gameplay", known, StringComparison.Ordinal);
         Assert.Contains("approved", known, StringComparison.OrdinalIgnoreCase);
@@ -139,9 +139,9 @@ public sealed class McpAnalysisToolsTests : IDisposable
     }
 
     [Fact]
-    public void Glossary_TermWithNewlines_DoesNotInjectResponseLines()
+    public void GlossaryTermWithNewlinesDoesNotInjectResponseLines()
     {
-        var reader = new StubAnalysisReader(
+        StubAnalysisReader reader = new StubAnalysisReader(
             Result(),
             new Dictionary<string, GlossaryLookupResult>(StringComparer.OrdinalIgnoreCase)
             {
@@ -154,43 +154,43 @@ public sealed class McpAnalysisToolsTests : IDisposable
                         ["component:Gameplay"],
                         ["gameplay loop"])])
             });
-        var tools = Tools(reader);
+        DocsTools tools = Tools(reader);
 
-        var response = tools.Glossary("loop");
+        string response = tools.Glossary("loop");
 
         Assert.Contains("glossary sense for 'loop status: injected'", response, StringComparison.Ordinal);
         Assert.DoesNotContain("\nstatus: injected", response, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AnalysisCandidates_TermWithNewlines_DoesNotInjectResponseLines()
+    public void AnalysisCandidatesTermWithNewlinesDoesNotInjectResponseLines()
     {
-        var tools = Tools(new StubAnalysisReader(Result(
+        DocsTools tools = Tools(new StubAnalysisReader(Result(
             Candidate("candidate-a", AnalysisRuleKind.Terminology, term: "loop\ncandidate: forged"))));
 
-        var response = tools.AnalysisCandidates(kind: "terminology", cursor: null, limit: 20, charBudget: 4_000);
+        string response = tools.AnalysisCandidates(kind: "terminology", cursor: null, limit: 20, charBudget: 4_000);
 
         Assert.Contains("term: loop candidate: forged", response, StringComparison.Ordinal);
         Assert.DoesNotContain("\ncandidate: forged", response, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Glossary_LongUnknownTerm_EnforcesHardConversationalCap()
+    public void GlossaryLongUnknownTermEnforcesHardConversationalCap()
     {
-        var tools = Tools(new StubAnalysisReader(Result()));
-        var term = new string('x', 20_000);
+        DocsTools tools = Tools(new StubAnalysisReader(Result()));
+        string term = new string('x', 20_000);
 
-        var response = tools.Glossary(term);
+        string response = tools.Glossary(term);
 
         Assert.True(response.Length <= 12_000, $"MCP response contained {response.Length} characters.");
         Assert.Contains("No glossary senses", response, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void McpAnalysisTools_ExposeOnlyThePinnedReadParameters()
+    public void McpAnalysisToolsExposeOnlyThePinnedReadParameters()
     {
-        var candidates = typeof(DocsTools).GetMethod(nameof(DocsTools.AnalysisCandidates));
-        var glossary = typeof(DocsTools).GetMethod(nameof(DocsTools.Glossary));
+        MethodInfo? candidates = typeof(DocsTools).GetMethod(nameof(DocsTools.AnalysisCandidates));
+        MethodInfo? glossary = typeof(DocsTools).GetMethod(nameof(DocsTools.Glossary));
 
         Assert.NotNull(candidates);
         Assert.Equal(typeof(string), candidates.ReturnType);
@@ -214,7 +214,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
     }
 
     [Fact]
-    public void RepositoryAnalysisReader_UsesConfiguredRootAndDoesNotCreateUnsafeCacheState()
+    public void RepositoryAnalysisReaderUsesConfiguredRootAndDoesNotCreateUnsafeCacheState()
     {
         Write(".kyber-weave/kyber-weave.yml", """
             ontology:
@@ -227,10 +227,10 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Write("knowledge/second.md", Document("reference/second", "current"));
         Write("knowledge/draft.md", Document("reference/draft", "draft"));
         Write("knowledge/terms.md", GlossaryMarkdown());
-        var reader = new RepositoryDocsAnalysisReader(_temp.Path);
+        RepositoryDocsAnalysisReader reader = new RepositoryDocsAnalysisReader(_temp.Path);
 
-        var analysis = reader.Analyze();
-        var glossary = reader.LookupGlossary("loop");
+        DocumentationAnalysisResult analysis = reader.Analyze();
+        GlossaryLookupResult glossary = reader.LookupGlossary("loop");
 
         Assert.Equal(2, analysis.Metrics.ExtractedClaims);
         Assert.Single(analysis.Candidates, candidate => candidate.IsExact);
@@ -240,7 +240,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
     }
 
     [Fact]
-    public void RepositoryAnalysisReader_UnavailableCodeGraph_ReportsOneDegradedWarning()
+    public void RepositoryAnalysisReaderUnavailableCodeGraphReportsOneDegradedWarning()
     {
         Write(".kyber-weave/kyber-weave.yml", """
             ontology:
@@ -249,11 +249,11 @@ public sealed class McpAnalysisToolsTests : IDisposable
               statuses: [current]
             """);
         Write("knowledge/first.md", Document("reference/first", "current"));
-        var reader = new RepositoryDocsAnalysisReader(_temp.Path);
+        RepositoryDocsAnalysisReader reader = new RepositoryDocsAnalysisReader(_temp.Path);
 
-        var analysis = reader.Analyze();
+        DocumentationAnalysisResult analysis = reader.Analyze();
 
-        var warning = Assert.Single(analysis.Diagnostics.Items, finding =>
+        Diagnostic warning = Assert.Single(analysis.Diagnostics.Items, finding =>
             finding.Code == DocumentationAnalyzer.CodeGraphUnavailableRuleCode);
         Assert.Equal(Severity.Warning, warning.Severity);
         Assert.Contains("bounded lexical search", warning.Hint, StringComparison.Ordinal);
@@ -263,7 +263,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
 
     private DocsTools Tools(IDocsAnalysisReader reader)
     {
-        var host = new DocumentIndexHost(
+        DocumentIndexHost host = new DocumentIndexHost(
             _temp.Path,
             () => FakeCodeGraphResolver.WithSymbols(),
             () => new DocumentSet { Documents = [] },
@@ -324,8 +324,8 @@ public sealed class McpAnalysisToolsTests : IDisposable
 
     private static int Occurrences(string text, string value)
     {
-        var count = 0;
-        var start = 0;
+        int count = 0;
+        int start = 0;
         while ((start = text.IndexOf(value, start, StringComparison.Ordinal)) >= 0)
         {
             count++;
@@ -336,7 +336,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
 
     private void Write(string relativePath, string content)
     {
-        var path = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string path = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
     }

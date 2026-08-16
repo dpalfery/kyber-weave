@@ -11,24 +11,24 @@ public sealed class DocsGraphCliCommandTests : IDisposable
     private readonly TempDirectory _output = new();
 
     [Fact]
-    public void Execute_ManagedGlossary_ExportsApprovedKnowledgeOnlyAndPreservesDocuments()
+    public void ExecuteManagedGlossaryExportsApprovedKnowledgeOnlyAndPreservesDocuments()
     {
         WriteRepository();
-        using var codeGraph = new CodeGraphFixtureDb();
+        using CodeGraphFixtureDb codeGraph = new CodeGraphFixtureDb();
         codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
-        var codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
+        string codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        var execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
             null!,
             new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path }));
-        var exitCode = execution.Result;
+        int exitCode = execution.Result;
         Assert.Equal(0, exitCode);
 
-        var nodes = ReadJsonLines(Path.Combine(_output.Path, "nodes.jsonl"));
-        var edges = ReadJsonLines(Path.Combine(_output.Path, "edges.jsonl"));
-        var allOutput = File.ReadAllText(Path.Combine(_output.Path, "nodes.jsonl"))
+        JsonElement[] nodes = ReadJsonLines(Path.Combine(_output.Path, "nodes.jsonl"));
+        JsonElement[] edges = ReadJsonLines(Path.Combine(_output.Path, "edges.jsonl"));
+        string allOutput = File.ReadAllText(Path.Combine(_output.Path, "nodes.jsonl"))
             + File.ReadAllText(Path.Combine(_output.Path, "edges.jsonl"));
         Assert.Contains(nodes, node => IsNode(node, "doc:reference/gameplay", "Document"));
         Assert.Contains(nodes, node => IsNode(node, "term:loop", "Term"));
@@ -46,7 +46,7 @@ public sealed class DocsGraphCliCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_InvalidGlossary_ReturnsOperationalFailureInsteadOfThrowing()
+    public void ExecuteInvalidGlossaryReturnsOperationalFailureInsteadOfThrowing()
     {
         WriteRepository();
         Write("docs/glossary.md", """
@@ -67,13 +67,13 @@ public sealed class DocsGraphCliCommandTests : IDisposable
             |---|---|---|---|---|
             | loop-gameplay | CURRENT | The gameplay update cycle. | component:Gameplay | gameplay loop |
             """);
-        using var codeGraph = new CodeGraphFixtureDb();
+        using CodeGraphFixtureDb codeGraph = new CodeGraphFixtureDb();
         codeGraph.IndexSymbol("Game.Run", "src/Game.cs", 10);
-        var codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
+        string codeGraphDirectory = Path.Combine(_repository.Path, ".codegraph");
         Directory.CreateDirectory(codeGraphDirectory);
         File.Copy(codeGraph.DatabasePath, Path.Combine(codeGraphDirectory, "codegraph.db"));
 
-        var execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => new DocsExportGraphCommand().Execute(
             null!,
             new DocsExportGraphSettings { Path = _repository.Path, Out = _output.Path, Format = "json" }));
 
@@ -146,7 +146,7 @@ public sealed class DocsGraphCliCommandTests : IDisposable
 
     private void Write(string relativePath, string content)
     {
-        var path = Path.Combine(_repository.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string path = Path.Combine(_repository.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
     }

@@ -5,7 +5,9 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Embeddings;
+using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
+using KyberWeave.Core.Docs.Analysis.Review;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -32,7 +34,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
     [InlineData(DocsAnalysisEmbeddingMode.Off, true, true, 1, 0)]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, true, true, 1, 1)]
     [InlineData(DocsAnalysisEmbeddingMode.Required, true, true, 1, 1)]
-    public void Composition_EnforcesEmbeddingModeAndSafePersistenceBeforeConstruction(
+    public void CompositionEnforcesEmbeddingModeAndSafePersistenceBeforeConstruction(
         DocsAnalysisEmbeddingMode mode,
         bool cacheSafe,
         bool expectedSuccess,
@@ -40,16 +42,16 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         int expectedEmbeddingConstructions)
     {
         WriteConfig(mode);
-        var persistence = new DisposablePersistence(isAvailable: true);
-        var embedding = new DisposableEmbeddingGenerator();
-        var factories = Factories(cacheSafe, persistence, embedding, new AvailableResolver());
-        var report = new DiagnosticReport();
+        DisposablePersistence persistence = new DisposablePersistence(isAvailable: true);
+        DisposableEmbeddingGenerator embedding = new DisposableEmbeddingGenerator();
+        FactoryProbe factories = Factories(cacheSafe, persistence, embedding, new AvailableResolver());
+        DiagnosticReport report = new DiagnosticReport();
 
-        var success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
-            out var runtime);
+            out DocsAnalysisRuntime? runtime);
 
         Assert.Equal(expectedSuccess, success);
         Assert.Equal(expectedPersistenceConstructions, factories.PersistenceConstructions);
@@ -66,13 +68,13 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
 
         if (mode == DocsAnalysisEmbeddingMode.Required && !cacheSafe)
         {
-            var finding = Assert.Single(report.Items, item =>
+            Diagnostic finding = Assert.Single(report.Items, item =>
                 item.Code == DocumentationAnalyzer.EmbeddingUnavailableRuleCode);
             Assert.Equal(Severity.Error, finding.Severity);
         }
         else if (mode == DocsAnalysisEmbeddingMode.Prefer && !cacheSafe)
         {
-            var finding = Assert.Single(report.Items, item =>
+            Diagnostic finding = Assert.Single(report.Items, item =>
                 item.Code == DocumentationAnalyzer.EmbeddingUnavailableRuleCode);
             Assert.Equal(Severity.Warning, finding.Severity);
         }
@@ -81,21 +83,21 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
     [Theory]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, true)]
     [InlineData(DocsAnalysisEmbeddingMode.Required, false)]
-    public void Composition_UnavailablePersistenceFallsBackOnlyForPreferAndDisposesPartialRuntime(
+    public void CompositionUnavailablePersistenceFallsBackOnlyForPreferAndDisposesPartialRuntime(
         DocsAnalysisEmbeddingMode mode,
         bool expectedSuccess)
     {
         WriteConfig(mode);
-        var persistence = new DisposablePersistence(isAvailable: false);
-        var embedding = new DisposableEmbeddingGenerator();
-        var factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
-        var report = new DiagnosticReport();
+        DisposablePersistence persistence = new DisposablePersistence(isAvailable: false);
+        DisposableEmbeddingGenerator embedding = new DisposableEmbeddingGenerator();
+        FactoryProbe factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
+        DiagnosticReport report = new DiagnosticReport();
 
-        var success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
-            out var runtime);
+            out DocsAnalysisRuntime? runtime);
 
         Assert.Equal(expectedSuccess, success);
         Assert.Equal(1, factories.PersistenceConstructions);
@@ -110,24 +112,24 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         {
             Assert.Null(runtime);
         }
-        var finding = Assert.Single(report.Items, item =>
+        Diagnostic finding = Assert.Single(report.Items, item =>
             item.Code == DocumentationAnalyzer.EmbeddingUnavailableRuleCode);
         Assert.Equal(expectedSuccess ? Severity.Warning : Severity.Error, finding.Severity);
     }
 
     [Fact]
-    public void Composition_SuccessfulRuntimeDisposesEveryConstructedDisposableExactlyOnce()
+    public void CompositionSuccessfulRuntimeDisposesEveryConstructedDisposableExactlyOnce()
     {
         WriteConfig(DocsAnalysisEmbeddingMode.Prefer);
-        var persistence = new DisposablePersistence(isAvailable: true);
-        var embedding = new DisposableEmbeddingGenerator();
-        var factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
+        DisposablePersistence persistence = new DisposablePersistence(isAvailable: true);
+        DisposableEmbeddingGenerator embedding = new DisposableEmbeddingGenerator();
+        FactoryProbe factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
 
-        var success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,
-            out var runtime);
+            out DocsAnalysisRuntime? runtime);
 
         Assert.True(success);
         runtime!.Dispose();
@@ -138,45 +140,45 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
     }
 
     [Fact]
-    public void Composition_MissingCodeGraphWarnsExactlyOnceAndContinues()
+    public void CompositionMissingCodeGraphWarnsExactlyOnceAndContinues()
     {
         WriteConfig(DocsAnalysisEmbeddingMode.Off);
-        var report = new DiagnosticReport();
-        var factories = Factories(
+        DiagnosticReport report = new DiagnosticReport();
+        FactoryProbe factories = Factories(
             cacheSafe: false,
             new DisposablePersistence(isAvailable: true),
             new DisposableEmbeddingGenerator(),
             new UnavailableResolver());
 
-        var success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
-            out var runtime);
+            out DocsAnalysisRuntime? runtime);
 
         Assert.True(success);
         runtime!.Dispose();
-        var warning = Assert.Single(report.Items, item =>
+        Diagnostic warning = Assert.Single(report.Items, item =>
             item.Code == DocumentationAnalyzer.CodeGraphUnavailableRuleCode);
         Assert.Equal(Severity.Warning, warning.Severity);
     }
 
     [Fact]
-    public void Composition_UnsafeOrdinaryAnalysisCreatesNoCacheOrTrackedFiles()
+    public void CompositionUnsafeOrdinaryAnalysisCreatesNoCacheOrTrackedFiles()
     {
         WriteConfig(DocsAnalysisEmbeddingMode.Off);
-        var before = Files();
-        var factories = Factories(
+        string[] before = Files();
+        FactoryProbe factories = Factories(
             cacheSafe: false,
             new DisposablePersistence(isAvailable: true),
             new DisposableEmbeddingGenerator(),
             new AvailableResolver());
 
-        var success = DocsCommandComposition.TryCreateAnalysisRuntime(
+        bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,
-            out var runtime);
+            out DocsAnalysisRuntime? runtime);
 
         Assert.True(success);
         runtime!.Dispose();
@@ -191,21 +193,21 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
     [InlineData("export")]
     [InlineData("import")]
     [InlineData("glossary")]
-    public void RepositoryService_RequiredEmbeddingFailureStopsEveryRequestedWrite(string operation)
+    public void RepositoryServiceRequiredEmbeddingFailureStopsEveryRequestedWrite(string operation)
     {
         WriteAnalysisFixture(DocsAnalysisEmbeddingMode.Required);
-        var persistence = new DisposablePersistence(isAvailable: true);
-        var factories = Factories(
+        DisposablePersistence persistence = new DisposablePersistence(isAvailable: true);
+        FactoryProbe factories = Factories(
             cacheSafe: true,
             persistence,
             new DisposableEmbeddingGenerator(),
             new AvailableResolver());
-        var service = new RepositoryDocsAnalysisCommandService(factories.Factories);
-        var output = Path.Combine(_temp.Path, "candidates.json");
-        var input = Path.Combine(_temp.Path, "verdicts.json");
+        RepositoryDocsAnalysisCommandService service = new RepositoryDocsAnalysisCommandService(factories.Factories);
+        string output = Path.Combine(_temp.Path, "candidates.json");
+        string input = Path.Combine(_temp.Path, "verdicts.json");
         File.WriteAllText(input, "{}");
 
-        var exitCode = ProcessConsoleCapture.Run(() => operation switch
+        int exitCode = ProcessConsoleCapture.Run(() => operation switch
         {
             "export" => new DocsReviewExportCommand(service).Execute(
                 null!,
@@ -226,20 +228,20 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
     }
 
     [Fact]
-    public void RepositoryService_PreferAndCodeGraphWarningsFlowOnceThroughEveryResult()
+    public void RepositoryServicePreferAndCodeGraphWarningsFlowOnceThroughEveryResult()
     {
         WriteAnalysisFixture(DocsAnalysisEmbeddingMode.Prefer);
-        var persistence = new DisposablePersistence(isAvailable: true);
-        var factories = Factories(
+        DisposablePersistence persistence = new DisposablePersistence(isAvailable: true);
+        FactoryProbe factories = Factories(
             cacheSafe: true,
             persistence,
             new DisposableEmbeddingGenerator(),
             new UnavailableResolver());
-        var service = new RepositoryDocsAnalysisCommandService(factories.Factories);
+        RepositoryDocsAnalysisCommandService service = new RepositoryDocsAnalysisCommandService(factories.Factories);
 
-        var exported = service.ExportReview(new DocsReviewExportSettings { Path = _temp.Path });
-        var imported = service.ImportReview(new DocsReviewImportSettings { Path = _temp.Path }, "{}");
-        var glossary = service.UpdateGlossary(new DocsGlossarySettings { Path = _temp.Path });
+        ReviewExportResult exported = service.ExportReview(new DocsReviewExportSettings { Path = _temp.Path });
+        ReviewImportResult imported = service.ImportReview(new DocsReviewImportSettings { Path = _temp.Path }, "{}");
+        GlossaryUpdateResult glossary = service.UpdateGlossary(new DocsGlossarySettings { Path = _temp.Path });
 
         AssertWarningsOnce(exported.Diagnostics);
         AssertWarningsOnce(imported.Diagnostics);
@@ -278,7 +280,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
 
     private void WriteConfig(DocsAnalysisEmbeddingMode mode)
     {
-        var state = Path.Combine(_temp.Path, ".kyber-weave");
+        string state = Path.Combine(_temp.Path, ".kyber-weave");
         Directory.CreateDirectory(state);
         File.WriteAllText(
             Path.Combine(state, "kyber-weave.yml"),
@@ -303,7 +305,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
 
     private void WriteDocument(string id, string claim, string component)
     {
-        var docs = Path.Combine(_temp.Path, "docs");
+        string docs = Path.Combine(_temp.Path, "docs");
         Directory.CreateDirectory(docs);
         File.WriteAllText(
             Path.Combine(docs, $"{id}.md"),

@@ -22,17 +22,17 @@ public static class AgentPromptScanner
 
     public static DiagnosticReport Scan(AgentModel agent)
     {
-        var report = new DiagnosticReport();
-        var text = $"{agent.Description}\n{agent.InstructionsBody}";
-        var codes = InstructionSurfaceRuleCodes.ForAgents;
-        var subject = agent.RoleName;
-        var file = agent.FilePath;
+        DiagnosticReport report = new DiagnosticReport();
+        string text = $"{agent.Description}\n{agent.InstructionsBody}";
+        InstructionSurfaceRuleCodes codes = InstructionSurfaceRuleCodes.ForAgents;
+        string subject = agent.RoleName;
+        string file = agent.FilePath;
 
         report.AddRange(InstructionSurfaceScanner.ScanProse(text, subject, file, codes, "agent"));
 
         // Prefer top-level frontmatter keys; also accept nested metadata.* style keys.
-        var meta = agent.FrontmatterOrMetadata;
-        meta.TryGetValue("license", out var license);
+        Dictionary<string, string> meta = agent.FrontmatterOrMetadata;
+        meta.TryGetValue("license", out string? license);
         if (string.IsNullOrWhiteSpace(license))
             meta.TryGetValue("License", out license);
 

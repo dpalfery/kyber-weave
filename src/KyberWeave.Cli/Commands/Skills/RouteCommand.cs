@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json.Nodes;
+using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Routing;
 using Spectre.Console;
@@ -45,7 +47,7 @@ public sealed class RouteCommand : Command<RouteSettings>
 {
     public override int Execute(CommandContext context, RouteSettings settings)
     {
-        var set = SkillLoader.LoadSet(settings.SkillsPath);
+        SkillSet set = SkillLoader.LoadSet(settings.SkillsPath);
         if (set.Count == 0)
         {
             AnsiConsole.MarkupLine($"[red]No skills found under '{Markup.Escape(settings.SkillsPath)}'.[/]");
@@ -71,11 +73,11 @@ public sealed class RouteCommand : Command<RouteSettings>
             return 2;
         }
 
-        var result = strategy.Route(settings.Prompt!, set);
+        RoutingResult result = strategy.Route(settings.Prompt!, set);
 
         if (settings.Json)
         {
-            var obj = new System.Text.Json.Nodes.JsonObject
+            JsonObject obj = new System.Text.Json.Nodes.JsonObject
             {
                 ["prompt"] = settings.Prompt,
                 ["fired"] = result.Fired,
@@ -98,12 +100,12 @@ public sealed class RouteCommand : Command<RouteSettings>
         else
             AnsiConsole.MarkupLine($"[yellow]No skill clears the fire threshold ({strategy.Name} @ {settings.Threshold}).[/]");
 
-        var table = new Table().Border(TableBorder.Rounded);
+        Table table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Rank"); table.AddColumn("Skill"); table.AddColumn("Score");
-        var rank = 1;
-        foreach (var c in result.Ranked.Take(8))
+        int rank = 1;
+        foreach (RoutingCandidate? c in result.Ranked.Take(8))
         {
-            var mark = rank == 1 && result.Fired ? "[green]→[/] " : "  ";
+            string mark = rank == 1 && result.Fired ? "[green]→[/] " : "  ";
             table.AddRow($"{mark}{rank}", Markup.Escape(c.SkillName), $"{c.Score:F3}");
             rank++;
         }
@@ -119,12 +121,12 @@ public sealed class RouteCommand : Command<RouteSettings>
             return 2;
         }
 
-        var evalFile = RoutingEvalFile.Load(settings.EvalFile!);
-        var summary = new RoutingEvaluator(strategy).Evaluate(evalFile, set);
+        RoutingEvalFile evalFile = RoutingEvalFile.Load(settings.EvalFile!);
+        RoutingEvalSummary summary = new RoutingEvaluator(strategy).Evaluate(evalFile, set);
 
         if (settings.Json)
         {
-            var obj = new System.Text.Json.Nodes.JsonObject
+            JsonObject obj = new System.Text.Json.Nodes.JsonObject
             {
                 ["accuracy"] = Math.Round(summary.Accuracy, 4),
                 ["passed"] = summary.Passed,
@@ -143,15 +145,15 @@ public sealed class RouteCommand : Command<RouteSettings>
         }
         else
         {
-            var table = new Table().Border(TableBorder.Rounded).Expand();
+            Table table = new Table().Border(TableBorder.Rounded).Expand();
             table.AddColumn(""); table.AddColumn("Prompt"); table.AddColumn("Expected"); table.AddColumn("Actual");
-            foreach (var r in summary.Results)
+            foreach (RoutingCaseResult r in summary.Results)
             {
-                var glyph = r.Passed ? "[green]✔[/]" : "[red]✘[/]";
+                string glyph = r.Passed ? "[green]✔[/]" : "[red]✘[/]";
                 table.AddRow(glyph, Markup.Escape(Trunc(r.Case.Prompt, 50)), Markup.Escape(r.ExpectedLabel), Markup.Escape(r.ActualLabel));
             }
             AnsiConsole.Write(table);
-            var color = summary.Accuracy >= settings.MinAccuracy ? "green" : "red";
+            string color = summary.Accuracy >= settings.MinAccuracy ? "green" : "red";
             AnsiConsole.MarkupLine($"Routing accuracy: [{color}]{summary.Accuracy:P0}[/] ({summary.Passed}/{summary.Total}), threshold {settings.MinAccuracy:P0}.");
         }
 

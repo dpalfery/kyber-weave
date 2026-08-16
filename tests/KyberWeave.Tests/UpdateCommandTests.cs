@@ -28,16 +28,16 @@ public sealed partial class UpdateCommandTests : IDisposable
     [InlineData(false, false, true, Architecture.X64, "osx-x64")]
     [InlineData(false, false, true, Architecture.Arm64, "osx-arm64")]
     [InlineData(true, false, false, Architecture.X64, "win-x64")]
-    public void PlatformRid_Detect_MapsPublishedCombinations(
+    public void PlatformRidDetectMapsPublishedCombinations(
         bool windows, bool linux, bool macos, Architecture architecture, string expected)
     {
         Assert.Equal(expected, PlatformRid.Detect(windows, linux, macos, architecture));
     }
 
     [Fact]
-    public void PlatformRid_Detect_RejectsWinArm64()
+    public void PlatformRidDetectRejectsWinArm64()
     {
-        var ex = Assert.Throws<SelfUpdateException>(
+        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
             () => PlatformRid.Detect(windows: true, linux: false, macos: false, Architecture.Arm64));
         Assert.Contains("win-arm64", ex.Message, StringComparison.Ordinal);
     }
@@ -47,22 +47,22 @@ public sealed partial class UpdateCommandTests : IDisposable
     [InlineData("0.2.0-rc.1", "0.2.0-rc.1")]
     [InlineData("0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f", "0.1.0")]
     [InlineData("V0.2.0-dev.1", "0.2.0-dev.1")]
-    public void ReleaseVersion_Normalize_StripsPrefixAndMetadata(string input, string expected)
+    public void ReleaseVersionNormalizeStripsPrefixAndMetadata(string input, string expected)
     {
         Assert.Equal(expected, ReleaseVersion.Normalize(input));
     }
 
     [Fact]
-    public void ReleaseVersion_Normalize_RejectsPathFragments()
+    public void ReleaseVersionNormalizeRejectsPathFragments()
     {
         Assert.Throws<SelfUpdateException>(() => ReleaseVersion.Normalize("../0.2.0"));
         Assert.Throws<SelfUpdateException>(() => ReleaseVersion.Normalize("0.2.0/evil"));
     }
 
     [Fact]
-    public void ChecksumVerifier_ExpectedHex_MatchesExactFileNameOnly()
+    public void ChecksumVerifierExpectedHexMatchesExactFileNameOnly()
     {
-        var sums = """
+        string sums = """
             aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-linux-x64.tar.gz
             bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  kyber-weave-linux-arm64.tar.gz
             """;
@@ -76,27 +76,27 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void ChecksumVerifier_ExpectedHex_AcceptsStarAndPathPrefix()
+    public void ChecksumVerifierExpectedHexAcceptsStarAndPathPrefix()
     {
-        var sums = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *dist/kyber-weave-osx-arm64.tar.gz";
+        string sums = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc *dist/kyber-weave-osx-arm64.tar.gz";
         Assert.Equal(
             "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             ChecksumVerifier.ExpectedHex(sums, "kyber-weave-osx-arm64.tar.gz"));
     }
 
     [Fact]
-    public void ChecksumVerifier_ExpectedHex_MissingEntry_Throws()
+    public void ChecksumVerifierExpectedHexMissingEntryThrows()
     {
-        var ex = Assert.Throws<SelfUpdateException>(
+        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
             () => ChecksumVerifier.ExpectedHex("deadbeef  other.tar.gz\n", "kyber-weave-osx-arm64.tar.gz"));
         Assert.Contains("no entry", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ChecksumVerifier_Verify_Mismatch_Throws()
+    public void ChecksumVerifierVerifyMismatchThrows()
     {
-        var actual = SHA256.HashData("nope"u8.ToArray());
-        var ex = Assert.Throws<SelfUpdateException>(
+        byte[] actual = SHA256.HashData("nope"u8.ToArray());
+        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
             () => ChecksumVerifier.Verify(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 actual,
@@ -105,23 +105,23 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void EnsureHttps_RejectsHttp()
+    public void EnsureHttpsRejectsHttp()
     {
-        var ex = Assert.Throws<SelfUpdateException>(
+        SelfUpdateException ex = Assert.Throws<SelfUpdateException>(
             () => GitHubReleaseClient.EnsureHttps(new Uri("http://example.com/file")));
         Assert.Contains("non-HTTPS", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Run_LatestStable_UsesReleasesLatestAndReplacesBothBinaries()
+    public void RunLatestStableUsesReleasesLatestAndReplacesBothBinaries()
     {
-        using var handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
-        var host = CreateHost("0.1.0", "osx-arm64");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        var outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("updated kyber-weave 0.2.0", outcome.Message, StringComparison.Ordinal);
@@ -140,9 +140,9 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_ReleaseCandidate_SkipsDraftsAndUsesReleasesList()
+    public void RunReleaseCandidateSkipsDraftsAndUsesReleasesList()
     {
-        using var handler = MapRelease("0.2.0-rc.1", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0-rc.1", "osx-arm64", windows: false);
         handler.MapJson(
             GitHubReleaseClient.ReleasesApi.AbsoluteUri,
             """
@@ -152,9 +152,9 @@ public sealed partial class UpdateCommandTests : IDisposable
               {"tag_name":"v0.1.1","draft":false,"prerelease":false}
             ]
             """);
-        var host = CreateHost("0.1.0", "osx-arm64");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        var outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0-rc.1", outcome.Message, StringComparison.Ordinal);
@@ -163,12 +163,12 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_PinnedVersion_SkipsApiAndStripsVPrefix()
+    public void RunPinnedVersionSkipsApiAndStripsVPrefix()
     {
-        using var handler = MapRelease("0.2.0", "osx-arm64", windows: false);
-        var host = CreateHost("0.1.0", "osx-arm64");
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        var outcome = Run(handler, host, new SelfUpdateOptions("v0.2.0", false, false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("v0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
@@ -177,12 +177,12 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_ReleaseCandidateWithVersion_FailsWithoutHttp()
+    public void RunReleaseCandidateWithVersionFailsWithoutHttp()
     {
-        using var handler = new MapHandler();
-        var host = CreateHost("0.1.0", "osx-arm64");
+        using MapHandler handler = new MapHandler();
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        var outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", ReleaseCandidate: true, NoMcp: false));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", ReleaseCandidate: true, NoMcp: false));
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("--release-candidate", outcome.Message, StringComparison.Ordinal);
@@ -190,9 +190,9 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_ChecksumMismatch_LeavesExistingBinary()
+    public void RunChecksumMismatchLeavesExistingBinary()
     {
-        using var handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
@@ -200,9 +200,9 @@ public sealed partial class UpdateCommandTests : IDisposable
             GitHubReleaseClient.AssetUri("v0.2.0", "SHA256SUMS.txt").AbsoluteUri,
             Encoding.UTF8.GetBytes(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-osx-arm64.tar.gz\n"));
-        var host = CreateHost("0.1.0", "osx-arm64");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        var outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("SHA256 mismatch", outcome.Message, StringComparison.Ordinal);
@@ -210,15 +210,15 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_AlreadyCurrent_IsNoOp()
+    public void RunAlreadyCurrentIsNoOp()
     {
-        using var handler = new MapHandler();
+        using MapHandler handler = new MapHandler();
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.1.1","draft":false}""");
-        var host = CreateHost("0.1.1+abc", "osx-arm64");
+        SelfUpdateHost host = CreateHost("0.1.1+abc", "osx-arm64");
 
-        var outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("already on 0.1.1", outcome.Message);
@@ -229,15 +229,15 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_NoMcp_DoesNotInstallMcp()
+    public void RunNoMcpDoesNotInstallMcp()
     {
-        using var handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
-        var host = CreateHost("0.1.0", "osx-arm64");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        var outcome = Run(handler, host, new SelfUpdateOptions(null, false, NoMcp: true));
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, false, NoMcp: true));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
@@ -248,15 +248,15 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_WindowsZip_ReplacesExeNames()
+    public void RunWindowsZipReplacesExeNames()
     {
-        using var handler = MapRelease("0.2.0", "win-x64", windows: true);
+        using MapHandler handler = MapRelease("0.2.0", "win-x64", windows: true);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
-        var host = CreateHost("0.1.0", "win-x64", windows: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "win-x64", windows: true);
 
-        var outcome = Run(handler, host, new SelfUpdateOptions());
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
@@ -266,9 +266,9 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_DotnetHost_IsRefused()
+    public void RunDotnetHostIsRefused()
     {
-        var host = new SelfUpdateHost(
+        SelfUpdateHost host = new SelfUpdateHost(
             Path.Combine(_install.Path, "dotnet"),
             "0.1.0",
             "osx-arm64",
@@ -276,31 +276,31 @@ public sealed partial class UpdateCommandTests : IDisposable
             IsMacOs: false);
         File.WriteAllText(host.ProcessPath, "shim");
 
-        using var handler = new MapHandler();
-        var outcome = Run(handler, host, new SelfUpdateOptions());
+        using MapHandler handler = new MapHandler();
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("dotnet run", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Run_DotnetToolInstall_IsRefused()
+    public void RunDotnetToolInstallIsRefused()
     {
-        var tools = Path.Combine(_install.Path, ".dotnet", "tools");
+        string tools = Path.Combine(_install.Path, ".dotnet", "tools");
         Directory.CreateDirectory(tools);
-        var processPath = Path.Combine(tools, "kyber-weave");
+        string processPath = Path.Combine(tools, "kyber-weave");
         File.WriteAllText(processPath, "shim");
-        var host = new SelfUpdateHost(processPath, "0.1.0", "osx-arm64", false, false);
+        SelfUpdateHost host = new SelfUpdateHost(processPath, "0.1.0", "osx-arm64", false, false);
 
-        using var handler = new MapHandler();
-        var outcome = Run(handler, host, new SelfUpdateOptions());
+        using MapHandler handler = new MapHandler();
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
 
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("dotnet tool", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Run_ReadOnlyInstallDirectory_IsRefused()
+    public void RunReadOnlyInstallDirectoryIsRefused()
     {
         if (OperatingSystem.IsWindows())
             throw SkipException.ForSkip("Read-only POSIX file mode permissions are not supported on Windows.");
@@ -308,14 +308,14 @@ public sealed partial class UpdateCommandTests : IDisposable
         if (GetEffectiveUserId() == 0)
             throw SkipException.ForSkip("Executing as root bypasses read-only POSIX directory permissions.");
 
-        var host = CreateHost("0.1.0", "osx-arm64");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         File.SetUnixFileMode(
             _install.Path,
             UnixFileMode.UserRead | UnixFileMode.UserExecute);
         try
         {
-            using var handler = new MapHandler();
-            var outcome = Run(handler, host, new SelfUpdateOptions());
+            using MapHandler handler = new MapHandler();
+            SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
             Assert.Equal(1, outcome.ExitCode);
             Assert.Contains("write permission", outcome.Message, StringComparison.Ordinal);
         }
@@ -330,13 +330,13 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Run_GitHubToken_IsSentAsBearerAndNotMentionedOnFailure()
+    public void RunGitHubTokenIsSentAsBearerAndNotMentionedOnFailure()
     {
-        using var handler = new MapHandler();
-        var host = CreateHost("0.1.0", "osx-arm64");
+        using MapHandler handler = new MapHandler();
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         const string token = "not-a-real-token";
 
-        var outcome = Run(
+        SelfUpdateOutcome outcome = Run(
             handler,
             host,
             new SelfUpdateOptions("0.9.9", false, true),
@@ -348,21 +348,21 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void Execute_WritesHumanOutput()
+    public void ExecuteWritesHumanOutput()
     {
-        using var handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         handler.MapJson(
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             """{"tag_name":"v0.2.0","draft":false}""");
-        var host = CreateHost("0.1.0", "osx-arm64");
-        var command = new UpdateCommand
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        UpdateCommand command = new UpdateCommand
         {
             Host = host,
             Handler = handler,
             ReadEnvironment = _ => null
         };
 
-        var execution = ProcessConsoleCapture.Run(
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new UpdateSettings()));
 
         Assert.Equal(0, execution.Result);
@@ -370,11 +370,95 @@ public sealed partial class UpdateCommandTests : IDisposable
     }
 
     [Fact]
-    public void IsDotnetToolInstall_DetectsToolsDirectory()
+    public void IsDotnetToolInstallDetectsToolsDirectory()
     {
         Assert.True(SelfUpdater.IsDotnetToolInstall("/Users/x/.dotnet/tools/kyber-weave"));
         Assert.True(SelfUpdater.IsDotnetToolInstall(@"C:\Users\x\.dotnet\tools\kyber-weave.exe"));
         Assert.False(SelfUpdater.IsDotnetToolInstall("/Users/x/.local/bin/kyber-weave"));
+    }
+
+    [Fact]
+    public void RunWhenMcpStagingFailsRestoresOriginalCliBinary()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        string tag = "v0.2.0";
+        string cliName = BinaryInstaller.ArchiveName("kyber-weave", "osx-arm64");
+        string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", "osx-arm64");
+        string cliArchive = Path.Combine(_assets.Path, cliName);
+        byte[] cliBytes = File.ReadAllBytes(cliArchive);
+        string corruptSums = $"{Sha(cliBytes)}  {cliName}\n{"0000000000000000000000000000000000000000000000000000000000000000"}  {mcpName}\n";
+        handler.MapFile(
+            GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
+            Encoding.UTF8.GetBytes(corruptSums));
+        handler.MapJson(
+            GitHubReleaseClient.LatestApi.AbsoluteUri,
+            """{"tag_name":"v0.2.0","draft":false}""");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("old-cli", File.ReadAllText(host.ProcessPath));
+    }
+
+    [Fact]
+    public void RunCommitsTheRunningImageLast()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+
+        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        int mcpIndex = log.FindIndex(line => line.StartsWith("installed kyber-weave-mcp", StringComparison.Ordinal));
+        int cliIndex = log.FindIndex(line => line.StartsWith("installed kyber-weave ", StringComparison.Ordinal));
+        Assert.True(mcpIndex >= 0 && cliIndex >= 0);
+        Assert.True(
+            mcpIndex < cliIndex,
+            "The running kyber-weave image must be replaced after every other binary: "
+                + "overwriting it first leaves the rollback path unable to load assemblies "
+                + "the single-file host has not already read out of the old executable.");
+    }
+
+    [Fact]
+    public void RunWhenMcpCommitFailsLeavesTheRunningImageUntouched()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        // A directory at the MCP destination fails the commit, not the staging that
+        // RunWhenMcpStagingFailsRestoresOriginalCliBinary already covers.
+        Directory.CreateDirectory(Path.Combine(_install.Path, "kyber-weave-mcp"));
+        List<string> log = [];
+
+        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("old-cli", File.ReadAllText(host.ProcessPath));
+        Assert.DoesNotContain(
+            log,
+            line => line.StartsWith("installed kyber-weave ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RunOnMacOsInstallsAfterClearingQuarantine()
+    {
+        // The ordering this pins — xattr runs against the staging copy, before the move —
+        // is only observable in a published single-file binary, where reaching
+        // System.Diagnostics.Process after the swap fails to load. What is checkable here
+        // is that the macOS path still installs, so the quarantine call cannot regress into
+        // something that throws past BinaryInstaller and aborts the update.
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64") with { IsMacOs = true };
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+        Assert.Equal("new-mcp", File.ReadAllText(Path.Combine(_install.Path, "kyber-weave-mcp")));
     }
 
     [DllImport("libc", EntryPoint = "geteuid")]
@@ -387,33 +471,33 @@ public sealed partial class UpdateCommandTests : IDisposable
         SelfUpdateOptions options,
         Func<string, string?>? env = null)
     {
-        using var updater = new SelfUpdater(handler, host, _ => { }, env ?? (_ => null));
+        using SelfUpdater updater = new SelfUpdater(handler, host, _ => { }, env ?? (_ => null));
         return updater.Run(options);
     }
 
     private SelfUpdateHost CreateHost(string currentVersion, string rid, bool windows = false)
     {
-        var name = BinaryInstaller.InstalledFileName("kyber-weave", windows);
-        var path = Path.Combine(_install.Path, name);
+        string name = BinaryInstaller.InstalledFileName("kyber-weave", windows);
+        string path = Path.Combine(_install.Path, name);
         File.WriteAllText(path, "old-cli");
         return new SelfUpdateHost(path, currentVersion, rid, windows, IsMacOs: false);
     }
 
     private MapHandler MapRelease(string version, string rid, bool windows)
     {
-        var handler = new MapHandler();
-        var tag = "v" + version;
-        var cliName = BinaryInstaller.ArchiveName("kyber-weave", rid);
-        var mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", rid);
-        var cliArchive = Path.Combine(_assets.Path, cliName);
-        var mcpArchive = Path.Combine(_assets.Path, mcpName);
-        var cliFile = BinaryInstaller.InstalledFileName("kyber-weave", windows);
-        var mcpFile = BinaryInstaller.InstalledFileName("kyber-weave-mcp", windows);
+        MapHandler handler = new MapHandler();
+        string tag = "v" + version;
+        string cliName = BinaryInstaller.ArchiveName("kyber-weave", rid);
+        string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", rid);
+        string cliArchive = Path.Combine(_assets.Path, cliName);
+        string mcpArchive = Path.Combine(_assets.Path, mcpName);
+        string cliFile = BinaryInstaller.InstalledFileName("kyber-weave", windows);
+        string mcpFile = BinaryInstaller.InstalledFileName("kyber-weave-mcp", windows);
         WriteArchive(cliArchive, cliFile, "new-cli"u8.ToArray(), windows);
         WriteArchive(mcpArchive, mcpFile, "new-mcp"u8.ToArray(), windows);
-        var cliBytes = File.ReadAllBytes(cliArchive);
-        var mcpBytes = File.ReadAllBytes(mcpArchive);
-        var sums = $"{Sha(cliBytes)}  {cliName}\n{Sha(mcpBytes)}  {mcpName}\n";
+        byte[] cliBytes = File.ReadAllBytes(cliArchive);
+        byte[] mcpBytes = File.ReadAllBytes(mcpArchive);
+        string sums = $"{Sha(cliBytes)}  {cliName}\n{Sha(mcpBytes)}  {mcpName}\n";
         handler.MapFile(
             GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
             Encoding.UTF8.GetBytes(sums));
@@ -426,17 +510,17 @@ public sealed partial class UpdateCommandTests : IDisposable
     {
         if (windows)
         {
-            using var zip = ZipFile.Open(archivePath, ZipArchiveMode.Create);
-            var entry = zip.CreateEntry(entryName, CompressionLevel.Fastest);
-            using var stream = entry.Open();
+            using ZipArchive zip = ZipFile.Open(archivePath, ZipArchiveMode.Create);
+            ZipArchiveEntry entry = zip.CreateEntry(entryName, CompressionLevel.Fastest);
+            using Stream stream = entry.Open();
             stream.Write(content);
             return;
         }
 
-        using var file = File.Create(archivePath);
-        using var gzip = new GZipStream(file, CompressionLevel.Fastest);
-        using var writer = new TarWriter(gzip);
-        using var data = new MemoryStream(content);
+        using FileStream file = File.Create(archivePath);
+        using GZipStream gzip = new GZipStream(file, CompressionLevel.Fastest);
+        using TarWriter writer = new TarWriter(gzip);
+        using MemoryStream data = new MemoryStream(content);
         writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, entryName)
         {
             DataStream = data
@@ -463,7 +547,7 @@ public sealed partial class UpdateCommandTests : IDisposable
         public void MapFile(string uri, byte[] bytes) =>
             Map(uri, () =>
             {
-                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent(bytes)
                 };
@@ -476,10 +560,10 @@ public sealed partial class UpdateCommandTests : IDisposable
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            var uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            string uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
             Uris.Add(uri);
             Authorizations.Add(request.Headers.Authorization?.ToString());
-            if (_map.TryGetValue(uri, out var factory))
+            if (_map.TryGetValue(uri, out Func<HttpResponseMessage>? factory))
                 return Task.FromResult(factory());
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)

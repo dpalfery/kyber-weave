@@ -94,17 +94,17 @@ public static class DocsScaffolder
         bool force = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        var root = Path.GetFullPath(repoRoot);
+        string root = Path.GetFullPath(repoRoot);
 
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-        var resolvedOwner = owner.Trim();
+        string resolvedOwner = owner.Trim();
         RequireCatalogValue(resolvedOwner, nameof(owner));
 
-        var loadedConfig = RequireLoadableHostConfig(root);
+        KyberWeaveConfigLoadResult loadedConfig = RequireLoadableHostConfig(root);
         (string DocsRoot, DocsRootSource Source) resolution = string.IsNullOrWhiteSpace(docsRoot)
             ? ResolveDocsRoot(root, loadedConfig)
             : (docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
-        var resolvedDocsRoot = resolution.DocsRoot;
+        string resolvedDocsRoot = resolution.DocsRoot;
         resolvedDocsRoot = RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
 
         // Checked before the first write, not only inside Write. The host config resolves
@@ -112,7 +112,7 @@ public static class DocsScaffolder
         // pointing at a docs root that the very next write then rejects.
         RequireContained(root, resolvedDocsRoot, nameof(docsRoot));
 
-        var files = new List<ScaffoldedFile>
+        List<ScaffoldedFile> files = new List<ScaffoldedFile>
         {
             WriteHostConfig(root, resolvedDocsRoot),
             WriteAnalysisCacheIgnore(root),
@@ -131,7 +131,7 @@ public static class DocsScaffolder
     /// </summary>
     internal static string DetectDocsRoot(string repoRoot)
     {
-        foreach (var candidate in ConventionalRoots)
+        foreach (string candidate in ConventionalRoots)
         {
             if (Directory.Exists(Path.Combine(repoRoot, candidate)))
                 return candidate;
@@ -166,11 +166,11 @@ public static class DocsScaffolder
     /// </summary>
     private static KyberWeaveConfigLoadResult RequireLoadableHostConfig(string repoRoot)
     {
-        var loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
         if (loaded.Success)
             return loaded;
 
-        var path = loaded.ConfigPath ?? KyberWeaveYamlParser.DefaultFileName;
+        string path = loaded.ConfigPath ?? KyberWeaveYamlParser.DefaultFileName;
         throw new InvalidDataException(
             $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load '{path}': " +
             (loaded.Error ?? "The configuration could not be read."));
@@ -220,10 +220,10 @@ public static class DocsScaffolder
     /// </remarks>
     private static string RequireContained(string repoRoot, string relativePath, string parameterName)
     {
-        var absolute = Path.GetFullPath(
+        string absolute = Path.GetFullPath(
             Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-        var boundary = repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string boundary = repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!IsWithinRepositoryBoundary(absolute, boundary, OperatingSystem.IsWindows()))
         {
             throw new ArgumentException(
@@ -266,7 +266,7 @@ public static class DocsScaffolder
     /// </remarks>
     private static ScaffoldedFile WriteHostConfig(string repoRoot, string docsRoot)
     {
-        var existingPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot);
+        string? existingPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot);
         if (existingPath is null)
         {
             return Write(
@@ -276,9 +276,9 @@ public static class DocsScaffolder
                 force: false);
         }
 
-        var relativePath = Path.GetRelativePath(repoRoot, existingPath).Replace('\\', '/');
-        var existing = File.ReadAllText(existingPath);
-        var updated = HostConfigYaml.WithDocsRoot(existing, docsRoot);
+        string relativePath = Path.GetRelativePath(repoRoot, existingPath).Replace('\\', '/');
+        string existing = File.ReadAllText(existingPath);
+        string updated = HostConfigYaml.WithDocsRoot(existing, docsRoot);
 
         if (string.Equals(existing, updated, StringComparison.Ordinal))
         {
@@ -305,7 +305,7 @@ public static class DocsScaffolder
     /// </remarks>
     private static ScaffoldedFile WriteAnalysisCacheIgnore(string repoRoot)
     {
-        var absolute = RequireContained(repoRoot, AnalysisCacheIgnorePath, nameof(repoRoot));
+        string absolute = RequireContained(repoRoot, AnalysisCacheIgnorePath, nameof(repoRoot));
         if (!File.Exists(absolute))
         {
             Directory.CreateDirectory(Path.GetDirectoryName(absolute)!);
@@ -313,9 +313,9 @@ public static class DocsScaffolder
             return new ScaffoldedFile(AnalysisCacheIgnorePath, ScaffoldOutcome.Created);
         }
 
-        var existingBytes = File.ReadAllBytes(absolute);
-        var (encoding, preambleLength) = DetectEncoding(existingBytes);
-        var existing = encoding.GetString(
+        byte[] existingBytes = File.ReadAllBytes(absolute);
+        (Encoding? encoding, int preambleLength) = DetectEncoding(existingBytes);
+        string existing = encoding.GetString(
             existingBytes,
             preambleLength,
             existingBytes.Length - preambleLength);
@@ -327,10 +327,10 @@ public static class DocsScaffolder
                 "your local-state ignore rules, kept as-is");
         }
 
-        var newline = ExistingNewline(existing);
-        var boundary = existing.Length == 0 || EndsWithNewline(existing) ? string.Empty : newline;
-        var appendedBytes = encoding.GetBytes(boundary + AnalysisCacheIgnoreEntry + newline);
-        using (var stream = File.Open(absolute, FileMode.Append, FileAccess.Write, FileShare.None))
+        string newline = ExistingNewline(existing);
+        string boundary = existing.Length == 0 || EndsWithNewline(existing) ? string.Empty : newline;
+        byte[] appendedBytes = encoding.GetBytes(boundary + AnalysisCacheIgnoreEntry + newline);
+        using (FileStream stream = File.Open(absolute, FileMode.Append, FileAccess.Write, FileShare.None))
         {
             stream.Write(appendedBytes);
         }
@@ -355,8 +355,8 @@ public static class DocsScaffolder
 
     private static bool HasEffectiveAnalysisCacheIgnore(string content)
     {
-        var protectedByExactEntry = false;
-        using var reader = new StringReader(content);
+        bool protectedByExactEntry = false;
+        using StringReader reader = new StringReader(content);
         while (reader.ReadLine() is { } line)
         {
             if (StringComparer.Ordinal.Equals(line, AnalysisCacheIgnoreEntry))
@@ -403,7 +403,7 @@ public static class DocsScaffolder
 
     private static string ExistingNewline(string content)
     {
-        var lineFeed = content.IndexOf('\n', StringComparison.Ordinal);
+        int lineFeed = content.IndexOf('\n', StringComparison.Ordinal);
         if (lineFeed >= 0)
             return lineFeed > 0 && content[lineFeed - 1] == '\r' ? "\r\n" : "\n";
 
@@ -417,9 +417,9 @@ public static class DocsScaffolder
     {
         // Enforced per write as well as up front, so the invariant holds for every path
         // this type will ever emit, not only the ones routed through the docs root.
-        var absolute = RequireContained(repoRoot, relativePath, nameof(relativePath));
+        string absolute = RequireContained(repoRoot, relativePath, nameof(relativePath));
 
-        var existed = File.Exists(absolute);
+        bool existed = File.Exists(absolute);
         if (existed && !force)
             return new ScaffoldedFile(relativePath, ScaffoldOutcome.Skipped);
 
@@ -431,7 +431,7 @@ public static class DocsScaffolder
 
     private static string HostConfig(string docsRoot)
     {
-        var yamlDocsRoot = HostConfigYaml.QuoteScalar(docsRoot);
+        string yamlDocsRoot = HostConfigYaml.QuoteScalar(docsRoot);
         return $"""
         # Kyber-Weave host configuration. Every ontology default is overridable here.
         # Reference: {docsRoot}/documentation-ontology.md
@@ -448,7 +448,7 @@ public static class DocsScaffolder
     private static string Catalog(string owner)
     {
         RequireCatalogValue(owner, nameof(owner));
-        var yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
         return $"""
         ---
         id: catalog
@@ -488,7 +488,7 @@ public static class DocsScaffolder
 
     private static string OntologyReference(string docsRoot, string owner)
     {
-        var yamlOwner = HostConfigYaml.QuoteScalar(owner);
+        string yamlOwner = HostConfigYaml.QuoteScalar(owner);
         return $"""
         ---
         id: documentation-ontology

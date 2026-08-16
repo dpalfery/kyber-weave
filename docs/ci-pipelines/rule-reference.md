@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 ---
 
 # Rule reference

@@ -18,21 +18,21 @@ public sealed class LexicalRoutingStrategy : IRoutingStrategy
 
     public RoutingResult Route(string prompt, SkillSet skills)
     {
-        var promptVec = TextVectorizer.Vectorize(prompt);
+        Dictionary<string, double> promptVec = TextVectorizer.Vectorize(prompt);
 
-        var ranked = skills.Skills
+        List<RoutingCandidate> ranked = skills.Skills
             .Select(s =>
             {
-                var routingText = $"{s.Frontmatter.Name} {s.Frontmatter.Description}";
-                var score = TextVectorizer.CosineSimilarity(promptVec, TextVectorizer.Vectorize(routingText));
+                string routingText = $"{s.Frontmatter.Name} {s.Frontmatter.Description}";
+                double score = TextVectorizer.CosineSimilarity(promptVec, TextVectorizer.Vectorize(routingText));
                 return new RoutingCandidate(s.Frontmatter.Name ?? s.DirectoryName, score);
             })
             .OrderByDescending(c => c.Score)
             .ThenBy(c => c.SkillName, StringComparer.Ordinal)
             .ToList();
 
-        var top = ranked.FirstOrDefault();
-        var fired = top is not null && top.Score >= FireThreshold;
+        RoutingCandidate? top = ranked.FirstOrDefault();
+        bool fired = top is not null && top.Score >= FireThreshold;
         return new RoutingResult(fired ? top!.SkillName : null, fired, ranked);
     }
 }

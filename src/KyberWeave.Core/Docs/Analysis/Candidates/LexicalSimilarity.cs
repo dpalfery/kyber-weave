@@ -13,11 +13,11 @@ internal static partial class LexicalSimilarity
 
     internal static IReadOnlySet<string> Tokens(string text)
     {
-        var tokens = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> tokens = new HashSet<string>(StringComparer.Ordinal);
         foreach (Match match in TokenPattern().Matches(text.ToLowerInvariant()))
         {
-            var token = Stem(match.Value);
-            if (Equivalents.TryGetValue(token, out var equivalent)) token = equivalent;
+            string token = Stem(match.Value);
+            if (Equivalents.TryGetValue(token, out string? equivalent)) token = equivalent;
             if (token.Length > 0) tokens.Add(token);
         }
 
@@ -31,7 +31,7 @@ internal static partial class LexicalSimilarity
     {
         if (leftTokens.Count == 0 || rightTokens.Count == 0) return 0;
 
-        var overlap = leftTokens.Count(token => rightTokens.Contains(token));
+        int overlap = leftTokens.Count(token => rightTokens.Contains(token));
         return (double)overlap / Math.Min(leftTokens.Count, rightTokens.Count);
     }
 

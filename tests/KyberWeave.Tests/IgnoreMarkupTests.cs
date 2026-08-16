@@ -1,5 +1,6 @@
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Claims;
+using KyberWeave.Core.Docs.Model;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -15,11 +16,11 @@ public sealed class IgnoreMarkupTests
     [InlineData("conflict", IgnoreRule.Conflict)]
     [InlineData("terminology", IgnoreRule.Terminology)]
     [InlineData("all", IgnoreRule.All)]
-    public void Extract_WithAnExactIgnoreRule_MarksOnlyTheWrappedClaim(
+    public void ExtractWithAnExactIgnoreRuleMarksOnlyTheWrappedClaim(
         string rule,
         IgnoreRule expectedRule)
     {
-        var body = $$"""
+        string body = $$"""
             # Ignores
 
             ## Runtime
@@ -30,10 +31,10 @@ public sealed class IgnoreMarkupTests
 
             The Codex loop consumes model tokens.
             """;
-        var originalBody = body;
-        var document = ClaimExtractionTests.Document(body);
+        string originalBody = body;
+        DocumentModel document = ClaimExtractionTests.Document(body);
 
-        var result = new ClaimExtractor().Extract(document);
+        ClaimExtractionResult result = new ClaimExtractor().Extract(document);
 
         Assert.Empty(result.Diagnostics.Items);
         Assert.Equal(2, result.Claims.Count);
@@ -51,10 +52,10 @@ public sealed class IgnoreMarkupTests
     [InlineData("<kyber-ignore rule=duplicate>\nSuppressed prose.\n</kyber-ignore>")]
     [InlineData("<kyber-ignore rule=\"duplicate\">\nSuppressed prose.")]
     [InlineData("Suppressed prose.\n</kyber-ignore>")]
-    public void Extract_WithMalformedUnknownCaseChangedOrUnbalancedMarkup_ReportsOperationalError(
+    public void ExtractWithMalformedUnknownCaseChangedOrUnbalancedMarkupReportsOperationalError(
         string markup)
     {
-        var body = $$"""
+        string body = $$"""
             # Invalid ignores
 
             ## Runtime
@@ -62,13 +63,13 @@ public sealed class IgnoreMarkupTests
             {{markup}}
             """;
 
-        var result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
 
         AssertOperationalIgnoreError(result.Diagnostics.Items);
     }
 
     [Fact]
-    public void Extract_WithNestedIgnoreMarkup_ReportsOperationalError()
+    public void ExtractWithNestedIgnoreMarkupReportsOperationalError()
     {
         const string body = """
             # Invalid ignores
@@ -82,13 +83,13 @@ public sealed class IgnoreMarkupTests
             </kyber-ignore>
             """;
 
-        var result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
 
         AssertOperationalIgnoreError(result.Diagnostics.Items);
     }
 
     [Fact]
-    public void Extract_WithIgnoreMarkupCrossingASectionBoundary_ReportsOperationalError()
+    public void ExtractWithIgnoreMarkupCrossingASectionBoundaryReportsOperationalError()
     {
         const string body = """
             # Invalid ignores
@@ -104,13 +105,13 @@ public sealed class IgnoreMarkupTests
             </kyber-ignore>
             """;
 
-        var result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
 
         AssertOperationalIgnoreError(result.Diagnostics.Items);
     }
 
     [Fact]
-    public void Extract_WithIgnoreMarkupCrossingFrontmatter_ReportsOperationalError()
+    public void ExtractWithIgnoreMarkupCrossingFrontmatterReportsOperationalError()
     {
         const string rawMarkdown = """
             ---
@@ -138,15 +139,15 @@ public sealed class IgnoreMarkupTests
             </kyber-ignore>
             """;
 
-        var document = ClaimExtractionTests.Document(body, rawMarkdown, bodyStartLine: 10);
+        DocumentModel document = ClaimExtractionTests.Document(body, rawMarkdown, bodyStartLine: 10);
 
-        var result = new ClaimExtractor().Extract(document);
+        ClaimExtractionResult result = new ClaimExtractor().Extract(document);
 
         AssertOperationalIgnoreError(result.Diagnostics.Items);
     }
 
     [Fact]
-    public void Extract_WithTagLikeTextInsideFences_TreatsItAsCodeInsteadOfMarkup()
+    public void ExtractWithTagLikeTextInsideFencesTreatsItAsCodeInsteadOfMarkup()
     {
         const string body = """
             # Ignore examples
@@ -164,7 +165,7 @@ public sealed class IgnoreMarkupTests
             ~~~
             """;
 
-        var result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
 
         Assert.Empty(result.Diagnostics.Items);
         Assert.Equal(2, result.Claims.Count);
@@ -176,7 +177,7 @@ public sealed class IgnoreMarkupTests
     }
 
     [Fact]
-    public void Extract_WithIgnoreMarkup_DoesNotMutateTheRetrievalBody()
+    public void ExtractWithIgnoreMarkupDoesNotMutateTheRetrievalBody()
     {
         const string body = """
             # Ignores
@@ -187,7 +188,7 @@ public sealed class IgnoreMarkupTests
             Preserve this original body verbatim.
             </kyber-ignore>
             """;
-        var document = ClaimExtractionTests.Document(body);
+        DocumentModel document = ClaimExtractionTests.Document(body);
 
         _ = new ClaimExtractor().Extract(document);
 
@@ -196,7 +197,7 @@ public sealed class IgnoreMarkupTests
 
     private static void AssertOperationalIgnoreError(IReadOnlyList<Diagnostic> diagnostics)
     {
-        var diagnostic = Assert.Single(diagnostics);
+        Diagnostic diagnostic = Assert.Single(diagnostics);
         Assert.Equal("KW-DOC-ANALYSIS-004", diagnostic.Code);
         Assert.Equal(Severity.Error, diagnostic.Severity);
         Assert.False(string.IsNullOrWhiteSpace(diagnostic.Hint));

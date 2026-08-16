@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kyber-weave.dev/schemas/kyber-squad/capability-profiles/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "capabilities", "profiles"],
+  "properties": {
+    "schema": { "const": "kyber-squad.capability-profiles/v1" },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["permissions"],
+        "properties": {
+          "permissions": {
+            "type": "object",
+            "additionalProperties": { "enum": ["deny", "ask", "allow"] }
+          }
+        }
+      }
+    }
+  }
+}

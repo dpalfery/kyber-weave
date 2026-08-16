@@ -5,7 +5,7 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-14
+last-reviewed: 2026-08-15
 code-refs:
   - DocSpecValidator
   - DocDriftLinter

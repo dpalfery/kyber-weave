@@ -31,7 +31,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        var fullRoot = Path.GetFullPath(repositoryRoot);
+        string fullRoot = Path.GetFullPath(repositoryRoot);
         _repositoryRoot = fullRoot;
         DatabasePath = Path.Combine(
             fullRoot,
@@ -66,7 +66,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         ArgumentNullException.ThrowIfNull(claims);
         EnsureAvailable();
-        foreach (var claim in claims) Validate(claim);
+        foreach (PersistedClaim claim in claims) Validate(claim);
 
         ExecuteWriteTransaction(claims.Select(ClaimUpsert));
     }
@@ -86,7 +86,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         ArgumentNullException.ThrowIfNull(candidates);
         EnsureAvailable();
-        foreach (var candidate in candidates) Validate(candidate);
+        foreach (PersistedCandidateFingerprint candidate in candidates) Validate(candidate);
 
         ExecuteWriteTransaction(candidates.Select(CandidateUpsert));
     }
@@ -105,7 +105,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         ArgumentNullException.ThrowIfNull(verdicts);
         EnsureAvailable();
-        foreach (var verdict in verdicts) Validate(verdict);
+        foreach (AnalysisVerdict verdict in verdicts) Validate(verdict);
 
         ExecuteWriteTransaction(verdicts.Select(VerdictUpsert));
     }
@@ -120,11 +120,11 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(verdicts);
         EnsureAvailable();
-        foreach (var claim in claims) Validate(claim);
-        foreach (var candidate in candidates) Validate(candidate);
-        foreach (var verdict in verdicts) Validate(verdict);
+        foreach (PersistedClaim claim in claims) Validate(claim);
+        foreach (PersistedCandidateFingerprint candidate in candidates) Validate(candidate);
+        foreach (AnalysisVerdict verdict in verdicts) Validate(verdict);
 
-        var candidateIds = candidates
+        HashSet<string> candidateIds = candidates
             .Select(candidate => candidate.CandidateId)
             .ToHashSet(StringComparer.Ordinal);
         if (verdicts.Any(verdict => !candidateIds.Contains(verdict.CandidateId)))
@@ -145,33 +145,33 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         if (!IsAvailable || keys.Count == 0)
             return new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
 
-        var requested = new HashSet<EmbeddingCacheKey>(keys);
-        var contextualHashes = keys.Select(k => k.ContextualHash).Distinct(StringComparer.Ordinal).ToArray();
-        var loaded = new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
+        HashSet<EmbeddingCacheKey> requested = new HashSet<EmbeddingCacheKey>(keys);
+        string[] contextualHashes = keys.Select(k => k.ContextualHash).Distinct(StringComparer.Ordinal).ToArray();
+        Dictionary<EmbeddingCacheKey, StoredEmbedding> loaded = new Dictionary<EmbeddingCacheKey, StoredEmbedding>();
 
         const int batchSize = 500;
-        for (var i = 0; i < contextualHashes.Length; i += batchSize)
+        for (int i = 0; i < contextualHashes.Length; i += batchSize)
         {
-            var chunk = contextualHashes.Skip(i).Take(batchSize).ToArray();
-            var inClause = string.Join(", ", chunk.Select(Blob));
-            var output = ExecuteSqlite(
+            string[] chunk = contextualHashes.Skip(i).Take(batchSize).ToArray();
+            string inClause = string.Join(", ", chunk.Select(Blob));
+            string output = ExecuteSqlite(
                 ".mode tabs\n" +
                 ".headers off\n" +
                 "SELECT hex(contextual_hash), hex(provider_fingerprint), hex(model), " +
                 $"dimensions, hex(encoding), hex(vector) FROM analysis_embeddings WHERE contextual_hash IN ({inClause});");
 
-            foreach (var line in Lines(output))
+            foreach (string line in Lines(output))
             {
                 try
                 {
-                    var fields = line.Split('\t');
+                    string[] fields = line.Split('\t');
                     if (fields.Length != 6
-                        || !int.TryParse(fields[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var storedDimensions))
+                        || !int.TryParse(fields[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int storedDimensions))
                     {
                         throw new InvalidDataException("An embedding row has an invalid shape.");
                     }
 
-                    var key = new EmbeddingCacheKey(
+                    EmbeddingCacheKey key = new EmbeddingCacheKey(
                         Text(fields[0]),
                         Text(fields[1]),
                         Text(fields[2]),
@@ -179,7 +179,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
                         Text(fields[4]));
                     if (!requested.Contains(key)) continue;
 
-                    var vector = DecodeVector(fields[5]);
+                    IReadOnlyList<float> vector = DecodeVector(fields[5]);
                     Validate(new StoredEmbedding(key, vector));
                     loaded[key] = new StoredEmbedding(key, vector);
                 }
@@ -198,11 +198,11 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     {
         ArgumentNullException.ThrowIfNull(embeddings);
         EnsureAvailable();
-        foreach (var embedding in embeddings) Validate(embedding);
+        foreach (StoredEmbedding embedding in embeddings) Validate(embedding);
 
         ExecuteWriteTransaction(embeddings.Select(embedding =>
         {
-            var dimensions = embedding.Key.Dimensions ?? -1;
+            int dimensions = embedding.Key.Dimensions ?? -1;
             return "INSERT INTO analysis_embeddings(" +
                    "contextual_hash, provider_fingerprint, model, dimensions, encoding, vector) VALUES (" +
                    $"{Blob(embedding.Key.ContextualHash)}, " +
@@ -218,8 +218,8 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
 
     private void InitializeSchema()
     {
-        var versionText = ExecuteSqlite("PRAGMA user_version;").Trim();
-        if (!int.TryParse(versionText, NumberStyles.None, CultureInfo.InvariantCulture, out var version))
+        string versionText = ExecuteSqlite("PRAGMA user_version;").Trim();
+        if (!int.TryParse(versionText, NumberStyles.None, CultureInfo.InvariantCulture, out int version))
             throw CorruptCache("The analysis cache schema version is not an integer.");
         if (version > SchemaVersion)
             throw CorruptCache(
@@ -268,28 +268,28 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
             return new Dictionary<string, T>(StringComparer.Ordinal);
         }
 
-        var loaded = new Dictionary<string, T>(StringComparer.Ordinal);
+        Dictionary<string, T> loaded = new Dictionary<string, T>(StringComparer.Ordinal);
         const int batchSize = 500;
-        var distinctKeys = requestedKeys.Distinct(StringComparer.Ordinal).ToArray();
+        string[] distinctKeys = requestedKeys.Distinct(StringComparer.Ordinal).ToArray();
 
-        for (var i = 0; i < distinctKeys.Length; i += batchSize)
+        for (int i = 0; i < distinctKeys.Length; i += batchSize)
         {
-            var chunk = distinctKeys.Skip(i).Take(batchSize).ToArray();
-            var inClause = string.Join(", ", chunk.Select(Blob));
-            var output = ExecuteSqlite(
+            string[] chunk = distinctKeys.Skip(i).Take(batchSize).ToArray();
+            string inClause = string.Join(", ", chunk.Select(Blob));
+            string output = ExecuteSqlite(
                 ".mode tabs\n" +
                 ".headers off\n" +
                 $"SELECT hex({keyColumn}), hex(payload) FROM {table} WHERE {keyColumn} IN ({inClause});");
 
-            foreach (var line in Lines(output))
+            foreach (string line in Lines(output))
             {
-                var fields = line.Split('\t');
+                string[] fields = line.Split('\t');
                 if (fields.Length != 2) throw CorruptCache($"Table '{table}' contains an invalid row.");
 
                 try
                 {
-                    var key = Text(fields[0]);
-                    var value = JsonSerializer.Deserialize<T>(Convert.FromHexString(fields[1]), SerializerOptions)
+                    string key = Text(fields[0]);
+                    T value = JsonSerializer.Deserialize<T>(Convert.FromHexString(fields[1]), SerializerOptions)
                         ?? throw CorruptCache($"Table '{table}' contains an empty payload.");
                     ValidateLoadedPayload(table, key, value);
                     loaded[key] = value;
@@ -307,8 +307,8 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
 
     private void ExecuteWriteTransaction(IEnumerable<string> statements)
     {
-        var script = new StringBuilder("PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\n");
-        foreach (var statement in statements) script.AppendLine(statement);
+        StringBuilder script = new StringBuilder("PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\n");
+        foreach (string statement in statements) script.AppendLine(statement);
         script.AppendLine("COMMIT;");
         ExecuteSqlite(script.ToString());
     }
@@ -316,10 +316,10 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     private string ExecuteSqlite(string input)
     {
         EnsureSafePersistencePath(_repositoryRoot, DatabasePath);
-        var boundedInput = $".timeout {BusyTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}\n{input}";
-        for (var attempt = 1; attempt <= BusyAttempts; attempt++)
+        string boundedInput = $".timeout {BusyTimeoutMilliseconds.ToString(CultureInfo.InvariantCulture)}\n{input}";
+        for (int attempt = 1; attempt <= BusyAttempts; attempt++)
         {
-            var startInfo = CreateStartInfo();
+            ProcessStartInfo startInfo = CreateStartInfo();
             startInfo.ArgumentList.Add("-batch");
             startInfo.ArgumentList.Add("-bail");
             startInfo.ArgumentList.Add(DatabasePath);
@@ -336,7 +336,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
 
             if (result.ExitCode == 0) return result.StandardOutput;
 
-            var reason = result.StandardError.Trim();
+            string reason = result.StandardError.Trim();
             if (IsBusy(reason))
             {
                 if (attempt < BusyAttempts) continue;
@@ -359,7 +359,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
 
     private static bool CanStartSqlite()
     {
-        var startInfo = CreateStartInfo();
+        ProcessStartInfo startInfo = CreateStartInfo();
         startInfo.ArgumentList.Add("--version");
         try
         {
@@ -407,8 +407,8 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
 
     private static byte[] EncodeVector(IReadOnlyList<float> vector)
     {
-        var bytes = new byte[checked(vector.Count * sizeof(float))];
-        for (var index = 0; index < vector.Count; index++)
+        byte[] bytes = new byte[checked(vector.Count * sizeof(float))];
+        for (int index = 0; index < vector.Count; index++)
             BinaryPrimitives.WriteSingleLittleEndian(bytes.AsSpan(index * sizeof(float)), vector[index]);
         return bytes;
     }
@@ -428,8 +428,8 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         if (bytes.Length == 0 || bytes.Length % sizeof(float) != 0)
             throw CorruptCache("An embedding vector has an invalid byte length.");
 
-        var vector = new float[bytes.Length / sizeof(float)];
-        for (var index = 0; index < vector.Length; index++)
+        float[] vector = new float[bytes.Length / sizeof(float)];
+        for (int index = 0; index < vector.Length; index++)
             vector[index] = BinaryPrimitives.ReadSingleLittleEndian(bytes.AsSpan(index * sizeof(float)));
         return vector;
     }
@@ -486,7 +486,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
         }
         if (verdict.ProposedGlossarySenses is not null)
         {
-            foreach (var sense in verdict.ProposedGlossarySenses)
+            foreach (ProposedGlossarySense sense in verdict.ProposedGlossarySenses)
                 Validate(sense);
         }
     }
@@ -524,7 +524,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
             throw new ArgumentException("Embedding dimensions must match the vector length.", nameof(embedding));
         }
 
-        var squaredNorm = embedding.Vector.Sum(value => (double)value * value);
+        double squaredNorm = embedding.Vector.Sum(value => (double)value * value);
         if (Math.Abs(Math.Sqrt(squaredNorm) - 1) > NormalizedVectorTolerance)
             throw new ArgumentException("Embedding vectors must be normalized.", nameof(embedding));
     }
@@ -570,8 +570,8 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
     private static void EnsureSafePersistencePath(string repositoryRoot, string databasePath)
     {
         EnsureContained(repositoryRoot, databasePath);
-        var stateDirectory = Path.Combine(repositoryRoot, ".kyber-weave");
-        var cacheDirectory = Path.GetDirectoryName(databasePath)!;
+        string stateDirectory = Path.Combine(repositoryRoot, ".kyber-weave");
+        string cacheDirectory = Path.GetDirectoryName(databasePath)!;
         RejectLinkOrReparsePoint(stateDirectory);
         RejectLinkOrReparsePoint(cacheDirectory);
         RejectLinkOrReparsePoint(databasePath);
@@ -579,7 +579,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
 
     private static void EnsureContained(string repositoryRoot, string candidatePath)
     {
-        var relative = Path.GetRelativePath(repositoryRoot, candidatePath);
+        string relative = Path.GetRelativePath(repositoryRoot, candidatePath);
         if (Path.IsPathRooted(relative)
             || relative == ".."
             || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)

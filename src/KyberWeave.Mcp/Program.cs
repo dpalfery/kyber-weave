@@ -19,13 +19,13 @@ if (args.Contains("--version", StringComparer.OrdinalIgnoreCase) || args.Contain
 // writes there. A separate entry point makes stream corruption structurally impossible
 // instead of a matter of discipline.
 
-var builder = Host.CreateApplicationBuilder(args);
+HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 
 // Every log line goes to stderr. One stray line on stdout breaks the transport.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-var repoRoot = ResolveRepoRoot(args);
-var ontology = ResolveOntology(repoRoot);
+string repoRoot = ResolveRepoRoot(args);
+OntologyConfig ontology = ResolveOntology(repoRoot);
 
 // Composition root: factories for DocumentIndexHost. Core never invents these collaborators.
 builder.Services.AddSingleton(new DocumentIndexHost(
@@ -52,15 +52,15 @@ return 0;
 /// </summary>
 static string ResolveRepoRoot(string[] args)
 {
-    for (var i = 0; i < args.Length - 1; i++)
+    for (int i = 0; i < args.Length - 1; i++)
     {
         if (args[i] == "--repo-root") return Path.GetFullPath(args[i + 1]);
     }
 
-    var fromEnvironment = Environment.GetEnvironmentVariable("KYBER_WEAVE_REPO_ROOT");
+    string? fromEnvironment = Environment.GetEnvironmentVariable("KYBER_WEAVE_REPO_ROOT");
     if (!string.IsNullOrWhiteSpace(fromEnvironment)) return Path.GetFullPath(fromEnvironment);
 
-    var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+    DirectoryInfo? directory = new DirectoryInfo(Directory.GetCurrentDirectory());
     while (directory is not null)
     {
         if (Directory.Exists(Path.Combine(directory.FullName, ".git")) ||
@@ -94,7 +94,7 @@ static string ResolveRepoRoot(string[] args)
 /// </remarks>
 static OntologyConfig ResolveOntology(string repoRoot)
 {
-    var loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+    KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
     if (loaded.Success && loaded.Config is not null)
         return loaded.Config.Ontology;
 
@@ -109,15 +109,15 @@ static OntologyConfig ResolveOntology(string repoRoot)
 
 static string GetVersion()
 {
-    var assembly = typeof(Program).Assembly;
-    var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    Assembly assembly = typeof(Program).Assembly;
+    string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
     if (!string.IsNullOrWhiteSpace(infoVersion))
     {
-        var plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
+        int plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
         return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
     }
 
-    var nameVersion = assembly.GetName().Version;
+    Version? nameVersion = assembly.GetName().Version;
     if (nameVersion is not null)
     {
         return nameVersion.ToString();

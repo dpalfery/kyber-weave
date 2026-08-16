@@ -59,6 +59,38 @@ Asset names follow `kyber-weave-<rid>` and `kyber-weave-mcp-<rid>`, `.tar.gz` ev
 except `win-x64`, which is `.zip`. Windows archives contain `*.exe`; others contain
 extensionless binaries.
 
+## Squad release assets and packaging
+
+In addition to binary executables, each GitHub Release publishes two version-matched Squad distribution packages:
+
+| Asset Name | Format | Contents |
+|---|---|---|
+| `kyber-squad-<version>.zip` | APM bundle | All 20 canonical agents, 25 skills, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | Portable skills (25) and MCP server configuration |
+
+### Packaging via `squad pack`
+
+Release CI and maintainers build Squad assets using `kyber-weave squad pack`:
+
+```bash
+# Build APM distribution zip
+kyber-weave squad pack --format apm --out ./artifacts
+
+# Build Agent Plugins v1 zip
+kyber-weave squad pack --format plugins --out ./artifacts
+
+# Build both distribution artifacts
+kyber-weave squad pack --format all --out ./artifacts
+```
+
+`squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
+
+### Version lockstep and toolchain validation
+
+- **Version Lockstep**: The CLI, MCP server, and Squad archive must share the same normalized semantic version, including any pre-release identifier.
+- **Toolchain Qualification**: `products/kyber-squad/toolchain.yml` defines the required APM capabilities (`agent-ir/v1`, `semantic-permissions/v1`, `structured-degradation/v1`, `agent-to-skill-lowering/v1`). Release packaging validates against the pinned official APM release and its recorded platform archive SHA-256 hashes.
+- **Checksum Verification**: Squad assets are included in `SHA256SUMS.txt`. Client-side `kyber-weave squad install` and `update` download the asset over HTTPS, verify its SHA-256 against `SHA256SUMS.txt`, and stage it into an isolated temporary location before rendering.
+
 ## Release flow
 
 Cut a release in either way (the `v*` tag is the version source of truth):
@@ -69,8 +101,9 @@ Cut a release in either way (the `v*` tag is the version source of truth):
    (it does not `git push` a tag, so the workflow is not re-triggered).
 
 Then `.github/workflows/release.yml` stamps that version onto the binaries, publishes
-each RID, and creates a GitHub Release with archives and `SHA256SUMS.txt` (passing
-`--prerelease=auto` for pre-release tags and `--generate-notes` for changelogs).
+each RID, builds the Squad archives via `squad pack`, and creates a GitHub Release with
+all archives and `SHA256SUMS.txt` (passing `--prerelease=auto` for pre-release tags and
+`--generate-notes` for changelogs).
 Pushes `PackAsTool` nupkgs (including pre-release versions) to GitHub Packages
 (`https://nuget.pkg.github.com/dpalfery`) — never to nuget.org.
 
@@ -160,4 +193,6 @@ dotnet publish src/KyberWeave.Cli/KyberWeave.Cli.csproj -c Release \
 ## Related
 
 - [Installing Kyber-Weave](install.md) — the user-facing path
+- [Kyber-Squad onboarding](kyber-squad/onboarding.md) — installing and updating agent squads
+- [Kyber-Squad architecture](kyber-squad/architecture.md) — packaging and toolchain design
 - [Wiring Kyber-Weave into CI](ci-pipelines/workflows-runbook.md) — installing in a runner

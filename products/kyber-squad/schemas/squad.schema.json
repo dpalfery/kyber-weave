@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kyber-weave.dev/schemas/kyber-squad/squad/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "name",
+    "version-source",
+    "default-bundle",
+    "bundles",
+    "profiles",
+    "toolchain",
+    "mcp"
+  ],
+  "properties": {
+    "schema": { "const": "kyber-squad.squad/v1" },
+    "name": { "type": "string", "minLength": 1 },
+    "version-source": { "const": "kyber-weave-assembly" },
+    "default-bundle": { "type": "string", "minLength": 1 },
+    "bundles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["models", "capabilities", "fallbacks"],
+      "properties": {
+        "models": { "type": "string", "minLength": 1 },
+        "capabilities": { "type": "string", "minLength": 1 },
+        "fallbacks": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolchain": { "type": "string", "minLength": 1 },
+    "mcp": { "type": "string", "minLength": 1 }
+  }
+}

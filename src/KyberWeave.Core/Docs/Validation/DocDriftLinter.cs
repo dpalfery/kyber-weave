@@ -30,7 +30,7 @@ public sealed class DocDriftLinter
     {
         ArgumentNullException.ThrowIfNull(set);
 
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
 
         if (!_resolver.IsAvailable)
         {
@@ -42,15 +42,15 @@ public sealed class DocDriftLinter
             return report;
         }
 
-        var routes = _resolver.AllRoutes();
+        IReadOnlyList<string> routes = _resolver.AllRoutes();
 
-        foreach (var doc in set.Documents)
+        foreach (DocumentModel doc in set.Documents)
         {
-            foreach (var symbol in doc.CodeRefs)
+            foreach (string symbol in doc.CodeRefs)
             {
                 if (_resolver.ResolveSymbol(symbol).Count > 0) continue;
 
-                var nearest = DocSpecValidator.Nearest(symbol, _resolver.CandidateNames(symbol));
+                string? nearest = DocSpecValidator.Nearest(symbol, _resolver.CandidateNames(symbol));
                 report.Add(new Diagnostic(
                     UnresolvedCodeRef, Severity.Error,
                     $"code-refs entry '{symbol}' resolves to no symbol in the CodeGraph index.",
@@ -60,11 +60,11 @@ public sealed class DocDriftLinter
                         : $"Nearest surviving symbol: '{nearest}'."));
             }
 
-            foreach (var endpoint in doc.ApiEndpoints)
+            foreach (string endpoint in doc.ApiEndpoints)
             {
                 if (_resolver.ResolveRoute(endpoint).Count > 0) continue;
 
-                var nearest = DocSpecValidator.Nearest(endpoint, routes);
+                string? nearest = DocSpecValidator.Nearest(endpoint, routes);
                 report.Add(new Diagnostic(
                     UnresolvedEndpoint, Severity.Error,
                     $"api-endpoints entry '{endpoint}' matches no indexed route.",
@@ -74,7 +74,7 @@ public sealed class DocDriftLinter
                         : $"Nearest indexed route: '{nearest}'."));
             }
 
-            var sourceRoot = doc.Frontmatter.SourceRoot;
+            string? sourceRoot = doc.Frontmatter.SourceRoot;
             if (!string.IsNullOrWhiteSpace(sourceRoot) && !_resolver.HasFilesUnder(sourceRoot))
             {
                 report.Add(new Diagnostic(

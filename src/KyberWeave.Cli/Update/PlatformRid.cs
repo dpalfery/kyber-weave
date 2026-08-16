@@ -22,19 +22,19 @@ internal static class PlatformRid
 
     internal static string Detect(bool windows, bool linux, bool macos, Architecture architecture)
     {
-        var os = windows ? "win"
+        string os = windows ? "win"
             : linux ? "linux"
             : macos ? "osx"
             : throw new SelfUpdateException("unsupported OS. Published RIDs: " + string.Join(", ", Published));
 
-        var cpu = architecture switch
+        string cpu = architecture switch
         {
             Architecture.X64 => "x64",
             Architecture.Arm64 => "arm64",
             _ => throw new SelfUpdateException($"unsupported architecture: {architecture}. Published RIDs: {string.Join(", ", Published)}")
         };
 
-        var rid = os + "-" + cpu;
+        string rid = os + "-" + cpu;
         if (Array.IndexOf(Published, rid) < 0)
         {
             throw new SelfUpdateException(

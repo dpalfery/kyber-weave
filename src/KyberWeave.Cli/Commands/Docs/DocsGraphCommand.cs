@@ -1,6 +1,10 @@
+using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Export;
+using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -11,20 +15,20 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings)
     {
-        var report = new DiagnosticReport();
+        DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateLoader(
                 settings,
                 report,
-                out var loader,
+                out DocumentLoader? loader,
                 out _,
-                out var config))
+                out KyberWeaveConfig? config))
         {
             CommandHelpers.Finish(report, settings, "docs export-graph", "Document");
             return 1;
         }
 
-        var set = loader!.Load();
-        var resolver = DocsCommandComposition.CreateResolver(settings);
+        DocumentSet set = loader!.Load();
+        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings);
 
         if (!resolver.IsAvailable)
         {
@@ -53,7 +57,7 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
                 ManagedGlossaryService.ValidationRuleCode);
             return 1;
         }
-        var result = new DocGraphExporter(resolver).Export(
+        DocGraphExportResult result = new DocGraphExporter(resolver).Export(
             set,
             settings.Out,
             contributors: [glossaryContributor]);

@@ -4,10 +4,11 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-12
+last-reviewed: 2026-08-15
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
+  - SquadConfig
 ---
 
 # Configuration
@@ -47,6 +48,13 @@ ontology:
   catalog:
     component-column: 1
     owner-column: 6
+
+squad:
+  bundle: full
+  version: 1.2.3
+  targets: [codex, cursor]
+  exclusions: [warp]
+  translation: best-effort
 
 harness:
   profiles:
@@ -211,6 +219,25 @@ narrow `cache/` path and by the cache not already being tracked. Without that pr
 Kyber-Weave sends no document text. `prefer` falls back; `required` fails. `docs init`
 safely merges the ignore entry for new and existing hosts.
 
+## Squad configuration
+
+The `squad:` section governs agent and skill deployment via `kyber-weave squad`.
+
+| Key | Default | Effect |
+|---|---|---|
+| `bundle` | `full` | The Squad bundle to install (`full` in v1) |
+| `version` | `null` | Optional exact version pin; must match the running CLI version |
+| `targets` | `[]` | Explicit targets to deploy; non-empty list replaces auto-detection |
+| `exclusions` | `[]` | Target harnesses to exclude from deployment |
+| `translation` | `best-effort` | Capability translation mode (`best-effort` in v1) |
+
+### Merge and override semantics
+
+- **Targets**: An omitted or empty `targets` list leaves target selection to filesystem auto-detection. Specifying a non-empty `targets` list in configuration disables auto-detection. CLI `--target` flags completely replace configured targets.
+- **Exclusions**: Configured exclusions and CLI `--exclude` arguments are combined (unioned) after expanding `all`. Exclusion can only narrow the deployed target set.
+- **Version**: When omitted, installation uses the running CLI version. When specified, `squad.version` must match the CLI's semantic `X.Y.Z` version.
+- **Validation**: Unrecognized bundles, invalid target tokens, or unsupported translation modes fail immediately with `KW-CONFIG-001`.
+
 ## Harness profiles
 
 Harnesses differ in what they can express, so [agent parity](context-hygiene/agents.md)
@@ -235,4 +262,6 @@ which is the intended shape of a host config.
 ## Related
 
 - [The documentation ontology](documentation-ontology.md) — what these keys configure
+- [Kyber-Squad architecture](kyber-squad/architecture.md) — deployment and lowering engine
+- [Kyber-Squad onboarding](kyber-squad/onboarding.md) — usage and lifecycle guide
 - [Agent harness governance](context-hygiene/agents.md) — what the profiles affect

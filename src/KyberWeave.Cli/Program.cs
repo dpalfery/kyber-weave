@@ -2,10 +2,11 @@ using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Skills;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Update;
 using Spectre.Console.Cli;
 
-var app = new CommandApp();
+CommandApp app = new CommandApp();
 app.Configure(config =>
 {
     config.SetApplicationName("kyber-weave");
@@ -120,6 +121,44 @@ app.Configure(config =>
             .WithExample("docs", "glossary", ".", "--write");
     });
 
+    // Kyber-Squad Unified Agent and Skill Deployment Command Branch
+    config.AddBranch("squad", squad =>
+    {
+        squad.SetDescription("Manage unified agent and skill deployments across coding harnesses.");
+
+        squad.AddCommand<SquadInstallCommand>("install")
+            .WithDescription("Deploy canonical agents and skills to coding harness directories.")
+            .WithExample("squad", "install", ".")
+            .WithExample("squad", "install", "--target", "codex,cursor")
+            .WithExample("squad", "install", "--global");
+
+        squad.AddCommand<SquadUpdateCommand>("update")
+            .WithDescription("Update an existing Squad deployment while preserving managed local edits.")
+            .WithExample("squad", "update", ".")
+            .WithExample("squad", "update", "--replace-managed")
+            .WithExample("squad", "update", "--global");
+
+        squad.AddCommand<SquadUninstallCommand>("uninstall")
+            .WithDescription("Remove deployed files and state recorded in the ownership receipt.")
+            .WithExample("squad", "uninstall", ".")
+            .WithExample("squad", "uninstall", "--dry-run")
+            .WithExample("squad", "uninstall", "--global");
+
+        squad.AddCommand<SquadStatusCommand>("status")
+            .WithDescription("Verify deployed files and report local drift against the ownership receipt.")
+            .WithExample("squad", "status", ".")
+            .WithExample("squad", "status", "--global");
+
+        squad.AddCommand<SquadDoctorCommand>("doctor")
+            .WithDescription("Diagnose prerequisites, toolchain availability, and deployment health.")
+            .WithExample("squad", "doctor")
+            .WithExample("squad", "doctor", "--global");
+
+        squad.AddCommand<SquadPackCommand>("pack")
+            .WithDescription("Package canonical agents and skills into APM and plugin distribution archives.")
+            .WithExample("squad", "pack", "--format", "all", "--out", "./dist");
+    });
+
     // Distribution: replace the running Release binaries. Not an artifact-class branch.
     config.AddCommand<UpdateCommand>("update")
         .WithDescription("Replace the installed CLI and MCP binaries from a GitHub Release.")
@@ -133,15 +172,15 @@ return app.Run(args);
 
 static string GetVersion()
 {
-    var assembly = typeof(Program).Assembly;
-    var infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+    Assembly assembly = typeof(Program).Assembly;
+    string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
     if (!string.IsNullOrWhiteSpace(infoVersion))
     {
-        var plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
+        int plusIndex = infoVersion.IndexOf('+', StringComparison.Ordinal);
         return plusIndex >= 0 ? infoVersion[..plusIndex] : infoVersion;
     }
 
-    var nameVersion = assembly.GetName().Version;
+    Version? nameVersion = assembly.GetName().Version;
     if (nameVersion is not null)
     {
         return nameVersion.ToString();

@@ -4,6 +4,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
@@ -15,7 +16,7 @@ public class OntologyConfigTests
 {
     private static readonly string[] ExpectedDocTypes =
     [
-        "architecture", "onboarding", "requirements", "adr", "plan", "spec",
+        "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
         "runbook", "reference", "rule", "governance", "index"
     ];
 
@@ -23,9 +24,9 @@ public class OntologyConfigTests
         ["current", "draft", "needs-review", "superseded"];
 
     [Fact]
-    public void ProductDefaults_Reproduce_Closed_Vocabularies()
+    public void ProductDefaultsReproduceClosedVocabularies()
     {
-        var config = OntologyConfig.ProductDefaults;
+        OntologyConfig config = OntologyConfig.ProductDefaults;
 
         Assert.Equal(ExpectedDocTypes, config.DocTypes);
         Assert.Equal(ExpectedStatuses, config.Statuses);
@@ -33,11 +34,11 @@ public class OntologyConfigTests
     }
 
     [Fact]
-    public void ProductDefaults_Reproduce_Base_Required_Key_Matrix()
+    public void ProductDefaultsReproduceBaseRequiredKeyMatrix()
     {
-        var config = OntologyConfig.ProductDefaults;
+        OntologyConfig config = OntologyConfig.ProductDefaults;
 
-        foreach (var key in new[] { "id", "title", "owner", "last-reviewed", "doc-type", "status" })
+        foreach (string? key in new[] { "id", "title", "owner", "last-reviewed", "doc-type", "status" })
             Assert.True(config.IsRequiredForAll(key), $"Base key '{key}' must be required for every document.");
 
         Assert.True(config.IsRequired(DocType.Onboarding, "component"));
@@ -47,12 +48,13 @@ public class OntologyConfigTests
         Assert.True(config.IsRequired(DocType.Runbook, "component"));
         Assert.True(config.IsRequired(DocType.Plan, "component"));
         Assert.True(config.IsRequired(DocType.Spec, "component"));
+        Assert.True(config.IsRequired(DocType.Todo, "component"));
     }
 
     [Fact]
-    public void ProductDefaults_Reproduce_Exclusion_And_Catalog_Column_Mapping()
+    public void ProductDefaultsReproduceExclusionAndCatalogColumnMapping()
     {
-        var config = OntologyConfig.ProductDefaults;
+        OntologyConfig config = OntologyConfig.ProductDefaults;
 
         Assert.Equal(["archive", "node_modules", "obj", "bin"], config.ExcludedPathSegments);
         Assert.Contains("DevOps/incremental-build.md", config.ExcludedFiles);
@@ -61,9 +63,9 @@ public class OntologyConfigTests
     }
 
     [Fact]
-    public void OverrideYaml_Can_Add_Required_Key_And_Remove_Per_Type_Requirement()
+    public void OverrideYamlCanAddRequiredKeyAndRemovePerTypeRequirement()
     {
-        var yamlPath = WriteTempYaml("""
+        string yamlPath = WriteTempYaml("""
             ontology:
               required-keys:
                 reference:
@@ -71,7 +73,7 @@ public class OntologyConfigTests
                 onboarding: []
             """);
 
-        var merged = OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.True(merged.IsRequired(DocType.Reference, "audience"));
         Assert.False(merged.IsRequired(DocType.Onboarding, "component"));
@@ -79,9 +81,9 @@ public class OntologyConfigTests
     }
 
     [Fact]
-    public void OverrideYaml_Can_Change_Exclusions_DocsRoot_And_Catalog_Columns()
+    public void OverrideYamlCanChangeExclusionsDocsRootAndCatalogColumns()
     {
-        var yamlPath = WriteTempYaml("""
+        string yamlPath = WriteTempYaml("""
             ontology:
               docs-root: custom-docs
               excluded-segments:
@@ -94,7 +96,7 @@ public class OntologyConfigTests
                 owner-column: 7
             """);
 
-        var merged = OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.Equal("custom-docs", merged.DocsRoot);
         Assert.Equal(["archive", "vendor-cache"], merged.ExcludedPathSegments);
@@ -104,9 +106,9 @@ public class OntologyConfigTests
     }
 
     [Fact]
-    public void OverrideYaml_Wires_DocumentLoader_And_DocSpecValidator()
+    public void OverrideYamlWiresDocumentLoaderAndDocSpecValidator()
     {
-        var yamlPath = WriteTempYaml("""
+        string yamlPath = WriteTempYaml("""
             ontology:
               docs-root: docs
               excluded-segments:
@@ -115,15 +117,15 @@ public class OntologyConfigTests
                 - vendored/skill.md
             """);
 
-        var config = OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath);
-        using var fixture = new OntologyConfigDocFixture(config);
+        OntologyConfig config = OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath);
+        using OntologyConfigDocFixture fixture = new OntologyConfigDocFixture(config);
 
         fixture.WithCatalog()
             .Write("docs/archive/old.md", "# archived\n")
             .Write("docs/vendored/skill.md", "---\nname: upstream\n---\n")
             .Write("docs/reference/kept.md", ValidReference);
 
-        var subjects = fixture.LoadSubjects();
+        IReadOnlyList<DocumentModel> subjects = fixture.LoadSubjects();
 
         Assert.Single(subjects);
         Assert.Equal("docs/reference/kept.md", subjects[0].RelativePath);
@@ -131,11 +133,11 @@ public class OntologyConfigTests
     }
 
     [Fact]
-    public void InvalidYaml_Reports_Parse_Diagnostic_Not_Silent_Fallback()
+    public void InvalidYamlReportsParseDiagnosticNotSilentFallback()
     {
-        var yamlPath = WriteTempYaml("ontology: [unclosed");
+        string yamlPath = WriteTempYaml("ontology: [unclosed");
 
-        var result = OntologyConfigLoader.TryLoad(yamlPath);
+        OntologyConfigLoadResult result = OntologyConfigLoader.TryLoad(yamlPath);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ParseError);
@@ -143,37 +145,37 @@ public class OntologyConfigTests
     }
 
     [Fact]
-    public void Unknown_RequiredKeys_DocType_Is_Rejected()
+    public void UnknownRequiredKeysDocTypeIsRejected()
     {
-        var yamlPath = WriteTempYaml("""
+        string yamlPath = WriteTempYaml("""
             ontology:
               required-keys:
                 not-a-real-type:
                   - audience
             """);
 
-        var result = OntologyConfigLoader.TryLoad(yamlPath);
+        OntologyConfigLoadResult result = OntologyConfigLoader.TryLoad(yamlPath);
 
         Assert.False(result.Success);
         Assert.Contains("not-a-real-type", result.ParseError, StringComparison.Ordinal);
         Assert.Null(result.Config);
 
-        var ex = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
+        YamlException ex = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
             () => OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath));
         Assert.Contains("not-a-real-type", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void CombinedConfig_TryLoad_Surfaces_InvalidYaml_As_KW_CONFIG_001_Payload()
+    public void CombinedConfigTryLoadSurfacesInvalidYamlAsKWCONFIG001Payload()
     {
-        var root = Path.Combine(Path.GetTempPath(), "kw-config-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "kw-config-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            var configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
+            DirectoryInfo configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
             File.WriteAllText(Path.Combine(configDir.FullName, "kyber-weave.yml"), "ontology: [unclosed");
 
-            var result = KyberWeaveConfigLoader.TryLoad(root);
+            KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(root);
 
             Assert.False(result.Success);
             Assert.NotNull(result.Error);
@@ -203,7 +205,7 @@ public class OntologyConfigTests
 
     private static string WriteTempYaml(string content)
     {
-        var path = Path.Combine(Path.GetTempPath(), "kw-ontology-" + Guid.NewGuid().ToString("N") + ".yml");
+        string path = Path.Combine(Path.GetTempPath(), "kw-ontology-" + Guid.NewGuid().ToString("N") + ".yml");
         File.WriteAllText(path, content);
         return path;
     }
@@ -241,7 +243,7 @@ public class OntologyConfigTests
 
         public OntologyConfigDocFixture Write(string relativePath, string content)
         {
-            var full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            string full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
             File.WriteAllText(full, content);
             return this;

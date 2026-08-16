@@ -16,7 +16,7 @@ public sealed class OntologyConfig
 
     private static readonly string[] DefaultDocTypes =
     [
-        "architecture", "onboarding", "requirements", "adr", "plan", "spec",
+        "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
         "runbook", "reference", "rule", "governance", "index"
     ];
 
@@ -96,7 +96,7 @@ public sealed class OntologyConfig
     public bool IsRequired(DocType docType, string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        if (!RequiredKeysByType.TryGetValue(docType, out var keys))
+        if (!RequiredKeysByType.TryGetValue(docType, out IReadOnlyList<string>? keys))
             return false;
 
         return keys.Contains(key, StringComparer.Ordinal);
@@ -152,6 +152,7 @@ public sealed class OntologyConfig
             [DocType.Requirements] = ["component"],
             [DocType.Runbook] = ["component"],
             [DocType.Plan] = ["component"],
-            [DocType.Spec] = ["component"]
+            [DocType.Spec] = ["component"],
+            [DocType.Todo] = ["component"]
         };
 }

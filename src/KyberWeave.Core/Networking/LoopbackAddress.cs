@@ -13,7 +13,7 @@ internal static class LoopbackAddress
     public static bool IsLoopback(IPAddress address)
     {
         ArgumentNullException.ThrowIfNull(address);
-        var normalized = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        IPAddress normalized = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
         return IPAddress.IsLoopback(normalized);
     }
 }

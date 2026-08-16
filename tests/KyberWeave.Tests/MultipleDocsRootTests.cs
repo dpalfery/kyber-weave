@@ -1,5 +1,7 @@
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
@@ -25,9 +27,9 @@ public class MultipleDocsRootTests : IDisposable
     // --- configuration --------------------------------------------------------------
 
     [Fact]
-    public void A_Scalar_DocsRoot_Still_Loads_As_The_One_Root()
+    public void AScalarDocsRootStillLoadsAsTheOneRoot()
     {
-        var config = Load("""
+        OntologyConfig config = Load("""
             ontology:
               docs-root: handbook
             """);
@@ -37,9 +39,9 @@ public class MultipleDocsRootTests : IDisposable
     }
 
     [Fact]
-    public void A_List_DocsRoot_Loads_Every_Root_In_The_Order_Written()
+    public void AListDocsRootLoadsEveryRootInTheOrderWritten()
     {
-        var config = Load("""
+        OntologyConfig config = Load("""
             ontology:
               docs-root:
                 - docs
@@ -52,17 +54,17 @@ public class MultipleDocsRootTests : IDisposable
 
     /// <summary>Flow style is the same key, and hosts write it for short lists.</summary>
     [Fact]
-    public void A_Flow_Sequence_DocsRoot_Loads_The_Same_Way()
+    public void AFlowSequenceDocsRootLoadsTheSameWay()
     {
-        var config = Load("ontology:\n  docs-root: [docs, automation]\n");
+        OntologyConfig config = Load("ontology:\n  docs-root: [docs, automation]\n");
 
         Assert.Equal(["docs", "automation"], config.DocsRoots);
     }
 
     [Fact]
-    public void The_First_Root_Is_The_Primary_One()
+    public void TheFirstRootIsThePrimaryOne()
     {
-        var config = Load("""
+        OntologyConfig config = Load("""
             ontology:
               docs-root:
                 - automation
@@ -78,9 +80,9 @@ public class MultipleDocsRootTests : IDisposable
     [InlineData("./docs", "docs")]
     [InlineData("docs\\nested", "docs/nested")]
     [InlineData(".", ".")]
-    public void A_Root_Is_Canonicalized(string written, string expected)
+    public void ARootIsCanonicalized(string written, string expected)
     {
-        var config = Load($"ontology:\n  docs-root: '{written}'\n");
+        OntologyConfig config = Load($"ontology:\n  docs-root: '{written}'\n");
 
         Assert.Equal([expected], config.DocsRoots);
     }
@@ -90,9 +92,9 @@ public class MultipleDocsRootTests : IDisposable
     /// but the document beneath must still be loaded once.
     /// </summary>
     [Fact]
-    public void Duplicate_Roots_Collapse_Rather_Than_Failing()
+    public void DuplicateRootsCollapseRatherThanFailing()
     {
-        var config = Load("""
+        OntologyConfig config = Load("""
             ontology:
               docs-root:
                 - docs
@@ -106,20 +108,20 @@ public class MultipleDocsRootTests : IDisposable
     [Theory]
     [InlineData("../elsewhere")]
     [InlineData("docs/../../elsewhere")]
-    public void A_Root_That_Escapes_The_Repository_Is_A_Configuration_Error(string escaping)
+    public void ARootThatEscapesTheRepositoryIsAConfigurationError(string escaping)
     {
-        var result = TryLoad($"ontology:\n  docs-root: '{escaping}'\n");
+        OntologyConfigLoadResult result = TryLoad($"ontology:\n  docs-root: '{escaping}'\n");
 
         Assert.False(result.Success);
         Assert.Contains("escapes the repository root", result.ParseError, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void An_Absolute_Root_Is_A_Configuration_Error()
+    public void AnAbsoluteRootIsAConfigurationError()
     {
-        var absolute = OperatingSystem.IsWindows() ? "C:/elsewhere" : "/etc";
+        string absolute = OperatingSystem.IsWindows() ? "C:/elsewhere" : "/etc";
 
-        var result = TryLoad($"ontology:\n  docs-root: '{absolute}'\n");
+        OntologyConfigLoadResult result = TryLoad($"ontology:\n  docs-root: '{absolute}'\n");
 
         Assert.False(result.Success);
         Assert.Contains("is absolute", result.ParseError, StringComparison.Ordinal);
@@ -130,9 +132,9 @@ public class MultipleDocsRootTests : IDisposable
     /// the repository root. Rootedness has to be checked before that trim.
     /// </summary>
     [Fact]
-    public void A_Root_That_Is_Only_A_Slash_Is_Absolute()
+    public void ARootThatIsOnlyASlashIsAbsolute()
     {
-        var result = TryLoad("ontology:\n  docs-root: '/'\n");
+        OntologyConfigLoadResult result = TryLoad("ontology:\n  docs-root: '/'\n");
 
         Assert.False(result.Success);
         Assert.Contains("is absolute", result.ParseError, StringComparison.Ordinal);
@@ -143,9 +145,9 @@ public class MultipleDocsRootTests : IDisposable
     /// <c>Path.IsPathRooted</c> does not treat them as rooted, so they must still fail.
     /// </summary>
     [Fact]
-    public void A_Windows_Drive_Root_Is_Absolute_On_Every_Host()
+    public void AWindowsDriveRootIsAbsoluteOnEveryHost()
     {
-        var result = TryLoad("ontology:\n  docs-root: 'C:/'\n");
+        OntologyConfigLoadResult result = TryLoad("ontology:\n  docs-root: 'C:/'\n");
 
         Assert.False(result.Success);
         Assert.Contains("is absolute", result.ParseError, StringComparison.Ordinal);
@@ -156,11 +158,11 @@ public class MultipleDocsRootTests : IDisposable
     /// Collapsing them with OrdinalIgnoreCase would silently drop one.
     /// </summary>
     [Fact]
-    public void Case_Distinct_Roots_Survive_On_Case_Sensitive_Hosts()
+    public void CaseDistinctRootsSurviveOnCaseSensitiveHosts()
     {
         if (OperatingSystem.IsWindows()) return;
 
-        var config = Load("""
+        OntologyConfig config = Load("""
             ontology:
               docs-root:
                 - docs
@@ -175,9 +177,9 @@ public class MultipleDocsRootTests : IDisposable
     /// surface the deserializer's own type error.
     /// </summary>
     [Fact]
-    public void A_DocsRoot_That_Is_Neither_A_Directory_Nor_A_List_Names_The_Key()
+    public void ADocsRootThatIsNeitherADirectoryNorAListNamesTheKey()
     {
-        var result = TryLoad("""
+        OntologyConfigLoadResult result = TryLoad("""
             ontology:
               docs-root:
                 primary: docs
@@ -190,13 +192,13 @@ public class MultipleDocsRootTests : IDisposable
     // --- scanning -------------------------------------------------------------------
 
     [Fact]
-    public void A_Document_In_Any_Root_Is_Loaded_And_Validated()
+    public void ADocumentInAnyRootIsLoadedAndValidated()
     {
         WriteCatalog("docs/catalog.md");
         Write("automation/README.md", Document("automation/readme", owner: "Maintainers"));
         Write("lab/README.md", Document("lab/readme", owner: "not-in-the-catalog"));
 
-        var report = Validate(MultiRootConfig);
+        DiagnosticReport report = Validate(MultiRootConfig);
 
         Assert.Contains(report.Items, i =>
             i.FilePath == "lab/README.md" && i.Code == DocSpecValidator.UnknownCatalogValue);
@@ -204,13 +206,13 @@ public class MultipleDocsRootTests : IDisposable
     }
 
     [Fact]
-    public void Roots_Are_Walked_In_Configured_Order()
+    public void RootsAreWalkedInConfiguredOrder()
     {
         WriteCatalog("docs/catalog.md");
         Write("automation/README.md", Document("automation/readme"));
         Write("lab/README.md", Document("lab/readme"));
 
-        var paths = new DocumentLoader(_temp.Path, MultiRootConfig).Load()
+        List<string> paths = new DocumentLoader(_temp.Path, MultiRootConfig).Load()
             .Documents.Select(d => d.RelativePath).ToList();
 
         Assert.Equal(["docs/catalog.md", "automation/README.md", "lab/README.md"], paths);
@@ -221,13 +223,13 @@ public class MultipleDocsRootTests : IDisposable
     /// the file twice would report every finding twice and fail its own id-uniqueness check.
     /// </summary>
     [Fact]
-    public void An_Overlapping_Root_Does_Not_Load_A_Document_Twice()
+    public void AnOverlappingRootDoesNotLoadADocumentTwice()
     {
         WriteCatalog("docs/catalog.md");
         Write("docs/nested/guide.md", Document("nested/guide"));
 
-        var config = OntologyConfig.ProductDefaults.WithDocsRoots(["docs", "docs/nested"]);
-        var documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoots(["docs", "docs/nested"]);
+        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
 
         Assert.Single(documents, d => d.RelativePath == "docs/nested/guide.md");
         Assert.False(new DocSpecValidator(_temp.Path, config).Validate(
@@ -236,28 +238,28 @@ public class MultipleDocsRootTests : IDisposable
 
     /// <summary>Exclusion entries are recorded relative to a root, not to the repository.</summary>
     [Fact]
-    public void Excluded_Files_Apply_Within_Each_Root()
+    public void ExcludedFilesApplyWithinEachRoot()
     {
         WriteCatalog("docs/catalog.md");
         Write("docs/vendored/upstream.md", "# no frontmatter\n");
         Write("automation/vendored/upstream.md", "# no frontmatter either\n");
 
-        var config = MultiRootConfig.Clone(excludedFiles: ["vendored/upstream.md"]);
-        var documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        OntologyConfig config = MultiRootConfig.Clone(excludedFiles: ["vendored/upstream.md"]);
+        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
 
         Assert.DoesNotContain(documents, d => d.RelativePath.EndsWith("upstream.md", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void The_Longest_Matching_Root_Decides_What_An_Exclusion_Is_Relative_To()
+    public void TheLongestMatchingRootDecidesWhatAnExclusionIsRelativeTo()
     {
         WriteCatalog("docs/catalog.md");
         Write("docs/nested/skip.md", "# skipped\n");
 
-        var config = OntologyConfig.ProductDefaults
+        OntologyConfig config = OntologyConfig.ProductDefaults
             .WithDocsRoots(["docs", "docs/nested"])
             .Clone(excludedFiles: ["skip.md"]);
-        var documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
 
         Assert.DoesNotContain(documents, d => d.RelativePath == "docs/nested/skip.md");
     }
@@ -267,13 +269,13 @@ public class MultipleDocsRootTests : IDisposable
     /// exactly where a collision appears. The existing uniqueness rule has to catch it.
     /// </summary>
     [Fact]
-    public void The_Same_Id_In_Two_Roots_Is_A_Collision()
+    public void TheSameIdInTwoRootsIsACollision()
     {
         WriteCatalog("docs/catalog.md");
         Write("automation/README.md", Document("readme"));
         Write("lab/README.md", Document("readme"));
 
-        var report = Validate(MultiRootConfig);
+        DiagnosticReport report = Validate(MultiRootConfig);
 
         Assert.Contains(report.Items, i =>
             i.Code == DocSpecValidator.BadReference &&
@@ -283,13 +285,13 @@ public class MultipleDocsRootTests : IDisposable
     // --- the catalog ----------------------------------------------------------------
 
     [Fact]
-    public void The_Catalog_Comes_From_The_Primary_Root_By_Default()
+    public void TheCatalogComesFromThePrimaryRootByDefault()
     {
         WriteCatalog("docs/catalog.md", component: "Docs");
         WriteCatalog("automation/catalog.md", component: "Automation", id: "automation/catalog");
         Write("automation/thing.md", Component("automation/thing", "Automation"));
 
-        var report = Validate(MultiRootConfig);
+        DiagnosticReport report = Validate(MultiRootConfig);
 
         // 'Automation' exists only in the second root's table, which supplies nothing.
         Assert.Contains(report.Items, i =>
@@ -297,12 +299,12 @@ public class MultipleDocsRootTests : IDisposable
     }
 
     [Fact]
-    public void A_Configured_CatalogPath_Supplies_The_Vocabulary()
+    public void AConfiguredCatalogPathSuppliesTheVocabulary()
     {
         WriteCatalog(".kyber-weave/catalog.md", component: "Automation");
         Write("automation/thing.md", Component("automation/thing", "Automation"));
 
-        var config = MultiRootConfig.Clone(catalogPath: ".kyber-weave/catalog.md");
+        OntologyConfig config = MultiRootConfig.Clone(catalogPath: ".kyber-weave/catalog.md");
 
         Assert.False(Validate(config).HasErrors);
     }
@@ -312,12 +314,12 @@ public class MultipleDocsRootTests : IDisposable
     /// and its retrievability for that placement.
     /// </summary>
     [Fact]
-    public void A_Catalog_Outside_Every_Root_Is_Still_A_Governed_Document()
+    public void ACatalogOutsideEveryRootIsStillAGovernedDocument()
     {
         WriteCatalog(".kyber-weave/catalog.md", owner: "not-in-the-catalog");
 
-        var config = MultiRootConfig.Clone(catalogPath: ".kyber-weave/catalog.md");
-        var documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        OntologyConfig config = MultiRootConfig.Clone(catalogPath: ".kyber-weave/catalog.md");
+        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
 
         Assert.Contains(documents, d => d.RelativePath == ".kyber-weave/catalog.md");
         Assert.Contains(Validate(config).Items, i =>
@@ -325,12 +327,12 @@ public class MultipleDocsRootTests : IDisposable
     }
 
     [Fact]
-    public void A_Catalog_Inside_A_Root_Is_Not_Loaded_Twice()
+    public void ACatalogInsideARootIsNotLoadedTwice()
     {
         WriteCatalog("docs/catalog.md");
 
-        var config = MultiRootConfig.Clone(catalogPath: "docs/catalog.md");
-        var documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        OntologyConfig config = MultiRootConfig.Clone(catalogPath: "docs/catalog.md");
+        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
 
         Assert.Single(documents, d => d.RelativePath == "docs/catalog.md");
     }
@@ -338,11 +340,11 @@ public class MultipleDocsRootTests : IDisposable
     // --- the --docs-root option -----------------------------------------------------
 
     [Fact]
-    public void An_Unsupplied_DocsRoot_Option_Leaves_The_Configured_Roots_Alone()
+    public void AnUnsuppliedDocsRootOptionLeavesTheConfiguredRootsAlone()
     {
         WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
 
-        Assert.True(TryResolveOntology([], out var ontology, out _));
+        Assert.True(TryResolveOntology([], out OntologyConfig? ontology, out _));
         Assert.Equal(["docs", "automation"], ontology.DocsRoots);
     }
 
@@ -351,20 +353,20 @@ public class MultipleDocsRootTests : IDisposable
     /// product default is still an override rather than being silently discarded.
     /// </summary>
     [Fact]
-    public void A_Repeated_DocsRoot_Option_Replaces_The_Configured_Roots()
+    public void ARepeatedDocsRootOptionReplacesTheConfiguredRoots()
     {
         WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
 
-        Assert.True(TryResolveOntology(["lab", OntologyConfig.DefaultDocsRoot], out var ontology, out _));
+        Assert.True(TryResolveOntology(["lab", OntologyConfig.DefaultDocsRoot], out OntologyConfig? ontology, out _));
         Assert.Equal(["lab", OntologyConfig.DefaultDocsRoot], ontology.DocsRoots);
     }
 
     [Fact]
-    public void A_DocsRoot_Option_That_Escapes_The_Repository_Reports_KW_CONFIG_001()
+    public void ADocsRootOptionThatEscapesTheRepositoryReportsKWCONFIG001()
     {
         WriteHostConfig("ontology:\n  docs-root: docs\n");
 
-        Assert.False(TryResolveOntology(["../elsewhere"], out _, out var report));
+        Assert.False(TryResolveOntology(["../elsewhere"], out _, out DiagnosticReport? report));
         Assert.Contains(report.Items, i =>
             i.Code == KyberWeaveConfigLoader.ConfigLoadErrorCode &&
             i.Message.Contains("escapes the repository root", StringComparison.Ordinal));
@@ -378,28 +380,28 @@ public class MultipleDocsRootTests : IDisposable
     /// never wrote.
     /// </summary>
     [Fact]
-    public void Scaffolding_Leaves_A_Multi_Root_Config_Byte_For_Byte_Identical()
+    public void ScaffoldingLeavesAMultiRootConfigByteForByteIdentical()
     {
-        var configPath = WriteHostConfig("""
+        string configPath = WriteHostConfig("""
             ontology:
               docs-root:
                 - docs      # the primary root
                 - automation
               excluded-files: []
             """);
-        var before = File.ReadAllText(configPath);
+        string before = File.ReadAllText(configPath);
 
-        var result = DocsScaffolder.Scaffold(_temp.Path);
+        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path);
 
         Assert.Equal("docs", result.DocsRoot);
         Assert.Equal(before, File.ReadAllText(configPath));
     }
 
     [Fact]
-    public void Scaffolding_Into_A_Listed_Root_Leaves_The_Config_Alone()
+    public void ScaffoldingIntoAListedRootLeavesTheConfigAlone()
     {
-        var configPath = WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
-        var before = File.ReadAllText(configPath);
+        string configPath = WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
+        string before = File.ReadAllText(configPath);
 
         DocsScaffolder.Scaffold(_temp.Path, "automation");
 
@@ -410,17 +412,17 @@ public class MultipleDocsRootTests : IDisposable
     /// Ordering a host's roots is a decision this command does not get to make for them.
     /// </summary>
     [Fact]
-    public void Scaffolding_Into_An_Unlisted_Root_Reports_Rather_Than_Rewriting()
+    public void ScaffoldingIntoAnUnlistedRootReportsRatherThanRewriting()
     {
-        var configPath = WriteHostConfig("""
+        string configPath = WriteHostConfig("""
             ontology:
               docs-root:
                 - docs
                 - automation
             """);
-        var before = File.ReadAllText(configPath);
+        string before = File.ReadAllText(configPath);
 
-        var ex = Assert.Throws<InvalidDataException>(
+        InvalidDataException ex = Assert.Throws<InvalidDataException>(
             () => DocsScaffolder.Scaffold(_temp.Path, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
@@ -430,9 +432,9 @@ public class MultipleDocsRootTests : IDisposable
 
     /// <summary>A key with no value at all is still a scalar the scaffolder may fill in.</summary>
     [Fact]
-    public void An_Empty_DocsRoot_Key_Is_Filled_In_Rather_Than_Treated_As_A_List()
+    public void AnEmptyDocsRootKeyIsFilledInRatherThanTreatedAsAList()
     {
-        var configPath = WriteHostConfig("ontology:\n  docs-root:\n  excluded-files: []\n");
+        string configPath = WriteHostConfig("ontology:\n  docs-root:\n  excluded-files: []\n");
 
         DocsScaffolder.Scaffold(_temp.Path, "handbook");
 
@@ -446,16 +448,16 @@ public class MultipleDocsRootTests : IDisposable
     /// corruption multi-root scaffolding exists to prevent.
     /// </summary>
     [Fact]
-    public void Scaffolding_Leaves_A_Multi_Line_Flow_Sequence_Alone()
+    public void ScaffoldingLeavesAMultiLineFlowSequenceAlone()
     {
-        var configPath = WriteHostConfig("""
+        string configPath = WriteHostConfig("""
             ontology:
               docs-root: [
                 docs,
                 automation
               ]
             """);
-        var before = File.ReadAllText(configPath);
+        string before = File.ReadAllText(configPath);
 
         DocsScaffolder.Scaffold(_temp.Path, "docs");
 
@@ -463,18 +465,18 @@ public class MultipleDocsRootTests : IDisposable
     }
 
     [Fact]
-    public void Scaffolding_Into_An_Unlisted_Root_Of_A_Multi_Line_Flow_Sequence_Reports()
+    public void ScaffoldingIntoAnUnlistedRootOfAMultiLineFlowSequenceReports()
     {
-        var configPath = WriteHostConfig("""
+        string configPath = WriteHostConfig("""
             ontology:
               docs-root: [
                 docs,
                 automation
               ]
             """);
-        var before = File.ReadAllText(configPath);
+        string before = File.ReadAllText(configPath);
 
-        var ex = Assert.Throws<InvalidDataException>(
+        InvalidDataException ex = Assert.Throws<InvalidDataException>(
             () => DocsScaffolder.Scaffold(_temp.Path, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
@@ -494,7 +496,7 @@ public class MultipleDocsRootTests : IDisposable
 
     private string WriteYaml(string yaml)
     {
-        var path = Path.Combine(_temp.Path, "ontology-" + Guid.NewGuid().ToString("N") + ".yml");
+        string path = Path.Combine(_temp.Path, "ontology-" + Guid.NewGuid().ToString("N") + ".yml");
         File.WriteAllText(path, yaml);
         return path;
     }
@@ -505,13 +507,13 @@ public class MultipleDocsRootTests : IDisposable
         out KyberWeave.Core.Diagnostics.DiagnosticReport report)
     {
         report = new KyberWeave.Core.Diagnostics.DiagnosticReport();
-        var settings = new DocsSettings { Path = _temp.Path, DocsRoots = docsRoots };
+        DocsSettings settings = new DocsSettings { Path = _temp.Path, DocsRoots = docsRoots };
         return DocsCommandComposition.TryResolveOntology(settings, report, out ontology);
     }
 
     private string WriteHostConfig(string yaml)
     {
-        var path = Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml");
+        string path = Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, yaml);
         return path;
@@ -519,7 +521,7 @@ public class MultipleDocsRootTests : IDisposable
 
     private void Write(string relativePath, string content)
     {
-        var full = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string full = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         File.WriteAllText(full, content);
     }

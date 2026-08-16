@@ -13,38 +13,38 @@ public sealed class SparseLexicalCandidateSource : IClaimCandidateSource
     public ClaimCandidateSourceResult FindCandidates(ClaimCandidateSourceRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var tokenSets = request.Claims.Select(claim => LexicalSimilarity.Tokens(claim.ContextualText)).ToArray();
-        var postings = BuildPostings(tokenSets);
-        var postingLimit = Math.Max(8, request.Search.MaxNeighborsPerClaim * 8);
-        var compared = new HashSet<IndexPair>();
-        var scored = new Dictionary<IndexPair, double>();
-        var neighbors = Enumerable.Range(0, request.Claims.Count)
+        IReadOnlySet<string>[] tokenSets = request.Claims.Select(claim => LexicalSimilarity.Tokens(claim.ContextualText)).ToArray();
+        IReadOnlyDictionary<string, IReadOnlyList<int>> postings = BuildPostings(tokenSets);
+        int postingLimit = Math.Max(8, request.Search.MaxNeighborsPerClaim * 8);
+        HashSet<IndexPair> compared = new HashSet<IndexPair>();
+        Dictionary<IndexPair, double> scored = new Dictionary<IndexPair, double>();
+        List<(IndexPair Pair, double Score)>[] neighbors = Enumerable.Range(0, request.Claims.Count)
             .Select(_ => new List<(IndexPair Pair, double Score)>())
             .ToArray();
 
-        for (var leftIndex = 0; leftIndex < request.Claims.Count; leftIndex++)
+        for (int leftIndex = 0; leftIndex < request.Claims.Count; leftIndex++)
         {
-            var possible = request.Search.Mode == DocsAnalysisSearchMode.HighRecall
+            HashSet<int> possible = request.Search.Mode == DocsAnalysisSearchMode.HighRecall
                 ? Enumerable.Range(0, request.Claims.Count)
                     .Where(index => index != leftIndex)
                     .ToHashSet()
                 : FindSparseNeighbors(leftIndex, tokenSets[leftIndex], postings, postingLimit);
 
-            foreach (var rightIndex in possible)
+            foreach (int rightIndex in possible)
             {
-                var identity = IndexPair.Create(leftIndex, rightIndex);
+                IndexPair identity = IndexPair.Create(leftIndex, rightIndex);
                 if (!compared.Add(identity)) continue;
-                var score = LexicalSimilarity.Score(tokenSets[leftIndex], tokenSets[rightIndex]);
+                double score = LexicalSimilarity.Score(tokenSets[leftIndex], tokenSets[rightIndex]);
                 scored[identity] = score;
                 neighbors[identity.Left].Add((identity, score));
                 neighbors[identity.Right].Add((identity, score));
             }
         }
 
-        var selected = new HashSet<IndexPair>();
-        for (var claimIndex = 0; claimIndex < request.Claims.Count; claimIndex++)
+        HashSet<IndexPair> selected = new HashSet<IndexPair>();
+        for (int claimIndex = 0; claimIndex < request.Claims.Count; claimIndex++)
         {
-            foreach (var item in neighbors[claimIndex]
+            foreach ((IndexPair Pair, double Score) item in neighbors[claimIndex]
                          .OrderByDescending(item => item.Score)
                          .ThenBy(item => item.Pair.Left)
                          .ThenBy(item => item.Pair.Right)
@@ -54,8 +54,8 @@ public sealed class SparseLexicalCandidateSource : IClaimCandidateSource
             }
         }
 
-        var truncated = selected.Count > request.Search.MaxCandidates;
-        var pairs = selected
+        bool truncated = selected.Count > request.Search.MaxCandidates;
+        ClaimPairCandidate[] pairs = selected
             .OrderByDescending(pair => scored[pair])
             .ThenBy(pair => pair.Left)
             .ThenBy(pair => pair.Right)
@@ -75,11 +75,11 @@ public sealed class SparseLexicalCandidateSource : IClaimCandidateSource
         IReadOnlyDictionary<string, IReadOnlyList<int>> postings,
         int postingLimit)
     {
-        var possible = new HashSet<int>();
-        foreach (var token in tokens)
+        HashSet<int> possible = new HashSet<int>();
+        foreach (string token in tokens)
         {
-            if (!postings.TryGetValue(token, out var indexes) || indexes.Count > postingLimit) continue;
-            foreach (var index in indexes)
+            if (!postings.TryGetValue(token, out IReadOnlyList<int>? indexes) || indexes.Count > postingLimit) continue;
+            foreach (int index in indexes)
             {
                 if (index != leftIndex) possible.Add(index);
             }
@@ -91,12 +91,12 @@ public sealed class SparseLexicalCandidateSource : IClaimCandidateSource
     private static IReadOnlyDictionary<string, IReadOnlyList<int>> BuildPostings(
         IReadOnlyList<IReadOnlySet<string>> tokenSets)
     {
-        var postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
-        for (var index = 0; index < tokenSets.Count; index++)
+        Dictionary<string, List<int>> postings = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        for (int index = 0; index < tokenSets.Count; index++)
         {
-            foreach (var token in tokenSets[index])
+            foreach (string token in tokenSets[index])
             {
-                if (!postings.TryGetValue(token, out var indexes))
+                if (!postings.TryGetValue(token, out List<int>? indexes))
                 {
                     indexes = [];
                     postings[token] = indexes;

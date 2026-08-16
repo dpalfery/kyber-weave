@@ -9,6 +9,7 @@ using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Graph;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 
 namespace KyberWeave.Mcp;
@@ -35,34 +36,35 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var config = LoadConfig();
-        var documents = new DocumentLoader(_repositoryRoot, config.Ontology).Load();
+        KyberWeaveConfig config = LoadConfig();
+        DocumentSet documents = new DocumentLoader(_repositoryRoot, config.Ontology).Load();
         cancellationToken.ThrowIfCancellationRequested();
-        var codeGraph = CodeGraphResolverAdapter.ForRepository(_repositoryRoot);
-        var graph = DocGraphProjection.Build(
+        CodeGraphResolverAdapter codeGraph = CodeGraphResolverAdapter.ForRepository(_repositoryRoot);
+        DocGraphProjection graph = DocGraphProjection.Build(
             documents,
             codeGraph,
             config.DocsAnalysis.Search.MaxCodeNeighbors);
         cancellationToken.ThrowIfCancellationRequested();
-        var persistence = new SqliteAnalysisPersistence(_repositoryRoot);
-        using var embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
+        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(_repositoryRoot);
+        using OpenAiCompatibleEmbeddingGenerator? embeddingGenerator = config.DocsAnalysis.Embeddings.Mode == DocsAnalysisEmbeddingMode.Off
             ? null
             : new OpenAiCompatibleEmbeddingGenerator();
-        var analyzer = new DocumentationAnalyzer(
+        DocumentationAnalyzer analyzer = new DocumentationAnalyzer(
             new ClaimExtractor(),
             [new GraphClaimCandidateSource(), new SparseLexicalCandidateSource()],
             embeddingGenerator,
             persistence);
-        var glossary = new ManagedGlossaryService(
+        ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
             _repositoryRoot,
             config,
             TimeProvider.System).Load();
 
-        var result = analyzer.Analyze(
+        DocumentationAnalysisResult result = analyzer.Analyze(
             documents,
             graph,
             config.DocsAnalysis,
-            glossary.AnalysisGlossary);
+            glossary.AnalysisGlossary,
+            cancellationToken);
         AddCodeGraphUnavailable(result.Diagnostics, codeGraph);
         return result;
     }
@@ -71,7 +73,7 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     public GlossaryLookupResult LookupGlossary(string term)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
-        var config = LoadConfig();
+        KyberWeaveConfig config = LoadConfig();
         return new ManagedGlossaryService(
             _repositoryRoot,
             config,
@@ -80,7 +82,7 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
 
     private KyberWeaveConfig LoadConfig()
     {
-        var loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
+        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
         if (loaded.Success && loaded.Config is not null) return loaded.Config;
 
         throw new InvalidDataException(

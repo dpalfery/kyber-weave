@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json.Nodes;
+using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Validation;
 using Spectre.Console;
@@ -21,30 +23,29 @@ public sealed class CatalogCommand : Command<CatalogSettings>
 {
     public override int Execute(CommandContext context, CatalogSettings settings)
     {
-        var set = SkillLoader.LoadSet(settings.Path);
+        SkillSet set = SkillLoader.LoadSet(settings.Path);
         if (set.Count == 0)
         {
             AnsiConsole.MarkupLine($"[yellow]No skills found under '{Markup.Escape(settings.Path)}'.[/]");
             return 0;
         }
 
-        var rows = set.Skills.Select(s =>
+        List<(string Name, string Version, string Author, int Score, int Tokens, int Resources)> rows = set.Skills.Select(s =>
         {
-            var meta = s.Frontmatter.Metadata;
-            return new
-            {
-                Name = s.Frontmatter.Name ?? s.DirectoryName,
-                Version = meta is not null && meta.TryGetValue("version", out var v) ? v : "—",
-                Author = meta is not null && meta.TryGetValue("author", out var a) ? a : "—",
-                Score = DescriptionScorer.Score(s).Total,
-                Tokens = s.ApproximateBodyTokens,
-                Resources = s.Resources.Count
-            };
+            Dictionary<string, string>? meta = s.Frontmatter.Metadata;
+            return (
+                Name: s.Frontmatter.Name ?? s.DirectoryName,
+                Version: meta is not null && meta.TryGetValue("version", out string? v) ? v : "—",
+                Author: meta is not null && meta.TryGetValue("author", out string? a) ? a : "—",
+                Score: DescriptionScorer.Score(s).Total,
+                Tokens: s.ApproximateBodyTokens,
+                Resources: s.Resources.Count
+            );
         }).OrderBy(r => r.Name, StringComparer.Ordinal).ToList();
 
         if (settings.Json)
         {
-            var arr = new System.Text.Json.Nodes.JsonArray(
+            JsonArray arr = new System.Text.Json.Nodes.JsonArray(
                 rows.Select(r => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
                 {
                     ["name"] = r.Name,
@@ -58,12 +59,12 @@ public sealed class CatalogCommand : Command<CatalogSettings>
             return 0;
         }
 
-        var table = new Table().Border(TableBorder.Rounded).Expand();
+        Table table = new Table().Border(TableBorder.Rounded).Expand();
         table.AddColumn("Skill"); table.AddColumn("Version"); table.AddColumn("Author");
         table.AddColumn("Desc score"); table.AddColumn("~Tokens"); table.AddColumn("Files");
-        foreach (var r in rows)
+        foreach ((string Name, string Version, string Author, int Score, int Tokens, int Resources) r in rows)
         {
-            var scoreColor = r.Score >= 70 ? "green" : r.Score >= 50 ? "yellow" : "red";
+            string scoreColor = r.Score >= 70 ? "green" : r.Score >= 50 ? "yellow" : "red";
             table.AddRow(Markup.Escape(r.Name), Markup.Escape(r.Version), Markup.Escape(r.Author),
                 $"[{scoreColor}]{r.Score}[/]", r.Tokens.ToString(), r.Resources.ToString());
         }

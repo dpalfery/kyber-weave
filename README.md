@@ -1,10 +1,11 @@
 # Kyber-Weave
 
-**Documentation your agents can actually retrieve — and that can't quietly go stale.**
+**End-to-end agent governance and deployment system.**
 
-Kyber-Weave gives a repository's documentation a closed ontology, enforces it in CI, and
-serves the result to agents as a ranked, code-joined graph over MCP. Two further features
-extend the same treatment to the other artifacts that shape agent behaviour.
+Kyber-Weave is the unified control plane for engineering agent ecosystems. It couples
+rigorous documentation governance (DocGraph), supply-chain skill and agent linting
+(ContextHygiene), atomic multi-harness deployment (Kyber-Squad), and unified CI diagnostics
+into a cohesive platform for teams operating coding agents at scale.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
@@ -16,6 +17,17 @@ no sudo, checksum-verified. Already installed? `kyber-weave update`. [Install de
 > **This repository governs its own documentation.** Everything under [`docs/`](docs/)
 > carries conformant frontmatter and passes `kyber-weave docs validate` and `docs drift`
 > with zero findings. If the ontology were unusable, you would see it here first.
+
+---
+
+## Four Premier Features
+
+Kyber-Weave provides four integrated features for agent governance and lifecycle management:
+
+1. **[DocGraph (Kyber-Docs)](#feature-1--docgraph)** — Typed, governed documentation corpus, drift detection, integrity analysis, and MCP graph retrieval.
+2. **[ContextHygiene](#feature-2--contexthygiene)** — Skill and harness agent linting, routing readiness scoring, parity drift detection, and security scanning.
+3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 10 IDE/CLI harnesses with transactional recovery.
+4. **[CI Pipelines](#feature-4--ci-pipelines)** — Unified diagnostic engine with stable `KW-*` rules, SARIF reporting, and GitHub Actions workflows.
 
 ---
 
@@ -127,9 +139,46 @@ that was fixed in `.claude` and left broken in `.cursor`.
 
 ---
 
-## Feature 3 — CI Pipelines
+## Feature 3 — Kyber-Squad
 
-One diagnostic engine behind all three artifact classes: stable `KW-*` rule ids that never
+Managing agent roles and skill sets across disparate developer environments leads to
+configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
+**single, unified lifecycle and deployment control plane** for deploying 20 canonical agents
+and 25 skills across 10 coding harnesses.
+
+**The canonical tree.** Maintains 20 canonical agent bodies and 25 canonical skills under
+[`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
+profiles, and capability profiles. Generated target trees and APM packages are never tracked.
+
+**The compiler & lowering engine.** Normalizes definitions into AgentIR, enforces a semantic
+permission lattice (`deny < ask < allow`), and applies deterministic role-skill lowering (with
+shared conductor identities and prefixed `role-*` collision namespaces) for harnesses without
+native agent primitives.
+
+**Transactional deployment.** Atomic, write-ahead deployments with cross-process OS mutex
+leasing (`kyber-weave-squad-<root-key>`), same-filesystem no-overwrite leaf claim/publish,
+and compare-and-restore recovery that safely preserves local operator modifications.
+
+```bash
+kyber-weave squad install                    # auto-detects targets across 10 harnesses
+kyber-weave squad update                     # updates deployments while preserving local edits
+kyber-weave squad status                     # verifies file integrity and reports drift
+kyber-weave squad doctor                     # checks toolchain prerequisites
+kyber-weave squad pack --format all --out ./dist # builds APM and Agent Plugins release packages
+```
+
+| Harness Class | Supported Targets |
+|---|---|
+| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Warp (`.warp`), Factory Droids (`.factory`) |
+| Role-Skill Lowering | Gemini CLI (`.gemini`), Antigravity |
+
+[Adoption & usage guide →](docs/kyber-squad/onboarding.md) · [Architecture →](docs/kyber-squad/architecture.md) · [Requirements & degradation →](docs/kyber-squad/requirements.md)
+
+---
+
+## Feature 4 — CI Pipelines
+
+One diagnostic engine behind all artifact classes: stable `KW-*` rule ids that never
 get renumbered, four output formats including SARIF for GitHub code scanning, and severity
 gating tuned per branch so adopting scanning does not immediately break every host build.
 
@@ -151,11 +200,14 @@ src/
     Docs/                   Feature 1 — parsing, search, validation, export
     Skills/ Agents/         Feature 2 — governance per artifact class
     Security/               Feature 2 — shared instruction-surface scanner
-    Diagnostics/            Feature 3 — rule ids, severities, reports
+    Squad/                  Feature 3 — multi-harness deployment engine & transaction store
+    Diagnostics/            Feature 4 — rule ids, severities, reports
     CodeGraph/              read-only port over the CodeGraph index
     Configuration/ Text/ Parsing/
-  KyberWeave.Cli/         kyber-weave — skill | agent | docs | update
+  KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
+products/
+  kyber-squad/            canonical 20 agents, 25 skills, profiles, and schemas
 tests/KyberWeave.Tests/
 .apm/skills/              kyber-weave-docs — the authoring skill, shipped as an APM package
 samples/                  exemplar and deliberately bad skills; routing eval set
@@ -181,6 +233,7 @@ dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 - **The routing simulator approximates, not replicates** a real orchestrator.
 - **`docs drift` needs a CodeGraph index and the `sqlite3` CLI.**
 - **`docs init` expects [APM](https://microsoft.github.io/apm)** to deploy the authoring skill. Both it and CodeGraph are *expected* dependencies — Kyber-Weave detects them and degrades with a message, but never installs anything on your machine.
+- **`squad install` and `squad pack` rely on [APM](https://microsoft.github.io/apm)** toolchain capabilities for multi-harness compilation.
 - **Security scanning is necessary but not sufficient** — pair it with human review.
 - **The document index is rebuilt, never persisted.** Editing one document rebuilds the whole corpus; comfortable at hundreds of documents, worth revisiting at thousands.
 - **Documentation analysis persistence is a separate local cache.** `.kyber-weave/cache/docs-analysis.sqlite3` stores reusable vectors and verdicts only when the narrow cache path is safely ignored; it is never a source of retrieval prose.

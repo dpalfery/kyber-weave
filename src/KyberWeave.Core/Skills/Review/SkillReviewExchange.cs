@@ -31,17 +31,17 @@ public static partial class SkillReviewExchange
         IEnumerable<Skill>? skills,
         IEnumerable<AgentModel>? agents = null)
     {
-        var candidates = new List<SkillReviewCandidate>();
-        var linter = new RoutingLinter();
+        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>();
+        RoutingLinter linter = new RoutingLinter();
 
         if (skills is not null)
         {
-            foreach (var skill in skills)
+            foreach (Skill skill in skills)
             {
-                var id = skill.Frontmatter.Name ?? skill.DirectoryName;
-                var description = skill.Frontmatter.Description ?? string.Empty;
-                var score = DescriptionScorer.Score(skill).Total;
-                var flags = linter.LintSkill(skill)
+                string id = skill.Frontmatter.Name ?? skill.DirectoryName;
+                string description = skill.Frontmatter.Description ?? string.Empty;
+                int score = DescriptionScorer.Score(skill).Total;
+                List<string> flags = linter.LintSkill(skill)
                     .Select(d => d.Code)
                     .Distinct()
                     .OrderBy(c => c, StringComparer.Ordinal)
@@ -59,12 +59,12 @@ public static partial class SkillReviewExchange
 
         if (agents is not null)
         {
-            foreach (var agent in agents)
+            foreach (AgentModel agent in agents)
             {
                 // Role names repeat across harnesses; the review key must distinguish them.
-                var id = AgentCandidateId(agent);
-                var description = agent.Description ?? string.Empty;
-                var dummySkill = new Skill
+                string id = AgentCandidateId(agent);
+                string description = agent.Description ?? string.Empty;
+                Skill dummySkill = new Skill
                 {
                     SkillFilePath = agent.FilePath,
                     DirectoryPath = agent.DirectoryPath,
@@ -76,10 +76,10 @@ public static partial class SkillReviewExchange
                         Description = agent.Description
                     }
                 };
-                var score = DescriptionScorer.Score(dummySkill).Total;
+                int score = DescriptionScorer.Score(dummySkill).Total;
 
-                var flags = new List<string>();
-                var trimmedDesc = description.Trim();
+                List<string> flags = new List<string>();
+                string trimmedDesc = description.Trim();
                 if (!string.IsNullOrWhiteSpace(trimmedDesc))
                 {
                     if (!RoutingLinter.TriggerClauseRegex().IsMatch(trimmedDesc))
@@ -106,8 +106,8 @@ public static partial class SkillReviewExchange
             }
         }
 
-        var bundle = new SkillReviewCandidateBundle(CandidateSchema, candidates);
-        var json = JsonSerializer.Serialize(bundle, SerializerOptions);
+        SkillReviewCandidateBundle bundle = new SkillReviewCandidateBundle(CandidateSchema, candidates);
+        string json = JsonSerializer.Serialize(bundle, SerializerOptions);
         return new SkillReviewExportResult(bundle, json, new DiagnosticReport());
     }
 
@@ -154,8 +154,8 @@ public static partial class SkillReviewExchange
             return Failure("The verdict bundle does not contain any verdicts.");
         }
 
-        var candidateMap = new Dictionary<string, SkillReviewCandidate>(StringComparer.Ordinal);
-        foreach (var candidate in currentCandidates)
+        Dictionary<string, SkillReviewCandidate> candidateMap = new Dictionary<string, SkillReviewCandidate>(StringComparer.Ordinal);
+        foreach (SkillReviewCandidate candidate in currentCandidates)
         {
             if (string.IsNullOrWhiteSpace(candidate.Id))
             {
@@ -168,9 +168,9 @@ public static partial class SkillReviewExchange
             }
         }
 
-        var seenCandidateIds = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> seenCandidateIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var verdict in bundle.Verdicts)
+        foreach (SkillReviewVerdict? verdict in bundle.Verdicts)
         {
             if (verdict is null)
             {
@@ -194,7 +194,7 @@ public static partial class SkillReviewExchange
 
             if (verdict.Confidence.HasValue)
             {
-                var conf = verdict.Confidence.Value;
+                double conf = verdict.Confidence.Value;
                 if (double.IsNaN(conf) || double.IsInfinity(conf) || conf < 0.0 || conf > 1.0)
                 {
                     return Failure($"Verdict candidate '{verdict.CandidateId}' has invalid confidence {conf}. Must be between 0.0 and 1.0.");
@@ -202,7 +202,7 @@ public static partial class SkillReviewExchange
             }
         }
 
-        foreach (var id in candidateMap.Keys)
+        foreach (string id in candidateMap.Keys)
         {
             if (!seenCandidateIds.Contains(id))
             {
@@ -218,7 +218,7 @@ public static partial class SkillReviewExchange
 
     private static SkillReviewImportResult Failure(string message)
     {
-        var diagnostics = new DiagnosticReport();
+        DiagnosticReport diagnostics = new DiagnosticReport();
         diagnostics.Add(new Diagnostic(
             ReviewRuleCode,
             Severity.Error,

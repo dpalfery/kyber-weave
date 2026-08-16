@@ -14,26 +14,26 @@ public sealed class SkillScanner
 {
     public IEnumerable<Diagnostic> Scan(Skill skill)
     {
-        var id = skill.Frontmatter.Name ?? skill.DirectoryName;
-        var file = skill.SkillFilePath;
-        var codes = InstructionSurfaceRuleCodes.ForSkills;
+        string id = skill.Frontmatter.Name ?? skill.DirectoryName;
+        string file = skill.SkillFilePath;
+        InstructionSurfaceRuleCodes codes = InstructionSurfaceRuleCodes.ForSkills;
 
-        foreach (var d in InstructionSurfaceScanner.ScanProse(
+        foreach (Diagnostic d in InstructionSurfaceScanner.ScanProse(
                      skill.InstructionsBody, id, file, codes, "skill"))
             yield return d;
 
-        foreach (var script in skill.Scripts)
+        foreach (SkillResource script in skill.Scripts)
         {
             string text;
             try { text = File.ReadAllText(script.AbsolutePath); }
             catch { continue; }
 
-            foreach (var d in InstructionSurfaceScanner.ScanScriptText(
+            foreach (Diagnostic d in InstructionSurfaceScanner.ScanScriptText(
                          text, script.RelativePath, script.AbsolutePath, id, codes))
                 yield return d;
         }
 
-        foreach (var d in InstructionSurfaceScanner.ScanProvenance(
+        foreach (Diagnostic d in InstructionSurfaceScanner.ScanProvenance(
                      skill.Frontmatter.Metadata,
                      skill.Frontmatter.License,
                      id,

@@ -39,27 +39,27 @@ internal static partial class HostConfigYaml
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentException.ThrowIfNullOrWhiteSpace(docsRoot);
 
-        var newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var lines = yaml.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
+        string newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        List<string> lines = yaml.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
 
-        var ontology = IndexOfOntologyKey(lines);
+        int ontology = IndexOfOntologyKey(lines);
         if (ontology < 0)
             return string.Join(newline, AppendOntologyBlock(lines, docsRoot));
 
-        var blockEnd = EndOfBlock(lines, ontology);
-        var blockIndent = BlockIndent(lines, ontology, blockEnd);
-        for (var i = ontology + 1; i < blockEnd; i++)
+        int blockEnd = EndOfBlock(lines, ontology);
+        string blockIndent = BlockIndent(lines, ontology, blockEnd);
+        for (int i = ontology + 1; i < blockEnd; i++)
         {
-            var match = DocsRootKey().Match(lines[i]);
+            Match match = DocsRootKey().Match(lines[i]);
             if (!match.Success || !string.Equals(
                     match.Groups["indent"].Value,
                     blockIndent,
                     StringComparison.Ordinal))
                 continue;
 
-            var (value, suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
+            (string? value, string? suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
 
-            if (TryReadSequence(lines, i, value, blockIndent, out var roots))
+            if (TryReadSequence(lines, i, value, blockIndent, out IReadOnlyList<string>? roots))
                 return WithDocsRootAmong(yaml, roots, docsRoot);
 
             if (ScalarEquals(value, docsRoot))
@@ -67,7 +67,7 @@ internal static partial class HostConfigYaml
 
             // A key written with no value at all ends at its colon, so the separating space
             // has to be added back — 'docs-root:' + a scalar is not YAML.
-            var prefix = match.Groups["prefix"].Value;
+            string prefix = match.Groups["prefix"].Value;
             if (prefix.EndsWith(':')) prefix += " ";
 
             lines[i] = prefix + QuoteScalar(docsRoot) + suffix;
@@ -121,7 +121,7 @@ internal static partial class HostConfigYaml
 
         if (value.StartsWith('['))
         {
-            if (!TryCollectFlowSequence(lines, keyIndex, value, out var flow))
+            if (!TryCollectFlowSequence(lines, keyIndex, value, out string? flow))
             {
                 throw new InvalidDataException(
                     "ontology.docs-root looks like a flow sequence but its brackets do not " +
@@ -146,13 +146,13 @@ internal static partial class HostConfigYaml
         // A block sequence lives on the lines below the key. Its items may be indented past
         // the key or sit at the key's own indent — both are valid YAML — so an item is
         // recognised by its '-', and the first line that is not one ends the sequence.
-        var items = new List<string>();
-        for (var i = keyIndex + 1; i < lines.Count; i++)
+        List<string> items = new List<string>();
+        for (int i = keyIndex + 1; i < lines.Count; i++)
         {
-            var trimmed = lines[i].TrimStart();
+            string trimmed = lines[i].TrimStart();
             if (trimmed.Length == 0 || trimmed[0] == '#') continue;
 
-            var indent = lines[i].Length - trimmed.Length;
+            int indent = lines[i].Length - trimmed.Length;
             if (trimmed[0] != '-' || indent < blockIndent.Length) break;
 
             items.Add(lines[i]);
@@ -170,7 +170,7 @@ internal static partial class HostConfigYaml
         string value,
         out string flow)
     {
-        var depth = FlowBracketDepth(value);
+        int depth = FlowBracketDepth(value);
         if (depth == 0)
         {
             flow = value;
@@ -183,8 +183,8 @@ internal static partial class HostConfigYaml
             return false;
         }
 
-        var parts = new List<string> { value };
-        for (var i = keyIndex + 1; i < lines.Count && depth > 0; i++)
+        List<string> parts = new List<string> { value };
+        for (int i = keyIndex + 1; i < lines.Count && depth > 0; i++)
         {
             parts.Add(lines[i]);
             depth += FlowBracketDepth(lines[i]);
@@ -211,11 +211,11 @@ internal static partial class HostConfigYaml
     /// </summary>
     private static int FlowBracketDepth(string text)
     {
-        var depth = 0;
-        var quote = '\0';
-        for (var i = 0; i < text.Length; i++)
+        int depth = 0;
+        char quote = '\0';
+        for (int i = 0; i < text.Length; i++)
         {
-            var c = text[i];
+            char c = text[i];
             if (quote == '\'')
             {
                 if (c == '\'')
@@ -262,17 +262,17 @@ internal static partial class HostConfigYaml
         roots = [];
         try
         {
-            var stream = new YamlStream();
+            YamlStream stream = new YamlStream();
             stream.Load(new StringReader(document));
-            var root = (YamlMappingNode)stream.Documents[0].RootNode;
-            if (!root.Children.TryGetValue(new YamlScalarNode("value"), out var node) ||
+            YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
+            if (!root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node) ||
                 node is not YamlSequenceNode sequence)
             {
                 return false;
             }
 
-            var values = new List<string>();
-            foreach (var child in sequence.Children)
+            List<string> values = new List<string>();
+            foreach (YamlNode child in sequence.Children)
             {
                 if (child is not YamlScalarNode { Value: { } scalar }) return false;
                 values.Add(scalar);
@@ -302,10 +302,10 @@ internal static partial class HostConfigYaml
     {
         try
         {
-            var stream = new YamlStream();
+            YamlStream stream = new YamlStream();
             stream.Load(new StringReader("value: " + token));
-            var root = (YamlMappingNode)stream.Documents[0].RootNode;
-            return root.Children.TryGetValue(new YamlScalarNode("value"), out var node)
+            YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
+            return root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node)
                 && node is YamlScalarNode scalar
                 && string.Equals(scalar.Value, expected, StringComparison.Ordinal);
         }
@@ -321,9 +321,9 @@ internal static partial class HostConfigYaml
     /// </summary>
     private static (string Value, string Suffix) SplitScalarAndSuffix(string rest)
     {
-        var quote = rest.Length > 0 && rest[0] is '\'' or '"' ? rest[0] : '\0';
-        var start = quote == '\0' ? 0 : 1;
-        for (var i = start; i < rest.Length; i++)
+        char quote = rest.Length > 0 && rest[0] is '\'' or '"' ? rest[0] : '\0';
+        int start = quote == '\0' ? 0 : 1;
+        for (int i = start; i < rest.Length; i++)
         {
             if (quote == '\'' && rest[i] == '\'')
             {
@@ -355,7 +355,7 @@ internal static partial class HostConfigYaml
 
             if (rest[i] == '#' && i > 0 && char.IsWhiteSpace(rest[i - 1]))
             {
-                var suffixStart = i - 1;
+                int suffixStart = i - 1;
                 while (suffixStart > 0 && char.IsWhiteSpace(rest[suffixStart - 1]))
                     suffixStart--;
 
@@ -363,7 +363,7 @@ internal static partial class HostConfigYaml
             }
         }
 
-        var valueEnd = rest.Length;
+        int valueEnd = rest.Length;
         while (valueEnd > 0 && char.IsWhiteSpace(rest[valueEnd - 1]))
             valueEnd--;
 
@@ -373,7 +373,7 @@ internal static partial class HostConfigYaml
     /// <summary>Index of the top-level <c>ontology:</c> key, or -1.</summary>
     private static int IndexOfOntologyKey(List<string> lines)
     {
-        for (var i = 0; i < lines.Count; i++)
+        for (int i = 0; i < lines.Count; i++)
         {
             if (OntologyKey().IsMatch(lines[i]))
                 return i;
@@ -389,9 +389,9 @@ internal static partial class HostConfigYaml
     /// </summary>
     private static int EndOfBlock(List<string> lines, int blockStart)
     {
-        for (var i = blockStart + 1; i < lines.Count; i++)
+        for (int i = blockStart + 1; i < lines.Count; i++)
         {
-            var line = lines[i];
+            string line = lines[i];
             if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] == '#')
                 continue;
 
@@ -405,13 +405,13 @@ internal static partial class HostConfigYaml
     private static string BlockIndent(List<string> lines, int blockStart, int blockEnd)
     {
         string? shallowest = null;
-        for (var i = blockStart + 1; i < blockEnd; i++)
+        for (int i = blockStart + 1; i < blockEnd; i++)
         {
-            var trimmed = lines[i].TrimStart();
+            string trimmed = lines[i].TrimStart();
             if (trimmed.Length == 0 || trimmed[0] == '#')
                 continue;
 
-            var indent = lines[i].Length - trimmed.Length;
+            int indent = lines[i].Length - trimmed.Length;
             if (indent > 0 && (shallowest is null || indent < shallowest.Length))
                 shallowest = lines[i][..indent];
         }

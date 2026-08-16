@@ -1,0 +1,49 @@
+schema: kyber-squad.bundle/v1
+name: full
+agents:
+  - architect
+  - architect-v3
+  - azure-reader
+  - bug-crusher-investigator
+  - code-reviewer
+  - conductor
+  - conductor-v3
+  - dal-dev
+  - docs-dev
+  - dotnet-dev
+  - github-devops
+  - maui-dev
+  - product-owner
+  - pulumi-dev
+  - python-dev
+  - react-dev
+  - research-agent
+  - sql-database-architect
+  - tauri-dev
+  - test-dev
+skills:
+  - app-docs-standard
+  - architecture-decision-record
+  - azure-cli
+  - azure-naming
+  - bug-crusher
+  - code-review
+  - conductor
+  - conductor-v3
+  - create-pull-request
+  - create-pull-request-github
+  - csp-security
+  - dal-dev
+  - dotnet-dev
+  - dp-code-reviewer
+  - github-cli
+  - github-devops
+  - lm-studio-cli
+  - maui-dev
+  - pr-review-fix-comments
+  - product-owner
+  - python-dev
+  - second-brain
+  - security-review
+  - setup-dev-environment
+  - test-dev

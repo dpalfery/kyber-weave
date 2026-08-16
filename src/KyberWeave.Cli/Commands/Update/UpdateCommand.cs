@@ -18,11 +18,11 @@ public sealed class UpdateCommand : Command<UpdateSettings>
 
         try
         {
-            var host = Host ?? SelfUpdateHost.FromCurrentProcess();
-            using var updater = Handler is null
+            SelfUpdateHost host = Host ?? SelfUpdateHost.FromCurrentProcess();
+            using SelfUpdater updater = Handler is null
                 ? SelfUpdater.Create(host, Log)
                 : new SelfUpdater(Handler, host, Log, ReadEnvironment);
-            var outcome = updater.Run(new SelfUpdateOptions(
+            SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions(
                 settings.Version,
                 settings.ReleaseCandidate,
                 settings.NoMcp));

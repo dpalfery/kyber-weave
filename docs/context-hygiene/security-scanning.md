@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: ContextHygiene
 owner: dpalfery
-last-reviewed: 2026-08-01
+last-reviewed: 2026-08-15
 code-refs:
   - InstructionSurfaceScanner
 ---

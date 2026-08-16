@@ -43,21 +43,21 @@ public sealed partial class DocumentLoader
     /// </remarks>
     public DocumentSet Load()
     {
-        var documents = new List<DocumentModel>();
-        var visited = new HashSet<string>(PathComparer);
+        List<DocumentModel> documents = new List<DocumentModel>();
+        HashSet<string> visited = new HashSet<string>(PathComparer);
 
-        foreach (var docsRoot in _docsRoots)
+        foreach (string docsRoot in _docsRoots)
         {
-            var absoluteRoot = Absolute(docsRoot);
+            string absoluteRoot = Absolute(docsRoot);
             if (!Directory.Exists(absoluteRoot)) continue;
 
-            foreach (var file in Directory
+            foreach (string? file in Directory
                          .EnumerateFiles(absoluteRoot, "*.md", SearchOption.AllDirectories)
                          .OrderBy(p => p, StringComparer.Ordinal))
             {
                 if (!visited.Add(file)) continue;
 
-                var relative = ToRelative(file);
+                string relative = ToRelative(file);
                 if (IsExcluded(relative)) continue;
                 documents.Add(Parse(file, relative));
             }
@@ -71,7 +71,7 @@ public sealed partial class DocumentLoader
             documents.Add(Parse(_catalogPath, ToRelative(_catalogPath)));
         }
 
-        var (components, owners) = ReadCatalogVocabularies();
+        (IReadOnlySet<string>? components, IReadOnlySet<string>? owners) = ReadCatalogVocabularies();
 
         return new DocumentSet
         {
@@ -83,7 +83,7 @@ public sealed partial class DocumentLoader
 
     internal bool IsExcluded(string relativePath)
     {
-        var segments = relativePath.Split('/');
+        string[] segments = relativePath.Split('/');
         if (segments.Any(s => _config.ExcludedPathSegments.Contains(s, StringComparer.OrdinalIgnoreCase)))
         {
             return true;
@@ -100,7 +100,7 @@ public sealed partial class DocumentLoader
     private string BeneathRoot(string relativePath)
     {
         string? longest = null;
-        foreach (var root in _docsRoots)
+        foreach (string root in _docsRoots)
         {
             if (root == ".")
             {
@@ -108,7 +108,7 @@ public sealed partial class DocumentLoader
                 continue;
             }
 
-            var prefix = root + "/";
+            string prefix = root + "/";
             if (!relativePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
             if (longest is null || prefix.Length > longest.Length) longest = prefix;
         }
@@ -129,8 +129,8 @@ public sealed partial class DocumentLoader
 
     private DocumentModel Parse(string absolutePath, string relativePath)
     {
-        var raw = File.ReadAllText(absolutePath);
-        var read = MarkdownFrontmatterReader.Read(raw);
+        string raw = File.ReadAllText(absolutePath);
+        FrontmatterReadResult read = MarkdownFrontmatterReader.Read(raw);
 
         if (!read.HasFrontmatter)
         {
@@ -186,13 +186,13 @@ public sealed partial class DocumentLoader
     /// </summary>
     internal static IReadOnlyList<DocumentSection> SplitSections(string body)
     {
-        var sections = new List<DocumentSection>();
-        var lines = body.Replace("\r\n", "\n").Split('\n');
+        List<DocumentSection> sections = new List<DocumentSection>();
+        string[] lines = body.Replace("\r\n", "\n").Split('\n');
 
         string? heading = null;
-        var headingLine = 1;
-        var buffer = new List<string>();
-        var inFence = false;
+        int headingLine = 1;
+        List<string> buffer = new List<string>();
+        bool inFence = false;
 
         void Flush()
         {
@@ -208,9 +208,9 @@ public sealed partial class DocumentLoader
                 headingLine));
         }
 
-        for (var i = 0; i < lines.Length; i++)
+        for (int i = 0; i < lines.Length; i++)
         {
-            var line = lines[i];
+            string line = lines[i];
 
             if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
             {
@@ -245,6 +245,7 @@ public sealed partial class DocumentLoader
             "adr" => DocType.Adr,
             "plan" => DocType.Plan,
             "spec" => DocType.Spec,
+            "todo" => DocType.Todo,
             "runbook" => DocType.Runbook,
             "reference" => DocType.Reference,
             "rule" => DocType.Rule,
@@ -268,11 +269,11 @@ public sealed partial class DocumentLoader
 
     internal static IReadOnlyList<string> ExtractRelativeLinks(string markdown)
     {
-        var links = new List<string>();
+        List<string> links = new List<string>();
         foreach (Match match in LinkPattern().Matches(markdown))
         {
-            var target = match.Groups[1].Value.Trim().Trim('<', '>');
-            var hashIndex = target.IndexOf('#', StringComparison.Ordinal);
+            string target = match.Groups[1].Value.Trim().Trim('<', '>');
+            int hashIndex = target.IndexOf('#', StringComparison.Ordinal);
             if (hashIndex >= 0) target = target[..hashIndex];
             if (target.Length == 0) continue;
             if (target.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) continue;
@@ -297,29 +298,29 @@ public sealed partial class DocumentLoader
     /// </remarks>
     private (IReadOnlySet<string> Components, IReadOnlySet<string> Owners) ReadCatalogVocabularies()
     {
-        var components = new HashSet<string>(StringComparer.Ordinal);
-        var owners = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> components = new HashSet<string>(StringComparer.Ordinal);
+        HashSet<string> owners = new HashSet<string>(StringComparer.Ordinal);
 
         if (!File.Exists(_catalogPath))
         {
             return (components, owners);
         }
 
-        foreach (var line in File.ReadLines(_catalogPath))
+        foreach (string line in File.ReadLines(_catalogPath))
         {
             if (!line.StartsWith('|')) continue;
 
-            var cells = line.Split('|', StringSplitOptions.None)
+            string[] cells = line.Split('|', StringSplitOptions.None)
                 .Select(c => c.Trim())
                 .ToArray();
 
             // | Component | Type | Source root | Overview | Detailed documentation | Owner | Last reviewed | Status |
             // Split on a leading and trailing pipe yields a leading and trailing empty cell.
-            var maxColumn = Math.Max(_config.CatalogComponentColumn, _config.CatalogOwnerColumn);
+            int maxColumn = Math.Max(_config.CatalogComponentColumn, _config.CatalogOwnerColumn);
             if (cells.Length <= maxColumn) continue;
 
-            var component = cells[_config.CatalogComponentColumn];
-            var owner = cells[_config.CatalogOwnerColumn];
+            string component = cells[_config.CatalogComponentColumn];
+            string owner = cells[_config.CatalogOwnerColumn];
 
             if (component.Length == 0 || component.StartsWith("---", StringComparison.Ordinal)) continue;
             if (component.Equals("Component", StringComparison.Ordinal)) continue;
