@@ -90,7 +90,21 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
             extractedFiles.Add("squad.yml");
 
             string toolchainYmlPath = Path.Combine(request.DestinationPath, "toolchain.yml");
-            await File.WriteAllTextAsync(toolchainYmlPath, "schema: kyber-squad.toolchain/v1\nvalidated-release:\n  version: 0.28.0\n  tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd\n", cancellationToken);
+            await File.WriteAllTextAsync(
+                toolchainYmlPath,
+                """
+                schema: kyber-squad.toolchain/v1
+                required-features:
+                  - agent-ir/v1
+                  - semantic-permissions/v1
+                  - structured-degradation/v1
+                  - agent-to-skill-lowering/v1
+                validated-release:
+                  version: 0.28.0
+                  tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd
+                  asset-sha256: e041462f4a48086dbee3da145c07d71b8a3b84fde041462f4a48086dbee3da14
+                """,
+                cancellationToken);
             extractedFiles.Add("toolchain.yml");
         }
 

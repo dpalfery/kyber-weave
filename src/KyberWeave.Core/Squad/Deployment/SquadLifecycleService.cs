@@ -436,22 +436,26 @@ public sealed class SquadLifecycleService
     private static SquadApmIdentity ReadApmIdentity(string extractionRoot)
     {
         string toolchainPath = Path.Combine(extractionRoot, "toolchain.yml");
-        string apmVersion = "0.28.0";
-        string apmTagCommit = "e041462f4a48086dbee3da145c07d71b8a3b84fd";
-        string apmDigest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("apm-0.28.0")));
-
-        if (File.Exists(toolchainPath))
+        if (!File.Exists(toolchainPath))
         {
-            try
+            return new SquadApmIdentity("unverified", "unverified", "unverified");
+        }
+
+        try
+        {
+            string yamlText = File.ReadAllText(toolchainPath);
+            YamlStream yaml = new();
+            yaml.Load(new StringReader(yamlText));
+            if (yaml.Documents.Count > 0 && yaml.Documents[0].RootNode is YamlMappingNode root)
             {
-                string yamlText = File.ReadAllText(toolchainPath);
-                YamlStream yaml = new();
-                yaml.Load(new StringReader(yamlText));
-                if (yaml.Documents.Count > 0 && yaml.Documents[0].RootNode is YamlMappingNode root)
+                if (root.Children.TryGetValue(new YamlScalarNode("validated-release"), out YamlNode? valRelNode))
                 {
-                    if (root.Children.TryGetValue(new YamlScalarNode("validated-release"), out YamlNode? valRelNode) &&
-                        valRelNode is YamlMappingNode valRel)
+                    if (valRelNode is YamlMappingNode valRel)
                     {
+                        string apmVersion = string.Empty;
+                        string apmTagCommit = string.Empty;
+                        string apmDigest = string.Empty;
+
                         if (valRel.Children.TryGetValue(new YamlScalarNode("version"), out YamlNode? vNode) &&
                             vNode is YamlScalarNode vScalar && !string.IsNullOrWhiteSpace(vScalar.Value))
                         {
@@ -469,21 +473,36 @@ public sealed class SquadLifecycleService
                         {
                             apmDigest = shaScalar.Value;
                         }
+
+                        if (string.IsNullOrWhiteSpace(apmVersion) ||
+                            string.IsNullOrWhiteSpace(apmTagCommit) ||
+                            apmDigest.Length != 64 ||
+                            !apmDigest.All(char.IsAsciiHexDigit))
+                        {
+                            throw new SquadApmValidationException(
+                                $"'{toolchainPath}' declares an invalid APM validated-release. A 64-character hex asset-sha256, version, and tag-commit are required.");
+                        }
+
+                        return new SquadApmIdentity(apmVersion, apmTagCommit, apmDigest.ToLowerInvariant());
+                    }
+                    else if (valRelNode is not YamlScalarNode scalar || (scalar.Value is not null && scalar.Value != "null" && scalar.Value != "~" && scalar.Value.Length > 0))
+                    {
+                        throw new SquadApmValidationException(
+                            $"'{toolchainPath}' declares an invalid APM validated-release shape. A mapping with version, tag-commit, and asset-sha256 (or null) is required.");
                     }
                 }
             }
-            catch
-            {
-                // fallback to defaults
-            }
         }
-
-        if (apmDigest.Length != 64)
+        catch (SquadApmValidationException)
         {
-            apmDigest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(apmDigest)));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SquadApmValidationException($"Failed to parse toolchain file at '{toolchainPath}': {ex.Message}", ex);
         }
 
-        return new SquadApmIdentity(apmVersion, apmTagCommit, apmDigest);
+        return new SquadApmIdentity("unverified", "unverified", "unverified");
     }
 
     private static void CleanupTempDirectory(string path)

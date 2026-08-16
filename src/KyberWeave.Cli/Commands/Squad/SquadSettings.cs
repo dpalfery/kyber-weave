@@ -65,6 +65,14 @@ public sealed class SquadUpdateSettings : CommandSettings
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
     public string[] Targets { get; set; } = [];
 
+    /// <summary>Target(s) to exclude from update.</summary>
+    [CommandOption("-x|--exclude <TARGETS>")]
+    [Description("Target(s) to exclude from update.")]
+    [SuppressMessage(
+        "Performance", "CA1819:Properties should not return arrays",
+        Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
+    public string[] Exclusions { get; set; } = [];
+
     /// <summary>Preview the planned mutations without making filesystem changes.</summary>
     [CommandOption("--dry-run")]
     [Description("Preview the planned mutations without making filesystem changes.")]

@@ -30,9 +30,10 @@ public sealed class ApmProcessRunner : IApmRunner
     }
 
     /// <inheritdoc />
-    public Task<ApmRenderResult> RenderAsync(ApmRenderRequest request, CancellationToken cancellationToken = default)
+    public async Task<ApmRenderResult> RenderAsync(ApmRenderRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
 
         ProcessStartInfo startInfo = CreateStartInfo(_executable, request.SourceDirectory);
         startInfo.ArgumentList.Add("compile");
@@ -61,16 +62,20 @@ public sealed class ApmProcessRunner : IApmRunner
         ProcessResult processResult;
         try
         {
-            processResult = _executor.Run(startInfo, string.Empty);
+            processResult = await Task.Run(() => _executor.Run(startInfo, string.Empty), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            return Task.FromResult(new ApmRenderResult(
+            return new ApmRenderResult(
                 Success: false,
                 Files: [],
                 Degradations: [],
                 Warnings: [],
-                Errors: [$"Failed to execute APM CLI ('{_executable}'): {ex.Message}"]));
+                Errors: [$"Failed to execute APM CLI ('{_executable}'): {ex.Message}"]);
         }
 
         if (processResult.ExitCode != 0)
@@ -109,21 +114,22 @@ public sealed class ApmProcessRunner : IApmRunner
                 errors.Add($"APM CLI compile failed with exit code {processResult.ExitCode}.");
             }
 
-            return Task.FromResult(new ApmRenderResult(
+            return new ApmRenderResult(
                 Success: false,
                 Files: [],
                 Degradations: [],
                 Warnings: [],
-                Errors: errors));
+                Errors: errors);
         }
 
-        return Task.FromResult(ParseRenderOutput(processResult.StandardOutput, request.SourceDirectory));
+        return ParseRenderOutput(processResult.StandardOutput, request.SourceDirectory);
     }
 
     /// <inheritdoc />
-    public Task<ApmPackResult> PackAsync(ApmPackRequest request, CancellationToken cancellationToken = default)
+    public async Task<ApmPackResult> PackAsync(ApmPackRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
 
         string formatToken = request.Format switch
         {
@@ -147,15 +153,19 @@ public sealed class ApmProcessRunner : IApmRunner
         ProcessResult processResult;
         try
         {
-            processResult = _executor.Run(startInfo, string.Empty);
+            processResult = await Task.Run(() => _executor.Run(startInfo, string.Empty), cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            return Task.FromResult(new ApmPackResult(
+            return new ApmPackResult(
                 Success: false,
                 CreatedArchives: [],
                 Errors: [$"Failed to execute APM pack ('{_executable}'): {ex.Message}"],
-                Warnings: []));
+                Warnings: []);
         }
 
         if (processResult.ExitCode != 0)
@@ -166,14 +176,14 @@ public sealed class ApmProcessRunner : IApmRunner
                     ? processResult.StandardOutput.Trim()
                     : $"APM CLI pack failed with exit code {processResult.ExitCode}.");
 
-            return Task.FromResult(new ApmPackResult(
+            return new ApmPackResult(
                 Success: false,
                 CreatedArchives: [],
                 Errors: [error],
-                Warnings: []));
+                Warnings: []);
         }
 
-        return Task.FromResult(ParsePackOutput(request));
+        return ParsePackOutput(request);
     }
 
     private static ProcessStartInfo CreateStartInfo(string executable, string workingDirectory) =>
@@ -225,6 +235,27 @@ public sealed class ApmProcessRunner : IApmRunner
                         ? targetElem.GetString() ?? string.Empty
                         : string.Empty;
 
+                    string normalizedPath;
+                    try
+                    {
+                        normalizedPath = SquadPathPolicy.NormalizeRelativePath(path);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new SquadApmValidationException(
+                            $"APM render output path '{path}' is invalid: {ex.Message}", ex);
+                    }
+
+                    string stagingRoot = Path.GetFullPath(sourceDirectory);
+                    string diskPath = Path.GetFullPath(
+                        Path.Combine(stagingRoot, normalizedPath.Replace('/', Path.DirectorySeparatorChar)));
+                    if (!diskPath.StartsWith(stagingRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                        !string.Equals(diskPath, stagingRoot, StringComparison.Ordinal))
+                    {
+                        throw new SquadApmValidationException(
+                            $"APM render output path '{path}' resolves outside the staging directory.");
+                    }
+
                     byte[] content;
                     if (fileObj.TryGetProperty("content", out JsonElement contentElement))
                     {
@@ -234,11 +265,9 @@ public sealed class ApmProcessRunner : IApmRunner
                     }
                     else
                     {
-                        string diskPath = Path.Combine(sourceDirectory, path.Replace('/', Path.DirectorySeparatorChar));
                         content = File.Exists(diskPath) ? File.ReadAllBytes(diskPath) : [];
                     }
 
-                    string normalizedPath = SquadPathPolicy.NormalizeRelativePath(path);
                     files.Add(new SquadDeploymentFile(normalizedPath, content, target));
                 }
             }

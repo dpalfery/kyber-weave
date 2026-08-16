@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Packaging;
 
@@ -33,6 +34,8 @@ public sealed class SquadApmSourceWriter : ISquadApmSourceWriter
         WriteIndented = true
     };
 
+    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+
     /// <summary>
     /// Writes the given Squad source to a temporary target-neutral staging directory.
     /// </summary>
@@ -60,92 +63,86 @@ public sealed class SquadApmSourceWriter : ISquadApmSourceWriter
 
     private static void WriteManifest(SquadSource source, string root)
     {
-        StringBuilder builder = new();
-        builder.Append("schema: ").Append(source.Manifest.Schema).Append('\n');
-        builder.Append("name: ").Append(source.Manifest.Name).Append('\n');
-        builder.Append("version-source: ").Append(source.Manifest.VersionSource).Append('\n');
-        builder.Append("default-bundle: ").Append(source.Manifest.DefaultBundle).Append('\n');
-
-        builder.Append("bundles:\n");
+        Dictionary<string, string> bundles = new(StringComparer.Ordinal);
         foreach ((string name, string path) in source.Manifest.Bundles)
         {
-            builder.Append("  ").Append(name).Append(": ").Append(path.Replace('\\', '/')).Append('\n');
+            bundles[name] = path.Replace('\\', '/');
         }
 
-        builder.Append("profiles:\n");
-        builder.Append("  models: ").Append(source.Manifest.Profiles.Models.Replace('\\', '/')).Append('\n');
-        builder.Append("  capabilities: ").Append(source.Manifest.Profiles.Capabilities.Replace('\\', '/')).Append('\n');
-        builder.Append("  fallbacks: ").Append(source.Manifest.Profiles.Fallbacks.Replace('\\', '/')).Append('\n');
+        Dictionary<string, object?> manifestDict = new(StringComparer.Ordinal)
+        {
+            ["schema"] = source.Manifest.Schema,
+            ["name"] = source.Manifest.Name,
+            ["version-source"] = source.Manifest.VersionSource,
+            ["default-bundle"] = source.Manifest.DefaultBundle,
+            ["bundles"] = bundles,
+            ["profiles"] = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["models"] = source.Manifest.Profiles.Models.Replace('\\', '/'),
+                ["capabilities"] = source.Manifest.Profiles.Capabilities.Replace('\\', '/'),
+                ["fallbacks"] = source.Manifest.Profiles.Fallbacks.Replace('\\', '/')
+            },
+            ["toolchain"] = source.Manifest.ToolchainPath.Replace('\\', '/'),
+            ["mcp"] = source.Manifest.McpPath.Replace('\\', '/')
+        };
 
-        builder.Append("toolchain: ").Append(source.Manifest.ToolchainPath.Replace('\\', '/')).Append('\n');
-        builder.Append("mcp: ").Append(source.Manifest.McpPath.Replace('\\', '/')).Append('\n');
-
-        WriteFile(root, source.Manifest.SourcePath, builder.ToString());
+        string yaml = YamlSerializer.Serialize(manifestDict);
+        WriteFile(root, source.Manifest.SourcePath, yaml);
     }
 
     private static void WriteBundle(SquadSource source, string root)
     {
-        StringBuilder builder = new();
-        builder.Append("schema: ").Append(source.Bundle.Schema).Append('\n');
-        builder.Append("name: ").Append(source.Bundle.Name).Append('\n');
-
-        builder.Append("agents:\n");
-        foreach (string agent in source.Bundle.AgentNames)
+        Dictionary<string, object?> bundleDict = new(StringComparer.Ordinal)
         {
-            builder.Append("  - ").Append(agent).Append('\n');
-        }
-
-        builder.Append("skills:\n");
-        foreach (string skill in source.Bundle.SkillNames)
-        {
-            builder.Append("  - ").Append(skill).Append('\n');
-        }
+            ["schema"] = source.Bundle.Schema,
+            ["name"] = source.Bundle.Name,
+            ["agents"] = source.Bundle.AgentNames.ToList(),
+            ["skills"] = source.Bundle.SkillNames.ToList()
+        };
 
         string bundlePath = !string.IsNullOrWhiteSpace(source.Bundle.SourcePath)
             ? source.Bundle.SourcePath
             : $"bundles/{source.Bundle.Name}.yml";
 
-        WriteFile(root, bundlePath, builder.ToString());
+        WriteFile(root, bundlePath, YamlSerializer.Serialize(bundleDict));
     }
 
     private static void WriteModelProfiles(SquadSource source, string root)
     {
-        StringBuilder builder = new();
-        builder.Append("schema: ").Append(source.ModelProfiles.Schema).Append('\n');
-        builder.Append("profiles:\n");
-
+        Dictionary<string, object?> profilesDict = new(StringComparer.Ordinal);
         foreach ((string profileName, SquadModelProfile profile) in source.ModelProfiles.Profiles)
         {
-            builder.Append("  ").Append(profileName).Append(":\n");
-            builder.Append("    default: ").Append(profile.Default).Append('\n');
+            Dictionary<string, object?> profileEntry = new(StringComparer.Ordinal)
+            {
+                ["default"] = profile.Default
+            };
             foreach ((string harness, string model) in profile.HarnessModels)
             {
-                builder.Append("    ").Append(harness).Append(": ").Append(model).Append('\n');
+                profileEntry[harness] = model;
             }
+
+            profilesDict[profileName] = profileEntry;
         }
+
+        Dictionary<string, object?> modelProfilesDict = new(StringComparer.Ordinal)
+        {
+            ["schema"] = source.ModelProfiles.Schema,
+            ["profiles"] = profilesDict
+        };
 
         string modelsPath = !string.IsNullOrWhiteSpace(source.ModelProfiles.SourcePath)
             ? source.ModelProfiles.SourcePath
             : source.Manifest.Profiles.Models;
 
-        WriteFile(root, modelsPath, builder.ToString());
+        WriteFile(root, modelsPath, YamlSerializer.Serialize(modelProfilesDict));
     }
 
     private static void WriteCapabilityProfiles(SquadSource source, string root)
     {
-        StringBuilder builder = new();
-        builder.Append("schema: ").Append(source.CapabilityProfiles.Schema).Append('\n');
-        builder.Append("capabilities:\n");
-        foreach (string capability in source.CapabilityProfiles.Capabilities)
-        {
-            builder.Append("  - ").Append(capability).Append('\n');
-        }
-
-        builder.Append("profiles:\n");
+        Dictionary<string, object?> profilesDict = new(StringComparer.Ordinal);
         foreach ((string profileName, SquadCapabilityProfile profile) in source.CapabilityProfiles.Profiles)
         {
-            builder.Append("  ").Append(profileName).Append(":\n");
-            builder.Append("    permissions:\n");
+            Dictionary<string, string> permissionsDict = new(StringComparer.Ordinal);
             foreach ((string capability, SquadPermissionDecision decision) in profile.Permissions)
             {
                 string decisionStr = decision switch
@@ -155,82 +152,82 @@ public sealed class SquadApmSourceWriter : ISquadApmSourceWriter
                     SquadPermissionDecision.Allow => "allow",
                     _ => "deny"
                 };
-                builder.Append("      ").Append(capability).Append(": ").Append(decisionStr).Append('\n');
+                permissionsDict[capability] = decisionStr;
             }
+
+            profilesDict[profileName] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["permissions"] = permissionsDict
+            };
         }
+
+        Dictionary<string, object?> capabilityProfilesDict = new(StringComparer.Ordinal)
+        {
+            ["schema"] = source.CapabilityProfiles.Schema,
+            ["capabilities"] = source.CapabilityProfiles.Capabilities.ToList(),
+            ["profiles"] = profilesDict
+        };
 
         string capabilitiesPath = !string.IsNullOrWhiteSpace(source.CapabilityProfiles.SourcePath)
             ? source.CapabilityProfiles.SourcePath
             : source.Manifest.Profiles.Capabilities;
 
-        WriteFile(root, capabilitiesPath, builder.ToString());
+        WriteFile(root, capabilitiesPath, YamlSerializer.Serialize(capabilityProfilesDict));
     }
 
     private static void WriteFallbackProfiles(SquadSource source, string root)
     {
-        StringBuilder builder = new();
-        builder.Append("schema: ").Append(source.FallbackProfiles.Schema).Append('\n');
-        builder.Append("profiles:\n");
-
+        Dictionary<string, object?> profilesDict = new(StringComparer.Ordinal);
         foreach ((string profileName, SquadFallbackProfile profile) in source.FallbackProfiles.Profiles)
         {
-            builder.Append("  ").Append(profileName).Append(":\n");
-            builder.Append("    no-primary-agent: ").Append(profile.NoPrimaryAgent).Append('\n');
-            builder.Append("    no-agent-primitive: ").Append(profile.NoAgentPrimitive).Append('\n');
-            builder.Append("    body-source: ").Append(profile.BodySource).Append('\n');
-            builder.Append("    output-identity:\n");
-            builder.Append("      unoccupied: ").Append(profile.OutputIdentity.Unoccupied).Append('\n');
-            builder.Append("      shared: ").Append(profile.OutputIdentity.Shared).Append('\n');
-            builder.Append("      collision: ").Append(profile.OutputIdentity.Collision).Append('\n');
-            builder.Append("      prefix: ").Append(profile.OutputIdentity.Prefix).Append('\n');
-
-            if (profile.SharedIdentities.Count > 0)
+            Dictionary<string, object?> profileEntry = new(StringComparer.Ordinal)
             {
-                builder.Append("    shared-identities:\n");
-                foreach (string id in profile.SharedIdentities)
+                ["no-primary-agent"] = profile.NoPrimaryAgent,
+                ["no-agent-primitive"] = profile.NoAgentPrimitive,
+                ["body-source"] = profile.BodySource,
+                ["output-identity"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
-                    builder.Append("      - ").Append(id).Append('\n');
-                }
-            }
-            else
-            {
-                builder.Append("    shared-identities: []\n");
-            }
+                    ["unoccupied"] = profile.OutputIdentity.Unoccupied,
+                    ["shared"] = profile.OutputIdentity.Shared,
+                    ["collision"] = profile.OutputIdentity.Collision,
+                    ["prefix"] = profile.OutputIdentity.Prefix
+                },
+                ["shared-identities"] = profile.SharedIdentities.ToList()
+            };
+
+            profilesDict[profileName] = profileEntry;
         }
+
+        Dictionary<string, object?> fallbackProfilesDict = new(StringComparer.Ordinal)
+        {
+            ["schema"] = source.FallbackProfiles.Schema,
+            ["profiles"] = profilesDict
+        };
 
         string fallbacksPath = !string.IsNullOrWhiteSpace(source.FallbackProfiles.SourcePath)
             ? source.FallbackProfiles.SourcePath
             : source.Manifest.Profiles.Fallbacks;
 
-        WriteFile(root, fallbacksPath, builder.ToString());
+        WriteFile(root, fallbacksPath, YamlSerializer.Serialize(fallbackProfilesDict));
     }
 
     private static void WriteToolchain(SquadSource source, string root)
     {
-        StringBuilder builder = new();
-        builder.Append("schema: ").Append(source.Toolchain.Schema).Append('\n');
-        builder.Append("required-features:\n");
-        foreach (string feature in source.Toolchain.RequiredFeatures)
+        Dictionary<string, object?> toolchainDict = new(StringComparer.Ordinal)
         {
-            builder.Append("  - ").Append(feature).Append('\n');
-        }
+            ["schema"] = source.Toolchain.Schema,
+            ["required-features"] = source.Toolchain.RequiredFeatures.ToList(),
+            ["validated-release"] = source.Toolchain.ValidatedRelease.HasValue
+                ? JsonElementToYamlObject(source.Toolchain.ValidatedRelease.Value)
+                : null
+        };
 
-        if (source.Toolchain.ValidatedRelease.HasValue)
-        {
-            builder.Append("validated-release: ")
-                .Append(source.Toolchain.ValidatedRelease.Value.GetRawText())
-                .Append('\n');
-        }
-        else
-        {
-            builder.Append("validated-release: null\n");
-        }
-
+        string yaml = YamlSerializer.Serialize(toolchainDict);
         string toolchainPath = !string.IsNullOrWhiteSpace(source.Toolchain.SourcePath)
             ? source.Toolchain.SourcePath
             : source.Manifest.ToolchainPath;
 
-        WriteFile(root, toolchainPath, builder.ToString());
+        WriteFile(root, toolchainPath, yaml);
     }
 
     private static void WriteMcp(SquadSource source, string root)
@@ -247,45 +244,27 @@ public sealed class SquadApmSourceWriter : ISquadApmSourceWriter
     {
         foreach (SquadAgent agent in source.Agents)
         {
+            Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+            {
+                ["schema"] = agent.Schema,
+                ["name"] = agent.Name,
+                ["description"] = agent.Description,
+                ["invocation"] = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent",
+                ["model-profile"] = agent.ModelProfile,
+                ["capability-profile"] = agent.CapabilityProfile,
+                ["delegates-to"] = agent.DelegatesTo.ToList(),
+                ["fallback"] = agent.Fallback,
+                ["aliases"] = agent.Aliases.ToList()
+            };
+
+            string yaml = YamlSerializer.Serialize(frontmatter);
             StringBuilder builder = new();
             builder.Append("---\n");
-            builder.Append("schema: ").Append(agent.Schema).Append('\n');
-            builder.Append("name: ").Append(agent.Name).Append('\n');
-            builder.Append("description: ").Append(EscapeYamlString(agent.Description)).Append('\n');
-            builder.Append("invocation: ")
-                .Append(agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent")
-                .Append('\n');
-            builder.Append("model-profile: ").Append(agent.ModelProfile).Append('\n');
-            builder.Append("capability-profile: ").Append(agent.CapabilityProfile).Append('\n');
-
-            if (agent.DelegatesTo.Count > 0)
+            builder.Append(yaml);
+            if (!yaml.EndsWith('\n'))
             {
-                builder.Append("delegates-to:\n");
-                foreach (string del in agent.DelegatesTo)
-                {
-                    builder.Append("  - ").Append(del).Append('\n');
-                }
+                builder.Append('\n');
             }
-            else
-            {
-                builder.Append("delegates-to: []\n");
-            }
-
-            builder.Append("fallback: ").Append(agent.Fallback).Append('\n');
-
-            if (agent.Aliases.Count > 0)
-            {
-                builder.Append("aliases:\n");
-                foreach (string alias in agent.Aliases)
-                {
-                    builder.Append("  - ").Append(alias).Append('\n');
-                }
-            }
-            else
-            {
-                builder.Append("aliases: []\n");
-            }
-
             builder.Append("---\n");
 
             string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n");
@@ -307,10 +286,20 @@ public sealed class SquadApmSourceWriter : ISquadApmSourceWriter
     {
         foreach (SquadSkill skill in source.Skills)
         {
+            Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+            {
+                ["name"] = skill.Name,
+                ["description"] = skill.Description
+            };
+
+            string yaml = YamlSerializer.Serialize(frontmatter);
             StringBuilder builder = new();
             builder.Append("---\n");
-            builder.Append("name: ").Append(skill.Name).Append('\n');
-            builder.Append("description: ").Append(EscapeYamlString(skill.Description)).Append('\n');
+            builder.Append(yaml);
+            if (!yaml.EndsWith('\n'))
+            {
+                builder.Append('\n');
+            }
             builder.Append("---\n");
 
             string normalizedBody = skill.InstructionBody.Replace("\r\n", "\n");
@@ -412,23 +401,44 @@ public sealed class SquadApmSourceWriter : ISquadApmSourceWriter
         File.WriteAllText(fullPath, normalizedContent, Utf8WithoutBom);
     }
 
-    private static string EscapeYamlString(string value)
+    private static object? JsonElementToYamlObject(JsonElement element)
     {
-        if (string.IsNullOrEmpty(value))
+        switch (element.ValueKind)
         {
-            return "\"\"";
-        }
+            case JsonValueKind.Object:
+                Dictionary<string, object?> dict = new(StringComparer.Ordinal);
+                foreach (JsonProperty prop in element.EnumerateObject())
+                {
+                    dict[prop.Name] = JsonElementToYamlObject(prop.Value);
+                }
+                return dict;
 
-        if (value.Contains('\n') || value.Contains('\r') || value.Contains(':') || value.Contains('#') ||
-            value.Contains('\"') || value.Contains('\'') || value.StartsWith(' ') || value.EndsWith(' '))
-        {
-            return "\"" + value
-                .Replace("\\", "\\\\", StringComparison.Ordinal)
-                .Replace("\"", "\\\"", StringComparison.Ordinal)
-                .Replace("\r", "", StringComparison.Ordinal)
-                .Replace("\n", "\\n", StringComparison.Ordinal) + "\"";
-        }
+            case JsonValueKind.Array:
+                List<object?> list = [];
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    list.Add(JsonElementToYamlObject(item));
+                }
+                return list;
 
-        return value;
+            case JsonValueKind.String:
+                return element.GetString();
+
+            case JsonValueKind.Number:
+                if (element.TryGetInt64(out long l)) return l;
+                if (element.TryGetDouble(out double d)) return d;
+                return element.GetRawText();
+
+            case JsonValueKind.True:
+                return true;
+
+            case JsonValueKind.False:
+                return false;
+
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+            default:
+                return null;
+        }
     }
 }

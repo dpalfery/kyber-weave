@@ -237,9 +237,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "mcp.json" || name == ".mcp/mcp.json" || name == "plugin.json");
 
         // Strictly NO agents in the portable Agent Plugins v1.0.0 package
-        Assert.DoesNotContain(entryNames, name =>
-            name.StartsWith("agents/", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("/agents/", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(entryNames, name => name.StartsWith("agents/", StringComparison.OrdinalIgnoreCase));
 
         foreach (string agent in CanonicalAgents)
         {
@@ -276,6 +274,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         string workingDir = Path.Combine(_temp.Path, scenario);
         Directory.CreateDirectory(workingDir);
         string outDir = Path.Combine(_temp.Path, $"pack-out-{scenario}");
+        QualifiedSquadRepoFixture? repo = null;
 
         if (scenario == "sln-only")
         {
@@ -288,10 +287,12 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         }
         else if (scenario == "child-dir")
         {
-            using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
+            repo = QualifiedSquadRepoFixture.CreateValid();
             workingDir = Path.Combine(repo.Path, "src", "KyberWeave.Cli");
             Directory.CreateDirectory(workingDir);
         }
+
+        using QualifiedSquadRepoFixture? ownedRepo = repo;
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
         SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: workingDir);
@@ -463,7 +464,10 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                       - semantic-permissions/v1
                       - structured-degradation/v1
                       - agent-to-skill-lowering/v1
-                    validated-release: "0.29.0"
+                    validated-release:
+                      version: 0.29.0
+                      tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd
+                      asset-sha256: e041462f4a48086dbee3da145c07d71b8a3b84fde041462f4a48086dbee3da14
                     """);
             }
             else
@@ -486,7 +490,10 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     schema: kyber-squad.toolchain/v1
                     required-features:
                       - agent-ir/v1
-                    validated-release: "0.29.0"
+                    validated-release:
+                      version: 0.29.0
+                      tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd
+                      asset-sha256: e041462f4a48086dbee3da145c07d71b8a3b84fde041462f4a48086dbee3da14
                     """);
             }
 

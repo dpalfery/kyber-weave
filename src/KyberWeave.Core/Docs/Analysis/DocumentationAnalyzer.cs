@@ -54,14 +54,17 @@ public sealed partial class DocumentationAnalyzer
         DocumentSet documents,
         DocGraphProjection graph,
         DocsAnalysisConfig config,
-        AnalysisGlossary? glossary = null)
+        AnalysisGlossary? glossary = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(documents);
         ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(config);
+        cancellationToken.ThrowIfCancellationRequested();
 
         DiagnosticReport diagnostics = new DiagnosticReport();
         IReadOnlyList<Claim> claims = ExtractEligibleClaims(documents, config, diagnostics);
+        cancellationToken.ThrowIfCancellationRequested();
         Dictionary<string, AnalysisCandidate> candidates = new Dictionary<string, AnalysisCandidate>(StringComparer.Ordinal);
 
         AddExactDuplicateClusters(claims, candidates);
@@ -82,6 +85,7 @@ public sealed partial class DocumentationAnalyzer
         ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, graph, config.Search);
         foreach (IClaimCandidateSource? source in _candidateSources.Where(source => ShouldRun(source.Kind, config)))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ClaimCandidateSourceResult result = source.FindCandidates(request)
                 ?? throw new InvalidOperationException("A claim candidate source returned null.");
             sourceTruncated |= result.Truncated;
@@ -105,6 +109,7 @@ public sealed partial class DocumentationAnalyzer
 
             foreach (ClaimPairCandidate pair in result.Pairs)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (source.Kind != CandidateSourceKind.Embedding)
                     semanticSeedPairs.Add(pair);
                 ClassifyPair(pair, config.Search, glossary, candidates);
@@ -113,6 +118,7 @@ public sealed partial class DocumentationAnalyzer
 
         if (config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             EmbeddingResolutionResult resolution = ResolveEmbeddings(claims, config.Embeddings);
             diagnostics.AddRange(resolution.Diagnostics.Items);
             embeddingCacheHits = resolution.CacheHits;
@@ -122,6 +128,7 @@ public sealed partial class DocumentationAnalyzer
 
             if (resolution.Embeddings.Count == claims.Count)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 ClaimCandidateSourceResult result = EmbeddingCandidateBuilder.Build(
                     claims,
                     resolution.Embeddings,
@@ -131,10 +138,14 @@ public sealed partial class DocumentationAnalyzer
                 embeddingComparisons += result.ComparisonCount;
                 embeddingCandidates += result.Pairs.Count;
                 foreach (ClaimPairCandidate pair in result.Pairs)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
                     ClassifyPair(pair, config.Search, glossary, candidates);
+                }
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         IReadOnlyList<AnalysisCandidate> consolidated = ConsolidateTerminology(candidates.Values);
         IReadOnlyList<AnalysisCandidate> reviewed = ApplyVerdicts(consolidated, config.VerdictConfidence);
         AnalysisCandidate[] ordered = reviewed

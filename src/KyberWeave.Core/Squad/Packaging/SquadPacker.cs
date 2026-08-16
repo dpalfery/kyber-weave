@@ -153,11 +153,6 @@ public static class SquadPacker
             foreach (string filePath in Directory.GetFiles(skillsDir, "*", SearchOption.AllDirectories))
             {
                 string relPath = Path.GetRelativePath(sourcePath, filePath).Replace('\\', '/');
-                if (relPath.Contains("/agents/", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
                 entries.Add((relPath, ReadNormalizedFile(filePath)));
             }
         }

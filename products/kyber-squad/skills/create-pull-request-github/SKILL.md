@@ -190,7 +190,10 @@ ${SUMMARY}
 EOF
 
 # Check for existing PR
-EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number -q '.[0].number // empty' 2>/dev/null || echo "")
+if ! EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number -q '.[0].number // empty'); then
+  echo "Error: Failed to query existing pull requests for ${OWNER}/${REPO}." >&2
+  exit 1
+fi
 if [ -n "${EXISTING}" ]; then
   gh pr edit "${EXISTING}" --repo "${OWNER}/${REPO}" --title "${TITLE}" --body-file "${DESCRIPTION_FILE}"
 else

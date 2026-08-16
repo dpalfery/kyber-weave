@@ -17,12 +17,12 @@ if ([string]::IsNullOrWhiteSpace($Owner) -or [string]::IsNullOrWhiteSpace($Repo)
         Write-Error "Error: Could not determine git remote URL for origin."
         exit 1
     }
-    if ($remoteUrl -match '^(?:git@github\.com:|https://github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$') {
+    if ($remoteUrl -match '^(?:git@github\.com:|https?://(?:[^/@]+@)?github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$') {
         if ([string]::IsNullOrWhiteSpace($Owner)) { $Owner = $Matches[1] }
         if ([string]::IsNullOrWhiteSpace($Repo)) { $Repo = $Matches[2] -replace '\.git$', '' }
     }
     else {
-        Write-Error "Error: Remote origin host must be github.com (found: $remoteUrl)."
+        Write-Error "Error: Remote origin host must be github.com."
         exit 1
     }
 }
@@ -99,7 +99,11 @@ $descriptionFile = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]
 try {
     Set-Content -Path $descriptionFile -Value $description -Encoding utf8
 
-    $existing = gh pr list --repo "$Owner/$Repo" --head $SB --base $TB --state open --json number -q '.[0].number // empty' 2>$null
+    $existing = gh pr list --repo "$Owner/$Repo" --head $SB --base $TB --state open --json number -q '.[0].number // empty'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Error: Failed to query existing pull requests for $Owner/$Repo."
+        exit 1
+    }
     if ($existing) {
         gh pr edit $existing --repo "$Owner/$Repo" --title $title --body-file $descriptionFile
     }

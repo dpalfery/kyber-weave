@@ -63,7 +63,8 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
             documents,
             graph,
             config.DocsAnalysis,
-            glossary.AnalysisGlossary);
+            glossary.AnalysisGlossary,
+            cancellationToken);
         AddCodeGraphUnavailable(result.Diagnostics, codeGraph);
         return result;
     }

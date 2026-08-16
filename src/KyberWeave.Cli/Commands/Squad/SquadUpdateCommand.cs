@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
@@ -47,11 +48,14 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         string targetRoot = SquadCommandComposition.ResolveTargetRoot(settings.Path);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
-        // Validate explicit targets if provided; invalid token returns exit code 2
+        // Validate explicit targets and exclusions; invalid tokens return exit code 2
         try
         {
             if (settings.Targets.Length > 0)
                 _ = SquadTargetCatalog.Parse(settings.Targets);
+
+            if (settings.Exclusions.Length > 0)
+                _ = SquadTargetCatalog.Parse(settings.Exclusions);
         }
         catch (ArgumentException ex)
         {
@@ -77,12 +81,25 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             receiptTargets = Array.Empty<SquadTarget>();
         }
 
+        // Load configuration if present
+        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot, null);
+        if (!configResult.Success)
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(configResult.Error ?? "Failed to load configuration.")}[/]");
+            return 1;
+        }
+
+        SquadConfig squadConfig = configResult.Config?.Squad ?? SquadConfig.ProductDefaults;
+
         SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
         {
             RootPath = targetRoot,
             Operation = SquadTargetOperation.Update,
             ExplicitTargets = settings.Targets,
+            ConfiguredTargets = squadConfig.Targets,
             ReceiptTargets = receiptTargets,
+            ExplicitExclusions = settings.Exclusions,
+            ConfiguredExclusions = squadConfig.Exclusions,
             IsInteractive = SquadCommandComposition.IsInteractiveConsole()
         };
 
@@ -109,7 +126,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             TargetRoot: targetRoot,
             Scope: scope,
             Targets: decision.Targets,
-            Exclusions: Array.Empty<string>(),
+            Exclusions: settings.Exclusions,
             ReplaceManaged: settings.ReplaceManaged,
             DryRun: settings.DryRun);
 

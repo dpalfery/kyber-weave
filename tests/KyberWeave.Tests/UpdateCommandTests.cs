@@ -377,6 +377,30 @@ public sealed partial class UpdateCommandTests : IDisposable
         Assert.False(SelfUpdater.IsDotnetToolInstall("/Users/x/.local/bin/kyber-weave"));
     }
 
+    [Fact]
+    public void RunWhenMcpStagingFailsRestoresOriginalCliBinary()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        string tag = "v0.2.0";
+        string cliName = BinaryInstaller.ArchiveName("kyber-weave", "osx-arm64");
+        string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", "osx-arm64");
+        string cliArchive = Path.Combine(_assets.Path, cliName);
+        byte[] cliBytes = File.ReadAllBytes(cliArchive);
+        string corruptSums = $"{Sha(cliBytes)}  {cliName}\n{"0000000000000000000000000000000000000000000000000000000000000000"}  {mcpName}\n";
+        handler.MapFile(
+            GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
+            Encoding.UTF8.GetBytes(corruptSums));
+        handler.MapJson(
+            GitHubReleaseClient.LatestApi.AbsoluteUri,
+            """{"tag_name":"v0.2.0","draft":false}""");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Equal("old-cli", File.ReadAllText(host.ProcessPath));
+    }
+
     [DllImport("libc", EntryPoint = "geteuid")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static extern uint GetEffectiveUserId();

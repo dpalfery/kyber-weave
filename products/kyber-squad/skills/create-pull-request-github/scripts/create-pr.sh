@@ -15,14 +15,14 @@ fi
 if [ -z "${OWNER}" ] || [ -z "${REPO}" ]; then
   REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
   if [ -z "${REMOTE_URL}" ]; then
-    echo "Error: Could not determine git remote URL for origin."
+    echo "Error: Could not determine git remote URL for origin." >&2
     exit 1
   fi
-  if [[ "${REMOTE_URL}" =~ ^(git@github\.com:|https://github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$ ]]; then
-    [ -z "${OWNER}" ] && OWNER="${BASH_REMATCH[2]}"
-    [ -z "${REPO}" ] && REPO="${BASH_REMATCH[3]%.git}"
+  if [[ "${REMOTE_URL}" =~ ^(git@github\.com:|https?://([^/@]+@)?github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$ ]]; then
+    [ -z "${OWNER}" ] && OWNER="${BASH_REMATCH[3]}"
+    [ -z "${REPO}" ] && REPO="${BASH_REMATCH[4]%.git}"
   else
-    echo "Error: Remote origin host must be github.com (found: ${REMOTE_URL})."
+    echo "Error: Remote origin host must be github.com." >&2
     exit 1
   fi
 fi
@@ -95,7 +95,10 @@ ${SUMMARY}
 EOF
 
 # Check for existing PR
-EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number -q '.[0].number // empty' 2>/dev/null || echo "")
+if ! EXISTING=$(gh pr list --repo "${OWNER}/${REPO}" --head "${SB}" --base "${TB}" --state open --json number -q '.[0].number // empty'); then
+  echo "Error: Failed to query existing pull requests for ${OWNER}/${REPO}." >&2
+  exit 1
+fi
 if [ -n "${EXISTING}" ]; then
   gh pr edit "${EXISTING}" --repo "${OWNER}/${REPO}" --title "${TITLE}" --body-file "${DESC_FILE}"
 else

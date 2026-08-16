@@ -111,8 +111,60 @@ internal sealed class SelfUpdater : IDisposable
             if (!options.NoMcp)
                 staged.Add(StageBinary(McpBaseName, tag, windows, sums, work.FullName));
 
-            foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
-                CommitBinary(item.BaseName, tag, windows, item.ExtractedPath, item.Destination);
+            DirectoryInfo backupDir = Directory.CreateTempSubdirectory("kyber-weave-backup-");
+            try
+            {
+                List<(string BackupPath, string Destination, bool Existed)> backups = [];
+                foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
+                {
+                    string backupFile = Path.Combine(backupDir.FullName, item.BaseName + ".bak");
+                    bool existed = File.Exists(item.Destination);
+                    if (existed)
+                    {
+                        File.Copy(item.Destination, backupFile, overwrite: true);
+                    }
+                    backups.Add((backupFile, item.Destination, existed));
+                }
+
+                try
+                {
+                    foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
+                        CommitBinary(item.BaseName, tag, windows, item.ExtractedPath, item.Destination);
+                }
+                catch
+                {
+                    foreach ((string BackupPath, string Destination, bool Existed) backup in backups)
+                    {
+                        try
+                        {
+                            if (backup.Existed && File.Exists(backup.BackupPath))
+                            {
+                                File.Copy(backup.BackupPath, backup.Destination, overwrite: true);
+                            }
+                            else if (!backup.Existed && File.Exists(backup.Destination))
+                            {
+                                File.Delete(backup.Destination);
+                            }
+                        }
+                        catch
+                        {
+                            // Best-effort rollback
+                        }
+                    }
+
+                    throw;
+                }
+            }
+            finally
+            {
+                try
+                {
+                    backupDir.Delete(true);
+                }
+                catch (IOException)
+                {
+                }
+            }
         }
         finally
         {

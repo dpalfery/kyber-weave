@@ -49,7 +49,18 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         bool hasIssues = false;
         foreach (SquadOwnedFile file in receipt.Files)
         {
-            string fullPath = Path.Combine(targetRoot, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+            string fullPath;
+            try
+            {
+                fullPath = SquadPathPolicy.ResolveFile(targetRoot, file.RelativePath);
+            }
+            catch (Exception)
+            {
+                AnsiConsole.MarkupLine($"  [red]invalid[/] {Markup.Escape(file.RelativePath)} (outside the deployment root)");
+                hasIssues = true;
+                continue;
+            }
+
             if (!File.Exists(fullPath))
             {
                 AnsiConsole.MarkupLine($"  [red]missing[/] {Markup.Escape(file.RelativePath)}");
