@@ -1,9 +1,8 @@
 ---
-id: plans/2026-08-14-kyber-squad-unified-agent-skill-deployment
+id: archive/plans/2026-08-14-kyber-squad-unified-agent-skill-deployment
 title: Kyber-Squad Unified Agent and Skill Deployment
 doc-type: plan
-status: current
-approval-status: approved
+status: archived
 component: ContextHygiene
 owner: dpalfery
 last-reviewed: 2026-08-15
@@ -11,6 +10,8 @@ last-reviewed: 2026-08-15
 
 # Kyber-Squad: unified agent and skill deployment
 
+**Status:** Archived
+**Archive Date:** 2026-08-15
 **Approval:** Approved by the user on 2026-08-14
 **Execution model:** Test-first; every Kyber-Weave implementation task follows RED -> GREEN -> review
 **Goal:** Add `kyber-weave squad` as the one control plane for a canonical set of 20 agents
