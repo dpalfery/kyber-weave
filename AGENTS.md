@@ -52,16 +52,25 @@ trade, documented where it is made.
 | Tests | [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-weave-docs` skill in [`.apm/skills/`](.apm/skills/kyber-weave-docs/SKILL.md) |
 
-## Prefer querying the docs over reading them
+## Exploration: CodeGraph & Kyber-Weave outrank Grep and Search
 
-If `kyber-weave-mcp` is available, use **`docs_explore`** instead of grepping `docs/`.
-Ranking uses declared frontmatter identity, which prose does not carry, and the corpus
-excludes the archive — which must never be cited as current guidance. Use
-**`docs_for_symbol`** before renaming anything, to find the documentation that must change
-with it.
+Do NOT start by grepping, finding, or reading arbitrary files across the repository. Treat CodeGraph and Kyber-Weave as **eager first-line tools**:
 
-Product questions — what DocGraph is, how retrieval ranks, what a rule means — are
-answered there, not here. Start at [`docs/README.md`](docs/README.md).
+1. **For Code Exploration & Understanding (CodeGraph):**
+   - Use **`codegraph_explore`** (MCP `call_mcp_tool` or CLI `codegraph explore "<query>"`) **BEFORE** using `grep_search`, `find`, or browsing raw source files.
+   - Returns verbatim symbol definitions, callers, callees, dynamic dispatch links, and blast-radius summaries in a single call.
+   - Name symbols, file names, or natural-language architectural questions in your query.
+
+2. **For Documentation, Concepts & Governance (Kyber-Weave):**
+   - Use **`docs_explore`** (MCP `call_mcp_tool`) **instead of grepping `docs/`**.
+   - Ranking uses declared frontmatter identity, joins live code symbols via CodeGraph, and excludes superseded archive documents.
+   - Use **`docs_for_symbol`** before renaming or modifying symbols to locate documentation that must change with it.
+   - Use **`docs_glossary`** and **`docs_analysis_candidates`** for taxonomy and review queries.
+
+3. **Fallback only:**
+   - Fall back to `grep_search`, `list_dir`, or direct file reading only when querying unindexed text assets or after CodeGraph/DocGraph have pointed to specific non-code files.
+
+Product questions — what DocGraph is, how retrieval ranks, what a rule means — are answered in the docs corpus via `docs_explore`. Start at [`docs/README.md`](docs/README.md).
 
 ## House style
 
