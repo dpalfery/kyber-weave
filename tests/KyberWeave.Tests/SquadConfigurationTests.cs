@@ -159,6 +159,8 @@ public sealed class SquadConfigurationTests : IDisposable
     [Theory]
     [InlineData(null, "1.2.3+build.42", "1.2.3")]
     [InlineData("1.2.3", "1.2.3+build.42", "1.2.3")]
+    [InlineData(null, "0.1.6-rc.4+commit.sha", "0.1.6-rc.4")]
+    [InlineData("0.1.6-rc.4", "0.1.6-rc.4+commit.sha", "0.1.6-rc.4")]
     public void ResolveVersionUsesNormalizedCliVersionAndRequiresAnExactPin(
         string? configuredVersion,
         string cliVersion,
@@ -189,6 +191,8 @@ public sealed class SquadConfigurationTests : IDisposable
     [InlineData("1.2.3+.build")]
     [InlineData("1.2.3+build.")]
     [InlineData("1.2.3+build..42")]
+    [InlineData("not-a-version")]
+    [InlineData("01.2.3")]
     public void ResolveVersionBuildMetadataWithEmptyIdentifierIsRejected(string cliVersion)
     {
         SquadConfig config = new SquadConfig();
@@ -196,7 +200,7 @@ public sealed class SquadConfigurationTests : IDisposable
         YamlException exception = Assert.Throws<YamlException>(
             () => SquadConfigLoader.ResolveVersion(config, cliVersion));
 
-        Assert.Contains("stable X.Y.Z", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("semantic version", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

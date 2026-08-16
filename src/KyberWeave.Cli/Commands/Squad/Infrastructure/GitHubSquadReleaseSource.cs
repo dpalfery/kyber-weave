@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Release;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -141,22 +142,21 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 nameof(request));
         }
 
-        if (!IsStableVersion(request.Version))
+        if (!IsValidReleaseVersion(request.Version))
         {
             throw new ArgumentException(
-                "The release version must use stable X.Y.Z form with no leading zeros.",
+                "The release version must use valid semantic version format (X.Y.Z or X.Y.Z-prerelease) with no leading zeros.",
                 nameof(request));
         }
     }
 
-    private static bool IsStableVersion(string version)
-    {
-        string[] parts = version.Split('.', StringSplitOptions.None);
-        return parts.Length == 3 && parts.All(part =>
-            part.Length > 0 &&
-            (part.Length == 1 || part[0] != '0') &&
-            part.All(char.IsAsciiDigit));
-    }
+    [GeneratedRegex(
+        @"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex ReleaseVersionPattern();
+
+    private static bool IsValidReleaseVersion(string version) =>
+        ReleaseVersionPattern().IsMatch(version);
 
     private Uri BuildReleaseUri(string repository, string version)
     {

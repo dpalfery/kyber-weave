@@ -97,11 +97,13 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Theory]
-    [InlineData("1.2.3-beta.1")]
     [InlineData("1.2.3+build.1")]
     [InlineData("not-a-version")]
     [InlineData("01.2.3")]
-    public async Task DownloadAndExtractAsyncWithNonStableReleaseVersionRejectsBeforeHttpRequest(
+    [InlineData("1.02.3")]
+    [InlineData("1.2.03")]
+    [InlineData("1.2.3-01")]
+    public async Task DownloadAndExtractAsyncWithInvalidReleaseVersionRejectsBeforeHttpRequest(
         string version)
     {
         using RoutingHandler handler = new RoutingHandler();
@@ -116,9 +118,35 @@ public sealed class SquadReleaseClientTests : IDisposable
         ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() =>
             source.DownloadAndExtractAsync(request, CancellationToken.None));
 
-        Assert.Contains("stable X.Y.Z", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("release version", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
         AssertTreeUnchanged(before);
+    }
+
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.3-beta.1")]
+    [InlineData("0.1.6-rc.4")]
+    public async Task DownloadAndExtractAsyncWithValidSemanticReleaseVersionProcessesRequest(
+        string version)
+    {
+        string assetName = $"kyber-squad-{version}.zip";
+        byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
+        string checksum = Sha256(archiveBytes);
+        using RoutingHandler handler = ReleaseHandler(
+            archiveBytes,
+            $"{checksum}  {assetName}\n",
+            version: version,
+            assetName: assetName);
+        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        string destination = Path.Combine(_temp.Path, "squad-" + version.Replace('.', '-'));
+        SquadReleaseRequest request = new SquadReleaseRequest(Repository, version, destination);
+
+        SquadReleaseResult result = await source.DownloadAndExtractAsync(request, CancellationToken.None);
+
+        Assert.Equal(version, result.Version);
+        Assert.Equal(assetName, result.Asset.Name);
+        Assert.Equal(checksum, result.Checksum.Sha256);
     }
 
     [Fact]
@@ -595,15 +623,17 @@ public sealed class SquadReleaseClientTests : IDisposable
         byte[] archiveBytes,
         string checksumManifest,
         Uri? redirectArchiveTo = null,
-        CancellationTokenSource? cancelAfterArchiveRead = null)
+        CancellationTokenSource? cancelAfterArchiveRead = null,
+        string version = Version,
+        string assetName = AssetName)
     {
-        Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
+        Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{version}");
         Uri checksumUri = new Uri("https://downloads.github.test/SHA256SUMS.txt");
-        Uri archiveUri = new Uri("https://downloads.github.test/" + AssetName);
+        Uri archiveUri = new Uri("https://downloads.github.test/" + assetName);
         RoutingHandler handler = new RoutingHandler();
         handler.Enqueue(
             releaseUri,
-            () => JsonResponse(ReleaseJson(checksumUri, archiveUri)));
+            () => JsonResponse(ReleaseJson(checksumUri, archiveUri, version, assetName)));
         handler.Enqueue(
             checksumUri,
             () => BytesResponse(Encoding.UTF8.GetBytes(checksumManifest), "text/plain"));
@@ -630,9 +660,13 @@ public sealed class SquadReleaseClientTests : IDisposable
         return handler;
     }
 
-    private static string ReleaseJson(Uri checksumUri, Uri archiveUri) => $$"""
+    private static string ReleaseJson(
+        Uri checksumUri,
+        Uri archiveUri,
+        string version = Version,
+        string assetName = AssetName) => $$"""
         {
-          "tag_name": "v{{Version}}",
+          "tag_name": "v{{version}}",
           "assets": [
             {
               "name": "SHA256SUMS.txt",
@@ -640,7 +674,7 @@ public sealed class SquadReleaseClientTests : IDisposable
               "size": 4096
             },
             {
-              "name": "{{AssetName}}",
+              "name": "{{assetName}}",
               "browser_download_url": "{{archiveUri}}",
               "size": 8192
             }

@@ -18,7 +18,7 @@ public static partial class SquadConfigLoader
     }
 
     /// <summary>
-    /// Resolves the CLI's normalized <c>X.Y.Z</c> version and rejects a different host pin.
+    /// Resolves the CLI's normalized semantic version and rejects a different host pin.
     /// </summary>
     public static string ResolveVersion(SquadConfig config, string cliVersion)
     {
@@ -29,7 +29,7 @@ public static partial class SquadConfigLoader
         if (!match.Success)
         {
             throw new YamlException(
-                $"The Kyber-Weave CLI version '{cliVersion}' is not a stable X.Y.Z version.");
+                $"The Kyber-Weave CLI version '{cliVersion}' is not a valid semantic version.");
         }
 
         string normalizedCliVersion = match.Groups["version"].Value;
@@ -56,7 +56,7 @@ public static partial class SquadConfigLoader
 
         string? version = section.Version ?? defaults.Version;
         if (version is not null && !PinnedVersionPattern().IsMatch(version))
-            throw new YamlException("squad.version must be an exact stable X.Y.Z version.");
+            throw new YamlException("squad.version must be an exact semantic version.");
 
         SquadTranslationMode translation = ParseTranslation(section.Translation) ?? defaults.Translation;
         IReadOnlyList<SquadTarget> targets = section.Targets is null
@@ -104,12 +104,12 @@ public static partial class SquadConfigLoader
     }
 
     [GeneratedRegex(
-        @"^(?<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$",
+        @"^(?<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$",
         RegexOptions.CultureInvariant)]
     private static partial Regex CliVersionPattern();
 
     [GeneratedRegex(
-        @"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$",
+        @"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$",
         RegexOptions.CultureInvariant)]
     private static partial Regex PinnedVersionPattern();
 }
