@@ -59,6 +59,7 @@ done
 
 command -v python3 >/dev/null 2>&1 || die "need python3 on PATH"
 command -v dotnet >/dev/null 2>&1 || die "need dotnet on PATH"
+command -v curl >/dev/null 2>&1 || die "need curl on PATH"
 
 if [ -z "$RID" ]; then
     case "$(uname -s)" in
@@ -166,19 +167,80 @@ fi
 
 log "starting the loopback release server"
 SERVER_OUT="${SANDBOX}/server.port"
+SERVER_LOG="${SANDBOX}/server.log"
 python3 "${REPO_ROOT}/scripts/local-release-server.py" --root "$RELEASE_TREE" --port 0 \
-    > "$SERVER_OUT" 2> "${SANDBOX}/server.log" &
+    > "$SERVER_OUT" 2> "$SERVER_LOG" &
 SERVER_PID=$!
 
+# Dumps everything needed to tell "still starting" from "crashed" apart. The first
+# version of this printed only an empty log, which said neither.
+server_diagnostics() {
+    printf 'python3: %s\n' "$(command -v python3)" >&2
+    python3 --version >&2 2>&1 || true
+    if kill -0 "$SERVER_PID" 2>/dev/null; then
+        printf 'server process %s is alive but never became ready\n' "$SERVER_PID" >&2
+    else
+        wait "$SERVER_PID" 2>/dev/null && server_status=0 || server_status=$?
+        printf 'server process %s exited with status %s\n' "$SERVER_PID" "$server_status" >&2
+    fi
+    printf -- '--- stdout (%s bytes) ---\n' "$(wc -c < "$SERVER_OUT" | tr -d ' ')" >&2
+    cat "$SERVER_OUT" >&2 2>/dev/null || true
+    printf -- '--- stderr (%s bytes) ---\n' "$(wc -c < "$SERVER_LOG" | tr -d ' ')" >&2
+    cat "$SERVER_LOG" >&2 2>/dev/null || true
+    printf -- '--- release tree ---\n' >&2
+    ls -la "$RELEASE_TREE" >&2 2>/dev/null || true
+}
+
+# A cold python3 on a loaded runner is slow to start — the first version of this waited
+# five seconds and lost that race on macOS CI right after two dotnet publishes. Wait
+# generously; the loop exits as soon as the port appears, so a warm start costs nothing.
 PORT=""
-for _ in $(seq 1 50); do
-    PORT="$(head -n 1 "$SERVER_OUT" 2>/dev/null || true)"
+WAITED=0
+while [ "$WAITED" -lt "${SERVER_START_TIMEOUT:-60}" ]; do
+    # Only accept a newline-terminated line. Reading mid-write would yield a truncated
+    # port and send every later request somewhere unrelated. Command substitution strips
+    # trailing newlines, so an empty result here means the last byte was one.
+    if [ -s "$SERVER_OUT" ] && [ -z "$(tail -c 1 "$SERVER_OUT" 2>/dev/null)" ]; then
+        CANDIDATE="$(head -n 1 "$SERVER_OUT" 2>/dev/null || true)"
+        case "$CANDIDATE" in
+            ''|*[!0-9]*) ;;
+            *) PORT="$CANDIDATE" ;;
+        esac
+    fi
     [ -n "$PORT" ] && break
-    sleep 0.1
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        server_diagnostics
+        die "the release server exited before reporting a port"
+    fi
+    sleep 1
+    WAITED=$((WAITED + 1))
 done
-[ -n "$PORT" ] || { cat "${SANDBOX}/server.log" >&2; die "the release server did not start"; }
+
+if [ -z "$PORT" ]; then
+    server_diagnostics
+    die "the release server did not report a port within ${SERVER_START_TIMEOUT:-60}s"
+fi
 
 ORIGIN="http://127.0.0.1:${PORT}"
+
+# Having a port is not the same as accepting connections. Probe until it answers, so a
+# slow bind surfaces here rather than as a confusing download failure later.
+READY=""
+WAITED=0
+while [ "$WAITED" -lt 30 ]; do
+    if curl -fsS -o /dev/null --max-time 2 "${ORIGIN}/healthz" 2>/dev/null; then
+        READY=1
+        break
+    fi
+    sleep 1
+    WAITED=$((WAITED + 1))
+done
+
+if [ -z "$READY" ]; then
+    server_diagnostics
+    die "the release server never answered ${ORIGIN}/healthz"
+fi
+
 export KYBER_WEAVE_RELEASE_ORIGIN="$ORIGIN"
 log "serving ${RELEASE_TREE} at ${ORIGIN}"
 

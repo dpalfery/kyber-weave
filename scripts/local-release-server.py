@@ -4,6 +4,7 @@
 Serves just enough of the API for `kyber-weave update` and `kyber-weave squad install`
 to run against locally built artifacts:
 
+    GET /healthz                                    -> readiness probe
     GET /repos/<owner>/<repo>/releases              -> release list
     GET /repos/<owner>/<repo>/releases/latest       -> newest non-prerelease
     GET /repos/<owner>/<repo>/releases/tags/<tag>   -> one release, with assets
@@ -12,6 +13,11 @@ to run against locally built artifacts:
 Releases are discovered from the layout `<root>/<tag>/<asset files>`. The list and
 latest endpoints cannot both be plain files on disk (`releases` would have to be a
 file and a directory at once), which is why this is a router and not a static server.
+
+Discovery runs per request rather than at startup, so the server can be launched
+before — or alongside — whatever is publishing into the tree, and needs no restart
+when a new version appears. The scan is two listdir calls; at this scale that costs
+less than the ordering constraint it removes.
 
 Binds loopback only. Prints the chosen port on the first line of stdout so a caller
 can pass `--port 0` and read back the ephemeral port.
@@ -61,8 +67,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.server.verbose:
             sys.stderr.write("release-server: " + (fmt % args) + "\n")
 
-    def release_json(self, tag):
-        assets = self.server.releases[tag]
+    @property
+    def releases(self):
+        """Rescans the tree per request; see the module docstring."""
+        return discover(self.server.root)
+
+    def release_json(self, tag, releases):
+        assets = releases[tag]
         origin = f"http://{self.headers.get('Host', self.server.origin)}"
         return {
             "tag_name": tag,
@@ -108,14 +119,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's required spelling
         path = unquote(urlparse(self.path).path)
         owner, repo = self.server.owner, self.server.repo
-        releases = self.server.releases
+
+        # Answered before any filesystem work so a readiness probe stays meaningful
+        # even when the release tree is still being written.
+        if path == "/healthz":
+            self.send_json({"status": "ok"})
+            return
+
+        releases = self.releases
 
         api_prefix = f"/repos/{owner}/{repo}/releases"
         download_prefix = f"/{owner}/{repo}/releases/download/"
 
         if path == api_prefix:
             ordered = sorted(releases, key=sort_key, reverse=True)
-            self.send_json([self.release_json(tag) for tag in ordered])
+            self.send_json([self.release_json(tag, releases) for tag in ordered])
             return
 
         if path == f"{api_prefix}/latest":
@@ -123,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
             if not stable:
                 self.fail(404, "no stable release")
                 return
-            self.send_json(self.release_json(max(stable, key=sort_key)))
+            self.send_json(self.release_json(max(stable, key=sort_key), releases))
             return
 
         if path.startswith(f"{api_prefix}/tags/"):
@@ -131,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
             if tag not in releases:
                 self.fail(404, f"no release {tag}")
                 return
-            self.send_json(self.release_json(tag))
+            self.send_json(self.release_json(tag, releases))
             return
 
         if path.startswith(download_prefix):
@@ -159,21 +177,27 @@ def main():
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
-    releases = discover(args.root)
-    if not releases:
-        sys.exit(f"release-server: no v* release directories under {args.root}")
+    if not os.path.isdir(args.root):
+        sys.exit(f"release-server: {args.root} is not a directory")
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.daemon_threads = True
-    server.releases = releases
+    server.root = args.root
     server.owner = args.owner
     server.repo = args.repo
     server.verbose = args.verbose
     server.origin = f"127.0.0.1:{server.server_address[1]}"
 
+    # Emitted before the release listing so a caller polling for the port is unblocked
+    # by the earliest possible write.
     print(server.server_address[1], flush=True)
+
+    releases = discover(args.root)
     for tag in sorted(releases, key=sort_key, reverse=True):
         print(f"{tag}: {len(releases[tag])} assets", file=sys.stderr)
+    if not releases:
+        print(f"no v* release directories under {args.root} yet", file=sys.stderr)
+    sys.stderr.flush()
 
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
