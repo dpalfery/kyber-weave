@@ -25,7 +25,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     }
 
     /// <summary>Creates a new update command using injectable dependencies.</summary>
-    public SquadUpdateCommand(
+    internal SquadUpdateCommand(
         IProcessExecutor? executor = null,
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,

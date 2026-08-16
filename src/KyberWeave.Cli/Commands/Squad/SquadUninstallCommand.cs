@@ -19,7 +19,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     }
 
     /// <summary>Creates a new uninstall command using injectable dependencies.</summary>
-    public SquadUninstallCommand(
+    internal SquadUninstallCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
         SquadLifecycleService? lifecycleService = null)

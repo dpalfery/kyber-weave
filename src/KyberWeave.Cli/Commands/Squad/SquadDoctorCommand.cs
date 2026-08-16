@@ -26,7 +26,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>Creates a new doctor command using injectable dependencies.</summary>
-    public SquadDoctorCommand(
+    internal SquadDoctorCommand(
         IProcessExecutor? executor = null,
         ISquadUserPaths? userPaths = null,
         string? workingDirectory = null)

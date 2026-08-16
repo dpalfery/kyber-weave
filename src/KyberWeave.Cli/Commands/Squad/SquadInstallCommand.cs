@@ -25,7 +25,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     }
 
     /// <summary>Creates a new install command using injectable dependencies.</summary>
-    public SquadInstallCommand(
+    internal SquadInstallCommand(
         IProcessExecutor? executor = null,
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,

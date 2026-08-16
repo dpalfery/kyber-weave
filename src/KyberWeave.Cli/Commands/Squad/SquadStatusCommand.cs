@@ -19,7 +19,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     }
 
     /// <summary>Creates a new status command using injectable dependencies.</summary>
-    public SquadStatusCommand(
+    internal SquadStatusCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null)
     {

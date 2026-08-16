@@ -23,7 +23,7 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     }
 
     /// <summary>Creates a new pack command using injectable process executor and working directory.</summary>
-    public SquadPackCommand(IProcessExecutor? executor, string? workingDirectory = null)
+    internal SquadPackCommand(IProcessExecutor? executor, string? workingDirectory = null)
     {
         _executor = executor;
         _workingDirectory = workingDirectory;
