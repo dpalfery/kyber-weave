@@ -48,9 +48,9 @@ public sealed class SquadCanonicalContentTests
         "code-reviewer",
         "conductor",
         "conductor-v3",
+        "csharp-dev",
         "dal-dev",
         "docs-dev",
-        "dotnet-dev",
         "github-devops",
         "maui-dev",
         "product-owner",
@@ -75,9 +75,9 @@ public sealed class SquadCanonicalContentTests
         "conductor-v3",
         "create-pull-request",
         "create-pull-request-github",
+        "csharp-dev",
         "csp-security",
         "dal-dev",
-        "dotnet-dev",
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
@@ -96,8 +96,8 @@ public sealed class SquadCanonicalContentTests
     [
         "conductor",
         "conductor-v3",
+        "csharp-dev",
         "dal-dev",
-        "dotnet-dev",
         "github-devops",
         "maui-dev",
         "product-owner",
@@ -113,8 +113,8 @@ public sealed class SquadCanonicalContentTests
 
     private static readonly string[] DistinctBodyAgentSkillCollisions =
     [
+        "csharp-dev",
         "dal-dev",
-        "dotnet-dev",
         "github-devops",
         "maui-dev",
         "product-owner",
@@ -129,6 +129,7 @@ public sealed class SquadCanonicalContentTests
             {
                 "conductor" => ".opencode/agents/conductor-v2.md",
                 "conductor-v3" => ".opencode/agents/conductor-v3.md",
+                "csharp-dev" => ".claude/agents/dotnet-dev.md",
                 _ => $".claude/agents/{name}.md"
             },
             StringComparer.Ordinal);
@@ -391,7 +392,12 @@ public sealed class SquadCanonicalContentTests
         string name = fileName.EndsWith(".agent.md", StringComparison.Ordinal)
             ? fileName[..^".agent.md".Length]
             : Path.GetFileNameWithoutExtension(fileName);
-        return name == "conductor-v2" ? "conductor" : name;
+        return name switch
+        {
+            "conductor-v2" => "conductor",
+            "dotnet-dev" => "csharp-dev",
+            _ => name
+        };
     }
 
     private static MigrationReport ReadMigrationReport(string path)

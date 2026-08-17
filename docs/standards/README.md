@@ -13,9 +13,9 @@ How code is written in this repository, one directory per technology. A standard
 project-specific; the agents and skills that read it are not, which is why they resolve it
 through the configuration registry rather than carrying their own.
 
-This repository declares one technology, because it is C# and nothing else. The authoritative
-list is the Config Reg block in the repository root [`AGENTS.md`](../../AGENTS.md), which is
-regenerated on every `docs init` run — this file is not.
+This repository declares C# and the tests that pin it. The authoritative list is the Config
+Reg block in the repository root [`AGENTS.md`](../../AGENTS.md), which is regenerated on
+every `docs init` run — this file is not.
 
 ## Declaring a technology
 

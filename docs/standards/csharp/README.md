@@ -1,17 +1,17 @@
 ---
-id: standards/dotnet
-title: dotnet coding standard
+id: standards/csharp
+title: "C# coding standard"
 doc-type: coding-standard
 status: current
-technology: dotnet
+technology: csharp
 owner: dpalfery
 last-reviewed: 2026-08-16
 ---
 
-# dotnet coding standard
+# C# coding standard
 
 How C# is written in this repository. Agents and skills resolve this document as
-`<dotnet-coding-standard>` in the repository root `AGENTS.md`, so what it says here outranks
+`<csharp-coding-standard>` in the repository root `AGENTS.md`, so what it says here outranks
 the defaults a portable agent shipped with.
 
 This is not a summary of the C# language documentation. It records the decisions this
@@ -102,11 +102,5 @@ markup — a path containing brackets otherwise corrupts the render or throws.
 
 ## Tests
 
-- **xUnit, and real files over fakes.** The loader and validator read the file system, so the
-  fixtures build a real directory tree in a temp folder and dispose it.
-- **A test name is an assertion.** `AFreshlyScaffoldedCorpusPassesDocsValidate`, not
-  `TestScaffold2`.
-- **Test the decision, not the implementation.** The tests that have earned their keep here
-  pin behaviour someone would otherwise "simplify" back into a defect — that `--force` does
-  not reach operator state, that an unclosed marker is reported rather than overwritten.
-- New behaviour ships with the test that would fail without it.
+Test authorship follows `<test-coding-standard>`. Language-level C# in test files follows
+this document.

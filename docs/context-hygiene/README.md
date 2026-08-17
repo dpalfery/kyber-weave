@@ -25,7 +25,7 @@ In modern agentic development workflows, engineering teams quickly encounter thr
 When developers work across multiple harnesses (Cursor, Claude Code, GitHub Copilot, Cline, Antigravity), prompt definitions and persona instructions diverge rapidly. A rule updated in one environment is forgotten in another, leading to inconsistent code quality and conflicting architectural decisions across team members.
 
 ### 2. Ambiguous Routing and Skill Collisions
-As teams accumulate skills, description boundaries blur. When an agent cannot distinguish whether to invoke `dotnet-dev`, `dal-dev`, or `code-review` for a database refactor, it either fails to trigger the appropriate tool or loads multiple unneeded instruction blocks into context—wasting expensive token headroom and introducing erratic behavior.
+As teams accumulate skills, description boundaries blur. When an agent cannot distinguish whether to invoke `csharp-dev`, `dal-dev`, or `code-review` for a database refactor, it either fails to trigger the appropriate tool or loads multiple unneeded instruction blocks into context—wasting expensive token headroom and introducing erratic behavior.
 
 ### 3. Unchecked Security Surface (Prompt Injection & Execution Hazards)
 Skills contain instructions, regexes, scripts, and MCP references. An unmonitored skill can inadvertently instruct agents to execute destructive shell commands, exfiltrate sensitive repository data, or bypass architectural boundaries.

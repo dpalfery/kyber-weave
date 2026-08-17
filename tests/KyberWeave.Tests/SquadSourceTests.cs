@@ -25,7 +25,7 @@ public sealed class SquadSourceTests
         Assert.Equal("kyber-squad", first.Manifest.Name);
         Assert.Equal("full", first.Bundle.Name);
         Assert.Equal(
-            ["architect", "dotnet-dev"],
+            ["architect", "csharp-dev"],
             first.Agents.Select(agent => agent.Name));
         Assert.Equal(["test-dev"], first.Skills.Select(skill => skill.Name));
         Assert.Equal(
@@ -298,7 +298,7 @@ public sealed class SquadSourceTests
         string missingIdentity)
     {
         using SquadFixture fixture = SquadFixture.CreateValid();
-        string anchor = identityKind == "agent" ? "  - dotnet-dev" : "  - test-dev";
+        string anchor = identityKind == "agent" ? "  - csharp-dev" : "  - test-dev";
         fixture.Replace("bundles/full.yml", anchor, $"{anchor}\n  - {missingIdentity}");
 
         Diagnostic diagnostic = AssertInvalid(fixture, "bundles/full.yml", missingIdentity);
@@ -320,7 +320,7 @@ public sealed class SquadSourceTests
             fixture.Write(
                 duplicateRelativePath,
                 SquadFixture.Agent("reviewer", name: duplicateName, aliases: "[]"));
-            fixture.Replace("bundles/full.yml", "  - dotnet-dev", "  - dotnet-dev\n  - reviewer");
+            fixture.Replace("bundles/full.yml", "  - csharp-dev", "  - csharp-dev\n  - reviewer");
         }
         else
         {
@@ -352,8 +352,8 @@ public sealed class SquadSourceTests
     {
         using SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
-            "agents/dotnet-dev.md",
-            SquadFixture.Agent("dotnet-dev", aliases: $"[{alias}]"));
+            "agents/csharp-dev.md",
+            SquadFixture.Agent("csharp-dev", aliases: $"[{alias}]"));
         if (alias == "shared-alias")
         {
             fixture.Write(
@@ -361,7 +361,7 @@ public sealed class SquadSourceTests
                 SquadFixture.Agent("architect", aliases: "[shared-alias]"));
         }
 
-        Diagnostic diagnostic = AssertInvalid(fixture, "agents/dotnet-dev.md", alias);
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", alias);
 
         Assert.Contains("alias", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -484,7 +484,7 @@ public sealed class SquadSourceTests
             "invocation: subagent\n" +
             "model-profile: deep-planning\n" +
             "capability-profile: architect\n" +
-            "delegates-to: [dotnet-dev]\n" +
+            "delegates-to: [csharp-dev]\n" +
             "fallback: role-skill\n" +
             "aliases: []\n" +
             "---\n" +
@@ -562,7 +562,7 @@ public sealed class SquadSourceTests
             "invocation: subagent\n" +
             "model-profile: deep-planning\n" +
             "capability-profile: architect\n" +
-            "delegates-to: [dotnet-dev]\n" +
+            "delegates-to: [csharp-dev]\n" +
             "fallback: role-skill\n" +
             "aliases: []\n" +
             "---\n" +
@@ -598,7 +598,7 @@ public sealed class SquadSourceTests
                 name: full
                 agents:
                   - architect
-                  - dotnet-dev
+                  - csharp-dev
                 skills:
                   - test-dev
                 """);
@@ -652,7 +652,7 @@ public sealed class SquadSourceTests
                 }
                 """);
             fixture.Write("agents/architect.md", ArchitectAgentLf);
-            fixture.Write("agents/dotnet-dev.md", Agent("dotnet-dev"));
+            fixture.Write("agents/csharp-dev.md", Agent("csharp-dev"));
             fixture.Write("skills/test-dev/SKILL.md", Skill("test-dev", "Use when writing tests."));
 
             foreach (string? schema in new[]

@@ -1,6 +1,6 @@
 ---
-name: dotnet-dev/aspnetcore-webapi
-description: ASP.NET Core Web API patterns — sealed record DTOs, TypedResults, RFC 7807 problem details, .NET 9+ OpenAPI, controller checklist.
+name: csharp-dev/aspnetcore-webapi
+description: ASP.NET Core Web API patterns — sealed record DTOs, TypedResults, RFC 7807 problem details, OpenAPI with Swashbuckle, controller checklist.
 source: https://github.com/dotnet/skills/tree/main/plugins/aspnetcore/skills/dotnet-webapi
 ---
 
@@ -38,7 +38,7 @@ public sealed record ManualResponse(
 [ProducesResponseType(StatusCodes.Status404NotFound)]
 public async Task<Results<Ok<ManualResponse>, NotFound>> GetAsync(Guid id)
 {
-    var manual = await _service.GetByIdAsync(id);
+    Manual? manual = await _service.GetByIdAsync(id);
     if (manual is null)
         return TypedResults.NotFound();
 
@@ -59,11 +59,11 @@ public async Task<Results<Created<ManualResponse>, ValidationProblem>> CreateAsy
     CreateManualRequest request,
     CancellationToken cancellationToken = default)
 {
-    var validationErrors = Validate(request);
-    if (validationErrors.Any())
+    Dictionary<string, string[]> validationErrors = Validate(request);
+    if (validationErrors.Count > 0)
         return TypedResults.ValidationProblem(validationErrors);
 
-    var manual = await _service.CreateAsync(request, cancellationToken);
+    Manual manual = await _service.CreateAsync(request, cancellationToken);
     return TypedResults.Created($"/api/manuals/{manual.Id}", Map(manual));
 }
 ```
@@ -82,16 +82,17 @@ app.UseExceptionHandler();  // produces RFC 7807 JSON automatically
 
 ---
 
-## .NET 9+ OpenAPI (No Swashbuckle)
+## OpenAPI and Swashbuckle
 
-.NET 9 ships built-in OpenAPI support — **do not add `Swashbuckle.AspNetCore`**.
+Emit the OpenAPI document with `Microsoft.AspNetCore.OpenApi`. Serve the UI with Swashbuckle. Do not add Scalar as a second UI.
 
 ```csharp
-// Program.cs
 builder.Services.AddOpenApi();
+builder.Services.AddSwaggerGen();
 
-app.MapOpenApi();          // /openapi/v1.json
-app.MapScalarApiReference(); // /scalar — interactive UI (add Scalar.AspNetCore package)
+app.MapOpenApi();
+app.UseSwagger();
+app.UseSwaggerUI();
 ```
 
 Enrich the document:
@@ -101,7 +102,7 @@ builder.Services.AddOpenApi(options =>
 {
     options.AddDocumentTransformer((doc, ctx, ct) =>
     {
-        doc.Info.Title = "MotorcycleRAG API";
+        doc.Info.Title = "API";
         doc.Info.Version = "v1";
         return Task.CompletedTask;
     });
@@ -153,7 +154,7 @@ Always accept and forward `CancellationToken` on async actions:
 public async Task<Ok<IEnumerable<ManualResponse>>> GetAllAsync(
     CancellationToken cancellationToken)
 {
-    var manuals = await _service.GetAllAsync(cancellationToken);
+    IEnumerable<Manual> manuals = await _service.GetAllAsync(cancellationToken);
     return TypedResults.Ok(manuals.Select(Map));
 }
 ```

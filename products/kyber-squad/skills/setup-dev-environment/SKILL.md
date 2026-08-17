@@ -1,6 +1,6 @@
 ---
 name: setup-dev-environment
-description: Set up the MotorcycleRAG development environment on a brand new Windows or macOS machine. Use when the user asks to setup/install/bootstrap/configure the repo or dev environment, including .NET, MAUI, Node/npm, Tauri/Rust, Python/Poetry, Docker/SQL Server database setup, VS Code extensions, MCP servers, Azure CLI read-only tooling, GitHub CLI, Ollama, and validation.
+description: Set up the host repository development environment on a brand new Windows or macOS machine. Use when the user asks to setup/install/bootstrap/configure the repo or dev environment, including .NET, MAUI, Node/npm, Tauri/Rust, Python/Poetry, Docker/SQL Server database setup, VS Code extensions, MCP servers, Azure CLI read-only tooling, GitHub CLI, Ollama, and validation.
 license: MIT
 metadata:
   author: David R Palfery
@@ -9,7 +9,7 @@ metadata:
 
 # Setup Dev Environment
 
-Use this skill to turn a new Windows or macOS machine into a working MotorcycleRAG development machine.
+Use this skill to turn a new Windows or macOS machine into a working development machine for the host repository.
 
 Required tooling, install approach, guardrails, and validation criteria are the path declared as **Developer Setup Standard** in the root `AGENTS.md` Repository Configuration & Paths registry. Read that document before planning or running any install — it is the single source of truth; do not restate or fork its rules here. This file covers only the session mechanics: how to run the setup conversation.
 

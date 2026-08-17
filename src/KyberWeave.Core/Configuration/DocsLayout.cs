@@ -40,7 +40,7 @@ public static class DocsLayout
 
     /// <summary>
     /// The document a technology's registry property points at. A standard is one file, not
-    /// a directory to be listed: an agent resolving <c>&lt;dotnet-coding-standard&gt;</c>
+    /// a directory to be listed: an agent resolving <c>&lt;csharp-coding-standard&gt;</c>
     /// should be able to read it in one step.
     /// </summary>
     public static string TechnologyStandard(string docsRoot, string technology) =>

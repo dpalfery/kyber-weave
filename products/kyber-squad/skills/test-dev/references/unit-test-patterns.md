@@ -86,7 +86,7 @@ var job = new IngestionJobBuilder()
     .Build();
 ```
 
-Builders live in `5-Test/{ProjectName}.Tests/Builders/`.
+Builders live next to the tests they serve, typically under a `Builders/` folder in the test project.
 
 ---
 

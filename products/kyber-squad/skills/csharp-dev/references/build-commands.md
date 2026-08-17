@@ -1,6 +1,6 @@
 ---
 name: build-commands
-description: Build, run, and test commands for the MotorcycleRAG solution. Use when you need to build, run the API, run tests, or start the frontend dev server.
+description: Build, run, and test commands for the host .NET solution. Use when you need to build, run the API, or run tests.
 license: MIT
 metadata:
   author: David R Palfery
@@ -9,27 +9,30 @@ metadata:
 
 # Build & Run Commands
 
+Commands below are the portable defaults. Prefer the path declared as **<csharp-coding-standard>** when the host names different projects.
+
 ## Build (with analyzers)
-```powershell
-dotnet build -c Debug -p:Platform="Any CPU" -p:EnforceCodeStyleInBuild=true -p:EnableNETAnalyzers=true
+
+```bash
+dotnet build -c Release
 ```
 
 ## Run API
-```powershell
-dotnet run --project 1-Presentation/MotorcycleRAG.API
+
+```bash
+dotnet run
 ```
 
-## Run Tests
-```powershell
+Hot reload during development:
+
+```bash
+dotnet watch
+```
+
+## Run tests
+
+```bash
 dotnet test
 ```
 
-## Frontend Dev Server
-```powershell
-cd 1-Presentation/MotorcycleRag.WebUI
-npm run dev
-```
-
-## Data Ingestion Endpoints
-- Upload: `POST /api/DataPipeline/upload`
-- Process: `POST /api/DataPipeline/process`
+Migrations are owned by `dal-dev`. See **<data-access-layer-coding-standard>**.

@@ -10,7 +10,8 @@ last-reviewed: 2026-08-16
 # Rules
 
 Repository-wide rules that govern how the system is built, independent of any one technology.
-A rule about how C# is written belongs in the [dotnet coding standard](../standards/dotnet/README.md);
+A rule about how C# is written belongs in the [C# coding standard](../standards/csharp/README.md);
+a rule about how tests are written belongs in the [test coding standard](../standards/test/README.md);
 a rule that would still hold if this repository were rewritten in another language belongs
 here.
 

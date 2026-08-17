@@ -110,7 +110,7 @@ flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
     
     Intersection -->|"Shared Identities\n(conductor, conductor-v3)"| SharedPath["Byte-Identical Bodies Required"]
-    Intersection -->|"Distinct-Body Collisions\n(dal-dev, dotnet-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
+    Intersection -->|"Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
     Intersection -->|"No Skill Collision\n(e.g. architect)"| UnoccupiedPath["Unoccupied Identity"]
 
     SharedPath --> NativePrimary{"Target has Native\nPrimary Role?"}
@@ -133,7 +133,7 @@ flowchart TD
    - On native-primary harnesses, only the native agent is emitted.
    - On fallback harnesses, only the same-name skill is emitted.
    - `conductor` is the default orchestrator; `conductor-v3` is explicit. `conductor-v2` exists only as an input migration alias.
-2. **Distinct-Body Collisions (`dal-dev`, `dotnet-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**:
+2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**:
    - The canonical skill and agent serve distinct functions.
    - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.

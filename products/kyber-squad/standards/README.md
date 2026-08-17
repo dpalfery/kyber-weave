@@ -34,6 +34,19 @@ and still say roughly the same things; consolidating them is
 [a todo](../../../docs/todo/portable-artifacts-carry-project-standards.md), not something this
 folder did.
 
+The seven templates that match the seven review references are `csharp`, `react`, `python`,
+`sql`, `azure`, `pulumi`, and `github-actions`. `maui`, `data-access-layer`, and `test` are
+additional templates rewritten from agents rather than from a review reference. `pulumi` and
+`python` were then rewritten from their agents so stack, packaging, environment, and
+quality-gate policy live in the template — those agents only name **<pulumi-coding-standard>**
+and **<python-coding-standard>**. `test` was rewritten from the `test-dev` agent so runners,
+isolation, naming, and assertion policy live in the template — the agent only names
+**<test-coding-standard>**. Kyber-Weave's own
+[`docs/standards/csharp/`](../../../docs/standards/csharp/README.md) is not a substitute for
+the `csharp` template here — it records this repository's decisions, including ones a host
+may reasonably reverse. The same is true of
+[`docs/standards/test/`](../../../docs/standards/test/README.md) versus the `test` template.
+
 **A template is a guess about a repository it has never seen.** Every one of these carries
 decisions a host may reasonably reverse — a line length, a state-management library, a naming
 convention. Reversing one is the point of the standard being project-specific; what matters is

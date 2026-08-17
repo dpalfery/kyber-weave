@@ -9,7 +9,7 @@ sources:
   .cursor/agents/docs-dev.agent.md: d21c3c06d105b517234d2eb5e9faf4cce02ec677e922cb81edb08ea8bd1fbe8e
   .github/agents/docs-dev.agent.md: 6d064d541f50a38f471083352cb1dcc9de8cc745fd96b75972da61b3ce4a44ee
   .opencode/agents/docs-dev.md: e95d461ea01b696d5c45e519f71fad135042bf683c04b9e348daaf2d1dd60ae1
-final-body-sha256: e6a37a19e9a115bbdc3fe1115a9a47a8606ed1eeaa2186b82ac48ae2a67347e5
+final-body-sha256: 46a0ae7b5e53abb7124663206338cec1d5b48e1c1f5787730cf7c154499fb92e
 ---
 # docs-dev migration
 

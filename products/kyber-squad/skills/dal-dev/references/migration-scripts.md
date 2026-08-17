@@ -7,7 +7,7 @@ description: FluentMigrator migration conventions — versioning, up/down script
 
 ## Ownership
 
-The `dotnet-dev` agent authors FluentMigrator scripts. The `dal-dev` / `sql-database-architect` agent approves the underlying DDL schema before any migration is written. If a migration script diverges from the approved schema (wrong type, missing constraint, dropped index), escalate back to `dal-dev` before writing code.
+The `dal-dev` agent authors FluentMigrator scripts. The `sql-database-architect` agent approves the underlying DDL schema before any migration is written. If a migration script diverges from the approved schema (wrong type, missing constraint, dropped index), escalate back to `sql-database-architect` before applying.
 
 ---
 
@@ -49,7 +49,7 @@ public class AddIngestionJobsTable : Migration
 
 - Every `Up()` must be safe to re-run: check for existence before creating (`IfTableDoesNotExist`, `IfIndexDoesNotExist`).
 - Every migration **must** implement `Down()` for rollback capability.
-- Schema changes approved by `dal-dev` (DDL) must match exactly what FluentMigrator applies — column names, data types, constraints, and index declarations must align.
+- Schema changes approved by `sql-database-architect` (DDL) must match exactly what FluentMigrator applies — column names, data types, constraints, and index declarations must align.
 
 ---
 
@@ -69,5 +69,5 @@ public class AddIngestionJobsTable : Migration
 If a FluentMigrator script conflicts with the dacpac artifact (wrong type, missing constraint, dropped index):
 
 1. Stop — do not apply the migration.
-2. Escalate to `dal-dev` / `sql-database-architect` with the DDL difference.
+2. Escalate to `sql-database-architect` with the DDL difference.
 3. Receive corrected DDL and update the migration before applying.

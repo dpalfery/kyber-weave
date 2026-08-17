@@ -28,7 +28,7 @@ than by reading these files.
 
 Agents and skills resolve this corpus by name rather than by path: the **Config Reg** block in
 the repository root [`AGENTS.md`](../AGENTS.md) publishes `<component-catalog>`,
-`<dotnet-coding-standard>` and the rest, and `docs init` regenerates it from
+`<csharp-coding-standard>` and the rest, and `docs init` regenerates it from
 [configuration](configuration.md). A portable instruction file that names a property stays
 correct in a repository that arranges its documentation differently.
 

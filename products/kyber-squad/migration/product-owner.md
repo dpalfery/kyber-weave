@@ -9,7 +9,7 @@ sources:
   .cursor/agents/product-owner.agent.md: e8bc63a89a1b078f4df4aee15eae89b159972ce20ecdc0507473d4f75b635513
   .github/agents/product-owner.agent.md: a3a01c8088cdbf4891b639a21b099be84ead7229b5b477b20b76b5f1d4df3729
   .opencode/agents/product-owner.md: cdfefd1fe9000e568e7d35972753364892cfd0f3c90c67fa7407a7a79a21fb9b
-final-body-sha256: f43c952aedadc93815ab6b8d040eb995dc0d5b112dec6c925d03102553e912d3
+final-body-sha256: 30adef003b402432203836c33f5368572390bd9250206b6df337715c0f4a3e0c
 ---
 # product-owner migration
 

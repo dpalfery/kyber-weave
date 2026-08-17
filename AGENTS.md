@@ -111,11 +111,11 @@ yet touched — does not exist in any other shape.
 
 | Working on | Read |
 |---|---|
-| Writing C# anywhere in this repository | [`docs/standards/dotnet/README.md`](docs/standards/dotnet/README.md), the path declared as **<dotnet-coding-standard>** below |
+| Writing C# anywhere in this repository | [`docs/standards/csharp/README.md`](docs/standards/csharp/README.md), the path declared as **<csharp-coding-standard>** below |
 | The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
-| Tests | [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) |
+| Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-weave-docs` skill in [`.apm/skills/`](.apm/skills/kyber-weave-docs/SKILL.md) |
 
 ## Exploration: CodeGraph & Kyber-Weave outrank Grep and Search
@@ -182,7 +182,8 @@ references that belong to this repository.
 - **<documentation-ontology>**: `docs/documentation-ontology.md`
 - **<component-catalog>**: `docs/catalog.md`
 - **<standards-root>**: `docs/standards`
-- **<dotnet-coding-standard>**: `docs/standards/dotnet/README.md`
+- **<csharp-coding-standard>**: `docs/standards/csharp/README.md`
+- **<test-coding-standard>**: `docs/standards/test/README.md`
 - **<plan-index>**: `docs/plans/README.md`
 - **<specification-index>**: `docs/specs/README.md`
 - **<todo-index>**: `docs/todo/README.md`

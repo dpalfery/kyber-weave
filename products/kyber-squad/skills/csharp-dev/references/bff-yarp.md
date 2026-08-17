@@ -11,7 +11,7 @@ metadata:
 
 **Trigger:**
 This skill MUST be loaded whenever working on:
-- The BFF project at `1-Presentation/MotorcycleRag.WebUI.BFF/`.
+- The host BFF / YARP project (reverse proxy in front of the API).
 - YARP reverse proxy configuration, routes, or transforms.
 - Authentication flows between the React WebUI and backend API.
 - Token forwarding, cookie-based auth, or OIDC integration.
@@ -36,7 +36,7 @@ React WebUI (SPA) → BFF (YARP + Auth) → Backend API
 ## Project Structure
 
 ```
-1-Presentation/MotorcycleRag.WebUI.BFF/
+<Solution>.WebUI.Bff/
 ├── Program.cs                              # YARP setup, auth, middleware pipeline
 ├── appsettings.json                        # YARP ReverseProxy routes & clusters
 ├── appsettings.Development.json            # Dev-specific CORS, Azure AD settings

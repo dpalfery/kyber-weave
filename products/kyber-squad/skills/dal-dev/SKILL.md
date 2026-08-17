@@ -1,6 +1,6 @@
 ---
 name: dal-dev
-description: Use when designing SQL schemas, creating FluentMigrator migrations, implementing generic repositories (IRepository of T), or working exclusively in the 4-Persistence layer.
+description: Use when implementing ADO.NET repositories, IRepository of T, ISqlConnectionFactory, FluentMigrator migrations, or persistence DI registration. Do not use for schema design or application/domain logic.
 license: MIT
 metadata:
   author: David R Palfery
@@ -13,8 +13,8 @@ Identify your sub-task and read ONLY the relevant reference before proceeding.
 
 | Sub-Task | When to Use | Reference |
 |---|---|---|
-| Schema Design | Table definitions, data types, constraints, indexes, SQL database projects, dacpac artifacts | [Schema Design](./references/schema-design.md) |
-| Dapper Repository | ISqlConnectionFactory, IRepository implementations, parameterized queries, DI registration | [Dapper Repository](./references/dapper-repository.md) |
-| Migration Scripts | FluentMigrator versioning, idempotent up/down scripts, rollback strategy | [Migration Scripts](./references/migration-scripts.md) |
+| Schema contract | Consuming approved table definitions, types, constraints, and dacpac alignment | [Schema Design](./references/schema-design.md) |
+| ADO.NET repository | ISqlConnectionFactory, IRepository implementations, parameterized SqlCommand, DI registration | [ADO.NET Repository](./references/adonet-repository.md) |
+| Migration scripts | FluentMigrator versioning, idempotent up/down scripts, rollback strategy | [Migration Scripts](./references/migration-scripts.md) |
 
 **Rule:** Read only the reference(s) relevant to your current task. Do not pre-load all references.

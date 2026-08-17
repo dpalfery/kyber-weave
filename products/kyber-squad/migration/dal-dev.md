@@ -9,7 +9,7 @@ sources:
   .cursor/agents/dal-dev.agent.md: f55c14cc1dbca99edca8912e4094f0696837289764a577d56ffb0521a8cbb43f
   .github/agents/dal-dev.agent.md: 5a9e1b9ef11c9e62c4f7ce71776c7ea88009041fe79aca0fa9002e13fd427d51
   .opencode/agents/dal-dev.md: 9f3fd875d63276e02b0219fbed33e084f0fd3c95e7090cd7152b98ad120f9adf
-final-body-sha256: de5f38ad607bec4d130de7d6d1d546d7a9670249a641fde818e30c59c7ed6f36
+final-body-sha256: 9b8da3d7693e2eb6d2551f2a0fc13aff58da782c115dea175b502066b8ccdad2
 ---
 # dal-dev migration
 

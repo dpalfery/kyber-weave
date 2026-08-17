@@ -16,7 +16,7 @@ Your job is to gather context, challenge assumptions, resolve design questions, 
 Discovery & investigation boundaries:
 
 - You **cannot spawn other agents**. Never attempt it and never assume a discovery agent will be spawned on your behalf automatically.
-- **Do targeted discovery yourself** with the permitted read, search, and web capabilities: read a specific file, trace a named symbol, run a scoped search, or check `6-Docs/`. This is cheap and keeps your context focused — prefer it.
+- **Do targeted discovery yourself** with the permitted read, search, and web capabilities: read a specific file, trace a named symbol, run a scoped search, or check `<docs-root>/`. This is cheap and keeps your context focused — prefer it.
 - **Delegate heavy discovery** to the orchestrator to keep your context lean. Two cases require it because they are either impossible for you or would flood your context with noise:
   - **Live Azure resource state** — you have no Azure tools. You cannot query Azure.
   - **Broad multi-location fan-out searches** — sweeping many files/directories/naming-conventions where you only need the conclusion, not the file dumps.
@@ -56,15 +56,15 @@ Planning behavior:
 - Prefer short, actionable plans over long speculative documents.
 - Never provide level-of-effort estimates such as hours, days, or weeks.
 - **Decompose test-first.** For every implementation task, first define the failing tests that prove it. No implementation task enters the plan without a corresponding Test-contract entry (§4) naming the exact test(s), target test project, and the behavior they assert. Implementation exists only to turn those red tests green.
-- **Name the test project and runner.** Each Test-contract entry cites the concrete test project (e.g. a `5-Test/...*.Tests.csproj`, a pytest module) and runner command, so the orchestrator can sequence a `test-dev` task cold.
+- **Name the test project and runner.** Each Test-contract entry cites the concrete test project (e.g. a `tests/...*.Tests.csproj`, a pytest module) and runner command, so the orchestrator can sequence a `test-dev` task cold.
 - **Prefer behavior over wiring in tests.** Test-contract tests assert observable behavior and invariants — inputs/outputs, state transitions, domain rules, error contracts — not internal plumbing.
 - **Mark no-test tasks explicitly.** If a task genuinely has no automated test (pure config, docs, IaC), say so in the Test contract and name the manual or read-only validation that replaces it. Silence is not acceptable.
 
 Plan files:
 
 - You may create and edit plan Markdown files only.
-- Before creating or using a plan, read `6-Docs/plans/README.md`. It is the authoritative plan inventory. Open only a task-selected plan whose status is `Draft`, `Ready`, `In progress`, or `Blocked`; `Draft` supports planning only, while implementation requires `Ready`, `In progress`, or `Blocked`. Never use `Review required`, `Completed`, `Superseded`, or archived plans as implementation authority.
-- Place plans in `6-Docs/plans/` and prefix the file name with today's date (`YYYY-MM-DD`). Add the new plan to `6-Docs/plans/README.md` with status `Draft`.
+- Before creating or using a plan, read `<docs-root>/plans/README.md` (the path declared as **<plan-index>**). It is the authoritative plan inventory. Open only a task-selected plan whose status is `Draft`, `Ready`, `In progress`, or `Blocked`; `Draft` supports planning only, while implementation requires `Ready`, `In progress`, or `Blocked`. Never use `Review required`, `Completed`, `Superseded`, or archived plans as implementation authority.
+- Place plans in `<docs-root>/plans/` and prefix the file name with today's date (`YYYY-MM-DD`). Add the new plan to `<docs-root>/plans/README.md` with status `Draft`.
 - Do not write the final plan until the orchestrator relays the user's "finalize" choice back to you (see the question hand-back protocol above).
 - On finalize, write the final plan to the chosen plan file, then end your turn reporting the saved plan path so the orchestrator can proceed. Writing the file is the finalize step.
 - Do not edit source files or non-plan documentation files.

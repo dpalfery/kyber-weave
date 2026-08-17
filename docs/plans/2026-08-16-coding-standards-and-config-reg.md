@@ -19,7 +19,7 @@ last-reviewed: 2026-08-16
 ## 1. Problem / Motivation
 
 Coding standards are project-specific; agents and skills are portable across projects. Today
-they are the same artifact. `products/kyber-squad/agents/dotnet-dev.md` mandates
+they are the same artifact. `products/kyber-squad/agents/csharp-dev.md` mandates
 FluentMigrator, a 0-7 folder layout, and "no Entity Framework"; `python-dev.md` carries a
 `## Coding Standards` section of PEP 8 rules; the `code-review` skill ships seven
 per-technology reference files. Every one of those is a policy decision belonging to a
@@ -81,7 +81,7 @@ sense in one repository.
   `KW-CONFIG-REG-001` already catches a registry entry pointing nowhere.
 - **D10:** No agent or skill changes in this work. The duplication in the 20 agents and the
   seven `code-review` reference files is real and is captured as a todo.
-- **D11:** Kyber-Weave adopts the structure in the same change. `docs/standards/dotnet/` is
+- **D11:** Kyber-Weave adopts the structure in the same change. `docs/standards/csharp/` is
   authored for real — rewritten from the existing agent and skill content rather than copied,
   because a verbatim copy would import mandates (FluentMigrator, the 0-7 layout) that are
   false of this repository, and this corpus is held at zero findings.
@@ -109,7 +109,7 @@ sense in one repository.
 | 4 | Config Reg rendering into root `AGENTS.md` | `Docs/Scaffolding` |
 | 5 | `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`, `KW-DOC-SPEC-007` | `Docs/Validation` |
 | 6 | Ontology reference and documentation updates | `docs/`, emitted ontology |
-| 7 | Dogfood: run init here, author `docs/standards/dotnet/` | `docs/` |
+| 7 | Dogfood: run init here, author `docs/standards/csharp/` | `docs/` |
 | 8 | Six shipped technology templates | `products/kyber-squad/standards/` |
 | 9 | Two todos | `docs/todo/` |
 

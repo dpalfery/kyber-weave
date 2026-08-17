@@ -41,7 +41,7 @@ ontology:
   doc-types: [architecture, onboarding, requirements, adr, plan, spec,
               runbook, reference, rule, governance, index, coding-standard]
   statuses: [current, draft, needs-review, superseded]
-  technologies: [dotnet]
+  technologies: [csharp, test]
   base-required-keys: [id, title, owner, last-reviewed, doc-type, status]
   required-keys:
     architecture: [component]

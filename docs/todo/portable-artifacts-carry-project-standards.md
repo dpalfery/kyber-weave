@@ -30,25 +30,21 @@ deferred so that the mechanism and a 27-file content migration did not land toge
 
 Two populations, one defect:
 
-- **The 20 canonical agents** under `products/kyber-squad/agents/`. The clearest cases:
-  - [`dotnet-dev.md`](../../products/kyber-squad/agents/dotnet-dev.md) mandates FluentMigrator,
-    native ADO.NET over Entity Framework, and a "0-7 project folder structure" — decisions
-    belonging to the repository the agent was first written for. None of them is true of
-    Kyber-Weave's own repository, which the agent nonetheless installs into.
-  - [`python-dev.md`](../../products/kyber-squad/agents/python-dev.md) carries a
-    `## Coding Standards` section of PEP 8 rules, including a line-length figure that
-    disagrees with the one in the code-review reference beside it.
+- **The 20 canonical agents** under `products/kyber-squad/agents/`. Several already
+  resolve a registry property instead of embedding a standard (`csharp-dev`, `maui-dev`,
+  `dal-dev`, `pulumi-dev`, `python-dev`, `test-dev`). Remaining cases include:
   - [`react-dev.md`](../../products/kyber-squad/agents/react-dev.md) defers to "established
     coding standards and linting rules" without naming where they are — which is the shape the
     others should take once a registry property exists to name.
 - **The seven per-technology references** under
   [`products/kyber-squad/skills/code-review/references/`](../../products/kyber-squad/skills/code-review/references/)
-  — `dotnet`, `react`, `python`, `sql`, `azure`, `pulumi`, `github-actions`. These are written
+  — `csharp`, `react`, `python`, `sql`, `azure`, `pulumi`, `github-actions`. These are written
   in reviewer voice ("check that…") rather than author voice, but they are standards.
-- Rewritten templates for six of those seven already exist at
-  [`products/kyber-squad/standards/`](../../products/kyber-squad/standards/README.md), and the
-  seventh became this repository's own [dotnet standard](../standards/dotnet/README.md).
-  Nothing installs them yet.
+- Rewritten templates for all seven already exist at
+  [`products/kyber-squad/standards/`](../../products/kyber-squad/standards/README.md). This
+  repository's own [C# standard](../standards/csharp/README.md) and
+  [test standard](../standards/test/README.md) are separate, adopted documents — not
+  stand-ins for the host templates. Nothing installs the templates yet.
 
 ## What needs deciding
 

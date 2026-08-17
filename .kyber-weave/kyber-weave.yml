@@ -10,8 +10,9 @@ ontology:
   # repository. An empty list clears them rather than carrying dead exclusions forward.
   excluded-files: []
 
-  # This repository is C# and nothing else, so it declares one technology. The list is what
-  # creates docs/standards/dotnet/, publishes <dotnet-coding-standard> in the registry, and
-  # legalizes 'technology: dotnet' in that standard's frontmatter.
+  # This repository is C# plus the tests that pin it. The list is what creates
+  # docs/standards/<technology>/, publishes <technology-coding-standard> in the registry,
+  # and legalizes the technology value in that standard's frontmatter.
   technologies:
-    - dotnet
+    - csharp
+    - test

@@ -1126,7 +1126,7 @@ public sealed class SquadCliCommandTests : IDisposable
                 name: full
                 agents:
                   - architect
-                  - dotnet-dev
+                  - csharp-dev
                 skills:
                   - test-dev
                 """);
@@ -1187,17 +1187,17 @@ public sealed class SquadCliCommandTests : IDisposable
                 invocation: subagent
                 model-profile: deep-planning
                 capability-profile: architect
-                delegates-to: [dotnet-dev]
+                delegates-to: [csharp-dev]
                 fallback: role-skill
                 aliases: []
                 ---
                 You are architect.
                 Plan first.
                 """);
-            fixture.Write("products/kyber-squad/agents/dotnet-dev.md", """
+            fixture.Write("products/kyber-squad/agents/csharp-dev.md", """
                 ---
                 schema: kyber-squad.agent/v1
-                name: dotnet-dev
+                name: csharp-dev
                 description: Use for .NET work.
                 invocation: subagent
                 model-profile: general
@@ -1206,7 +1206,7 @@ public sealed class SquadCliCommandTests : IDisposable
                 fallback: role-skill
                 aliases: []
                 ---
-                You are dotnet-dev.
+                You are csharp-dev.
                 """);
             fixture.Write("products/kyber-squad/skills/test-dev/SKILL.md", """
                 ---

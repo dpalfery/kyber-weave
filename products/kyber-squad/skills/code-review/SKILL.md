@@ -16,7 +16,7 @@ metadata:
 1. **Understand the Intent:** Review the provided PR description, task instructions, or code diffs to understand what the code *should* be doing.
 2. **Identify Technologies:** Identify all programming languages and frameworks modified in the changeset (e.g., C#, Python, React, SQL).
 3. **Load Specific References:** For each identified technology, you MUST read its corresponding detailed checklist in the `references/` folder before proceeding:
-   - [.NET (C#)](references/dotnet.md)
+   - [C#](references/csharp.md)
    - [Python](references/python.md)
    - [React](references/react.md)
    - [SQL](references/sql.md)
@@ -27,24 +27,21 @@ metadata:
 5. **Technology-Specific Check:** Evaluate the code against the checklists found in the references loaded in Step 3.
 6. **Security Review (always):** Invoke the `security-review` skill to perform a branch-diff vulnerability pass — identify HIGH-CONFIDENCE (≥8/10) exploitable vulnerabilities newly introduced by the change, applying its false-positive exclusions. Do not duplicate that skill's methodology here.
 7. **Pre-Merge Test & Coverage Gate (always — blocking):** Run the unified test + coverage suite to confirm every test passes **and** the mandatory unit-coverage thresholds declared in the coverage config (path declared as **Test Coverage Config** in the repository root `AGENTS.md`) are met. This gate is **non-negotiable** for an Approve verdict; failing it downgrades the verdict to `Needs Changes` regardless of how clean the other findings are.
-   - **macOS / Linux (default):**
+   - Run the host's comprehensive test command. If the repository declares one next to **Test Coverage Config** in the root `AGENTS.md`, use that. Otherwise:
+
      ```bash
-     bash 5-Test/scripts/run-comprehensive-tests.sh
+     dotnet test -c Release
      ```
-   - **Windows (PowerShell):**
-     ```powershell
-     pwsh -File 5-Test/scripts/run-comprehensive-tests.ps1
-     ```
-   - **Coverage-only fast path (use while iterating locally — not a substitute for the full run before approving):**
+
+     On Windows, the same command in PowerShell. For a coverage-only fast path while iterating locally (not a substitute for the full run before approving), pass the host's coverage flags, or:
+
      ```bash
-     bash 5-Test/scripts/run-comprehensive-tests.sh --unit-coverage --coverage-threshold 85
+     dotnet test -c Release --collect:"XPlat Code Coverage"
      ```
    - **Threshold enforcement:** the script reads `thresholds.fileLinePercent` and `thresholds.classLinePercent` from the path declared as **Test Coverage Config** in the root `AGENTS.md` registry. Treat the higher of the two configured values as the mandatory floor for this gate and pass it via `--coverage-threshold` only when an override is required.
    - **What MUST pass to approve:**
      - Build succeeds (`dotnet build` step inside the script).
-     - Unit tests (`.NET` `MotorcycleRAG.UnitTests.slnf`, Python `local-processing-service`, Admin Desktop Node, WebUI Node) all green.
-     - Integration tests (`5-Test/MotorcycleRAG.IntegrationTests`) all green.
-     - End-to-end tests (`5-Test/MotorcycleRAG.EndToEndTests`, `Category!=Integration`) all green.
+     - Unit, integration, and end-to-end test projects for the host repository all green.
      - Unit-coverage report at or above the configured `fileLinePercent` / `classLinePercent` thresholds.
    - **What is opt-in (do not block on these unless the change touches the area):**
      - `--azure-integration-tests` — requires live Azure credentials; only required if the diff touches Azure-integrated code paths.

@@ -82,7 +82,7 @@ public class AgentGovernanceTests
         string tempFile = Path.GetTempFileName() + ".agent.md";
         string content = """
             ---
-            name: dotnet-dev
+            name: csharp-dev
             description: Use when writing C# and .NET code.
             model: gpt-5.6-sol
             ---
@@ -96,7 +96,7 @@ public class AgentGovernanceTests
             Assert.True(parser.CanParse(tempFile));
 
             AgentModel agent = parser.Parse(tempFile, HarnessKind.Cursor);
-            Assert.Equal("dotnet-dev", agent.RoleName);
+            Assert.Equal("csharp-dev", agent.RoleName);
             Assert.Equal("Use when writing C# and .NET code.", agent.Description);
             Assert.Contains("senior .NET engineer", agent.InstructionsBody);
         }
@@ -236,9 +236,9 @@ public class AgentGovernanceTests
         {
             new AgentModel
             {
-                RoleName = "dotnet-dev",
+                RoleName = "csharp-dev",
                 Harness = HarnessKind.Codex,
-                FilePath = "/tmp/.codex/agents/dotnet-dev.toml",
+                FilePath = "/tmp/.codex/agents/csharp-dev.toml",
                 DirectoryPath = "/tmp/.codex/agents",
                 Description = "Use when writing C# .NET code and ASP.NET Core APIs.",
                 InstructionsBody = "Write clean C#."
