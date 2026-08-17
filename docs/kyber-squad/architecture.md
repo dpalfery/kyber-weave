@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-17
 status: current
 code-refs:
   - SquadTransaction
@@ -261,6 +261,11 @@ and validates.
   allow-list with no published mapping to the semantic capability vocabulary) records a
   structured degradation instead of a claimed mapping that might silently broaden or narrow
   what the deployed agent can actually do.
+- **Tools flow sequence & MCP allow-listing**: Copilot agent manifests serialize `tools` as an
+  inline YAML flow sequence (e.g. `tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]`).
+  Base tools (`vscode`, `todo`) are granted unconditionally, while capability-governed built-ins
+  and single-quoted MCP server wildcards (`'codegraph/*'`, `'kyber-weave/*'`, `'context7/*'`) are
+  capability-gated (`filesystem.read` for non-orchestrator roles).
 - **Coverage today**: only `copilot` has a renderer. `kyber-weave squad doctor` reports which
   targets are covered; `docs/todo/<target>.md` has what implementing the rest needs.
 

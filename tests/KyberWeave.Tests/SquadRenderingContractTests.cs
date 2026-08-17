@@ -31,7 +31,19 @@ public sealed class SquadRenderingContractTests
     /// harness, turning an intended grant into a missing capability at runtime.
     /// </summary>
     private static readonly string[] DocumentedCopilotTools =
-        ["execute", "read", "edit", "search", "agent", "web", "todo"];
+    [
+        "vscode",
+        "execute",
+        "read",
+        "codegraph/*",
+        "kyber-weave/*",
+        "context7/*",
+        "edit",
+        "search",
+        "agent",
+        "web",
+        "todo"
+    ];
 
     /// <summary>
     /// The capability→tool lowering this suite pins. Declared independently of the renderer
@@ -129,10 +141,17 @@ public sealed class SquadRenderingContractTests
                 }
             }
 
-            // 'todo' lowers from no capability, so every agent keeps it. Together with the
-            // two checks above this pins the emitted set exactly: it is the only documented
-            // built-in that CapabilityToolContract does not cover.
+            // 'vscode' and 'todo' lower from no capability, so every agent keeps them.
+            Assert.Contains("vscode", tools);
             Assert.Contains("todo", tools);
+
+            // MCP wildcards are granted if filesystem.read is allowed AND the agent is not a pure orchestrator.
+            bool isOrchestrator = agent.Name is "conductor" or "conductor-v3";
+            bool hasRead = profile.Permissions["filesystem.read"] == SquadPermissionDecision.Allow;
+            bool expectedMcp = hasRead && !isOrchestrator;
+            Assert.Equal(expectedMcp, tools.Contains("codegraph/*", StringComparer.Ordinal));
+            Assert.Equal(expectedMcp, tools.Contains("kyber-weave/*", StringComparer.Ordinal));
+            Assert.Equal(expectedMcp, tools.Contains("context7/*", StringComparer.Ordinal));
 
             string body = ReadBody(file);
             Assert.True(body.Length <= 30_000, $"'{agent.Name}' body is {body.Length} characters; Copilot caps agent files at 30,000.");
@@ -141,12 +160,12 @@ public sealed class SquadRenderingContractTests
 
         // Concrete lowerings, so a capability→tool map change is caught here even if the
         // renderer and the profiles drift together.
-        AssertTools(result, "research-agent", ["read", "search", "web", "todo"]);
+        AssertTools(result, "research-agent", ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"]);
         // The orchestrator profile is the reason filesystem.search exists separately: the
         // conductor may open a plan it is pointed at, but never sweep the tree for one.
-        AssertTools(result, "conductor", ["read", "agent", "todo"]);
-        AssertTools(result, "conductor-v3", ["read", "agent", "todo"]);
-        AssertTools(result, "github-devops", ["execute", "read", "edit", "search", "web", "todo"]);
+        AssertTools(result, "conductor", ["vscode", "read", "agent", "todo"]);
+        AssertTools(result, "conductor-v3", ["vscode", "read", "agent", "todo"]);
+        AssertTools(result, "github-devops", ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "web", "todo"]);
 
         // Conductor and conductor-v3 are native primary agents on Copilot: present as
         // .agent.md, and never duplicated as a skill (the single-projection rule).
