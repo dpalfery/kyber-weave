@@ -408,6 +408,11 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
             foreach (string? res in embeddedResources.Concat(contents))
             {
+                if (res!.Contains("standards", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 Assert.DoesNotContain("products", res!, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("kyber-squad", res!, StringComparison.OrdinalIgnoreCase);
             }

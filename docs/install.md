@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-17
 ---
 
 # Installing Kyber-Weave
@@ -134,7 +134,8 @@ kyber-weave docs init .
 
 This scaffolds host config, the catalog, and the ontology reference; safely merges the
 narrow `.kyber-weave/.gitignore` entry for local analysis cache state; and deploys the
-`kyber-weave-docs` authoring skill via APM. It does not create an empty glossary. See
+`kyber-weave-docs` authoring skill via APM. Pass `--kyber-standards` to seed the full suite
+of 10 Kyber Squad coding standards templates. It does not create an empty glossary. See
 [Adopting DocGraph](docgraph/onboarding.md) for the whole path.
 
 ## External dependencies

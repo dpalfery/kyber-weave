@@ -4,7 +4,7 @@ title: Coding standards
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-08-17
 ---
 
 # Coding standards
@@ -24,6 +24,10 @@ Add it to `ontology.technologies` in
 `kyber-weave docs init .`. That one list creates the technology's folder, publishes its
 `<name-coding-standard>` property in the registry, and legalizes the `technology` value in the
 standard's frontmatter — so the three cannot disagree.
+
+To bootstrap a repository with the full suite of 10 Kyber Squad coding standards templates
+(`csharp`, `test`, `react`, `python`, `pulumi`, `maui`, `data-access-layer`, `sql`, `azure`,
+`github-actions`), run `kyber-weave docs init . --kyber-standards`.
 
 A technology name is a slug: lowercase letters, digits and single hyphens.
 

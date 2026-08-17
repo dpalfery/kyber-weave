@@ -30,4 +30,8 @@ public sealed class DocsInitSettings : CommandSettings
     [CommandOption("--force")]
     [Description("Overwrite existing scaffolded documents instead of leaving them alone. Never overwrites .kyber-weave/kyber-weave.yml.")]
     public bool Force { get; set; }
+
+    [CommandOption("--kyber-standards")]
+    [Description("Scaffolds the full suite of rich Kyber Squad coding standards templates into the standards folder.")]
+    public bool KyberStandards { get; set; }
 }

@@ -94,7 +94,8 @@ public static class DocsScaffolder
         string repoRoot,
         string? docsRoot = null,
         string owner = "unassigned",
-        bool force = false)
+        bool force = false,
+        bool kyberStandards = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         string root = Path.GetFullPath(repoRoot);
@@ -121,9 +122,17 @@ public static class DocsScaffolder
         OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults)
             .Ontology.WithDocsRoot(resolvedDocsRoot);
 
+        if (kyberStandards)
+        {
+            IReadOnlyList<string> mergedTechnologies = ontology.Technologies
+                .Union(KyberStandardsTemplates.All, StringComparer.Ordinal)
+                .ToList();
+            ontology = ontology.Clone(technologies: mergedTechnologies);
+        }
+
         List<ScaffoldedFile> files = new List<ScaffoldedFile>
         {
-            WriteHostConfig(root, resolvedDocsRoot),
+            WriteHostConfig(root, resolvedDocsRoot, kyberStandards),
             WriteAnalysisCacheIgnore(root),
             Write(root, DocsLayout.Ontology(resolvedDocsRoot),
                 OntologyReference(resolvedDocsRoot, resolvedOwner), force),
@@ -141,8 +150,12 @@ public static class DocsScaffolder
 
         foreach (string technology in ontology.Technologies)
         {
+            string standardContent = kyberStandards && KyberStandardsTemplates.TryRender(technology, resolvedOwner, Today, out string? rendered)
+                ? rendered
+                : TechnologyStandard(technology, resolvedOwner);
+
             files.Add(Write(root, DocsLayout.TechnologyStandard(resolvedDocsRoot, technology),
-                TechnologyStandard(technology, resolvedOwner), force));
+                standardContent, force));
         }
 
         files.Add(WriteConfigReg(
@@ -292,7 +305,7 @@ public static class DocsScaffolder
     /// different tree than the one the catalog was just written to.
     /// </para>
     /// </remarks>
-    private static ScaffoldedFile WriteHostConfig(string repoRoot, string docsRoot)
+    private static ScaffoldedFile WriteHostConfig(string repoRoot, string docsRoot, bool kyberStandards)
     {
         string? existingPath = KyberWeaveConfigLoader.FindConfigPath(repoRoot);
         if (existingPath is null)
@@ -300,13 +313,17 @@ public static class DocsScaffolder
             return Write(
                 repoRoot,
                 $"{KyberWeaveYamlParser.DefaultDirectoryName}/{KyberWeaveYamlParser.DefaultFileName}",
-                HostConfig(docsRoot),
+                HostConfig(docsRoot, kyberStandards),
                 force: false);
         }
 
         string relativePath = Path.GetRelativePath(repoRoot, existingPath).Replace('\\', '/');
         string existing = File.ReadAllText(existingPath);
         string updated = HostConfigYaml.WithDocsRoot(existing, docsRoot);
+        if (kyberStandards)
+        {
+            updated = HostConfigYaml.WithTechnologies(updated, KyberStandardsTemplates.All);
+        }
 
         if (string.Equals(existing, updated, StringComparison.Ordinal))
         {
@@ -318,7 +335,11 @@ public static class DocsScaffolder
 
         File.WriteAllText(existingPath, updated);
         return new ScaffoldedFile(
-            relativePath, ScaffoldOutcome.Updated, "docs-root only; the rest of the file is untouched");
+            relativePath,
+            ScaffoldOutcome.Updated,
+            kyberStandards
+                ? "docs-root and technologies; the rest of the file is untouched"
+                : "docs-root only; the rest of the file is untouched");
     }
 
     /// <summary>
@@ -497,9 +518,21 @@ public static class DocsScaffolder
             relativePath, existed ? ScaffoldOutcome.Updated : ScaffoldOutcome.Created);
     }
 
-    private static string HostConfig(string docsRoot)
+    private static string HostConfig(string docsRoot, bool kyberStandards = false)
     {
         string yamlDocsRoot = HostConfigYaml.QuoteScalar(docsRoot);
+        string technologiesBlock;
+        if (kyberStandards)
+        {
+            technologiesBlock = "technologies:\n" + string.Join(
+                "\n",
+                KyberStandardsTemplates.All.Select(t => $"    - {t}"));
+        }
+        else
+        {
+            technologiesBlock = "technologies: []";
+        }
+
         return $"""
         # Kyber-Weave host configuration. Every ontology default is overridable here.
         # Reference: {docsRoot}/documentation-ontology.md
@@ -513,7 +546,7 @@ public static class DocsScaffolder
           # Technologies this repository declares a coding standard for. Adding one and
           # re-running 'docs init' creates {docsRoot}/standards/<technology>/, publishes its
           # registry property, and legalizes that value in the standard's 'technology' key.
-          technologies: []
+          {technologiesBlock}
 
         # Additions to the configuration registry rendered into AGENTS.md. Everything
         # 'docs init' creates is already published; name only what is yours.

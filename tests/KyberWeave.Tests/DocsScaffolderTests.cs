@@ -851,4 +851,104 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.Throws<InvalidDataException>(() => DocsScaffolder.Scaffold(_temp.Path, "docs"));
         Assert.Contains("Keep me.", Read("AGENTS.md"), StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Initializing with kyberStandards enabled on a fresh repository creates all 10 rich
+    /// coding standards from embedded templates, registers them in ontology.technologies
+    /// and AGENTS.md Config Reg, and passes docs validation cleanly.
+    /// </summary>
+    [Fact]
+    public void ScaffoldWithKyberStandardsOnFreshRepoScaffoldsAllTenRichStandardsAndUpdatesConfig()
+    {
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true);
+
+        // All 10 standards under <docs-root>/standards/<tech>/README.md are created
+        Assert.Equal(KyberStandardsTemplates.All.Count, KyberStandardsTemplates.All.Count(tech =>
+            result.Files.Any(f => f.RelativePath == $"{result.DocsRoot}/standards/{tech}/README.md"
+                && f.Outcome == ScaffoldOutcome.Created
+                && f.Written)));
+
+        // Contents match KyberStandardsTemplates.Render(tech, owner, date)
+        foreach (string tech in KyberStandardsTemplates.All)
+        {
+            string relativePath = $"{result.DocsRoot}/standards/{tech}/README.md";
+            string content = Read(relativePath);
+            string expected = KyberStandardsTemplates.Render(tech, "unassigned", today);
+            Assert.Equal(expected, content);
+        }
+
+        // .kyber-weave/kyber-weave.yml contains all 10 technologies under ontology.technologies
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        Assert.Equal(
+            KyberStandardsTemplates.All.OrderBy(t => t),
+            config.Ontology.Technologies.OrderBy(t => t));
+
+        string configYaml = Read(ConfigPath);
+        Assert.Contains("technologies:", configYaml, StringComparison.Ordinal);
+        foreach (string tech in KyberStandardsTemplates.All)
+        {
+            Assert.Contains($"- {tech}", configYaml, StringComparison.Ordinal);
+        }
+
+        // AGENTS.md Config Reg block has all 10 <{tech}-coding-standard> properties
+        string agents = Read("AGENTS.md");
+        foreach (string tech in KyberStandardsTemplates.All)
+        {
+            Assert.Contains(
+                $"- **<{tech}-coding-standard>**: `{result.DocsRoot}/standards/{tech}/README.md`",
+                agents,
+                StringComparison.Ordinal);
+        }
+
+        // Running DocSpecValidator.Validate yields 0 findings
+        DocumentSet set = new DocumentLoader(_temp.Path, config.Ontology).Load();
+        DiagnosticReport report = new DocSpecValidator(_temp.Path, config.Ontology).Validate(set);
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+        Assert.Equal(3 + DocsLayout.Folders.Count + KyberStandardsTemplates.All.Count, set.Documents.Count);
+    }
+
+    /// <summary>
+    /// Scaffolding with kyberStandards skips pre-existing standard files when force is false,
+    /// and overwrites them with the rich template when force is true.
+    /// </summary>
+    [Fact]
+    public void ScaffoldWithKyberStandardsSkipsExistingWithoutForceAndOverwritesWithForce()
+    {
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "docs", "standards", "csharp"));
+        const string customText =
+            """
+            ---
+            id: standards/csharp
+            title: Custom C# coding standard
+            doc-type: coding-standard
+            status: draft
+            technology: csharp
+            owner: custom-team
+            last-reviewed: 2026-08-01
+            ---
+
+            # Custom C# coding standard
+            Custom rules that must not be overwritten without --force.
+            """;
+        File.WriteAllText(Path.Combine(_temp.Path, "docs", "standards", "csharp", "README.md"), customText);
+
+        // Run without force -> Skipped, file untouched
+        ScaffoldResult result1 = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true, force: false);
+        ScaffoldedFile csharpFile1 = result1.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
+        Assert.Equal(ScaffoldOutcome.Skipped, csharpFile1.Outcome);
+        Assert.False(csharpFile1.Written);
+        Assert.Equal(customText, Read("docs/standards/csharp/README.md"));
+
+        // Run with force -> Updated, file overwritten with rich template
+        ScaffoldResult result2 = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true, force: true);
+        ScaffoldedFile csharpFile2 = result2.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
+        Assert.Equal(ScaffoldOutcome.Updated, csharpFile2.Outcome);
+        Assert.True(csharpFile2.Written);
+        string overwrittenText = Read("docs/standards/csharp/README.md");
+        Assert.NotEqual(customText, overwrittenText);
+        Assert.Equal(KyberStandardsTemplates.Render("csharp", "unassigned", today), overwrittenText);
+    }
 }

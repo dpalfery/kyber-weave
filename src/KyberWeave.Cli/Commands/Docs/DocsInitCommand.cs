@@ -70,7 +70,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         try
         {
             ScaffoldResult result = DocsScaffolder.Scaffold(
-                settings.Path, settings.DocsRoot, settings.Owner, settings.Force);
+                settings.Path,
+                settings.DocsRoot,
+                settings.Owner,
+                settings.Force,
+                settings.KyberStandards);
             return (0, result, null);
         }
         catch (Exception ex) when (ex is

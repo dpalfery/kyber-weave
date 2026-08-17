@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-17
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -138,6 +138,11 @@ Declaring one and re-running `docs init`:
 1. creates `<docs-root>/standards/<technology>/` with a standard to fill in;
 2. publishes `<technology-coding-standard>` in the configuration registry;
 3. legalizes `technology: <technology>` in that standard's frontmatter.
+
+Passing `--kyber-standards` to `kyber-weave docs init` seeds all 10 Kyber Squad rich coding
+standards templates (`csharp`, `test`, `react`, `python`, `pulumi`, `maui`, `data-access-layer`,
+`sql`, `azure`, `github-actions`), merges them into `ontology.technologies`, and registers
+their paths in Config Reg.
 
 One list, so the three cannot disagree — a standard whose folder, registry property and
 frontmatter came from separate sources is one that drifts the first time a name changes. A
