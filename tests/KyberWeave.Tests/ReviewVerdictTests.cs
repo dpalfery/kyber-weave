@@ -186,7 +186,7 @@ public class ReviewVerdictTests
         Assert.Contains(expectedMissing, dropped.Reason, StringComparison.Ordinal);
         Assert.Contains(
             outcome.Diagnostics,
-            d => d.Code == VerdictEngine.IncompleteFinding && d.Subject == "correctness");
+            d => d is { Code: VerdictEngine.IncompleteFinding, Subject: "correctness" });
     }
 
     [Fact]
@@ -259,7 +259,7 @@ public class ReviewVerdictTests
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
         Assert.Contains(
             outcome.Diagnostics,
-            d => d.Code == VerdictEngine.CoverageBelowFloor && d.Severity == Severity.Warning);
+            d => d is { Code: VerdictEngine.CoverageBelowFloor, Severity: Severity.Warning });
     }
 
     [Fact]

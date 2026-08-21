@@ -13,7 +13,7 @@ namespace KyberWeave.Core.Agents.Validation;
 public static class AgentSyncLinter
 {
     public const string RuleUnsatisfiedRole = "KW-AGENT-SYNC-001";
-    public const string RuleInstructionDrift = "KW-AGENT-SYNC-002";
+    private const string RuleInstructionDrift = "KW-AGENT-SYNC-002";
     public const string RuleLowRoutingScore = "KW-AGENT-LINT-001";
     public const string RuleMissingTriggerPhrasing = "KW-AGENT-LINT-002";
 

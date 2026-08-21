@@ -95,27 +95,28 @@ public sealed class GlossaryGraphExportTests
         Assert.Contains("collision", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static TheoryData<ManagedGlossaryLoadResult> CollidingGlossaries() => new()
-    {
-        CreateLoad(
-            Term("run loop", Sense("run-cycle-a")),
-            Term("run-loop", Sense("run-cycle-b"))),
-        CreateLoad(
-            Term("loop", Sense("loop-primary", aliases: ["agent loop"])),
-            Term("agent-loop", Sense("loop-agent"))),
-        CreateLoad(
-            Term("loop", Sense("shared-sense")),
-            Term("cycle", Sense("shared-sense")))
-    };
+    public static TheoryData<ManagedGlossaryLoadResult> CollidingGlossaries() =>
+        new TheoryData<ManagedGlossaryLoadResult>
+        {
+            CreateLoad(
+                Term("run loop", Sense("run-cycle-a")),
+                Term("run-loop", Sense("run-cycle-b"))),
+            CreateLoad(
+                Term("loop", Sense("loop-primary", aliases: ["agent loop"])),
+                Term("agent-loop", Sense("loop-agent"))),
+            CreateLoad(
+                Term("loop", Sense("shared-sense")),
+                Term("cycle", Sense("shared-sense")))
+        };
 
     [Fact]
     public void ConstructorSnapshotsOuterAndNestedGlossaryCollections()
     {
-        List<string> scopes = new List<string> { "component:Gameplay" };
-        List<string> aliases = new List<string> { "gameplay loop" };
-        List<string> evidence = new List<string> { "claim-gameplay" };
-        List<GlossarySense> senses = new List<GlossarySense>
-        {
+        List<string> scopes = ["component:Gameplay"];
+        List<string> aliases = ["gameplay loop"];
+        List<string> evidence = ["claim-gameplay"];
+        List<GlossarySense> senses =
+        [
             new(
                 "loop-gameplay",
                 GlossarySenseStatus.Approved,
@@ -123,8 +124,8 @@ public sealed class GlossaryGraphExportTests
                 scopes,
                 aliases,
                 evidence)
-        };
-        List<GlossaryLookupResult> terms = new List<GlossaryLookupResult> { new("loop", senses) };
+        ];
+        List<GlossaryLookupResult> terms = [new("loop", senses)];
         ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(
             new ManagedGlossaryLoadResult(new AnalysisGlossary([]), terms));
 

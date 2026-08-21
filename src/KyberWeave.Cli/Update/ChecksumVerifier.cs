@@ -58,9 +58,9 @@ internal static class ChecksumVerifier
     {
         foreach (char c in value)
         {
-            bool ok = (c >= '0' && c <= '9')
-                || (c >= 'a' && c <= 'f')
-                || (c >= 'A' && c <= 'F');
+            bool ok = c is (>= '0' and <= '9')
+                or (>= 'a' and <= 'f')
+                or (>= 'A' and <= 'F');
             if (!ok)
                 return false;
         }

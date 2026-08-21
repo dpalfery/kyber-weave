@@ -874,15 +874,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         Transaction(fixture.Path, observer).Execute(fixture.CreateUpdatePlan());
 
-        SquadTransactionStepKind[] expected = new[]
-        {
+        SquadTransactionStepKind[] expected =
+        [
             SquadTransactionStepKind.IntentWritten,
             SquadTransactionStepKind.FileStaged,
             SquadTransactionStepKind.FileBackedUp,
             SquadTransactionStepKind.FileApplied,
             SquadTransactionStepKind.LockApplied,
             SquadTransactionStepKind.ReceiptApplied
-        };
+        ];
         Assert.Equal(expected, Enum.GetValues<SquadTransactionStepKind>());
         Assert.Equal(expected, observer.Steps.Select(step => step.Kind));
         Assert.Equal(
@@ -2033,18 +2033,18 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     {
         using TransactionFixture fixture = TransactionFixture.Create();
         SquadStateStore store = Store(fixture.Path);
-        SquadLock[] locks = new[]
-        {
+        SquadLock[] locks =
+        [
             Lock(),
             Lock() with { Targets = [], Exclusions = [] }
-        };
+        ];
         foreach (SquadLock squadLock in locks)
             AssertLockEqual(squadLock, store.DeserializeLock(store.SerializeLock(squadLock)));
 
         foreach (SquadDeploymentScope scope in Enum.GetValues<SquadDeploymentScope>())
         {
-            SquadReceipt[] receipts = new[]
-            {
+            SquadReceipt[] receipts =
+            [
                 fixture.Receipt with { Scope = scope },
                 fixture.Receipt with
                 {
@@ -2052,7 +2052,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     Degradations = [],
                     Files = []
                 }
-            };
+            ];
             foreach (SquadReceipt receipt in receipts)
             {
                 string serialized = store.SerializeReceipt(receipt);
@@ -2663,7 +2663,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             fixturePath,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
                 observer.InterruptedTreeSnapshot));
-        File.WriteAllBytes(scenario.ArtifactPath, Encoding.UTF8.GetBytes("corrupt restore evidence"));
+        File.WriteAllBytes(scenario.ArtifactPath, "corrupt restore evidence"u8.ToArray());
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
         SquadTransaction recoveryTransaction = Transaction(fixturePath);
 
@@ -2743,17 +2743,17 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "conductor",
             "role-skill-fallback");
         SquadReceipt valid = Receipt(validFile) with { Degradations = [validDegradation] };
-        List<(string Name, SquadReceipt Receipt)> invalidReceipts = new List<(string Name, SquadReceipt Receipt)>
-        {
+        List<(string Name, SquadReceipt Receipt)> invalidReceipts =
+        [
             ("null file entry", valid with
             {
-                Files = new SquadOwnedFile[] { null! }
+                Files = [null!]
             }),
             ("null degradation entry", valid with
             {
-                Degradations = new SquadDegradation[] { null! }
+                Degradations = [null!]
             })
-        };
+        ];
         string?[] blankValues = [null, string.Empty, " \t\r\n", "\u00a0\u2003"];
         foreach (string? blank in blankValues)
         {
@@ -2777,7 +2777,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         string[] noncanonicalTargets = SquadTargetCatalog.All
             .Select(SquadTargetCatalog.GetToken)
-            .SelectMany(token => NoncanonicalCaseVariants(token))
+            .SelectMany(NoncanonicalCaseVariants)
             .Concat(["github-copilot", "factory-droids", "unknown-target"])
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -3385,14 +3385,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     Path.Combine(transactionDirectory, "backups"),
                     targetRelativePath),
                 targetRelativePath,
-                Encoding.UTF8.GetBytes("updated body")),
+                "updated body"u8.ToArray()),
             "target-link-metadata" => (
                 SquadTransactionStepKind.FileApplied,
                 ToPlatformPath(
                     Path.Combine(transactionDirectory, "links"),
                     targetRelativePath),
                 targetRelativePath,
-                Encoding.UTF8.GetBytes("updated body")),
+                "updated body"u8.ToArray()),
             "lock-original" => (
                 SquadTransactionStepKind.LockApplied,
                 Path.Combine(transactionDirectory, "state-originals", "lock"),
@@ -3578,8 +3578,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false));
             WriteState(root, Lock(), receipt);
             SquadDeploymentFile[] rendered = scenario == "file-write"
-                ? new[] { Rendered(relativePath, "updated file body") }
-                : Array.Empty<SquadDeploymentFile>();
+                ? [Rendered(relativePath, "updated file body")]
+                : [];
             return new ActiveTransitionScenario(
                 SquadDeploymentPlan.CreateUpdate(
                     root,
@@ -3611,8 +3611,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 false));
             WriteState(root, Lock(), receipt);
             SquadDeploymentFile[] rendered = scenario == "link-write"
-                ? new[] { Rendered(relativePath, "updated link body") }
-                : Array.Empty<SquadDeploymentFile>();
+                ? [Rendered(relativePath, "updated link body")]
+                : [];
             return new ActiveTransitionScenario(
                 SquadDeploymentPlan.CreateUpdate(
                     root,
@@ -3908,7 +3908,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 break;
             case "well-digested-unexpected":
                 const string unexpectedPath = "unexpected-authority.bin";
-                byte[] unexpectedBytes = Encoding.UTF8.GetBytes("well-digested but undeclared");
+                byte[] unexpectedBytes = "well-digested but undeclared"u8.ToArray();
                 File.WriteAllBytes(Path.Combine(transactionDirectory, unexpectedPath), unexpectedBytes);
                 JsonObject unexpected = Assert.IsType<JsonObject>(first.DeepClone());
                 unexpected["area"] = "journal";

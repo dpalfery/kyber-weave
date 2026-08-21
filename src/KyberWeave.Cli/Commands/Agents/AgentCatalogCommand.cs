@@ -34,7 +34,7 @@ public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
 
         foreach ((string role, Dictionary<HarnessKind, AgentModel> harnessMap) in matrix.OrderBy(m => m.Key))
         {
-            List<string> row = new List<string> { $"[bold]{Markup.Escape(role)}[/]" };
+            List<string> row = [$"[bold]{Markup.Escape(role)}[/]"];
 
             foreach ((HarnessKind harnessKind, HarnessCapabilityProfile profile) in profiles)
             {

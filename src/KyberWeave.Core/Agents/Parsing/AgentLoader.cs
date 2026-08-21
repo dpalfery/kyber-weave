@@ -30,11 +30,11 @@ public static class AgentLoader
     public static AgentSet LoadAll(string projectRoot, HarnessKind? harnessFilter = null)
     {
         IReadOnlyList<AgentLoadResult> results = LoadResults(projectRoot, harnessFilter);
-        List<AgentModel> validAgents = results.Where(r => r.Success && r.Agent is not null).Select(r => r.Agent!).ToList();
+        List<AgentModel> validAgents = results.Where(r => r is { Success: true, Agent: not null }).Select(r => r.Agent!).ToList();
         return new AgentSet(validAgents);
     }
 
-    public static IReadOnlyList<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
+    private static IReadOnlyList<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
     {
         List<AgentLoadResult> results = new List<AgentLoadResult>();
         string fullRoot = Path.GetFullPath(projectRoot);
@@ -107,9 +107,7 @@ public static class AgentLoader
             if (!Directory.Exists(agentsDir))
                 continue;
 
-            HarnessKind kind = FolderToHarness.TryGetValue(folderName, out HarnessKind mapped)
-                ? mapped
-                : HarnessKind.Custom;
+            HarnessKind kind = FolderToHarness.GetValueOrDefault(folderName, HarnessKind.Custom);
 
             found.Add((agentsDir, kind, folderName));
         }

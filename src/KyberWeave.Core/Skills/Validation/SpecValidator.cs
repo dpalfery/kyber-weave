@@ -11,12 +11,12 @@ namespace KyberWeave.Core.Skills.Validation;
 /// </summary>
 public static partial class SpecValidator
 {
-    public const int NameMaxLength = 64;
+    private const int NameMaxLength = 64;
     public const int DescriptionMaxLength = 1024;
-    public const int CompatibilityMaxLength = 500;
+    private const int CompatibilityMaxLength = 500;
 
     // lowercase letters, digits, single hyphens; no leading/trailing/consecutive hyphens
-    [GeneratedRegex(@"^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.None, matchTimeoutMilliseconds: 2000)]
+    [GeneratedRegex("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.None, matchTimeoutMilliseconds: 2000)]
     private static partial Regex NamePattern();
 
     public static IEnumerable<Diagnostic> Validate(Skill skill)

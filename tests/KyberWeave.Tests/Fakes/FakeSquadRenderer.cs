@@ -11,7 +11,7 @@ namespace KyberWeave.Tests.Fakes;
 /// </summary>
 public sealed class FakeSquadRenderer : ISquadRenderer
 {
-    public static readonly IReadOnlyList<string> CanonicalAgents =
+    private static readonly IReadOnlyList<string> CanonicalAgents =
     [
         "architect",
         "architect-v3",
@@ -35,7 +35,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "test-dev"
     ];
 
-    public static readonly IReadOnlyList<string> CanonicalSkills =
+    private static readonly IReadOnlyList<string> CanonicalSkills =
     [
         "app-docs-standard",
         "architecture-decision-record",
@@ -64,13 +64,13 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "test-dev"
     ];
 
-    public static readonly IReadOnlyList<string> SharedConductorIdentities =
+    private static readonly IReadOnlyList<string> SharedConductorIdentities =
     [
         "conductor",
         "conductor-v3"
     ];
 
-    public static readonly IReadOnlyList<string> DistinctBodyCollisionIdentities =
+    private static readonly IReadOnlyList<string> DistinctBodyCollisionIdentities =
     [
         "csharp-dev",
         "dal-dev",
@@ -300,7 +300,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
             Errors: errors));
     }
 
-    public static string ComputeSha256(string utf8LfText)
+    private static string ComputeSha256(string utf8LfText)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(utf8LfText.Replace("\r\n", "\n", StringComparison.Ordinal));
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
@@ -325,7 +325,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         return Encoding.UTF8.GetBytes($"---\nname: {name}\ndescription: Native agent for {name}.\n---\n{body}");
     }
 
-    public static string GetTargetAgentFilePath(SquadTarget target, string agentName) => target switch
+    private static string GetTargetAgentFilePath(SquadTarget target, string agentName) => target switch
     {
         SquadTarget.Codex => $".codex/agents/{agentName}.toml",
         SquadTarget.Cursor => $".cursor/agents/{agentName}.md",
@@ -337,7 +337,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         _ => throw new ArgumentException($"Target {target} does not have a native agent file path.", nameof(target))
     };
 
-    public static string GetTargetSkillFilePath(SquadTarget target, string skillName) => target switch
+    private static string GetTargetSkillFilePath(SquadTarget target, string skillName) => target switch
     {
         SquadTarget.Codex => $".codex/skills/{skillName}/SKILL.md",
         SquadTarget.Cursor => $".cursor/skills/{skillName}/SKILL.md",

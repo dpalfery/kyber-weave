@@ -45,7 +45,7 @@ public sealed partial class ClaimExtractor
                 case FencedCodeBlock code:
                     AddCodeClaim(claims, code, document, markdown, sections, ignoreRead.Intervals);
                     break;
-                case TableRow row when !row.IsHeader:
+                case TableRow { IsHeader: false } row:
                     AddTableClaim(claims, row, document, markdown, sections, ignoreRead.Intervals);
                     break;
                 case ListItemBlock item:

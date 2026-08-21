@@ -388,25 +388,13 @@ public sealed class CopilotRenderer : ISquadRenderer
     /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through
     /// <see cref="CopilotToolsFlowSequenceConverter"/>.
     /// </summary>
-    private sealed class CopilotToolsFlowSequence : List<string>
-    {
-        public CopilotToolsFlowSequence(IEnumerable<string> tools)
-            : base(tools)
-        {
-        }
-    }
+    private sealed class CopilotToolsFlowSequence(IEnumerable<string> tools) : List<string>(tools);
 
     /// <summary>
     /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through
     /// <see cref="CopilotAgentsFlowSequenceConverter"/>.
     /// </summary>
-    private sealed class CopilotAgentsFlowSequence : List<string>
-    {
-        public CopilotAgentsFlowSequence(IEnumerable<string> agents)
-            : base(agents)
-        {
-        }
-    }
+    private sealed class CopilotAgentsFlowSequence(IEnumerable<string> agents) : List<string>(agents);
 
     /// <summary>
     /// Serializes the delegation roster as an inline YAML flow sequence of single-quoted

@@ -6,7 +6,7 @@ namespace KyberWeave.Core.Configuration;
 public static class ConfigRegConfigLoader
 {
     /// <summary>Key name as an operator wrote it, so diagnostics name the real line.</summary>
-    internal const string SectionKey = "config-reg";
+    private const string SectionKey = "config-reg";
 
     internal static ConfigRegConfig Merge(ConfigRegConfig defaults, Dictionary<string, string>? section)
     {

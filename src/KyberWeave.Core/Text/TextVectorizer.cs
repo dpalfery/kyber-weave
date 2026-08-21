@@ -35,7 +35,7 @@ public static partial class TextVectorizer
     /// discards: "Web UI" and "WebUI" are the same subject, and only a caller that can
     /// see the two tokens were neighbours can recover that.
     /// </summary>
-    public static IReadOnlyList<string> Tokenize(string text)
+    private static IReadOnlyList<string> Tokenize(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
 
@@ -99,6 +99,6 @@ public static partial class TextVectorizer
 
     public static double Similarity(string left, string right) =>
         CosineSimilarity(Vectorize(left), Vectorize(right));
-    [GeneratedRegex(@"[a-z0-9]+", RegexOptions.Compiled)]
+    [GeneratedRegex("[a-z0-9]+", RegexOptions.Compiled)]
     private static partial Regex MyRegex();
 }

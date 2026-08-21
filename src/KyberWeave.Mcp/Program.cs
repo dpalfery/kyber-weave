@@ -87,8 +87,10 @@ static string ResolveRepoRoot(string[] args)
 static OntologyConfig ResolveOntology(string repoRoot)
 {
     KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
-    if (loaded.Success && loaded.Config is not null)
+    if (loaded is { Success: true, Config: not null })
+    {
         return loaded.Config.Ontology;
+    }
 
     // stderr, never stdout: stdout is the JSON-RPC transport.
     Console.Error.WriteLine(

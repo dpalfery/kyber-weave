@@ -546,8 +546,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
             onStagingCreated?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
 
-            using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
-            using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+            await using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
+            await using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
 
             for (int index = 0; index < archive.Entries.Count; index++)
             {

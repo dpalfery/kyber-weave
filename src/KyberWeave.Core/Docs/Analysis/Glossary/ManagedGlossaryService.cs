@@ -150,8 +150,7 @@ public sealed class ManagedGlossaryService
     /// <summary>Returns all senses for a term using case-insensitive term matching.</summary>
     public GlossaryLookupResult Lookup(string term) => Lookup(term, Load());
 
-    /// <summary>Returns all senses for a term from preloaded glossary data using case-insensitive term matching.</summary>
-    public static GlossaryLookupResult Lookup(string term, ManagedGlossaryLoadResult loaded)
+    private static GlossaryLookupResult Lookup(string term, ManagedGlossaryLoadResult loaded)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
         ArgumentNullException.ThrowIfNull(loaded);
@@ -334,7 +333,7 @@ public sealed class ManagedGlossaryService
 
     private static IReadOnlyList<string> NewTermSection(string term, IReadOnlyList<GlossaryProposal> proposals)
     {
-        List<string> lines = new List<string> { $"## {term}", string.Empty, Header, Separator };
+        List<string> lines = [$"## {term}", string.Empty, Header, Separator];
         foreach (GlossaryProposal proposal in proposals)
         {
             string id = SenseId(proposal);
@@ -841,12 +840,12 @@ public sealed class ManagedGlossaryService
             .Order(StringComparer.Ordinal)
             .Select(evidenceId => $"- {EscapeEvidence(evidenceId)}")
             .ToArray();
-        List<string> lines = new List<string>
-        {
-            $"{EvidenceStart} sense=\"{EscapeAttribute(id)}\" fingerprint=\"{OwnershipFingerprint(row, evidenceLines)}\" -->"
-        };
-        lines.AddRange(evidenceLines);
-        lines.Add(EvidenceEnd);
+        List<string> lines =
+        [
+            $"{EvidenceStart} sense=\"{EscapeAttribute(id)}\" fingerprint=\"{OwnershipFingerprint(row, evidenceLines)}\" -->",
+            .. evidenceLines,
+            EvidenceEnd
+        ];
         return lines;
     }
 

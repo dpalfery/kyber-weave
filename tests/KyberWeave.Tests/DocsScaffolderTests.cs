@@ -334,7 +334,7 @@ public sealed class DocsScaffolderTests : IDisposable
             File.ReadAllLines(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore")),
             line => StringComparer.Ordinal.Equals(line, "cache/"));
         Assert.All(
-            new[] { first, second },
+            [first, second],
             result => Assert.Equal(
                 ScaffoldOutcome.Preserved,
                 result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore").Outcome));
@@ -785,7 +785,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.Contains(ConfigRegMarkdown.StartMarker, agents, StringComparison.Ordinal);
         Assert.Contains("- **<docs-root>**: `docs`", agents, StringComparison.Ordinal);
         Assert.Contains("- **<component-catalog>**: `docs/catalog.md`", agents, StringComparison.Ordinal);
-        Assert.Contains(result.Files, f => f.RelativePath == "AGENTS.md" && f.Outcome == ScaffoldOutcome.Created);
+        Assert.Contains(result.Files, f => f is { RelativePath: "AGENTS.md", Outcome: ScaffoldOutcome.Created });
     }
 
     /// <summary>
@@ -829,7 +829,7 @@ public sealed class DocsScaffolderTests : IDisposable
         ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path, "docs");
 
         Assert.Equal(first, Read("AGENTS.md"));
-        Assert.Contains(second.Files, f => f.RelativePath == "AGENTS.md" && f.Outcome == ScaffoldOutcome.Preserved);
+        Assert.Contains(second.Files, f => f is { RelativePath: "AGENTS.md", Outcome: ScaffoldOutcome.Preserved });
     }
 
     /// <summary>
@@ -886,8 +886,7 @@ public sealed class DocsScaffolderTests : IDisposable
         // All 10 standards under <docs-root>/standards/<tech>/README.md are created
         Assert.Equal(KyberStandardsTemplates.All.Count, KyberStandardsTemplates.All.Count(tech =>
             result.Files.Any(f => f.RelativePath == $"{result.DocsRoot}/standards/{tech}/README.md"
-                && f.Outcome == ScaffoldOutcome.Created
-                && f.Written)));
+                && f is { Outcome: ScaffoldOutcome.Created, Written: true })));
 
         // Contents match KyberStandardsTemplates.Render(tech, owner, date)
         foreach (string tech in KyberStandardsTemplates.All)

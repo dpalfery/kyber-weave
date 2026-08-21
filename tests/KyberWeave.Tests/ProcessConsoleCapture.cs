@@ -8,7 +8,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 internal static class ProcessConsoleCapture
 {
-    private static readonly object Gate = new();
+    private static readonly Lock Gate = new();
 
     public static CapturedConsoleExecution<T> Run<T>(Func<T> execute)
     {

@@ -109,8 +109,8 @@ public class AgentGovernanceTests
     [Fact]
     public void AgentSyncLinterSatisfiesMappedSkillRolesLikeConductor()
     {
-        List<AgentModel> agents = new List<AgentModel>
-        {
+        List<AgentModel> agents =
+        [
             new AgentModel
             {
                 RoleName = "conductor",
@@ -120,13 +120,13 @@ public class AgentGovernanceTests
                 Description = "Orchestrates multi-agent tasks.",
                 InstructionsBody = "Orchestrate work."
             }
-        };
+        ];
 
         AgentSet set = new AgentSet(agents);
         DiagnosticReport report = AgentSyncLinter.LintSet(set, "/tmp");
 
         // Conductor is mapped as a skill for Claude/Cursor/Antigravity/Codex, so role satisfaction should not fail for them if skills exist
-        List<Diagnostic> missingErrors = report.Items.Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor").ToList();
+        List<Diagnostic> missingErrors = report.Items.Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" }).ToList();
         Assert.NotNull(missingErrors);
     }
 
@@ -145,7 +145,7 @@ public class AgentGovernanceTests
 
         DiagnosticReport report = AgentPromptScanner.Scan(agent);
         Assert.Contains(report.Items, i => i.Code == AgentPromptScanner.RuleHardcodedSecret);
-        Assert.Contains(report.Items, i => i.Code == AgentPromptScanner.RuleHardcodedSecret && i.Severity == Severity.Critical);
+        Assert.Contains(report.Items, i => i is { Code: AgentPromptScanner.RuleHardcodedSecret, Severity: Severity.Critical });
     }
 
     [Fact]
@@ -232,8 +232,8 @@ public class AgentGovernanceTests
     [Fact]
     public void AgentRoutingEvaluatorRoutesPromptToBestAgent()
     {
-        List<AgentModel> agents = new List<AgentModel>
-        {
+        List<AgentModel> agents =
+        [
             new AgentModel
             {
                 RoleName = "csharp-dev",
@@ -252,7 +252,7 @@ public class AgentGovernanceTests
                 Description = "Use when writing Python code and local processing services.",
                 InstructionsBody = "Write clean Python."
             }
-        };
+        ];
 
         AgentSet set = new AgentSet(agents);
         AgentRoutingResult result = AgentRoutingEvaluator.Route("Build an ASP.NET Core API in C#", set);
@@ -287,7 +287,7 @@ public class AgentSyncLinterTests
     public void LintSetWhenAgentDescriptionIsActionOnlyEmitsKwAgentLint002Warning(string description)
     {
         AgentModel agent = CreateAgent(description);
-        AgentSet agentSet = new AgentSet(new[] { agent });
+        AgentSet agentSet = new AgentSet([agent]);
 
         DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp");
 
@@ -308,7 +308,7 @@ public class AgentSyncLinterTests
     public void LintSetWhenAgentDescriptionHasTriggerPhrasingDoesNotEmitKwAgentLint002(string description)
     {
         AgentModel agent = CreateAgent(description);
-        AgentSet agentSet = new AgentSet(new[] { agent });
+        AgentSet agentSet = new AgentSet([agent]);
 
         DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp");
 
@@ -333,7 +333,7 @@ public class AgentSpecValidatorTests
 
         DiagnosticReport report = AgentSpecValidator.Validate(agent);
 
-        Assert.Contains(report.Items, d => d.Code == AgentSpecValidator.RuleMissingName && d.Severity == Severity.Error);
+        Assert.Contains(report.Items, d => d is { Code: AgentSpecValidator.RuleMissingName, Severity: Severity.Error });
     }
 
     [Fact]
@@ -351,7 +351,7 @@ public class AgentSpecValidatorTests
 
         DiagnosticReport report = AgentSpecValidator.Validate(agent);
 
-        Assert.Contains(report.Items, d => d.Code == AgentSpecValidator.RuleMissingDescription && d.Severity == Severity.Warning);
+        Assert.Contains(report.Items, d => d is { Code: AgentSpecValidator.RuleMissingDescription, Severity: Severity.Warning });
     }
 
     [Fact]
@@ -369,6 +369,6 @@ public class AgentSpecValidatorTests
 
         DiagnosticReport report = AgentSpecValidator.Validate(agent);
 
-        Assert.Contains(report.Items, d => d.Code == AgentSpecValidator.RuleMissingInstructions && d.Severity == Severity.Error);
+        Assert.Contains(report.Items, d => d is { Code: AgentSpecValidator.RuleMissingInstructions, Severity: Severity.Error });
     }
 }

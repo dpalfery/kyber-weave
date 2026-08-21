@@ -183,7 +183,7 @@ internal static partial class HostConfigYaml
             return false;
         }
 
-        List<string> parts = new List<string> { value };
+        List<string> parts = [value];
         for (int i = keyIndex + 1; i < lines.Count && depth > 0; i++)
         {
             parts.Add(lines[i]);
@@ -674,10 +674,10 @@ internal static partial class HostConfigYaml
             insertIndex--;
         }
 
-        List<string> toInsert = new List<string>
-        {
+        List<string> toInsert =
+        [
             blockIndent + "technologies:"
-        };
+        ];
 
         string itemIndent = blockIndent + DefaultIndent;
         foreach (string tech in technologies.Distinct(StringComparer.Ordinal))

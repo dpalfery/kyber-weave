@@ -53,7 +53,7 @@ public sealed class EmbeddingClientTests
             batchSize: 2,
             dimensions: 2,
             apiKeyEnv: "LOCAL_EMBEDDING_TOKEN");
-        EmbeddingCacheKey[] keys = new[] { Key("alpha"), Key("beta"), Key("gamma") };
+        EmbeddingCacheKey[] keys = [Key("alpha"), Key("beta"), Key("gamma")];
 
         EmbeddingGenerationResult result = generator.Generate(keys, ["first input", "second input", "third input"], config);
 

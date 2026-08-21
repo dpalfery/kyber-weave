@@ -87,7 +87,7 @@ internal static class DocsRootPath
         && path[1] == ':';
 
     /// <summary>Canonicalizes one documentation root, which may be the repository itself.</summary>
-    public static string NormalizeRoot(string value, string key)
+    private static string NormalizeRoot(string value, string key)
     {
         string root = Normalize(value, key);
         return root.Length == 0 ? RepositoryRoot : root;

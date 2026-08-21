@@ -130,7 +130,7 @@ public class MotorcycleRagHostProfileTests
         DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config.Harness);
 
         List<Diagnostic> conductorMissing = report.Items
-            .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
+            .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
             .ToList();
 
         Assert.DoesNotContain(
@@ -204,7 +204,7 @@ public class MotorcycleRagHostProfileTests
 
     private sealed class HostProfileDocFixture : IDisposable
     {
-        public string Root { get; }
+        private string Root { get; }
         private readonly KyberWeaveConfig _config;
 
         public HostProfileDocFixture(KyberWeaveConfig config)

@@ -459,7 +459,7 @@ public static class SquadSourceLoader
     private static SquadAgent ParseAgent(SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
-        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml), frontmatter.LineOffset);
+        YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
             ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "delegates-to", "fallback", "aliases"],
@@ -542,7 +542,7 @@ public static class SquadSourceLoader
     private static SquadSkill ParseSkill(SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
-        YamlMappingNode root = ParseYamlMapping(new SourceFile(file.RelativePath, frontmatter.Yaml), frontmatter.LineOffset);
+        YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
             ["name", "description", "license", "compatibility", "metadata", "allowed-tools"],

@@ -201,7 +201,7 @@ public class MultipleDocsRootTests : IDisposable
         DiagnosticReport report = Validate(MultiRootConfig);
 
         Assert.Contains(report.Items, i =>
-            i.FilePath == "lab/README.md" && i.Code == DocSpecValidator.UnknownCatalogValue);
+            i is { FilePath: "lab/README.md", Code: DocSpecValidator.UnknownCatalogValue });
         Assert.DoesNotContain(report.Items, i => i.FilePath == "automation/README.md");
     }
 
@@ -295,7 +295,7 @@ public class MultipleDocsRootTests : IDisposable
 
         // 'Automation' exists only in the second root's table, which supplies nothing.
         Assert.Contains(report.Items, i =>
-            i.FilePath == "automation/thing.md" && i.Code == DocSpecValidator.UnknownCatalogValue);
+            i is { FilePath: "automation/thing.md", Code: DocSpecValidator.UnknownCatalogValue });
     }
 
     [Fact]
@@ -323,7 +323,7 @@ public class MultipleDocsRootTests : IDisposable
 
         Assert.Contains(documents, d => d.RelativePath == ".kyber-weave/catalog.md");
         Assert.Contains(Validate(config).Items, i =>
-            i.FilePath == ".kyber-weave/catalog.md" && i.Code == DocSpecValidator.UnknownCatalogValue);
+            i is { FilePath: ".kyber-weave/catalog.md", Code: DocSpecValidator.UnknownCatalogValue });
     }
 
     [Fact]

@@ -96,14 +96,9 @@ public sealed class RouteCommand : Command<RouteSettings>
         }
 
         AnsiConsole.MarkupLine($"Prompt: [italic]\"{Markup.Escape(settings.Prompt!)}\"[/]");
-        if (result.Fired)
-        {
-            AnsiConsole.MarkupLine($"Would fire: [green bold]{Markup.Escape(result.SelectedSkill!)}[/] (margin over runner-up: {result.Margin:F3})");
-        }
-        else
-        {
-            AnsiConsole.MarkupLine($"[yellow]No skill clears the fire threshold ({strategy.Name} @ {settings.Threshold}).[/]");
-        }
+        AnsiConsole.MarkupLine(result.Fired
+            ? $"Would fire: [green bold]{Markup.Escape(result.SelectedSkill!)}[/] (margin over runner-up: {result.Margin:F3})"
+            : $"[yellow]No skill clears the fire threshold ({strategy.Name} @ {settings.Threshold}).[/]");
 
         Table table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Rank"); table.AddColumn("Skill"); table.AddColumn("Score");

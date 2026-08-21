@@ -203,7 +203,7 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
             {
                 // The measurement completed normally.
             }
-        });
+        }, cancellationToken);
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         Stopwatch stopwatch = Stopwatch.StartNew();
         T value = action();

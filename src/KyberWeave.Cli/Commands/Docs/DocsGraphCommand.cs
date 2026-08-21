@@ -38,11 +38,10 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
             return 1;
         }
 
-        ManagedGlossaryLoadResult glossary;
         ManagedGlossaryGraphContributor glossaryContributor;
         try
         {
-            glossary = new ManagedGlossaryService(
+            ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
                 settings.Path,
                 config,
                 TimeProvider.System).Load();

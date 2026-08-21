@@ -3,14 +3,9 @@ namespace KyberWeave.Core.Agents.Model;
 /// <summary>
 /// A collection of agents discovered across all coding harness directories in a project.
 /// </summary>
-public sealed class AgentSet
+public sealed class AgentSet(IEnumerable<AgentModel> agents)
 {
-    private readonly List<AgentModel> _agents;
-
-    public AgentSet(IEnumerable<AgentModel> agents)
-    {
-        _agents = agents.ToList();
-    }
+    private readonly List<AgentModel> _agents = agents.ToList();
 
     public IReadOnlyList<AgentModel> Agents => _agents;
     public int Count => _agents.Count;

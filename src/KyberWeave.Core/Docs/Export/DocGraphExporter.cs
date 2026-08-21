@@ -15,16 +15,11 @@ namespace KyberWeave.Core.Docs.Export;
 /// export carries document nodes and the document-to-code join edges only. An external
 /// ingester consumes it alongside the CodeGraph index, not instead of it.
 /// </remarks>
-public sealed class DocGraphExporter
+public sealed class DocGraphExporter(ICodeGraphResolver resolver)
 {
     private static readonly JsonSerializerOptions Compact = new() { WriteIndented = false };
 
-    private readonly ICodeGraphResolver _resolver;
-
-    public DocGraphExporter(ICodeGraphResolver resolver)
-    {
-        _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
-    }
+    private readonly ICodeGraphResolver _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
 
     public DocGraphExportResult Export(DocumentSet set, string outputDirectory)
         => Export(set, outputDirectory, contributors: null);

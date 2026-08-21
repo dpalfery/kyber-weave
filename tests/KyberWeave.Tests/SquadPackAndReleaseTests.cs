@@ -558,7 +558,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        public void Write(string relativePath, string content)
+        private void Write(string relativePath, string content)
         {
             string fullPath = System.IO.Path.Combine(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);

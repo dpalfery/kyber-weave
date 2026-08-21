@@ -46,11 +46,11 @@ public class RoutingTests
     private static Skill Make(string name, string description, string dir) =>
         SkillParser.Parse($"---\nname: {name}\ndescription: {description}\n---\n\nbody", $"{dir}/SKILL.md", dir);
 
-    private static SkillSet SampleSet() => new(new[]
-    {
+    private static SkillSet SampleSet() => new(
+    [
         Make("password-reset", "Use to reset a corporate password. Use when a user is locked out or forgot their password. Do NOT use for service accounts.", "/tmp/pr"),
         Make("expense-policy", "Use as the reference for expense limits and reimbursable categories. Use when answering whether an expense is reimbursable.", "/tmp/ep")
-    });
+    ]);
 
     [Fact]
     public void RoutesToExpectedSkill()
@@ -72,12 +72,12 @@ public class RoutingTests
     {
         RoutingEvalFile evalFile = new RoutingEvalFile
         {
-            Cases = new()
-            {
+            Cases =
+            [
                 new RoutingEvalCase { Prompt = "reset my password I'm locked out", Expected = "password-reset" },
                 new RoutingEvalCase { Prompt = "is this hotel reimbursable expense", Expected = "expense-policy" },
                 new RoutingEvalCase { Prompt = "totally unrelated gibberish xyzzy", Expected = "none" }
-            }
+            ]
         };
         RoutingEvalSummary summary = new RoutingEvaluator(new LexicalRoutingStrategy()).Evaluate(evalFile, SampleSet());
         Assert.Equal(3, summary.Total);

@@ -135,7 +135,7 @@ public sealed class DocumentationReviewExchangeTests
 
         Assert.Equal([uncertain.Id], result.Bundle.Candidates.Select(item => item.CandidateId));
         Assert.All(
-            new[] { duplicate, conflict, senses, benign },
+            [duplicate, conflict, senses, benign],
             candidate => Assert.DoesNotContain(result.Bundle.Candidates, item => item.CandidateId == candidate.Id));
     }
 
@@ -194,11 +194,11 @@ public sealed class DocumentationReviewExchangeTests
     [Fact]
     public void ImportValidBundlePersistsAllVerdictsInOneAtomicCall()
     {
-        AnalysisCandidate[] candidates = new[]
-        {
+        AnalysisCandidate[] candidates =
+        [
             Candidate("duplicate", AnalysisRuleKind.Duplicate),
             Candidate("terminology", AnalysisRuleKind.Terminology, term: "loop")
-        };
+        ];
         RecordingPersistence persistence = new RecordingPersistence();
         DocumentationReviewExchange exchange = Exchange(persistence);
         ReviewCandidateBundle export = exchange.Export(candidates).Bundle;
@@ -322,7 +322,7 @@ public sealed class DocumentationReviewExchangeTests
     {
         AnalysisCandidate first = Candidate("first", AnalysisRuleKind.Duplicate);
         AnalysisCandidate second = Candidate("second", AnalysisRuleKind.Conflict);
-        AnalysisCandidate[] candidates = new[] { first, second };
+        AnalysisCandidate[] candidates = [first, second];
         RecordingPersistence persistence = new RecordingPersistence();
         DocumentationReviewExchange exchange = Exchange(persistence);
         ReviewCandidateBundle export = exchange.Export(candidates).Bundle;
@@ -422,11 +422,11 @@ public sealed class DocumentationReviewExchangeTests
         IReadOnlyList<CandidateSourceKind>? sources = null,
         CandidateScore? score = null)
     {
-        Claim[] claims = new[]
-        {
+        Claim[] claims =
+        [
             Claim(id + "-left", "hash-" + id + "-left", claimText, 10),
             Claim(id + "-right", "hash-" + id + "-right", claimText + " Related context.", 20)
-        };
+        ];
         return new AnalysisCandidate(
             id,
             kind,

@@ -988,7 +988,7 @@ public sealed class SquadTransaction
                 : null;
         intent = intent with
         {
-            Artifacts = intent.Artifacts.Append(artifact).ToArray(),
+            Artifacts = [.. intent.Artifacts, artifact],
             ActiveTransitions =
             [new IntentTransition(ArtifactIdentity(claimArea, claimRelativePath), ArtifactLifecycleState.PreOperation)]
         };
@@ -1237,9 +1237,7 @@ public sealed class SquadTransaction
         string receiptPath)
     {
         foreach (IntentArtifact artifact in intent.Artifacts.Where(artifact =>
-                     artifact.Role == ArtifactRole.ClaimedOriginal &&
-                     artifact.LifecycleState is ArtifactLifecycleState.ActiveTransition or
-                         ArtifactLifecycleState.PostOperation))
+                     artifact is { Role: ArtifactRole.ClaimedOriginal, LifecycleState: ArtifactLifecycleState.ActiveTransition or ArtifactLifecycleState.PostOperation }))
         {
             string? targetPath = null;
             foreach (IntentFile file in intent.Files)
@@ -2686,8 +2684,7 @@ public sealed class SquadTransaction
                 StringComparison.Ordinal);
 
         bool hasStagedArtifact = artifacts.Any(a =>
-            a.Area == ArtifactArea.Journal &&
-            a.Role == ArtifactRole.StateStage &&
+            a is { Area: ArtifactArea.Journal, Role: ArtifactRole.StateStage } &&
             string.Equals(a.Path, $"state-staging/{stateName}", StringComparison.Ordinal));
 
         if (afterKind == OriginalEntryKind.File && (hasStagedArtifact || !unchangedFile))
@@ -2843,10 +2840,9 @@ public sealed class SquadTransaction
             OriginalEntryKind.File => artifact.ByteLength >= 0 &&
                 IsDigest(artifact.Sha256) && artifact.LinkTarget.Length == 0,
             OriginalEntryKind.FileSymbolicLink or OriginalEntryKind.DirectorySymbolicLink =>
-                artifact.ByteLength == 0 && artifact.Sha256.Length == 0 &&
-                artifact.LinkTarget.Length > 0,
-            OriginalEntryKind.Directory => artifact.ByteLength == 0 &&
-                artifact.Sha256.Length == 0 && artifact.LinkTarget.Length == 0,
+                artifact is { ByteLength: 0, Sha256.Length: 0, LinkTarget.Length: > 0 },
+            OriginalEntryKind.Directory =>
+                artifact is { ByteLength: 0, Sha256.Length: 0, LinkTarget.Length: 0 },
             _ => false
         };
 
@@ -3278,11 +3274,5 @@ public sealed class SquadTransaction
     }
 
     [SuppressMessage("Design", "CA1032:Implement standard exception constructors", Justification = "Private nested exception used internally for transaction control flow.")]
-    private sealed class LeafClaimConflictException : InvalidOperationException
-    {
-        public LeafClaimConflictException(string message)
-            : base(message)
-        {
-        }
-    }
+    private sealed class LeafClaimConflictException(string message) : InvalidOperationException(message);
 }

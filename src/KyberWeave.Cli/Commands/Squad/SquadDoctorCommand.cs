@@ -69,7 +69,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // 3. MCP Probe
         McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_executor);
         ToolProbeResult mcpResult = mcpProbe.Probe();
-        if (mcpResult.IsAvailable && mcpResult.Version is not null)
+        if (mcpResult is { IsAvailable: true, Version: not null })
         {
             AnsiConsole.MarkupLine($"  [green]ok[/] Kyber-Weave MCP: [bold]kyber-weave-mcp {Markup.Escape(mcpResult.Version)}[/]");
         }

@@ -212,7 +212,7 @@ public class OntologyConfigTests
 
     private sealed class OntologyConfigDocFixture : IDisposable
     {
-        public string Root { get; }
+        private string Root { get; }
         private readonly OntologyConfig _config;
 
         public OntologyConfigDocFixture(OntologyConfig config)

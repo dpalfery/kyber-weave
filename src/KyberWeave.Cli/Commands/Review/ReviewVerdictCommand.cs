@@ -10,11 +10,8 @@ namespace KyberWeave.Cli.Commands.Review;
 /// </summary>
 public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
 {
-    /// <summary>An input document that could not be read.</summary>
-    public const string UnreadableInput = "KW-REVIEW-023";
-
-    /// <summary>The computed verdict.</summary>
-    public const string Verdict = "KW-REVIEW-024";
+    private const string UnreadableInput = "KW-REVIEW-023";
+    private const string Verdict = "KW-REVIEW-024";
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewVerdictSettings settings)

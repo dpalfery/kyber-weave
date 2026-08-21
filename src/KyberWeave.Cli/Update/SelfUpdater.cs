@@ -278,7 +278,7 @@ internal sealed class SelfUpdater : IDisposable
             || normalized.EndsWith("/.dotnet/tools", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static bool CanWriteDirectory(string directory)
+    private static bool CanWriteDirectory(string directory)
     {
         try
         {

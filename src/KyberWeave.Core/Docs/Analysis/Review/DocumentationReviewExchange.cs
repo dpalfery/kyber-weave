@@ -15,7 +15,7 @@ namespace KyberWeave.Core.Docs.Analysis.Review;
 public sealed class DocumentationReviewExchange
 {
     public const string CandidateSchema = "kyber-weave.docs-review.candidates/v1";
-    public const string VerdictSchema = "kyber-weave.docs-review.verdicts/v1";
+    private const string VerdictSchema = "kyber-weave.docs-review.verdicts/v1";
     public const string ReviewRuleCode = "KW-DOC-REVIEW-001";
 
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();

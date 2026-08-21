@@ -31,7 +31,7 @@ internal static partial class LexicalSimilarity
     {
         if (leftTokens.Count == 0 || rightTokens.Count == 0) return 0;
 
-        int overlap = leftTokens.Count(token => rightTokens.Contains(token));
+        int overlap = leftTokens.Count(rightTokens.Contains);
         return (double)overlap / Math.Min(leftTokens.Count, rightTokens.Count);
     }
 

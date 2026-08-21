@@ -8,8 +8,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <summary>Runs the deterministic gates the host declares under <c>review.gates</c>.</summary>
 public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 {
-    /// <summary>Raised when the host has declared no gates to run.</summary>
-    public const string NoGatesDeclared = "KW-REVIEW-020";
+    private const string NoGatesDeclared = "KW-REVIEW-020";
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewGatesSettings settings)
@@ -63,7 +62,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         }
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
-        return gates.Gates.Any(g => g.Blocking && !g.Passed) ? 1 : 0;
+        return gates.Gates.Any(g => g is { Blocking: true, Passed: false }) ? 1 : 0;
     }
 }
 

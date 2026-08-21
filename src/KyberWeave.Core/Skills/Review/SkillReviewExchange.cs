@@ -12,9 +12,9 @@ namespace KyberWeave.Core.Skills.Review;
 /// </summary>
 public static class SkillReviewExchange
 {
-    public const string CandidateSchema = "kyber-weave.skill-review.candidates/v1";
-    public const string VerdictSchema = "kyber-weave.skill-review.verdicts/v1";
-    public const string ReviewRuleCode = "KW-SKILL-REVIEW-001";
+    private const string CandidateSchema = "kyber-weave.skill-review.candidates/v1";
+    private const string VerdictSchema = "kyber-weave.skill-review.verdicts/v1";
+    private const string ReviewRuleCode = "KW-SKILL-REVIEW-001";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -27,7 +27,7 @@ public static class SkillReviewExchange
         AgentSet? agents = null) =>
         ExportCandidates(skills?.Skills, agents?.Agents);
 
-    public static SkillReviewExportResult ExportCandidates(
+    private static SkillReviewExportResult ExportCandidates(
         IEnumerable<Skill>? skills,
         IEnumerable<AgentModel>? agents = null)
     {

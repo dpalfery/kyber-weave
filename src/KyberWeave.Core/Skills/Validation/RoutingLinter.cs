@@ -13,14 +13,14 @@ namespace KyberWeave.Core.Skills.Validation;
 public sealed partial class RoutingLinter
 {
     /// <summary>Recommended max body size before progressive disclosure suffers.</summary>
-    public int BodyTokenBudget { get; init; } = 5000;
-    public int BodyLineBudget { get; init; } = 500;
+    private const int BodyTokenBudget = 5000;
+    private const int BodyLineBudget = 500;
 
     /// <summary>Minimum description score (0-100) to pass. Used as a CI gate.</summary>
     public int MinDescriptionScore { get; init; } = 70;
 
     /// <summary>Cosine similarity above which two descriptions are flagged as overlapping.</summary>
-    public double OverlapThreshold { get; init; } = 0.55;
+    private const double OverlapThreshold = 0.55;
 
     [GeneratedRegex(@"\b(ALWAYS|NEVER|MUST|DO NOT|MUST NOT)\b", RegexOptions.None, matchTimeoutMilliseconds: 2000)]
     private static partial Regex DirectiveRegex();

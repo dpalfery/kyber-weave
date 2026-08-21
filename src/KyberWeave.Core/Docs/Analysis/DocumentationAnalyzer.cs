@@ -11,7 +11,11 @@ using KyberWeave.Core.Docs.Model;
 namespace KyberWeave.Core.Docs.Analysis;
 
 /// <summary>Runs graph-first, bounded documentation analysis over a parsed corpus.</summary>
-public sealed partial class DocumentationAnalyzer
+public sealed partial class DocumentationAnalyzer(
+    ClaimExtractor extractor,
+    IReadOnlyList<IClaimCandidateSource> candidateSources,
+    IEmbeddingGenerator? embeddingGenerator,
+    IAnalysisPersistence? persistence)
 {
     public const string DuplicateRuleCode = "KW-DOC-ANALYSIS-001";
     public const string ConflictRuleCode = "KW-DOC-ANALYSIS-002";
@@ -32,22 +36,8 @@ public sealed partial class DocumentationAnalyzer
             "behavior", "documentation", "reference"
         };
 
-    private readonly ClaimExtractor _extractor;
-    private readonly IReadOnlyList<IClaimCandidateSource> _candidateSources;
-    private readonly IEmbeddingGenerator? _embeddingGenerator;
-    private readonly IAnalysisPersistence? _persistence;
-
-    public DocumentationAnalyzer(
-        ClaimExtractor extractor,
-        IReadOnlyList<IClaimCandidateSource> candidateSources,
-        IEmbeddingGenerator? embeddingGenerator,
-        IAnalysisPersistence? persistence)
-    {
-        _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
-        _candidateSources = candidateSources ?? throw new ArgumentNullException(nameof(candidateSources));
-        _embeddingGenerator = embeddingGenerator;
-        _persistence = persistence;
-    }
+    private readonly ClaimExtractor _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
+    private readonly IReadOnlyList<IClaimCandidateSource> _candidateSources = candidateSources ?? throw new ArgumentNullException(nameof(candidateSources));
 
     /// <summary>Analyzes eligible documents without changing the corpus.</summary>
     public DocumentationAnalysisResult Analyze(
@@ -180,20 +170,20 @@ public sealed partial class DocumentationAnalyzer
         IReadOnlyList<Claim> claims,
         DocsAnalysisEmbeddingConfig config)
     {
-        if (_embeddingGenerator is null)
+        if (embeddingGenerator is null)
         {
             return EmbeddingCoordinator.Unavailable(
                 config.Mode,
                 "No embedding provider is configured in this host.");
         }
-        if (_persistence is null)
+        if (persistence is null)
         {
             return EmbeddingCoordinator.Unavailable(
                 config.Mode,
                 "No safe analysis persistence provider is configured in this host.");
         }
 
-        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(_embeddingGenerator, _persistence);
+        EmbeddingCoordinator coordinator = new EmbeddingCoordinator(embeddingGenerator, persistence);
         return coordinator.Resolve(
             claims.Select(claim => new EmbeddingWorkItem(
                 claim.ContextualHash,
@@ -293,7 +283,7 @@ public sealed partial class DocumentationAnalyzer
 
         foreach (string term in SharedInformativeTerms(pair.Left.Text, pair.Right.Text))
         {
-            Claim[] claims = new[] { pair.Left, pair.Right };
+            Claim[] claims = [pair.Left, pair.Right];
             if (glossary?.Covers(term, claims) == true) continue;
             AddOrMerge(candidates, CreateCandidate(AnalysisRuleKind.Terminology, pair, term));
         }
@@ -409,9 +399,9 @@ public sealed partial class DocumentationAnalyzer
         double confidenceThreshold)
     {
         AnalysisCandidate[] materialized = candidates.ToArray();
-        if (_persistence?.IsAvailable != true || materialized.Length == 0) return materialized;
+        if (persistence?.IsAvailable != true || materialized.Length == 0) return materialized;
 
-        IReadOnlyDictionary<string, AnalysisVerdict> verdicts = _persistence.LoadVerdicts(materialized.Select(candidate => candidate.Id).ToArray());
+        IReadOnlyDictionary<string, AnalysisVerdict> verdicts = persistence.LoadVerdicts(materialized.Select(candidate => candidate.Id).ToArray());
         return materialized
             .Where(candidate => !IsSuppressed(candidate, verdicts, confidenceThreshold))
             .Select(candidate => verdicts.TryGetValue(candidate.Id, out AnalysisVerdict? verdict)
@@ -579,7 +569,7 @@ public sealed partial class DocumentationAnalyzer
     {
         CandidateSourceKind.Graph => true,
         CandidateSourceKind.Lexical => config.Search.Mode != DocsAnalysisSearchMode.Graph,
-        CandidateSourceKind.Embedding => _embeddingGenerator is not null
+        CandidateSourceKind.Embedding => embeddingGenerator is not null
             && config.Embeddings.Mode != DocsAnalysisEmbeddingMode.Off,
         _ => false
     };

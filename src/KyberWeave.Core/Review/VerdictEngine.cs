@@ -42,7 +42,7 @@ public static class VerdictEngine
     public const string CriticalFinding = "KW-REVIEW-006";
 
     /// <summary>Surviving major findings at or above the configured threshold.</summary>
-    public const string MajorFindingThreshold = "KW-REVIEW-007";
+    private const string MajorFindingThreshold = "KW-REVIEW-007";
 
     /// <summary>A changed path the policy reserves for human review.</summary>
     public const string ReservedPath = "KW-REVIEW-008";
@@ -280,7 +280,7 @@ public static class VerdictEngine
         List<Diagnostic> diagnostics)
     {
         bool failed = false;
-        foreach (GateResult gate in gates.Where(g => g.Blocking && !g.Passed))
+        foreach (GateResult gate in gates.Where(g => g is { Blocking: true, Passed: false }))
         {
             failed = true;
             diagnostics.Add(new Diagnostic(
@@ -368,7 +368,7 @@ public static class VerdictEngine
     {
         if (verdict is ReviewVerdict.NeedsHuman ||
             accepted.Exists(f => f.Severity == ReviewSeverity.Critical) ||
-            gates.Any(g => g.Blocking && !g.Passed))
+            gates.Any(g => g is { Blocking: true, Passed: false }))
         {
             return RiskGrade.High;
         }

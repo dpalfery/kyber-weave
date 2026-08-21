@@ -347,7 +347,7 @@ public sealed class DocGraphProjection
     private static DocGraphNode Copy(DocGraphNode node) =>
         new(node.Id, node.Label, new Dictionary<string, string?>(node.Properties, StringComparer.Ordinal));
 
-    internal static string DocId(string id) => $"doc:{id}";
+    private static string DocId(string id) => $"doc:{id}";
 
     private static string? ConceptId(string label, string? name) =>
         string.IsNullOrWhiteSpace(name) ? null : $"{label.ToLowerInvariant()}:{name}";

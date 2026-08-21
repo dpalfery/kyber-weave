@@ -1090,14 +1090,9 @@ public sealed class SquadCliCommandTests : IDisposable
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
-    private sealed class FakeUserPaths : ISquadUserPaths
+    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
-        public FakeUserPaths(string appDataDirectory)
-        {
-            ApplicationDataDirectory = appDataDirectory;
-        }
-
-        public string ApplicationDataDirectory { get; }
+        public string ApplicationDataDirectory { get; } = appDataDirectory;
     }
 
     private sealed class SquadRepoFixture : IDisposable
@@ -1240,7 +1235,7 @@ public sealed class SquadCliCommandTests : IDisposable
             return fixture;
         }
 
-        public void Write(string relativePath, string content)
+        private void Write(string relativePath, string content)
         {
             string fullPath = System.IO.Path.Combine(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);

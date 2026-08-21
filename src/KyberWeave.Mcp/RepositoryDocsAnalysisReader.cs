@@ -83,7 +83,10 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     private KyberWeaveConfig LoadConfig()
     {
         KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repositoryRoot);
-        if (loaded.Success && loaded.Config is not null) return loaded.Config;
+        if (loaded is { Success: true, Config: not null })
+        {
+            return loaded.Config;
+        }
 
         throw new InvalidDataException(
             $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load " +

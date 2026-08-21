@@ -8,7 +8,7 @@ namespace KyberWeave.Core.Configuration;
 /// </summary>
 public sealed class HarnessProfileConfig
 {
-    public IReadOnlyDictionary<HarnessKind, HarnessCapabilityProfile> Profiles { get; init; } =
+    public IReadOnlyDictionary<HarnessKind, HarnessCapabilityProfile> Profiles { get; private init; } =
         CreateProductDefaultProfiles();
 
     public static HarnessProfileConfig ProductDefaults { get; } = new();

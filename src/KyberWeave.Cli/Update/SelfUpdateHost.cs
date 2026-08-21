@@ -24,7 +24,7 @@ internal sealed record SelfUpdateHost(
             OperatingSystem.IsMacOS());
     }
 
-    internal static string ReadCurrentVersion()
+    private static string ReadCurrentVersion()
     {
         Assembly assembly = typeof(SelfUpdateHost).Assembly;
         string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;

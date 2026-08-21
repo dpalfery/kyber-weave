@@ -44,7 +44,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
         }
     }
 
-    internal static int FindingExitCode(DiagnosticReport report, string failOn) =>
+    private static int FindingExitCode(DiagnosticReport report, string failOn) =>
         failOn.Trim().ToLowerInvariant() switch
         {
             "none" => 0,

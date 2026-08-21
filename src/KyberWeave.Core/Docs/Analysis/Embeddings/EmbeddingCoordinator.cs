@@ -6,16 +6,10 @@ using KyberWeave.Core.Docs.Analysis.Model;
 namespace KyberWeave.Core.Docs.Analysis.Embeddings;
 
 /// <summary>Applies embedding mode and safe-cache policy around a provider.</summary>
-public sealed class EmbeddingCoordinator
+public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysisPersistence persistence)
 {
-    private readonly IEmbeddingGenerator _generator;
-    private readonly IAnalysisPersistence _persistence;
-
-    public EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysisPersistence persistence)
-    {
-        _generator = generator ?? throw new ArgumentNullException(nameof(generator));
-        _persistence = persistence ?? throw new ArgumentNullException(nameof(persistence));
-    }
+    private readonly IEmbeddingGenerator _generator = generator ?? throw new ArgumentNullException(nameof(generator));
+    private readonly IAnalysisPersistence _persistence = persistence ?? throw new ArgumentNullException(nameof(persistence));
 
     public EmbeddingResolutionResult Resolve(
         IReadOnlyCollection<EmbeddingWorkItem> workItems,
@@ -135,7 +129,7 @@ public sealed class EmbeddingCoordinator
         return new EmbeddingResolutionResult(
             ordered,
             new DiagnosticReport(),
-            orderedKeys.Count(key => cached.ContainsKey(key)),
+            orderedKeys.Count(cached.ContainsKey),
             orderedKeys.Count(key => !cached.ContainsKey(key)),
             usage);
     }

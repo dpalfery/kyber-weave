@@ -376,7 +376,7 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Fact]
     public async Task DownloadAndExtractAsyncWhenArchiveIsInvalidRejectsWithoutDestinationOrStateChanges()
     {
-        byte[] invalidArchive = Encoding.UTF8.GetBytes("not a zip archive");
+        byte[] invalidArchive = "not a zip archive"u8.ToArray();
 
         Exception exception = await DownloadFailure(
             invalidArchive,
@@ -736,30 +736,21 @@ public sealed class SquadReleaseClientTests : IDisposable
         }
     }
 
-    private sealed class CancelAfterSerializationContent : HttpContent
+    private sealed class CancelAfterSerializationContent(
+        byte[] bytes,
+        CancellationTokenSource cancellation) : HttpContent
     {
-        private readonly byte[] _bytes;
-        private readonly CancellationTokenSource _cancellation;
-
-        public CancelAfterSerializationContent(
-            byte[] bytes,
-            CancellationTokenSource cancellation)
-        {
-            _bytes = bytes;
-            _cancellation = cancellation;
-        }
-
         protected override async Task SerializeToStreamAsync(
             Stream stream,
             TransportContext? context)
         {
-            await stream.WriteAsync(_bytes, CancellationToken.None);
-            await _cancellation.CancelAsync();
+            await stream.WriteAsync(bytes, CancellationToken.None);
+            await cancellation.CancelAsync();
         }
 
         protected override bool TryComputeLength(out long length)
         {
-            length = _bytes.Length;
+            length = bytes.Length;
             return true;
         }
     }
