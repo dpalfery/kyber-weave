@@ -21,7 +21,7 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
                 report,
                 out DocumentLoader? loader,
                 out _,
-                out KyberWeaveConfig? config))
+                out KyberWeaveConfig config))
         {
             CommandHelpers.Finish(report, settings, "docs export-graph", "Document");
             return 1;

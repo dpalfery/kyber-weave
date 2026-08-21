@@ -5,6 +5,7 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -64,8 +65,8 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Null(SquadPackSourceLocator.Resolve(childDir));
 
         // Assert CLI and Core assemblies have no embedded resource for products/kyber-squad corpus
-        Assembly cliAssembly = typeof(KyberWeave.Cli.Commands.Squad.SquadPackSourceLocator).Assembly;
-        Assembly coreAssembly = typeof(KyberWeave.Core.Squad.Model.SquadSource).Assembly;
+        Assembly cliAssembly = typeof(SquadPackSourceLocator).Assembly;
+        Assembly coreAssembly = typeof(SquadSource).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
         string[] coreResources = coreAssembly.GetManifestResourceNames();
@@ -90,7 +91,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.NotNull(resolved);
         Assert.Equal(
             Path.GetFullPath(Path.Combine(repo.Path, "products", "kyber-squad")),
-            Path.GetFullPath(resolved!));
+            Path.GetFullPath(resolved));
     }
 
     #endregion
@@ -159,10 +160,11 @@ public sealed class SquadCliCommandTests : IDisposable
         // toolchain in the loop, so a valid source root packs successfully outright —
         // there is no longer a toolchain-qualification gate to reach.
         using SquadRepoFixture repo = SquadRepoFixture.CreateValid();
+        string repoPath = repo.Path;
         string outDir = Path.Combine(_temp.Path, "pack-output");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repo.Path);
+        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -427,19 +429,20 @@ public sealed class SquadCliCommandTests : IDisposable
     public void Doctor_WhenInsideRepository_ValidatesLocalSource()
     {
         using SquadRepoFixture repo = SquadRepoFixture.CreateValid();
+        string repoPath = repo.Path;
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("apm", "apm, version 0.28.0\n")
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: repo.Path);
+        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = repo.Path,
+                Path = repoPath,
                 Global = false
             }));
 

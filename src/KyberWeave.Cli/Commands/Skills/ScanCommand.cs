@@ -19,12 +19,11 @@ public sealed class ScanCommand : Command<ScanSettings>
     public override int Execute(CommandContext context, ScanSettings settings)
     {
         DiagnosticReport report = new DiagnosticReport();
-        SkillSet? set = CommandHelpers.LoadOrReport(settings.Path, report);
+        SkillSet set = CommandHelpers.LoadOrReport(settings.Path, report);
 
         SkillScanner scanner = new SkillScanner();
-        if (set is not null)
-            foreach (Skill skill in set.Skills)
-                report.AddRange(scanner.Scan(skill));
+        foreach (Skill skill in set.Skills)
+            report.AddRange(scanner.Scan(skill));
 
         CommandHelpers.Finish(report, settings, "skill scan", "Skill");
 

@@ -4,13 +4,14 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-20
+last-reviewed: 2026-08-21
 ---
 
 # Kyber-Weave Plan Inventory
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Reference | Goal |
 |---|---|---|---|---|---|
+| [2026-08-21-inspectcode-warning-fixes-and-suggestion-triage.md](2026-08-21-inspectcode-warning-fixes-and-suggestion-triage.md) | Complete | 2026-08-21 | — | [standards/csharp/README.md](../standards/csharp/README.md), [standards/test/README.md](../standards/test/README.md) | Fix all actionable InspectCode warnings across KyberWeave.sln and establish solution-level DotSettings configuration to filter reflection and DTO noise. |
 | [2026-08-20-code-review-council.md](2026-08-20-code-review-council.md) | In progress | 2026-08-20 | — | [architecture.md](../kyber-squad/architecture.md), [agents.md](../context-hygiene/agents.md), [skills.md](../context-hygiene/skills.md) | Rebuild `code-reviewer` into three layers: deterministic gate scripts, a parallel council of specialist review lenses, and a unit-tested verdict engine that converts findings into Approve / Request-changes / Needs-human. |
 | [2026-08-17-copilot-agent-tools-format.md](../archive/plans/2026-08-17-copilot-agent-tools-format.md) | Archived | 2026-08-17 | 2026-08-17 | [architecture.md](../kyber-squad/architecture.md), [agents.md](../context-hygiene/agents.md) | Align GitHub Copilot custom agent definitions by updating `CopilotRenderer` to serialize `tools` as a YAML flow sequence containing VS Code environment tools, capability-governed built-ins, standard MCP server wildcards, and diagnostics. |
 | [2026-08-17-kyber-standards-docs-init.md](../archive/plans/2026-08-17-kyber-standards-docs-init.md) | Archived | 2026-08-17 | 2026-08-17 | [standards/README.md](../standards/README.md), [configuration.md](../configuration.md), [install.md](../install.md), [docgraph/onboarding.md](../docgraph/onboarding.md) | Add `--kyber-standards` to `kyber-weave docs init` to embed and scaffold the 10 rich Kyber Squad coding standards templates into `<docs-root>/standards/`, populate `ontology.technologies`, and register standard paths in Config Reg. |

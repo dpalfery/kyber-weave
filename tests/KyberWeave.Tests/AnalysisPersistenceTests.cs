@@ -360,7 +360,7 @@ public sealed class AnalysisPersistenceTests
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
-        (string? table, string? keyColumn, string? rowId, byte[]? payload) = scenario switch
+        (string table, string keyColumn, string rowId, byte[] payload) = scenario switch
         {
             "claim-empty-id" => (
                 "analysis_claims",

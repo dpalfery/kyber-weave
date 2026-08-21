@@ -209,7 +209,7 @@ public sealed class ManagedGlossaryService
             .GroupBy(proposal => proposal.Term.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (ParsedSection? section in document.Sections.OrderByDescending(section => section.StartLine))
+        foreach (ParsedSection section in document.Sections.OrderByDescending(section => section.StartLine))
         {
             proposalsByTerm.Remove(section.Term, out GlossaryProposal[]? termProposals);
             List<string> replacement = MergeSection(
@@ -392,7 +392,7 @@ public sealed class ManagedGlossaryService
             if (!line.StartsWith('|')) continue;
             // Catalog column configuration intentionally uses the raw pipe-split indices,
             // including the empty cell before a leading pipe, matching DocumentLoader.
-            string[] cells = line.Split('|', StringSplitOptions.None)
+            string[] cells = line.Split('|')
                 .Select(cell => cell.Trim())
                 .ToArray();
             int maxColumn = Math.Max(
@@ -605,7 +605,7 @@ public sealed class ManagedGlossaryService
             try
             {
                 frontmatter = MarkdownFrontmatterReader.Deserializer
-                    .Deserialize<Dictionary<string, string>>(read.Yaml)
+                    .Deserialize<Dictionary<string, string>?>(read.Yaml)
                     ?? new Dictionary<string, string>(StringComparer.Ordinal);
             }
             catch (Exception exception)
@@ -623,12 +623,6 @@ public sealed class ManagedGlossaryService
             frontmatterValid,
             frontmatterError);
     }
-
-    private static ParsedDocument Parse(List<string> lines) => new(
-        new Dictionary<string, string>(StringComparer.Ordinal),
-        ParseSections(lines, 0),
-        true,
-        null);
 
     private static IReadOnlyList<ParsedSection> ParseSections(List<string> lines, int bodyStart)
     {

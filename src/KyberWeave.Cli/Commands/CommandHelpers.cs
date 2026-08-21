@@ -14,21 +14,29 @@ public static class CommandHelpers
     /// errors and returns the successfully parsed set. Returns null only when the path
     /// itself is invalid (nothing to do).
     /// </summary>
-    public static SkillSet? LoadOrReport(string path, DiagnosticReport report)
+    public static SkillSet LoadOrReport(string path, DiagnosticReport report)
     {
         IReadOnlyList<SkillLoadResult> results = SkillLoader.Load(path);
         List<Skill> skills = new List<Skill>();
 
         foreach (SkillLoadResult r in results)
         {
-            if (r.Success) skills.Add(r.Skill!);
-            else report.Add(new Diagnostic("KW-PARSE-000", Severity.Error,
-                r.Error ?? "Failed to parse skill.", System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(r.Path) ?? r.Path), r.Path));
+            if (r.Success)
+            {
+                skills.Add(r.Skill!);
+            }
+            else
+            {
+                report.Add(new Diagnostic("KW-PARSE-000", Severity.Error,
+                    r.Error ?? "Failed to parse skill.", Path.GetFileName(Path.GetDirectoryName(r.Path) ?? r.Path), r.Path));
+            }
         }
 
         // If nothing parsed and the only result is a "path not found / none found" message, treat as fatal-but-reported.
         if (skills.Count == 0 && results.All(r => !r.Success))
+        {
             return new SkillSet(skills); // report already carries the errors; caller decides exit code
+        }
 
         return new SkillSet(skills);
     }

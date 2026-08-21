@@ -56,7 +56,7 @@ public static partial class SkillParser
         SkillFrontmatter frontmatter;
         try
         {
-            frontmatter = Deserializer.Deserialize<SkillFrontmatter>(rawYaml) ?? new SkillFrontmatter();
+            frontmatter = Deserializer.Deserialize<SkillFrontmatter?>(rawYaml) ?? new SkillFrontmatter();
         }
         catch (Exception ex)
         {

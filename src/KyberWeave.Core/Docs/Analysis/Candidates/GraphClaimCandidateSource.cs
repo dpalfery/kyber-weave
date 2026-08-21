@@ -103,7 +103,7 @@ public sealed class GraphClaimCandidateSource : IClaimCandidateSource
         int maximumNeighbors)
     {
         Dictionary<Claim, int> counts = new Dictionary<Claim, int>();
-        foreach (ClaimPairCandidate? pair in pairs
+        foreach (ClaimPairCandidate pair in pairs
                      .OrderByDescending(pair => pair.Score.Lexical)
                      .ThenBy(pair => pair.Left.FilePath, StringComparer.Ordinal)
                      .ThenBy(pair => pair.Right.FilePath, StringComparer.Ordinal))

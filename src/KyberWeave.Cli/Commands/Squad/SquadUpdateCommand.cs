@@ -82,7 +82,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
 
         // Load configuration if present
-        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot, null);
+        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);
         if (!configResult.Success)
         {
             AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(configResult.Error ?? "Failed to load configuration.")}[/]");

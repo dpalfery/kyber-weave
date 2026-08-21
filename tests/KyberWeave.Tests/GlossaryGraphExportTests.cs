@@ -145,13 +145,13 @@ public sealed class GlossaryGraphExportTests
             && node.Properties["definition"] == "The gameplay update cycle.");
         Assert.Contains(contribution.Nodes, node => node.Id == "term:gameplay-loop");
         Assert.Contains(
-            new KyberWeave.Core.Docs.Graph.DocGraphEdge(
+            new DocGraphEdge(
                 "SCOPED_TO",
                 "sense:loop-gameplay",
                 "component:Gameplay"),
             contribution.Edges);
         Assert.Contains(
-            new KyberWeave.Core.Docs.Graph.DocGraphEdge(
+            new DocGraphEdge(
                 "EVIDENCED_BY",
                 "sense:loop-gameplay",
                 "claim-gameplay"),

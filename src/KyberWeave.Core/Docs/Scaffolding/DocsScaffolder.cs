@@ -107,7 +107,7 @@ public static class DocsScaffolder
         KyberWeaveConfigLoadResult loadedConfig = RequireLoadableHostConfig(root);
         (string DocsRoot, DocsRootSource Source) resolution = string.IsNullOrWhiteSpace(docsRoot)
             ? ResolveDocsRoot(root, loadedConfig)
-            : (docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
+            : (docsRoot.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
         string resolvedDocsRoot = resolution.DocsRoot;
         resolvedDocsRoot = RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
 

@@ -51,7 +51,7 @@ public sealed partial class DocumentLoader
             string absoluteRoot = Absolute(docsRoot);
             if (!Directory.Exists(absoluteRoot)) continue;
 
-            foreach (string? file in Directory
+            foreach (string file in Directory
                          .EnumerateFiles(absoluteRoot, "*.md", SearchOption.AllDirectories)
                          .OrderBy(p => p, StringComparer.Ordinal))
             {
@@ -311,7 +311,7 @@ public sealed partial class DocumentLoader
         {
             if (!line.StartsWith('|')) continue;
 
-            string[] cells = line.Split('|', StringSplitOptions.None)
+            string[] cells = line.Split('|')
                 .Select(c => c.Trim())
                 .ToArray();
 

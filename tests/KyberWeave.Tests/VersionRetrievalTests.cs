@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Reflection;
+using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Core.Processes;
+using KyberWeave.Mcp;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -14,7 +16,7 @@ public class VersionRetrievalTests
     public void CliAssemblyVersionRetrievalReturnsConfiguredVersion()
     {
         // Arrange
-        Assembly assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
+        Assembly assembly = typeof(AgentCatalogCommand).Assembly;
 
         // Act
         string version = GetVersionFromAssembly(assembly);
@@ -29,7 +31,7 @@ public class VersionRetrievalTests
     public void McpAssemblyVersionRetrievalReturnsConfiguredVersion()
     {
         // Arrange
-        Assembly assembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
+        Assembly assembly = typeof(DocsTools).Assembly;
 
         // Act
         string version = GetVersionFromAssembly(assembly);
@@ -44,7 +46,7 @@ public class VersionRetrievalTests
     public void GetVersionFromAssemblyPrefersInformationalVersionOverAssemblyVersion()
     {
         // Arrange
-        Assembly assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
+        Assembly assembly = typeof(AgentCatalogCommand).Assembly;
         string? expectedInformationalVersion = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
@@ -71,7 +73,7 @@ public class VersionRetrievalTests
     public void CliVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
     {
         // Arrange
-        Assembly assembly = typeof(KyberWeave.Cli.Commands.Agents.AgentCatalogCommand).Assembly;
+        Assembly assembly = typeof(AgentCatalogCommand).Assembly;
 
         // Act
         ProcessResult result = RunAssembly(assembly, flag);
@@ -88,7 +90,7 @@ public class VersionRetrievalTests
     public void McpVersionFlagOutputsApplicationVersionAndExitsZero(string flag)
     {
         // Arrange
-        Assembly assembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
+        Assembly assembly = typeof(DocsTools).Assembly;
 
         // Act
         ProcessResult result = RunAssembly(assembly, flag);

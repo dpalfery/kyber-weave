@@ -37,7 +37,7 @@ internal sealed class CodeGraphFixtureDb : IDisposable
 
     private void RunSqlite(string sql)
     {
-        ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo("sqlite3")
+        ProcessStartInfo startInfo = new ProcessStartInfo("sqlite3")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -46,12 +46,12 @@ internal sealed class CodeGraphFixtureDb : IDisposable
         startInfo.ArgumentList.Add(DatabasePath);
         startInfo.ArgumentList.Add(sql);
 
-        using Process process = System.Diagnostics.Process.Start(startInfo)
+        using Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite3.");
 
         // Drain before waiting: WaitForExit with undrained redirected pipes deadlocks as
         // soon as the child writes more than the pipe buffer holds.
-        ProcessResult result = KyberWeave.Core.Processes.ProcessRunner.ReadToEnd(process);
+        ProcessResult result = ProcessRunner.ReadToEnd(process);
         if (result.ExitCode != 0)
             throw new InvalidOperationException(result.StandardError);
     }

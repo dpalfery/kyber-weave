@@ -11,7 +11,7 @@ using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
-public sealed partial class UpdateCommandTests : IDisposable
+public sealed class UpdateCommandTests : IDisposable
 {
     private readonly TempDirectory _install = new();
     private readonly TempDirectory _assets = new();

@@ -437,7 +437,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
         string portablePath = entryName.Replace('\\', '/');
         bool isDirectory = portablePath.EndsWith('/');
-        string[] segments = portablePath.Split('/', StringSplitOptions.None);
+        string[] segments = portablePath.Split('/');
         int segmentCount = isDirectory ? segments.Length - 1 : segments.Length;
         if (segmentCount == 0 || segments.Take(segmentCount).Any(
             segment => segment.Length == 0 || segment is "." or ".."))

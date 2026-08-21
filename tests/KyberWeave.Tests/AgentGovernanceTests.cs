@@ -256,7 +256,8 @@ public class AgentGovernanceTests
 
         AgentSet set = new AgentSet(agents);
         AgentRoutingResult result = AgentRoutingEvaluator.Route("Build an ASP.NET Core API in C#", set);
-
+        Assert.True(result.Fired);
+        Assert.Equal("csharp-dev", result.SelectedRole);
     }
 }
 
@@ -285,7 +286,7 @@ public class AgentSyncLinterTests
     [InlineData("Validates authentication tokens and manages OAuth session lifecycles.")]
     public void LintSetWhenAgentDescriptionIsActionOnlyEmitsKwAgentLint002Warning(string description)
     {
-        AgentModel agent = CreateAgent(description, "data-engineer");
+        AgentModel agent = CreateAgent(description);
         AgentSet agentSet = new AgentSet(new[] { agent });
 
         DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp");
@@ -306,7 +307,7 @@ public class AgentSyncLinterTests
     [InlineData("Use this agent when analyzing memory leaks in .NET applications.")]
     public void LintSetWhenAgentDescriptionHasTriggerPhrasingDoesNotEmitKwAgentLint002(string description)
     {
-        AgentModel agent = CreateAgent(description, "data-engineer");
+        AgentModel agent = CreateAgent(description);
         AgentSet agentSet = new AgentSet(new[] { agent });
 
         DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, "/tmp");

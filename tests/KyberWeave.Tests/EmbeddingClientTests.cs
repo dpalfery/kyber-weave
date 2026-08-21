@@ -211,10 +211,8 @@ public sealed class EmbeddingClientTests
     [Fact]
     public void GenerateWhenEndpointRedirectsRejectsTheRedirectWithoutFollowingIt()
     {
-        using HttpResponseMessage redirect = new HttpResponseMessage(HttpStatusCode.Redirect)
-        {
-            Headers = { Location = new Uri("https://example.com/v1/embeddings") }
-        };
+        using HttpResponseMessage redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
+        redirect.Headers.Location = new Uri("https://example.com/v1/embeddings");
         using RecordingHandler handler = new RecordingHandler(redirect);
         using OpenAiCompatibleEmbeddingGenerator generator = new OpenAiCompatibleEmbeddingGenerator(
             handler,

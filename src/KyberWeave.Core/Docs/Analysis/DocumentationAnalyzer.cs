@@ -83,7 +83,7 @@ public sealed partial class DocumentationAnalyzer
         List<ClaimPairCandidate> semanticSeedPairs = new List<ClaimPairCandidate>();
 
         ClaimCandidateSourceRequest request = new ClaimCandidateSourceRequest(claims, graph, config.Search);
-        foreach (IClaimCandidateSource? source in _candidateSources.Where(source => ShouldRun(source.Kind, config)))
+        foreach (IClaimCandidateSource source in _candidateSources.Where(source => ShouldRun(source.Kind, config)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             ClaimCandidateSourceResult result = source.FindCandidates(request)
@@ -156,7 +156,7 @@ public sealed partial class DocumentationAnalyzer
         bool truncated = sourceTruncated || ordered.Length > config.Search.MaxCandidates;
         AnalysisCandidate[] visible = ordered.Take(config.Search.MaxCandidates).ToArray();
 
-        foreach (AnalysisCandidate? candidate in visible)
+        foreach (AnalysisCandidate candidate in visible)
             diagnostics.Add(ToDiagnostic(candidate, config.VerdictConfidence));
 
         AnalysisMetrics metrics = new AnalysisMetrics(
@@ -234,7 +234,7 @@ public sealed partial class DocumentationAnalyzer
         IReadOnlyList<Claim> claims,
         IDictionary<string, AnalysisCandidate> candidates)
     {
-        foreach (IGrouping<string, Claim>? group in claims
+        foreach (IGrouping<string, Claim> group in claims
                      .Where(claim => !claim.IgnoreRules.HasFlag(IgnoreRule.Duplicate))
                      .GroupBy(claim => claim.ContentHash, StringComparer.Ordinal)
                      .Where(group => group.Count() > 1))
@@ -439,7 +439,7 @@ public sealed partial class DocumentationAnalyzer
                 "Related analysis evidence."))
             .ToArray();
 
-        (string? code, Severity severity, string? message, string? hint) = candidate.Kind switch
+        (string code, Severity severity, string message, string hint) = candidate.Kind switch
         {
             AnalysisRuleKind.Duplicate => (
                 DuplicateRuleCode,
@@ -589,7 +589,7 @@ public sealed partial class DocumentationAnalyzer
         (null, null) => null,
         (not null, null) => left,
         (null, not null) => right,
-        _ => Math.Max(left!.Value, right!.Value)
+        _ => Math.Max(left.Value, right.Value)
     };
 
     private static string? NormalizePath(string? path)

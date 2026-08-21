@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
@@ -65,7 +66,7 @@ public sealed class RouteCommand : Command<RouteSettings>
             : RunSingle(settings, set, strategy);
     }
 
-    private static int RunSingle(RouteSettings settings, Core.Skills.Model.SkillSet set, IRoutingStrategy strategy)
+    private static int RunSingle(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
         if (string.IsNullOrWhiteSpace(settings.Prompt))
         {
@@ -77,33 +78,37 @@ public sealed class RouteCommand : Command<RouteSettings>
 
         if (settings.Json)
         {
-            JsonObject obj = new System.Text.Json.Nodes.JsonObject
+            JsonObject obj = new JsonObject
             {
                 ["prompt"] = settings.Prompt,
                 ["fired"] = result.Fired,
                 ["selected"] = result.SelectedSkill,
                 ["margin"] = Math.Round(result.Margin, 4),
-                ["ranked"] = new System.Text.Json.Nodes.JsonArray(
-                    result.Ranked.Select(c => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+                ["ranked"] = new JsonArray(
+                    result.Ranked.Select(c => (JsonNode)new JsonObject
                     {
                         ["skill"] = c.SkillName,
                         ["score"] = Math.Round(c.Score, 4)
                     }).ToArray())
             };
-            Console.WriteLine(obj.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            Console.WriteLine(obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             return 0;
         }
 
         AnsiConsole.MarkupLine($"Prompt: [italic]\"{Markup.Escape(settings.Prompt!)}\"[/]");
         if (result.Fired)
+        {
             AnsiConsole.MarkupLine($"Would fire: [green bold]{Markup.Escape(result.SelectedSkill!)}[/] (margin over runner-up: {result.Margin:F3})");
+        }
         else
+        {
             AnsiConsole.MarkupLine($"[yellow]No skill clears the fire threshold ({strategy.Name} @ {settings.Threshold}).[/]");
+        }
 
         Table table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Rank"); table.AddColumn("Skill"); table.AddColumn("Score");
         int rank = 1;
-        foreach (RoutingCandidate? c in result.Ranked.Take(8))
+        foreach (RoutingCandidate c in result.Ranked.Take(8))
         {
             string mark = rank == 1 && result.Fired ? "[green]→[/] " : "  ";
             table.AddRow($"{mark}{rank}", Markup.Escape(c.SkillName), $"{c.Score:F3}");
@@ -113,7 +118,7 @@ public sealed class RouteCommand : Command<RouteSettings>
         return 0;
     }
 
-    private static int RunEval(RouteSettings settings, Core.Skills.Model.SkillSet set, IRoutingStrategy strategy)
+    private static int RunEval(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
         if (!File.Exists(settings.EvalFile))
         {
@@ -126,14 +131,14 @@ public sealed class RouteCommand : Command<RouteSettings>
 
         if (settings.Json)
         {
-            JsonObject obj = new System.Text.Json.Nodes.JsonObject
+            JsonObject obj = new JsonObject
             {
                 ["accuracy"] = Math.Round(summary.Accuracy, 4),
                 ["passed"] = summary.Passed,
                 ["total"] = summary.Total,
                 ["minAccuracy"] = settings.MinAccuracy,
-                ["cases"] = new System.Text.Json.Nodes.JsonArray(
-                    summary.Results.Select(r => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+                ["cases"] = new JsonArray(
+                    summary.Results.Select(r => (JsonNode)new JsonObject
                     {
                         ["prompt"] = r.Case.Prompt,
                         ["expected"] = r.ExpectedLabel,
@@ -141,7 +146,7 @@ public sealed class RouteCommand : Command<RouteSettings>
                         ["passed"] = r.Passed
                     }).ToArray())
             };
-            Console.WriteLine(obj.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            Console.WriteLine(obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         }
         else
         {

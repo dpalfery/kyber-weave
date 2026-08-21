@@ -13,7 +13,7 @@ public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
     public override int Execute(CommandContext context, AgentCatalogSettings settings)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig? config))
+        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig config))
         {
             ReportRenderer.Render(report, OutputFormat.Table, "agent catalog", "Config");
             return 1;

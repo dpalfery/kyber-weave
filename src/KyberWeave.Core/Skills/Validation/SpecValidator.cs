@@ -22,7 +22,7 @@ public static partial class SpecValidator
     public static IEnumerable<Diagnostic> Validate(Skill skill)
     {
         string? name = skill.Frontmatter.Name;
-        string skillId = string.IsNullOrWhiteSpace(name) ? skill.DirectoryName : name!;
+        string skillId = string.IsNullOrWhiteSpace(name) ? skill.DirectoryName : name;
         string file = skill.SkillFilePath;
 
         // ---- name ----
@@ -34,7 +34,7 @@ public static partial class SpecValidator
         }
         else
         {
-            if (name!.Length > NameMaxLength)
+            if (name.Length > NameMaxLength)
                 yield return new Diagnostic("KW-SKILL-SPEC-002", Severity.Error,
                     $"'name' is {name.Length} chars; the spec limit is {NameMaxLength}.", skillId, file);
 
@@ -61,7 +61,7 @@ public static partial class SpecValidator
                 "Front matter is missing the required 'description' field. This is the routing signal the orchestrator uses to select the skill.",
                 skillId, file);
         }
-        else if (description!.Length > DescriptionMaxLength)
+        else if (description.Length > DescriptionMaxLength)
         {
             yield return new Diagnostic("KW-SKILL-SPEC-006", Severity.Error,
                 $"'description' is {description.Length} chars; the spec limit is {DescriptionMaxLength}.", skillId, file);

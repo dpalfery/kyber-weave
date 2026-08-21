@@ -113,8 +113,8 @@ public class MotorcycleRagHostProfileTests
         KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
         using HostProfileRepoFixture repo = new HostProfileRepoFixture();
 
-        repo.WithConductorSkillDirectory()
-            .WithAgent(HarnessKind.Kilo, "conductor");
+        repo.WithConductorSkillDirectory();
+        repo.WithAgent(HarnessKind.Kilo, "conductor");
 
         foreach (HarnessKind harness in new[]
                  {
@@ -240,10 +240,9 @@ public class MotorcycleRagHostProfileTests
             return this;
         }
 
-        public HostProfileDocFixture WithSourceRoot(string relativePath)
+        public void WithSourceRoot(string relativePath)
         {
             Directory.CreateDirectory(Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-            return this;
         }
 
         public HostProfileDocFixture Write(string relativePath, string content)
@@ -280,16 +279,15 @@ public class MotorcycleRagHostProfileTests
             Directory.CreateDirectory(Root);
         }
 
-        public HostProfileRepoFixture WithConductorSkillDirectory()
+        public void WithConductorSkillDirectory()
         {
             Directory.CreateDirectory(Path.Combine(Root, ".agents", "skills", "conductor"));
             File.WriteAllText(
                 Path.Combine(Root, ".agents", "skills", "conductor", "SKILL.md"),
                 "---\nname: conductor\n---\n");
-            return this;
         }
 
-        public HostProfileRepoFixture WithAgent(HarnessKind harness, string roleName)
+        public void WithAgent(HarnessKind harness, string roleName)
         {
             string folder = harness switch
             {
@@ -309,11 +307,10 @@ public class MotorcycleRagHostProfileTests
                 $"""
                 ---
                 name: {roleName}
-                description: Host profile contract agent.
+                description: Synthetic agent for {roleName}
                 ---
-                Body for {roleName}.
+                Instructions body.
                 """);
-            return this;
         }
 
         public void WriteHostConfig(string yaml)

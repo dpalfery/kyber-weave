@@ -29,7 +29,7 @@ public sealed class RoutingEvalFile
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
             .Build();
-        return deserializer.Deserialize<RoutingEvalFile>(File.ReadAllText(path)) ?? new RoutingEvalFile();
+        return deserializer.Deserialize<RoutingEvalFile?>(File.ReadAllText(path)) ?? new RoutingEvalFile();
     }
 }
 

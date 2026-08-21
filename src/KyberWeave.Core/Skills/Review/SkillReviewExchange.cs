@@ -10,7 +10,7 @@ namespace KyberWeave.Core.Skills.Review;
 /// <summary>
 /// Exports skill and agent description review candidates and validates/imports agent review verdicts.
 /// </summary>
-public static partial class SkillReviewExchange
+public static class SkillReviewExchange
 {
     public const string CandidateSchema = "kyber-weave.skill-review.candidates/v1";
     public const string VerdictSchema = "kyber-weave.skill-review.verdicts/v1";
@@ -63,7 +63,7 @@ public static partial class SkillReviewExchange
             {
                 // Role names repeat across harnesses; the review key must distinguish them.
                 string id = AgentCandidateId(agent);
-                string description = agent.Description ?? string.Empty;
+                string description = agent.Description;
                 Skill dummySkill = new Skill
                 {
                     SkillFilePath = agent.FilePath,
@@ -149,7 +149,7 @@ public static partial class SkillReviewExchange
             return Failure($"Unsupported verdict schema '{bundle.Schema}'. Expected '{VerdictSchema}'.");
         }
 
-        if (bundle.Verdicts is null || bundle.Verdicts.Count == 0)
+        if (bundle.Verdicts.Count == 0)
         {
             return Failure("The verdict bundle does not contain any verdicts.");
         }
@@ -170,13 +170,8 @@ public static partial class SkillReviewExchange
 
         HashSet<string> seenCandidateIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (SkillReviewVerdict? verdict in bundle.Verdicts)
+        foreach (SkillReviewVerdict verdict in bundle.Verdicts)
         {
-            if (verdict is null)
-            {
-                return Failure("The verdict bundle contains a null verdict entry.");
-            }
-
             if (string.IsNullOrWhiteSpace(verdict.CandidateId))
             {
                 return Failure("Verdict candidate_id must be non-empty.");

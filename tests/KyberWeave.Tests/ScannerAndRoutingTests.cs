@@ -37,7 +37,7 @@ public class SkillScannerTests
     public void CleanSkillHasNoCriticalFindings()
     {
         List<Diagnostic> diags = new SkillScanner().Scan(Make("ALWAYS verify identity before acting.")).ToList();
-        Assert.DoesNotContain(diags, d => d.Severity == KyberWeave.Core.Diagnostics.Severity.Critical);
+        Assert.DoesNotContain(diags, d => d.Severity == Severity.Critical);
     }
 }
 

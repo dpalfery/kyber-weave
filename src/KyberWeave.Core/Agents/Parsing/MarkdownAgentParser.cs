@@ -47,7 +47,7 @@ public sealed partial class MarkdownAgentParser : IAgentParser
             try
             {
                 Dictionary<string, object>? dict = MarkdownFrontmatterReader.Deserializer
-                    .Deserialize<Dictionary<string, object>>(read.Yaml);
+                    .Deserialize<Dictionary<string, object>?>(read.Yaml);
                 if (dict is not null)
                 {
                     foreach ((string? k, object? v) in dict)

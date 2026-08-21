@@ -117,7 +117,10 @@ internal static class DocsCommandComposition
         ArgumentNullException.ThrowIfNull(factories);
 
         runtime = null;
-        if (!TryResolveConfig(settings, report, out KyberWeaveConfig? config, out OntologyConfig? ontology)) return false;
+        if (!TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
+        {
+            return false;
+        }
 
         ICodeGraphResolver resolver = factories.CreateResolver(settings.Path);
         if (!resolver.IsAvailable)

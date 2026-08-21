@@ -276,7 +276,7 @@ public class ReviewVerdictTests
         ReviewOutcome outcome = Evaluate([
             Finding(ReviewSeverity.Minor, id: "a"),
             Finding(ReviewSeverity.Critical, id: "b"),
-            Finding(ReviewSeverity.Major, id: "c")
+            Finding(id: "c")
         ]);
 
         Assert.Equal(["b", "c", "a"], outcome.Accepted.Select(f => f.Id));

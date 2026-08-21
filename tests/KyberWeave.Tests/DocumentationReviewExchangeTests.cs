@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using KyberWeave.Core.Diagnostics;
@@ -8,9 +7,7 @@ using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Analysis.Review;
-using KyberWeave.Core.Processes;
 using Xunit;
-using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -508,11 +505,8 @@ public sealed class DocumentationReviewExchangeTests
     private static string QuerySqlite(string databasePath, string sql) =>
         SqliteTestFixture.QuerySqlite(databasePath, sql);
 
-    private static ProcessResult RunSqlite(string databasePath, string sql) =>
+    private static void RunSqlite(string databasePath, string sql) =>
         SqliteTestFixture.RunSqlite(databasePath, sql);
-
-    private static ProcessStartInfo SqliteStartInfo() =>
-        SqliteTestFixture.SqliteStartInfo();
 
     private static JsonSerializerOptions CreateJsonOptions()
     {

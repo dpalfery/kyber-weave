@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -44,11 +45,11 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
 
         Assert.Equal("none", settings.FailOn);
         Assert.Equal("table", settings.Format);
-        Assert.Equal(KyberWeave.Cli.Rendering.OutputFormat.Json,
+        Assert.Equal(OutputFormat.Json,
             new DocsIntegrityCheckSettings { Format = "json" }.ParsedFormat);
-        Assert.Equal(KyberWeave.Cli.Rendering.OutputFormat.Sarif,
+        Assert.Equal(OutputFormat.Sarif,
             new DocsIntegrityCheckSettings { Format = "sarif" }.ParsedFormat);
-        Assert.Equal(KyberWeave.Cli.Rendering.OutputFormat.Markdown,
+        Assert.Equal(OutputFormat.Markdown,
             new DocsIntegrityCheckSettings { Format = "markdown" }.ParsedFormat);
     }
 

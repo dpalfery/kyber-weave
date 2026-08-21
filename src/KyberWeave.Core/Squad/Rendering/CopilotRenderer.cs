@@ -416,7 +416,7 @@ public sealed class CopilotRenderer : ISquadRenderer
     {
         public bool Accepts(Type type) => type == typeof(CopilotAgentsFlowSequence);
 
-        public object? ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
             throw new NotSupportedException("Deserialization of CopilotAgentsFlowSequence is not supported.");
         }
@@ -446,7 +446,7 @@ public sealed class CopilotRenderer : ISquadRenderer
     {
         public bool Accepts(Type type) => type == typeof(CopilotToolsFlowSequence);
 
-        public object? ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
             throw new NotSupportedException("Deserialization of CopilotToolsFlowSequence is not supported.");
         }

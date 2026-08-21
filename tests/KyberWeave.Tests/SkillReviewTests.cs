@@ -353,8 +353,7 @@ public sealed class SkillReviewTests
     {
         AgentModel claude = MakeAgent(
             "schema-architect",
-            "Use when designing SQL schemas in Claude.",
-            HarnessKind.Claude);
+            "Use when designing SQL schemas in Claude.");
         AgentModel cursor = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Cursor.",
@@ -407,8 +406,7 @@ public sealed class SkillReviewTests
     {
         AgentModel claude = MakeAgent(
             "schema-architect",
-            "Use when designing SQL schemas in Claude.",
-            HarnessKind.Claude);
+            "Use when designing SQL schemas in Claude.");
         AgentModel cursor = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Cursor.",

@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -81,7 +82,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
             report.AddMetric("reviewCandidates", result.Bundle.Candidates.Count);
             report.AddMetric("truncated", result.Truncated);
             CommandHelpers.Finish(report, settings, "docs review export", "Candidate");
-            if (settings.ParsedFormat == KyberWeave.Cli.Rendering.OutputFormat.Table)
+            if (settings.ParsedFormat == OutputFormat.Table)
             {
                 AnsiConsole.MarkupLine(
                     $"[green]Exported[/] {result.Bundle.Candidates.Count} review candidates to " +
@@ -120,8 +121,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
             DocsAnalysisCommandErrors.Render(
                 exception,
                 settings,
-                "docs review import",
-                DocumentationReviewExchange.ReviewRuleCode);
+                "docs review import");
             return 1;
         }
     }
@@ -204,7 +204,10 @@ internal static class AtomicTextFile
         }
         finally
         {
-            if (File.Exists(temporary)) File.Delete(temporary);
+            if (File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
         }
     }
 }

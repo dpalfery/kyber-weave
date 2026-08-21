@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
@@ -45,8 +46,8 @@ public sealed class CatalogCommand : Command<CatalogSettings>
 
         if (settings.Json)
         {
-            JsonArray arr = new System.Text.Json.Nodes.JsonArray(
-                rows.Select(r => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+            JsonArray arr = new JsonArray(
+                rows.Select(r => (JsonNode)new JsonObject
                 {
                     ["name"] = r.Name,
                     ["version"] = r.Version,
@@ -55,7 +56,7 @@ public sealed class CatalogCommand : Command<CatalogSettings>
                     ["bodyTokens"] = r.Tokens,
                     ["resources"] = r.Resources
                 }).ToArray());
-            Console.WriteLine(arr.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            Console.WriteLine(arr.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             return 0;
         }
 

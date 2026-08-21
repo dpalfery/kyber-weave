@@ -229,14 +229,13 @@ public sealed class DocumentationReviewExchange
             return "The verdict bundle analyzer version is stale.";
         if (!StringComparer.Ordinal.Equals(bundle.RubricVersion, DocumentationAnalyzer.RubricVersion))
             return "The verdict bundle rubric version is stale.";
-        if (bundle.Verdicts is null || bundle.Verdicts.Count == 0)
+        if (bundle.Verdicts.Count == 0)
             return "The verdict bundle does not contain any verdicts.";
 
         HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
         List<AnalysisCandidate> reviewedCandidates = new List<AnalysisCandidate>(bundle.Verdicts.Count);
-        foreach (ReviewVerdictItem? verdict in bundle.Verdicts)
+        foreach (ReviewVerdictItem verdict in bundle.Verdicts)
         {
-            if (verdict is null) return "The verdict bundle contains an empty verdict.";
             if (string.IsNullOrWhiteSpace(verdict.CandidateId) || !seen.Add(verdict.CandidateId))
                 return "Verdict candidate ids must be non-empty and unique.";
             if (!candidates.TryGetValue(verdict.CandidateId, out AnalysisCandidate? candidate))
@@ -366,7 +365,6 @@ public sealed class DocumentationReviewExchange
             && !string.IsNullOrWhiteSpace(sense.Definition)
             && sense.Scopes is { Count: > 0 }
             && sense.Scopes.All(ValidScope)
-            && sense.Aliases is not null
             && sense.Aliases.All(alias => !string.IsNullOrWhiteSpace(alias)));
     }
 

@@ -396,7 +396,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
     private sealed class UnavailableResolver : EmptyResolver
     {
         public override bool IsAvailable => false;
-        public override string? UnavailableReason => "No CodeGraph index.";
+        public override string UnavailableReason => "No CodeGraph index.";
     }
 
     private abstract class EmptyResolver : ICodeGraphResolver

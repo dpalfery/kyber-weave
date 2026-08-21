@@ -28,7 +28,7 @@ public sealed class Skill
     public required string DirectoryPath { get; init; }
 
     /// <summary>The directory name (used to validate the name == folder rule).</summary>
-    public string DirectoryName => System.IO.Path.GetFileName(DirectoryPath.TrimEnd(System.IO.Path.DirectorySeparatorChar));
+    public string DirectoryName => Path.GetFileName(DirectoryPath.TrimEnd(Path.DirectorySeparatorChar));
 
     /// <summary>Parsed front matter. Never null after a successful parse.</summary>
     public required SkillFrontmatter Frontmatter { get; init; }

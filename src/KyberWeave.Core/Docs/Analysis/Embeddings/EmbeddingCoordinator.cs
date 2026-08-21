@@ -97,8 +97,7 @@ public sealed class EmbeddingCoordinator
                 item.ContextualHash,
                 provider,
                 model,
-                config.Dimensions,
-                "float"))
+                config.Dimensions))
             .ToArray();
         EmbeddingCacheKey[] uniqueKeys = orderedKeys.Distinct().ToArray();
         IReadOnlyDictionary<EmbeddingCacheKey, StoredEmbedding> cached = _persistence.LoadEmbeddings(uniqueKeys);

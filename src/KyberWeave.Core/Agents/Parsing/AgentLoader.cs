@@ -77,7 +77,7 @@ public static class AgentLoader
             return true;
         }
 
-        if (Enum.TryParse<HarnessKind>(key, ignoreCase: true, out HarnessKind parsed) &&
+        if (Enum.TryParse(key, ignoreCase: true, out HarnessKind parsed) &&
             parsed != HarnessKind.Custom)
         {
             filter = parsed;

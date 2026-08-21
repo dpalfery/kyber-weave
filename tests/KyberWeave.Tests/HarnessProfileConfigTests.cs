@@ -118,7 +118,7 @@ public class HarnessProfileConfigTests
                     conductor: conductor
             """);
 
-        YamlException ex = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
+        YamlException ex = Assert.ThrowsAny<YamlException>(
             () => HarnessProfileConfigLoader.Load(yamlPath));
         Assert.Contains("not-a-harness", ex.Message, StringComparison.Ordinal);
     }
@@ -266,7 +266,7 @@ public class HarnessProfileConfigTests
 
         public HarnessRepoFixture WithAgent(HarnessKind harness, string roleName)
         {
-            (string? folder, string? fileName) = harness switch
+            (string folder, string fileName) = harness switch
             {
                 HarnessKind.Codex => (".codex/agents", $"{roleName}.toml"),
                 HarnessKind.Cursor => (".cursor/agents", $"{roleName}.agent.md"),

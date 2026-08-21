@@ -77,7 +77,7 @@ public static class ReportRenderer
         table.AddColumn(new TableColumn("Location").NoWrap());
         table.AddColumn("Message");
 
-        foreach (Diagnostic? d in rows)
+        foreach (Diagnostic d in rows)
         {
             Color color = ColorFor(d.Severity);
             table.AddRow(
@@ -166,7 +166,7 @@ public static class ReportRenderer
         {
             sb.AppendLine($"| Severity | Code | {subjectLabel} | Location | Message |");
             sb.AppendLine("|---|---|---|---|---|");
-            foreach (Diagnostic? d in report.Items.OrderByDescending(i => i.Severity))
+            foreach (Diagnostic d in report.Items.OrderByDescending(i => i.Severity))
             {
                 sb.AppendLine($"| {d.Severity} | {EscapeMarkdown(d.Code)} | {EscapeMarkdown(d.Subject)} | {EscapeMarkdown(FormatLocation(d, includeRelatedCount: false))} | {EscapeMarkdown(d.Message)} |");
                 if (d.RelatedLocations is not { Count: > 0 })
@@ -176,7 +176,7 @@ public static class ReportRenderer
 
                 foreach (DiagnosticLocation related in d.RelatedLocations)
                 {
-                    string message = related.Message is null ? "Related location" : related.Message;
+                    string message = related.Message ?? "Related location";
                     sb.AppendLine($"|  |  |  | {EscapeMarkdown(FormatLocation(related))} | {EscapeMarkdown(message)} |");
                 }
             }
@@ -349,7 +349,7 @@ public static class ReportRenderer
         float item => JsonValue.Create(item),
         double item => JsonValue.Create(item),
         decimal item => JsonValue.Create(item),
-        _ => JsonValue.Create(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty)
+        _ => JsonValue.Create(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty)
     };
 
     private static void AddRange(JsonObject target, int? startLine, int? endLine)

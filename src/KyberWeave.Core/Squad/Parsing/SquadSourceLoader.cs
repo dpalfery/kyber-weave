@@ -513,7 +513,7 @@ public static class SquadSourceLoader
 
         EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, isDirectory: true);
         List<SquadSkill> skills = new List<SquadSkill>();
-        foreach (string? skillDirectory in Directory.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
+        foreach (string skillDirectory in Directory.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
         {
             string relativeDirectory = ToRelativePath(logicalRoot, skillDirectory);
             EnsureDiscoveredPath(logicalRoot, resolvedRoot, relativeDirectory, isDirectory: true);
@@ -920,7 +920,7 @@ public static class SquadSourceLoader
             return null;
         }
 
-        if (node is not YamlSequenceNode sequence)
+        if (node is not YamlSequenceNode)
         {
             SquadSourceValidator.Throw(
                 $"Field '{field}' must be a sequence.",

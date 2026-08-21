@@ -59,7 +59,7 @@ internal static partial class HostConfigYaml
 
             (string? value, string? suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
 
-            if (TryReadSequence(lines, i, value, blockIndent, out IReadOnlyList<string>? roots))
+            if (TryReadSequence(lines, i, value, blockIndent, out IReadOnlyList<string> roots))
                 return WithDocsRootAmong(yaml, roots, docsRoot);
 
             if (ScalarEquals(value, docsRoot))
@@ -121,7 +121,7 @@ internal static partial class HostConfigYaml
 
         if (value.StartsWith('['))
         {
-            if (!TryCollectFlowSequence(lines, keyIndex, value, out string? flow))
+            if (!TryCollectFlowSequence(lines, keyIndex, value, out string flow))
             {
                 throw new InvalidDataException(
                     "ontology.docs-root looks like a flow sequence but its brackets do not " +
@@ -487,7 +487,7 @@ internal static partial class HostConfigYaml
                 continue;
             }
 
-            (string? value, string? suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
+            (string? value, _) = SplitScalarAndSuffix(match.Groups["rest"].Value);
 
             if (value.StartsWith('['))
             {

@@ -186,26 +186,27 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         using Process process = Process.GetCurrentProcess();
         long peakWorkingSet = process.WorkingSet64;
         using CancellationTokenSource samplingCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = samplingCancellation.Token;
         Task sampler = Task.Run(async () =>
         {
             try
             {
-                while (true)
+                while (!cancellationToken.IsCancellationRequested)
                 {
                     process.Refresh();
                     InterlockedExtensions.Max(ref peakWorkingSet, process.WorkingSet64);
-                    await Task.Delay(TimeSpan.FromMilliseconds(5), samplingCancellation.Token)
+                    await Task.Delay(TimeSpan.FromMilliseconds(5), cancellationToken)
                         .ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException) when (samplingCancellation.IsCancellationRequested)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 // The measurement completed normally.
             }
         });
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         Stopwatch stopwatch = Stopwatch.StartNew();
-        T? value = action();
+        T value = action();
         stopwatch.Stop();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         samplingCancellation.Cancel();

@@ -150,7 +150,7 @@ public static class OntologyConfigLoader
         List<string> normalized = new List<string>(values.Count);
         foreach (string value in values)
         {
-            string technology = value?.Trim() ?? string.Empty;
+            string technology = value.Trim();
             if (!ConfigSlug.IsValid(technology))
             {
                 throw new YamlException(
@@ -174,7 +174,7 @@ public static class OntologyConfigLoader
 
     private static bool TryParseDocType(string name, out DocType docType)
     {
-        docType = name?.Trim().ToLowerInvariant() switch
+        docType = name.Trim().ToLowerInvariant() switch
         {
             "architecture" => DocType.Architecture,
             "onboarding" => DocType.Onboarding,

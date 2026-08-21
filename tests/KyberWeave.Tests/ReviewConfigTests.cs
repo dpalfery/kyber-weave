@@ -146,7 +146,7 @@ public class ReviewConfigTests
     [Fact]
     public void ThisRepositorysOwnReviewConfigurationLoadsAndReservesItsGovernanceArtifacts()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot, null);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
 
         Assert.True(result.Success, result.Error);
         ReviewConfig review = result.Config!.Review;

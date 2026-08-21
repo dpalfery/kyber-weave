@@ -73,10 +73,8 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Fact]
     public void ConstructorWithRedirectFollowingHandlerRejectsTheUnsafeTransportContract()
     {
-        using HttpClientHandler handler = new HttpClientHandler
-        {
-            AllowAutoRedirect = true
-        };
+        using HttpClientHandler handler = new HttpClientHandler();
+        handler.AllowAutoRedirect = true;
 
         ArgumentException exception = Assert.Throws<ArgumentException>(() =>
             new GitHubSquadReleaseSource(handler, ApiRoot));
@@ -410,31 +408,38 @@ public sealed class SquadReleaseClientTests : IDisposable
     public async Task DownloadAndExtractAsyncWhenCancellationArrivesAfterStagingStartsCancelsBeforePublish()
     {
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        using CancellationTokenSource cancellation = new CancellationTokenSource();
-        bool stagingCreated = false;
-        using RoutingHandler handler = ReleaseHandler(
-            archiveBytes,
-            $"{Sha256(archiveBytes)}  {AssetName}\n");
-        SeedStateOnly();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
-        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
-            handler,
-            ApiRoot,
-            onStagingCreated: () =>
-            {
-                stagingCreated = true;
-                cancellation.Cancel();
-            });
+        CancellationTokenSource cancellation = new CancellationTokenSource();
+        try
+        {
+            bool stagingCreated = false;
+            using RoutingHandler handler = ReleaseHandler(
+                archiveBytes,
+                $"{Sha256(archiveBytes)}  {AssetName}\n");
+            SeedStateOnly();
+            IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+            using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+                handler,
+                ApiRoot,
+                onStagingCreated: () =>
+                {
+                    stagingCreated = true;
+                    cancellation.Cancel();
+                });
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            source.DownloadAndExtractAsync(Request(), cancellation.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                source.DownloadAndExtractAsync(Request(), cancellation.Token));
 
-        Assert.True(stagingCreated);
-        AssertTreeUnchanged(before);
-        Assert.Empty(Directory.EnumerateDirectories(
-            _temp.Path,
-            ".destination.kyber-squad-*",
-            SearchOption.TopDirectoryOnly));
+            Assert.True(stagingCreated);
+            AssertTreeUnchanged(before);
+            Assert.Empty(Directory.EnumerateDirectories(
+                _temp.Path,
+                ".destination.kyber-squad-*",
+                SearchOption.TopDirectoryOnly));
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
     }
 
     [Fact]
@@ -725,7 +730,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             Assert.NotNull(request.RequestUri);
             Requests.Add(request.RequestUri);
             if (!_responses.TryGetValue(request.RequestUri, out Queue<Func<HttpResponseMessage>>? queue) || queue.Count == 0)
-                throw new Xunit.Sdk.XunitException($"Unexpected HTTP request: {request.RequestUri}");
+                throw new XunitException($"Unexpected HTTP request: {request.RequestUri}");
 
             return Task.FromResult(queue.Dequeue()());
         }

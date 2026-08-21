@@ -25,11 +25,11 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
         List<DocGraphEdge> edges = new List<DocGraphEdge>();
         HashSet<string> emittedNodeIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (TermSnapshot? term in _terms.OrderBy(item => item.Term, StringComparer.Ordinal))
+        foreach (TermSnapshot term in _terms.OrderBy(item => item.Term, StringComparer.Ordinal))
         {
             string termId = TermId(term.Term);
             AddTermNode(nodes, emittedNodeIds, termId, term.Term);
-            foreach (SenseSnapshot? sense in term.Senses.OrderBy(item => item.Id, StringComparer.Ordinal))
+            foreach (SenseSnapshot sense in term.Senses.OrderBy(item => item.Id, StringComparer.Ordinal))
             {
                 string senseId = $"sense:{sense.Id}";
                 AddNode(nodes, emittedNodeIds, new DocGraphNode(
@@ -42,7 +42,7 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
                     }));
                 edges.Add(new DocGraphEdge("HAS_SENSE", termId, senseId));
 
-                foreach (string? alias in sense.Aliases
+                foreach (string alias in sense.Aliases
                              .Distinct(StringComparer.OrdinalIgnoreCase)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
@@ -52,14 +52,14 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
                         edges.Add(new DocGraphEdge("ALIAS_OF", aliasId, senseId));
                 }
 
-                foreach (string? scope in sense.Scopes
+                foreach (string scope in sense.Scopes
                              .Distinct(StringComparer.Ordinal)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
                     AddScopeEdges(nodes, emittedNodeIds, edges, senseId, scope, codeGraph);
                 }
 
-                foreach (string? evidenceId in sense.EvidenceIds
+                foreach (string evidenceId in sense.EvidenceIds
                              .Distinct(StringComparer.Ordinal)
                              .OrderBy(value => value, StringComparer.Ordinal))
                 {
@@ -158,7 +158,7 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
 
         if (!scope.StartsWith(codePrefix, StringComparison.Ordinal)) return;
         string symbol = scope[codePrefix.Length..];
-        foreach (CodeGraphNode? node in codeGraph.ResolveSymbol(symbol).OrderBy(node => node.Id, StringComparer.Ordinal))
+        foreach (CodeGraphNode node in codeGraph.ResolveSymbol(symbol).OrderBy(node => node.Id, StringComparer.Ordinal))
             edges.Add(new DocGraphEdge("SCOPED_TO", senseId, node.Id));
     }
 

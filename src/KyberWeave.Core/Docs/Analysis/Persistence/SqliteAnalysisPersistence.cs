@@ -519,7 +519,7 @@ public sealed class SqliteAnalysisPersistence : IAnalysisPersistence
             throw new ArgumentException("Embedding vectors must contain only finite values.", nameof(embedding));
         }
         if (embedding.Key.Dimensions is <= 0
-            || embedding.Key.Dimensions is int dimensions && dimensions != embedding.Vector.Count)
+            || (embedding.Key.Dimensions is not null && embedding.Key.Dimensions.Value != embedding.Vector.Count))
         {
             throw new ArgumentException("Embedding dimensions must match the vector length.", nameof(embedding));
         }

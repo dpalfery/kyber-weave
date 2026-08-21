@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -369,7 +370,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         // Assert that CLI, Core, and MCP assemblies do not bundle the raw products/kyber-squad corpus in embedded resources
         Assembly cliAssembly = typeof(SquadPackCommand).Assembly;
         Assembly coreAssembly = typeof(SquadSource).Assembly;
-        Assembly mcpAssembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
+        Assembly mcpAssembly = typeof(DocsTools).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
         string[] coreResources = coreAssembly.GetManifestResourceNames();

@@ -6,7 +6,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Squad;
 
 /// <summary>
 /// Unit tests pinning GitHub Copilot agent rendering in <see cref="CopilotRenderer"/>,
@@ -37,9 +37,10 @@ public sealed class CopilotRendererTests
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        IEnumerable<SquadDeploymentFile> agentFiles = result.Files
+        SquadDeploymentFile[] agentFiles = result.Files
             .Where(f => f.RelativePath.StartsWith(".github/agents/", StringComparison.Ordinal) &&
-                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal));
+                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal))
+            .ToArray();
 
         Assert.NotEmpty(agentFiles);
 
@@ -104,9 +105,10 @@ public sealed class CopilotRendererTests
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        IEnumerable<SquadDeploymentFile> agentFiles = result.Files
+        SquadDeploymentFile[] agentFiles = result.Files
             .Where(f => f.RelativePath.StartsWith(".github/agents/", StringComparison.Ordinal) &&
-                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal));
+                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal))
+            .ToArray();
 
         foreach (SquadDeploymentFile file in agentFiles)
         {

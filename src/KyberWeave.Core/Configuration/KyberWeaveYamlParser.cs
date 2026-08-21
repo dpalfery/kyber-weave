@@ -24,7 +24,7 @@ internal static class KyberWeaveYamlParser
         // YamlDotNet raises YamlException (and subclasses SyntaxErrorException /
         // SemanticErrorException) for parse failures; those propagate unchanged.
         // Non-YAML exceptions are not wrapped — they surface as programming/runtime errors.
-        return MarkdownFrontmatterReader.Deserializer.Deserialize<KyberWeaveYamlDocument>(yaml)
+        return MarkdownFrontmatterReader.Deserializer.Deserialize<KyberWeaveYamlDocument?>(yaml)
                ?? new KyberWeaveYamlDocument();
     }
 }

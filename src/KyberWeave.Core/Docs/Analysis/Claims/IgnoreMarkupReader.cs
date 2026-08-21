@@ -53,7 +53,7 @@ internal static partial class IgnoreMarkupReader
 
             MatchCollection matches = ExactTagPattern().Matches(line);
             string residue = line;
-            foreach (Match match in matches.Cast<Match>().Reverse())
+            foreach (Match match in matches.Reverse())
             {
                 residue = residue.Remove(match.Index, match.Length);
             }
