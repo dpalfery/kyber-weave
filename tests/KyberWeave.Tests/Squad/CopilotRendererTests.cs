@@ -202,8 +202,8 @@ public sealed class CopilotRendererTests
     [InlineData("dal-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
     [InlineData("conductor", "tools: [vscode, read, agent, todo]")]
     [InlineData("conductor-v3", "tools: [vscode, read, agent, todo]")]
-    [InlineData("architect", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
-    [InlineData("architect-v3", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
+    [InlineData("architect", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
+    [InlineData("architect-v3", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
     [InlineData("github-devops", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, web, todo]")]
     // execute and agent are the widened reviewer profile reaching the tool allow-list; edit
     // is absent because filesystem.write=ask has no per-tool confirmation gate here and
@@ -441,6 +441,69 @@ public sealed class CopilotRendererTests
         int end = markdown.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
         Assert.True(end > 0, "Expected closing frontmatter delimiter.");
         return markdown[delimiter.Length..end];
+    }
+
+    /// <summary>
+    /// The "agent" tool grants a subagent the mechanism to delegate; "agents" names who it
+    /// may reach. Emitting only the first leaves architect and code-reviewer holding a tool
+    /// with an empty roster — delegation that looks configured and silently does nothing.
+    /// A primary agent is dispatched from the top-level session and receives the full
+    /// roster from the harness, so declaring one there would only narrow it.
+    /// </summary>
+    [Theory]
+    [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
+    [InlineData("architect-v3", "agents: ['azure-reader', 'research-agent']")]
+    [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
+    [InlineData("product-owner", "agents: ['research-agent']")]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
+        string agentName,
+        string expectedAgentsLine)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        string? actual = frontmatter
+            .Split('\n')
+            .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+            ?.Trim();
+
+        Assert.Equal(expectedAgentsLine, actual);
+    }
+
+    /// <summary>
+    /// A subagent that delegates to nothing, and every primary agent, must carry no roster:
+    /// an empty or redundant "agents" key is a permission statement nobody meant to make.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("review-lens")]
+    [InlineData("azure-reader")]
+    [InlineData("conductor")]
+    [InlineData("conductor-v3")]
+    public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("agents:", StringComparison.Ordinal));
+    }
+
+    private static async Task<string> RenderFrontmatterAsync(string agentName)
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".github/agents/{agentName}.agent.md");
+
+        return ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
     }
 
     private static string ExtractToolsLine(string frontmatter)

@@ -44,6 +44,16 @@ review:
     - id: skill-scan
       run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, scan, .apm/skills/kyber-weave-docs]
       blocking: true
+    # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
+    # `static-analysis-triage` lens reads the report at the --output path below and
+    # attributes each diagnostic to the diff. InspectCode exits 0 whether or not it finds
+    # anything, so "blocking" here means the analyzer must have *run* — a review that
+    # skipped it silently would read as one that passed it. Scoped to WARNING and above:
+    # the suggestion tier is dominated by style inspections this repository settles in
+    # .editorconfig, and burying 500 real warnings under 1200 of those helps nobody.
+    - id: inspectcode
+      run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING]
+      blocking: true
 
   policy:
     # The artifacts that govern what agents may do are not approvable by an agent. A change

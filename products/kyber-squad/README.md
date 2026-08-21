@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **22 canonical agents** and **25 canonical skills**,
+It maintains a target-neutral, declarative catalog of **22 canonical agents** and **26 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 This canonical tree is the single source of truth from which target-native agent and skill deployments
@@ -54,7 +54,7 @@ products/kyber-squad/
 │   ├── sql-database-architect.md
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 25 canonical skill directories
+├── skills/                             # 26 canonical skill directories
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -110,7 +110,7 @@ The normalized Markdown body following the second `---` delimiter is the authori
 
 ### 2. Skills (25 Canonical Skills)
 
-The 25 canonical skill directories under `skills/` adhere to the Agent Skills open standard (`SKILL.md`, optional `scripts/`, `references/`, and asset files). Note that `kyber-weave-docs` is intentionally managed separately under `.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.
+The 26 canonical skill directories under `skills/` adhere to the Agent Skills open standard (`SKILL.md`, optional `scripts/`, `references/`, and asset files). Note that `kyber-weave-docs` is intentionally managed separately under `.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.
 
 ### 3. Profiles
 

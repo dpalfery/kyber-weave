@@ -9,7 +9,7 @@ sources:
   .cursor/agents/architect.agent.md: 21530e88dc55fc5b8abb4f64489c56f71b2946fdee126439d6405763df1f3529
   .github/agents/architect.agent.md: f4efb0dc22263c22469cdcfc7a77c172782748f874a69209c869b4ab09001534
   .opencode/agents/architect.md: 986174e95069d9693f98d6358850e6304973868467daca0129549f60cd0ccef5
-final-body-sha256: 7c2bf8ae60206df3a1052f1b52704c1494885ca5f16bd828c1c3dbe22578a258
+final-body-sha256: 0d54f180dcafde4501e035a91ef1c7f14dd709873817a078d8d7a1fea86e6711
 ---
 # architect migration
 
@@ -24,5 +24,7 @@ Source frontmatter, provider model identifiers, tool allowlists, and command-sha
 The architect profile is the conservative intersection of effective live permissions after unsupported capabilities are marked unavailable: filesystem.read=allow, filesystem.write=deny, process.execute=deny, network.read=allow, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
 
 The instruction body was revised after migration. It stated "You **cannot spawn other agents**" as a flat fact about being a subagent. That framing became false when the reviewer profile gained delegate=allow, so the sentence now attributes the prohibition to its actual cause — the architect profile denies delegation — leaving the behaviour identical and the reason accurate. The architect profile itself is unchanged.
+
+The instruction body was revised after migration. Discovery changed from a request/fulfill loop mediated by the orchestrator to direct delegation: the architect profile now grants `delegate`, and `delegates-to` names the two read-only discovery roles, `azure-reader` and `research-agent`. Mediation cost a full orchestrator round trip per question and made the conductor a relay for work it has no opinion about. The labeled `DISCOVERY REQUEST` hand-up survives as the fallback for a harness that does not let a subagent delegate, and for an Azure call that fails after one retry. Governed-documentation lookup is now stated as a first-class discovery source, and an explicit edit-permission section bounds writes to a plan file under the plans folder and its index row.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

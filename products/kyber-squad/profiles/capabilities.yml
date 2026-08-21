@@ -20,7 +20,15 @@ profiles:
       process.execute: deny
       network.read: allow
       network.publish: deny
-      delegate: deny
+      # Planning needs two kinds of fact the architect cannot obtain itself: live Azure
+      # state, for which it holds no tools at all, and broad multi-location sweeps whose
+      # raw output would crowd out the plan it is trying to write. Routing both through
+      # the orchestrator cost a full round trip per question and made the conductor a
+      # relay for work it has no opinion about. The grant is narrow — the roles reachable
+      # from here are the two read-only discovery agents named in the architect bodies'
+      # delegates-to, not the implementation roster — and it does not let the architect
+      # hand work back: discovery agents return findings, never tasks.
+      delegate: allow
   documentation:
     permissions:
       filesystem.read: allow
@@ -98,9 +106,10 @@ profiles:
       process.execute: allow
       network.read: allow
       network.publish: deny
-      # code-reviewer fans out a council of review-lens instances over the diff. Granting
-      # delegation here is what makes deny on the architect profile meaningful rather than
-      # incidental: delegation is a per-role grant, not a property of being a subagent.
+      # code-reviewer fans out a council of review-lens instances over the diff. Delegation
+      # is a per-role grant, not a property of being a subagent: most profiles here deny
+      # it outright, and the ones that hold it — reviewer for its council, architect for
+      # read-only discovery — reach only the roles their own delegates-to names.
       delegate: allow
   worker:
     permissions:

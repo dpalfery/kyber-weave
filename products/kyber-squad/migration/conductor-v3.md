@@ -5,7 +5,7 @@ source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
 selected-baseline: .opencode/agents/conductor-v3.md
 sources:
   .opencode/agents/conductor-v3.md: 2696d45e25dcc3bbfc0f20445026d5f0213a59e783ba247bd59dc109b112e95c
-final-body-sha256: 21d4dfee313ae7b6b1c56deb2cba344f31cc1a0620580e6e496c5874be24d1cc
+final-body-sha256: a409482453bb7913f774626d5afa869120c8ce2c045193f7e0ee5913b4c69a86
 ---
 # conductor-v3 migration
 
@@ -22,5 +22,7 @@ The orchestrator profile is the conservative intersection of effective live perm
 The migration originally recorded filesystem.read=ask to stand for the baseline's scoped read. That proved unrepresentable: a target whose permission model is a binary tool allow-list narrows ask to deny, which left the orchestrator unable to open the plan it exists to sequence. The scoped grant is now carried by filesystem.read=allow paired with filesystem.search=deny — the role may open a document it is pointed at, but never sweep the tree for one — and the folder restriction is stated in the instruction body, since no target expresses path scoping in its permission model.
 
 The instruction body was revised after migration. It asserted that subagents may not spawn other agents — "none of them can, under the current design". That ceased to be true when the reviewer profile gained delegate=allow, and a false invariant in an instruction body is worse than no invariant. The body now states the rule that actually holds: an agent may invoke only the roles named in its own delegates-to, and only where its capability profile grants delegate. The architect request/fulfill loop is unaffected and is now enforced by architect's delegate=deny rather than asserted by prose. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor-v3 skill body.
+
+The instruction body was revised after migration, twice. First, the Authority section stopped granting delegation by exception and stated the rule that holds: delegation is a per-role grant carried by each agent's capability profile and its declared delegates-to. Then the architect profile gained that grant, so the request/fulfill discovery loop this body mediated is now a fallback rather than the normal path — architect reaches azure-reader and research-agent itself and folds the findings into its own plan, and the conductor fulfils a labeled discovery request only where the harness does not let a subagent delegate or an Azure call fails after one retry. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

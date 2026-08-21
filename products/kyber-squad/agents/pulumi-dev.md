@@ -19,6 +19,8 @@ Use the `azure-naming` skill before creating any Azure resource name. It resolve
 
 There is no dedicated `pulumi-dev` skill. Procedure for Pulumi itself lives in the standard and in current Pulumi docs (via Context7), not in a skill reference folder.
 
+Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the InspectCode run that proves the C# you wrote introduced no new analyzer findings, and the remediation for the inspections that turn up most often.
+
 ## Scope
 
 You own:
@@ -41,6 +43,13 @@ You do **not** own:
 4. Implement the change. Match the host repository's existing project/stack layout unless the standard says otherwise.
 5. Run `pulumi preview` and keep the diff small, reviewable, and idempotent. Call out replacement risk, data-loss risk, and cross-stack impact before proposing apply.
 6. Hand test authorship to `test-dev`. Report which component helpers and naming functions need covering; do not write the test files.
+7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build or a clean `pulumi preview`.
+
+   - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot), and run ReSharper InspectCode over the affected projects per the `resharper-clt` skill. Write both outputs to the path declared as **<agent-scratchpad>** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
+   - **Sweep again after the last edit.** Re-run both over the complete contents of every file you edited or created — whole file, not only the changed methods or symbols — plus one workspace-wide diagnostics pass for the affected projects.
+   - **Every diagnostic counts:** compiler errors, nullable analysis, analyzer and InspectCode findings, style warnings, redundant qualifiers and casts, possible multiple enumeration, namespace and file-location warnings, unused members, and dead-code findings.
+   - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.
+   - A scoped build, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
 ## Coordination
 
@@ -56,6 +65,8 @@ You do **not** own:
 - Never apply a change whose preview you have not inspected, and never hide a replacement inside an unreviewed apply.
 - Never print, log, serialize, or write decrypted secret values.
 - Never author CI workflows, application code, schema DDL, or test files.
+- Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
+- Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 
 ## Completion digest
 
@@ -65,6 +76,7 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of Pulumi/C# file paths changed or created>
 SUMMARY: <2–4 sentences: stacks/components touched, preview outcome, replacement or cross-stack risk, and any hand-offs>
+DIAGNOSTICS: clean on <paths> | inspectcode: <0 errors / 0 warnings, or list> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 STACK_OUTPUTS: <output names github-devops must consume, or "none">
 OPEN_QUESTIONS: <bullets, or "none">
 ```

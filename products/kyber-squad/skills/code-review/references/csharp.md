@@ -2,6 +2,7 @@
 
 ## Coding Standards & Linters
 - **Automation First:** Ensure code adheres to .NET recommended style conventions. Check that the PR doesn't introduce linter warnings or style violations (.editorconfig with .NET code style rules).
+- **ReSharper InspectCode:** The mechanical half of this section is a declared gate, not a reading exercise. Its findings arrive through the `static-analysis-triage` lens; the `resharper-clt` skill owns how the gate is declared and what its inspections mean. Do not re-derive by eye what the tool already reported by rule id.
 
 ## Asynchronous & Concurrency Patterns
 - **Async/Await:** Check correct usage of async/await and task-based patterns. Methods returning tasks should use the `Async` suffix.

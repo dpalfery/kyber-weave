@@ -10,6 +10,11 @@ Applies whenever the analyzer, linter, compiler, or type-checker gate produced o
 Skip only when no such gate is configured for this repository — and say so, because a
 repository with no static analysis is worth the reviewer knowing about.
 
+On .NET repositories the analyzer gate is normally ReSharper `InspectCode`, declared under
+`review.gates` and documented by the `resharper-clt` skill — read that skill for the report
+format and the inspections it commonly emits. You consume its output; you do not run it
+yourself, and you never run `cleanupcode`, which rewrites source.
+
 ## What this lens owns
 
 Turning gate output into review findings: every diagnostic in a file the diff touched,

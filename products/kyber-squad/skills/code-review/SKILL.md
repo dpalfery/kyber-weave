@@ -194,6 +194,9 @@ review:
     - id: test
       run: [dotnet, test, -c, Release]     # argv, never a command line
       blocking: true
+    - id: inspectcode                      # .NET static analysis; see the resharper-clt skill
+      run: [dotnet, jb, inspectcode, MySolution.sln, --output=.scratch/inspectcode.xml, --format=Xml]
+      blocking: true
   coverage:
     file-line-percent: 85
     class-line-percent: 85
