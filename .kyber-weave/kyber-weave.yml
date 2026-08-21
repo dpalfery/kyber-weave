@@ -16,3 +16,47 @@ ontology:
   technologies:
     - csharp
     - test
+
+# The deterministic half of code review. `kyber-weave review gates` runs these; the reviewer
+# cites their output as evidence rather than restating a claim that they passed.
+#
+# `run` is argv, never a command line — ProcessRunner refuses a shell and refuses a
+# concatenated argument string, so no value from a diff, a finding, or a prompt can become
+# part of a command. The cost is that a pipeline or a redirect cannot be expressed here; that
+# is the trade, and it is the right way round.
+review:
+  gates:
+    - id: build
+      run: [dotnet, build, KyberWeave.sln, -c, Release]
+      blocking: true
+    - id: test
+      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release]
+      blocking: true
+    - id: docs-validate
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, validate, .]
+      blocking: true
+    - id: docs-drift
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, drift, .]
+      blocking: true
+    - id: skill-validate
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, validate, .apm/skills/kyber-weave-docs]
+      blocking: true
+    - id: skill-scan
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, scan, .apm/skills/kyber-weave-docs]
+      blocking: true
+
+  policy:
+    # The artifacts that govern what agents may do are not approvable by an agent. A change
+    # widening a capability profile or editing an instruction surface is exactly the change
+    # an automated reviewer has the least standing to wave through, so it escalates on path
+    # alone — before any finding is weighed, and with no way for the engine to decide
+    # otherwise.
+    always-human:
+      - "products/kyber-squad/profiles/capabilities.yml"
+      - "products/kyber-squad/agents/**"
+      - ".kyber-weave/kyber-weave.yml"
+      - "**/*secret*"
+      - "**/*credential*"
+    max-reviewable-lines: 10000
+    major-count-blocks: 3
+    min-confidence: 7

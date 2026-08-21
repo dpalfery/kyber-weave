@@ -116,7 +116,7 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 ## Feature 3 — Kyber-Squad
 
-Unified multi-harness deployment and lifecycle control plane for 20 canonical agents and
+Unified multi-harness deployment and lifecycle control plane for 22 canonical agents and
 25 skills across 10 coding harnesses with transactional rollback.
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.
 
@@ -128,7 +128,18 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 | [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix |
 | [Renderer coverage — what's left](todo/kyber-squad-renderer-coverage.md) | Which of the 10 harnesses install today, and the per-target context for implementing the rest |
 
-## Feature 4 — KyberDash (Upcoming)
+## Feature 4 — Review council
+
+Parallel code review: a council of specialist lenses over the diff, the host's deterministic
+gate suite, and a rule-based verdict engine that decides from both.
+Start at the [Review council overview](code-review/README.md) for the idea and the two commands.
+
+| Page | Covers |
+|---|---|
+| [Overview & Why the council](code-review/README.md) | Lens fan-out, gates as evidence, what makes the verdict trustworthy |
+| [Architecture](code-review/architecture.md) | Three layers, two lens seats, the evidence schema, verdict rules, permissions, configuration |
+
+## Feature 5 — KyberDash (Upcoming)
 
 Local interactive web dashboard consuming OpenTelemetry data from the .NET Aspire dashboard to observe, analyze, and tune agentic context windows.
 Start at the [KyberDash Overview](dash/README.md) for value proposition and development roadmap.

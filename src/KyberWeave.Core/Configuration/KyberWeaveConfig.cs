@@ -13,6 +13,8 @@ public sealed class KyberWeaveConfig
 
     public ConfigRegConfig ConfigReg { get; init; } = ConfigRegConfig.ProductDefaults;
 
+    public ReviewConfig Review { get; init; } = ReviewConfig.ProductDefaults;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -51,18 +53,26 @@ public sealed class KyberWeaveConfig
         return Clone(configReg: configReg);
     }
 
+    public KyberWeaveConfig WithReview(ReviewConfig review)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        return Clone(review: review);
+    }
+
     internal KyberWeaveConfig Clone(
         OntologyConfig? ontology = null,
         HarnessProfileConfig? harness = null,
         DocsAnalysisConfig? docsAnalysis = null,
         SquadConfig? squad = null,
-        ConfigRegConfig? configReg = null) =>
+        ConfigRegConfig? configReg = null,
+        ReviewConfig? review = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
             Harness = harness ?? Harness,
             DocsAnalysis = docsAnalysis ?? DocsAnalysis,
             Squad = squad ?? Squad,
-            ConfigReg = configReg ?? ConfigReg
+            ConfigReg = configReg ?? ConfigReg,
+            Review = review ?? Review
         };
 }

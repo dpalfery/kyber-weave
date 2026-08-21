@@ -18,6 +18,8 @@ agents:
   - python-dev
   - react-dev
   - research-agent
+  - review-lens
+  - review-triage
   - sql-database-architect
   - tauri-dev
   - test-dev

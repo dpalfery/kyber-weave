@@ -84,11 +84,24 @@ profiles:
     permissions:
       filesystem.read: allow
       filesystem.search: allow
-      filesystem.write: deny
-      process.execute: deny
+      # A reviewer writes exactly one thing: the findings artifact. The lattice has no path
+      # scoping, so the scope is instruction-only and the permission is ask rather than
+      # allow — the same split the orchestrator profile uses for its folder restriction.
+      # Targets that cannot express ask narrow to deny, and the reviewer returns findings
+      # in its response instead of writing a file. Separation of duties survives either
+      # way: the role that judges a change never ships it.
+      filesystem.write: ask
+      # The gate layer runs real commands — build, tests, coverage, analyzers, scanners —
+      # through one declared runner. Denying this made the blocking pre-merge gate in the
+      # code-review skill unexecutable, which left the one agent whose purpose is refusing
+      # unverified claims structurally forced to make one.
+      process.execute: allow
       network.read: allow
       network.publish: deny
-      delegate: deny
+      # code-reviewer fans out a council of review-lens instances over the diff. Granting
+      # delegation here is what makes deny on the architect profile meaningful rather than
+      # incidental: delegation is a per-role grant, not a property of being a subagent.
+      delegate: allow
   worker:
     permissions:
       filesystem.read: allow

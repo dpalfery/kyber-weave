@@ -31,4 +31,4 @@
 - **Docstrings:** Verify that docstrings (PEP 257) are present for public functions/classes.
 
 ## Testing
-- **Test Coverage:** Confirm the presence and adequacy of unit/integration tests for new code. Ensure tests cover corner cases and can run reliably in any order. Coverage on new code must meet the threshold declared as **Test Coverage Config** in the root `AGENTS.md` registry.
+- **Test Coverage:** Confirm the presence and adequacy of unit/integration tests for new code. Ensure tests cover corner cases and can run reliably in any order. Coverage on new code must meet the coverage floor the host declares under `review.coverage` in its Kyber-Weave configuration and `kyber-weave review gates` reports.

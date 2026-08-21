@@ -14,7 +14,7 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **20 canonical agents** and
+It manages the installation, update, inspection, and uninstallation of **22 canonical agents** and
 **25 canonical skills** across 10 coding harnesses, with transactional recovery and state governance.
 
 ---

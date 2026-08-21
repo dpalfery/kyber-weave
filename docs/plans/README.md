@@ -4,13 +4,14 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-17
+last-reviewed: 2026-08-20
 ---
 
 # Kyber-Weave Plan Inventory
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Reference | Goal |
 |---|---|---|---|---|---|
+| [2026-08-20-code-review-council.md](2026-08-20-code-review-council.md) | In progress | 2026-08-20 | — | [architecture.md](../kyber-squad/architecture.md), [agents.md](../context-hygiene/agents.md), [skills.md](../context-hygiene/skills.md) | Rebuild `code-reviewer` into three layers: deterministic gate scripts, a parallel council of specialist review lenses, and a unit-tested verdict engine that converts findings into Approve / Request-changes / Needs-human. |
 | [2026-08-17-copilot-agent-tools-format.md](../archive/plans/2026-08-17-copilot-agent-tools-format.md) | Archived | 2026-08-17 | 2026-08-17 | [architecture.md](../kyber-squad/architecture.md), [agents.md](../context-hygiene/agents.md) | Align GitHub Copilot custom agent definitions by updating `CopilotRenderer` to serialize `tools` as a YAML flow sequence containing VS Code environment tools, capability-governed built-ins, standard MCP server wildcards, and diagnostics. |
 | [2026-08-17-kyber-standards-docs-init.md](../archive/plans/2026-08-17-kyber-standards-docs-init.md) | Archived | 2026-08-17 | 2026-08-17 | [standards/README.md](../standards/README.md), [configuration.md](../configuration.md), [install.md](../install.md), [docgraph/onboarding.md](../docgraph/onboarding.md) | Add `--kyber-standards` to `kyber-weave docs init` to embed and scaffold the 10 rich Kyber Squad coding standards templates into `<docs-root>/standards/`, populate `ontology.technologies`, and register standard paths in Config Reg. |
 | [2026-08-16-coding-standards-and-config-reg.md](2026-08-16-coding-standards-and-config-reg.md) | In progress | 2026-08-16 | — | [documentation-ontology.md](../documentation-ontology.md), [standards/README.md](../standards/README.md), [AGENTS.md](../../AGENTS.md) | Separate project-specific coding standards from portable agents and skills: a `coding-standard` doc-type under `<docs-root>/standards/<technology>/`, and a Configuration Registry of named paths rendered into the root `AGENTS.md` by `docs init`. |

@@ -47,8 +47,14 @@ public sealed class DocsInitCommandTests : IDisposable
             });
         });
 
-        int exitCode = ProcessConsoleCapture.Run(() =>
-            app.Run(["docs", "init", _temp.Path, "--kyber-standards", "--no-skill"])).Result;
+        // Driving a real CommandApp writes through the process-global AnsiConsole. Another
+        // test holding ProcessConsoleCapture's gate swaps that console for a StringWriter and
+        // disposes it on the way out; a render racing that teardown fails and the command
+        // returns non-zero. Taking the same gate is what the other command-driving test
+        // classes do, and it is why this one flaked in full runs but never in isolation.
+        int exitCode = ProcessConsoleCapture
+            .Run(() => app.Run(["docs", "init", _temp.Path, "--kyber-standards", "--no-skill"]))
+            .Result;
         Assert.Equal(0, exitCode);
 
         // 3. Verifies that all 10 rich standards were created

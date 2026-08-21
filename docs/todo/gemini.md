@@ -28,13 +28,13 @@ full target roster and its current coverage.
 
 ## Classification
 
-**Fallback (role-skill lowering) target.** No native agent primitive is assumed. All 20 canonical agents lower to skills at `.gemini/skills/<name>/SKILL.md` per the role-skill rules in `products/kyber-squad/profiles/fallbacks.yml` — see the target-specific note below for the exact projection rules.
+**Fallback (role-skill lowering) target.** No native agent primitive is assumed. All 22 canonical agents lower to skills at `.gemini/skills/<name>/SKILL.md` per the role-skill rules in `products/kyber-squad/profiles/fallbacks.yml` — see the target-specific note below for the exact projection rules.
 
 ## What is known (from the canonical source and the codebase)
 
 - Strong detection marker: `.gemini/`
 - Alias(es): none
-- The 20 canonical agents and 25 canonical skills this renderer must cover live under
+- The 22 canonical agents and 25 canonical skills this renderer must cover live under
   `products/kyber-squad/agents/*.md` and `products/kyber-squad/skills/*/SKILL.md`, loaded via
   `SquadSourceLoader.Load` (`src/KyberWeave.Core/Squad/Parsing/SquadSourceLoader.cs`) into a
   `SquadSource` — the same model `CopilotRenderer` renders from.
@@ -45,7 +45,7 @@ full target roster and its current coverage.
 
 ## What is assumed and needs verification, not trusted as-is
 
-Fallback target: no native agent primitive assumed, so every one of the 20 canonical agents lowers to a skill per the role-skill rules in [architecture.md §3](../kyber-squad/architecture.md#3-role-skill-lowering-and-namespace-resolution) and the `role-skill` fallback profile in `products/kyber-squad/profiles/fallbacks.yml`: `conductor`/`conductor-v3` reuse their already-emitted canonical skill (no duplicate projection), the seven distinct-body-collision identities (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`) emit *both* their canonical skill and a `role-<name>` lowered skill, and every other agent lowers to an unoccupied `<name>` skill. `CopilotRenderer` (`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`) is a native-target reference, not a fallback one — `FakeSquadRenderer` (`tests/KyberWeave.Tests/Fakes/FakeSquadRenderer.cs`) is the closer structural reference for how a fallback renderer's output should be shaped, though its skill content is still a placeholder, not verified against Gemini's real skill format.
+Fallback target: no native agent primitive assumed, so every one of the 22 canonical agents lowers to a skill per the role-skill rules in [architecture.md §3](../kyber-squad/architecture.md#3-role-skill-lowering-and-namespace-resolution) and the `role-skill` fallback profile in `products/kyber-squad/profiles/fallbacks.yml`: `conductor`/`conductor-v3` reuse their already-emitted canonical skill (no duplicate projection), the seven distinct-body-collision identities (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`) emit *both* their canonical skill and a `role-<name>` lowered skill, and every other agent lowers to an unoccupied `<name>` skill. `CopilotRenderer` (`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`) is a native-target reference, not a fallback one — `FakeSquadRenderer` (`tests/KyberWeave.Tests/Fakes/FakeSquadRenderer.cs`) is the closer structural reference for how a fallback renderer's output should be shaped, though its skill content is still a placeholder, not verified against Gemini's real skill format.
 
 None of this has been checked against this harness's actual, current documentation. The one
 concrete, verified reference implementation in the codebase is `CopilotRenderer`
@@ -85,7 +85,7 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   literals, so the test can't silently drift from the canonical source it's supposed to be
   checking.
 - Confirm `kyber-weave squad install --target gemini --dry-run` plans a file for every
-  agent and skill this target should cover (native: 20 agents + 23 non-conductor skills = 43,
+  agent and skill this target should cover (native: 22 agents + 23 non-conductor skills = 45,
   matching Copilot's count, unless this target's own agent-primitive support differs;
   fallback: 25 skills plus role-lowered skills per the collision rules above).
 - Confirm `kyber-weave squad doctor` reports `gemini` under renderers available, not

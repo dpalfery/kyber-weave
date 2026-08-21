@@ -10,7 +10,7 @@ description: xUnit unit test patterns — NSubstitute mocking, FluentAssertions,
 - **Framework:** xUnit
 - **Mocking:** NSubstitute (prefer over Moq — leaner syntax, no `Setup`/`Returns` duplication)
 - **Assertions:** FluentAssertions (`result.Should().Be(...)`)
-- **Coverage:** Meet the threshold declared as **Test Coverage Config** in the root `AGENTS.md` registry
+- **Coverage:** Meet the coverage floor the host declares under `review.coverage` in its Kyber-Weave configuration and `kyber-weave review gates` reports
 
 ---
 
@@ -105,7 +105,7 @@ Builders live next to the tests they serve, typically under a `Builders/` folder
 - **Framework:** pytest with `parametrize` for table-driven cases
 - **Mocking:** `unittest.mock` or `pytest-mock`; mock at I/O boundary, never inside domain logic
 - **Naming:** `test_<unit>_<scenario>` snake_case
-- **Coverage:** meet the threshold declared as **Test Coverage Config** in the root `AGENTS.md` registry (`pytest-cov`)
+- **Coverage:** meet the coverage floor the host declares under `review.coverage` in its Kyber-Weave configuration and `kyber-weave review gates` reports (`pytest-cov`)
 
 ---
 

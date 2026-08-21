@@ -34,7 +34,7 @@ full target roster and its current coverage.
 
 - Strong detection marker: `.kilo/`
 - Alias(es): none
-- The 20 canonical agents and 25 canonical skills this renderer must cover live under
+- The 22 canonical agents and 25 canonical skills this renderer must cover live under
   `products/kyber-squad/agents/*.md` and `products/kyber-squad/skills/*/SKILL.md`, loaded via
   `SquadSourceLoader.Load` (`src/KyberWeave.Core/Squad/Parsing/SquadSourceLoader.cs`) into a
   `SquadSource` — the same model `CopilotRenderer` renders from.
@@ -85,7 +85,7 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   literals, so the test can't silently drift from the canonical source it's supposed to be
   checking.
 - Confirm `kyber-weave squad install --target kilo --dry-run` plans a file for every
-  agent and skill this target should cover (native: 20 agents + 23 non-conductor skills = 43,
+  agent and skill this target should cover (native: 22 agents + 23 non-conductor skills = 45,
   matching Copilot's count, unless this target's own agent-primitive support differs;
   fallback: 25 skills plus role-lowered skills per the collision rules above).
 - Confirm `kyber-weave squad doctor` reports `kilo` under renderers available, not
