@@ -64,7 +64,7 @@ The system implements a custom multi-agent RAG pattern:
 - **Error handling**: Retry on transient failures, continue on individual chunk failures
 
 ### Azure AI Search Index
-- **Index name**: configured via `SearchOptions.IndexName` — do not hardcode a specific name; the current configuration may be a single index or partitioned per category
+- **Index name**: `SearchOptions.IndexName` is the sole index reference — do not hardcode a host-specific name; the current configuration may be a single index or partitioned per category
 - **Search type**: Hybrid (vector + keyword + semantic ranking)
 - **Vector algorithm**: HNSW (m=4, efConstruction=400, efSearch=500)
 - **Semantic ranker**: Re-ranks top 50 results
@@ -94,7 +94,7 @@ The system implements a custom multi-agent RAG pattern:
 - Hardcode Azure endpoints, keys, or connection strings — use environment variables
 - Skip credibility validation for web search results
 - Bypass rate limiting on web scraping operations
-- Create new Azure AI Search indexes without approval — use the unified `motorcycle-index`
+- Create new Azure AI Search indexes without approval — use the index named by `SearchOptions.IndexName`
 
 ## MUST DO
 - Follow the wrapper pattern: Application layer calls wrapper interfaces, Persistence implements them

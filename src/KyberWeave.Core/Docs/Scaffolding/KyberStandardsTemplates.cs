@@ -18,7 +18,9 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 /// <para>
 /// When rendering a template for a host repository, <see cref="Render"/> replaces the default
 /// frontmatter <c>owner</c> and <c>last-reviewed</c> date while leaving the remainder of the
-/// template intact.
+/// template intact. Both values are YAML-encoded with the same scalar quoting
+/// <see cref="DocsScaffolder"/> uses, so punctuation in an accepted owner (colons, hashes,
+/// quotes) stays a scalar rather than becoming a nested mapping or a comment.
 /// </para>
 /// </remarks>
 public static class KyberStandardsTemplates
@@ -148,11 +150,11 @@ public static class KyberStandardsTemplates
             bool hasCr = lines[i].EndsWith('\r');
             if (trimmed.StartsWith("owner:", StringComparison.Ordinal))
             {
-                lines[i] = $"owner: {owner}" + (hasCr ? "\r" : string.Empty);
+                lines[i] = "owner: " + HostConfigYaml.QuoteScalar(owner) + (hasCr ? "\r" : string.Empty);
             }
             else if (trimmed.StartsWith("last-reviewed:", StringComparison.Ordinal))
             {
-                lines[i] = $"last-reviewed: {date}" + (hasCr ? "\r" : string.Empty);
+                lines[i] = "last-reviewed: " + HostConfigYaml.QuoteScalar(date) + (hasCr ? "\r" : string.Empty);
             }
         }
 

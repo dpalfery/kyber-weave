@@ -438,6 +438,13 @@ internal static partial class HostConfigYaml
     /// is created. If <c>ontology.technologies</c> does not exist, it is inserted with proper
     /// block indentation. Existing technologies and comments are preserved without duplicates.
     /// </summary>
+    /// <remarks>
+    /// A scalar <c>technologies: csharp</c> is valid YAML, but inserting <c>- item</c> lines
+    /// beneath it leaves a scalar followed by a sequence — the file would still parse as a
+    /// scalar and the new items would be orphaned. Only a flow sequence (value starting with
+    /// <c>[</c>) is merged in place; a non-empty scalar is rejected so the operator can
+    /// replace it with a sequence rather than this command guessing a conversion.
+    /// </remarks>
     public static string WithTechnologies(string yaml, IReadOnlyList<string> technologies)
     {
         ArgumentNullException.ThrowIfNull(yaml);
@@ -485,6 +492,15 @@ internal static partial class HostConfigYaml
             if (value.StartsWith('['))
             {
                 return MergeFlowSequence(yaml, lines, i, value, technologies, newline);
+            }
+
+            if (value.Length > 0)
+            {
+                throw new InvalidDataException(
+                    "ontology.technologies is a scalar, not a sequence. Replace the scalar " +
+                    "with a YAML sequence (a block list or a [...] flow list) before adding " +
+                    "technologies — merging would otherwise leave a scalar followed by " +
+                    "orphaned list items.");
             }
 
             return MergeBlockSequence(yaml, lines, i, blockIndent, blockEnd, technologies, newline);

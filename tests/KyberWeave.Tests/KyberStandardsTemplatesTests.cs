@@ -1,4 +1,6 @@
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Core.Parsing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -83,12 +85,37 @@ public sealed class KyberStandardsTemplatesTests
 
         string rendered = KyberStandardsTemplates.Render("csharp", owner, date);
 
-        Assert.Contains("owner: alice", rendered, StringComparison.Ordinal);
-        Assert.Contains("last-reviewed: 2026-08-17", rendered, StringComparison.Ordinal);
+        Assert.Contains("owner: 'alice'", rendered, StringComparison.Ordinal);
+        Assert.Contains("last-reviewed: '2026-08-17'", rendered, StringComparison.Ordinal);
         Assert.DoesNotContain("owner: unassigned", rendered, StringComparison.Ordinal);
         Assert.Contains("# C# coding standard", rendered, StringComparison.Ordinal);
         Assert.Contains("technology: csharp", rendered, StringComparison.Ordinal);
         Assert.Contains("doc-type: coding-standard", rendered, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// YAML punctuation in an accepted owner must remain a scalar. Unquoted interpolation
+    /// turns a colon into a nested mapping and a hash into a comment — the same values
+    /// DocsScaffolder.Scaffold already accepts for stub standards.
+    /// </summary>
+    [Fact]
+    public void RenderYamlEncodesOwnerAndDateSoFrontmatterStaysValid()
+    {
+        const string owner = "platform's: \"core\" #1";
+        const string date = "2026-08-17";
+
+        string rendered = KyberStandardsTemplates.Render("csharp", owner, date);
+
+        FrontmatterReadResult read = MarkdownFrontmatterReader.Read(rendered);
+        Assert.True(read.HasFrontmatter);
+
+        DocumentFrontmatter frontmatter = MarkdownFrontmatterReader.Deserializer
+            .Deserialize<DocumentFrontmatter>(read.Yaml);
+
+        Assert.Equal(owner, frontmatter.Owner);
+        Assert.Equal(date, frontmatter.LastReviewed);
+        Assert.Contains("owner: " + HostConfigYaml.QuoteScalar(owner), rendered, StringComparison.Ordinal);
+        Assert.Contains("last-reviewed: " + HostConfigYaml.QuoteScalar(date), rendered, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -110,8 +137,8 @@ public sealed class KyberStandardsTemplatesTests
 
         Assert.True(found);
         Assert.NotNull(rendered);
-        Assert.Contains("owner: alice", rendered, StringComparison.Ordinal);
-        Assert.Contains("last-reviewed: 2026-08-17", rendered, StringComparison.Ordinal);
+        Assert.Contains("owner: 'alice'", rendered, StringComparison.Ordinal);
+        Assert.Contains("last-reviewed: '2026-08-17'", rendered, StringComparison.Ordinal);
     }
 
     /// <summary>

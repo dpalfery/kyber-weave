@@ -655,6 +655,25 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
     }
 
+    /// <summary>
+    /// Rich standards share the same quoting as stub documents. Without it, an accepted
+    /// owner that contains YAML punctuation fails validation only on the --kyber-standards path.
+    /// </summary>
+    [Fact]
+    public void QuotesYamlSpecialCharactersInKyberStandardsFrontmatter()
+    {
+        const string owner = "platform's: \"core\" #1";
+
+        DocsScaffolder.Scaffold(_temp.Path, owner: owner, kyberStandards: true);
+
+        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
+        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
+        Assert.Contains(owner, set.Owners);
+        Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+    }
+
     /// <summary>Owner whitespace is canonicalized once so YAML and catalog agree.</summary>
     [Fact]
     public void TrimsOwnerBeforeWritingFrontmatterAndCatalog()

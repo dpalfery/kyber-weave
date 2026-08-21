@@ -141,6 +141,27 @@ public sealed class HostConfigYamlTests
     }
 
     /// <summary>
+    /// A scalar <c>technologies: csharp</c> must not be treated as an empty block sequence.
+    /// Merging would insert <c>- item</c> lines beneath the scalar and leave invalid YAML.
+    /// </summary>
+    [Fact]
+    public void AScalarTechnologiesValueIsRejectedRatherThanMergedAsASequence()
+    {
+        const string yaml =
+            """
+            ontology:
+              docs-root: docs
+              technologies: csharp
+            """;
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => HostConfigYaml.WithTechnologies(yaml, ["test"]));
+
+        Assert.Contains("scalar", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Replace the scalar with a YAML sequence", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Returns the exact input string when all requested technologies are already present.
     /// </summary>
     [Fact]

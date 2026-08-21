@@ -131,7 +131,7 @@ The PR Gate workflow (`.github/workflows/pr-gate.yml`) runs automatically on eve
 ### Handling check failures
 
 1. **Build-test failure:** Inspect the build log. Common causes: missing dependency restore, broken test, or a build error introduced by the change.
-2. **Docs-quality failure:** Run `npx markdownlint-cli2` locally. Fix any broken links (check with `lychee --offline`). Run `kyber-weave docs validate .` (and `docs drift` if the corpus uses code-refs) to verify catalog coverage.
+2. **Docs-quality failure:** Run `npx markdownlint-cli2@0.23.2` locally. Fix any broken links (check with `lychee --offline`). Run `kyber-weave docs validate .` (and `docs drift` if the corpus uses code-refs) to verify catalog coverage.
 3. **Security failure (CodeQL/Trivy/Semgrep/Checkov):** Review the SARIF output in the GitHub Security tab. Address HIGH or CRITICAL findings. If a finding is a false positive, annotate it in the PR with a brief explanation referencing the relevant SARIF rule.
 4. **Integration/E2E failure:** Check the test log for the failing test name. Reproduce locally with `dotnet test --filter "FullyQualifiedName=<test-name>"`.
 5. **Skill-gate failure:** Run Kyber-Weave commands locally: `kyber-weave skill validate`, `kyber-weave skill lint`, or `kyber-weave skill scan` on `.agents/skills/`. Fix any validation errors or HIGH+ severity findings.
