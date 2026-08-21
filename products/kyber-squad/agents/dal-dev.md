@@ -56,7 +56,8 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
 - Never embed a relative path to a standard. Resolve the registry names above.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never use Dapper or Entity Framework.
-- Never author schema DDL, application services, or test files.
+- Never design schemas or author unmanaged DDL. FluentMigrator migration scripts that implement an approved schema contract are allowed.
+- Never author application services or test files.
 
 ## Completion digest
 
