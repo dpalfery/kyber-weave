@@ -17,34 +17,42 @@ namespace KyberWeave.Tests;
 /// suite tracks the shipped corpus rather than hardcoded 22/26/46 literals that would
 /// silently drift.
 /// </remarks>
-public sealed class AntigravityRendererContractTests
+public sealed class AntigravityRendererContractTests : IDisposable
 {
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
 
-    private static readonly string[] DistinctBodyCollisions =
-    [
-        "csharp-dev",
-        "dal-dev",
-        "github-devops",
-        "maui-dev",
-        "product-owner",
-        "python-dev",
-        "test-dev"
-    ];
+    /// <summary>
+    /// The expected permission-degradation roster is derived from the loaded capability
+    /// profiles' own declared vocabulary, mirroring the renderer's source of truth.
+    /// </summary>
+    private static bool HasNonDenyCapability(SquadCapabilityProfiles profiles, SquadCapabilityProfile profile) =>
+        profiles.Capabilities.Any(capability =>
+            profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+            decision != SquadPermissionDecision.Deny);
 
-    private static readonly string[] CapabilityVocabulary =
-    [
-        "filesystem.read",
-        "filesystem.search",
-        "filesystem.write",
-        "process.execute",
-        "network.read",
-        "network.publish",
-        "delegate"
-    ];
+    /// <summary>
+    /// Collisions are derived from the loaded source (agent identity that also exists as a
+    /// canonical skill), not a hardcoded roster, so the suite tracks the corpus rather than
+    /// a snapshot that could silently drift. Shared conductor identities are excluded —
+    /// they reuse the canonical skill rather than emitting a role-prefixed one.
+    /// </summary>
+    private static HashSet<string> DeriveCollisions(SquadSource source)
+    {
+        HashSet<string> skillNames = source.Skills.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        return source.Agents
+            .Where(a => skillNames.Contains(a.Name) && !SharedConductorIdentities.Contains(a.Name))
+            .Select(a => a.Name)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public void Dispose()
+    {
+        // No disposable state: the suite only reads the checked-in corpus. IDisposable is
+        // implemented per the test-coding-standard so adding fixtures later has a home.
+    }
 
     [Fact]
     public void ToolRoot_ExistsForCanonicalCorpus()
@@ -73,11 +81,8 @@ public sealed class AntigravityRendererContractTests
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        HashSet<string> skillNames = source.Skills.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
         HashSet<string> shared = SharedConductorIdentities.ToHashSet(StringComparer.Ordinal);
-        HashSet<string> collisions = DistinctBodyCollisions
-            .Where(name => source.Agents.Any(a => a.Name == name) && skillNames.Contains(name))
-            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> collisions = DeriveCollisions(source);
 
         int unoccupiedAgents = source.Agents.Count(a => !shared.Contains(a.Name) && !collisions.Contains(a.Name));
         int expectedFiles = source.Skills.Count + unoccupiedAgents + collisions.Count;
@@ -92,6 +97,19 @@ public sealed class AntigravityRendererContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.Equal(expectedFiles, result.Files.Count);
+
+        // Path uniqueness guards the occupancy-derived lowering: two agents claiming the
+        // same .agents/skills/{name}/SKILL.md path would pass the count check while one
+        // silently overwrites the other at deployment time.
+        string[] duplicatePaths = result.Files
+            .GroupBy(f => f.RelativePath, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+        Assert.True(
+            duplicatePaths.Length == 0,
+            $"Duplicate rendered paths: {string.Join(", ", duplicatePaths)}");
+
         Assert.All(result.Files, f =>
         {
             Assert.Equal("antigravity", f.Target);
@@ -163,7 +181,7 @@ public sealed class AntigravityRendererContractTests
         }
 
         string[] expectedPermissionAgents = source.Agents
-            .Where(a => HasNonDenyCapability(source.CapabilityProfiles.Profiles[a.CapabilityProfile]))
+            .Where(a => HasNonDenyCapability(source.CapabilityProfiles, source.CapabilityProfiles.Profiles[a.CapabilityProfile]))
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
@@ -212,11 +230,6 @@ public sealed class AntigravityRendererContractTests
             Assert.True(first.Files[i].Content.Span.SequenceEqual(second.Files[i].Content.Span));
         }
     }
-
-    private static bool HasNonDenyCapability(SquadCapabilityProfile profile) =>
-        CapabilityVocabulary.Any(capability =>
-            profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-            decision != SquadPermissionDecision.Deny);
 
     private static string NormalizeBody(string body)
     {

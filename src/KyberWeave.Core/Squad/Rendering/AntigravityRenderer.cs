@@ -32,32 +32,23 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
     private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
 
-    private static readonly string[] DistinctBodyCollisions =
-    [
-        "csharp-dev",
-        "dal-dev",
-        "github-devops",
-        "maui-dev",
-        "product-owner",
-        "python-dev",
-        "test-dev"
-    ];
-
     /// <summary>
-    /// The capability vocabulary from <c>profiles/capabilities.yml</c>. Listed here so
-    /// permission degradations stay ordered and complete even if a profile dictionary
-    /// enumerates in a different order.
+    /// The seven identities that exist as both a canonical agent and a canonical skill with
+    /// distinct bodies. Read from the loaded source at render time rather than hardcoded,
+    /// so a corpus change that creates or removes a collision updates the lowering without
+    /// a renderer change — the renderer decides collisions from occupancy, not a snapshot.
     /// </summary>
-    private static readonly string[] CapabilityVocabulary =
-    [
-        "filesystem.read",
-        "filesystem.search",
-        "filesystem.write",
-        "process.execute",
-        "network.read",
-        "network.publish",
-        "delegate"
-    ];
+    private static HashSet<string> ResolveDistinctBodyCollisions(SquadSource source)
+    {
+        HashSet<string> agentNames = source.Agents
+            .Select(agent => agent.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return source.Skills
+            .Where(skill => agentNames.Contains(skill.Name))
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -89,6 +80,16 @@ public sealed class AntigravityRenderer : ISquadRenderer
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
+        // The declared vocabulary, not a renderer-local copy: a capability added to
+        // profiles/capabilities.yml must appear in degradation text without a renderer
+        // change. Sorted for deterministic details strings.
+        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
+
+        // Collisions are decided from occupancy of the loaded corpus, not a hardcoded
+        // snapshot: an identity emitted as both a canonical skill and a lowered agent
+        // role skill must be discovered from the source itself.
+        HashSet<string> distinctBodyCollisions = ResolveDistinctBodyCollisions(source);
+
         foreach (SquadSkill skill in source.Skills)
         {
             files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody));
@@ -112,7 +113,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                     InstructionDigest: agent.BodyDigest,
                     Details: "Reused identical shared canonical skill; agent primitive lowered to skill."));
             }
-            else if (DistinctBodyCollisions.Contains(agent.Name, StringComparer.Ordinal) &&
+            else if (distinctBodyCollisions.Contains(agent.Name) &&
                      skillNames.Contains(agent.Name))
             {
                 string outputIdentity = $"role-{agent.Name}";
@@ -137,7 +138,10 @@ public sealed class AntigravityRenderer : ISquadRenderer
                     Details: "Agent lowered to role skill."));
             }
 
-            SquadDegradationRecord? permission = BuildPermissionDegradation(agent, source.CapabilityProfiles.Profiles);
+            SquadDegradationRecord? permission = BuildPermissionDegradation(
+                agent,
+                source.CapabilityProfiles.Profiles,
+                capabilityVocabulary);
             if (permission is not null)
             {
                 degradations.Add(permission);
@@ -147,8 +151,29 @@ public sealed class AntigravityRenderer : ISquadRenderer
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
     }
 
+    /// <summary>
+    /// Canonical names become directory names in the rendered tree, so a name carrying
+    /// path syntax would not be a portable relative path. The registry's validation pass
+    /// would reject it at deployment time; rejecting it here keeps the failure at the
+    /// source, before any file is built. A valid canonical name is a single non-empty
+    /// path segment with no separators and no traversal.
+    /// </summary>
+    private static void ValidateCanonicalName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) ||
+            name.Contains('/') ||
+            name.Contains('\\') ||
+            name.Contains("..", StringComparison.Ordinal))
+        {
+            throw new SquadRenderValidationException(
+                $"Canonical name '{name}' is not a valid single-segment path for rendering.");
+        }
+    }
+
     private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody)
     {
+        ValidateCanonicalName(name);
+
         // Insertion order is the frontmatter contract: name, description, license. No model
         // or permission keys — models.yml has no antigravity entry, and skills cannot express
         // the capability lattice.
@@ -185,7 +210,8 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
     private static SquadDegradationRecord? BuildPermissionDegradation(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> capabilityVocabulary)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
@@ -194,7 +220,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         // Antigravity skills are instruction-only: any non-deny decision is unenforceable
         // at the harness boundary, so it is named rather than invented into frontmatter.
-        List<string> constrained = CapabilityVocabulary
+        List<string> constrained = capabilityVocabulary
             .Where(capability =>
                 profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
                 decision != SquadPermissionDecision.Deny)
