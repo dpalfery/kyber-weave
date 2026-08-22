@@ -1,6 +1,6 @@
 using KyberWeave.Core.Docs.Scaffolding;
-using YamlDotNet.RepresentationModel;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Tests;
 
