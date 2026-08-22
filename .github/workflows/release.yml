@@ -8,6 +8,10 @@
 # SHA256SUMS.txt to a GitHub Release (passing --prerelease for hyphenated pre-releases),
 # and publishes PackAsTool packages (including pre-releases) to GitHub Packages.
 #
+# The `release` and `gh-packages` jobs run in the `release` environment, which
+# requires a reviewer approval before any tag, GitHub Release, or package is
+# published. Builds and packaging run unapproved so failures surface early.
+#
 # npm and Homebrew are not published from this workflow. nuget.org is forbidden.
 
 name: Release
@@ -240,6 +244,7 @@ jobs:
     needs: [version, build, pack-squad]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
+    environment: release
     permissions:
       contents: write
     steps:
@@ -317,6 +322,7 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
+    environment: release
     permissions:
       contents: read
       packages: write
