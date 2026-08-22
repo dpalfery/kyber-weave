@@ -542,7 +542,7 @@ public class DocDriftLinterTests
 
         // No .codegraph/ in the fixture tree: an unverifiable drift check must fail loudly
         // rather than report a clean run.
-        CodeGraphResolverAdapter resolver = Core.CodeGraph.CodeGraphResolverAdapter.ForRepository(fixture.Root);
+        CodeGraphResolverAdapter resolver = CodeGraphResolverAdapter.ForRepository(fixture.Root);
         DiagnosticReport report = new DocDriftLinter(resolver).Validate(fixture.Load());
 
         Assert.False(resolver.IsAvailable);

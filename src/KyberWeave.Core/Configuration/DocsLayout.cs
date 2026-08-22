@@ -35,9 +35,6 @@ public static class DocsLayout
 
     public static string FolderIndex(string docsRoot, string folder) => $"{docsRoot}/{folder}/README.md";
 
-    public static string TechnologyFolder(string docsRoot, string technology) =>
-        $"{docsRoot}/{Standards}/{technology}";
-
     /// <summary>
     /// The document a technology's registry property points at. A standard is one file, not
     /// a directory to be listed: an agent resolving <c>&lt;csharp-coding-standard&gt;</c>

@@ -11,7 +11,7 @@ using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
-public sealed partial class UpdateCommandTests : IDisposable
+public sealed class UpdateCommandTests : IDisposable
 {
     private readonly TempDirectory _install = new();
     private readonly TempDirectory _assets = new();
@@ -198,8 +198,7 @@ public sealed partial class UpdateCommandTests : IDisposable
             """{"tag_name":"v0.2.0","draft":false}""");
         handler.MapFile(
             GitHubReleaseClient.AssetUri("v0.2.0", "SHA256SUMS.txt").AbsoluteUri,
-            Encoding.UTF8.GetBytes(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-osx-arm64.tar.gz\n"));
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  kyber-weave-osx-arm64.tar.gz\n"u8.ToArray());
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
         SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
@@ -386,7 +385,7 @@ public sealed partial class UpdateCommandTests : IDisposable
         string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", "osx-arm64");
         string cliArchive = Path.Combine(_assets.Path, cliName);
         byte[] cliBytes = File.ReadAllBytes(cliArchive);
-        string corruptSums = $"{Sha(cliBytes)}  {cliName}\n{"0000000000000000000000000000000000000000000000000000000000000000"}  {mcpName}\n";
+        string corruptSums = $"{Sha(cliBytes)}  {cliName}\n0000000000000000000000000000000000000000000000000000000000000000  {mcpName}\n";
         handler.MapFile(
             GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
             Encoding.UTF8.GetBytes(corruptSums));
@@ -554,7 +553,7 @@ public sealed partial class UpdateCommandTests : IDisposable
                 return response;
             });
 
-        public void Map(string uri, Func<HttpResponseMessage> factory) => _map[uri] = factory;
+        private void Map(string uri, Func<HttpResponseMessage> factory) => _map[uri] = factory;
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,

@@ -403,7 +403,7 @@ public sealed class DocSpecValidator
         return bestDistance <= threshold ? best : null;
     }
 
-    internal static int Levenshtein(string a, string b)
+    private static int Levenshtein(string a, string b)
     {
         if (a.Length == 0) return b.Length;
         if (b.Length == 0) return a.Length;

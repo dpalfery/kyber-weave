@@ -210,7 +210,7 @@ public sealed class DocGraphProjection
             RelateEveryPair(group.Select(edge => edge.From), related);
         }
 
-        foreach (DocGraphEdge? edge in edges.Where(edge => DirectDocumentLabels.Contains(edge.Label)))
+        foreach (DocGraphEdge edge in edges.Where(edge => DirectDocumentLabels.Contains(edge.Label)))
         {
             if (documentIds.Contains(edge.From) && documentIds.Contains(edge.To))
                 related.Add(DocumentPair.Create(edge.From, edge.To));
@@ -257,14 +257,14 @@ public sealed class DocGraphProjection
         // Providers enforce the cap against the full index. Enforcing it again makes the
         // optional port safe for simpler fakes and alternative providers as well.
         Dictionary<string, int> returnedDegree = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (CodeGraphEdge? edge in codeEdges)
+        foreach (CodeGraphEdge edge in codeEdges)
         {
             IncrementDegree(returnedDegree, edge.SourceId);
             if (!StringComparer.Ordinal.Equals(edge.SourceId, edge.TargetId))
                 IncrementDegree(returnedDegree, edge.TargetId);
         }
 
-        foreach (CodeGraphEdge? edge in codeEdges)
+        foreach (CodeGraphEdge edge in codeEdges)
         {
             if (returnedDegree[edge.SourceId] > maxCodeNeighbors
                 || returnedDegree[edge.TargetId] > maxCodeNeighbors
@@ -347,7 +347,7 @@ public sealed class DocGraphProjection
     private static DocGraphNode Copy(DocGraphNode node) =>
         new(node.Id, node.Label, new Dictionary<string, string?>(node.Properties, StringComparer.Ordinal));
 
-    internal static string DocId(string id) => $"doc:{id}";
+    private static string DocId(string id) => $"doc:{id}";
 
     private static string? ConceptId(string label, string? name) =>
         string.IsNullOrWhiteSpace(name) ? null : $"{label.ToLowerInvariant()}:{name}";

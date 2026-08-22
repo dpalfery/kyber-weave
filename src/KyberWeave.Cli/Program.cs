@@ -1,6 +1,7 @@
 using System.Reflection;
 using KyberWeave.Cli.Commands.Agents;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Update;
@@ -157,6 +158,27 @@ app.Configure(config =>
         squad.AddCommand<SquadPackCommand>("pack")
             .WithDescription("Package canonical agents and skills into APM and plugin distribution archives.")
             .WithExample("squad", "pack", "--format", "all", "--out", "./dist");
+    });
+
+    // Code Review Command Branch — the deterministic half of the review system. The
+    // council's judgement is a model's; the gate the judgement passes through is not.
+    config.AddBranch("review", review =>
+    {
+        review.SetDescription("Run the declared review gates and compute the review verdict.");
+
+        review.AddCommand<ReviewGatesCommand>("gates")
+            .WithDescription("Run the deterministic gates declared under review.gates.")
+            .WithExample("review", "gates", ".")
+            .WithExample("review", "gates", ".", "--out", "gates.json");
+
+        review.AddCommand<ReviewDuplicatesCommand>("duplicates")
+            .WithDescription("Find symbols whose bodies are duplicated across the tree, from the CodeGraph index.")
+            .WithExample("review", "duplicates", ".")
+            .WithExample("review", "duplicates", ".", "--out", "duplicates.json");
+
+        review.AddCommand<ReviewVerdictCommand>("verdict")
+            .WithDescription("Compute approve / request-changes / needs-human from findings and gates.")
+            .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
     });
 
     // Distribution: replace the running Release binaries. Not an artifact-class branch.

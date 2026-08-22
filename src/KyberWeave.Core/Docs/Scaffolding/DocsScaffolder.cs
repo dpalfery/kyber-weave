@@ -56,10 +56,7 @@ public sealed record ScaffoldedFile(string RelativePath, ScaffoldOutcome Outcome
 public sealed record ScaffoldResult(
     string DocsRoot,
     DocsRootSource DocsRootSource,
-    IReadOnlyList<ScaffoldedFile> Files)
-{
-    public bool WroteAnything => Files.Any(f => f.Written);
-}
+    IReadOnlyList<ScaffoldedFile> Files);
 
 /// <summary>
 /// Bootstraps a host repository into a governable documentation corpus: host config, the
@@ -107,7 +104,7 @@ public static class DocsScaffolder
         KyberWeaveConfigLoadResult loadedConfig = RequireLoadableHostConfig(root);
         (string DocsRoot, DocsRootSource Source) resolution = string.IsNullOrWhiteSpace(docsRoot)
             ? ResolveDocsRoot(root, loadedConfig)
-            : (docsRoot!.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
+            : (docsRoot.Trim().Replace('\\', '/').TrimEnd('/'), DocsRootSource.Explicit);
         string resolvedDocsRoot = resolution.DocsRoot;
         resolvedDocsRoot = RequireEmittableValue(resolvedDocsRoot, nameof(docsRoot));
 
@@ -130,8 +127,8 @@ public static class DocsScaffolder
             ontology = ontology.Clone(technologies: mergedTechnologies);
         }
 
-        List<ScaffoldedFile> files = new List<ScaffoldedFile>
-        {
+        List<ScaffoldedFile> files =
+        [
             WriteHostConfig(root, resolvedDocsRoot, kyberStandards),
             WriteAnalysisCacheIgnore(root),
             Write(root, DocsLayout.Ontology(resolvedDocsRoot),
@@ -140,7 +137,7 @@ public static class DocsScaffolder
                 Catalog(resolvedOwner), force),
             Write(root, DocsLayout.Index(resolvedDocsRoot),
                 DocumentationIndex(resolvedDocsRoot, resolvedOwner), force)
-        };
+        ];
 
         foreach (string folder in DocsLayout.Folders)
         {
@@ -170,7 +167,7 @@ public static class DocsScaffolder
     /// The first conventional documentation directory that already exists, else "docs".
     /// Adopting an existing tree is the common case; creating one is not.
     /// </summary>
-    internal static string DetectDocsRoot(string repoRoot)
+    private static string DetectDocsRoot(string repoRoot)
     {
         foreach (string candidate in ConventionalRoots)
         {
@@ -190,7 +187,7 @@ public static class DocsScaffolder
     /// <c>docs validate</c> then reads. Only a missing config falls back to
     /// <see cref="DetectDocsRoot"/>; an invalid or unreadable one must stop scaffolding.
     /// </summary>
-    internal static (string DocsRoot, DocsRootSource Source) ResolveDocsRoot(
+    private static (string DocsRoot, DocsRootSource Source) ResolveDocsRoot(
         string repoRoot,
         KyberWeaveConfigLoadResult loaded)
     {

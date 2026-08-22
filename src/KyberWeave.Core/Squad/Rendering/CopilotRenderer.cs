@@ -90,6 +90,7 @@ public sealed class CopilotRenderer : ISquadRenderer
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder()
         .WithTypeConverter(new CopilotToolsFlowSequenceConverter())
+        .WithTypeConverter(new CopilotAgentsFlowSequenceConverter())
         .Build();
 
     /// <inheritdoc />
@@ -174,6 +175,15 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         if (agent.Invocation == SquadInvocation.Subagent)
         {
+            // A subagent that delegates needs its permitted roster named in frontmatter:
+            // the "agent" tool grants the mechanism, "agents" names who it may reach. A
+            // primary agent is dispatched from the top-level session and receives the
+            // full roster from the harness, so declaring one there would only narrow it.
+            if (agent.DelegatesTo.Count > 0)
+            {
+                frontmatter["agents"] = new CopilotAgentsFlowSequence(agent.DelegatesTo);
+            }
+
             // Subagents are dispatched by the conductor, not chosen directly by a human —
             // "user-invocable: false" is Copilot's closest equivalent. Primary agents
             // (conductor, conductor-v3) leave this at its default (true, omitted).
@@ -378,11 +388,42 @@ public sealed class CopilotRenderer : ISquadRenderer
     /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through
     /// <see cref="CopilotToolsFlowSequenceConverter"/>.
     /// </summary>
-    private sealed class CopilotToolsFlowSequence : List<string>
+    private sealed class CopilotToolsFlowSequence(IEnumerable<string> tools) : List<string>(tools);
+
+    /// <summary>
+    /// Prevents the generic YAML serializer from changing the deployed delegation
+    /// allow-list shape required by Copilot agent frontmatter.
+    /// </summary>
+    private sealed class CopilotAgentsFlowSequence(IEnumerable<string> agents) : List<string>(agents);
+
+    /// <summary>
+    /// Keeps each subagent restricted to its declared delegation roster in emitted
+    /// Copilot frontmatter by serializing as an inline single-quoted flow sequence
+    /// rather than YamlDotNet's default block list.
+    /// </summary>
+    private sealed class CopilotAgentsFlowSequenceConverter : IYamlTypeConverter
     {
-        public CopilotToolsFlowSequence(IEnumerable<string> tools)
-            : base(tools)
+        public bool Accepts(Type type) => type == typeof(CopilotAgentsFlowSequence);
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
+            throw new NotSupportedException("Deserialization of CopilotAgentsFlowSequence is not supported.");
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
+        {
+            if (value is not CopilotAgentsFlowSequence agents)
+            {
+                return;
+            }
+
+            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
+            foreach (string agent in agents)
+            {
+                emitter.Emit(new Scalar(AnchorName.Empty, TagName.Empty, agent, ScalarStyle.SingleQuoted, isPlainImplicit: true, isQuotedImplicit: true));
+            }
+
+            emitter.Emit(new SequenceEnd());
         }
     }
 
@@ -394,7 +435,7 @@ public sealed class CopilotRenderer : ISquadRenderer
     {
         public bool Accepts(Type type) => type == typeof(CopilotToolsFlowSequence);
 
-        public object? ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
         {
             throw new NotSupportedException("Deserialization of CopilotToolsFlowSequence is not supported.");
         }

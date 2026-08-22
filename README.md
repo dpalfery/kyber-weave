@@ -143,10 +143,10 @@ that was fixed in `.claude` and left broken in `.cursor`.
 
 Managing agent roles and skill sets across disparate developer environments leads to
 configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
-**single, unified lifecycle and deployment control plane** for deploying 20 canonical agents
-and 25 skills across 10 coding harnesses.
+**single, unified lifecycle and deployment control plane** for deploying 22 canonical agents
+and 26 skills across 10 coding harnesses.
 
-**The canonical tree.** Maintains 20 canonical agent bodies and 25 canonical skills under
+**The canonical tree.** Maintains 22 canonical agent bodies and 26 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
 profiles, and capability profiles. Generated target trees and APM packages are never tracked.
 
@@ -207,7 +207,7 @@ src/
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
-  kyber-squad/            canonical 20 agents, 25 skills, profiles, and schemas
+  kyber-squad/            canonical 22 agents, 26 skills, profiles, and schemas
 tests/KyberWeave.Tests/
 .apm/skills/              kyber-weave-docs — the authoring skill, shipped as an APM package
 samples/                  exemplar and deliberately bad skills; routing eval set

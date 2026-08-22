@@ -6,7 +6,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Squad;
 
 /// <summary>
 /// Unit tests pinning GitHub Copilot agent rendering in <see cref="CopilotRenderer"/>,
@@ -37,9 +37,10 @@ public sealed class CopilotRendererTests
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        IEnumerable<SquadDeploymentFile> agentFiles = result.Files
+        SquadDeploymentFile[] agentFiles = result.Files
             .Where(f => f.RelativePath.StartsWith(".github/agents/", StringComparison.Ordinal) &&
-                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal));
+                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal))
+            .ToArray();
 
         Assert.NotEmpty(agentFiles);
 
@@ -104,9 +105,10 @@ public sealed class CopilotRendererTests
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        IEnumerable<SquadDeploymentFile> agentFiles = result.Files
+        SquadDeploymentFile[] agentFiles = result.Files
             .Where(f => f.RelativePath.StartsWith(".github/agents/", StringComparison.Ordinal) &&
-                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal));
+                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal))
+            .ToArray();
 
         foreach (SquadDeploymentFile file in agentFiles)
         {
@@ -202,14 +204,22 @@ public sealed class CopilotRendererTests
     [InlineData("dal-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
     [InlineData("conductor", "tools: [vscode, read, agent, todo]")]
     [InlineData("conductor-v3", "tools: [vscode, read, agent, todo]")]
-    [InlineData("architect", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
-    [InlineData("architect-v3", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
+    [InlineData("architect", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
+    [InlineData("architect-v3", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
     [InlineData("github-devops", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, web, todo]")]
-    [InlineData("code-reviewer", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
+    // execute and agent are the widened reviewer profile reaching the tool allow-list; edit
+    // is absent because filesystem.write=ask has no per-tool confirmation gate here and
+    // safely narrows to deny — the reviewer returns findings rather than writing them.
+    [InlineData("code-reviewer", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
     [InlineData("azure-reader", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
     [InlineData("research-agent", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
     [InlineData("bug-crusher-investigator", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
     [InlineData("docs-dev", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
+    // Both lens seats are read-only: they read the diff and report. Neither executes, writes,
+    // nor delegates — the reviewer that spawned them holds those grants, and a council seat
+    // that could re-enter the council is a loop nobody bounded.
+    [InlineData("review-lens", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
+    [InlineData("review-triage", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
@@ -230,6 +240,34 @@ public sealed class CopilotRendererTests
         string actualToolsLine = ExtractToolsLine(ExtractFrontmatterText(content));
 
         Assert.Equal(expectedToolsLine, actualToolsLine);
+    }
+
+    /// <summary>
+    /// The triage seat exists to run cheaper than the judgement seat. If its model profile
+    /// silently resolved to the same tier, the second role would be pure overhead — so the
+    /// tier is asserted rather than assumed.
+    /// </summary>
+    [Theory]
+    [InlineData("review-lens", "Grok 4.5 (copilot)")]
+    [InlineData("review-triage", "GPT-5.6 Luna (copilot)")]
+    public async Task RenderAsync_LensSeatsResolveToTheirDeclaredModelTier(string agentName, string expectedModel)
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".github/agents/{agentName}.agent.md");
+
+        Assert.Contains(
+            $"model: {expectedModel}",
+            Encoding.UTF8.GetString(file.Content.Span),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -405,6 +443,69 @@ public sealed class CopilotRendererTests
         int end = markdown.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
         Assert.True(end > 0, "Expected closing frontmatter delimiter.");
         return markdown[delimiter.Length..end];
+    }
+
+    /// <summary>
+    /// The "agent" tool grants a subagent the mechanism to delegate; "agents" names who it
+    /// may reach. Emitting only the first leaves architect and code-reviewer holding a tool
+    /// with an empty roster — delegation that looks configured and silently does nothing.
+    /// A primary agent is dispatched from the top-level session and receives the full
+    /// roster from the harness, so declaring one there would only narrow it.
+    /// </summary>
+    [Theory]
+    [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
+    [InlineData("architect-v3", "agents: ['azure-reader', 'research-agent']")]
+    [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
+    [InlineData("product-owner", "agents: ['research-agent']")]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
+        string agentName,
+        string expectedAgentsLine)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        string? actual = frontmatter
+            .Split('\n')
+            .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+            ?.Trim();
+
+        Assert.Equal(expectedAgentsLine, actual);
+    }
+
+    /// <summary>
+    /// A subagent that delegates to nothing, and every primary agent, must carry no roster:
+    /// an empty or redundant "agents" key is a permission statement nobody meant to make.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp-dev")]
+    [InlineData("review-lens")]
+    [InlineData("azure-reader")]
+    [InlineData("conductor")]
+    [InlineData("conductor-v3")]
+    public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("agents:", StringComparison.Ordinal));
+    }
+
+    private static async Task<string> RenderFrontmatterAsync(string agentName)
+    {
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".github/agents/{agentName}.agent.md");
+
+        return ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
     }
 
     private static string ExtractToolsLine(string frontmatter)

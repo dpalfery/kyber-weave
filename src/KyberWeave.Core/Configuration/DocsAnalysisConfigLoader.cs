@@ -26,9 +26,7 @@ public static class DocsAnalysisConfigLoader
 
         DocsAnalysisSearchConfig search = MergeSearch(defaults.Search, section.Search);
         DocsAnalysisEmbeddingConfig embeddings = MergeEmbeddings(defaults.Embeddings, section.Embeddings);
-        IReadOnlyList<string> statuses = section.Statuses is null
-            ? defaults.Statuses
-            : section.Statuses.ToArray();
+        IReadOnlyList<string> statuses = section.Statuses?.ToArray() ?? defaults.Statuses;
         string? glossaryPath = NormalizeGlossaryPath(section.GlossaryPath, ontology.DocsRoots);
 
         DocsAnalysisConfig merged = defaults.Clone(

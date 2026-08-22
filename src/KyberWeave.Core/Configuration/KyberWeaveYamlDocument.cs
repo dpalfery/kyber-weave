@@ -11,6 +11,8 @@ internal sealed class KyberWeaveYamlDocument
 
     public SquadYamlSection? Squad { get; set; }
 
+    public ReviewYamlSection? Review { get; set; }
+
     /// <summary>
     /// Host additions to the configuration registry, as property name to repository-relative
     /// path. Bound as a plain map because the property names are the host's vocabulary, not

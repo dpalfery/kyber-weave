@@ -56,7 +56,7 @@ public static partial class SkillParser
         SkillFrontmatter frontmatter;
         try
         {
-            frontmatter = Deserializer.Deserialize<SkillFrontmatter>(rawYaml) ?? new SkillFrontmatter();
+            frontmatter = Deserializer.Deserialize<SkillFrontmatter?>(rawYaml) ?? new SkillFrontmatter();
         }
         catch (Exception ex)
         {
@@ -109,7 +109,7 @@ public static partial class SkillParser
 
             foreach (KeyValuePair<YamlNode, YamlNode> entry in root.Children)
             {
-                if (entry.Key is YamlScalarNode key && key.Value is { } keyName && !KnownKeys.Contains(keyName))
+                if (entry.Key is YamlScalarNode { Value: { } keyName } && !KnownKeys.Contains(keyName))
                 {
                     string value = entry.Value is YamlScalarNode sv ? sv.Value ?? string.Empty : "<complex>";
                     frontmatter.UnknownKeys[keyName] = value;

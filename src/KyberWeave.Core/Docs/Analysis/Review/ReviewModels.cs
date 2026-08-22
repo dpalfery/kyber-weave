@@ -54,7 +54,7 @@ public sealed record ReviewExportResult(
     DiagnosticReport? Diagnostics = null)
 {
     /// <summary>Analysis warnings and local cost measurements associated with the export.</summary>
-    public DiagnosticReport Diagnostics { get; init; } = Diagnostics ?? new DiagnosticReport();
+    public DiagnosticReport Diagnostics { get; } = Diagnostics ?? new DiagnosticReport();
 }
 
 /// <summary>One reviewer verdict echoed against the exported content identity.</summary>

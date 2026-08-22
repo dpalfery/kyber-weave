@@ -42,7 +42,7 @@ tests follow `<python-coding-standard>` and `<react-coding-standard>` the same w
 - **Mocking:** `unittest.mock` or `pytest-mock`. Mock at the I/O boundary, never inside
   domain logic.
 - **Naming:** `test_<unit>_<scenario>` snake_case.
-- **Coverage:** meet the threshold declared as **Test Coverage Config**, or `>80%` line
+- **Coverage:** meet the coverage floor the host declares under `review.coverage` in its Kyber-Weave configuration and `kyber-weave review gates` reports, or `>80%` line
   coverage with `pytest-cov` when that property is absent.
 
 ### Frontend

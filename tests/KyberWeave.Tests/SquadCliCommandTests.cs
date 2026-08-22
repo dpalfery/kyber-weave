@@ -5,6 +5,7 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -64,8 +65,8 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Null(SquadPackSourceLocator.Resolve(childDir));
 
         // Assert CLI and Core assemblies have no embedded resource for products/kyber-squad corpus
-        Assembly cliAssembly = typeof(KyberWeave.Cli.Commands.Squad.SquadPackSourceLocator).Assembly;
-        Assembly coreAssembly = typeof(KyberWeave.Core.Squad.Model.SquadSource).Assembly;
+        Assembly cliAssembly = typeof(SquadPackSourceLocator).Assembly;
+        Assembly coreAssembly = typeof(SquadSource).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
         string[] coreResources = coreAssembly.GetManifestResourceNames();
@@ -90,7 +91,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.NotNull(resolved);
         Assert.Equal(
             Path.GetFullPath(Path.Combine(repo.Path, "products", "kyber-squad")),
-            Path.GetFullPath(resolved!));
+            Path.GetFullPath(resolved));
     }
 
     #endregion
@@ -159,10 +160,11 @@ public sealed class SquadCliCommandTests : IDisposable
         // toolchain in the loop, so a valid source root packs successfully outright —
         // there is no longer a toolchain-qualification gate to reach.
         using SquadRepoFixture repo = SquadRepoFixture.CreateValid();
+        string repoPath = repo.Path;
         string outDir = Path.Combine(_temp.Path, "pack-output");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repo.Path);
+        SquadPackCommand command = new SquadPackCommand(executor, workingDirectory: repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -427,19 +429,20 @@ public sealed class SquadCliCommandTests : IDisposable
     public void Doctor_WhenInsideRepository_ValidatesLocalSource()
     {
         using SquadRepoFixture repo = SquadRepoFixture.CreateValid();
+        string repoPath = repo.Path;
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("apm", "apm, version 0.28.0\n")
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
 
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: repo.Path);
+        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: repoPath);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = repo.Path,
+                Path = repoPath,
                 Global = false
             }));
 
@@ -584,12 +587,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithProbeOutput("apm", "apm, version 0.28.0\n")
-            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -620,7 +619,6 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
 
         SquadInstallCommand command = new(
-            executor: null,
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -656,7 +654,6 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
 
         SquadInstallCommand command = new(
-            executor: null,
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -686,9 +683,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-invalid-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -710,9 +706,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-invalid-exclude");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -733,9 +728,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-no-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -761,11 +755,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithProbeOutput("apm", "apm, version 0.28.0\n")
-            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -796,7 +786,6 @@ public sealed class SquadCliCommandTests : IDisposable
             (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
         SquadUpdateCommand command = new(
-            executor: null,
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -825,9 +814,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-invalid-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -862,8 +850,7 @@ public sealed class SquadCliCommandTests : IDisposable
             Files: []);
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(emptyReceipt), Encoding.UTF8);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths, stateStore);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths, stateStore);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -882,9 +869,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-no-receipt");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -1087,14 +1073,9 @@ public sealed class SquadCliCommandTests : IDisposable
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
-    private sealed class FakeUserPaths : ISquadUserPaths
+    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
-        public FakeUserPaths(string appDataDirectory)
-        {
-            ApplicationDataDirectory = appDataDirectory;
-        }
-
-        public string ApplicationDataDirectory { get; }
+        public string ApplicationDataDirectory { get; } = appDataDirectory;
     }
 
     private sealed class SquadRepoFixture : IDisposable
@@ -1237,7 +1218,7 @@ public sealed class SquadCliCommandTests : IDisposable
             return fixture;
         }
 
-        public void Write(string relativePath, string content)
+        private void Write(string relativePath, string content)
         {
             string fullPath = System.IO.Path.Combine(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);

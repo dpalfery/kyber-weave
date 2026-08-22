@@ -51,7 +51,7 @@ public sealed partial class DocumentLoader
             string absoluteRoot = Absolute(docsRoot);
             if (!Directory.Exists(absoluteRoot)) continue;
 
-            foreach (string? file in Directory
+            foreach (string file in Directory
                          .EnumerateFiles(absoluteRoot, "*.md", SearchOption.AllDirectories)
                          .OrderBy(p => p, StringComparer.Ordinal))
             {
@@ -81,7 +81,7 @@ public sealed partial class DocumentLoader
         };
     }
 
-    internal bool IsExcluded(string relativePath)
+    private bool IsExcluded(string relativePath)
     {
         string[] segments = relativePath.Split('/');
         if (segments.Any(s => _config.ExcludedPathSegments.Contains(s, StringComparer.OrdinalIgnoreCase)))
@@ -236,7 +236,7 @@ public sealed partial class DocumentLoader
     private static bool HasProse(IEnumerable<string> lines) =>
         lines.Any(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#'));
 
-    internal static DocType ParseDocType(string? value) =>
+    private static DocType ParseDocType(string? value) =>
         value?.Trim().ToLowerInvariant() switch
         {
             "architecture" => DocType.Architecture,
@@ -255,7 +255,7 @@ public sealed partial class DocumentLoader
             _ => DocType.Unknown
         };
 
-    internal static DocStatus ParseStatus(string? value) =>
+    private static DocStatus ParseStatus(string? value) =>
         value?.Trim().ToLowerInvariant() switch
         {
             "current" => DocStatus.Current,
@@ -311,7 +311,7 @@ public sealed partial class DocumentLoader
         {
             if (!line.StartsWith('|')) continue;
 
-            string[] cells = line.Split('|', StringSplitOptions.None)
+            string[] cells = line.Split('|')
                 .Select(c => c.Trim())
                 .ToArray();
 

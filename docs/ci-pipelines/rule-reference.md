@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-22
 ---
 
 # Rule reference
@@ -124,6 +124,54 @@ details.
 above, one-for-one. Both come from the same
 [instruction-surface engine](../context-hygiene/security-scanning.md); the prefixes differ
 only so hosts can gate the two artifact classes at different severities.
+
+## Code review — [the review council](../plans/2026-08-20-code-review-council.md)
+
+The verdict tier is the one place in the product where a rule decides something a model
+proposed. `review verdict` computes the outcome from the council's findings and the gate
+results by fixed rule, so the same inputs produce the same verdict every time and each
+decision names the id that made it.
+
+### Verdict — `review verdict`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-REVIEW-001` | Warning | A finding arrived without an excerpt, evidence, or a failure scenario, and was dropped |
+| `KW-REVIEW-002` | Info | A finding fell below the configured confidence floor |
+| `KW-REVIEW-003` | Info | A finding was removed by an active suppression |
+| `KW-REVIEW-004` | Warning | A suppression passed its expiry and no longer applies |
+| `KW-REVIEW-005` | Error | A blocking gate failed |
+| `KW-REVIEW-006` | Error | A surviving critical finding |
+| `KW-REVIEW-007` | Error | Surviving major findings reached the blocking threshold |
+| `KW-REVIEW-008` | Error | A changed path is reserved for human review by policy |
+| `KW-REVIEW-009` | Error | The diff exceeds the reviewable size ceiling |
+| `KW-REVIEW-010` | Warning | Measured coverage is below the declared floor |
+| `KW-REVIEW-011` | Info | No reserved paths are declared, so nothing can escalate on path alone |
+| `KW-REVIEW-012` | Warning | A coverage floor is declared but no coverage report was produced |
+
+`-008` and `-009` are evaluated before any finding is weighed, and neither can be overridden
+by the engine: both say the change is not the engine's to settle, not that it is faulty.
+`-010` and `-012` never block — a verdict driven by a coverage number rewards padding that
+number, and a missing report is the same class of signal rather than a failed gate.
+
+### Gates — `review gates`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-REVIEW-020` | Warning | No gates are declared, so the review has no executed evidence |
+| `KW-REVIEW-021` | Info | A gate passed |
+| `KW-REVIEW-022` | Error / Warning | A gate failed. Error when blocking, warning otherwise. |
+| `KW-REVIEW-023` | Error | A findings or gate document could not be read |
+| `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
+| `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
+
+### Duplicates — `review duplicates`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-REVIEW-030` | Warning | No CodeGraph index was read, so duplicate detection did not run |
+| `KW-REVIEW-031` | Warning | A set of symbols shares one normalized body |
+| `KW-REVIEW-032` | Warning | The CodeGraph index disagrees with the working tree, so its clusters are stale |
 
 ## Shared
 

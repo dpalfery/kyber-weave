@@ -17,9 +17,6 @@ public static class AgentPromptScanner
     /// <summary>OpenAI-style API key finding (KW-AGENT-SEC-024). Other secret codes are KW-AGENT-SEC-020–025.</summary>
     public const string RuleHardcodedSecret = "KW-AGENT-SEC-024";
 
-    /// <summary>System-prompt override / reveal (KW-AGENT-SEC-003).</summary>
-    public const string RuleRiskyDirective = "KW-AGENT-SEC-003";
-
     public static DiagnosticReport Scan(AgentModel agent)
     {
         DiagnosticReport report = new DiagnosticReport();

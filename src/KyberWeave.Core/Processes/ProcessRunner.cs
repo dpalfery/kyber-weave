@@ -26,7 +26,12 @@ public static class ProcessRunner
     /// rather than the concatenated <see cref="ProcessStartInfo.Arguments"/> string.
     /// </param>
     /// <param name="standardInput">The complete text to write to the child process.</param>
-    public static ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
+    /// <param name="timeout">
+    /// When set, the process tree is killed and a <see cref="TimeoutException"/> is thrown
+    /// if the child has not finished within this limit. Unbounded waits are how a hung gate
+    /// takes the whole review with it.
+    /// </param>
+    public static ProcessResult Run(ProcessStartInfo startInfo, string standardInput, TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         ArgumentNullException.ThrowIfNull(standardInput);
@@ -62,21 +67,54 @@ public static class ProcessRunner
         Task<string> standardError = process.StandardError.ReadToEndAsync();
         Task inputWrite = WriteAndCloseAsync(process.StandardInput, standardInput);
 
+        bool timedOut = false;
         try
         {
-            Task.WhenAll(inputWrite, standardOutput, standardError).GetAwaiter().GetResult();
+            Task io = Task.WhenAll(inputWrite, standardOutput, standardError);
+            if (timeout is { } limit)
+            {
+                if (!io.Wait(limit))
+                {
+                    timedOut = true;
+                    TryKillTree(process);
+                    io.Wait(TimeSpan.FromSeconds(5));
+                    throw new TimeoutException(
+                        $"The process did not exit within {limit.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} seconds.");
+                }
+            }
+            else
+            {
+                io.GetAwaiter().GetResult();
+            }
         }
         finally
         {
-            // WhenAll does not finish until both output streams reach EOF, so waiting here
-            // cannot leave the child blocked on a full redirected pipe.
-            process.WaitForExit();
+            // After a timeout kill, an unbounded WaitForExit can hang if the tree did not
+            // actually die. The success path still waits without a cap: WhenAll already
+            // drained both pipes, so the child cannot be blocked on write.
+            if (timedOut)
+                process.WaitForExit(TimeSpan.FromSeconds(5));
+            else
+                process.WaitForExit();
         }
 
         return new ProcessResult(
             process.ExitCode,
             standardOutput.GetAwaiter().GetResult(),
             standardError.GetAwaiter().GetResult());
+    }
+
+    private static void TryKillTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Already gone, or the OS refused the kill. The timeout still reports as a failure.
+        }
     }
 
     /// <summary>

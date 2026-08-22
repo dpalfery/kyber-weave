@@ -1,3 +1,5 @@
+using JetBrains.Annotations;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -21,6 +23,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsIntegrityCheckCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
@@ -43,7 +46,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
         }
     }
 
-    internal static int FindingExitCode(DiagnosticReport report, string failOn) =>
+    private static int FindingExitCode(DiagnosticReport report, string failOn) =>
         failOn.Trim().ToLowerInvariant() switch
         {
             "none" => 0,
@@ -64,6 +67,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsReviewExportCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsReviewExportCommand(IDocsAnalysisCommandService service) =>
@@ -81,7 +85,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
             report.AddMetric("reviewCandidates", result.Bundle.Candidates.Count);
             report.AddMetric("truncated", result.Truncated);
             CommandHelpers.Finish(report, settings, "docs review export", "Candidate");
-            if (settings.ParsedFormat == KyberWeave.Cli.Rendering.OutputFormat.Table)
+            if (settings.ParsedFormat == OutputFormat.Table)
             {
                 AnsiConsole.MarkupLine(
                     $"[green]Exported[/] {result.Bundle.Candidates.Count} review candidates to " +
@@ -101,6 +105,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsReviewImportCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsReviewImportCommand(IDocsAnalysisCommandService service) =>
@@ -120,8 +125,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
             DocsAnalysisCommandErrors.Render(
                 exception,
                 settings,
-                "docs review import",
-                DocumentationReviewExchange.ReviewRuleCode);
+                "docs review import");
             return 1;
         }
     }
@@ -131,6 +135,7 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsGlossaryCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsGlossaryCommand(IDocsAnalysisCommandService service) =>
@@ -204,7 +209,16 @@ internal static class AtomicTextFile
         }
         finally
         {
-            if (File.Exists(temporary)) File.Delete(temporary);
+            // Best-effort cleanup: a delete failure must not replace the write or move
+            // failure the caller needs to diagnose.
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // The temporary file is left behind; the primary exception is preserved.
+            }
         }
     }
 }

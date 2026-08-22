@@ -13,18 +13,13 @@ namespace KyberWeave.Core.Docs.Validation;
 /// This is the countermeasure to the failure mode the ontology exists to prevent: prose
 /// still reads correctly after a rename, so nothing surfaces the break except resolution.
 /// </remarks>
-public sealed class DocDriftLinter
+public sealed class DocDriftLinter(ICodeGraphResolver resolver)
 {
     public const string UnresolvedCodeRef = "KW-DOC-DRIFT-001";
     public const string UnresolvedEndpoint = "KW-DOC-DRIFT-002";
-    public const string SourceRootNotIndexed = "KW-DOC-DRIFT-003";
+    private const string SourceRootNotIndexed = "KW-DOC-DRIFT-003";
 
-    private readonly ICodeGraphResolver _resolver;
-
-    public DocDriftLinter(ICodeGraphResolver resolver)
-    {
-        _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
-    }
+    private readonly ICodeGraphResolver _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
 
     public DiagnosticReport Validate(DocumentSet set)
     {

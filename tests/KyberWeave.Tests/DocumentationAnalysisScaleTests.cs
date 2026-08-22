@@ -184,35 +184,49 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
         GC.WaitForPendingFinalizers();
         GC.Collect();
         using Process process = Process.GetCurrentProcess();
-        long peakWorkingSet = process.WorkingSet64;
         using CancellationTokenSource samplingCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = samplingCancellation.Token;
+        SamplerState samplerState = new SamplerState(process);
+
         Task sampler = Task.Run(async () =>
         {
             try
             {
-                while (true)
+                while (!cancellationToken.IsCancellationRequested)
                 {
-                    process.Refresh();
-                    InterlockedExtensions.Max(ref peakWorkingSet, process.WorkingSet64);
-                    await Task.Delay(TimeSpan.FromMilliseconds(5), samplingCancellation.Token)
+                    samplerState.Sample();
+                    await Task.Delay(TimeSpan.FromMilliseconds(5), cancellationToken)
                         .ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException) when (samplingCancellation.IsCancellationRequested)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 // The measurement completed normally.
             }
-        });
+        }, cancellationToken);
+
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         Stopwatch stopwatch = Stopwatch.StartNew();
-        T? value = action();
+        T value = action();
         stopwatch.Stop();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         samplingCancellation.Cancel();
         sampler.GetAwaiter().GetResult();
-        process.Refresh();
-        InterlockedExtensions.Max(ref peakWorkingSet, process.WorkingSet64);
-        return new Measurement<T>(value, stopwatch.Elapsed, peakWorkingSet, allocated);
+        samplerState.Sample();
+        return new Measurement<T>(value, stopwatch.Elapsed, samplerState.PeakWorkingSet, allocated);
+    }
+
+    private sealed class SamplerState(Process process)
+    {
+        private long _peakWorkingSet = process.WorkingSet64;
+
+        public long PeakWorkingSet => Volatile.Read(ref _peakWorkingSet);
+
+        public void Sample()
+        {
+            process.Refresh();
+            InterlockedExtensions.Max(ref _peakWorkingSet, process.WorkingSet64);
+        }
     }
 
     private sealed record Measurement<T>(

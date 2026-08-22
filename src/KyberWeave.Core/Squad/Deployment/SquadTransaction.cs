@@ -988,7 +988,7 @@ public sealed class SquadTransaction
                 : null;
         intent = intent with
         {
-            Artifacts = intent.Artifacts.Append(artifact).ToArray(),
+            Artifacts = [.. intent.Artifacts, artifact],
             ActiveTransitions =
             [new IntentTransition(ArtifactIdentity(claimArea, claimRelativePath), ArtifactLifecycleState.PreOperation)]
         };
@@ -1155,7 +1155,7 @@ public sealed class SquadTransaction
 
         VerifyRestoreArtifacts(intent);
         List<string> conflicts = new List<string>();
-        foreach (IntentFile? file in intent.Files.Reverse())
+        foreach (IntentFile file in intent.Files.Reverse())
         {
             string targetPath = SquadPathPolicy.ResolveFile(targetRoot, file.RelativePath);
             string backupPath = TransactionFilePath(
@@ -1183,7 +1183,7 @@ public sealed class SquadTransaction
         }
 
         HashSet<string> seenDirs = new HashSet<string>(StringComparer.Ordinal);
-        foreach (IntentFile? file in intent.Files)
+        foreach (IntentFile file in intent.Files)
         {
             foreach (string relativeDirectory in file.MissingParentDirectories)
             {
@@ -1236,10 +1236,8 @@ public sealed class SquadTransaction
         string lockPath,
         string receiptPath)
     {
-        foreach (IntentArtifact? artifact in intent.Artifacts.Where(artifact =>
-                     artifact.Role == ArtifactRole.ClaimedOriginal &&
-                     artifact.LifecycleState is ArtifactLifecycleState.ActiveTransition or
-                         ArtifactLifecycleState.PostOperation))
+        foreach (IntentArtifact artifact in intent.Artifacts.Where(artifact =>
+                     artifact is { Role: ArtifactRole.ClaimedOriginal, LifecycleState: ArtifactLifecycleState.ActiveTransition or ArtifactLifecycleState.PostOperation }))
         {
             string? targetPath = null;
             foreach (IntentFile file in intent.Files)
@@ -2200,15 +2198,6 @@ public sealed class SquadTransaction
         }
     }
 
-    private string JournalBoundary(SquadDeploymentPlan plan) =>
-        plan.Scope == SquadDeploymentScope.Project
-            ? plan.PhysicalRootPath
-            : Path.GetPathRoot(_stateStore.ResolveStateDirectory(
-                plan.PhysicalRootPath,
-                plan.Scope))
-                ?? throw new InvalidOperationException(
-                    "Could not resolve the global Squad state filesystem root.");
-
     private static void WriteIntent(
         string intentPath,
         IntentDocument intent,
@@ -2298,11 +2287,7 @@ public sealed class SquadTransaction
             if (!string.Equals(intent.Schema, IntentSchema, StringComparison.Ordinal) ||
                 !string.Equals(intent.RootKey, expectedRootKey, StringComparison.Ordinal) ||
                 !IsDigest(intent.RootKey) ||
-                !IsTransactionId(intent.TransactionId) ||
-                intent.Files is null ||
-                intent.CreatedDirectories is null ||
-                intent.Artifacts is null ||
-                intent.ActiveTransitions is null)
+                !IsTransactionId(intent.TransactionId))
             {
                 throw new InvalidDataException(
                     "Squad transaction intent has an unsupported schema or physical-root binding.");
@@ -2313,8 +2298,7 @@ public sealed class SquadTransaction
             {
                 string normalized = SquadPathPolicy.NormalizeRelativePath(file.RelativePath);
                 if (!string.Equals(normalized, file.RelativePath, StringComparison.Ordinal) ||
-                    !fileIdentities.Add(normalized) ||
-                    file.MissingParentDirectories is null)
+                    !fileIdentities.Add(normalized))
                 {
                     throw new InvalidDataException(
                         "Squad transaction intent contains a non-portable path.");
@@ -2700,8 +2684,7 @@ public sealed class SquadTransaction
                 StringComparison.Ordinal);
 
         bool hasStagedArtifact = artifacts.Any(a =>
-            a.Area == ArtifactArea.Journal &&
-            a.Role == ArtifactRole.StateStage &&
+            a is { Area: ArtifactArea.Journal, Role: ArtifactRole.StateStage } &&
             string.Equals(a.Path, $"state-staging/{stateName}", StringComparison.Ordinal));
 
         if (afterKind == OriginalEntryKind.File && (hasStagedArtifact || !unchangedFile))
@@ -2857,11 +2840,9 @@ public sealed class SquadTransaction
             OriginalEntryKind.File => artifact.ByteLength >= 0 &&
                 IsDigest(artifact.Sha256) && artifact.LinkTarget.Length == 0,
             OriginalEntryKind.FileSymbolicLink or OriginalEntryKind.DirectorySymbolicLink =>
-                artifact.ByteLength == 0 && artifact.Sha256.Length == 0 &&
-                artifact.LinkTarget.Length > 0,
-            OriginalEntryKind.Directory => artifact.ByteLength == 0 &&
-                artifact.Sha256.Length == 0 && artifact.LinkTarget.Length == 0,
-            OriginalEntryKind.Missing => false,
+                artifact is { ByteLength: 0, Sha256.Length: 0, LinkTarget.Length: > 0 },
+            OriginalEntryKind.Directory =>
+                artifact is { ByteLength: 0, Sha256.Length: 0, LinkTarget.Length: 0 },
             _ => false
         };
 
@@ -3008,7 +2989,7 @@ public sealed class SquadTransaction
             .Select(artifact => artifact.Path)
             .ToHashSet(StringComparer.Ordinal);
         HashSet<string> expectedDirectories = new HashSet<string>(StringComparer.Ordinal);
-        foreach (IntentArtifact? artifact in areaArtifacts
+        foreach (IntentArtifact artifact in areaArtifacts
                      .Where(artifact =>
                          ArtifactExpectedPresent(artifact) == true ||
                          (ArtifactExpectedPresent(artifact) is null &&
@@ -3292,20 +3273,6 @@ public sealed class SquadTransaction
         }
     }
 
-    private sealed class LeafClaimConflictException : InvalidOperationException
-    {
-        public LeafClaimConflictException()
-        {
-        }
-
-        public LeafClaimConflictException(string message)
-            : base(message)
-        {
-        }
-
-        public LeafClaimConflictException(string message, Exception innerException)
-            : base(message, innerException)
-        {
-        }
-    }
+    [SuppressMessage("Design", "CA1032:Implement standard exception constructors", Justification = "Private nested exception used internally for transaction control flow.")]
+    private sealed class LeafClaimConflictException(string message) : InvalidOperationException(message);
 }

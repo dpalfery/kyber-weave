@@ -83,17 +83,9 @@ internal static class DocsCommandComposition
         DocsSettings settings,
         DiagnosticReport report,
         out DocumentLoader? loader,
-        out OntologyConfig ontology)
-        => TryCreateLoader(settings, report, out loader, out ontology, out _);
-
-    public static bool TryCreateLoader(
-        DocsSettings settings,
-        DiagnosticReport report,
-        out DocumentLoader? loader,
-        out OntologyConfig ontology,
         out KyberWeaveConfig config)
     {
-        if (!TryResolveConfig(settings, report, out config, out ontology))
+        if (!TryResolveConfig(settings, report, out config, out OntologyConfig ontology))
         {
             loader = null;
             return false;
@@ -117,7 +109,10 @@ internal static class DocsCommandComposition
         ArgumentNullException.ThrowIfNull(factories);
 
         runtime = null;
-        if (!TryResolveConfig(settings, report, out KyberWeaveConfig? config, out OntologyConfig? ontology)) return false;
+        if (!TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
+        {
+            return false;
+        }
 
         ICodeGraphResolver resolver = factories.CreateResolver(settings.Path);
         if (!resolver.IsAvailable)
@@ -205,36 +200,24 @@ internal sealed class DocsAnalysisCompositionFactories
         CodeGraphResolverAdapter.ForRepository;
 }
 
-internal sealed class DocsAnalysisRuntime : IDisposable
+internal sealed class DocsAnalysisRuntime(
+    string repositoryRoot,
+    KyberWeaveConfig config,
+    OntologyConfig ontology,
+    ICodeGraphResolver resolver,
+    IAnalysisPersistence? persistence,
+    IEmbeddingGenerator? embeddingGenerator) : IDisposable
 {
-    private readonly IDisposable? _persistenceOwner;
-    private readonly IDisposable? _embeddingOwner;
+    private readonly IDisposable? _persistenceOwner = persistence as IDisposable;
+    private readonly IDisposable? _embeddingOwner = embeddingGenerator as IDisposable;
     private bool _disposed;
 
-    public DocsAnalysisRuntime(
-        string repositoryRoot,
-        KyberWeaveConfig config,
-        OntologyConfig ontology,
-        ICodeGraphResolver resolver,
-        IAnalysisPersistence? persistence,
-        IEmbeddingGenerator? embeddingGenerator)
-    {
-        RepositoryRoot = Path.GetFullPath(repositoryRoot);
-        Config = config;
-        Ontology = ontology;
-        Resolver = resolver;
-        Persistence = persistence;
-        EmbeddingGenerator = embeddingGenerator;
-        _persistenceOwner = persistence as IDisposable;
-        _embeddingOwner = embeddingGenerator as IDisposable;
-    }
-
-    public string RepositoryRoot { get; }
-    public KyberWeaveConfig Config { get; }
-    public OntologyConfig Ontology { get; }
-    public ICodeGraphResolver Resolver { get; }
-    public IAnalysisPersistence? Persistence { get; }
-    public IEmbeddingGenerator? EmbeddingGenerator { get; }
+    public string RepositoryRoot { get; } = Path.GetFullPath(repositoryRoot);
+    public KyberWeaveConfig Config { get; } = config;
+    public OntologyConfig Ontology { get; } = ontology;
+    public ICodeGraphResolver Resolver { get; } = resolver;
+    public IAnalysisPersistence? Persistence { get; } = persistence;
+    private IEmbeddingGenerator? EmbeddingGenerator { get; } = embeddingGenerator;
 
     public DocumentationAnalyzer CreateAnalyzer() => new(
         new ClaimExtractor(),

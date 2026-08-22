@@ -27,9 +27,9 @@ public sealed class DocGraphProjectionTests
 
         DocGraphProjection projection = DocGraphProjection.Build(set, resolver);
 
-        Assert.Contains(projection.Nodes, n => n.Id == "doc:architecture/billing" && n.Label == "Document");
-        Assert.Contains(projection.Nodes, n => n.Id == "component:Billing" && n.Label == "Component");
-        Assert.Contains(projection.Nodes, n => n.Id == "team:Platform" && n.Label == "Team");
+        Assert.Contains(projection.Nodes, n => n is { Id: "doc:architecture/billing", Label: "Document" });
+        Assert.Contains(projection.Nodes, n => n is { Id: "component:Billing", Label: "Component" });
+        Assert.Contains(projection.Nodes, n => n is { Id: "team:Platform", Label: "Team" });
         Assert.Contains(new DocGraphEdge("DOCUMENTS", "doc:architecture/billing", "component:Billing"), projection.Edges);
         Assert.Contains(new DocGraphEdge("OWNED_BY", "doc:architecture/billing", "team:Platform"), projection.Edges);
         Assert.Contains(new DocGraphEdge("DESCRIBES", "doc:architecture/billing", "path:src/Billing"), projection.Edges);
@@ -43,15 +43,15 @@ public sealed class DocGraphProjectionTests
     [Fact]
     public void BuildCopiesContributorOutputIntoAnImmutableSnapshot()
     {
-        List<DocGraphNode> nodes = new List<DocGraphNode>
-        {
+        List<DocGraphNode> nodes =
+        [
             new("term:loop", "Term", new ReadOnlyDictionary<string, string?>(
                 new Dictionary<string, string?> { ["name"] = "loop" }))
-        };
-        List<DocGraphEdge> edges = new List<DocGraphEdge>
-        {
+        ];
+        List<DocGraphEdge> edges =
+        [
             new("EVIDENCED_BY", "term:loop", "doc:reference/billing")
-        };
+        ];
         StubContributor contributor = new StubContributor(nodes, edges);
 
         DocGraphProjection projection = DocGraphProjection.Build(
@@ -96,8 +96,8 @@ public sealed class DocGraphProjectionTests
 
         DocGraphProjection projection = DocGraphProjection.Build(set, FakeCodeGraphResolver.WithSymbols());
 
-        Assert.Contains(projection.Nodes, node => node.Id == "doc:docs/left.md" && node.Label == "Document");
-        Assert.Contains(projection.Nodes, node => node.Id == "doc:docs/right.md" && node.Label == "Document");
+        Assert.Contains(projection.Nodes, node => node is { Id: "doc:docs/left.md", Label: "Document" });
+        Assert.Contains(projection.Nodes, node => node is { Id: "doc:docs/right.md", Label: "Document" });
         Assert.True(projection.AreDocumentsRelated("doc:docs/left.md", "doc:docs/right.md"));
     }
 

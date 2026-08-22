@@ -12,7 +12,7 @@ public sealed class AgentSyncCheckCommand : Command<AnalysisSettings>
     public override int Execute(CommandContext context, AnalysisSettings settings)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig? config))
+        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig config))
         {
             CommandHelpers.Finish(report, settings, "agent sync-check", "Agent");
             return 1;

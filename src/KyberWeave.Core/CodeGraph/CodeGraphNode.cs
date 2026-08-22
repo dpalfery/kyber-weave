@@ -9,6 +9,8 @@ namespace KyberWeave.Core.CodeGraph;
 /// <param name="Language">Indexed language, e.g. <c>csharp</c> or <c>typescript</c>. A bare
 /// symbol name can collide across languages, so callers disambiguating a match need it.</param>
 /// <param name="StartLine">1-based line the symbol is declared on.</param>
+/// <param name="EndLine">1-based line the symbol's declaration ends on, or 0 when the
+/// index did not record one. Defaulted so existing positional construction stays valid.</param>
 public sealed record CodeGraphNode(
     string Id,
     string Kind,
@@ -16,8 +18,12 @@ public sealed record CodeGraphNode(
     string QualifiedName,
     string FilePath,
     string Language,
-    int StartLine)
+    int StartLine,
+    int EndLine = 0)
 {
     /// <summary>The symbol's location as <c>file:line</c>.</summary>
     public string Location => StartLine > 0 ? $"{FilePath}:{StartLine}" : FilePath;
+
+    /// <summary>How many source lines the declaration spans, inclusive; 0 when unknown.</summary>
+    public int LineSpan => StartLine > 0 && EndLine >= StartLine ? EndLine - StartLine + 1 : 0;
 }

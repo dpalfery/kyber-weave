@@ -16,14 +16,6 @@ public sealed class DocumentSet
     public IReadOnlySet<string> Owners { get; init; } =
         new HashSet<string>(StringComparer.Ordinal);
 
-    /// <summary>Every declared document id. Duplicates are reported, not collapsed.</summary>
-    public IReadOnlyCollection<string> DeclaredIds =>
-        Documents
-            .Select(d => d.Frontmatter.Id)
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Select(id => id!)
-            .ToList();
-
     /// <summary>doc-type by component, for the catalog command.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<DocumentModel>> ByComponent() =>
         Documents

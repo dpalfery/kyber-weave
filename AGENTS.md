@@ -22,6 +22,18 @@ dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 ```
 
+Or run all of them, plus build, test, and ReSharper InspectCode, through the declared gate
+suite — the same command a review executes, so what you check is what the reviewer cites:
+
+```bash
+dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.json
+```
+
+InspectCode needs the pinned tool restored once per clone (`dotnet tool restore`). It exits
+zero whether or not it finds anything; the report lands at `artifacts/inspectcode.xml`, and
+the `static-analysis-triage` review lens attributes its findings to the diff. See the
+`resharper-clt` skill for how to read it.
+
 Touching the self-updater, `install.sh`, or the Squad release path also means running the
 local release loop documented in [distribution](docs/distribution.md#verifying-a-release-locally):
 

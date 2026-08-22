@@ -5,7 +5,7 @@ namespace KyberWeave.Cli.Update;
 /// <summary>Maps the running OS and CPU to a published Release RID.</summary>
 internal static class PlatformRid
 {
-    internal static readonly string[] Published =
+    private static readonly string[] Published =
     [
         "linux-x64",
         "linux-arm64",

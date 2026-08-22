@@ -35,6 +35,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!--
+      Compile-time only, and PrivateAssets="all" keeps it out of the shipped nupkg's
+      dependency graph: consumers of KyberWeave.Core still take only Markdig and YamlDotNet.
+      It is here because two analyzers disagree — ReSharper reports the conventional
+      exception constructors CA1032 requires as unused, and [UsedImplicitly] is the
+      sanctioned way to say "constructed by something you cannot see".
+    -->
+    <PackageReference Include="JetBrains.Annotations" Version="2025.2.2" PrivateAssets="all" />
     <PackageReference Include="Markdig" Version="1.3.2" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>

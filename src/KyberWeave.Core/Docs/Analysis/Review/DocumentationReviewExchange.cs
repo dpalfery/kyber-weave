@@ -15,7 +15,7 @@ namespace KyberWeave.Core.Docs.Analysis.Review;
 public sealed class DocumentationReviewExchange
 {
     public const string CandidateSchema = "kyber-weave.docs-review.candidates/v1";
-    public const string VerdictSchema = "kyber-weave.docs-review.verdicts/v1";
+    private const string VerdictSchema = "kyber-weave.docs-review.verdicts/v1";
     public const string ReviewRuleCode = "KW-DOC-REVIEW-001";
 
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
@@ -229,14 +229,17 @@ public sealed class DocumentationReviewExchange
             return "The verdict bundle analyzer version is stale.";
         if (!StringComparer.Ordinal.Equals(bundle.RubricVersion, DocumentationAnalyzer.RubricVersion))
             return "The verdict bundle rubric version is stale.";
-        if (bundle.Verdicts is null || bundle.Verdicts.Count == 0)
+        if (bundle.Verdicts is null)
+            return "The verdict bundle omits the verdicts collection.";
+        if (bundle.Verdicts.Count == 0)
             return "The verdict bundle does not contain any verdicts.";
 
         HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
         List<AnalysisCandidate> reviewedCandidates = new List<AnalysisCandidate>(bundle.Verdicts.Count);
         foreach (ReviewVerdictItem? verdict in bundle.Verdicts)
         {
-            if (verdict is null) return "The verdict bundle contains an empty verdict.";
+            if (verdict is null)
+                return "The verdict bundle contains a null verdict.";
             if (string.IsNullOrWhiteSpace(verdict.CandidateId) || !seen.Add(verdict.CandidateId))
                 return "Verdict candidate ids must be non-empty and unique.";
             if (!candidates.TryGetValue(verdict.CandidateId, out AnalysisCandidate? candidate))
@@ -361,11 +364,12 @@ public sealed class DocumentationReviewExchange
         }
 
         return verdict.ProposedGlossarySenses.All(sense =>
-            !string.IsNullOrWhiteSpace(sense.Term)
+            sense is not null
+            && !string.IsNullOrWhiteSpace(sense.Term)
             && StringComparer.OrdinalIgnoreCase.Equals(sense.Term, candidate.Term)
             && !string.IsNullOrWhiteSpace(sense.Definition)
             && sense.Scopes is { Count: > 0 }
-            && sense.Scopes.All(ValidScope)
+            && sense.Scopes.All(scope => scope is not null && ValidScope(scope))
             && sense.Aliases is not null
             && sense.Aliases.All(alias => !string.IsNullOrWhiteSpace(alias)));
     }

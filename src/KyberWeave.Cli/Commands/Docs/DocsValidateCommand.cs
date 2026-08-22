@@ -14,7 +14,7 @@ public sealed class DocsValidateCommand : Command<DocsSettings>
     public override int Execute(CommandContext context, DocsSettings settings)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig? config, out OntologyConfig? ontology))
+        if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
             CommandHelpers.Finish(report, settings, "docs validate", "Document");
             return 1;

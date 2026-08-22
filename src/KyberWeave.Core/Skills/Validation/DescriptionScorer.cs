@@ -7,10 +7,7 @@ namespace KyberWeave.Core.Skills.Validation;
 public sealed record ScoreComponent(string Name, int Points, int MaxPoints, string Detail);
 
 /// <summary>The explainable result of scoring a description as routing metadata.</summary>
-public sealed record DescriptionScore(int Total, IReadOnlyList<ScoreComponent> Components)
-{
-    public int Max => Components.Sum(c => c.MaxPoints);
-}
+public sealed record DescriptionScore(int Total, IReadOnlyList<ScoreComponent> Components);
 
 /// <summary>
 /// Scores a skill description on how well it functions as ROUTING METADATA — the signal

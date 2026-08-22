@@ -112,8 +112,8 @@ public sealed class SkillReviewTests
         Assert.NotNull(result);
         Assert.Equal("kyber-weave.skill-review.candidates/v1", result.Bundle.Schema);
         Assert.Equal(2, result.Bundle.Candidates.Count);
-        Assert.Contains(result.Bundle.Candidates, c => c.Id == "test-skill" && c.Type == SkillReviewCandidateType.Skill);
-        Assert.Contains(result.Bundle.Candidates, c => c.Id == "Claude:test-agent" && c.Type == SkillReviewCandidateType.Agent);
+        Assert.Contains(result.Bundle.Candidates, c => c is { Id: "test-skill", Type: SkillReviewCandidateType.Skill });
+        Assert.Contains(result.Bundle.Candidates, c => c is { Id: "Claude:test-agent", Type: SkillReviewCandidateType.Agent });
     }
 
     [Fact]
@@ -129,11 +129,11 @@ public sealed class SkillReviewTests
     [Fact]
     public void ImportVerdictsValidVerdictsParsesAndValidatesAllFieldsSuccessfully()
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"]),
             new("schema-architect", SkillReviewCandidateType.Agent, "Use when designing SQL schemas.", 85, [])
-        };
+        ];
 
         string verdictJson = """
         {
@@ -181,10 +181,10 @@ public sealed class SkillReviewTests
     [Fact]
     public void ImportVerdictsMalformedJsonFailsWithDiagnosticError()
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
-        };
+        ];
 
         string malformedJson = "{ \"schema\": \"kyber-weave.skill-review.verdicts/v1\", invalid json syntax";
 
@@ -193,16 +193,16 @@ public sealed class SkillReviewTests
         Assert.NotNull(result);
         Assert.False(result.Success);
         Assert.Equal(0, result.ImportedCount);
-        Assert.Contains(result.Diagnostics.Items, d => d.Code == "KW-SKILL-REVIEW-001" && d.Severity == Severity.Error);
+        Assert.Contains(result.Diagnostics.Items, d => d is { Code: "KW-SKILL-REVIEW-001", Severity: Severity.Error });
     }
 
     [Fact]
     public void ImportVerdictsMismatchedCandidateIdRejectsImportWithDiagnosticError()
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
-        };
+        ];
 
         string mismatchedJson = """
         {
@@ -223,7 +223,7 @@ public sealed class SkillReviewTests
         Assert.NotNull(result);
         Assert.False(result.Success);
         Assert.Equal(0, result.ImportedCount);
-        Assert.Contains(result.Diagnostics.Items, d => d.Code == "KW-SKILL-REVIEW-001" && d.Severity == Severity.Error);
+        Assert.Contains(result.Diagnostics.Items, d => d is { Code: "KW-SKILL-REVIEW-001", Severity: Severity.Error });
     }
 
     [Theory]
@@ -231,10 +231,10 @@ public sealed class SkillReviewTests
     [InlineData(1.5)]
     public void ImportVerdictsConfidenceOutOfRangeRejectsImport(double invalidConfidence)
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
-        };
+        ];
 
         string formattedConfidence = invalidConfidence.ToString(System.Globalization.CultureInfo.InvariantCulture);
         string json = $$"""
@@ -262,10 +262,10 @@ public sealed class SkillReviewTests
     [Fact]
     public void ImportVerdictsUnsupportedSchemaRejectsImport()
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
-        };
+        ];
 
         string json = """
         {
@@ -292,10 +292,10 @@ public sealed class SkillReviewTests
     [Fact]
     public void ImportVerdictsDuplicateCandidateIdsInBundleRejectsImport()
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
-        };
+        ];
 
         string json = """
         {
@@ -328,10 +328,10 @@ public sealed class SkillReviewTests
     [Fact]
     public void ImportVerdictsEmptyVerdictsListRejectsImport()
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
-        };
+        ];
 
         string json = """
         {
@@ -353,8 +353,7 @@ public sealed class SkillReviewTests
     {
         AgentModel claude = MakeAgent(
             "schema-architect",
-            "Use when designing SQL schemas in Claude.",
-            HarnessKind.Claude);
+            "Use when designing SQL schemas in Claude.");
         AgentModel cursor = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Cursor.",
@@ -372,11 +371,11 @@ public sealed class SkillReviewTests
     [Fact]
     public void ImportVerdictsOmittedCandidateRejectsImport()
     {
-        List<SkillReviewCandidate> candidates = new List<SkillReviewCandidate>
-        {
+        List<SkillReviewCandidate> candidates =
+        [
             new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"]),
             new("Claude:schema-architect", SkillReviewCandidateType.Agent, "Use when designing SQL schemas.", 85, [])
-        };
+        ];
 
         string json = """
         {
@@ -407,8 +406,7 @@ public sealed class SkillReviewTests
     {
         AgentModel claude = MakeAgent(
             "schema-architect",
-            "Use when designing SQL schemas in Claude.",
-            HarnessKind.Claude);
+            "Use when designing SQL schemas in Claude.");
         AgentModel cursor = MakeAgent(
             "schema-architect",
             "Use when designing SQL schemas in Cursor.",
@@ -439,5 +437,53 @@ public sealed class SkillReviewTests
 
         Assert.True(result.Success);
         Assert.Equal(2, result.ImportedCount);
+    }
+
+    [Fact]
+    public void ImportVerdictsNullVerdictsCollectionFailsWithoutThrowing()
+    {
+        List<SkillReviewCandidate> candidates =
+        [
+            new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
+        ];
+
+        string json = """
+        {
+            "schema": "kyber-weave.skill-review.verdicts/v1",
+            "verdicts": null
+        }
+        """;
+
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
+
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Contains(result.Diagnostics.Items, d =>
+            d.Code == "KW-SKILL-REVIEW-001" &&
+            d.Message.Contains("omits the verdicts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ImportVerdictsNullVerdictElementFailsWithoutThrowing()
+    {
+        List<SkillReviewCandidate> candidates =
+        [
+            new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
+        ];
+
+        string json = """
+        {
+            "schema": "kyber-weave.skill-review.verdicts/v1",
+            "verdicts": [null]
+        }
+        """;
+
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
+
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Contains(result.Diagnostics.Items, d =>
+            d.Code == "KW-SKILL-REVIEW-001" &&
+            d.Message.Contains("null verdict", StringComparison.Ordinal));
     }
 }

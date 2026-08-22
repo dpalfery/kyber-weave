@@ -3,10 +3,11 @@ using KyberWeave.Core.CodeGraph;
 namespace KyberWeave.Tests;
 
 /// <summary>Deterministic <see cref="ICodeGraphResolver"/> for CodeGraph port contract tests.</summary>
-internal sealed class FakeCodeGraphResolver : ICodeGraphResolver
+internal sealed class FakeCodeGraphResolver : ICodeGraphResolver, ICodeGraphSymbolEnumerator
 {
     private readonly Dictionary<string, List<CodeGraphNode>> _symbols = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CodeGraphNode> _routes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<CodeGraphNode>> _byKind = new(StringComparer.Ordinal);
     private readonly List<string> _files = [];
 
     public bool IsAvailable => true;
@@ -19,6 +20,26 @@ internal sealed class FakeCodeGraphResolver : ICodeGraphResolver
         foreach ((string? name, CodeGraphNode? node) in symbols)
         {
             fake._symbols[name] = [node];
+            if (!string.IsNullOrWhiteSpace(node.FilePath))
+                fake._files.Add(node.FilePath);
+        }
+
+        return fake;
+    }
+
+    public static FakeCodeGraphResolver WithNodes(params CodeGraphNode[] nodes)
+    {
+        FakeCodeGraphResolver fake = new FakeCodeGraphResolver();
+        foreach (CodeGraphNode node in nodes)
+        {
+            fake._symbols[node.Name] = [node];
+            if (!fake._byKind.TryGetValue(node.Kind, out List<CodeGraphNode>? ofKind))
+            {
+                ofKind = [];
+                fake._byKind[node.Kind] = ofKind;
+            }
+
+            ofKind.Add(node);
             if (!string.IsNullOrWhiteSpace(node.FilePath))
                 fake._files.Add(node.FilePath);
         }
@@ -54,4 +75,7 @@ internal sealed class FakeCodeGraphResolver : ICodeGraphResolver
     }
 
     public IReadOnlyList<string> AllRoutes() => _routes.Keys.ToList();
+
+    public IReadOnlyList<CodeGraphNode> NodesOfKind(string kind) =>
+        _byKind.TryGetValue(kind, out List<CodeGraphNode>? nodes) ? nodes : [];
 }

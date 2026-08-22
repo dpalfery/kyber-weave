@@ -47,19 +47,19 @@ public enum DocStatus
 /// </summary>
 public sealed class DocumentFrontmatter
 {
-    public string? Id { get; set; }
-    public string? Title { get; set; }
-    public string? DocType { get; set; }
-    public string? Status { get; set; }
-    public string? Component { get; set; }
-    public string? SourceRoot { get; set; }
-    public string? Owner { get; set; }
-    public string? LastReviewed { get; set; }
-    public string? Technology { get; set; }
-    public Collection<string>? CodeRefs { get; set; }
-    public Collection<string>? ApiEndpoints { get; set; }
-    public Collection<string>? DecidedBy { get; set; }
-    public Collection<string>? Supersedes { get; set; }
+    public string? Id { get; init; }
+    public string? Title { get; init; }
+    public string? DocType { get; init; }
+    public string? Status { get; init; }
+    public string? Component { get; init; }
+    public string? SourceRoot { get; init; }
+    public string? Owner { get; init; }
+    public string? LastReviewed { get; init; }
+    public string? Technology { get; init; }
+    public Collection<string>? CodeRefs { get; init; }
+    public Collection<string>? ApiEndpoints { get; init; }
+    public Collection<string>? DecidedBy { get; init; }
+    public Collection<string>? Supersedes { get; init; }
 }
 
 /// <summary>One <c>##</c> section of a document body.</summary>

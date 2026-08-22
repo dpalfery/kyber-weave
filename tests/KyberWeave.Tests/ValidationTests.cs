@@ -73,11 +73,11 @@ public class RoutingLinterTests
     [Fact]
     public void DetectsNameCollision()
     {
-        SkillSet set = new SkillSet(new[]
-        {
+        SkillSet set = new SkillSet(
+        [
             Make("dup", "Use to do A. Use when A. Do NOT use for B.", "/tmp/a"),
             Make("dup", "Use to do C. Use when C. Do NOT use for D.", "/tmp/b")
-        });
+        ]);
         IEnumerable<string> codes = new RoutingLinter().LintSet(set).Select(d => d.Code);
         Assert.Contains("KW-SKILL-LINT-010", codes);
     }
@@ -85,11 +85,11 @@ public class RoutingLinterTests
     [Fact]
     public void DetectsDescriptionOverlap()
     {
-        SkillSet set = new SkillSet(new[]
-        {
+        SkillSet set = new SkillSet(
+        [
             Make("reset-one", "Use to reset a corporate password when a user is locked out. Do NOT use for service accounts.", "/tmp/one"),
             Make("reset-two", "Use to reset a corporate password when a user is locked out. Do NOT use for service accounts.", "/tmp/two")
-        });
+        ]);
         IEnumerable<string> codes = new RoutingLinter().LintSet(set).Select(d => d.Code);
         Assert.Contains("KW-SKILL-LINT-011", codes);
     }

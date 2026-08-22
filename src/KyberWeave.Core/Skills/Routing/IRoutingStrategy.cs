@@ -11,7 +11,6 @@ public sealed record RoutingCandidate(string SkillName, double Score);
 /// </summary>
 public sealed record RoutingResult(string? SelectedSkill, bool Fired, IReadOnlyList<RoutingCandidate> Ranked)
 {
-    public RoutingCandidate? Top => Ranked.Count > 0 ? Ranked[0] : null;
     public double Margin => Ranked.Count >= 2 ? Ranked[0].Score - Ranked[1].Score : Ranked.Count == 1 ? Ranked[0].Score : 0;
 }
 

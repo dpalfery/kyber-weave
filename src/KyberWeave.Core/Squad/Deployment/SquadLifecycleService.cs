@@ -344,6 +344,11 @@ public sealed class SquadLifecycleService
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetRoot);
 
+        // The body is synchronous, so the token had no observation point and was silently
+        // ignored. Honouring it at the boundary is the whole contract an *Async method
+        // taking a token owes its caller.
+        cancellationToken.ThrowIfCancellationRequested();
+
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(request.TargetRoot);
         string targetRoot = identity.PhysicalPath;
 

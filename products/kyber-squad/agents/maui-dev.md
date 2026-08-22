@@ -19,6 +19,8 @@ Use the `maui-dev` skill when working on MAUI UI development.
 
 This routes to: .NET MAUI UI, XAML pages, Shell navigation, MVVM/CommunityToolkit patterns, CollectionView, data binding, and cross-platform reference documentation.
 
+Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the InspectCode run that proves the C# you wrote introduced no new analyzer findings, and the remediation for the inspections that turn up most often.
+
 ## Scope
 
 You own:
@@ -41,6 +43,13 @@ You do **not** own:
 4. Implement the change. Match the host repository's existing naming, folder layout, and DI style unless the standard says otherwise.
 5. Confirm the types you added are registered where the standard requires, and that ViewModels take interfaces rather than constructing services.
 6. Hand test authorship to `test-dev`. Report what needs covering; do not write the test files.
+7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
+
+   - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot), and run ReSharper InspectCode over the affected projects per the `resharper-clt` skill. Write both outputs to the path declared as **<agent-scratchpad>** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
+   - **Sweep again after the last edit.** Re-run both over the complete contents of every file you edited or created — whole file, not only the changed methods or symbols — plus one workspace-wide diagnostics pass for the affected projects.
+   - **Every diagnostic counts:** compiler errors, nullable analysis, analyzer and InspectCode findings, style warnings, redundant qualifiers and casts, possible multiple enumeration, namespace and file-location warnings, unused members, and dead-code findings.
+   - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.
+   - A scoped build, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
 ## Coordination
 
@@ -53,6 +62,8 @@ You do **not** own:
 - Never embed a relative path to a standard. Resolve **<maui-coding-standard>** and **<csharp-coding-standard>** by those registry names.
 - Never author test files, backend code, or CI workflows.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
+- Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
+- Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 
 ## Completion digest
 
@@ -62,5 +73,6 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of MAUI file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, pages/ViewModels touched, and any hand-offs>
+DIAGNOSTICS: clean on <paths> | inspectcode: <0 errors / 0 warnings, or list> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 OPEN_QUESTIONS: <bullets, or "none">
 ```

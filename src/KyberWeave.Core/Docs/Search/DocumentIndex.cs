@@ -79,7 +79,7 @@ public sealed class DocumentIndex
     /// grep, that is the most consequential possible failure: the caller has no signal to
     /// fall back and answers from whatever was nearest.
     /// </remarks>
-    public const double MinRelevanceScore = 0.25;
+    private const double MinRelevanceScore = 0.25;
 
     private readonly DocumentCorpus _corpus;
     private readonly Dictionary<string, List<DocumentModel>> _bySymbol;
