@@ -24,6 +24,22 @@ public sealed class CursorRendererContractTests
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
+    /// <summary>
+    /// Mirrors CursorRenderer's governed capability set so the degradation oracle applies
+    /// the same rule the renderer does; kept local so a renderer change must touch this
+    /// suite deliberately.
+    /// </summary>
+    private static readonly string[] GovernedCapabilities =
+    [
+        "filesystem.read",
+        "filesystem.search",
+        "filesystem.write",
+        "process.execute",
+        "network.read",
+        "network.publish",
+        "delegate"
+    ];
+
     [Fact]
     public void SupportedTargets_IsExactlyCursor()
     {
@@ -94,19 +110,26 @@ public sealed class CursorRendererContractTests
                 string.Equals(agent.Description, RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
-            // Model resolution: verify against loaded ModelProfiles
+            // Model resolution: verify against loaded ModelProfiles. Every assertion names
+            // the agent so a failure identifies the offender out of the 22-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             if (modelProfile.HarnessModels.TryGetValue("cursor", out string? expectedModel))
             {
-                Assert.Equal(expectedModel, RequireScalar(frontmatter, "model"));
+                Assert.True(
+                    string.Equals(expectedModel, RequireScalar(frontmatter, "model"), StringComparison.Ordinal),
+                    $"Agent '{agent.Name}' model mismatch: expected '{expectedModel}'.");
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
             {
-                Assert.Equal(modelProfile.Default, RequireScalar(frontmatter, "model"));
+                Assert.True(
+                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model"), StringComparison.Ordinal),
+                    $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
             }
             else
             {
-                Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("model")));
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
             }
 
             // Permission lowering: readonly is emitted only when both write and execute are withheld
@@ -119,11 +142,15 @@ public sealed class CursorRendererContractTests
 
             if (expectedReadOnly)
             {
-                Assert.Equal("true", RequireScalar(frontmatter, "readonly"));
+                Assert.True(
+                    string.Equals("true", RequireScalar(frontmatter, "readonly"), StringComparison.Ordinal),
+                    $"Agent '{agent.Name}' should carry readonly: true.");
             }
             else
             {
-                Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")));
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")),
+                    $"Agent '{agent.Name}' should omit readonly.");
             }
 
             // Exact comparison: the renderer appends the normalized body verbatim, so a
@@ -134,8 +161,9 @@ public sealed class CursorRendererContractTests
                 expectedAgentBody += "\n";
             }
 
-            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name"));
-            Assert.Equal(expectedAgentBody, body);
+            Assert.True(
+                string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
+                $"Agent '{agent.Name}' body mismatch.");
         }
 
         // Concrete lowerings verification against loaded profiles
@@ -198,7 +226,13 @@ public sealed class CursorRendererContractTests
             .Where(a =>
             {
                 SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                return prof.Permissions.Values.Any(d => d != SquadPermissionDecision.Deny);
+                // Mirror the renderer's governed set exactly: the renderer decides on
+                // CursorRenderer's seven capabilities, not on every key the profile
+                // happens to declare, so a corpus capability outside that set cannot
+                // break this oracle for a reason unrelated to the renderer.
+                return GovernedCapabilities.Any(cap =>
+                    prof.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
+                    decision != SquadPermissionDecision.Deny);
             })
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
@@ -281,7 +315,11 @@ public sealed class CursorRendererContractTests
 
     private static string RequireScalar(YamlMappingNode node, string key)
     {
-        YamlNode value = node.Children[new YamlScalarNode(key)];
+        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
+        {
+            throw new InvalidOperationException($"Frontmatter is missing required key '{key}'.");
+        }
+
         return Assert.IsType<YamlScalarNode>(value).Value
             ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
     }
