@@ -47,7 +47,8 @@ public sealed class DocsInitCommandTests : IDisposable
             });
         });
 
-        int exitCode = app.Run(["docs", "init", _temp.Path, "--kyber-standards", "--no-skill"]);
+        int exitCode = ProcessConsoleCapture.Run(() =>
+            app.Run(["docs", "init", _temp.Path, "--kyber-standards", "--no-skill"])).Result;
         Assert.Equal(0, exitCode);
 
         // 3. Verifies that all 10 rich standards were created
