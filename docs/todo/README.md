@@ -44,7 +44,6 @@ last-reviewed: YYYY-MM-DD
 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | draft | The authoring skill states a doc-type vocabulary missing `todo` and `coding-standard`. |
 | [embeddings-endpoint-loopback-check.md](embeddings-endpoint-loopback-check.md) | DocGraph | draft | A non-loopback HTTPS embeddings endpoint is accepted where the test asserts rejection. |
 | [kyber-squad-renderer-coverage.md](kyber-squad-renderer-coverage.md) | KyberSquad | draft | Overview of remaining Kyber-Squad renderer target coverage and CLI gaps. |
-| [antigravity.md](antigravity.md) | KyberSquad | draft | Add a native Antigravity renderer to Kyber-Squad. |
 | [claude-code.md](claude-code.md) | KyberSquad | draft | Add a native Claude Code renderer to Kyber-Squad. |
 | [codex.md](codex.md) | KyberSquad | draft | Add a native Codex renderer to Kyber-Squad. |
 | [cursor.md](cursor.md) | KyberSquad | draft | Add a native Cursor renderer to Kyber-Squad. |

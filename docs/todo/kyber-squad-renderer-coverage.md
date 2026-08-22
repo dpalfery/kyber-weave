@@ -12,8 +12,9 @@ status: draft
 
 `squad install`/`squad update` render canonical Squad source into a harness's native files
 through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-Only Copilot has a renderer today; every other approved target fails in preflight, before any
-network call, naming the gap and pointing here.
+`copilot` (native) and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have
+renderers today; every other approved target fails in preflight, before any network call,
+naming the gap and pointing here.
 
 Each page below is **context for planning that target's renderer, not a plan** — what's known
 from the canonical source and the codebase, what's assumed and needs verifying against that
@@ -28,12 +29,12 @@ harness's real documentation, the code seam to implement against, and how to ver
 | `kilo` | Native | [kilo.md](kilo.md) |
 | `factory` | Native | [factory.md](factory.md) |
 | `gemini` | Fallback (role-skill lowering) | [gemini.md](gemini.md) |
-| `antigravity` | Fallback (role-skill lowering) | [antigravity.md](antigravity.md) |
 | `warp` | Fallback (role-skill lowering) | [warp.md](warp.md) |
 
 `copilot` is covered by `CopilotRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`) and is not listed here — it's the
-one target this doesn't need to be written for.
+(`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`) and `antigravity` by
+`AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) —
+neither is listed above.
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.
 
