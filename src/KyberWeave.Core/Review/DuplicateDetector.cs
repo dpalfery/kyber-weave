@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -89,13 +90,21 @@ public sealed record DuplicateReport(
 /// </remarks>
 public static class DuplicateDetector
 {
-    /// <summary>The CodeGraph node kinds whose bodies are worth comparing.</summary>
-    public static readonly string[] ComparableKinds = ["method", "function"];
+    /// <summary>
+    /// The CodeGraph node kinds whose bodies are worth comparing. Frozen so one caller
+    /// cannot change what every other caller — and <see cref="Detect"/> itself — compares.
+    /// </summary>
+    public static ImmutableArray<string> ComparableKinds { get; } = ["method", "function"];
 
     /// <summary>
     /// Clusters the given symbols by normalized body. <paramref name="repoRoot"/> is the tree
     /// the index's relative paths resolve against.
     /// </summary>
+    /// <remarks>
+    /// <see cref="ComparableKinds"/> is applied here, not only at the call site. The CLI
+    /// still enumerates by kind because that is how the CodeGraph port is queried; Detect
+    /// still filters so a mixed list cannot widen the comparison.
+    /// </remarks>
     public static DuplicateReport Detect(
         string repoRoot,
         IReadOnlyList<CodeGraphNode> symbols,
@@ -115,6 +124,7 @@ public static class DuplicateDetector
 
         foreach (CodeGraphNode symbol in symbols)
         {
+            if (!IsComparableKind(symbol.Kind)) continue;
             if (symbol.LineSpan == 0 || symbol.FilePath.Length == 0) continue;
 
             string[]? lines = ReadFile(repoRoot, symbol.FilePath, fileCache);
@@ -187,6 +197,17 @@ public static class DuplicateDetector
             SymbolsConsidered: 0,
             SymbolsUnreadable: 0,
             Clusters: []);
+    }
+
+    private static bool IsComparableKind(string kind)
+    {
+        foreach (string comparable in ComparableKinds)
+        {
+            if (string.Equals(comparable, kind, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>

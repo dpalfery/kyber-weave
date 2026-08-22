@@ -48,10 +48,13 @@ The default after a fix push, and the reason this skill exists.
    applicability predicate the new diff newly satisfies.
 5. Recompute the verdict from the surviving findings and the fresh gate results.
 
-**When verifier mode is not enough.** Escalate to `full` when the fix push touched files
-outside those the prior findings named, added a new dependency, or changed a public contract.
-A fix that grows the diff is a new change, and a targeted re-check will not look where the
-new risk is.
+**When verifier mode is not enough.** Escalate to `full` — or re-run every applicable
+lens over the changed scope — when the fix changes behaviour outside the original
+finding. That includes a new file, a new dependency, or a changed public contract, and
+it also includes changed logic in a file the prior review already covered: a targeted
+re-check of the named finding will not look at the new risk next to it. A strictly
+isolated fix — the defect at that file and line, and nothing else — stays in
+`verifier`.
 
 ### full
 

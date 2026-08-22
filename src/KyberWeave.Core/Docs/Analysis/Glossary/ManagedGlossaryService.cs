@@ -150,7 +150,11 @@ public sealed class ManagedGlossaryService
     /// <summary>Returns all senses for a term using case-insensitive term matching.</summary>
     public GlossaryLookupResult Lookup(string term) => Lookup(term, Load());
 
-    private static GlossaryLookupResult Lookup(string term, ManagedGlossaryLoadResult loaded)
+    /// <summary>
+    /// Looks up a term in an already-loaded glossary so a caller that just called
+    /// <see cref="Load"/> does not pay for a second disk read.
+    /// </summary>
+    public GlossaryLookupResult Lookup(string term, ManagedGlossaryLoadResult loaded)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
         ArgumentNullException.ThrowIfNull(loaded);

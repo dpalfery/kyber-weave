@@ -26,6 +26,8 @@ internal sealed class ReviewGateYaml
     public List<string>? Run { get; init; }
 
     public bool? Blocking { get; init; }
+
+    public int? TimeoutSeconds { get; init; }
 }
 
 /// <summary>The <c>review.coverage</c> mapping.</summary>

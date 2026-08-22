@@ -209,9 +209,15 @@ internal static class AtomicTextFile
         }
         finally
         {
-            if (File.Exists(temporary))
+            // Best-effort cleanup: a delete failure must not replace the write or move
+            // failure the caller needs to diagnose.
+            try
             {
                 File.Delete(temporary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // The temporary file is left behind; the primary exception is preserved.
             }
         }
     }

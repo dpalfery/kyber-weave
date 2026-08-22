@@ -27,7 +27,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             return 1;
         }
 
-        if (!TryRead(settings.Findings, ReviewJson.ReadFindings, report, out FindingsReport? findings))
+        if (!TryRead(settings.Findings, "--findings", ReviewJson.ReadFindings, report, out FindingsReport? findings))
         {
             CommandHelpers.Finish(report, settings, "review verdict", "Review");
             return 1;
@@ -38,7 +38,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         // blocking gate result is visible to the engine rather than mistaken for a pass.
         GateReport? gates = null;
         if (settings.Gates is not null &&
-            !TryRead(settings.Gates, ReviewJson.ReadGates, report, out gates))
+            !TryRead(settings.Gates, "--gates", ReviewJson.ReadGates, report, out gates))
         {
             CommandHelpers.Finish(report, settings, "review verdict", "Review");
             return 1;
@@ -79,6 +79,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
 
     private static bool TryRead<T>(
         string? path,
+        string option,
         Func<string, T> read,
         DiagnosticReport report,
         out T? value)
@@ -90,7 +91,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             report.Add(new Diagnostic(
                 UnreadableInput,
                 Severity.Error,
-                "No findings document was given. Pass --findings <path>.",
+                $"No document was given for {option}. Pass {option} <path>.",
                 "review"));
             return false;
         }
@@ -112,7 +113,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
             value = read(File.ReadAllText(full));
             return true;
         }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException)
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or IOException or UnauthorizedAccessException)
         {
             report.Add(new Diagnostic(
                 UnreadableInput,

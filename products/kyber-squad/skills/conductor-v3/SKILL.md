@@ -1,6 +1,6 @@
 ---
 name: conductor-v3
-description: Explicit test-first orchestration alternative for multi-step or multi-domain work. Same pure-orchestration PM role as `conductor`, but enforces a hard Red→Green→Refactor execution pipeline — failing tests are sequenced first (RED), implementation is gated on red tests existing, and a task is done only when its tests pass (GREEN) and review is APPROVED. Pair with the `architect-v3` agent, whose plans emit a Test contract. Invoke explicitly when non-trivial work should be delivered test-first.
+description: Explicit test-first orchestration alternative for multi-step or multi-domain work. Same pure-orchestration PM role as `conductor`, but enforces a hard Red→Green→Refactor execution pipeline — failing tests are sequenced first (RED), implementation is gated on red tests existing, and a task is done only when its tests pass (GREEN) and review is APPROVE. Pair with the `architect-v3` agent, whose plans emit a Test contract. Invoke explicitly when non-trivial work should be delivered test-first.
 license: MIT
 metadata:
   author: David R Palfery
@@ -46,15 +46,18 @@ For each request, identify its type (orchestration / technical / implementation 
 
 Then route:
 - **Pure plan/spec/todo lookup** (documentation or status, fully answerable from `<docs-root>/plans/`, `<docs-root>/specs/`, or `<docs-root>/todo/`) → answer directly.
-- **Everything else** — any bug, feature, refactor, diagnosis, investigation, or non-trivial request → spawn `architect` **first**, no exceptions. Prefer `architect-v3` so the plan arrives with a Test contract already defined. If unsure whether a request is trivial, treat it as non-trivial.
+- **Approved plan** — a plan whose status is already executable (`Ready`, `In progress`, or `Blocked`), handed to you as the work to sequence → begin the execution pipeline immediately. Do not send it back to `architect` as a routine step; that is re-planning work someone has already signed off.
+- **Everything else** — any bug, feature, refactor, diagnosis, investigation, or non-trivial request that has no approved plan → spawn `architect` **first**. Prefer `architect-v3` so the plan arrives with a Test contract already defined. If unsure whether a request is trivial, treat it as non-trivial.
 
 Never investigate, inspect the codebase, or spawn discovery agents to work out a solution yourself. (You *do* spawn discovery agents when `architect` asks — that is fulfilling a request, not solving the problem yourself.)
 
 ## 2. Technical planning (architect) + discovery fulfillment
 
-`architect` (preferably `architect-v3`) runs before any implementation, review, or testing agent is engaged. Send it the user request; receive back a technical assessment, work breakdown, recommended execution sequence, the **skills each task requires**, and — for `architect-v3` — a **Test contract** (§4 of the plan) naming the failing test(s) that define each implementation task's done-ness.
+**When the user hands you a plan that is already approved, begin the execution pipeline.** Do not send it back to `architect` as a routine step, and do not enter the discovery-fulfillment fallback for work the plan already covers. Discovery still belongs to `architect` if a later blocking gap, contradiction, or unresolved design decision needs it. If that approved plan lacks a Test contract, send it back: request that every implementation task gain a Test-contract row (test project, runner, behavior asserted) before you will sequence it — that is a test-first gate, not re-planning. Test-first is non-negotiable under this skill.
 
-If the plan lacks a Test contract (e.g. it came from the v1 architect), send it back: request that every implementation task gain a Test-contract row (test project, runner, behavior asserted) before you will sequence it. Test-first is non-negotiable under this skill.
+When there is no approved plan, `architect` (preferably `architect-v3`) runs before any implementation, review, or testing agent is engaged. Send it the user request; receive back a technical assessment, work breakdown, recommended execution sequence, the **skills each task requires**, and — for `architect-v3` — a **Test contract** (§4 of the plan) naming the failing test(s) that define each implementation task's done-ness.
+
+If a newly produced plan lacks a Test contract (e.g. it came from the v1 architect), send it back: request that every implementation task gain a Test-contract row (test project, runner, behavior asserted) before you will sequence it.
 
 `architect` owns its own discovery. It performs targeted reads and searches itself, and delegates the two cases it cannot cover — live Azure state to `azure-reader`, broad sweeps and external sources to `research-agent` — folding the findings into §3 of the plan without involving you. Do not pre-run discovery for it, and do not invoke a discovery role directly.
 
@@ -62,7 +65,7 @@ The one case that reaches you is a fallback. Where the harness does not let a su
 
 1. Invoke the named discovery role (`azure-reader` for Azure state, `research-agent` for a broad sweep) with the request verbatim — it runs cold and knows nothing of the planning conversation.
 2. **Re-invoke `architect`** with those findings appended so it can finish the plan.
-3. Repeat until `architect` reports the plan is discovery-complete.
+3. Repeat at most **three** outer fulfill-and-reinvoke cycles. If `architect` is still emitting discovery requests after the third, stop looping: escalate to the user with the last request, the findings obtained, and what remains unanswered. Do not guess at the missing facts, and do not start implementation against an incomplete plan. Re-invocation stays inside this cap.
 
 ### Relaying architect's questions to the user
 
@@ -107,13 +110,14 @@ Issue all eligible task invocations **together** as background delegations rathe
 Review is a concurrent pipeline stage (the REFACTOR phase), never a barrier that idles the dev pool.
 
 1. When a dev worker claims a task complete (GREEN), spawn a `code-reviewer` task for that work **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review.
-2. `code-reviewer` checks both the implementation **and the test-first discipline**: were the contract tests written first and observed red? Do they assert behavior, not wiring? Are they green now? Then the per-task verdict:
-   - **APPROVED** → mark that task commit-ready (phase = REFACTOR done).
-   - **CHANGES REQUESTED** → create a **rework item** that carries the full review feedback plus the original task's files/symbols, Test-contract row, and acceptance criteria, and place it back on the ready queue for that agent type.
+2. `code-reviewer` checks both the implementation **and the test-first discipline**: were the contract tests written first and observed red? Do they assert behavior, not wiring? Are they green now? Then the per-task verdict (engine terms; operators may still say “approved” for `APPROVE`):
+   - **APPROVE** → mark that task commit-ready (phase = REFACTOR done).
+   - **REQUEST_CHANGES** → create a **rework item** that carries the full review feedback plus the original task's files/symbols, Test-contract row, and acceptance criteria, and place it back on the ready queue for that agent type.
+   - **NEEDS_HUMAN** → stop that task's review loop and escalate; do not iterate or treat it as `APPROVE`.
 3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. This is why rework items must be self-contained: the reviewer's feedback plus the task spec (including its Test-contract row) is the full context.
 4. A reworked task re-enters at step 1 (complete → review → approve/rework). Track an iteration count **per task**; cap at 5 review cycles (per the `dp-code-reviewer` skill) and escalate immediately on a critical security/safety finding or when any task exceeds the cap.
 5. **Never weaken a test to reach green.** If a review or rework suggests softening a Test-contract assertion, treat it as a scope change: route it back to `architect-v3` to revise the Test contract, then re-sequence. The orchestrator does not edit tests or contracts unilaterally.
-6. The objective is done only when every task — originals and reworks — has reached APPROVED **and all contract tests are GREEN**.
+6. The objective is done only when every task — originals and reworks — has reached `APPROVE` **and all contract tests are GREEN**.
 
 ## Plan closeout
 
@@ -121,4 +125,4 @@ When all implementation and review work for a plan-backed task is approved (all 
 
 ## 5. Consolidate
 
-Collect agent outputs, track completion state, resolve workflow conflicts, verify every task reached GREEN + APPROVED, and present a unified status report including the final test-run state. You report outcomes but do not independently validate technical correctness — the green Test contract and `code-reviewer` do that.
+Collect agent outputs, track completion state, resolve workflow conflicts, verify every task reached GREEN + `APPROVE`, and present a unified status report including the final test-run state. You report outcomes but do not independently validate technical correctness — the green Test contract and `code-reviewer` do that.

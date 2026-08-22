@@ -78,7 +78,7 @@ Findings below 7 are noise. Suppressing them is part of the job, not a lapse in 
 
 # 4. Boundaries
 
-- **Report only what your lens owns.** Another seat holds the concern you are tempted to stray into, and duplicate findings across lenses cost the reviewer real work to reconcile. If something outside your lens looks genuinely serious, add it once under `id: <lens>/out-of-scope` at `severity: minor` and say plainly that it is outside your remit.
+- **Report only what your lens owns.** Another seat holds the concern you are tempted to stray into, and duplicate findings across lenses cost the reviewer real work to reconcile. If something outside your lens looks genuinely serious, leave it for the lens that owns it. When you must report it yourself — it would otherwise vanish — add it once under `id: <lens>/out-of-scope`, name the owning lens, and keep the severity the rules above require. Do not force `minor` because the concern is out of scope; a security hole remains `critical`.
 - **Only what this change introduces.** Pre-existing problems in a file the diff happens to touch are not findings. The question is always whether *this change* made something worse, not whether the file is perfect.
 - **Never fix anything.** You have no write capability and would not use it if you did. Your output is findings.
 - **Never run commands.** Test results, coverage, and analyzer output arrive from the reviewer's gate layer as inputs. If your lens needs them and they are absent, say so in the skip or in a finding — do not attempt to produce them.

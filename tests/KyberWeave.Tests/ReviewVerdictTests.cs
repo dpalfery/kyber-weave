@@ -81,7 +81,10 @@ public class ReviewVerdictTests
         ReviewFinding[] three = [Finding(id: "a"), Finding(id: "b"), Finding(id: "c")];
 
         Assert.Equal(ReviewVerdict.Approve, Evaluate(two).Verdict);
-        Assert.Equal(ReviewVerdict.RequestChanges, Evaluate(three).Verdict);
+
+        ReviewOutcome blocked = Evaluate(three);
+        Assert.Equal(ReviewVerdict.RequestChanges, blocked.Verdict);
+        Assert.Contains(blocked.Diagnostics, d => d.Code == VerdictEngine.MajorFindingThreshold);
     }
 
     [Fact]
@@ -195,7 +198,28 @@ public class ReviewVerdictTests
         ReviewOutcome outcome = Evaluate([Finding(ReviewSeverity.Critical, confidence: 6)]);
 
         Assert.Equal(ReviewVerdict.Approve, outcome.Verdict);
+        Assert.Empty(outcome.Accepted);
         Assert.Equal(VerdictEngine.LowConfidenceFinding, Assert.Single(outcome.Dropped).Code);
+    }
+
+    [Fact]
+    public void AFindingAtTheConfidenceFloorIsKept()
+    {
+        ReviewOutcome outcome = Evaluate([Finding(ReviewSeverity.Critical, confidence: 7)]);
+
+        Assert.Equal(ReviewVerdict.RequestChanges, outcome.Verdict);
+        Assert.Empty(outcome.Dropped);
+        Assert.Equal(7, Assert.Single(outcome.Accepted).Confidence);
+    }
+
+    [Fact]
+    public void AFindingAboveTheConfidenceFloorIsKept()
+    {
+        ReviewOutcome outcome = Evaluate([Finding(ReviewSeverity.Critical, confidence: 8)]);
+
+        Assert.Equal(ReviewVerdict.RequestChanges, outcome.Verdict);
+        Assert.Empty(outcome.Dropped);
+        Assert.Equal(8, Assert.Single(outcome.Accepted).Confidence);
     }
 
     [Fact]

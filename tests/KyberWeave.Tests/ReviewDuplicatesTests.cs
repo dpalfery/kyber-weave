@@ -3,6 +3,7 @@ using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
@@ -44,7 +45,10 @@ public class ReviewDuplicatesTests : IDisposable
         File.ReadAllLines(Path.Combine(_temp.Path, relativePath)).Length;
 
     private static CodeGraphNode Method(string name, string file, int startLine, int endLine) =>
-        new($"id-{name}-{startLine}", "method", name, $"N.{name}", file, "csharp", startLine, endLine);
+        Node("method", name, file, startLine, endLine);
+
+    private static CodeGraphNode Node(string kind, string name, string file, int startLine, int endLine) =>
+        new($"id-{kind}-{name}-{startLine}", kind, name, $"N.{name}", file, "csharp", startLine, endLine);
 
     private DuplicateReport Detect(IReadOnlyList<CodeGraphNode> nodes, int minimumLines = 4) =>
         DuplicateDetector.Detect(
@@ -78,7 +82,7 @@ public class ReviewDuplicatesTests : IDisposable
         DuplicateReport report = Detect([Method("Total", "A.cs", 1, 7), Method("Sum", "B.cs", 1, 7)]);
 
         DuplicateCluster cluster = Assert.Single(report.Clusters);
-        Assert.Equal(["Total", "Sum"], cluster.Members.Select(m => m.Name).Order(StringComparer.Ordinal).Reverse());
+        Assert.Equal(["Sum", "Total"], cluster.Members.Select(m => m.Name).Order(StringComparer.Ordinal));
     }
 
     [Theory]
@@ -137,6 +141,8 @@ public class ReviewDuplicatesTests : IDisposable
     [Fact]
     public void BodiesBelowTheThresholdAreNotCompared()
     {
+        // Normalize drops the signature and brace lines, so this counts as one statement
+        // (`return 1;`) — below the default threshold of four, and identical everywhere.
         const string small = """
             public int One()
             {
@@ -155,6 +161,8 @@ public class ReviewDuplicatesTests : IDisposable
     [Fact]
     public void LoweringTheThresholdBringsShorterBodiesIntoScope()
     {
+        // After Normalize drops the signature and braces, two statements remain — enough
+        // for a threshold of two, still short of the default of four.
         const string small = """
             public int One()
             {
@@ -206,6 +214,47 @@ public class ReviewDuplicatesTests : IDisposable
 
         Assert.Equal(forward, reversed);
         Assert.StartsWith("dup-", forward, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DetectDoesNotClusterAComparableKindWithAMatchingNonComparableBody()
+    {
+        // Detect, not the caller, owns ComparableKinds. A mixed list used to cluster
+        // a method with a class that happened to share a span.
+        Write("A.cs", Body);
+        Write("B.cs", Body);
+
+        DuplicateReport report = Detect(
+            [Method("Total", "A.cs", 1, 7), Node("class", "Holder", "B.cs", 1, 7)]);
+
+        Assert.Empty(report.Clusters);
+        Assert.Equal(1, report.SymbolsConsidered);
+    }
+
+    [Fact]
+    public void TwoIdenticalNonComparableKindsDoNotFormACluster()
+    {
+        Write("A.cs", Body);
+        Write("B.cs", Body);
+
+        DuplicateReport report = Detect(
+            [Node("class", "A", "A.cs", 1, 7), Node("class", "B", "B.cs", 1, 7)]);
+
+        Assert.Empty(report.Clusters);
+        Assert.Equal(0, report.SymbolsConsidered);
+    }
+
+    [Fact]
+    public void FunctionAndMethodKindsAreBothCompared()
+    {
+        Write("A.cs", Body);
+        Write("B.cs", Body);
+
+        DuplicateReport report = Detect(
+            [Method("Total", "A.cs", 1, 7), Node("function", "Total", "B.cs", 1, 7)]);
+
+        Assert.Single(report.Clusters);
+        Assert.Equal(2, report.SymbolsConsidered);
     }
 
     [Fact]
@@ -281,15 +330,28 @@ public class ReviewDuplicatesTests : IDisposable
     }
 
     [Fact]
-    public void AHostThresholdBelowTwoFallsBackRatherThanDisablingTheGate()
+    public void AHostThresholdBelowTwoIsRejectedRatherThanSilentlyReplaced()
     {
         // Normalize drops the signature, so a one-line body is a single statement and would
-        // match everywhere. A host cannot configure the gate into uselessness.
-        ReviewConfig config = ReviewConfigLoader.Merge(
-            ReviewConfig.ProductDefaults,
-            new ReviewYamlSection { Duplicates = new ReviewDuplicatesYaml { MinimumLines = 1 } });
+        // match everywhere. A host that asks for one is told, not given a different number.
+        YamlException ex = Assert.ThrowsAny<YamlException>(() =>
+            ReviewConfigLoader.Merge(
+                ReviewConfig.ProductDefaults,
+                new ReviewYamlSection { Duplicates = new ReviewDuplicatesYaml { MinimumLines = 1 } }));
 
-        Assert.Equal(ReviewDuplicates.Default.MinimumLines, config.Duplicates.MinimumLines);
+        Assert.Contains("greater than one", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnAbsentDuplicatesThresholdKeepsTheProductDefault()
+    {
+        ReviewConfig omitted = ReviewConfigLoader.Merge(ReviewConfig.ProductDefaults, new ReviewYamlSection());
+        ReviewConfig declaredWithoutValue = ReviewConfigLoader.Merge(
+            ReviewConfig.ProductDefaults,
+            new ReviewYamlSection { Duplicates = new ReviewDuplicatesYaml() });
+
+        Assert.Equal(ReviewDuplicates.Default.MinimumLines, omitted.Duplicates.MinimumLines);
+        Assert.Equal(ReviewDuplicates.Default.MinimumLines, declaredWithoutValue.Duplicates.MinimumLines);
     }
 
     [Fact]

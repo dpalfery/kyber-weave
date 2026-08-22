@@ -35,6 +35,12 @@ public static class OntologyConfigLoader
         {
             return OntologyConfigLoadResult.Fail(ex.Message);
         }
+        catch (ArgumentException ex)
+        {
+            // YamlDotNet throws ArgumentException for a null mapping key (e.g. required-keys
+            // with an empty key). Surface it as a config failure rather than an unhandled crash.
+            return OntologyConfigLoadResult.Fail(ex.Message);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return OntologyConfigLoadResult.Fail(ex.Message);
@@ -148,8 +154,13 @@ public static class OntologyConfigLoader
         if (values is null) return null;
 
         List<string> normalized = new List<string>(values.Count);
-        foreach (string value in values)
+        foreach (string? value in values)
         {
+            if (value is null)
+            {
+                throw new YamlException(
+                    $"{TechnologiesKey} contains a null entry. Use a slug such as 'csharp'.");
+            }
             string technology = value.Trim();
             if (!ConfigSlug.IsValid(technology))
             {
@@ -172,8 +183,14 @@ public static class OntologyConfigLoader
         return normalized;
     }
 
-    private static bool TryParseDocType(string name, out DocType docType)
+    private static bool TryParseDocType(string? name, out DocType docType)
     {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            docType = DocType.Unknown;
+            return false;
+        }
+
         docType = name.Trim().ToLowerInvariant() switch
         {
             "architecture" => DocType.Architecture,

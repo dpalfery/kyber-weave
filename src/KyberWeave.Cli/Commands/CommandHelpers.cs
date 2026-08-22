@@ -89,4 +89,35 @@ public static class CommandHelpers
             ReportRenderer.RenderSummary(report);
         }
     }
+
+    /// <summary>
+    /// Writes a report document to <paramref name="path"/>. A write failure is recorded as a
+    /// diagnostic rather than thrown: the analysis already ran, and losing its findings to a
+    /// filesystem error is a worse outcome than losing the file.
+    /// </summary>
+    public static void TryWriteReport(string? path, string content, string code, DiagnosticReport report)
+    {
+        if (path is null)
+            return;
+
+        string full = Path.GetFullPath(path);
+        try
+        {
+            string? directory = Path.GetDirectoryName(full);
+            if (!string.IsNullOrEmpty(directory))
+                Directory.CreateDirectory(directory);
+
+            File.WriteAllText(full, content);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            report.Add(new Diagnostic(
+                code,
+                Severity.Error,
+                $"Could not write the report to '{full}': {ex.Message}",
+                "review",
+                full,
+                Hint: "Check that the directory is writable, or drop --out."));
+        }
+    }
 }

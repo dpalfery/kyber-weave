@@ -9,6 +9,7 @@ namespace KyberWeave.Cli.Commands.Review;
 public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
 {
     private const string NoGatesDeclared = "KW-REVIEW-020";
+    private const string ReportWriteFailed = "KW-REVIEW-025";
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewGatesSettings settings)
@@ -54,15 +55,12 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         report.AddMetric("gates", gates.Gates.Count);
         report.AddMetric("failed", gates.Gates.Count(g => !g.Passed));
 
-        if (settings.Out is not null)
-        {
-            string outPath = Path.GetFullPath(settings.Out);
-            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
-            File.WriteAllText(outPath, ReviewJson.Write(gates));
-        }
+        CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(gates), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review gates", "Gate");
-        return gates.Gates.Any(g => g is { Blocking: true, Passed: false }) ? 1 : 0;
+        // Blocking failures are already Error diagnostics; a failed --out write is too.
+        // Non-blocking gate failures stay Warning and do not fail the process.
+        return report.HasErrors ? 1 : 0;
     }
 }
 

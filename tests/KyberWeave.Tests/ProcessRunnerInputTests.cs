@@ -144,4 +144,18 @@ public sealed class ProcessRunnerInputTests
                 .Run(() => ProcessRunner.Run(startInfo, input))
                 .WaitAsync(TimeSpan.FromSeconds(TimeoutSeconds)));
     }
+
+    [Fact]
+    public void RunWhenTheChildExceedsTheTimeoutThrowsTimeoutException()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw SkipException.ForSkip("POSIX shell process execution tests are not run on Windows.");
+        }
+
+        ProcessStartInfo startInfo = CreateShellStartInfo("sleep 2");
+
+        Assert.Throws<TimeoutException>(() =>
+            ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromMilliseconds(200)));
+    }
 }

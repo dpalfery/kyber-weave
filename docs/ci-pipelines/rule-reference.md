@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-20
+last-reviewed: 2026-08-22
 ---
 
 # Rule reference
@@ -147,10 +147,12 @@ decision names the id that made it.
 | `KW-REVIEW-009` | Error | The diff exceeds the reviewable size ceiling |
 | `KW-REVIEW-010` | Warning | Measured coverage is below the declared floor |
 | `KW-REVIEW-011` | Info | No reserved paths are declared, so nothing can escalate on path alone |
+| `KW-REVIEW-012` | Warning | A coverage floor is declared but no coverage report was produced |
 
 `-008` and `-009` are evaluated before any finding is weighed, and neither can be overridden
 by the engine: both say the change is not the engine's to settle, not that it is faulty.
-`-010` never blocks — a verdict driven by a coverage number rewards padding that number.
+`-010` and `-012` never block — a verdict driven by a coverage number rewards padding that
+number, and a missing report is the same class of signal rather than a failed gate.
 
 ### Gates — `review gates`
 
@@ -161,6 +163,7 @@ by the engine: both say the change is not the engine's to settle, not that it is
 | `KW-REVIEW-022` | Error / Warning | A gate failed. Error when blocking, warning otherwise. |
 | `KW-REVIEW-023` | Error | A findings or gate document could not be read |
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
+| `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
 
 ### Duplicates — `review duplicates`
 

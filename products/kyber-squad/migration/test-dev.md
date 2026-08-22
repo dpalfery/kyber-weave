@@ -9,7 +9,7 @@ sources:
   .cursor/agents/test-dev.agent.md: 77ac564aa1a783fab81e6fa702f16496c99c8aebf6dc7cf5f7bfe1b02452e6c7
   .github/agents/test-dev.agent.md: bb2700d7d1fa57405a8de345de6ab08e17d66b3727b0a987883345f761225f22
   .opencode/agents/test-dev.md: 0c6262120157c680f5d3403973b8dfe773209f93605891cc939b1f1584144025
-final-body-sha256: a898271a9604abb12368b34605a4c237f67cd43059e4f141a05996da63a69e89
+final-body-sha256: 2e8d2cb540aa692e7f6b84be0e9aee924b1e09a80536e425f4f64e6b6da1d4ed
 ---
 # test-dev migration
 

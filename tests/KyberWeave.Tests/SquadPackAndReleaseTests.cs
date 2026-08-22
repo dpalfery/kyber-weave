@@ -44,6 +44,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "python-dev",
         "react-dev",
         "research-agent",
+        "review-lens",
+        "review-triage",
         "sql-database-architect",
         "tauri-dev",
         "test-dev"
@@ -72,6 +74,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
+        "resharper-clt",
         "second-brain",
         "security-review",
         "setup-dev-environment",
@@ -144,15 +147,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 20 canonical agents
-        Assert.Equal(20, CanonicalAgents.Length);
+        // Presence of all 22 canonical agents
+        Assert.Equal(22, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
         // Presence of all 26 canonical skills
-        Assert.Equal(25, CanonicalSkills.Length);
+        Assert.Equal(26, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -518,29 +521,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
             else
             {
-                fixture.Write("products/kyber-squad/squad.yml", """
-                    schema: kyber-squad.squad/v1
-                    name: kyber-squad
-                    version-source: kyber-weave-assembly
-                    default-bundle: full
-                    bundles:
-                      full: bundles/full.yml
-                    profiles:
-                      models: profiles/models.yml
-                      capabilities: profiles/capabilities.yml
-                      fallbacks: profiles/fallbacks.yml
-                    toolchain: toolchain.yml
-                    mcp: mcp.json
-                    """);
-                fixture.Write("products/kyber-squad/toolchain.yml", """
-                    schema: kyber-squad.toolchain/v1
-                    required-features:
-                      - agent-ir/v1
-                    validated-release:
-                      version: 0.29.0
-                      tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd
-                      asset-sha256: e041462f4a48086dbee3da145c07d71b8a3b84fde041462f4a48086dbee3da14
-                    """);
+                fixture.WriteStubSquadSource();
             }
 
             return fixture;
@@ -563,6 +544,134 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             string fullPath = System.IO.Path.Combine(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);
             File.WriteAllText(fullPath, content, new UTF8Encoding(false));
+        }
+
+        /// <summary>
+        /// A loadable Squad tree for hosts that do not have <c>products/kyber-squad</c>. Every
+        /// path <c>squad.yml</c> names must exist, plus stubs for the canonical agents and
+        /// skills, or <c>SquadSourceLoader.Load</c> rejects the archive before packing.
+        /// </summary>
+        private void WriteStubSquadSource()
+        {
+            const string root = "products/kyber-squad";
+            Write($"{root}/squad.yml", """
+                schema: kyber-squad.squad/v1
+                name: kyber-squad
+                version-source: kyber-weave-assembly
+                default-bundle: full
+                bundles:
+                  full: bundles/full.yml
+                profiles:
+                  models: profiles/models.yml
+                  capabilities: profiles/capabilities.yml
+                  fallbacks: profiles/fallbacks.yml
+                toolchain: toolchain.yml
+                mcp: mcp.json
+                """);
+            string agentEntries = string.Join("\n", CanonicalAgents.Select(name => "  - " + name));
+            string skillEntries = string.Join("\n", CanonicalSkills.Select(name => "  - " + name));
+            Write($"{root}/bundles/full.yml",
+                "schema: kyber-squad.bundle/v1\n" +
+                "name: full\n" +
+                "agents:\n" +
+                agentEntries + "\n" +
+                "skills:\n" +
+                skillEntries + "\n");
+            Write($"{root}/profiles/models.yml", """
+                schema: kyber-squad.model-profiles/v1
+                profiles:
+                  general:
+                    default: inherit
+                """);
+            Write($"{root}/profiles/capabilities.yml", """
+                schema: kyber-squad.capability-profiles/v1
+                capabilities:
+                  - filesystem.read
+                  - filesystem.write
+                  - delegate
+                profiles:
+                  worker:
+                    permissions:
+                      filesystem.read: allow
+                      filesystem.write: ask
+                      delegate: deny
+                """);
+            Write($"{root}/profiles/fallbacks.yml", """
+                schema: kyber-squad.fallback-profiles/v1
+                profiles:
+                  role-skill:
+                    no-primary-agent: skill
+                    no-agent-primitive: skill
+                """);
+            Write($"{root}/toolchain.yml", """
+                schema: kyber-squad.toolchain/v1
+                required-features:
+                  - agent-ir/v1
+                validated-release:
+                  version: 0.29.0
+                  tag-commit: e041462f4a48086dbee3da145c07d71b8a3b84fd
+                  asset-sha256: e041462f4a48086dbee3da145c07d71b8a3b84fde041462f4a48086dbee3da14
+                """);
+            Write($"{root}/mcp.json", """
+                {
+                  "mcpServers": {
+                    "kyber-weave": {
+                      "command": "kyber-weave-mcp",
+                      "args": []
+                    }
+                  }
+                }
+                """);
+
+            string[] schemas = ["squad", "bundle", "agent", "model-profiles", "capability-profiles"];
+            foreach (string schema in schemas)
+            {
+                Write($"{root}/schemas/{schema}.schema.json", """
+                    {
+                      "$schema": "https://json-schema.org/draft/2020-12/schema",
+                      "type": "object"
+                    }
+                    """);
+            }
+
+            Write($"{root}/schemas/fallback-profiles.schema.json", """
+                {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "$id": "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
+                  "type": "object"
+                }
+                """);
+
+            foreach (string agent in CanonicalAgents)
+            {
+                Write($"{root}/agents/{agent}.md",
+                    "---\n" +
+                    "schema: kyber-squad.agent/v1\n" +
+                    $"name: {agent}\n" +
+                    $"description: Use when acting as {agent}.\n" +
+                    "invocation: subagent\n" +
+                    "model-profile: general\n" +
+                    "capability-profile: worker\n" +
+                    "delegates-to: []\n" +
+                    "fallback: role-skill\n" +
+                    "aliases: []\n" +
+                    "---\n" +
+                    $"You are {agent}.\n");
+            }
+
+            foreach (string skill in CanonicalSkills)
+            {
+                Write($"{root}/skills/{skill}/SKILL.md",
+                    "---\n" +
+                    $"name: {skill}\n" +
+                    $"description: Use when acting as {skill}.\n" +
+                    "license: MIT\n" +
+                    "metadata:\n" +
+                    "  author: Kyber-Weave\n" +
+                    "  version: 1.0.0\n" +
+                    "---\n" +
+                    $"# {skill}\n");
+            }
         }
 
         public void Dispose() => _temp.Dispose();

@@ -391,14 +391,15 @@ public sealed class CopilotRenderer : ISquadRenderer
     private sealed class CopilotToolsFlowSequence(IEnumerable<string> tools) : List<string>(tools);
 
     /// <summary>
-    /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through
-    /// <see cref="CopilotAgentsFlowSequenceConverter"/>.
+    /// Prevents the generic YAML serializer from changing the deployed delegation
+    /// allow-list shape required by Copilot agent frontmatter.
     /// </summary>
     private sealed class CopilotAgentsFlowSequence(IEnumerable<string> agents) : List<string>(agents);
 
     /// <summary>
-    /// Serializes the delegation roster as an inline YAML flow sequence of single-quoted
-    /// names, matching the shape Copilot agent frontmatter uses for <c>agents</c>.
+    /// Keeps each subagent restricted to its declared delegation roster in emitted
+    /// Copilot frontmatter by serializing as an inline single-quoted flow sequence
+    /// rather than YamlDotNet's default block list.
     /// </summary>
     private sealed class CopilotAgentsFlowSequenceConverter : IYamlTypeConverter
     {

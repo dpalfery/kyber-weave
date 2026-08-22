@@ -29,7 +29,7 @@ public sealed record GlossarySense(
     IReadOnlyList<string>? EvidenceIds = null)
 {
     /// <summary>Opaque claim identities from the managed generated-evidence block.</summary>
-    public IReadOnlyList<string> EvidenceIds { get; } = EvidenceIds ?? [];
+    public IReadOnlyList<string> EvidenceIds { get; init; } = EvidenceIds ?? [];
 }
 
 /// <summary>All managed senses declared for one glossary term.</summary>

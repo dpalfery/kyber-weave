@@ -19,7 +19,7 @@ Use the `test-dev` skill when working on tests.
 
 This routes to: unit-test patterns, integration-test patterns, E2E/Playwright patterns, mock-usage analysis, and test maintainability.
 
-Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the InspectCode run that proves the C# you wrote introduced no new analyzer findings, and the remediation for the inspections that turn up most often.
+Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW` **when the test work is C# / .NET**. It owns the InspectCode run that proves the C# you wrote introduced no new analyzer findings, and the remediation for the inspections that turn up most often. When the host language is not C# / .NET, do not run InspectCode; report the ReSharper gate as skipped.
 
 ## Scope
 
@@ -49,7 +49,7 @@ You do **not** own:
    - **Sweep again after the last edit.** Re-collect diagnostics for the complete contents of every file you edited or created — whole file, not only the changed methods or symbols — and once workspace-wide for the affected projects.
    - **Every diagnostic counts:** compiler errors, nullable analysis, analyzer warnings, style warnings, redundant qualifiers and casts, possible multiple enumeration, namespace and file-location warnings, unused members, and dead-code findings.
    - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.
-   - **Run ReSharper InspectCode over the affected projects**, per the `resharper-clt` skill, at the baseline and again at the end. Its inspection set and the compiler's overlap only partially: a suggestion-severity inspection is invisible to `dotnet build` and is still a real finding. Fix every ERROR and WARNING the change introduced.
+   - **Run ReSharper InspectCode over the affected projects when the test work is C# / .NET**, per the `resharper-clt` skill, at the baseline and again at the end. Its inspection set and the compiler's overlap only partially: a suggestion-severity inspection is invisible to `dotnet build` and is still a real finding. Fix every ERROR and WARNING the change introduced. When the tests are not C# / .NET, skip InspectCode and record the ReSharper gate as skipped.
    - A scoped build, `tsc --noEmit`, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
 ## Coordination
@@ -73,6 +73,6 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of test file paths>
 SUMMARY: <2–4 sentences: what layers are covered, test count, any notable gaps>
-DIAGNOSTICS: clean on <paths> | inspectcode: <0 errors / 0 warnings, or list> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
+DIAGNOSTICS: clean on <paths> | inspectcode: <0 errors / 0 warnings, or list, or skipped (not C# / .NET)> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 COVERAGE_GAPS: <untested branches or scenarios, or "none">
 ```
