@@ -1,8 +1,8 @@
 ---
-id: plans/2026-08-20-code-review-council
+id: archive/plans/2026-08-20-code-review-council
 title: The Review Council — parallel lenses, deterministic gates, and a verdict that is not a vibe
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-08-22
@@ -10,8 +10,10 @@ last-reviewed: 2026-08-22
 
 # The Review Council
 
-**Status:** In progress — Phases 0-4 delivered 2026-08-20; Phase 5 partially done
-**Date:** 2026-08-20
+**Status:** Archived  
+**Archive Date:** 2026-08-22  
+**Date:** 2026-08-20  
+**Outcome / Closeout:** Completed. Three-layer review council architecture (deterministic gates, parallel specialist lenses, and deterministic verdict engine) fully delivered, tested, and green across all validation gates. Durable architectural decisions harvested into [ADR 0002](../../adr/0002-three-layer-review-council-verdict-engine.md).  
 **Goal:** Rebuild `code-reviewer` from a single serial prompt into a three-layer review
 system: a **deterministic gate layer** that runs repeatable scripts (tests, coverage,
 static analysis, security scanners), an **agentic council** of specialist lenses that fan

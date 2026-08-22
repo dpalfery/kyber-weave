@@ -1,17 +1,19 @@
 ---
-id: plans/2026-08-21-complete-recommended-inspectcode-improvements
+id: archive/plans/2026-08-21-complete-recommended-inspectcode-improvements
 title: Complete Recommended InspectCode Improvements
 doc-type: plan
-status: current
+status: archived
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-21
+last-reviewed: 2026-08-22
 ---
 
 # Complete Recommended InspectCode Improvements
 
-**Status:** Complete  
+**Status:** Archived  
+**Archive Date:** 2026-08-22  
 **Date:** 2026-08-21  
+**Outcome / Closeout:** Completed. All 17 recommended InspectCode static analysis improvements implemented across `KyberWeave.sln` in strict compliance with repository C# and test coding standards. Architectural clean code policies harvested into [ADR 0004](../../adr/0004-solution-level-static-analysis-and-noise-suppression.md). 100% build and test pass rate.  
 **Goal:** Complete all 17 "Recommended to Do" static analysis code quality improvements across `KyberWeave.sln` to modernize codebase idioms (collection expressions, primary constructors, UTF-8 literals, immutability, pattern matching) in strict compliance with repository coding standards.
 
 ---

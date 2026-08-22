@@ -125,7 +125,7 @@ above, one-for-one. Both come from the same
 [instruction-surface engine](../context-hygiene/security-scanning.md); the prefixes differ
 only so hosts can gate the two artifact classes at different severities.
 
-## Code review — [the review council](../plans/2026-08-20-code-review-council.md)
+## Code review — [the review council](../code-review/architecture.md)
 
 The verdict tier is the one place in the product where a rule decides something a model
 proposed. `review verdict` computes the outcome from the council's findings and the gate

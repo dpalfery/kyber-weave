@@ -11,7 +11,7 @@ last-reviewed: 2026-08-22
 # KW-AGENT-SPEC-004 is documented but never emitted
 
 Found 2026-08-22 while clearing the analyzer backlog in
-[the duplication-lenses plan](../plans/2026-08-21-duplication-and-prior-art-lenses.md).
+[the duplication-lenses plan](../archive/plans/2026-08-21-duplication-and-prior-art-lenses.md).
 
 [`rule-reference.md`](../ci-pipelines/rule-reference.md) documents `KW-AGENT-SPEC-004` as
 "Broken file reference". `AgentSpecValidator` declared a `RuleBrokenReference` constant for it

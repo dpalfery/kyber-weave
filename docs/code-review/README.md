@@ -15,7 +15,8 @@ Parallel code review with an auditable verdict.
 |---|---|
 | [Architecture](architecture.md) | The three layers, the two lens seats, the evidence schema, the verdict rules, permissions, configuration |
 | [Rule reference](../ci-pipelines/rule-reference.md#code-review--the-review-council) | Every `KW-REVIEW-*` id |
-| [Plan](../plans/2026-08-20-code-review-council.md) | Why it is shaped this way, and what was rejected |
+| [ADR 0002](../adr/0002-three-layer-review-council-verdict-engine.md) | Three-layer review council and verdict engine decision record |
+| [Plan](../archive/plans/2026-08-20-code-review-council.md) | Original plan: why it is shaped this way, and what was rejected |
 
 ## The idea in one page
 

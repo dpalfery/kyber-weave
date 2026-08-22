@@ -11,7 +11,14 @@ last-reviewed: 2026-08-16
 # react coding standard
 
 How React code is written in this repository. Agents and skills resolve this document as
-`<react-coding-standard>`, so it outranks the defaults a portable agent shipped with.
+`<react-coding-standard>`.
+
+## Authority & status
+
+When this standard is in `status: current`, what it says here outranks whatever defaults a
+portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
+template/proposal and does NOT override portable agent defaults until reviewed and promoted
+to `current`.
 
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`.

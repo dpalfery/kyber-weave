@@ -697,8 +697,14 @@ public static class DocsScaffolder
 
         How {technology} code is written in this repository. Agents and skills resolve this
         document as `<{technology}{ConfigRegConfig.CodingStandardSuffix}>` in the repository
-        root `AGENTS.md`, so what it says here outranks whatever defaults a portable agent
-        shipped with.
+        root `AGENTS.md`.
+
+        ## Authority & status
+
+        When this standard is in `status: current`, what it says here outranks whatever defaults a
+        portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
+        template/proposal and does NOT override portable agent defaults until reviewed and
+        promoted to `current`.
 
         Replace this file with the rules that actually apply, and promote `status` to
         `current`. A standard that restates a language's own documentation is noise; write the

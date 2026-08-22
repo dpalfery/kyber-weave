@@ -22,7 +22,7 @@ one embedded in the agents it installed, or contradict it locally and hope the a
 The mechanism that fixes this now exists: a `coding-standard` doc-type, a
 `<docs-root>/standards/<technology>/` folder created by `docs init`, and a
 `<technology-coding-standard>` property in the configuration registry that a portable artifact
-resolves by name. See [the plan](../plans/2026-08-16-coding-standards-and-config-reg.md). What
+resolves by name. See [the plan](../archive/plans/2026-08-16-coding-standards-and-config-reg.md). What
 has not happened is removing the duplicated content from the artifacts themselves — deliberately
 deferred so that the mechanism and a 27-file content migration did not land together.
 
