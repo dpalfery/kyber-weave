@@ -40,6 +40,7 @@ public static class GateRunner
             throw new DirectoryNotFoundException($"Gate working directory not found: {workingDirectory}");
 
         List<GateResult> results = new(config.Gates.Count);
+        DateTime startedUtc = DateTime.UtcNow;
 
         foreach (ReviewGate gate in config.Gates)
         {
@@ -50,7 +51,10 @@ public static class GateRunner
                 break;
         }
 
-        return new GateReport(GateReport.CurrentSchema, results);
+        return new GateReport(
+            GateReport.CurrentSchema,
+            results,
+            CoverageCollector.ReadNewest(workingDirectory, startedUtc));
     }
 
     private static GateResult RunOne(ReviewGate gate, string workingDirectory)
@@ -69,14 +73,24 @@ public static class GateRunner
             startInfo.ArgumentList.Add(argument);
 
         long start = Stopwatch.GetTimestamp();
+        TimeSpan timeout = TimeSpan.FromSeconds(gate.TimeoutSeconds);
         try
         {
-            ProcessResult process = ProcessRunner.Run(startInfo, string.Empty);
+            ProcessResult process = ProcessRunner.Run(startInfo, string.Empty, timeout);
             return new GateResult(
                 gate.Id,
                 gate.Blocking,
                 process.ExitCode,
                 Summarize(process),
+                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+        }
+        catch (TimeoutException ex)
+        {
+            return new GateResult(
+                gate.Id,
+                gate.Blocking,
+                -1,
+                $"timed out after {gate.TimeoutSeconds} seconds: {ex.Message}",
                 (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)

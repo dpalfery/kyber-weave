@@ -43,9 +43,13 @@ They are independent. Neither waits on the other.
 **Gates.** Two commands, and they are the only things this skill executes:
 
 ```bash
-kyber-weave review gates . --out gates.json
-kyber-weave review duplicates . --out duplicates.json
+kyber-weave review gates . --out artifacts/gates.json
+kyber-weave review duplicates . --out artifacts/duplicates.json
 ```
+
+Write both under `artifacts/`. The CLI subprocess writes them via `process.execute`, so a
+denied write tool on the reviewer does not block the run. If the files cannot be persisted,
+keep the JSON from the command's response and pass it to `review verdict`.
 
 The second is separate because it is not host-declared work: it reads the repository's
 CodeGraph index and clusters symbols whose bodies are identical, which nothing in a normal
@@ -54,9 +58,12 @@ nothing — indexing is the owner's decision, and the report must not read as th
 passed.
 
 It runs what the host declared under `review.gates` in `.kyber-weave/kyber-weave.yml`, in
-declaration order, and normalizes every result into one document. Never substitute an ad-hoc
-command for a declared gate, and never skip a blocking gate because you expect it to pass —
-the output is cited as evidence, and evidence you produced by hand is not evidence.
+declaration order, and normalizes every result into one document. After the declared gates
+finish, the runner collects Coverlet Cobertura from `artifacts/coverage` or `TestResults`
+and attaches it to the gate report — that is the coverage evidence `test-adequacy` consumes.
+Never substitute an ad-hoc command for a declared gate, and never skip a blocking gate
+because you expect it to pass — the output is cited as evidence, and evidence you produced
+by hand is not evidence.
 
 If the host has declared no gates, the command says so. Record that: a review with no
 executed evidence is a weaker review, and the report must not read as though everything
@@ -100,6 +107,9 @@ and the most frequently expensive one.
 Three lenses consume gate output — `test-adequacy` needs the coverage report,
 `static-analysis-triage` needs the analyzer results, and `duplicate-implementation` needs the
 duplicates report. Issue each when its own gate completes, not behind a barrier on all gates.
+When the host has declared a `review.coverage` floor and the gate report carries no coverage
+evidence, `test-adequacy` treats that absence as a finding — not a skip, and not "we did
+not look".
 
 `prior-art` and `duplicate-implementation` divide one concern by unit and by evidence.
 `duplicate-implementation` reports **bodies**, from a gate artifact, and may not report what
@@ -129,6 +139,8 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 
 - **Drop anything missing `excerpt`, `evidence`, or `failure_scenario`.** No charitable
   reconstruction — a finding you complete on the reporter's behalf is one you are inventing.
+- **Drop anything whose `confidence` is below `review.policy.min-confidence`.** Equal to
+  the threshold is kept; above it is kept. Below it is noise.
 - **Verify the quote.** Open the file and confirm the excerpt is really there. A finding
   quoting code that does not exist invalidates that lens's whole run, and the report says so.
 - **Reconcile duplicates** — keep the most concrete, and note the corroboration.
@@ -139,7 +151,7 @@ The reviewer applies the checks no individual lens can, because no lens sees the
 ### 5. Compute the verdict
 
 ```bash
-kyber-weave review verdict . --findings findings.json --gates gates.json
+kyber-weave review verdict . --findings findings.json --gates artifacts/gates.json
 ```
 
 Rules, in evaluation order. The first that fires decides:
@@ -152,6 +164,10 @@ Rules, in evaluation order. The first that fires decides:
 | 4 | Any surviving `critical` finding | `REQUEST_CHANGES` |
 | 5 | Surviving `major` findings reach `major-count-blocks` | `REQUEST_CHANGES` |
 | 6 | Otherwise | `APPROVE` |
+
+Findings whose `confidence` is **below** `review.policy.min-confidence` are excluded before
+the critical and major blocking rules. Equal to the threshold is kept; above it is kept.
+Below it is dropped. The engine compares `Confidence < MinConfidence`.
 
 The two escalation rules run **before** any finding is weighed, because a reserved path and
 an unreviewable diff both say the same thing: this change is not the engine's to settle,

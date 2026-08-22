@@ -11,12 +11,15 @@ namespace KyberWeave.Cli.Commands.Review;
 /// </summary>
 /// <remarks>
 /// Declared as a gate under <c>review.gates</c> like any other. It exits 0 whether or not it
-/// finds anything, for the same reason the analyzer gate does: what a gate proves is that the
+/// finds clusters, for the same reason the analyzer gate does: what a gate proves is that the
 /// evidence was produced, and whether a cluster is this change's problem is the reviewing
-/// council's question, not this command's.
+/// council's question, not this command's. A failed <c>--out</c> write is different — the
+/// evidence was not produced — and fails the process.
 /// </remarks>
 public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
 {
+    private const string ReportWriteFailed = "KW-REVIEW-025";
+
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewDuplicatesSettings settings)
     {
@@ -76,15 +79,13 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
         report.AddMetric("clusters", duplicates.Clusters.Count);
         report.AddMetric("symbols", duplicates.SymbolsConsidered);
 
-        if (settings.Out is not null)
-        {
-            string outPath = Path.GetFullPath(settings.Out);
-            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
-            File.WriteAllText(outPath, ReviewJson.Write(duplicates));
-        }
+        CommandHelpers.TryWriteReport(settings.Out, ReviewJson.Write(duplicates), ReportWriteFailed, report);
 
         CommandHelpers.Finish(report, settings, "review duplicates", "Cluster");
-        return 0;
+        // Clusters are Warning by design (the gate proves evidence was produced). A failed
+        // --out write is Error and must fail the process, or CI would treat a missing report
+        // as a passed gate.
+        return report.HasErrors ? 1 : 0;
     }
 
     /// <summary>

@@ -21,7 +21,6 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
 
         Directory.CreateDirectory(request.DestinationPath);
 
-        // Write the standard minimal squad.yml and toolchain.yml into the destination.
         List<string> extractedFiles = [];
 
         string squadYmlPath = Path.Combine(request.DestinationPath, "squad.yml");

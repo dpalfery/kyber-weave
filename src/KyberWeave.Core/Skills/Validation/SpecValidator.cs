@@ -15,7 +15,9 @@ public static partial class SpecValidator
     public const int DescriptionMaxLength = 1024;
     private const int CompatibilityMaxLength = 500;
 
-    // lowercase letters, digits, single hyphens; no leading/trailing/consecutive hyphens
+    // Keep skill identifiers portable and unambiguous across runtimes: a mixed-case or
+    // underscored name is a different skill on a case-sensitive filesystem than on
+    // Windows, and loaders that key on the slug then fail to find it.
     [GeneratedRegex("^[a-z0-9]+(?:-[a-z0-9]+)*$", RegexOptions.None, matchTimeoutMilliseconds: 2000)]
     private static partial Regex NamePattern();
 

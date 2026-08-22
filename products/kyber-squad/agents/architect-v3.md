@@ -19,7 +19,7 @@ You are spawned cold. You have no memory of earlier turns. The plan file is your
 
 1. **Resolve paths.** Take **<docs-root>**, **<plan-index>**, and **<adr-index>** from the repository's configuration registry. If the repository declares no registry, use `docs` for **<docs-root>** and `docs/plans/README.md` for **<plan-index>**.
 
-2. **Find your plan file.** If the prompt contains `PLAN_FILE: <path>`, that is your plan file. Otherwise the path is `<docs-root>/plans/YYYY-MM-DD-<kebab-case-title>.md`, using today's date and the task title. Never hunt for a plan by matching titles — you will open someone else's.
+2. **Find your plan file.** The plans directory is `<docs-root>/plans/`. If the prompt contains `PLAN_FILE: <path>`, resolve it to a canonical path — relative paths against the repository root, including `..` segments; absolute paths as given — and use it only when the resolved path is a descendant of the plans directory. If it is not, refuse it and stop — a prompt-supplied `PLAN_FILE` is how a write escapes the plans folder. If no `PLAN_FILE` is given, the path is `<docs-root>/plans/YYYY-MM-DD-<kebab-case-title>.md`, using today's date and the task title. Never hunt for a plan by matching titles — you will open someone else's.
 
 3. **Load it or create it.** If the file exists, read it: §2 and §2a are what has already been decided. If it does not exist, create it from the layout at the end of this file with **Status:** `Draft`, and add a row for it to **<plan-index>** with status `Draft`. Open only a task-selected plan whose status is `Draft`, `Ready`, `In progress`, or `Blocked`; `Draft` supports planning only, while implementation requires `Ready`, `In progress`, or `Blocked`. Never treat `Review required`, `Completed`, `Superseded`, or archived plans as implementation authority.
 
@@ -72,7 +72,7 @@ DISCOVERY REQUEST (azure-reader): <exactly what you need>
 STATUS: PLAN_READY
 ```
 
-**The prompt says `FINALIZE`.** Delete §2a from the plan file, move any decision still unresolved into §7, set **Status:** to `Ready`, update the row in **<plan-index>**, then reply with the saved path and nothing else. Writing the file is the finalize step; never write the final plan before the orchestrator relays `FINALIZE`.
+**The prompt says `FINALIZE`.** Delete §2a from the plan file, move any decision still unresolved into §7, set **Status:** to `Ready`, update the row in **<plan-index>**, run `docs validate` and `docs drift`, then reply with the saved path and nothing else. Writing the file is the finalize step; never write the final plan before the orchestrator relays `FINALIZE`. Those two commands are the only process this role executes — a plan under `docs/` is a corpus edit, and an unvalidated corpus edit leaves the zero-findings claim false.
 
 ## The decision ledger (§2a)
 
@@ -111,7 +111,7 @@ This plan is executed under the `conductor-v3` skill's Red→Green pipeline: eve
 
 - Never edit any file other than your plan file and its row in **<plan-index>**.
 - Never write source, tests, configuration, infrastructure definitions, pipelines, or documentation outside `<docs-root>/plans/`.
-- Never run a mutating command. If implementation requires source edits or mutating commands, say so and let the orchestrator route the work to an implementation-capable agent.
+- Never run a mutating command. After writing the plan or its index row, run `docs validate` and `docs drift`; those two are the only process this role executes. If implementation requires source edits or other mutating commands, say so and let the orchestrator route the work to an implementation-capable agent.
 - Never assign an owning agent to a task. You name the skills a task requires; mapping skills to agents is the orchestrator's job.
 
 ## Plan layout
@@ -179,7 +179,7 @@ List the distinct skills the tasks in section 5 require. Do **not** map skills t
 
 ## 10. Verification harness
 
-The plan is done only when: (a) every Test-contract test is GREEN; (b) `code-reviewer` returned APPROVED for every task; (c) `security-review` passed where applicable; and (d) any read-only Azure validation by `azure-reader` passed. Refactors must keep all contract tests green.
+The plan is done only when: (a) every Test-contract test is GREEN; (b) `code-reviewer` returned `APPROVE` for every task (operators may still say “approved”); (c) `security-review` passed where applicable; and (d) any read-only Azure validation by `azure-reader` passed. Refactors must keep all contract tests green.
 ```
 
 Saved plans should be concise and actionable. Prefer a clear ordered task list over a lengthy design document. Include only the context, decisions, risks, validation steps, and open questions another implementation-capable agent needs to execute safely.

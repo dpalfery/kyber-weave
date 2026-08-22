@@ -26,7 +26,9 @@ unjoinable to anything else and is close to useless during an incident.
 
 **Logs that carry what must not be logged.** Credentials, tokens, keys, personal data, full
 request bodies, entire exception objects containing connection strings. Logging a
-high-value secret in plaintext is a real finding; logging a URL is not.
+high-value secret in plaintext is a real finding. Logging a URL is not a finding once
+tokens, credentials, personal data, and sensitive query parameters have been redacted;
+an unredacted URL that still carries any of those is.
 
 **Context that is absent when it matters.** An error recording that something failed but not
 which record, which tenant, which operation, or which input class. The message is the whole

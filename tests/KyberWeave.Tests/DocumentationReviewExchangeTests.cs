@@ -408,6 +408,74 @@ public sealed class DocumentationReviewExchangeTests
         Assert.Empty(persistence.LoadVerdicts([candidate.Id]));
     }
 
+    [Fact]
+    public void ImportNullVerdictsCollectionRejectsWithoutThrowing()
+    {
+        AnalysisCandidate candidate = Candidate("review", AnalysisRuleKind.Duplicate);
+        RecordingPersistence persistence = new RecordingPersistence();
+        DocumentationReviewExchange exchange = Exchange(persistence);
+        ReviewCandidateBundle export = exchange.Export([candidate]).Bundle;
+
+        ReviewImportResult result = exchange.Import(
+            VerdictEnvelope(export, "null"),
+            [candidate]);
+
+        AssertRejectedImport(result, persistence, "omits the verdicts");
+    }
+
+    [Fact]
+    public void ImportNullVerdictItemRejectsWithoutThrowing()
+    {
+        AnalysisCandidate candidate = Candidate("review", AnalysisRuleKind.Duplicate);
+        RecordingPersistence persistence = new RecordingPersistence();
+        DocumentationReviewExchange exchange = Exchange(persistence);
+        ReviewCandidateBundle export = exchange.Export([candidate]).Bundle;
+
+        ReviewImportResult result = exchange.Import(
+            VerdictEnvelope(export, "[null]"),
+            [candidate]);
+
+        AssertRejectedImport(result, persistence, "null verdict");
+    }
+
+    [Fact]
+    public void ImportNullGlossarySenseEntryRejectsWithoutThrowing()
+    {
+        ReviewImportResult result = ImportTerminologySenses("[null]");
+
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Diagnostic finding = Assert.Single(result.Diagnostics.Items);
+        Assert.Equal("KW-DOC-REVIEW-001", finding.Code);
+        Assert.Contains("glossary sense", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImportNullGlossarySenseAliasesRejectsWithoutThrowing()
+    {
+        ReviewImportResult result = ImportTerminologySenses(
+            """[{"term":"loop","definition":"The autonomous agent execution cycle.","scopes":["component:Automation"],"aliases":null}]""");
+
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Diagnostic finding = Assert.Single(result.Diagnostics.Items);
+        Assert.Equal("KW-DOC-REVIEW-001", finding.Code);
+        Assert.Contains("glossary sense", finding.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImportNullGlossarySenseScopeEntryRejectsWithoutThrowing()
+    {
+        ReviewImportResult result = ImportTerminologySenses(
+            """[{"term":"loop","definition":"The autonomous agent execution cycle.","scopes":[null],"aliases":[]}]""");
+
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Diagnostic finding = Assert.Single(result.Diagnostics.Items);
+        Assert.Equal("KW-DOC-REVIEW-001", finding.Code);
+        Assert.Contains("glossary sense", finding.Message, StringComparison.Ordinal);
+    }
+
     private static DocumentationReviewExchange Exchange(
         RecordingPersistence? persistence = null,
         double confidence = 0.80) =>
@@ -485,6 +553,59 @@ public sealed class DocumentationReviewExchangeTests
 
     private static string Serialize(ReviewVerdictBundle bundle) =>
         JsonSerializer.Serialize(bundle, JsonOptions);
+
+    private static string VerdictEnvelope(ReviewCandidateBundle export, string verdictsJson) =>
+        $$"""
+        {
+          "schema": "kyber-weave.docs-review.verdicts/v1",
+          "analyzerVersion": "{{export.AnalyzerVersion}}",
+          "rubricVersion": "{{export.RubricVersion}}",
+          "candidateSetHash": "{{export.CandidateSetHash}}",
+          "verdicts": {{verdictsJson}}
+        }
+        """;
+
+    private static ReviewImportResult ImportTerminologySenses(string sensesJson)
+    {
+        AnalysisCandidate candidate = Candidate("review", AnalysisRuleKind.Terminology, term: "loop");
+        RecordingPersistence persistence = new RecordingPersistence();
+        DocumentationReviewExchange exchange = Exchange(persistence);
+        ReviewCandidateBundle export = exchange.Export([candidate]).Bundle;
+        ReviewCandidateItem item = Assert.Single(export.Candidates);
+        string hashes = string.Join(",", item.ClaimContentHashes.Select(hash => $"\"{hash}\""));
+        string evidence = string.Join(",", item.Evidence.Select(e => $"\"{e.Id}\""));
+        string json = VerdictEnvelope(
+            export,
+            $$"""
+            [{
+              "candidateId": "{{item.CandidateId}}",
+              "label": "distinctSenses",
+              "confidence": 0.9,
+              "rationale": "Reviewer evaluated every supplied evidence location.",
+              "claimContentHashes": [{{hashes}}],
+              "evidenceIds": [{{evidence}}],
+              "proposedGlossarySenses": {{sensesJson}}
+            }]
+            """);
+
+        ReviewImportResult result = exchange.Import(json, [candidate]);
+        Assert.Equal(0, persistence.SaveVerdictCallCount);
+        return result;
+    }
+
+    private static void AssertRejectedImport(
+        ReviewImportResult result,
+        RecordingPersistence persistence,
+        string expectedMessage)
+    {
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Equal(0, persistence.SaveVerdictCallCount);
+        Diagnostic finding = Assert.Single(result.Diagnostics.Items);
+        Assert.Equal("KW-DOC-REVIEW-001", finding.Code);
+        Assert.Equal(Severity.Error, finding.Severity);
+        Assert.Contains(expectedMessage, finding.Message, StringComparison.Ordinal);
+    }
 
     private static string Join(DiagnosticReport diagnostics) =>
         string.Join(Environment.NewLine, diagnostics.Items);

@@ -5,7 +5,7 @@ doc-type: plan
 status: current
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-20
+last-reviewed: 2026-08-22
 ---
 
 # The Review Council
@@ -218,7 +218,7 @@ flowchart TD
     Skeptic["Layer 3a — Skeptic adjudication<br/>evidence required or dropped"] --> Verdict
 
     Verdict["Layer 3b — Verdict engine (C#, unit-tested)<br/>findings + policy -> verdict + risk grade"]
-    Policy["review-policy.yml<br/>always-human paths, thresholds, suppressions"] --> Verdict
+    Policy["review.policy<br/>always-human paths, thresholds, suppressions"] --> Verdict
     Verdict --> Out["APPROVE / REQUEST_CHANGES / NEEDS_HUMAN<br/>+ SARIF + findings artifact"]
 ```
 
@@ -301,29 +301,28 @@ engine. That single constraint is the skeptic, expressed as a schema.
 
 New CLI verb `kyber-weave review gates`, reading the `review:` section of the host's
 `.kyber-weave/kyber-weave.yml` (D6) and executing each declared gate, normalizing every
-result to one `gates.json`:
+result to one `gates.json`. Each gate's `run` is an argv list, not a shell command line
+(see §11a). Coverage is collected from Cobertura output the test gate writes; there is no
+`parser` key, and path-scoped `applies-when` gates did not ship:
 
 ```yaml
 review:
   coverage:
-    fileLinePercent: 85
-    classLinePercent: 85
+    file-line-percent: 85
+    class-line-percent: 85
   gates:
   - id: build
-    command: dotnet build KyberWeave.sln -c Release
+    run: [dotnet, build, KyberWeave.sln, -c, Release]
     blocking: true
   - id: test-coverage
-    command: dotnet test -c Release --collect:"XPlat Code Coverage"
+    run: [dotnet, test, -c, Release, --collect, "XPlat Code Coverage"]
     blocking: true
-    parser: cobertura
   - id: docs-validate
-    command: dotnet run --project src/KyberWeave.Cli -- docs validate .
+    run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, validate, .]
     blocking: true
   - id: skill-scan
-    command: dotnet run --project src/KyberWeave.Cli -- skill scan .apm/skills/kyber-weave-docs
+    run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, scan, .apm/skills/kyber-weave-docs]
     blocking: true
-  applies-when:
-    azure-integration: paths matching src/**/Azure/**
 ```
 
 Two properties of this design matter more than the file format. Gates are **repeatable** —
@@ -342,14 +341,17 @@ New CLI verb, backed by `KyberWeave.Core`, reporting through the existing Diagno
 (stable ids, severity gating, SARIF — the CI Pipelines component):
 
 ```bash
-kyber-weave review verdict --findings findings.json --gates gates.json --policy .kyber-weave/review-policy.yml
+kyber-weave review verdict --findings findings.json --gates gates.json
 ```
+
+Policy is not a CLI flag: `review verdict` loads `review.policy` from the same
+`.kyber-weave/kyber-weave.yml` as the gates (see §11a).
 
 Deterministic rules, unit-tested, in evaluation order. New `KW-REVIEW-*` ids — permanent,
 never renumbered, per the non-negotiable in [`AGENTS.md`](../../AGENTS.md):
 
 1. Any touched path matching `always-human` in the policy → **`NEEDS_HUMAN`**, unconditionally,
-   before findings are even considered. The engine cannot override the policy file.
+   before findings are even considered. The engine cannot override the policy.
 2. Diff exceeds `max-reviewable-lines` → **`NEEDS_HUMAN`**. An attention limit, not a risk
    signal — Diff Vader is explicit that size is not risk.
 3. Any blocking gate failed → **`REQUEST_CHANGES`**, citing the gate id and the exact failure.
@@ -360,25 +362,25 @@ never renumbered, per the non-negotiable in [`AGENTS.md`](../../AGENTS.md):
 **Risk grade** (`LOW` / `MEDIUM` / `HIGH`) derives from what the lenses found and which paths
 were touched — never from line count.
 
-`review-policy.yml`, the file the engine may not override:
+`review.policy`, the section the engine may not override:
 
 ```yaml
-schema: kyber-weave.review-policy/v1
-always-human:
-  - "**/auth/**"
-  - "**/*secret*"
-  - "**/*crypto*"
-  - ".kyber-weave/review-policy.yml"          # changes to the gate need a human
-  - "products/kyber-squad/profiles/capabilities.yml"   # permission changes need a human
-  - "products/kyber-squad/agents/**"                   # instruction surfaces need a human
-max-reviewable-lines: 10000
-thresholds:
-  major-count-blocks: 3
-  min-confidence: 7
-suppressions:
-  - id: correctness/nullable-warning-in-generated
-    reason: "Generated client, tracked in docs/todo/..."
-    expires: 2026-11-18                        # 90 days, re-justify or it returns
+review:
+  policy:
+    always-human:
+      - "**/auth/**"
+      - "**/*secret*"
+      - "**/*crypto*"
+      - ".kyber-weave/kyber-weave.yml"                    # changes to the gate need a human
+      - "products/kyber-squad/profiles/capabilities.yml"   # permission changes need a human
+      - "products/kyber-squad/agents/**"                   # instruction surfaces need a human
+    max-reviewable-lines: 10000
+    major-count-blocks: 3
+    min-confidence: 7
+    suppressions:
+      - id: correctness/nullable-warning-in-generated
+        reason: "Generated client, tracked in docs/todo/..."
+        expires: 2026-11-18                        # 90 days, re-justify or it returns
 ```
 
 The three Kyber-Weave-specific `always-human` entries are the important ones: the artifacts
@@ -508,7 +510,7 @@ C#.
   becomes real for the first time.
 - **Phase 3 — The verdict engine. ✅ Done.** `KyberWeave.Core/Review`, `KW-REVIEW-*` ids, the CLI
   verb, SARIF output, table-driven tests. "The gate is not a vibe."
-- **Phase 4 — Policy and modes. ✅ Done** (measurement and cost ceilings excepted — see §14). `review-policy.yml` with the three Kyber-Weave
+- **Phase 4 — Policy and modes. ✅ Done** (measurement and cost ceilings excepted — see §14). `review.policy` with the three Kyber-Weave
   `always-human` entries, expiring suppressions, shadow/enabled/verifier/full.
 - **Phase 5 — Sweep and gates. ◐ Partial** — count sweep, rule reference, and all repository gates are green; the renderer-side verification below is still open. Count sweep, `docs validate`, `docs drift`,
   `agent validate`, `agent scan`, `skill validate`, `skill lint`, `skill scan`, full test run.
@@ -536,7 +538,7 @@ Beyond the standard gates in [`AGENTS.md`](../../AGENTS.md):
 
 - **Cost.** Diff Vader reports ~$0.73/PR with a dozen-plus reviewers. Thirteen lenses plus a
   per-finding adversarial pass is not free. Auto-skip, verifier mode, and a per-repo ceiling
-  in `review-policy.yml` are the mitigations; the measurement to confirm them does not exist
+  in `review.policy` are the mitigations; the measurement to confirm them does not exist
   yet and is not in this plan.
 - **The widened `process.execute` is real everywhere.** The lattice grants the capability;
   the "only through `run-gates`" scope is instruction-only, exactly like the conductor's

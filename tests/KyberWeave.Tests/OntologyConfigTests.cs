@@ -166,6 +166,66 @@ public class OntologyConfigTests
     }
 
     [Fact]
+    public void ANullTechnologyEntryIsRejected()
+    {
+        using TempDirectory temp = new();
+        string yamlPath = Path.Combine(temp.Path, "kyber-weave.yml");
+        File.WriteAllText(yamlPath, """
+            ontology:
+              technologies:
+                - csharp
+                - null
+            """);
+
+        YamlException thrown = Assert.ThrowsAny<YamlException>(
+            () => OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath));
+        Assert.Contains("null entry", thrown.Message, StringComparison.Ordinal);
+
+        OntologyConfigLoadResult result = OntologyConfigLoader.TryLoad(yamlPath);
+        Assert.False(result.Success);
+        Assert.Contains("null entry", result.ParseError, StringComparison.Ordinal);
+        Assert.Null(result.Config);
+    }
+
+    [Fact]
+    public void ANullRequiredKeysMappingKeyFailsTheLoadRatherThanThrowing()
+    {
+        using TempDirectory temp = new();
+        string yamlPath = Path.Combine(temp.Path, "kyber-weave.yml");
+        File.WriteAllText(yamlPath, """
+            ontology:
+              required-keys:
+                ~:
+                  - audience
+            """);
+
+        OntologyConfigLoadResult result = OntologyConfigLoader.TryLoad(yamlPath);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ParseError);
+        Assert.Null(result.Config);
+    }
+
+    [Fact]
+    public void AnEmptyRequiredKeysDocTypeIsRejected()
+    {
+        using TempDirectory temp = new();
+        string yamlPath = Path.Combine(temp.Path, "kyber-weave.yml");
+        File.WriteAllText(yamlPath, """
+            ontology:
+              required-keys:
+                "":
+                  - audience
+            """);
+
+        OntologyConfigLoadResult result = OntologyConfigLoader.TryLoad(yamlPath);
+
+        Assert.False(result.Success);
+        Assert.Contains("required-keys", result.ParseError, StringComparison.Ordinal);
+        Assert.Null(result.Config);
+    }
+
+    [Fact]
     public void CombinedConfigTryLoadSurfacesInvalidYamlAsKWCONFIG001Payload()
     {
         string root = Path.Combine(Path.GetTempPath(), "kw-config-" + Guid.NewGuid().ToString("N"));

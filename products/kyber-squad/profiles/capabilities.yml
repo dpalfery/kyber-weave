@@ -16,8 +16,16 @@ profiles:
     permissions:
       filesystem.read: allow
       filesystem.search: allow
-      filesystem.write: deny
-      process.execute: deny
+      # The lattice has no path scoping. The body writes only a plan under <docs-root>/plans/
+      # plus that plan's row in the plan index; ask rather than allow so a target that cannot
+      # express ask narrows to deny instead of opening the whole tree. Source edits stay
+      # instruction-denied either way.
+      filesystem.write: ask
+      # docs validate and docs drift are the only commands this role runs: writing a plan
+      # under docs/ is a corpus edit, and a corpus edit that is not re-validated leaves the
+      # zero-findings claim false. ask rather than allow because the grant is those two
+      # commands, not a shell.
+      process.execute: ask
       network.read: allow
       network.publish: deny
       # Planning needs two kinds of fact the architect cannot obtain itself: live Azure
@@ -92,12 +100,13 @@ profiles:
     permissions:
       filesystem.read: allow
       filesystem.search: allow
-      # A reviewer writes exactly one thing: the findings artifact. The lattice has no path
-      # scoping, so the scope is instruction-only and the permission is ask rather than
-      # allow — the same split the orchestrator profile uses for its folder restriction.
-      # Targets that cannot express ask narrow to deny, and the reviewer returns findings
-      # in its response instead of writing a file. Separation of duties survives either
-      # way: the role that judges a change never ships it.
+      # A reviewer writes exactly one thing with the edit tool: the findings artifact.
+      # `kyber-weave review gates . --out artifacts/gates.json` and
+      # `kyber-weave review duplicates . --out artifacts/duplicates.json` are written by
+      # the executed CLI (`process.execute: allow`), not by the agent's write tool — which
+      # is why those two outputs survive on targets that narrow write:ask to deny. Findings
+      # JSON still uses write:ask; those targets return findings in the response instead.
+      # Source edits stay denied either way: the role that judges a change never ships it.
       filesystem.write: ask
       # The gate layer runs real commands — build, tests, coverage, analyzers, scanners —
       # through one declared runner. Denying this made the blocking pre-merge gate in the

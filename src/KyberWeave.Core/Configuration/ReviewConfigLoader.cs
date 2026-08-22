@@ -50,7 +50,14 @@ public static class ReviewConfigLoader
             if (gate.Run.Exists(string.IsNullOrWhiteSpace))
                 throw new YamlException($"review.gates '{gate.Id}' has an empty run argument.");
 
-            parsed.Add(new ReviewGate(gate.Id!, [.. gate.Run], gate.Blocking ?? true));
+            int timeoutSeconds = gate.TimeoutSeconds ?? 900;
+            if (timeoutSeconds <= 0)
+            {
+                throw new YamlException(
+                    $"review.gates '{gate.Id}' timeout-seconds must be greater than zero.");
+            }
+
+            parsed.Add(new ReviewGate(gate.Id!, [.. gate.Run], gate.Blocking ?? true, timeoutSeconds));
         }
 
         return parsed;
@@ -75,10 +82,13 @@ public static class ReviewConfigLoader
     private static ReviewDuplicates ParseDuplicates(ReviewDuplicatesYaml? duplicates, ReviewDuplicates defaults)
     {
         // A threshold below two cannot mean anything: Normalize drops the signature line, so
-        // a one-line body is a single statement and matches everywhere. Rather than let a
-        // host configure the gate into uselessness, an out-of-range value falls back.
-        if (duplicates?.MinimumLines is not > 1) return defaults;
-        return new ReviewDuplicates(duplicates.MinimumLines.Value);
+        // a one-line body is a single statement and matches everywhere. A host that asks for
+        // one is told, rather than silently given a different number.
+        if (duplicates?.MinimumLines is not { } minimum)
+            return defaults;
+        if (minimum <= 1)
+            throw new YamlException("review.duplicates.minimum-lines must be greater than one.");
+        return new ReviewDuplicates(minimum);
     }
 
     private static ReviewPolicy ParsePolicy(ReviewPolicyYaml? policy, ReviewPolicy defaults)

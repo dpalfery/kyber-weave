@@ -68,8 +68,9 @@ Planning behavior:
 
 Edit permission:
 
-- The only file you may create or update is a plan Markdown file under `<docs-root>/plans/`, plus that plan's row in the index at **<plan-index>**.
+- The only file you may create or update is a plan Markdown file under `<docs-root>/plans/`, plus that plan's row in the index at **<plan-index>**. The architect profile grants `filesystem.write: ask` because the lattice has no path scoping; a broad allow would open source edits this role must not make.
 - You may not create, update, delete, or rename any file outside `<docs-root>/plans/`, and that includes source, tests, configuration, infrastructure definitions, pipelines, and every documentation directory other than `plans/`.
+- After creating or updating the plan or its index row, run `docs validate` and `docs drift`. Those two commands are the only process this role executes — a plan under `docs/` is a corpus edit, and an unvalidated corpus edit leaves the zero-findings claim false. Do not treat execute permission as a license to build, test, or edit source.
 
 Plan files:
 
@@ -79,7 +80,7 @@ Plan files:
 - Do not write the final plan until the orchestrator relays the user's "finalize" choice back to you (see the question hand-back protocol above).
 - On finalize, write the final plan to the chosen plan file, then end your turn reporting the saved plan path so the orchestrator can proceed. Writing the file is the finalize step.
 - Do not edit source files or non-plan documentation files.
-- Do not run mutating commands.
+- Do not run mutating commands. `docs validate` and `docs drift` are not mutating; they are the standing follow-up to every plan-file write.
 - If implementation requires source edits or mutating commands, tell the user to switch to an implementation-capable agent.
 - The plan file should follow this layout:
 # {Feature/Change Title}

@@ -26,23 +26,42 @@ ontology:
 # is the trade, and it is the right way round.
 review:
   gates:
+    # Format is a required local check in AGENTS.md. Without these two gates, `review
+    # gates` can pass a change that `dotnet format --verify-no-changes` would reject,
+    # so the suite a review cites would not be the suite a contributor is told to run.
+    # `--no-restore` is omitted: each gate is an independent process and there is no
+    # restore gate ahead of them.
+    - id: format-whitespace
+      run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, -v, minimal]
+      blocking: true
+    - id: format-style
+      run: [dotnet, format, KyberWeave.sln, style, --verify-no-changes, --severity, warn, -v, minimal]
+      blocking: true
     - id: build
       run: [dotnet, build, KyberWeave.sln, -c, Release]
       blocking: true
+    # Coverlet writes Cobertura under artifacts/coverage so GateRunner can populate
+    # the coverage floor. `--collect` takes "XPlat Code Coverage" as its own argv
+    # element — a quoted shell string would never reach ProcessRunner.
     - id: test
-      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release]
+      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --collect, "XPlat Code Coverage", --results-directory, artifacts/coverage]
+      blocking: true
+    - id: skill-validate
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, validate, .apm/skills/kyber-weave-docs]
+      blocking: true
+    - id: skill-lint
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, lint, .apm/skills/kyber-weave-docs, --min-desc-score, "70"]
+      blocking: true
+    # `--fail-on critical` is the documented local check. Binding it here means a
+    # later change to the CLI default cannot silently loosen what the gate enforces.
+    - id: skill-scan
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, scan, .apm/skills/kyber-weave-docs, --fail-on, critical]
       blocking: true
     - id: docs-validate
       run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, validate, .]
       blocking: true
     - id: docs-drift
       run: [dotnet, run, --project, src/KyberWeave.Cli, --, docs, drift, .]
-      blocking: true
-    - id: skill-validate
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, validate, .apm/skills/kyber-weave-docs]
-      blocking: true
-    - id: skill-scan
-      run: [dotnet, run, --project, src/KyberWeave.Cli, --, skill, scan, .apm/skills/kyber-weave-docs]
       blocking: true
     # ReSharper InspectCode. The `resharper-clt` skill owns how to read this; the
     # `static-analysis-triage` lens reads the report at the --output path below and

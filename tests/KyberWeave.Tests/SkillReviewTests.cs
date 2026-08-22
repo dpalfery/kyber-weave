@@ -438,4 +438,52 @@ public sealed class SkillReviewTests
         Assert.True(result.Success);
         Assert.Equal(2, result.ImportedCount);
     }
+
+    [Fact]
+    public void ImportVerdictsNullVerdictsCollectionFailsWithoutThrowing()
+    {
+        List<SkillReviewCandidate> candidates =
+        [
+            new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
+        ];
+
+        string json = """
+        {
+            "schema": "kyber-weave.skill-review.verdicts/v1",
+            "verdicts": null
+        }
+        """;
+
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
+
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Contains(result.Diagnostics.Items, d =>
+            d.Code == "KW-SKILL-REVIEW-001" &&
+            d.Message.Contains("omits the verdicts", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ImportVerdictsNullVerdictElementFailsWithoutThrowing()
+    {
+        List<SkillReviewCandidate> candidates =
+        [
+            new("sql-generator", SkillReviewCandidateType.Skill, "Generates SQL queries.", 35, ["KW-SKILL-LINT-007"])
+        ];
+
+        string json = """
+        {
+            "schema": "kyber-weave.skill-review.verdicts/v1",
+            "verdicts": [null]
+        }
+        """;
+
+        SkillReviewImportResult result = SkillReviewExchange.ImportVerdicts(json, candidates);
+
+        Assert.False(result.Success);
+        Assert.Equal(0, result.ImportedCount);
+        Assert.Contains(result.Diagnostics.Items, d =>
+            d.Code == "KW-SKILL-REVIEW-001" &&
+            d.Message.Contains("null verdict", StringComparison.Ordinal));
+    }
 }

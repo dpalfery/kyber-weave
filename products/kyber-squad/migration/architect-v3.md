@@ -9,7 +9,7 @@ sources:
   .cursor/agents/architect-v3.agent.md: 6fbb40364b86fb88043145e3b9f9c895803b1bc0eabbe4e0cc57aaa5c328da7f
   .github/agents/architect-v3.agent.md: c973df5e8d283f7b5d9b36b95c583d9fb29e3d3633bf318603d2c4ba4ddc8208
   .opencode/agents/architect-v3.md: 5b35cc86188a35bb2a1d4edd8ed1fd8788ca7b5df772bc197defdfe3f53b93e6
-final-body-sha256: 8e5d7fb438f5b2f9421ccde71b6d54eb079127ac27909dc55aeaa844383b12ee
+final-body-sha256: 084e5e27e612f752b16e5ded160d45cfef91157eca3bd3b71994cbe4cb908d67
 ---
 # architect-v3 migration
 
@@ -21,7 +21,13 @@ Source frontmatter, provider model identifiers, tool allowlists, and command-sha
 
 ## Permission resolution
 
-The architect profile is the conservative intersection of effective live permissions after unsupported capabilities are marked unavailable: filesystem.read=allow, filesystem.write=deny, process.execute=deny, network.read=allow, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
+The architect profile's historical conservative intersection after unsupported capabilities were marked unavailable was: filesystem.read=allow, filesystem.write=deny, process.execute=deny, network.read=allow, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
+
+The effective profile is no longer that intersection. Discovery changed from a request/fulfill loop mediated by the orchestrator to direct delegation: the profile grants `delegate=allow`, and `delegates-to` names `azure-reader` and `research-agent`; the labeled `DISCOVERY REQUEST` hand-up remains as the fallback. The body requires writing the plan file under `<docs-root>/plans/` (plus its index row) and running `docs validate` / `docs drift`, so the lattice's lack of path scoping is carried as `filesystem.write=ask` and `process.execute=ask` rather than allow. Source edits stay denied.
+
+An earlier post-migration revision attributed the "cannot spawn" claim to the then-current `delegate=deny`. That record is historical: architect-v3 permissions now match the architect profile, including direct delegation to the two discovery roles.
+
+The instruction body was then restructured around the fact that the agent is spawned cold — a four-step bootstrap that resolves paths, locates or creates the plan file (refusing a prompt-supplied `PLAN_FILE` that is not a descendant of the plans directory), and reconciles answers from the prompt before anything else; a fixed set of output markers as the only way to end a turn; and a one-retry rule on failed delegation. The plan file, not context, is the agent's memory. The test-first material — the mandatory Test contract, test-first decomposition, and the ten-section plan layout the conductor-v3 Red→Green pipeline consumes — is unchanged in substance and retained in full.
 
 The instruction body was revised after migration, identically to architect and for the same reason: the blanket claim that a subagent cannot spawn other agents was replaced by an attribution to the architect profile's delegate=deny, which is what actually enforces it. The architect-v3 permissions are unchanged.
 

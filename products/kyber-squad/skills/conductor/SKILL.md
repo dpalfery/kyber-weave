@@ -98,7 +98,7 @@ Work from the `architect` plan flows through a pipeline, not one task at a time.
 - **Worker pool per agent type** — map each ready task to its specialist (§1), then run **multiple instances of the same specialist concurrently**, one task each. Example: three independent `csharp-dev` tasks with disjoint files → three `csharp-dev` workers in flight at once.
 - **Bounded concurrency** — cap parallel workers per file scopes so changes stay disjoint and edits never collide. When two ready tasks touch the same files or symbols, serialize them; the dependency graph and file scope — not arrival order — decide what is eligible. parallelize aggressively for user time savings and efficiency taking on some conflict risk for performance.
 
-don't wait till the current parallel tasks complete to start thinking about the prompts for the next runs, you can always ask the 'architect' agent to help you with subagent prompts. in a good working solution there are minimal 3 agents running at a time. be sure to monitor each agent for completion and don't wait for all spawned agents to complete before addressing a completed agent.
+Don't wait until the current parallel tasks complete to start drafting the prompts for the next runs; you can always ask `architect` to help you with subagent prompts. Launch as many workers as the approved plan currently has eligible (dependency-satisfied, disjoint-scope) tasks, including fewer than three when that is all the plan requires; do not start unrelated work solely to satisfy a three-worker minimum. Monitor each agent for completion and address a completed agent immediately — do not wait for every in-flight agent to finish first.
 
 Issue all eligible task invocations **together** in a batch rather than finishing one before starting the next. Keep each invocation self-contained — objective, exact files/symbols, acceptance criteria, and required skills from the plan — so any pool worker can execute it cold under context isolation.
 
@@ -107,12 +107,13 @@ Issue all eligible task invocations **together** in a batch rather than finishin
 Review is a concurrent pipeline stage, never a barrier that idles the dev pool.
 
 1. When a dev worker claims a task complete, enqueue a `code-reviewer` task for that work **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review.
-2. `code-reviewer` returns per task:
-   - **APPROVED** → mark that task commit-ready.
-   - **CHANGES REQUESTED** → create a **rework item** that carries the full review feedback plus the original task's files/symbols and acceptance criteria, and place it back on the ready queue for that agent type.
+2. `code-reviewer` returns per task (engine terms; operators may still say “approved” for `APPROVE`):
+   - **APPROVE** → mark that task commit-ready.
+   - **REQUEST_CHANGES** → create a **rework item** that carries the full review feedback plus the original task's files/symbols and acceptance criteria, and place it back on the ready queue for that agent type.
+   - **NEEDS_HUMAN** → stop that task's review loop and escalate; do not iterate or treat it as `APPROVE`.
 3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. (e.g., while `csharp-dev` #1 is still finishing task two, `csharp-dev` #2 takes the rework from task one's review.) This is why rework items must be self-contained: the reviewer's feedback plus the task spec is the full context.
 4. A reworked task re-enters step 1 (complete → review → approve/rework). Track an iteration count **per task**; cap at 5 review cycles (per the `dp-code-reviewer` skill) and escalate immediately on a critical security/safety finding or when any task exceeds the cap.
-5. The objective is done only when every task — originals and reworks — has reached APPROVED.
+5. The objective is done only when every task — originals and reworks — has reached `APPROVE`.
 
 ## Plan closeout
 

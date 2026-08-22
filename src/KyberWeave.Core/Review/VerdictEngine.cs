@@ -42,7 +42,7 @@ public static class VerdictEngine
     public const string CriticalFinding = "KW-REVIEW-006";
 
     /// <summary>Surviving major findings at or above the configured threshold.</summary>
-    private const string MajorFindingThreshold = "KW-REVIEW-007";
+    public const string MajorFindingThreshold = "KW-REVIEW-007";
 
     /// <summary>A changed path the policy reserves for human review.</summary>
     public const string ReservedPath = "KW-REVIEW-008";
@@ -55,6 +55,9 @@ public static class VerdictEngine
 
     /// <summary>No reserved paths are declared, so nothing can escalate.</summary>
     public const string NoReservedPathsDeclared = "KW-REVIEW-011";
+
+    /// <summary>A coverage floor is declared but no coverage report was produced.</summary>
+    public const string CoverageMissing = "KW-REVIEW-012";
 
     private const string Subject = "review";
 
@@ -333,8 +336,19 @@ public static class VerdictEngine
         ReviewCoverage floor,
         List<Diagnostic> diagnostics)
     {
-        if (coverage is null || !floor.IsDeclared)
+        if (!floor.IsDeclared)
             return;
+
+        if (coverage is null)
+        {
+            diagnostics.Add(new Diagnostic(
+                CoverageMissing,
+                Severity.Warning,
+                "A coverage floor is declared but no coverage report was produced.",
+                Subject,
+                Hint: "Add --collect 'XPlat Code Coverage' to the test gate, or drop review.coverage."));
+            return;
+        }
 
         // Reported, never decisive. Coverage is a proxy for protection, and a verdict driven
         // by a proxy rewards padding the proxy — which the test-adequacy lens is there to

@@ -4,6 +4,7 @@ namespace KyberWeave.Core.Configuration;
 /// <param name="Id">Slug identifying the gate in findings and reports.</param>
 /// <param name="Run">The command and its arguments, already split into argv.</param>
 /// <param name="Blocking">Whether failing this gate blocks the change.</param>
+/// <param name="TimeoutSeconds">Seconds to wait before the runner kills the process tree.</param>
 /// <remarks>
 /// <see cref="Run"/> is a list, never a command line, because
 /// <see cref="Processes.ProcessRunner"/> refuses a concatenated argument string and refuses
@@ -12,7 +13,7 @@ namespace KyberWeave.Core.Configuration;
 /// vocabulary is exactly "run this program with these arguments", which is the whole
 /// injection surface closed at the point the value is written.
 /// </remarks>
-public sealed record ReviewGate(string Id, IReadOnlyList<string> Run, bool Blocking = true);
+public sealed record ReviewGate(string Id, IReadOnlyList<string> Run, bool Blocking = true, int TimeoutSeconds = 900);
 
 /// <summary>The unit-coverage floor a change must clear.</summary>
 /// <param name="FileLinePercent">Minimum line coverage across files.</param>

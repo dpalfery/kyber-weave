@@ -52,7 +52,13 @@ This is the whole job, and both directions of error are costly.
 - A diagnostic on a line **the diff touched** belongs to this change.
 - A diagnostic **elsewhere in a touched file** may well predate it. Check the file's prior
   state before attributing it.
-- A diagnostic in a file **the diff did not touch** is not this change's, and is not reported.
+- A diagnostic in a file **the diff did not touch** is not this change's — unless a
+  project-wide input the diff did touch can introduce it. A project file, analyzer
+  configuration, dependency, or lock-file change can emit a new diagnostic in an
+  untouched source file. Compare the artifact with the pre-change baseline and
+  attribute diagnostics that appear because those inputs changed. Retain the
+  touched-line and pre-existing distinctions for diagnostics unrelated to those
+  inputs; those remain not this change's, and are not reported.
 
 Unattributed pre-existing noise buries the findings that matter. A genuinely introduced
 diagnostic waved away as pre-existing is how a codebase accumulates them. Where you cannot

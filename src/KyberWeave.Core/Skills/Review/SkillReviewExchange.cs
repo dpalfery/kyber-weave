@@ -149,6 +149,11 @@ public static class SkillReviewExchange
             return Failure($"Unsupported verdict schema '{bundle.Schema}'. Expected '{VerdictSchema}'.");
         }
 
+        if (bundle.Verdicts is null)
+        {
+            return Failure("The verdict bundle omits the verdicts collection.");
+        }
+
         if (bundle.Verdicts.Count == 0)
         {
             return Failure("The verdict bundle does not contain any verdicts.");
@@ -172,6 +177,10 @@ public static class SkillReviewExchange
 
         foreach (SkillReviewVerdict verdict in bundle.Verdicts)
         {
+            if (verdict is null)
+            {
+                return Failure("The verdict bundle contains a null verdict.");
+            }
             if (string.IsNullOrWhiteSpace(verdict.CandidateId))
             {
                 return Failure("Verdict candidate_id must be non-empty.");
