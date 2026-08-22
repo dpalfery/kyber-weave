@@ -17,7 +17,7 @@ This is **context for planning the work, not a plan**.
 `DocsAnalysisConfigTests.LoadFromYamlWhenEmbeddingEndpointIsNotAbsoluteLoopbackHttpRejectsIt`
 fails for one of its three rows:
 
-```
+```yaml
 mode: prefer, endpoint: https://example.com/v1/embeddings
 ```
 

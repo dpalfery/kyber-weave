@@ -98,7 +98,7 @@ archiving before migrating does not make the content stale — it makes it invis
 
 When done, return:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of documentation file paths>
 SUMMARY: <2–4 sentences: what was written or updated, scope, and any notable gaps>

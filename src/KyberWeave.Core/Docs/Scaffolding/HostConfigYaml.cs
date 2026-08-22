@@ -575,14 +575,14 @@ internal static partial class HostConfigYaml
             string middle = beforeBracket[(openBracketIndex + 1)..];
             if (string.IsNullOrWhiteSpace(middle))
             {
-                lines[closeLineIndex] = prefix + string.Join(", ", toAdd) + afterBracket;
+                lines[closeLineIndex] = prefix + string.Join(", ", toAdd.Select(QuoteScalar)) + afterBracket;
                 return string.Join(newline, lines);
             }
         }
 
         string addition = existingTechs.Count > 0
-            ? ", " + string.Join(", ", toAdd)
-            : string.Join(", ", toAdd);
+            ? ", " + string.Join(", ", toAdd.Select(QuoteScalar))
+            : string.Join(", ", toAdd.Select(QuoteScalar));
 
         lines[closeLineIndex] = beforeBracket + addition + afterBracket;
         return string.Join(newline, lines);
@@ -653,7 +653,7 @@ internal static partial class HostConfigYaml
         List<string> newLines = new List<string>();
         foreach (string tech in toAdd)
         {
-            newLines.Add(itemIndent + "- " + tech);
+            newLines.Add(itemIndent + "- " + QuoteScalar(tech));
         }
 
         lines.InsertRange(lastItemIndex + 1, newLines);
@@ -682,7 +682,7 @@ internal static partial class HostConfigYaml
         string itemIndent = blockIndent + DefaultIndent;
         foreach (string tech in technologies.Distinct(StringComparer.Ordinal))
         {
-            toInsert.Add(itemIndent + "- " + tech);
+            toInsert.Add(itemIndent + "- " + QuoteScalar(tech));
         }
 
         lines.InsertRange(insertIndex, toInsert);
@@ -702,7 +702,7 @@ internal static partial class HostConfigYaml
         lines.Add(DefaultIndent + "technologies:");
         foreach (string tech in technologies.Distinct(StringComparer.Ordinal))
         {
-            lines.Add(DefaultIndent + DefaultIndent + "- " + tech);
+            lines.Add(DefaultIndent + DefaultIndent + "- " + QuoteScalar(tech));
         }
 
         lines.Add(string.Empty);

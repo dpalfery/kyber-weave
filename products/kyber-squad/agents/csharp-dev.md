@@ -59,7 +59,7 @@ You do **not** own:
 
 When done, return:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of C# file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, types touched, and any hand-offs>

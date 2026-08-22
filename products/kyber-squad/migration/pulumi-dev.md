@@ -9,7 +9,7 @@ sources:
   .cursor/agents/pulumi-dev.agent.md: 87c7ab97c90c3d048d5c0b1c98f2e22c10bb0f5bd8b669ac7e736c57cb792448
   .github/agents/pulumi-dev.agent.md: 8f05c11bbdf58801e749d4b5b07ff903fa7b281d4acf60fc4743154f9a8fdc8d
   .opencode/agents/pulumi-dev.md: 802635c4c85532f1a0a3c78198cef9212494e73b352e139fe98ac280db84aea8
-final-body-sha256: 8e409d5031165f14fc501ad2e1c7f8ab8c7a9b164ae29885ad7935936a71b365
+final-body-sha256: dd678d36c794d5280dbd989d46688c7004c3abd90a77e336f5495233bad05556
 ---
 # pulumi-dev migration
 

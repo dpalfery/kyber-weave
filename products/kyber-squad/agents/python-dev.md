@@ -54,7 +54,7 @@ You do **not** own:
 
 When done, return:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of Python file paths changed or created>
 SUMMARY: <2–4 sentences: what was implemented, modules touched, and any hand-offs>

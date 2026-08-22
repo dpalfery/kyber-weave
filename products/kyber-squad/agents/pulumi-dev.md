@@ -61,7 +61,7 @@ You do **not** own:
 
 When done, return:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of Pulumi/C# file paths changed or created>
 SUMMARY: <2–4 sentences: stacks/components touched, preview outcome, replacement or cross-stack risk, and any hand-offs>

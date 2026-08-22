@@ -63,7 +63,7 @@ Deliver `IRepository<T>` implementations that satisfy the interfaces in the Cont
 
 When done, return:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of persistence file paths changed or created>
 SUMMARY: <2–4 sentences: repositories/migrations touched, and any hand-offs>

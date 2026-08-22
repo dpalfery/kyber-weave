@@ -128,6 +128,17 @@ public sealed class KyberStandardsTemplatesTests
     }
 
     /// <summary>
+    /// Rendering a misspelled technology throws an ArgumentException with a nearest-match hint.
+    /// </summary>
+    [Fact]
+    public void RenderThrowsWithDidYouMeanHintOnTypo()
+    {
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => KyberStandardsTemplates.Render("cshar", "owner", "2026-08-17"));
+        Assert.Contains("Did you mean 'csharp'?", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("technology", ex.ParamName);
+    }
+
+    /// <summary>
     /// TryRender successfully renders a known technology template.
     /// </summary>
     [Fact]

@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-21
 ---
 
 # Distribution and release flow
@@ -145,6 +145,42 @@ kyber-weave-mcp -v
 ```
 
 Output format: `kyber-weave <version>` (e.g. `kyber-weave 0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f` or `kyber-weave 0.2.0-rc.1`).
+
+## Verifying a release locally
+
+A self-updater is always executed by the **old** binary. A fix to the update path therefore
+cannot be proven by the release that contains it — only by updating away from a build that
+predates it. Tag-and-wait cycles get this wrong silently: the release ships, the same failure
+reappears, and the fix looks broken when it was simply never the code that ran.
+
+Changes to the self-updater, `install.sh`, or the Squad release path must run the local release
+loop. It publishes the working tree as a stand-in Release, serves it from loopback, and drives a
+real self-update and `squad install` against published single-file binaries. Nothing reaches
+github.com:
+
+```bash
+./scripts/update-loop.sh                  # publish, serve, self-update, squad install
+./scripts/update-loop.sh --keep           # leave the sandbox in place to inspect
+./scripts/update-loop.sh --from <git-ref> # update away from an older build
+```
+
+Three pieces are usable separately:
+
+| Script | Does |
+|---|---|
+| [`scripts/release-local.sh`](../scripts/release-local.sh) | Publishes one RID with `release.yml`'s exact flags into `.local-release/v<version>/`, plus Squad archives and `SHA256SUMS.txt`. |
+| [`scripts/local-release-server.py`](../scripts/local-release-server.py) | Serves that tree as the GitHub Releases endpoints the CLI reads. Loopback only. |
+| [`scripts/update-loop.sh`](../scripts/update-loop.sh) | Drives the two together and asserts the outcome. |
+
+The redirect is `KYBER_WEAVE_RELEASE_ORIGIN`, resolved by
+[`ReleaseOrigin`](../src/KyberWeave.Cli/Update/ReleaseOrigin.cs). It accepts **loopback
+authorities only**, and permits plain HTTP only for a loopback URL under an active override —
+a redirect off the local server still has to be HTTPS. Those restrictions are the point of
+the type; `ReleaseOriginTests` pins them, and widening them needs a reason you can state.
+
+Run against a **published single-file binary**, never `dotnet run`. The failure this exists
+to catch — a running image replacing itself and then failing to load an assembly it had not
+yet touched — does not exist in any other shape.
 
 ## Continuous integration security
 
