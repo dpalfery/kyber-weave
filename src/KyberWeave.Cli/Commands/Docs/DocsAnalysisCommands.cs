@@ -1,12 +1,12 @@
 using JetBrains.Annotations;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
-using KyberWeave.Core.Docs.Analysis;
-using Spectre.Console.Cli;
 using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
