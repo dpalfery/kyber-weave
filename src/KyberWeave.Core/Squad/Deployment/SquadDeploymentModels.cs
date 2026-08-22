@@ -1,3 +1,5 @@
+using JetBrains.Annotations;
+
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Where Kyber-Squad deployment state is stored.</summary>
@@ -76,9 +78,9 @@ public sealed record SquadDeploymentFile
 
     public string RelativePath { get; init; }
 
-    public ReadOnlyMemory<byte> Content { get; init; }
+    public ReadOnlyMemory<byte> Content { get; }
 
-    public string Target { get; init; }
+    public string Target { get; }
 }
 
 /// <summary>Supplies the per-user location used by global Squad state.</summary>
@@ -90,6 +92,7 @@ public interface ISquadUserPaths
 /// <summary>Raised when a deployment would overwrite a path outside its receipt authority.</summary>
 public sealed class SquadDeploymentConflictException : InvalidOperationException
 {
+    [UsedImplicitly]
     public SquadDeploymentConflictException()
     {
     }
@@ -108,6 +111,7 @@ public sealed class SquadDeploymentConflictException : InvalidOperationException
 /// <summary>Raised when a deployment path escapes its declared target root.</summary>
 public sealed class SquadPathContainmentException : InvalidOperationException
 {
+    [UsedImplicitly]
     public SquadPathContainmentException()
     {
     }
@@ -117,6 +121,7 @@ public sealed class SquadPathContainmentException : InvalidOperationException
     {
     }
 
+    [UsedImplicitly]
     public SquadPathContainmentException(string message, Exception innerException)
         : base(message, innerException)
     {

@@ -9,7 +9,7 @@ sources:
   .cursor/agents/dotnet-dev.agent.md: 908e5f0813a3a4a0ff6b1d983645744c24b7bce6574cb97dff34dd52b6f0b616
   .github/agents/dotnet-dev.agent.md: ea402133727e2b32d7987871a4aa7edb09fe5240340b2fe1dff8d61affdec72c
   .opencode/agents/dotnet-dev.md: 2190ab5b76e48203bf3250468e35741ec90625402bcf5ab7e2051cd3df3d1bb0
-final-body-sha256: 8565cc8d968a19acf428e091e53fded546dd447116ae6798a143315c6421eaa1
+final-body-sha256: 4fbdb87b65739c4c6d9e49549a4c9a101f2455733e53b0034c41d286a3a3623d
 ---
 # csharp-dev migration
 
@@ -22,5 +22,9 @@ Source frontmatter, provider model identifiers, tool allowlists, and command-sha
 ## Permission resolution
 
 The worker profile is the conservative intersection of effective live permissions after unsupported capabilities are marked unavailable: filesystem.read=allow, filesystem.write=allow, process.execute=allow, network.read=deny, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
+
+The instruction body was revised after migration. A blocking completion gate on language diagnostics was added: a baseline sweep before the first edit, a full-file and workspace sweep after the last one, a rule that every diagnostic class counts, and a `DIAGNOSTICS` line in the completion digest. The gate exists because a green build measures a different thing than a clean Problems list, and "pre-existing" was being asserted rather than proven. Capability profile and delegation are unchanged.
+
+The body now routes to the `resharper-clt` skill and folds a ReSharper InspectCode run into the completion gate, at the baseline and again before `READY_FOR_REVIEW`. ReSharper's inspection set and the compiler's overlap only partially — a suggestion-severity inspection never reaches `dotnet build` — so a green build was clearing a gate it does not actually measure.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

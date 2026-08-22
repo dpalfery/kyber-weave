@@ -138,7 +138,7 @@ public sealed class DocumentCorpus
         if (QuestionWords.Contains(term)) return false;
         if (_documentCount < 4) return true;
 
-        double n = _documentFrequency.TryGetValue(term, out double df) ? df : 0;
+        double n = _documentFrequency.GetValueOrDefault(term);
         return n <= _documentCount * UninformativeDocumentShare;
     }
 
@@ -148,7 +148,7 @@ public sealed class DocumentCorpus
     /// </summary>
     public double InverseDocumentFrequency(string term)
     {
-        double n = _documentFrequency.TryGetValue(term, out double df) ? df : 0;
+        double n = _documentFrequency.GetValueOrDefault(term);
         return Math.Log(1 + ((_documentCount - n + 0.5) / (n + 0.5)));
     }
 
@@ -233,8 +233,4 @@ public sealed class DocumentCorpus
         // of what was asked is answered and the score collapses.
         return answered / askedFor * score / (score + Saturation);
     }
-
-    /// <summary>The body vector of one document, for callers doing their own comparison.</summary>
-    public IReadOnlyDictionary<string, double> BodyVector(string relativePath) =>
-        _bodyVectors.TryGetValue(relativePath, out Dictionary<string, double>? v) ? v : new Dictionary<string, double>(StringComparer.Ordinal);
 }

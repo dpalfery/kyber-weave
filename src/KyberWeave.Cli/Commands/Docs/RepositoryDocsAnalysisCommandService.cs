@@ -119,7 +119,7 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
         IReadOnlyList<AnalysisCandidate> candidates)
     {
         List<GlossaryProposal> proposals = new List<GlossaryProposal>();
-        foreach (AnalysisCandidate? candidate in candidates.Where(candidate =>
+        foreach (AnalysisCandidate candidate in candidates.Where(candidate =>
                      candidate.Kind == AnalysisRuleKind.Terminology
                      && !string.IsNullOrWhiteSpace(candidate.Term)))
         {
@@ -136,7 +136,7 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
 
             proposals.AddRange(candidate.Claims
                 .Where(claim => !string.IsNullOrWhiteSpace(claim.Component))
-                .GroupBy(claim => claim.Component!, StringComparer.Ordinal)
+                .GroupBy(claim => claim.Component, StringComparer.Ordinal)
                 .Select(group => new GlossaryProposal(
                     candidate.Term!,
                     string.Empty,

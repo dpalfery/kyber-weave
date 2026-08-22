@@ -260,7 +260,7 @@ public sealed class SquadSourceTests
 
         using SquadFixture fixture = SquadFixture.CreateValid();
         using TempDirectory outside = new TempDirectory();
-        string outsideAgent = System.IO.Path.Combine(outside.Path, "architect.md");
+        string outsideAgent = Path.Combine(outside.Path, "architect.md");
         File.WriteAllText(outsideAgent, SquadFixture.ArchitectAgentLf, new UTF8Encoding(false));
         string linkedAgent = fixture.AbsolutePath("agents/architect.md");
         File.Delete(linkedAgent);
@@ -341,7 +341,7 @@ public sealed class SquadSourceTests
         Assert.NotEmpty(diagnostic.RelatedLocations);
         Assert.All(
             diagnostic.RelatedLocations,
-            location => Assert.False(System.IO.Path.IsPathRooted(location.FilePath)));
+            location => Assert.False(Path.IsPathRooted(location.FilePath)));
         Assert.False(string.IsNullOrWhiteSpace(diagnostic.Hint));
     }
 
@@ -547,7 +547,7 @@ public sealed class SquadSourceTests
                      (item.Hint?.Contains(expectedMessageFragment, StringComparison.OrdinalIgnoreCase) ?? false)));
 
         Assert.Equal(Severity.Error, diagnostic.Severity);
-        Assert.False(System.IO.Path.IsPathRooted(diagnostic.FilePath!));
+        Assert.False(Path.IsPathRooted(diagnostic.FilePath!));
         Assert.False(string.IsNullOrWhiteSpace(diagnostic.Hint));
         return diagnostic;
     }
@@ -655,7 +655,7 @@ public sealed class SquadSourceTests
             fixture.Write("agents/csharp-dev.md", Agent("csharp-dev"));
             fixture.Write("skills/test-dev/SKILL.md", Skill("test-dev", "Use when writing tests."));
 
-            foreach (string? schema in new[]
+            foreach (string schema in new[]
                      {
                          "squad", "bundle", "agent", "model-profiles", "capability-profiles"
                      })

@@ -10,11 +10,11 @@ namespace KyberWeave.Core.Skills.Review;
 /// <summary>
 /// Exports skill and agent description review candidates and validates/imports agent review verdicts.
 /// </summary>
-public static partial class SkillReviewExchange
+public static class SkillReviewExchange
 {
-    public const string CandidateSchema = "kyber-weave.skill-review.candidates/v1";
-    public const string VerdictSchema = "kyber-weave.skill-review.verdicts/v1";
-    public const string ReviewRuleCode = "KW-SKILL-REVIEW-001";
+    private const string CandidateSchema = "kyber-weave.skill-review.candidates/v1";
+    private const string VerdictSchema = "kyber-weave.skill-review.verdicts/v1";
+    private const string ReviewRuleCode = "KW-SKILL-REVIEW-001";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -27,7 +27,7 @@ public static partial class SkillReviewExchange
         AgentSet? agents = null) =>
         ExportCandidates(skills?.Skills, agents?.Agents);
 
-    public static SkillReviewExportResult ExportCandidates(
+    private static SkillReviewExportResult ExportCandidates(
         IEnumerable<Skill>? skills,
         IEnumerable<AgentModel>? agents = null)
     {
@@ -63,7 +63,7 @@ public static partial class SkillReviewExchange
             {
                 // Role names repeat across harnesses; the review key must distinguish them.
                 string id = AgentCandidateId(agent);
-                string description = agent.Description ?? string.Empty;
+                string description = agent.Description;
                 Skill dummySkill = new Skill
                 {
                     SkillFilePath = agent.FilePath,
@@ -108,7 +108,7 @@ public static partial class SkillReviewExchange
 
         SkillReviewCandidateBundle bundle = new SkillReviewCandidateBundle(CandidateSchema, candidates);
         string json = JsonSerializer.Serialize(bundle, SerializerOptions);
-        return new SkillReviewExportResult(bundle, json, new DiagnosticReport());
+        return new SkillReviewExportResult(bundle, json);
     }
 
     public static SkillReviewImportResult ImportVerdicts(
@@ -149,7 +149,7 @@ public static partial class SkillReviewExchange
             return Failure($"Unsupported verdict schema '{bundle.Schema}'. Expected '{VerdictSchema}'.");
         }
 
-        if (bundle.Verdicts is null || bundle.Verdicts.Count == 0)
+        if (bundle.Verdicts.Count == 0)
         {
             return Failure("The verdict bundle does not contain any verdicts.");
         }
@@ -170,13 +170,8 @@ public static partial class SkillReviewExchange
 
         HashSet<string> seenCandidateIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (SkillReviewVerdict? verdict in bundle.Verdicts)
+        foreach (SkillReviewVerdict verdict in bundle.Verdicts)
         {
-            if (verdict is null)
-            {
-                return Failure("The verdict bundle contains a null verdict entry.");
-            }
-
             if (string.IsNullOrWhiteSpace(verdict.CandidateId))
             {
                 return Failure("Verdict candidate_id must be non-empty.");

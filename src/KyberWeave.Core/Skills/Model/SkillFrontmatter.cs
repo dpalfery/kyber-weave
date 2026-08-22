@@ -13,11 +13,11 @@ public sealed class SkillFrontmatter
 
     /// <summary>Required. Lowercase a-z, 0-9 and hyphens; must match the parent directory name.</summary>
     [YamlMember(Alias = "name")]
-    public string? Name { get; set; }
+    public string? Name { get; init; }
 
     /// <summary>Required. What the skill does AND when to use it. This is the routing signal.</summary>
     [YamlMember(Alias = "description")]
-    public string? Description { get; set; }
+    public string? Description { get; init; }
 
     /// <summary>Optional. SPDX license identifier.</summary>
     [YamlMember(Alias = "license")]

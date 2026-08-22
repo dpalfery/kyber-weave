@@ -13,6 +13,8 @@ public sealed class KyberWeaveConfig
 
     public ConfigRegConfig ConfigReg { get; init; } = ConfigRegConfig.ProductDefaults;
 
+    public ReviewConfig Review { get; init; } = ReviewConfig.ProductDefaults;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -56,13 +58,15 @@ public sealed class KyberWeaveConfig
         HarnessProfileConfig? harness = null,
         DocsAnalysisConfig? docsAnalysis = null,
         SquadConfig? squad = null,
-        ConfigRegConfig? configReg = null) =>
+        ConfigRegConfig? configReg = null,
+        ReviewConfig? review = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
             Harness = harness ?? Harness,
             DocsAnalysis = docsAnalysis ?? DocsAnalysis,
             Squad = squad ?? Squad,
-            ConfigReg = configReg ?? ConfigReg
+            ConfigReg = configReg ?? ConfigReg,
+            Review = review ?? Review
         };
 }

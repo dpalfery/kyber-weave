@@ -1,3 +1,4 @@
+using JetBrains.Annotations;
 using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Core.Squad.Validation;
@@ -5,17 +6,20 @@ namespace KyberWeave.Core.Squad.Validation;
 /// <summary>Raised when canonical Squad source cannot be loaded safely.</summary>
 public sealed class SquadSourceValidationException : Exception
 {
+    [UsedImplicitly]
     public SquadSourceValidationException()
         : this(new DiagnosticReport())
     {
     }
 
+    [UsedImplicitly]
     public SquadSourceValidationException(string message)
         : base(message)
     {
         Diagnostics = new DiagnosticReport();
     }
 
+    [UsedImplicitly]
     public SquadSourceValidationException(string message, Exception innerException)
         : base(message, innerException)
     {

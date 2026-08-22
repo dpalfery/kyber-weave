@@ -73,10 +73,8 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Fact]
     public void ConstructorWithRedirectFollowingHandlerRejectsTheUnsafeTransportContract()
     {
-        using HttpClientHandler handler = new HttpClientHandler
-        {
-            AllowAutoRedirect = true
-        };
+        using HttpClientHandler handler = new HttpClientHandler();
+        handler.AllowAutoRedirect = true;
 
         ArgumentException exception = Assert.Throws<ArgumentException>(() =>
             new GitHubSquadReleaseSource(handler, ApiRoot));
@@ -378,7 +376,7 @@ public sealed class SquadReleaseClientTests : IDisposable
     [Fact]
     public async Task DownloadAndExtractAsyncWhenArchiveIsInvalidRejectsWithoutDestinationOrStateChanges()
     {
-        byte[] invalidArchive = Encoding.UTF8.GetBytes("not a zip archive");
+        byte[] invalidArchive = "not a zip archive"u8.ToArray();
 
         Exception exception = await DownloadFailure(
             invalidArchive,
@@ -417,12 +415,14 @@ public sealed class SquadReleaseClientTests : IDisposable
             $"{Sha256(archiveBytes)}  {AssetName}\n");
         SeedStateOnly();
         IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        // ReSharper disable once AccessToDisposedClosure
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(
             handler,
             ApiRoot,
             onStagingCreated: () =>
             {
                 stagingCreated = true;
+                // ReSharper disable once AccessToDisposedClosure
                 cancellation.Cancel();
             });
 
@@ -725,36 +725,27 @@ public sealed class SquadReleaseClientTests : IDisposable
             Assert.NotNull(request.RequestUri);
             Requests.Add(request.RequestUri);
             if (!_responses.TryGetValue(request.RequestUri, out Queue<Func<HttpResponseMessage>>? queue) || queue.Count == 0)
-                throw new Xunit.Sdk.XunitException($"Unexpected HTTP request: {request.RequestUri}");
+                throw new XunitException($"Unexpected HTTP request: {request.RequestUri}");
 
             return Task.FromResult(queue.Dequeue()());
         }
     }
 
-    private sealed class CancelAfterSerializationContent : HttpContent
+    private sealed class CancelAfterSerializationContent(
+        byte[] bytes,
+        CancellationTokenSource cancellation) : HttpContent
     {
-        private readonly byte[] _bytes;
-        private readonly CancellationTokenSource _cancellation;
-
-        public CancelAfterSerializationContent(
-            byte[] bytes,
-            CancellationTokenSource cancellation)
-        {
-            _bytes = bytes;
-            _cancellation = cancellation;
-        }
-
         protected override async Task SerializeToStreamAsync(
             Stream stream,
             TransportContext? context)
         {
-            await stream.WriteAsync(_bytes, CancellationToken.None);
-            await _cancellation.CancelAsync();
+            await stream.WriteAsync(bytes, CancellationToken.None);
+            await cancellation.CancelAsync();
         }
 
         protected override bool TryComputeLength(out long length)
         {
-            length = _bytes.Length;
+            length = bytes.Length;
             return true;
         }
     }

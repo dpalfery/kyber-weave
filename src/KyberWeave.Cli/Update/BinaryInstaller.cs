@@ -100,7 +100,7 @@ internal static class BinaryInstaller
     /// 'System.Diagnostics.Process'" — aborting an update that had already written the new
     /// binary. Running before the move also warms the assembly for anything after it.
     /// </remarks>
-    internal static void ClearMacQuarantine(string path)
+    private static void ClearMacQuarantine(string path)
     {
         try
         {

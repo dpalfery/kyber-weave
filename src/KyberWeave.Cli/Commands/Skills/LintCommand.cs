@@ -25,32 +25,29 @@ public sealed class LintCommand : Command<LintSettings>
     public override int Execute(CommandContext context, LintSettings settings)
     {
         DiagnosticReport report = new DiagnosticReport();
-        SkillSet? set = CommandHelpers.LoadOrReport(settings.Path, report);
+        SkillSet set = CommandHelpers.LoadOrReport(settings.Path, report);
 
         RoutingLinter linter = new RoutingLinter { MinDescriptionScore = settings.MinDescriptionScore };
 
-        if (set is not null)
-        {
-            foreach (Skill skill in set.Skills)
-                report.AddRange(linter.LintSkill(skill));
-            report.AddRange(linter.LintSet(set));
+        foreach (Skill skill in set.Skills)
+            report.AddRange(linter.LintSkill(skill));
+        report.AddRange(linter.LintSet(set));
 
-            if (settings.Explain && settings.ParsedFormat == OutputFormat.Table)
+        if (settings is { Explain: true, ParsedFormat: OutputFormat.Table })
+        {
+            AnsiConsole.WriteLine();
+            foreach (Skill skill in set.Skills)
             {
+                DescriptionScore score = DescriptionScorer.Score(skill);
+                string name = skill.Frontmatter.Name ?? skill.DirectoryName;
+                string color = score.Total >= settings.MinDescriptionScore ? "green" : "yellow";
+                AnsiConsole.MarkupLine($"[bold]{Markup.Escape(name)}[/] — routing score [{color}]{score.Total}/100[/]");
+                Table t = new Table().Border(TableBorder.Minimal);
+                t.AddColumn("Dimension"); t.AddColumn("Score"); t.AddColumn("Detail");
+                foreach (ScoreComponent c in score.Components)
+                    t.AddRow(Markup.Escape(c.Name), $"{c.Points}/{c.MaxPoints}", Markup.Escape(c.Detail));
+                AnsiConsole.Write(t);
                 AnsiConsole.WriteLine();
-                foreach (Skill skill in set.Skills)
-                {
-                    DescriptionScore score = DescriptionScorer.Score(skill);
-                    string name = skill.Frontmatter.Name ?? skill.DirectoryName;
-                    string color = score.Total >= settings.MinDescriptionScore ? "green" : "yellow";
-                    AnsiConsole.MarkupLine($"[bold]{Markup.Escape(name)}[/] — routing score [{color}]{score.Total}/100[/]");
-                    Table t = new Table().Border(TableBorder.Minimal);
-                    t.AddColumn("Dimension"); t.AddColumn("Score"); t.AddColumn("Detail");
-                    foreach (ScoreComponent c in score.Components)
-                        t.AddRow(Markup.Escape(c.Name), $"{c.Points}/{c.MaxPoints}", Markup.Escape(c.Detail));
-                    AnsiConsole.Write(t);
-                    AnsiConsole.WriteLine();
-                }
             }
         }
 

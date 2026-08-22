@@ -11,7 +11,7 @@ namespace KyberWeave.Core.Docs.Analysis.Claims;
 /// </summary>
 internal static partial class IgnoreMarkupReader
 {
-    internal const string DiagnosticCode = "KW-DOC-ANALYSIS-004";
+    private const string DiagnosticCode = "KW-DOC-ANALYSIS-004";
 
     internal static IgnoreMarkupReadResult Read(DocumentModel document)
     {
@@ -36,60 +36,56 @@ internal static partial class IgnoreMarkupReader
             int lineEnd = newline < 0 ? body.Length : newline;
             string line = body[lineStart..lineEnd];
 
-            if (UpdateFence(line, fence))
+            if (!UpdateFence(line, fence) && !fence.IsOpen)
             {
-                goto NextLine;
-            }
-
-            if (fence.IsOpen)
-            {
-                goto NextLine;
-            }
-
-            if (activeRule != IgnoreRule.None && LevelTwoHeadingPattern().IsMatch(line))
-            {
-                return Error(document, "Ignore markup cannot cross a level-two section boundary.");
-            }
-
-            MatchCollection matches = ExactTagPattern().Matches(line);
-            string residue = line;
-            foreach (Match match in matches.Cast<Match>().Reverse())
-            {
-                residue = residue.Remove(match.Index, match.Length);
-            }
-
-            if (TagLikePattern().IsMatch(residue))
-            {
-                return Error(document, "Ignore markup is malformed or uses an unknown, case-changed rule.");
-            }
-
-            foreach (Match match in matches)
-            {
-                Array.Fill(characters, ' ', lineStart + match.Index, match.Length);
-                if (match.Value == "</kyber-ignore>")
+                if (activeRule != IgnoreRule.None && LevelTwoHeadingPattern().IsMatch(line))
                 {
-                    if (activeRule == IgnoreRule.None)
+                    return Error(document, "Ignore markup cannot cross a level-two section boundary.");
+                }
+
+                MatchCollection matches = ExactTagPattern().Matches(line);
+                string residue = line;
+                foreach (Match match in matches.Reverse())
+                {
+                    residue = residue.Remove(match.Index, match.Length);
+                }
+
+                if (TagLikePattern().IsMatch(residue))
+                {
+                    return Error(document, "Ignore markup is malformed or uses an unknown, case-changed rule.");
+                }
+
+                foreach (Match match in matches)
+                {
+                    Array.Fill(characters, ' ', lineStart + match.Index, match.Length);
+                    if (match.Value == "</kyber-ignore>")
                     {
-                        return Error(document, "Ignore markup has a closing tag without an opening tag.");
+                        if (activeRule == IgnoreRule.None)
+                        {
+                            return Error(document, "Ignore markup has a closing tag without an opening tag.");
+                        }
+
+                        intervals.Add(new IgnoreInterval(activeLine, lineNumber, activeRule));
+                        activeRule = IgnoreRule.None;
+                        activeLine = 0;
+                        continue;
                     }
 
-                    intervals.Add(new IgnoreInterval(activeLine, lineNumber, activeRule));
-                    activeRule = IgnoreRule.None;
-                    activeLine = 0;
-                    continue;
-                }
+                    if (activeRule != IgnoreRule.None)
+                    {
+                        return Error(document, "Ignore markup cannot be nested.");
+                    }
 
-                if (activeRule != IgnoreRule.None)
-                {
-                    return Error(document, "Ignore markup cannot be nested.");
+                    activeRule = ParseRule(match.Groups["rule"].Value);
+                    activeLine = lineNumber;
                 }
-
-                activeRule = ParseRule(match.Groups["rule"].Value);
-                activeLine = lineNumber;
             }
 
-        NextLine:
-            if (newline < 0) break;
+            if (newline < 0)
+            {
+                break;
+            }
+
             lineStart = newline + 1;
             lineNumber++;
         }

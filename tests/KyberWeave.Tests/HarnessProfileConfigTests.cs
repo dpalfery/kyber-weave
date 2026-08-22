@@ -84,7 +84,7 @@ public class HarnessProfileConfigTests
         DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, config);
 
         List<Diagnostic> conductorMissing = report.Items
-            .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
+            .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
             .ToList();
 
         Assert.DoesNotContain(
@@ -118,7 +118,7 @@ public class HarnessProfileConfigTests
                     conductor: conductor
             """);
 
-        YamlException ex = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
+        YamlException ex = Assert.ThrowsAny<YamlException>(
             () => HarnessProfileConfigLoader.Load(yamlPath));
         Assert.Contains("not-a-harness", ex.Message, StringComparison.Ordinal);
     }
@@ -190,7 +190,7 @@ public class HarnessProfileConfigTests
             DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
 
             List<Diagnostic> conductorMissing = report.Items
-                .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
+                .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
                 .ToList();
 
             Assert.Contains(
@@ -210,7 +210,7 @@ public class HarnessProfileConfigTests
             DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config);
 
             List<Diagnostic> conductorMissing = report.Items
-                .Where(i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole && i.Subject == "conductor")
+                .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
                 .ToList();
 
             Assert.DoesNotContain(
@@ -236,9 +236,7 @@ public class HarnessProfileConfigTests
 
         Assert.Contains(
             report.Items,
-            i => i.Code == AgentSyncLinter.RuleUnsatisfiedRole &&
-                 i.Subject == "architect" &&
-                 i.Severity == Severity.Warning);
+            i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "architect", Severity: Severity.Warning });
     }
 
     private sealed class HarnessRepoFixture : IDisposable
@@ -266,7 +264,7 @@ public class HarnessProfileConfigTests
 
         public HarnessRepoFixture WithAgent(HarnessKind harness, string roleName)
         {
-            (string? folder, string? fileName) = harness switch
+            (string folder, string fileName) = harness switch
             {
                 HarnessKind.Codex => (".codex/agents", $"{roleName}.toml"),
                 HarnessKind.Cursor => (".cursor/agents", $"{roleName}.agent.md"),

@@ -45,9 +45,9 @@ public sealed class OntologyConfig
         "DevOps/msbuild-modernization.md"
     ];
 
-    public IReadOnlyList<string> DocTypes { get; init; } = DefaultDocTypes;
+    public IReadOnlyList<string> DocTypes { get; private init; } = DefaultDocTypes;
 
-    public IReadOnlyList<string> Statuses { get; init; } = DefaultStatuses;
+    public IReadOnlyList<string> Statuses { get; private init; } = DefaultStatuses;
 
     /// <summary>
     /// The technologies this repository declares a coding standard for. A closed vocabulary
@@ -74,7 +74,7 @@ public sealed class OntologyConfig
     /// Repository-relative path of the catalog, when the host puts it somewhere other than
     /// <c>&lt;primary root&gt;/catalog.md</c>. Read through <see cref="ResolvedCatalogPath"/>.
     /// </summary>
-    public string? CatalogPath { get; init; }
+    private string? CatalogPath { get; init; }
 
     /// <summary>
     /// The one catalog this repository has. A <c>catalog.md</c> in any other root is an
@@ -84,20 +84,20 @@ public sealed class OntologyConfig
     public string ResolvedCatalogPath =>
         string.IsNullOrWhiteSpace(CatalogPath) ? $"{DocsRoot}/catalog.md" : CatalogPath;
 
-    public IReadOnlyList<string> ExcludedPathSegments { get; init; } = DefaultExcludedSegments;
+    public IReadOnlyList<string> ExcludedPathSegments { get; private init; } = DefaultExcludedSegments;
 
-    public IReadOnlyList<string> ExcludedFiles { get; init; } = DefaultExcludedFiles;
+    public IReadOnlyList<string> ExcludedFiles { get; private init; } = DefaultExcludedFiles;
 
     /// <summary>Index into a pipe-split catalog table row for the Component cell.</summary>
-    public int CatalogComponentColumn { get; init; } = 1;
+    public int CatalogComponentColumn { get; private init; } = 1;
 
     /// <summary>Index into a pipe-split catalog table row for the Owner cell.</summary>
-    public int CatalogOwnerColumn { get; init; } = 6;
+    public int CatalogOwnerColumn { get; private init; } = 6;
 
-    public IReadOnlyList<string> BaseRequiredKeys { get; init; } = DefaultBaseRequiredKeys;
+    public IReadOnlyList<string> BaseRequiredKeys { get; private init; } = DefaultBaseRequiredKeys;
 
     /// <summary>Per-<see cref="DocType"/> required frontmatter keys (beyond the base set).</summary>
-    public IReadOnlyDictionary<DocType, IReadOnlyList<string>> RequiredKeysByType { get; init; } =
+    public IReadOnlyDictionary<DocType, IReadOnlyList<string>> RequiredKeysByType { get; private init; } =
         CreateDefaultRequiredKeysByType();
 
     public static OntologyConfig ProductDefaults { get; } = new();

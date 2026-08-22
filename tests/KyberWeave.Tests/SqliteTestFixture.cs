@@ -54,7 +54,7 @@ internal static class SqliteTestFixture
         return ProcessRunner.Run(startInfo, sql);
     }
 
-    public static ProcessStartInfo SqliteStartInfo() => new("sqlite3")
+    private static ProcessStartInfo SqliteStartInfo() => new("sqlite3")
     {
         RedirectStandardInput = true,
         RedirectStandardOutput = true,

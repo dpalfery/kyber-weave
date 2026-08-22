@@ -165,7 +165,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     {
         AnsiConsole.MarkupLine($"  [yellow]skipped[/]  kyber-weave-docs skill — {Markup.Escape(reason)}.");
         AnsiConsole.MarkupLine("           APM is an expected dependency; Kyber-Weave does not install it for you.");
-        AnsiConsole.MarkupLine($"           Install it ([grey]https://microsoft.github.io/apm[/]), then run:");
+        AnsiConsole.MarkupLine("           Install it ([grey]https://microsoft.github.io/apm[/]), then run:");
         AnsiConsole.MarkupLine($"             [grey]{Markup.Escape(command)}[/]");
         AnsiConsole.MarkupLine("           Or re-run with [grey]--no-skill[/] to skip this step.");
         AnsiConsole.WriteLine();

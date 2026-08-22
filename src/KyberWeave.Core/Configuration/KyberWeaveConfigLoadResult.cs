@@ -3,13 +3,13 @@ namespace KyberWeave.Core.Configuration;
 /// <summary>Outcome of attempting to load a combined Kyber-Weave config file.</summary>
 public sealed class KyberWeaveConfigLoadResult
 {
-    public bool Success { get; init; }
+    public bool Success { get; private init; }
 
-    public string? Error { get; init; }
+    public string? Error { get; private init; }
 
-    public string? ConfigPath { get; init; }
+    public string? ConfigPath { get; private init; }
 
-    public KyberWeaveConfig? Config { get; init; }
+    public KyberWeaveConfig? Config { get; private init; }
 
     public static KyberWeaveConfigLoadResult Ok(KyberWeaveConfig config, string? configPath) =>
         new() { Success = true, Config = config, ConfigPath = configPath };

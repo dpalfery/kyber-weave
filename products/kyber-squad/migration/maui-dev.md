@@ -9,7 +9,7 @@ sources:
   .cursor/agents/maui-dev.agent.md: f8f404b37f11eee6882f2a9394cb665056314df1b7be89978122c1cf1eaeae69
   .github/agents/maui-dev.agent.md: 1cb5984dfbf6142e88c464c4f8edd040fa7332ca0956ec299443cf822bb9843b
   .opencode/agents/maui-dev.md: 8c4133b41cd6439d078b1735482a5bdb10602078aa79f19a79b7a3dfe3951261
-final-body-sha256: 802dad4772f3aa37525390153f028423e148f111869966cd936b85d3f3d8bc45
+final-body-sha256: 48df73acd21c085d7ebd168189e05fd32876d4db3089c57fad0b08b35b4eb6c9
 ---
 # maui-dev migration
 
@@ -22,5 +22,7 @@ Source frontmatter, provider model identifiers, tool allowlists, and command-sha
 ## Permission resolution
 
 The worker profile is the conservative intersection of effective live permissions after unsupported capabilities are marked unavailable: filesystem.read=allow, filesystem.write=allow, process.execute=allow, network.read=deny, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
+
+The instruction body was revised after migration. A blocking completion gate on language diagnostics and ReSharper InspectCode was added: a baseline sweep before the first edit, a full-file and workspace sweep after the last one, a rule that every diagnostic class counts, and a `DIAGNOSTICS` line in the completion digest. The body also routes to the new `resharper-clt` skill. The gate exists because a green build measures a different thing than a clean Problems list or a clean inspection report, and "pre-existing" was being asserted rather than proven. Capability profile and delegation are unchanged.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

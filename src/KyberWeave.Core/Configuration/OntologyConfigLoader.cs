@@ -7,11 +7,11 @@ namespace KyberWeave.Core.Configuration;
 public static class OntologyConfigLoader
 {
     /// <summary>Key names as an operator wrote them, so diagnostics name the real line.</summary>
-    internal const string DocsRootKey = "ontology.docs-root";
+    private const string DocsRootKey = "ontology.docs-root";
 
-    internal const string CatalogPathKey = "ontology.catalog-path";
+    private const string CatalogPathKey = "ontology.catalog-path";
 
-    internal const string TechnologiesKey = "ontology.technologies";
+    private const string TechnologiesKey = "ontology.technologies";
 
     public static OntologyConfig LoadMerged(OntologyConfig defaults, string yamlPath)
     {
@@ -88,7 +88,7 @@ public static class OntologyConfigLoader
     /// <see cref="YamlException"/> so it reaches the operator as <c>KW-CONFIG-001</c>
     /// against the file they wrote, rather than as an unhandled argument error.
     /// </summary>
-    internal static IReadOnlyList<string>? NormalizeDocsRoots(object? value)
+    private static IReadOnlyList<string>? NormalizeDocsRoots(object? value)
     {
         if (value is null) return null;
 
@@ -143,14 +143,14 @@ public static class OntologyConfigLoader
     /// <c>technology</c> key, so it is constrained to a slug here — at the point the operator
     /// wrote it — rather than at the point something tries to create a path out of it.
     /// </summary>
-    internal static IReadOnlyList<string>? NormalizeTechnologies(List<string>? values)
+    private static IReadOnlyList<string>? NormalizeTechnologies(List<string>? values)
     {
         if (values is null) return null;
 
         List<string> normalized = new List<string>(values.Count);
         foreach (string value in values)
         {
-            string technology = value?.Trim() ?? string.Empty;
+            string technology = value.Trim();
             if (!ConfigSlug.IsValid(technology))
             {
                 throw new YamlException(
@@ -174,7 +174,7 @@ public static class OntologyConfigLoader
 
     private static bool TryParseDocType(string name, out DocType docType)
     {
-        docType = name?.Trim().ToLowerInvariant() switch
+        docType = name.Trim().ToLowerInvariant() switch
         {
             "architecture" => DocType.Architecture,
             "onboarding" => DocType.Onboarding,

@@ -14,7 +14,6 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// </summary>
 public sealed class SquadPackCommand : Command<SquadPackSettings>
 {
-    private readonly IProcessExecutor? _executor;
     private readonly string? _workingDirectory;
 
     /// <summary>Creates a new pack command using default dependencies.</summary>
@@ -23,9 +22,9 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     }
 
     /// <summary>Creates a new pack command using injectable process executor and working directory.</summary>
-    internal SquadPackCommand(IProcessExecutor? executor, string? workingDirectory = null)
+    internal SquadPackCommand(IProcessExecutor? executor = null, string? workingDirectory = null)
     {
-        _executor = executor;
+        _ = executor;
         _workingDirectory = workingDirectory;
     }
 
@@ -79,7 +78,7 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             }
             else
             {
-                (string? apmArchive, string? pluginsArchive, string? checksumPath) = SquadPacker.PackAll(sourcePath, outDir, version);
+                (string apmArchive, string pluginsArchive, string checksumPath) = SquadPacker.PackAll(sourcePath, outDir, version);
                 AnsiConsole.MarkupLine($"[green]Successfully packed APM archive to [bold]{Markup.Escape(apmArchive)}[/].[/]");
                 AnsiConsole.MarkupLine($"[green]Successfully packed Agent Plugins archive to [bold]{Markup.Escape(pluginsArchive)}[/].[/]");
                 AnsiConsole.MarkupLine($"[green]Generated checksums at [bold]{Markup.Escape(checksumPath)}[/].[/]");
@@ -96,8 +95,8 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
 
     private static string ResolveVersion()
     {
-        System.Reflection.Assembly assembly = typeof(SquadPackCommand).Assembly;
-        string? infoVersion = assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        Assembly assembly = typeof(SquadPackCommand).Assembly;
+        string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(infoVersion))
         {
             int plusIdx = infoVersion.IndexOf('+');

@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -150,7 +151,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 25 canonical skills
+        // Presence of all 26 canonical skills
         Assert.Equal(25, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
@@ -226,7 +227,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: Contains all 25 canonical skills
+        // Portable components only: Contains all 26 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -369,7 +370,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         // Assert that CLI, Core, and MCP assemblies do not bundle the raw products/kyber-squad corpus in embedded resources
         Assembly cliAssembly = typeof(SquadPackCommand).Assembly;
         Assembly coreAssembly = typeof(SquadSource).Assembly;
-        Assembly mcpAssembly = typeof(KyberWeave.Mcp.DocsTools).Assembly;
+        Assembly mcpAssembly = typeof(DocsTools).Assembly;
 
         string[] cliResources = cliAssembly.GetManifestResourceNames();
         string[] coreResources = coreAssembly.GetManifestResourceNames();
@@ -496,7 +497,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             // Solution marker
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
-            // Copy product source from real repo if available, or write all 20 agents and 25 skills
+            // Copy product source from real repo if available, or write all 22 agents and 26 skills
             string realSquadSource = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             if (Directory.Exists(realSquadSource))
             {
@@ -557,7 +558,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        public void Write(string relativePath, string content)
+        private void Write(string relativePath, string content)
         {
             string fullPath = System.IO.Path.Combine(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);

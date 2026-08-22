@@ -15,12 +15,4 @@ public sealed class HarnessCapabilityProfile
     public string DirectoryName { get; init; } = string.Empty;
     public bool SupportsNativeParentAgents { get; init; } = true;
     public Dictionary<string, string> MappedRoleSkillOverrides { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// Product-default harness directories with no host-policy skill mappings.
-    /// Prefer <see cref="Configuration.HarnessProfileConfig.ProductDefaults"/> when
-    /// host overrides may be in play.
-    /// </summary>
-    public static IReadOnlyDictionary<HarnessKind, HarnessCapabilityProfile> DefaultProfiles { get; } =
-        Configuration.HarnessProfileConfig.ProductDefaults.Profiles;
 }

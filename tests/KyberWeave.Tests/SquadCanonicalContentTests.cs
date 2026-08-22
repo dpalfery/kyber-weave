@@ -39,7 +39,11 @@ public sealed class SquadCanonicalContentTests
         "WARP.md"
     ];
 
-    private static readonly string[] ExpectedAgents =
+    /// <summary>
+    /// Agents that predate the canonical tree and carry a migration record reconciling them
+    /// against live harness copies at the locked source commit.
+    /// </summary>
+    private static readonly string[] ExpectedMigratedAgents =
     [
         "architect",
         "architect-v3",
@@ -62,6 +66,18 @@ public sealed class SquadCanonicalContentTests
         "tauri-dev",
         "test-dev"
     ];
+
+    /// <summary>
+    /// Agents authored after the migration. They have no baseline to reconcile against and
+    /// no live source hashes to declare, so they carry no migration record — writing one
+    /// would put a fabricated provenance claim in the one place provenance has to be
+    /// trustworthy. They are listed here instead so that a net-new agent is still a
+    /// deliberate, reviewed addition rather than a file that appeared.
+    /// </summary>
+    private static readonly string[] ExpectedNewAgents = ["review-lens", "review-triage"];
+
+    private static readonly string[] ExpectedAgents =
+        [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];
 
     private static readonly string[] ExpectedSkills =
     [
@@ -86,6 +102,7 @@ public sealed class SquadCanonicalContentTests
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
+        "resharper-clt",
         "second-brain",
         "security-review",
         "setup-dev-environment",
@@ -123,7 +140,7 @@ public sealed class SquadCanonicalContentTests
     ];
 
     private static readonly IReadOnlyDictionary<string, string> ExpectedBaselines =
-        ExpectedAgents.ToDictionary(
+        ExpectedMigratedAgents.ToDictionary(
             name => name,
             name => name switch
             {
@@ -308,10 +325,10 @@ public sealed class SquadCanonicalContentTests
             .Select(Path.GetFileNameWithoutExtension)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        Assert.Equal(ExpectedAgents, reportNames);
+        Assert.Equal(ExpectedMigratedAgents, reportNames);
 
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> expectedSources = ParseExpectedSourceHashes();
-        foreach (SquadAgent agent in source.Agents)
+        foreach (SquadAgent agent in source.Agents.Where(a => ExpectedMigratedAgents.Contains(a.Name, StringComparer.Ordinal)))
         {
             string reportPath = Path.Combine(migrationRoot, $"{agent.Name}.md");
             MigrationReport report = ReadMigrationReport(reportPath);
@@ -329,6 +346,32 @@ public sealed class SquadCanonicalContentTests
                     .Order(StringComparer.Ordinal));
             Assert.Equal(agent.BodyDigest, report.FinalBodySha256);
         }
+    }
+
+    /// <summary>
+    /// The migration directory records one specific event: reconciling the live harness
+    /// copies at the locked source commit. An agent written after that has nothing to
+    /// reconcile, and a record claiming otherwise would be false in exactly the place
+    /// falsehood is least detectable.
+    /// </summary>
+    [Fact]
+    public void LoadNetNewAgentsCarryNoFabricatedMigrationRecord()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string migrationRoot = Path.Combine(ProductRoot, "migration");
+
+        Assert.Equal(
+            ExpectedNewAgents,
+            source.Agents
+                .Select(agent => agent.Name)
+                .Where(name => !ExpectedMigratedAgents.Contains(name, StringComparer.Ordinal))
+                .ToArray());
+
+        Assert.All(
+            ExpectedNewAgents,
+            name => Assert.False(
+                File.Exists(Path.Combine(migrationRoot, $"{name}.md")),
+                $"'{name}' was authored after the migration and must not claim a migration baseline."));
     }
 
     private static string ProductRoot =>

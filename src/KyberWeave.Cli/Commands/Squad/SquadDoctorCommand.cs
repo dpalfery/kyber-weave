@@ -17,7 +17,6 @@ namespace KyberWeave.Cli.Commands.Squad;
 public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private readonly IProcessExecutor? _executor;
-    private readonly ISquadUserPaths? _userPaths;
     private readonly string? _workingDirectory;
 
     /// <summary>Creates a new doctor command using default dependencies.</summary>
@@ -31,8 +30,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ISquadUserPaths? userPaths = null,
         string? workingDirectory = null)
     {
+        _ = userPaths;
         _executor = executor;
-        _userPaths = userPaths;
         _workingDirectory = workingDirectory;
     }
 
@@ -70,7 +69,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // 3. MCP Probe
         McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_executor);
         ToolProbeResult mcpResult = mcpProbe.Probe();
-        if (mcpResult.IsAvailable && mcpResult.Version is not null)
+        if (mcpResult is { IsAvailable: true, Version: not null })
         {
             AnsiConsole.MarkupLine($"  [green]ok[/] Kyber-Weave MCP: [bold]kyber-weave-mcp {Markup.Escape(mcpResult.Version)}[/]");
         }

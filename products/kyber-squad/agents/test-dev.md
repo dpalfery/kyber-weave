@@ -19,6 +19,8 @@ Use the `test-dev` skill when working on tests.
 
 This routes to: unit-test patterns, integration-test patterns, E2E/Playwright patterns, mock-usage analysis, and test maintainability.
 
+Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the InspectCode run that proves the C# you wrote introduced no new analyzer findings, and the remediation for the inspections that turn up most often.
+
 ## Scope
 
 You own:
@@ -41,6 +43,14 @@ You do **not** own:
 4. Write the test file(s). Follow the naming and structure the standard requires for that layer.
 5. Run the tests with the command the standard names. Fix setup issues; do not change application code to make a test pass unless the implementation is wrong — escalate that.
 6. Report coverage gaps if the implementation has untested branches — note them in `COVERAGE_GAPS` rather than silently skipping them.
+7. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build or a passing test run.
+
+   - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **<agent-scratchpad>** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
+   - **Sweep again after the last edit.** Re-collect diagnostics for the complete contents of every file you edited or created — whole file, not only the changed methods or symbols — and once workspace-wide for the affected projects.
+   - **Every diagnostic counts:** compiler errors, nullable analysis, analyzer warnings, style warnings, redundant qualifiers and casts, possible multiple enumeration, namespace and file-location warnings, unused members, and dead-code findings.
+   - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.
+   - **Run ReSharper InspectCode over the affected projects**, per the `resharper-clt` skill, at the baseline and again at the end. Its inspection set and the compiler's overlap only partially: a suggestion-severity inspection is invisible to `dotnet build` and is still a real finding. Fix every ERROR and WARNING the change introduced.
+   - A scoped build, `tsc --noEmit`, `dotnet test`, or `git diff --check` measures something else. Report those separately; they do not clear this gate.
 
 ## Coordination
 
@@ -52,6 +62,8 @@ You do **not** own:
 - Never embed a relative path to a standard. Resolve **<test-coding-standard>** and **<csharp-coding-standard>** by those registry names.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never author application, persistence, schema, or CI files.
+- Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.
+- Never use a validation command that filters compiler or linter output, or ends with `|| true`, unless the command separately preserves and checks the underlying exit code. A masked command cannot serve as a quality gate.
 
 ## Completion digest
 
@@ -61,5 +73,6 @@ When done, return:
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of test file paths>
 SUMMARY: <2–4 sentences: what layers are covered, test count, any notable gaps>
+DIAGNOSTICS: clean on <paths> | inspectcode: <0 errors / 0 warnings, or list> | baseline: <scratchpad path> | remaining: <none, or list with baseline proof>
 COVERAGE_GAPS: <untested branches or scenarios, or "none">
 ```

@@ -99,8 +99,8 @@ public sealed class SquadRenderingContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // 20 agents + (25 skills - conductor - conductor-v3, suppressed by the native
-        // single-projection rule) = 43.
+        // 22 agents + (26 skills - conductor - conductor-v3, suppressed by the native
+        // single-projection rule) = 46.
         Assert.Equal(source.Agents.Count + source.Skills.Count - 2, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("copilot", f.Target));
 

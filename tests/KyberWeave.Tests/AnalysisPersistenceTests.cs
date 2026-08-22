@@ -173,15 +173,15 @@ public sealed class AnalysisPersistenceTests
         IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
         EmbeddingCacheKey storedKey = Key("context", provider: "local-a", model: "embed-a", dimensions: 2);
         persistence.SaveEmbeddings([Embedding(storedKey)]);
-        EmbeddingCacheKey[] requested = new[]
-        {
+        EmbeddingCacheKey[] requested =
+        [
             storedKey,
             Key("other-context", provider: "local-a", model: "embed-a", dimensions: 2),
             Key("context", provider: "local-b", model: "embed-a", dimensions: 2),
             Key("context", provider: "local-a", model: "embed-b", dimensions: 2),
             Key("context", provider: "local-a", model: "embed-a", dimensions: 3),
             Key("context", provider: "local-a", model: "embed-a", dimensions: 2, encoding: "base64")
-        };
+        ];
 
         IReadOnlyDictionary<EmbeddingCacheKey, StoredEmbedding> loaded = persistence.LoadEmbeddings(requested);
 
@@ -360,7 +360,7 @@ public sealed class AnalysisPersistenceTests
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
         SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
-        (string? table, string? keyColumn, string? rowId, byte[]? payload) = scenario switch
+        (string table, string keyColumn, string rowId, byte[] payload) = scenario switch
         {
             "claim-empty-id" => (
                 "analysis_claims",

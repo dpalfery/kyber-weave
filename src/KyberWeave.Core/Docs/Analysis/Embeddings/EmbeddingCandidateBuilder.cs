@@ -86,7 +86,7 @@ internal static class EmbeddingCandidateBuilder
         HashSet<IndexPair> selected = new HashSet<IndexPair>();
         for (int claimIndex = 0; claimIndex < claimCount; claimIndex++)
         {
-            foreach (ScoredPair? item in neighbors[claimIndex]
+            foreach (ScoredPair item in neighbors[claimIndex]
                          .OrderByDescending(item => item.Score)
                          .ThenBy(item => item.Pair.Left)
                          .ThenBy(item => item.Pair.Right)

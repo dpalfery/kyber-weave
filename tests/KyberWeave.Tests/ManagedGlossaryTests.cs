@@ -256,7 +256,7 @@ public sealed class ManagedGlossaryTests
             | loop-gameplay | approved | The gameplay update cycle. | component:Gameplay | gameplay loop |
             """));
         ManagedGlossaryService service = Service(repository);
-        GlossaryProposal[] proposals = new[] { Proposal("loop", "component:Agents", "claim-1") };
+        GlossaryProposal[] proposals = [Proposal("loop", "component:Agents", "claim-1")];
 
         GlossaryUpdateResult preview = service.Preview(proposals);
         GlossaryUpdateResult written = service.Write(proposals);

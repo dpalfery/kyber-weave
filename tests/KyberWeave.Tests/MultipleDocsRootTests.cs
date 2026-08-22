@@ -201,7 +201,7 @@ public class MultipleDocsRootTests : IDisposable
         DiagnosticReport report = Validate(MultiRootConfig);
 
         Assert.Contains(report.Items, i =>
-            i.FilePath == "lab/README.md" && i.Code == DocSpecValidator.UnknownCatalogValue);
+            i is { FilePath: "lab/README.md", Code: DocSpecValidator.UnknownCatalogValue });
         Assert.DoesNotContain(report.Items, i => i.FilePath == "automation/README.md");
     }
 
@@ -295,7 +295,7 @@ public class MultipleDocsRootTests : IDisposable
 
         // 'Automation' exists only in the second root's table, which supplies nothing.
         Assert.Contains(report.Items, i =>
-            i.FilePath == "automation/thing.md" && i.Code == DocSpecValidator.UnknownCatalogValue);
+            i is { FilePath: "automation/thing.md", Code: DocSpecValidator.UnknownCatalogValue });
     }
 
     [Fact]
@@ -323,7 +323,7 @@ public class MultipleDocsRootTests : IDisposable
 
         Assert.Contains(documents, d => d.RelativePath == ".kyber-weave/catalog.md");
         Assert.Contains(Validate(config).Items, i =>
-            i.FilePath == ".kyber-weave/catalog.md" && i.Code == DocSpecValidator.UnknownCatalogValue);
+            i is { FilePath: ".kyber-weave/catalog.md", Code: DocSpecValidator.UnknownCatalogValue });
     }
 
     [Fact]
@@ -344,7 +344,7 @@ public class MultipleDocsRootTests : IDisposable
     {
         WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
 
-        Assert.True(TryResolveOntology([], out OntologyConfig? ontology, out _));
+        Assert.True(TryResolveOntology([], out OntologyConfig ontology, out _));
         Assert.Equal(["docs", "automation"], ontology.DocsRoots);
     }
 
@@ -357,7 +357,7 @@ public class MultipleDocsRootTests : IDisposable
     {
         WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
 
-        Assert.True(TryResolveOntology(["lab", OntologyConfig.DefaultDocsRoot], out OntologyConfig? ontology, out _));
+        Assert.True(TryResolveOntology(["lab", OntologyConfig.DefaultDocsRoot], out OntologyConfig ontology, out _));
         Assert.Equal(["lab", OntologyConfig.DefaultDocsRoot], ontology.DocsRoots);
     }
 
@@ -366,7 +366,7 @@ public class MultipleDocsRootTests : IDisposable
     {
         WriteHostConfig("ontology:\n  docs-root: docs\n");
 
-        Assert.False(TryResolveOntology(["../elsewhere"], out _, out DiagnosticReport? report));
+        Assert.False(TryResolveOntology(["../elsewhere"], out _, out DiagnosticReport report));
         Assert.Contains(report.Items, i =>
             i.Code == KyberWeaveConfigLoader.ConfigLoadErrorCode &&
             i.Message.Contains("escapes the repository root", StringComparison.Ordinal));
@@ -504,9 +504,9 @@ public class MultipleDocsRootTests : IDisposable
     private bool TryResolveOntology(
         string[] docsRoots,
         out OntologyConfig ontology,
-        out KyberWeave.Core.Diagnostics.DiagnosticReport report)
+        out DiagnosticReport report)
     {
-        report = new KyberWeave.Core.Diagnostics.DiagnosticReport();
+        report = new DiagnosticReport();
         DocsSettings settings = new DocsSettings { Path = _temp.Path, DocsRoots = docsRoots };
         return DocsCommandComposition.TryResolveOntology(settings, report, out ontology);
     }
@@ -575,7 +575,7 @@ public class MultipleDocsRootTests : IDisposable
         # A Component
         """;
 
-    private KyberWeave.Core.Diagnostics.DiagnosticReport Validate(OntologyConfig config) =>
+    private DiagnosticReport Validate(OntologyConfig config) =>
         new DocSpecValidator(_temp.Path, config).Validate(
             new DocumentLoader(_temp.Path, config).Load());
 }

@@ -13,7 +13,7 @@ public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
     public override int Execute(CommandContext context, AgentCatalogSettings settings)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig? config))
+        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig config))
         {
             ReportRenderer.Render(report, OutputFormat.Table, "agent catalog", "Config");
             return 1;
@@ -34,7 +34,7 @@ public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
 
         foreach ((string role, Dictionary<HarnessKind, AgentModel> harnessMap) in matrix.OrderBy(m => m.Key))
         {
-            List<string> row = new List<string> { $"[bold]{Markup.Escape(role)}[/]" };
+            List<string> row = [$"[bold]{Markup.Escape(role)}[/]"];
 
             foreach ((HarnessKind harnessKind, HarnessCapabilityProfile profile) in profiles)
             {

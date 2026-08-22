@@ -44,12 +44,10 @@ builder.Services
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;
 
-/// <summary>
-/// The repository root, from <c>--repo-root</c>, else <c>KYBER_WEAVE_REPO_ROOT</c>, else
-/// the nearest ancestor of the working directory that contains a <c>.git</c> entry.
-/// Hosts launch the server with an unpredictable working directory, so guessing wrong
-/// here means an empty corpus rather than an error.
-/// </summary>
+// The repository root, from `--repo-root`, else `KYBER_WEAVE_REPO_ROOT`, else
+// the nearest ancestor of the working directory that contains a `.git` entry.
+// Hosts launch the server with an unpredictable working directory, so guessing wrong
+// here means an empty corpus rather than an error.
 static string ResolveRepoRoot(string[] args)
 {
     for (int i = 0; i < args.Length - 1; i++)
@@ -74,29 +72,25 @@ static string ResolveRepoRoot(string[] args)
     return Directory.GetCurrentDirectory();
 }
 
-/// <summary>
-/// The host's ontology from <c>.kyber-weave/kyber-weave.yml</c>, or product defaults when
-/// the repository has no config.
-/// </summary>
-/// <remarks>
-/// <para>
-/// The server reads the same configuration the CLI does. Without this it served the product
-/// default root, so every repository that had moved its documentation — the common case,
-/// since the default is inherited from one origin repository — got an empty corpus from a
-/// server that reported no error, and multi-root configuration would not have reached
-/// retrieval at all.
-/// </para>
-/// <para>
-/// A config that cannot be read is reported and then stepped over rather than being fatal.
-/// The corpus will be wrong, but a client that has already spawned this process gets a
-/// server that answers and says why, instead of a transport that dies at startup.
-/// </para>
-/// </remarks>
+// The host's ontology from `.kyber-weave/kyber-weave.yml`, or product defaults when
+// the repository has no config.
+//
+// The server reads the same configuration the CLI does. Without this it served the product
+// default root, so every repository that had moved its documentation — the common case,
+// since the default is inherited from one origin repository — got an empty corpus from a
+// server that reported no error, and multi-root configuration would not have reached
+// retrieval at all.
+//
+// A config that cannot be read is reported and then stepped over rather than being fatal.
+// The corpus will be wrong, but a client that has already spawned this process gets a
+// server that answers and says why, instead of a transport that dies at startup.
 static OntologyConfig ResolveOntology(string repoRoot)
 {
     KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
-    if (loaded.Success && loaded.Config is not null)
+    if (loaded is { Success: true, Config: not null })
+    {
         return loaded.Config.Ontology;
+    }
 
     // stderr, never stdout: stdout is the JSON-RPC transport.
     Console.Error.WriteLine(

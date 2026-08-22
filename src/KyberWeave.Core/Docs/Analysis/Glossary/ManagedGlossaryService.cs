@@ -150,8 +150,7 @@ public sealed class ManagedGlossaryService
     /// <summary>Returns all senses for a term using case-insensitive term matching.</summary>
     public GlossaryLookupResult Lookup(string term) => Lookup(term, Load());
 
-    /// <summary>Returns all senses for a term from preloaded glossary data using case-insensitive term matching.</summary>
-    public static GlossaryLookupResult Lookup(string term, ManagedGlossaryLoadResult loaded)
+    private static GlossaryLookupResult Lookup(string term, ManagedGlossaryLoadResult loaded)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(term);
         ArgumentNullException.ThrowIfNull(loaded);
@@ -209,7 +208,7 @@ public sealed class ManagedGlossaryService
             .GroupBy(proposal => proposal.Term.Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (ParsedSection? section in document.Sections.OrderByDescending(section => section.StartLine))
+        foreach (ParsedSection section in document.Sections.OrderByDescending(section => section.StartLine))
         {
             proposalsByTerm.Remove(section.Term, out GlossaryProposal[]? termProposals);
             List<string> replacement = MergeSection(
@@ -334,7 +333,7 @@ public sealed class ManagedGlossaryService
 
     private static IReadOnlyList<string> NewTermSection(string term, IReadOnlyList<GlossaryProposal> proposals)
     {
-        List<string> lines = new List<string> { $"## {term}", string.Empty, Header, Separator };
+        List<string> lines = [$"## {term}", string.Empty, Header, Separator];
         foreach (GlossaryProposal proposal in proposals)
         {
             string id = SenseId(proposal);
@@ -392,7 +391,7 @@ public sealed class ManagedGlossaryService
             if (!line.StartsWith('|')) continue;
             // Catalog column configuration intentionally uses the raw pipe-split indices,
             // including the empty cell before a leading pipe, matching DocumentLoader.
-            string[] cells = line.Split('|', StringSplitOptions.None)
+            string[] cells = line.Split('|')
                 .Select(cell => cell.Trim())
                 .ToArray();
             int maxColumn = Math.Max(
@@ -605,7 +604,7 @@ public sealed class ManagedGlossaryService
             try
             {
                 frontmatter = MarkdownFrontmatterReader.Deserializer
-                    .Deserialize<Dictionary<string, string>>(read.Yaml)
+                    .Deserialize<Dictionary<string, string>?>(read.Yaml)
                     ?? new Dictionary<string, string>(StringComparer.Ordinal);
             }
             catch (Exception exception)
@@ -623,12 +622,6 @@ public sealed class ManagedGlossaryService
             frontmatterValid,
             frontmatterError);
     }
-
-    private static ParsedDocument Parse(List<string> lines) => new(
-        new Dictionary<string, string>(StringComparer.Ordinal),
-        ParseSections(lines, 0),
-        true,
-        null);
 
     private static IReadOnlyList<ParsedSection> ParseSections(List<string> lines, int bodyStart)
     {
@@ -847,12 +840,12 @@ public sealed class ManagedGlossaryService
             .Order(StringComparer.Ordinal)
             .Select(evidenceId => $"- {EscapeEvidence(evidenceId)}")
             .ToArray();
-        List<string> lines = new List<string>
-        {
-            $"{EvidenceStart} sense=\"{EscapeAttribute(id)}\" fingerprint=\"{OwnershipFingerprint(row, evidenceLines)}\" -->"
-        };
-        lines.AddRange(evidenceLines);
-        lines.Add(EvidenceEnd);
+        List<string> lines =
+        [
+            $"{EvidenceStart} sense=\"{EscapeAttribute(id)}\" fingerprint=\"{OwnershipFingerprint(row, evidenceLines)}\" -->",
+            .. evidenceLines,
+            EvidenceEnd
+        ];
         return lines;
     }
 

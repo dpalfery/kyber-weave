@@ -11,8 +11,8 @@ namespace KyberWeave.Core.Skills.Routing;
 /// </summary>
 public sealed class RoutingEvalCase
 {
-    [YamlMember(Alias = "prompt")] public string Prompt { get; set; } = string.Empty;
-    [YamlMember(Alias = "expected")] public string? Expected { get; set; }
+    [YamlMember(Alias = "prompt")] public string Prompt { get; init; } = string.Empty;
+    [YamlMember(Alias = "expected")] public string? Expected { get; init; }
 
     [YamlIgnore]
     public bool ExpectsNoFire =>
@@ -21,7 +21,7 @@ public sealed class RoutingEvalCase
 
 public sealed class RoutingEvalFile
 {
-    [YamlMember(Alias = "cases")] public Collection<RoutingEvalCase> Cases { get; set; } = [];
+    [YamlMember(Alias = "cases")] public Collection<RoutingEvalCase> Cases { get; init; } = [];
 
     public static RoutingEvalFile Load(string path)
     {
@@ -29,7 +29,7 @@ public sealed class RoutingEvalFile
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
             .Build();
-        return deserializer.Deserialize<RoutingEvalFile>(File.ReadAllText(path)) ?? new RoutingEvalFile();
+        return deserializer.Deserialize<RoutingEvalFile?>(File.ReadAllText(path)) ?? new RoutingEvalFile();
     }
 }
 
@@ -47,17 +47,14 @@ public sealed record RoutingEvalSummary(IReadOnlyList<RoutingCaseResult> Results
 }
 
 /// <summary>Runs a routing eval set against a skill set and reports accuracy.</summary>
-public sealed class RoutingEvaluator
+public sealed class RoutingEvaluator(IRoutingStrategy strategy)
 {
-    private readonly IRoutingStrategy _strategy;
-    public RoutingEvaluator(IRoutingStrategy strategy) => _strategy = strategy;
-
     public RoutingEvalSummary Evaluate(RoutingEvalFile evalFile, SkillSet skills)
     {
         List<RoutingCaseResult> results = new List<RoutingCaseResult>();
         foreach (RoutingEvalCase c in evalFile.Cases)
         {
-            RoutingResult result = _strategy.Route(c.Prompt, skills);
+            RoutingResult result = strategy.Route(c.Prompt, skills);
             bool passed = c.ExpectsNoFire
                 ? !result.Fired
                 : result.Fired && string.Equals(result.SelectedSkill, c.Expected, StringComparison.OrdinalIgnoreCase);

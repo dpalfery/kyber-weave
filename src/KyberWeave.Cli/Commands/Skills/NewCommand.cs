@@ -61,7 +61,7 @@ public sealed partial class NewCommand : Command<NewSettings>
     private static string Template(string template, string name, bool includeLicense, bool includeMetadata)
     {
         string title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0]) + w[1..]));
-        (string? description, string? instructions) = template.ToLowerInvariant() switch
+        (string description, string instructions) = template.ToLowerInvariant() switch
         {
             "sop" => (
                 $"Use to perform {title} the same compliant way every time. Use when a request matches this procedure. Do NOT use for unrelated tasks or when approval limits are exceeded.",
@@ -76,7 +76,7 @@ public sealed partial class NewCommand : Command<NewSettings>
                 $"Use to run the {title} checklist so required validations are never skipped. Use before the gated action. Do NOT use after the action has completed.",
                 "## When to use\nRun before the gated step.\n\n## Checklist\n- [ ] Item one — MUST pass.\n- [ ] Item two — MUST pass.\n\n## Example\nShow the checklist applied to one case."),
             _ => (
-                $"Use when … (state the trigger). Do NOT use for … (state the boundary). Replace this with a specific, routable description.",
+                "Use when … (state the trigger). Do NOT use for … (state the boundary). Replace this with a specific, routable description.",
                 "## When to use\n\n## Instructions\n\n## Example\n")
         };
 

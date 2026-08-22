@@ -10,10 +10,10 @@ namespace KyberWeave.Core.Agents.Validation;
 /// <summary>
 /// Linter for evaluating cross-harness role parity, instruction drift, and routing readiness.
 /// </summary>
-public static partial class AgentSyncLinter
+public static class AgentSyncLinter
 {
     public const string RuleUnsatisfiedRole = "KW-AGENT-SYNC-001";
-    public const string RuleInstructionDrift = "KW-AGENT-SYNC-002";
+    private const string RuleInstructionDrift = "KW-AGENT-SYNC-002";
     public const string RuleLowRoutingScore = "KW-AGENT-LINT-001";
     public const string RuleMissingTriggerPhrasing = "KW-AGENT-LINT-002";
 
@@ -90,7 +90,7 @@ public static partial class AgentSyncLinter
             }
 
             // 3. Routing Description Score and Trigger Quality for each agent instance
-            foreach (AgentModel? agent in roleAgents)
+            foreach (AgentModel agent in roleAgents)
             {
                 if (!string.IsNullOrWhiteSpace(agent.Description))
                 {

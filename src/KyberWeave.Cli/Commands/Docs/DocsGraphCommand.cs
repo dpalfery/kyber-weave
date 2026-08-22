@@ -15,13 +15,12 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings)
     {
-        DiagnosticReport report = new DiagnosticReport();
+        DiagnosticReport report = new();
         if (!DocsCommandComposition.TryCreateLoader(
                 settings,
                 report,
                 out DocumentLoader? loader,
-                out _,
-                out KyberWeaveConfig? config))
+                out KyberWeaveConfig config))
         {
             CommandHelpers.Finish(report, settings, "docs export-graph", "Document");
             return 1;
@@ -38,11 +37,10 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
             return 1;
         }
 
-        ManagedGlossaryLoadResult glossary;
         ManagedGlossaryGraphContributor glossaryContributor;
         try
         {
-            glossary = new ManagedGlossaryService(
+            ManagedGlossaryLoadResult glossary = new ManagedGlossaryService(
                 settings.Path,
                 config,
                 TimeProvider.System).Load();

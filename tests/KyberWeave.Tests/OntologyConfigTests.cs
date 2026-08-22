@@ -38,7 +38,7 @@ public class OntologyConfigTests
     {
         OntologyConfig config = OntologyConfig.ProductDefaults;
 
-        foreach (string? key in new[] { "id", "title", "owner", "last-reviewed", "doc-type", "status" })
+        foreach (string key in new[] { "id", "title", "owner", "last-reviewed", "doc-type", "status" })
             Assert.True(config.IsRequiredForAll(key), $"Base key '{key}' must be required for every document.");
 
         Assert.True(config.IsRequired(DocType.Onboarding, "component"));
@@ -160,7 +160,7 @@ public class OntologyConfigTests
         Assert.Contains("not-a-real-type", result.ParseError, StringComparison.Ordinal);
         Assert.Null(result.Config);
 
-        YamlException ex = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
+        YamlException ex = Assert.ThrowsAny<YamlException>(
             () => OntologyConfigLoader.LoadMerged(OntologyConfig.ProductDefaults, yamlPath));
         Assert.Contains("not-a-real-type", ex.Message, StringComparison.Ordinal);
     }
@@ -212,7 +212,7 @@ public class OntologyConfigTests
 
     private sealed class OntologyConfigDocFixture : IDisposable
     {
-        public string Root { get; }
+        private string Root { get; }
         private readonly OntologyConfig _config;
 
         public OntologyConfigDocFixture(OntologyConfig config)

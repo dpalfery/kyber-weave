@@ -196,7 +196,7 @@ public sealed class DocumentationAnalyzerTests
         Assert.Equal(2, terminology.Claims.Count);
         Assert.Contains(
             result.Diagnostics.Items,
-            item => item.Code == DocumentationAnalyzer.TerminologyRuleCode && item.Severity == Severity.Warning);
+            item => item is { Code: DocumentationAnalyzer.TerminologyRuleCode, Severity: Severity.Warning });
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public sealed class DocumentationAnalyzerTests
 
         Assert.Contains(
             result.Diagnostics.Items,
-            item => item.Code == DocumentationAnalyzer.IgnoreMarkupRuleCode && item.Severity == Severity.Error);
+            item => item is { Code: DocumentationAnalyzer.IgnoreMarkupRuleCode, Severity: Severity.Error });
     }
 
     [Fact]
@@ -486,7 +486,7 @@ public sealed class DocumentationAnalyzerTests
 
         AnalysisCandidate candidate = Assert.Single(
             result.Candidates,
-            item => item.Kind == AnalysisRuleKind.Duplicate && !item.IsExact);
+            item => item is { Kind: AnalysisRuleKind.Duplicate, IsExact: false });
         Assert.Contains(CandidateSourceKind.Embedding, candidate.Sources);
         Assert.Equal(1, result.Metrics.EmbeddingComparisons);
         Assert.Equal(1, result.Metrics.EmbeddingCandidates);
@@ -598,7 +598,7 @@ public sealed class DocumentationAnalyzerTests
 
         AnalysisCandidate nearDuplicate = Assert.Single(
             result.Candidates,
-            candidate => candidate.Kind == AnalysisRuleKind.Duplicate && !candidate.IsExact);
+            candidate => candidate is { Kind: AnalysisRuleKind.Duplicate, IsExact: false });
         Assert.Equal(4, nearDuplicate.Claims.Count);
         Assert.Equal(4, nearDuplicate.Claims.Select(claim => claim.FilePath).Distinct(StringComparer.Ordinal).Count());
     }
@@ -794,7 +794,7 @@ public sealed class DocumentationAnalyzerTests
         Assert.DoesNotContain(ordinary.Candidates, candidate => candidate.Kind == AnalysisRuleKind.Conflict);
         Assert.Contains(
             terminology.Candidates,
-            candidate => candidate.Kind == AnalysisRuleKind.Terminology && candidate.Term == "loop");
+            candidate => candidate is { Kind: AnalysisRuleKind.Terminology, Term: "loop" });
     }
 
     [Fact]

@@ -29,13 +29,13 @@ Do not use execution, editing, or search capabilities to perform the work. Use o
 - **Delegate work** through the harness's agent-orchestration capability, selecting the specialist (`architect-v3`, `csharp-dev`, `python-dev`, `test-dev`, `code-reviewer`, `docs-dev`, …). Run instances in the background so multiple are in flight at once.
 - **Track work** through the harness's task-management capability — one item per unit of work, with status, ownership, dependencies, **and its TDD phase (RED / GREEN / REFACTOR)**.
 - **Read** only files under `<docs-root>/plans/`, `<docs-root>/specs/`, and `<docs-root>/todo/` for status/documentation lookups — no other project files, and no other directory under `<docs-root>/`. You have no search capability: open a document by path, either one you were given or one the relevant `README.md` index in those three folders names. Route all other discovery, searching, technical analysis, and file operations to `architect`/`architect-v3`.
-- **Discovery agents:** `architect` names the facts it needs; because a subagent cannot delegate further, **you** invoke the requested discovery role on `architect`'s behalf and feed its findings back to it. See §2.
+- **Discovery agents:** `architect` invokes `research-agent` and `azure-reader` itself and folds their findings into its own plan. Do not run discovery on its behalf, and do not call a discovery role directly. Where the harness does not let a subagent delegate, `architect` falls back to handing you a labeled discovery request; fulfil that request and re-invoke it. See §2.
 
 ## Authority
 
 You are the only actor that may create, assign, and sequence tasks, track dependencies, resolve ownership questions, coordinate execution, and communicate project-level status and results.
 
-Subagents report only to you. They may not assign work, create follow-up tasks, or spawn other agents — none of them can, under the current design. When an agent (notably `architect`) needs additional discovery, it returns a request to you and you fulfill it.
+Subagents report only to you: they may not assign work back to you or create follow-up tasks. Delegation itself is a per-role grant, not a property of being a subagent — an agent may invoke only the roles named in its own `delegates-to`, and only where its capability profile grants `delegate`. Most specialists are denied it and the attempt fails. Two are not: `architect` reaches the read-only discovery roles to complete its own analysis, and `code-reviewer` fans out its own review council. Neither hands work back to you; both return results.
 
 ***
 
@@ -59,12 +59,13 @@ Never investigate, inspect the codebase, or spawn discovery agents to work out a
 
 If the plan lacks a Test contract (e.g. it came from the v1 architect), send it back: request that every implementation task gain a Test-contract row (test project, runner, behavior asserted) before you will sequence it. Test-first is non-negotiable under this skill.
 
-Because `architect` can no longer spawn discovery agents itself, discovery is a **request/fulfill loop** you mediate:
+`architect` owns its own discovery. It performs targeted reads and searches itself, and delegates the two cases it cannot cover — live Azure state to `azure-reader`, broad sweeps and external sources to `research-agent` — folding the findings into §3 of the plan without involving you. Do not pre-run discovery for it, and do not invoke a discovery role directly.
 
-1. `architect` performs targeted codebase discovery through its permitted read, search, and web capabilities.
-2. When it needs facts beyond those tools — live Azure state, or a broad multi-location fan-out search — it returns a clearly labeled **discovery request** listing exactly what it needs.
-3. You invoke the matching discovery role (`azure-reader` for Azure state or another available investigation role for broad codebase fan-out), collect its findings, and **re-invoke `architect`** with those findings appended so it can finish the plan.
-4. Repeat until `architect` reports the plan is discovery-complete.
+The one case that reaches you is a fallback. Where the harness does not let a subagent delegate, or a delegated Azure call fails, `architect` ends its turn with a labeled **discovery request** naming exactly what it needs. Then, and only then:
+
+1. Invoke the named discovery role (`azure-reader` for Azure state, `research-agent` for a broad sweep) with the request verbatim — it runs cold and knows nothing of the planning conversation.
+2. **Re-invoke `architect`** with those findings appended so it can finish the plan.
+3. Repeat until `architect` reports the plan is discovery-complete.
 
 ### Relaying architect's questions to the user
 

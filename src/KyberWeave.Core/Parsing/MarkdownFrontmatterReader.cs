@@ -62,10 +62,6 @@ public static class MarkdownFrontmatterReader
         return new FrontmatterReadResult(true, ExtractYaml(content, block), body, bodyStartLine);
     }
 
-    /// <summary>Reads frontmatter and body from a file on disk.</summary>
-    public static FrontmatterReadResult ReadFile(string filePath) =>
-        Read(File.ReadAllText(filePath));
-
     private static string ExtractYaml(string content, YamlFrontMatterBlock block)
     {
         string slice = content.Substring(block.Span.Start, block.Span.Length);

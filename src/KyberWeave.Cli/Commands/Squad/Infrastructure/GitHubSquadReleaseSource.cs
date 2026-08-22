@@ -437,7 +437,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
         string portablePath = entryName.Replace('\\', '/');
         bool isDirectory = portablePath.EndsWith('/');
-        string[] segments = portablePath.Split('/', StringSplitOptions.None);
+        string[] segments = portablePath.Split('/');
         int segmentCount = isDirectory ? segments.Length - 1 : segments.Length;
         if (segmentCount == 0 || segments.Take(segmentCount).Any(
             segment => segment.Length == 0 || segment is "." or ".."))
@@ -546,8 +546,8 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
             onStagingCreated?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
 
-            using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
-            using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+            await using MemoryStream stream = new MemoryStream(archiveBytes, writable: false);
+            await using ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
 
             for (int index = 0; index < archive.Entries.Count; index++)
             {

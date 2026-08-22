@@ -300,11 +300,11 @@ public class CodeJoinScopingTests
     [Fact]
     public void AJoinPrefersASymbolBeneathTheDocumentsSourceRoot()
     {
-        CodeGraphNode[] nodes = new[]
-        {
+        CodeGraphNode[] nodes =
+        [
             Node("property", "1-Presentation/MotorcycleRAG.API/Services/CurrentUserService.cs", "csharp", 42),
             Node("function", "1-Presentation/MotorcycleRag.WebUI/src/contexts/AuthContext.tsx", "typescript", 17)
-        };
+        ];
 
         CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 
@@ -321,10 +321,10 @@ public class CodeJoinScopingTests
     [Fact]
     public void AJoinOutsideTheSourceRootIsFlagged()
     {
-        CodeGraphNode[] nodes = new[]
-        {
+        CodeGraphNode[] nodes =
+        [
             Node("property", "1-Presentation/MotorcycleRAG.API/Services/CurrentUserService.cs", "csharp", 42)
-        };
+        ];
 
         CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 
@@ -336,11 +336,11 @@ public class CodeJoinScopingTests
     [Fact]
     public void RemainingSameNamedCandidatesAreCounted()
     {
-        CodeGraphNode[] nodes = new[]
-        {
+        CodeGraphNode[] nodes =
+        [
             Node("class", "1-Presentation/MotorcycleRag.WebUI/src/a.tsx", "typescript", 3),
             Node("class", "1-Presentation/MotorcycleRag.WebUI/src/b.tsx", "typescript", 9)
-        };
+        ];
 
         CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 
@@ -354,11 +354,11 @@ public class CodeJoinScopingTests
     [Fact]
     public void ADeclarationOutranksASameNamedProperty()
     {
-        CodeGraphNode[] nodes = new[]
-        {
+        CodeGraphNode[] nodes =
+        [
             Node("property", "1-Presentation/MotorcycleRag.WebUI/src/a.tsx", "typescript", 3),
             Node("class", "1-Presentation/MotorcycleRag.WebUI/src/z.tsx", "typescript", 9)
-        };
+        ];
 
         CodeJoin join = DocumentIndex.ToJoin(Doc("1-Presentation/MotorcycleRag.WebUI"), "AuthProvider", nodes);
 

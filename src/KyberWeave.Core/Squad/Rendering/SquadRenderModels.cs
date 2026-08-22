@@ -1,3 +1,4 @@
+using JetBrains.Annotations;
 using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -58,6 +59,7 @@ public sealed record SquadRenderWarning(
 /// <summary>Raised when render output violates safety, integrity, or coverage invariants.</summary>
 public sealed class SquadRenderValidationException : InvalidOperationException
 {
+    [UsedImplicitly]
     public SquadRenderValidationException()
     {
     }

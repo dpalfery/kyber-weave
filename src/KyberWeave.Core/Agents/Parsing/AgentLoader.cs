@@ -13,8 +13,11 @@ public sealed record AgentLoadResult(bool Success, AgentModel? Agent, string Pat
 /// </summary>
 public static class AgentLoader
 {
-    private static readonly TomlAgentParser TomlParser = new();
-    private static readonly MarkdownAgentParser MarkdownParser = new();
+    // Held through the interface, and in priority order: TOML first, because a .agent.md
+    // file matches the Markdown parser and nothing else, while the TOML parser is the
+    // narrower predicate. Dispatching through IAgentParser is what stops that interface
+    // from being an abstraction with two implementations and no consumer.
+    private static readonly IAgentParser[] Parsers = [new TomlAgentParser(), new MarkdownAgentParser()];
 
     private static readonly Dictionary<string, HarnessKind> FolderToHarness =
         new(StringComparer.OrdinalIgnoreCase)
@@ -30,11 +33,11 @@ public static class AgentLoader
     public static AgentSet LoadAll(string projectRoot, HarnessKind? harnessFilter = null)
     {
         IReadOnlyList<AgentLoadResult> results = LoadResults(projectRoot, harnessFilter);
-        List<AgentModel> validAgents = results.Where(r => r.Success && r.Agent is not null).Select(r => r.Agent!).ToList();
+        List<AgentModel> validAgents = results.Where(r => r is { Success: true, Agent: not null }).Select(r => r.Agent!).ToList();
         return new AgentSet(validAgents);
     }
 
-    public static IReadOnlyList<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
+    private static IReadOnlyList<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
     {
         List<AgentLoadResult> results = new List<AgentLoadResult>();
         string fullRoot = Path.GetFullPath(projectRoot);
@@ -77,7 +80,7 @@ public static class AgentLoader
             return true;
         }
 
-        if (Enum.TryParse<HarnessKind>(key, ignoreCase: true, out HarnessKind parsed) &&
+        if (Enum.TryParse(key, ignoreCase: true, out HarnessKind parsed) &&
             parsed != HarnessKind.Custom)
         {
             filter = parsed;
@@ -107,9 +110,7 @@ public static class AgentLoader
             if (!Directory.Exists(agentsDir))
                 continue;
 
-            HarnessKind kind = FolderToHarness.TryGetValue(folderName, out HarnessKind mapped)
-                ? mapped
-                : HarnessKind.Custom;
+            HarnessKind kind = FolderToHarness.GetValueOrDefault(folderName, HarnessKind.Custom);
 
             found.Add((agentsDir, kind, folderName));
         }
@@ -133,15 +134,11 @@ public static class AgentLoader
         {
             try
             {
-                AgentModel agent;
-                if (TomlParser.CanParse(file))
-                    agent = TomlParser.Parse(file, harness);
-                else if (MarkdownParser.CanParse(file))
-                    agent = MarkdownParser.Parse(file, harness);
-                else
+                IAgentParser? parser = Array.Find(Parsers, p => p.CanParse(file));
+                if (parser is null)
                     continue;
 
-                results.Add(new AgentLoadResult(true, agent, file, null));
+                results.Add(new AgentLoadResult(true, parser.Parse(file, harness), file, null));
             }
             catch (Exception ex)
             {

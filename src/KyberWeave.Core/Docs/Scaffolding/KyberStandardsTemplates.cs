@@ -56,7 +56,7 @@ public static class KyberStandardsTemplates
     /// <param name="technology">The technology slug (e.g. <c>csharp</c>, <c>test</c>).</param>
     /// <param name="template">The raw template content if found; otherwise, <see langword="null"/>.</param>
     /// <returns><see langword="true"/> if a template exists for the technology; otherwise, <see langword="false"/>.</returns>
-    public static bool TryGet(string technology, [NotNullWhen(true)] out string? template)
+    public static bool TryGet(string? technology, [NotNullWhen(true)] out string? template)
     {
         if (technology is null)
         {
@@ -143,7 +143,6 @@ public static class KyberStandardsTemplates
 
                 if (frontmatterCount == 2)
                 {
-                    inFrontmatter = false;
                     break;
                 }
             }
