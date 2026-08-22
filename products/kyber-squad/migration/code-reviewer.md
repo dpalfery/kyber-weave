@@ -35,16 +35,4 @@ The instruction body was rewritten alongside that widening. The role is now an o
 
 The body was revised again the same day to name two lens runners rather than one. Lenses whose input is a machine artifact — analyzer diagnostics, a manifest diff — go to review-triage on the fast model profile, because attributing tool output to a change is bounded work; every lens that judges code stays on review-lens. The reviewer's own permissions and contract are unaffected.
 
-The reviewer profile was deliberately widened after migration, away from the conservative intersection recorded above: filesystem.write deny to ask, process.execute deny to allow, delegate deny to allow.
-
-The intersection was not wrong about the sources; it was wrong about the role. The instruction body demands build output and test logs, and the code-review skill declares a blocking pre-merge test and coverage gate. With process.execute=deny those are unexecutable — on Copilot the rendered agent has no execute tool at all — so the one agent whose purpose is refusing unverified claims was structurally forced to make one. process.execute=allow makes the gate real, exercised through the single declared runner.
-
-delegate=allow lets the role fan out a council of review-lens instances over the diff in parallel. It also gives delegate=deny on the other subagent profiles a meaning it did not have before: delegation is now a per-role grant rather than a property of being a subagent.
-
-filesystem.write stops at ask rather than following execute to allow. The reviewer writes one artifact, its findings; the lattice has no path scoping, so the scope is instruction-only and the permission is the weakest one that permits the write. Targets that cannot express ask narrow it to deny, and the reviewer returns findings in its response instead. network.publish stays deny. The role that judges a change never ships it.
-
-The instruction body was rewritten alongside that widening. The role is now an orchestrator and an adjudicator rather than a single serial pass: it runs the gate suite, fans out a council of review-lens instances, and decides what the combined evidence supports. Thirteen concern-specific blocks — dependency injection, model placement, the threat-modelling questions, analyzer triage — were not deleted but moved into the code-review skill's lens catalogue, where each is loaded only by the seat that owns it and only when the diff contains something for it. The skeptical contract is unchanged in substance and stronger in form: what was a demand for proof in prose is now a required evidence field that the verdict engine drops a finding for lacking.
-
-The body was revised again the same day to name two lens runners rather than one. Lenses whose input is a machine artifact — analyzer diagnostics, a manifest diff — go to review-triage on the fast model profile, because attributing tool output to a change is bounded work; every lens that judges code stays on review-lens. The reviewer's own permissions and contract are unaffected.
-
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

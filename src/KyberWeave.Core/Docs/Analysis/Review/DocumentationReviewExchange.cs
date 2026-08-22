@@ -236,7 +236,7 @@ public sealed class DocumentationReviewExchange
 
         HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
         List<AnalysisCandidate> reviewedCandidates = new List<AnalysisCandidate>(bundle.Verdicts.Count);
-        foreach (ReviewVerdictItem verdict in bundle.Verdicts)
+        foreach (ReviewVerdictItem? verdict in bundle.Verdicts)
         {
             if (verdict is null)
                 return "The verdict bundle contains a null verdict.";

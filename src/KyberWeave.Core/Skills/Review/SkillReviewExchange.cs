@@ -175,7 +175,7 @@ public static class SkillReviewExchange
 
         HashSet<string> seenCandidateIds = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (SkillReviewVerdict verdict in bundle.Verdicts)
+        foreach (SkillReviewVerdict? verdict in bundle.Verdicts)
         {
             if (verdict is null)
             {

@@ -31,8 +31,4 @@ An earlier post-migration revision attributed "cannot spawn other agents" to the
 
 Governed-documentation lookup is a first-class discovery source, and an explicit edit-permission section bounds writes to a plan file under the plans folder and its index row.
 
-The instruction body was revised after migration. It stated "You **cannot spawn other agents**" as a flat fact about being a subagent. That framing became false when the reviewer profile gained delegate=allow, so the sentence now attributes the prohibition to its actual cause — the architect profile denies delegation — leaving the behaviour identical and the reason accurate. The architect profile itself is unchanged.
-
-The instruction body was revised after migration. Discovery changed from a request/fulfill loop mediated by the orchestrator to direct delegation: the architect profile now grants `delegate`, and `delegates-to` names the two read-only discovery roles, `azure-reader` and `research-agent`. Mediation cost a full orchestrator round trip per question and made the conductor a relay for work it has no opinion about. The labeled `DISCOVERY REQUEST` hand-up survives as the fallback for a harness that does not let a subagent delegate, and for an Azure call that fails after one retry. Governed-documentation lookup is now stated as a first-class discovery source, and an explicit edit-permission section bounds writes to a plan file under the plans folder and its index row.
-
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.
