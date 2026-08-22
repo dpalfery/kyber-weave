@@ -49,6 +49,12 @@ public sealed class CursorRenderer : ISquadRenderer
         "delegate"
     ];
 
+    /// <summary>
+    /// The only pair of capabilities Cursor's <c>readonly</c> boolean can enforce; kept as a
+    /// field per CA1861 because the degradation builder runs per agent.
+    /// </summary>
+    private static readonly string[] ReadOnlyEnforcedCapabilities = ["filesystem.write", "process.execute"];
+
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
     /// <inheritdoc />
@@ -114,7 +120,7 @@ public sealed class CursorRenderer : ISquadRenderer
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
-        Dictionary<string, object> frontmatter = new(StringComparer.Ordinal)
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = agent.Name,
             ["description"] = agent.Description
@@ -131,27 +137,11 @@ public sealed class CursorRenderer : ISquadRenderer
             frontmatter["readonly"] = true;
         }
 
-        string yaml = YamlSerializer.Serialize(frontmatter);
-        StringBuilder builder = new();
-        builder.Append("---\n");
-        builder.Append(yaml);
-        if (!yaml.EndsWith('\n'))
-        {
-            builder.Append('\n');
-        }
-
-        builder.Append("---\n");
-
-        string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n");
-        builder.Append(normalizedBody);
-        if (!normalizedBody.EndsWith('\n'))
-        {
-            builder.Append('\n');
-        }
+        string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
 
         return new SquadDeploymentFile(
             $"{AgentsDirectory}/{agent.Name}.md",
-            Encoding.UTF8.GetBytes(builder.ToString()),
+            Encoding.UTF8.GetBytes(content),
             "cursor");
     }
 
@@ -161,34 +151,18 @@ public sealed class CursorRenderer : ISquadRenderer
             ['\r', '\n'],
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
-        Dictionary<string, object> frontmatter = new(StringComparer.Ordinal)
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = skill.Name,
             ["description"] = singleLineDescription,
             ["license"] = "MIT"
         };
 
-        string yaml = YamlSerializer.Serialize(frontmatter);
-        StringBuilder builder = new();
-        builder.Append("---\n");
-        builder.Append(yaml);
-        if (!yaml.EndsWith('\n'))
-        {
-            builder.Append('\n');
-        }
-
-        builder.Append("---\n");
-
-        string normalizedBody = skill.InstructionBody.Replace("\r\n", "\n");
-        builder.Append(normalizedBody);
-        if (!normalizedBody.EndsWith('\n'))
-        {
-            builder.Append('\n');
-        }
+        string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
 
         return new SquadDeploymentFile(
             $"{SkillsDirectory}/{skill.Name}/SKILL.md",
-            Encoding.UTF8.GetBytes(builder.ToString()),
+            Encoding.UTF8.GetBytes(content),
             "cursor");
     }
 
@@ -260,6 +234,16 @@ public sealed class CursorRenderer : ISquadRenderer
             ? nonDenyCapabilities.Where(cap => cap is not ("filesystem.write" or "process.execute")).ToList()
             : nonDenyCapabilities;
 
+        // Without the readonly boolean, Cursor grants file edits and terminal execution. A
+        // canonical deny for either capability is therefore not enforced by the rendered
+        // file, so it is named in the record rather than dropped silently.
+        List<string> unenforcedDenials = isReadOnly
+            ? []
+            : ReadOnlyEnforcedCapabilities
+                .Where(cap => profile.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
+                              decision == SquadPermissionDecision.Deny)
+                .ToList();
+
         StringBuilder details = new();
         if (unexpressed.Count > 0)
         {
@@ -268,6 +252,11 @@ public sealed class CursorRenderer : ISquadRenderer
         else
         {
             details.Append("Cursor subagent configuration enforces readonly mode, but cannot express other fine-grained permissions.");
+        }
+
+        if (unenforcedDenials.Count > 0)
+        {
+            details.Append($" Canonical denies not enforced without readonly: {string.Join(", ", unenforcedDenials)}.");
         }
 
         if (agent.DelegatesTo.Count > 0)

@@ -90,7 +90,10 @@ public sealed class CursorRendererContractTests
 
             (YamlMappingNode frontmatter, string body) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
             Assert.Equal(agent.Name, RequireScalar(frontmatter, "name"));
-            Assert.Equal(agent.Description, RequireScalar(frontmatter, "description"));
+            Assert.Equal(
+                agent.Description,
+                RequireScalar(frontmatter, "description"),
+                $"Agent '{agent.Name}' description mismatch.");
 
             // Model resolution: verify against loaded ModelProfiles
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
@@ -124,9 +127,16 @@ public sealed class CursorRendererContractTests
                 Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")));
             }
 
-            // Verify body matches instruction body normalized
-            string expectedBody = agent.InstructionBody.Replace("\r\n", "\n");
-            Assert.Contains(expectedBody.Trim(), body, StringComparison.Ordinal);
+            // Exact comparison: the renderer appends the normalized body verbatim, so a
+            // duplicated or padded body must fail, and the message names the offender.
+            string expectedAgentBody = agent.InstructionBody.Replace("\r\n", "\n");
+            if (!expectedAgentBody.EndsWith('\n'))
+            {
+                expectedAgentBody += "\n";
+            }
+
+            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name"));
+            Assert.Equal(expectedAgentBody, body);
         }
 
         // Concrete lowerings verification against loaded profiles
@@ -163,13 +173,26 @@ public sealed class CursorRendererContractTests
             }
 
             SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
+            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
             Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
             string expectedDescription = string.Join(" ", skill.Description.Split(
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description"));
+            Assert.Equal(
+                expectedDescription,
+                RequireScalar(frontmatter, "description"),
+                $"Skill '{skill.Name}' description mismatch.");
             Assert.Equal("MIT", RequireScalar(frontmatter, "license"));
+
+            // Exact comparison with the normalized canonical body: the renderer appends it
+            // verbatim, so duplication or padding must fail, naming the offender.
+            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n");
+            if (!expectedSkillBody.EndsWith('\n'))
+            {
+                expectedSkillBody += "\n";
+            }
+
+            Assert.Equal(expectedSkillBody, skillBody);
         }
 
         // Degradations: exactly the non-all-deny agents carry 'permission-not-expressible'
