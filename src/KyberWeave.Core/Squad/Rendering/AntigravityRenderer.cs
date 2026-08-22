@@ -30,10 +30,24 @@ public sealed class AntigravityRenderer : ISquadRenderer
 {
     private const string SkillsDirectory = ".agents/skills";
 
-    private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
+    /// <summary>
+    /// Shared identities (the fallback profile's <c>shared-identities</c> list) whose
+    /// canonical skill is reused instead of emitting a role-prefixed duplicate. Read from
+    /// the loaded fallback profile so a change to profiles/fallbacks.yml is honored
+    /// without a renderer change.
+    /// </summary>
+    private static HashSet<string> ResolveSharedIdentities(SquadSource source)
+    {
+        if (!source.FallbackProfiles.Profiles.TryGetValue("role-skill", out SquadFallbackProfile? profile))
+        {
+            return [];
+        }
+
+        return profile.SharedIdentities.ToHashSet(StringComparer.Ordinal);
+    }
 
     /// <summary>
-    /// The seven identities that exist as both a canonical agent and a canonical skill with
+    /// The identities that exist as both a canonical agent and a canonical skill with
     /// distinct bodies. Read from the loaded source at render time rather than hardcoded,
     /// so a corpus change that creates or removes a collision updates the lowering without
     /// a renderer change — the renderer decides collisions from occupancy, not a snapshot.
@@ -51,6 +65,13 @@ public sealed class AntigravityRenderer : ISquadRenderer
     }
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+
+    /// <summary>
+    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
+    /// registry may dispatch renderers concurrently; serialization takes this lock so a
+    /// shared static instance cannot interleave emitter state.
+    /// </summary>
+    private static readonly object SerializerLock = new();
 
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Antigravity];
@@ -90,6 +111,11 @@ public sealed class AntigravityRenderer : ISquadRenderer
         // role skill must be discovered from the source itself.
         HashSet<string> distinctBodyCollisions = ResolveDistinctBodyCollisions(source);
 
+        // Shared identities come from the authoritative fallbacks.yml shared-identities
+        // list, not a renderer-local roster — a corpus change to that list is honored
+        // without a renderer change.
+        HashSet<string> sharedIdentities = ResolveSharedIdentities(source);
+
         foreach (SquadSkill skill in source.Skills)
         {
             files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody));
@@ -101,10 +127,13 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         foreach (SquadAgent agent in source.Agents)
         {
-            if (SharedConductorIdentities.Contains(agent.Name, StringComparer.Ordinal))
+            if (sharedIdentities.Contains(agent.Name) && skillNames.Contains(agent.Name))
             {
-                // Shared identity: the canonical conductor skill is already emitted; emitting
-                // role-conductor would duplicate the projection the registry forbids.
+                // Shared identity: the canonical skill was already emitted above, so
+                // emitting a role-prefixed duplicate would violate the single-projection
+                // rule the registry enforces. Reuse is only correct while the canonical
+                // skill actually exists; otherwise the agent falls through to the
+                // unoccupied-identity lowering.
                 degradations.Add(new SquadDegradationRecord(
                     Target: "antigravity",
                     CanonicalIdentity: agent.Name,
@@ -184,7 +213,12 @@ public sealed class AntigravityRenderer : ISquadRenderer
             ["license"] = "MIT"
         };
 
-        string yaml = YamlSerializer.Serialize(frontmatter);
+        string yaml;
+        lock (SerializerLock)
+        {
+            yaml = YamlSerializer.Serialize(frontmatter);
+        }
+
         StringBuilder builder = new();
         builder.Append("---\n");
         builder.Append(yaml);

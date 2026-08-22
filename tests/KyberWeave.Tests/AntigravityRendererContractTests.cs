@@ -22,7 +22,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
+    /// <summary>
+    /// Shared identities are read from the loaded fallback profile's shared-identities
+    /// list — the same authoritative source the renderer uses — rather than a literal
+    /// roster that could drift from profiles/fallbacks.yml.
+    /// </summary>
+    private static IReadOnlyList<string> SharedIdentities(SquadSource source) =>
+        source.FallbackProfiles.Profiles.TryGetValue("role-skill", out SquadFallbackProfile? profile)
+            ? profile.SharedIdentities
+            : [];
 
     /// <summary>
     /// The expected permission-degradation roster is derived from the loaded capability
@@ -42,8 +50,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
     private static HashSet<string> DeriveCollisions(SquadSource source)
     {
         HashSet<string> skillNames = source.Skills.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
         return source.Agents
-            .Where(a => skillNames.Contains(a.Name) && !SharedConductorIdentities.Contains(a.Name))
+            .Where(a => skillNames.Contains(a.Name) && !shared.Contains(a.Name))
             .Select(a => a.Name)
             .ToHashSet(StringComparer.Ordinal);
     }
@@ -81,7 +90,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        HashSet<string> shared = SharedConductorIdentities.ToHashSet(StringComparer.Ordinal);
+        HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
         HashSet<string> collisions = DeriveCollisions(source);
 
         int unoccupiedAgents = source.Agents.Count(a => !shared.Contains(a.Name) && !collisions.Contains(a.Name));
@@ -148,7 +157,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.Equal(NormalizeBody(agent.InstructionBody), ReadBody(roleFile));
         }
 
-        foreach (string conductor in SharedConductorIdentities)
+        foreach (string conductor in SharedIdentities(source))
         {
             Assert.Contains(result.Files, f => f.RelativePath == $".agents/skills/{conductor}/SKILL.md");
             Assert.DoesNotContain(result.Files, f => f.RelativePath == $".agents/skills/role-{conductor}/SKILL.md");
@@ -181,7 +190,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
 
         string[] expectedPermissionAgents = source.Agents
-            .Where(a => HasNonDenyCapability(source.CapabilityProfiles, source.CapabilityProfiles.Profiles[a.CapabilityProfile]))
+            .Where(a =>
+            {
+                Assert.True(
+                    source.CapabilityProfiles.Profiles.TryGetValue(a.CapabilityProfile, out SquadCapabilityProfile? profile),
+                    $"Agent '{a.Name}' references undeclared capability profile '{a.CapabilityProfile}'.");
+                return HasNonDenyCapability(source.CapabilityProfiles, profile!);
+            })
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
@@ -229,6 +244,40 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.Equal(first.Files[i].Target, second.Files[i].Target);
             Assert.True(first.Files[i].Content.Span.SequenceEqual(second.Files[i].Content.Span));
         }
+
+        // Degradations must be deterministic as well: the renderer sorts the capability
+        // vocabulary precisely so details strings are stable across renders, and a
+        // regression that drops that sort would otherwise leave this suite green.
+        Assert.Equal(first.Degradations.Count, second.Degradations.Count);
+        for (int i = 0; i < first.Degradations.Count; i++)
+        {
+            Assert.Equal(first.Degradations[i], second.Degradations[i]);
+        }
+    }
+
+    [Fact]
+    public async Task RenderSkill_FrontmatterKeyOrderIsStable()
+    {
+        // The frontmatter contract is name, description, license — an ordered mapping, not
+        // a sequence. Pinned so a serializer change cannot silently reorder keys or emit
+        // a list-of-pairs shape.
+        SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Antigravity],
+            Scope: SquadDeploymentScope.Project));
+
+        SquadDeploymentFile rendered = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".agents/skills/conductor/SKILL.md");
+        string content = System.Text.Encoding.UTF8.GetString(rendered.Content.Span);
+        Assert.StartsWith("---\n", content, StringComparison.Ordinal);
+        int nameIdx = content.IndexOf("name:", StringComparison.Ordinal);
+        int descIdx = content.IndexOf("description:", StringComparison.Ordinal);
+        int licIdx = content.IndexOf("license:", StringComparison.Ordinal);
+        Assert.True(nameIdx < descIdx && descIdx < licIdx,
+            $"Frontmatter key order wrong: name={nameIdx} description={descIdx} license={licIdx}");
+        Assert.DoesNotContain("Key:", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("- ", content[..licIdx], StringComparison.Ordinal);
     }
 
     private static string NormalizeBody(string body)
