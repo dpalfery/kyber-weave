@@ -388,9 +388,10 @@ public sealed class SquadCliCommandTests : IDisposable
                 Global = false
             }));
 
-        // Copilot (native) and Antigravity (fallback) are registered; other approved
-        // targets still report as not-yet-implemented rather than silently absent.
+        // Three renderers are registered: Copilot (native), Cursor (native), and
+        // Antigravity (fallback); other approved targets still report as not-yet-implemented.
         Assert.Contains("copilot", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cursor", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("antigravity", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("docs/todo", execution.Output, StringComparison.Ordinal);

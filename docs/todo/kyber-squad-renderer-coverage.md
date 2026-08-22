@@ -12,7 +12,7 @@ status: draft
 
 `squad install`/`squad update` render canonical Squad source into a harness's native files
 through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-`copilot` (native) and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have
+`copilot` (native), `cursor` (native), and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have
 renderers today; every other approved target fails in preflight, before any network call,
 naming the gap and pointing here.
 
@@ -23,7 +23,6 @@ harness's real documentation, the code seam to implement against, and how to ver
 | Target | Kind | Page |
 |---|---|---|
 | `codex` | Native | [codex.md](codex.md) |
-| `cursor` | Native | [cursor.md](cursor.md) |
 | `claude` | Native | [claude-code.md](claude-code.md) |
 | `opencode` | Native | [opencode.md](opencode.md) |
 | `kilo` | Native | [kilo.md](kilo.md) |
@@ -32,9 +31,10 @@ harness's real documentation, the code seam to implement against, and how to ver
 | `warp` | Fallback (role-skill lowering) | [warp.md](warp.md) |
 
 `copilot` is covered by `CopilotRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`) and `antigravity` by
+(`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`), `cursor` by `CursorRenderer`
+(`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`), and `antigravity` by
 `AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) —
-neither is listed above.
+none is listed above.
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.
 

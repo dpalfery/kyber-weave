@@ -1,0 +1,267 @@
+using System.Text;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Core.Squad.Rendering;
+using Xunit;
+using YamlDotNet.RepresentationModel;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Renders the real canonical Squad source (<c>products/kyber-squad</c>) through
+/// <see cref="SquadRendererRegistry"/> with <see cref="CursorRenderer"/> and validates the result
+/// against Cursor's documented subagent and skill contracts.
+/// </summary>
+/// <remarks>
+/// Validates that canonical agents lower to Cursor subagents at <c>.cursor/agents/&lt;name&gt;.md</c>
+/// and skills lower to <c>.cursor/skills/&lt;name&gt;/SKILL.md</c>. Verifies single-projection suppression
+/// for primary conductors, permission lowering to Cursor's <c>readonly</c> boolean flag, model resolution
+/// from <c>models.yml</c>, and structured degradation accounting.
+/// </remarks>
+public sealed class CursorRendererContractTests
+{
+    private static readonly string ProductRoot =
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+    [Fact]
+    public void SupportedTargets_IsExactlyCursor()
+    {
+        SquadRendererRegistry registry = new([new CursorRenderer()]);
+
+        Assert.Equal([SquadTarget.Cursor], registry.SupportedTargets);
+    }
+
+    [Fact]
+    public async Task RenderAsync_UnsupportedTarget_FailsBeforeAnyRendererRuns()
+    {
+        SquadRendererRegistry registry = new([new CursorRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude, SquadTarget.Cursor],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.False(result.Success);
+        Assert.Empty(result.Files);
+        Assert.Contains(result.Errors, e => e.Contains("claude", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, e => e.Contains("docs/todo", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RenderAsync_Guard_RejectsNonCursorTarget()
+    {
+        CursorRenderer renderer = new();
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Project);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
+    }
+
+    [Fact]
+    public async Task RenderAsync_Cursor_RendersTheRealCanonicalCorpus()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRendererRegistry registry = new([new CursorRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Cursor],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // 22 agents + (26 skills - conductor - conductor-v3, suppressed by the native
+        // single-projection rule) = 46.
+        int expectedFileCount = source.Agents.Count + source.Skills.Count - 2;
+        Assert.Equal(expectedFileCount, result.Files.Count);
+        Assert.All(result.Files, f => Assert.Equal("cursor", f.Target));
+
+        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".cursor/agents/{agent.Name}.md");
+
+            (YamlMappingNode frontmatter, string body) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
+            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name"));
+            Assert.Equal(agent.Description, RequireScalar(frontmatter, "description"));
+
+            // Model resolution: verify against loaded ModelProfiles
+            SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
+            if (modelProfile.HarnessModels.TryGetValue("cursor", out string? expectedModel))
+            {
+                Assert.Equal(expectedModel, RequireScalar(frontmatter, "model"));
+            }
+            else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
+            {
+                Assert.Equal(modelProfile.Default, RequireScalar(frontmatter, "model"));
+            }
+            else
+            {
+                Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("model")));
+            }
+
+            // Permission lowering: readonly is emitted only when both write and execute are withheld
+            SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool allowsWrite = capProfile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+                               writeDecision == SquadPermissionDecision.Allow;
+            bool allowsExecute = capProfile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision executeDecision) &&
+                                 executeDecision == SquadPermissionDecision.Allow;
+            bool expectedReadOnly = !allowsWrite && !allowsExecute;
+
+            if (expectedReadOnly)
+            {
+                Assert.Equal("true", RequireScalar(frontmatter, "readonly"));
+            }
+            else
+            {
+                Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")));
+            }
+
+            // Verify body matches instruction body normalized
+            string expectedBody = agent.InstructionBody.Replace("\r\n", "\n");
+            Assert.Contains(expectedBody.Trim(), body, StringComparison.Ordinal);
+        }
+
+        // Concrete lowerings verification against loaded profiles
+        SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
+        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
+        AssertReadOnly(result, "architect", expectedReadOnly: true);
+
+        SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        AssertReadOnly(result, "docs-dev", expectedReadOnly: false);
+
+        SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
+        Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
+        AssertReadOnly(result, "bug-crusher-investigator", expectedReadOnly: false);
+
+        // Conductor and conductor-v3 are native primary agents on Cursor: present as
+        // .cursor/agents/<name>.md and never duplicated as skills.
+        foreach (string conductor in new[] { "conductor", "conductor-v3" })
+        {
+            Assert.Contains(result.Files, f => f.RelativePath == $".cursor/agents/{conductor}.md");
+            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".cursor/skills/{conductor}/SKILL.md");
+        }
+
+        // Skills verification
+        foreach (SquadSkill skill in source.Skills)
+        {
+            bool isConductor = skill.Name is "conductor" or "conductor-v3";
+            string path = $".cursor/skills/{skill.Name}/SKILL.md";
+            if (isConductor)
+            {
+                Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
+                continue;
+            }
+
+            SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
+            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
+            string expectedDescription = string.Join(" ", skill.Description.Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description"));
+            Assert.Equal("MIT", RequireScalar(frontmatter, "license"));
+        }
+
+        // Degradations: exactly the non-all-deny agents carry 'permission-not-expressible'
+        string[] expectedDegraded = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                return prof.Permissions.Values.Any(d => d != SquadPermissionDecision.Deny);
+            })
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(expectedDegraded);
+        Assert.Equal(
+            expectedDegraded,
+            result.Degradations.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+
+        foreach (SquadDegradationRecord degradation in result.Degradations)
+        {
+            Assert.Equal("cursor", degradation.Target);
+            Assert.Equal("permission-not-expressible", degradation.Code);
+            Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
+            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
+            Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
+        }
+    }
+
+    [Fact]
+    public async Task RenderAsync_IsDeterministic()
+    {
+        SquadRendererRegistry registry = new([new CursorRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Cursor],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult first = await registry.RenderAsync(request);
+        SquadRenderResult second = await registry.RenderAsync(request);
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.Equal(first.Files.Count, second.Files.Count);
+
+        for (int i = 0; i < first.Files.Count; i++)
+        {
+            SquadDeploymentFile file1 = first.Files[i];
+            SquadDeploymentFile file2 = second.Files[i];
+
+            Assert.Equal(file1.RelativePath, file2.RelativePath);
+            Assert.Equal(file1.Target, file2.Target);
+            Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span), $"Content differed for file '{file1.RelativePath}'.");
+        }
+    }
+
+    private static void AssertReadOnly(SquadRenderResult result, string agentName, bool expectedReadOnly)
+    {
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".cursor/agents/{agentName}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
+        if (expectedReadOnly)
+        {
+            Assert.Equal("true", RequireScalar(frontmatter, "readonly"));
+        }
+        else
+        {
+            Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")));
+        }
+    }
+
+    private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text)
+    {
+        const string delimiter = "---\n";
+        Assert.StartsWith(delimiter, text, StringComparison.Ordinal);
+        int end = text.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
+        Assert.True(end > 0, "Expected a closing '---' frontmatter delimiter.");
+
+        string yaml = text[delimiter.Length..(end + 1)];
+        string body = text[(end + 5)..];
+
+        YamlStream stream = new();
+        stream.Load(new StringReader(yaml));
+        YamlMappingNode root = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
+        return (root, body);
+    }
+
+    private static string RequireScalar(YamlMappingNode node, string key)
+    {
+        YamlNode value = node.Children[new YamlScalarNode(key)];
+        return Assert.IsType<YamlScalarNode>(value).Value
+            ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
+    }
+}

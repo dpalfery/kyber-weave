@@ -15,6 +15,7 @@ code-refs:
   - ISquadRenderer
   - SquadRendererRegistry
   - CopilotRenderer
+  - CursorRenderer
 ---
 
 # Kyber-Squad architecture
@@ -249,6 +250,7 @@ and validates.
   requested target set, never a partial render of the targets that happen to be covered.
 - **Dispatch**: each supported target's canonical source goes to the `ISquadRenderer` that
   owns it — `CopilotRenderer` for `.github/agents/*.agent.md` and `.github/skills/*/SKILL.md`,
+  `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
   and `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`.
 - **Validate**: the registry re-checks the merged output — portable paths stay inside the
   extraction root, every file's target was actually requested, the native/fallback
@@ -266,7 +268,7 @@ and validates.
   Base tools (`vscode`, `todo`) are granted unconditionally, while capability-governed built-ins
   and single-quoted MCP server wildcards (`'codegraph/*'`, `'kyber-weave/*'`, `'context7/*'`) are
   capability-gated (`filesystem.read` for non-orchestrator roles).
-- **Coverage today**: `copilot` (native) and `antigravity` (fallback role-skill lowering to
+- **Coverage today**: `copilot` (native), `cursor` (native), and `antigravity` (fallback role-skill lowering to
   `.agents/skills/`) have renderers. `kyber-weave squad doctor` reports which targets are
   covered; `docs/todo/<target>.md` has what implementing the rest needs.
 

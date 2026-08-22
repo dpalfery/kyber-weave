@@ -46,7 +46,6 @@ last-reviewed: YYYY-MM-DD
 | [kyber-squad-renderer-coverage.md](kyber-squad-renderer-coverage.md) | KyberSquad | draft | Overview of remaining Kyber-Squad renderer target coverage and CLI gaps. |
 | [claude-code.md](claude-code.md) | KyberSquad | draft | Add a native Claude Code renderer to Kyber-Squad. |
 | [codex.md](codex.md) | KyberSquad | draft | Add a native Codex renderer to Kyber-Squad. |
-| [cursor.md](cursor.md) | KyberSquad | draft | Add a native Cursor renderer to Kyber-Squad. |
 | [factory.md](factory.md) | KyberSquad | draft | Add a native Factory (factory-droids) renderer to Kyber-Squad. |
 | [gemini.md](gemini.md) | KyberSquad | draft | Add a native Gemini renderer to Kyber-Squad. |
 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | draft | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
