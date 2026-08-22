@@ -56,10 +56,7 @@ public sealed record ScaffoldedFile(string RelativePath, ScaffoldOutcome Outcome
 public sealed record ScaffoldResult(
     string DocsRoot,
     DocsRootSource DocsRootSource,
-    IReadOnlyList<ScaffoldedFile> Files)
-{
-    public bool WroteAnything => Files.Any(f => f.Written);
-}
+    IReadOnlyList<ScaffoldedFile> Files);
 
 /// <summary>
 /// Bootstraps a host repository into a governable documentation corpus: host config, the

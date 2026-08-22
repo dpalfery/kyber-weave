@@ -54,6 +54,22 @@ review:
     - id: inspectcode
       run: [dotnet, jb, inspectcode, KyberWeave.sln, --output=artifacts/inspectcode.xml, --format=Xml, --severity=WARNING]
       blocking: true
+    # Cross-file duplicate bodies, from the CodeGraph index. Nothing else in the chain
+    # answers this: JetBrains retired `dupfinder`, and the inspections InspectCode still
+    # ships that touch duplication are scoped to one statement or one method group. The
+    # `duplicate-implementation` lens reads the report at the --out path below and decides
+    # which clusters this change is responsible for. Like the analyzer gate it exits 0
+    # whether or not it finds anything, so "blocking" means it must have *run*.
+    - id: duplicates
+      run: [dotnet, run, --project, src/KyberWeave.Cli, --, review, duplicates, ., --out, artifacts/duplicates.json]
+      blocking: true
+
+  # Bodies shorter than this are guard clauses and one-line delegations, which are
+  # identical everywhere and evidence of nothing. The count is of normalized lines —
+  # braces, blank lines, whole-line comments, and the signature are already gone — so a
+  # threshold of 4 means four real statements shared between two symbols.
+  duplicates:
+    minimum-lines: 4
 
   policy:
     # The artifacts that govern what agents may do are not approvable by an agent. A change

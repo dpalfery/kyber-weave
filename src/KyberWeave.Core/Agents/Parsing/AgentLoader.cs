@@ -13,8 +13,11 @@ public sealed record AgentLoadResult(bool Success, AgentModel? Agent, string Pat
 /// </summary>
 public static class AgentLoader
 {
-    private static readonly TomlAgentParser TomlParser = new();
-    private static readonly MarkdownAgentParser MarkdownParser = new();
+    // Held through the interface, and in priority order: TOML first, because a .agent.md
+    // file matches the Markdown parser and nothing else, while the TOML parser is the
+    // narrower predicate. Dispatching through IAgentParser is what stops that interface
+    // from being an abstraction with two implementations and no consumer.
+    private static readonly IAgentParser[] Parsers = [new TomlAgentParser(), new MarkdownAgentParser()];
 
     private static readonly Dictionary<string, HarnessKind> FolderToHarness =
         new(StringComparer.OrdinalIgnoreCase)
@@ -131,15 +134,11 @@ public static class AgentLoader
         {
             try
             {
-                AgentModel agent;
-                if (TomlParser.CanParse(file))
-                    agent = TomlParser.Parse(file, harness);
-                else if (MarkdownParser.CanParse(file))
-                    agent = MarkdownParser.Parse(file, harness);
-                else
+                IAgentParser? parser = Array.Find(Parsers, p => p.CanParse(file));
+                if (parser is null)
                     continue;
 
-                results.Add(new AgentLoadResult(true, agent, file, null));
+                results.Add(new AgentLoadResult(true, parser.Parse(file, harness), file, null));
             }
             catch (Exception ex)
             {

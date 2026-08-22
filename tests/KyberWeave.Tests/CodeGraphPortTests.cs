@@ -87,6 +87,27 @@ public class CodeGraphPortTests
         Assert.Contains("GET /api/adapter/ping", adapter.AllRoutes());
     }
 
+    [Fact]
+    public void AdapterReadsEndLinesAndEnumeratesByKind()
+    {
+        // Guards the SELECT: duplicate detection needs the whole span, and a node with no
+        // end line has no body to compare, so losing the column would silently empty the gate.
+        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
+        fixture.IndexMethod("Total", "src/Adapter/Sums.cs", 10, 24);
+        fixture.IndexMethod("Count", "src/Adapter/Sums.cs", 26, 30);
+        fixture.IndexSymbol("Sums", "src/Adapter/Sums.cs", 5, 40);
+
+        ICodeGraphSymbolEnumerator adapter = new CodeGraphResolverAdapter(fixture.DatabasePath);
+        IReadOnlyList<CodeGraphNode> methods = adapter.NodesOfKind("method");
+
+        Assert.Equal(2, methods.Count);
+        CodeGraphNode total = methods.Single(m => m.Name == "Total");
+        Assert.Equal(10, total.StartLine);
+        Assert.Equal(24, total.EndLine);
+        Assert.Equal(15, total.LineSpan);
+        Assert.Empty(adapter.NodesOfKind("interface"));
+    }
+
     private static DocumentSet DocumentSetWithCodeRef(string symbol) =>
         new()
         {

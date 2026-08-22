@@ -15,12 +15,11 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings)
     {
-        DiagnosticReport report = new DiagnosticReport();
+        DiagnosticReport report = new();
         if (!DocsCommandComposition.TryCreateLoader(
                 settings,
                 report,
                 out DocumentLoader? loader,
-                out _,
                 out KyberWeaveConfig config))
         {
             CommandHelpers.Finish(report, settings, "docs export-graph", "Document");

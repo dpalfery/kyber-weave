@@ -6,16 +6,6 @@ namespace KyberWeave.Core.Configuration;
 /// <summary>Loads, merges, and validates the <c>review:</c> host configuration section.</summary>
 public static class ReviewConfigLoader
 {
-    /// <summary>Loads review configuration from a combined Kyber-Weave YAML file.</summary>
-    public static ReviewConfig LoadMerged(ReviewConfig defaults, string yamlPath)
-    {
-        ArgumentNullException.ThrowIfNull(defaults);
-        ArgumentException.ThrowIfNullOrWhiteSpace(yamlPath);
-
-        KyberWeaveYamlDocument document = KyberWeaveYamlParser.ParseFile(yamlPath);
-        return Merge(defaults, document.Review);
-    }
-
     internal static ReviewConfig Merge(ReviewConfig defaults, ReviewYamlSection? section)
     {
         ArgumentNullException.ThrowIfNull(defaults);
@@ -26,6 +16,7 @@ public static class ReviewConfigLoader
         {
             Gates = section.Gates is null ? defaults.Gates : ParseGates(section.Gates),
             Coverage = ParseCoverage(section.Coverage, defaults.Coverage),
+            Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
             Policy = ParsePolicy(section.Policy, defaults.Policy)
         };
     }
@@ -79,6 +70,15 @@ public static class ReviewConfigLoader
             throw new YamlException("review.coverage.class-line-percent must be between 0 and 100.");
 
         return new ReviewCoverage(file, @class);
+    }
+
+    private static ReviewDuplicates ParseDuplicates(ReviewDuplicatesYaml? duplicates, ReviewDuplicates defaults)
+    {
+        // A threshold below two cannot mean anything: Normalize drops the signature line, so
+        // a one-line body is a single statement and matches everywhere. Rather than let a
+        // host configure the gate into uselessness, an out-of-range value falls back.
+        if (duplicates?.MinimumLines is not > 1) return defaults;
+        return new ReviewDuplicates(duplicates.MinimumLines.Value);
     }
 
     private static ReviewPolicy ParsePolicy(ReviewPolicyYaml? policy, ReviewPolicy defaults)

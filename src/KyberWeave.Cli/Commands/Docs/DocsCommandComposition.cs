@@ -79,21 +79,13 @@ internal static class DocsCommandComposition
         out DocumentLoader? loader) =>
         TryCreateLoader(settings, report, out loader, out _);
 
-    private static bool TryCreateLoader(
-        DocsSettings settings,
-        DiagnosticReport report,
-        out DocumentLoader? loader,
-        out OntologyConfig ontology)
-        => TryCreateLoader(settings, report, out loader, out ontology, out _);
-
     public static bool TryCreateLoader(
         DocsSettings settings,
         DiagnosticReport report,
         out DocumentLoader? loader,
-        out OntologyConfig ontology,
         out KyberWeaveConfig config)
     {
-        if (!TryResolveConfig(settings, report, out config, out ontology))
+        if (!TryResolveConfig(settings, report, out config, out OntologyConfig ontology))
         {
             loader = null;
             return false;

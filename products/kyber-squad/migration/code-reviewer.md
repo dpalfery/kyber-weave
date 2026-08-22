@@ -9,7 +9,7 @@ sources:
   .cursor/agents/code-reviewer.agent.md: abbc10e4d5758d50d032d60598f48da0f590f3f4aef61fe68dd6a499d6a2626f
   .github/agents/code-reviewer.agent.md: c4b31d87762a8814cd0e69772be4e1b43c481337117debb1acbb658addde7976
   .opencode/agents/code-reviewer.md: 4e40f1a3130f9618f741d93b897c00a9606c6d7de970b583c7f8ad47d3a10de3
-final-body-sha256: ff4133f748c3ec7b38c085a400e51cc11a29360ebec48fdfce727c1bcec6d698
+final-body-sha256: e9c6b7b0d9ae13d7c314a4c6820bf1b7e0cd0fa4f740816a58639a646b3a76bc
 ---
 # code-reviewer migration
 

@@ -162,6 +162,14 @@ by the engine: both say the change is not the engine's to settle, not that it is
 | `KW-REVIEW-023` | Error | A findings or gate document could not be read |
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 
+### Duplicates — `review duplicates`
+
+| Id | Severity | Meaning |
+|---|---|---|
+| `KW-REVIEW-030` | Warning | No CodeGraph index was read, so duplicate detection did not run |
+| `KW-REVIEW-031` | Warning | A set of symbols shares one normalized body |
+| `KW-REVIEW-032` | Warning | The CodeGraph index disagrees with the working tree, so its clusters are stale |
+
 ## Shared
 
 | Id | Severity | Meaning |

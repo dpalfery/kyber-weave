@@ -23,6 +23,18 @@ public sealed record ReviewCoverage(double FileLinePercent = 0, double ClassLine
     public bool IsDeclared => FileLinePercent > 0 || ClassLinePercent > 0;
 }
 
+/// <summary>How much of a body has to match before a duplicate cluster is worth reporting.</summary>
+/// <param name="MinimumLines">
+/// Normalized lines a body must reach to be compared at all. Below this the matches are
+/// guard clauses, one-line delegations, and property bodies — identical everywhere, and
+/// evidence of nothing.
+/// </param>
+public sealed record ReviewDuplicates(int MinimumLines = 4)
+{
+    /// <summary>The threshold applied when a host declares none.</summary>
+    public static ReviewDuplicates Default { get; } = new();
+}
+
 /// <summary>A finding the host has decided not to be told about again, for now.</summary>
 /// <param name="Id">The finding identifier being suppressed.</param>
 /// <param name="Reason">Why, stated by whoever suppressed it.</param>
@@ -71,6 +83,9 @@ public sealed class ReviewConfig
 
     /// <summary>The unit-coverage floor.</summary>
     public ReviewCoverage Coverage { get; init; } = new();
+
+    /// <summary>The duplicate-detection threshold.</summary>
+    public ReviewDuplicates Duplicates { get; init; } = ReviewDuplicates.Default;
 
     /// <summary>The rules the verdict engine may not override.</summary>
     public ReviewPolicy Policy { get; init; } = ReviewPolicy.ProductDefaults;

@@ -58,8 +58,8 @@ public static class ReviewJson
         return JsonSerializer.Serialize(report, Options);
     }
 
-    /// <summary>Serializes a findings report.</summary>
-    public static string Write(FindingsReport report)
+    /// <summary>Serializes a duplicates report.</summary>
+    public static string Write(DuplicateReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
         return JsonSerializer.Serialize(report, Options);
@@ -79,5 +79,13 @@ public static class ReviewJson
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         return JsonSerializer.Deserialize<FindingsReport>(json, Options)
             ?? throw new JsonException("The findings report is empty.");
+    }
+
+    /// <summary>Reads a duplicates report.</summary>
+    public static DuplicateReport ReadDuplicates(string json)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+        return JsonSerializer.Deserialize<DuplicateReport>(json, Options)
+            ?? throw new JsonException("The duplicates report is empty.");
     }
 }

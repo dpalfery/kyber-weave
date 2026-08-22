@@ -11,7 +11,6 @@ public static class AgentSpecValidator
     public const string RuleMissingName = "KW-AGENT-SPEC-001";
     public const string RuleMissingDescription = "KW-AGENT-SPEC-002";
     public const string RuleMissingInstructions = "KW-AGENT-SPEC-003";
-    public const string RuleBrokenReference = "KW-AGENT-SPEC-004";
 
     public static DiagnosticReport Validate(AgentModel agent)
     {

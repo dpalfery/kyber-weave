@@ -53,12 +53,6 @@ public sealed class KyberWeaveConfig
         return Clone(configReg: configReg);
     }
 
-    public KyberWeaveConfig WithReview(ReviewConfig review)
-    {
-        ArgumentNullException.ThrowIfNull(review);
-        return Clone(review: review);
-    }
-
     internal KyberWeaveConfig Clone(
         OntologyConfig? ontology = null,
         HarnessProfileConfig? harness = null,

@@ -83,18 +83,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
 
     private readonly List<SquadRenderRequest> _renderRequests = [];
 
-    private Func<SquadRenderRequest, SquadRenderResult>? _renderHandler;
-    private string? _renderFailure;
-    private bool _simulatePermissionWidening;
-    private string? _permissionWideningAgent;
-    private bool _simulateMissingDigest;
-    private string? _missingDigestAgent;
-    private bool _simulateCorruptedDigest;
-    private string? _corruptedDigestAgent;
-    private bool _simulateDuplicateProjection;
-    private string? _duplicateProjectionTarget;
-    private string? _duplicateProjectionIdentity;
-    private readonly List<SquadRenderWarning> _warnings = [];
 
     public IReadOnlyList<SquadRenderRequest> RenderRequests => _renderRequests;
 
@@ -105,84 +93,12 @@ public sealed class FakeSquadRenderer : ISquadRenderer
     /// </summary>
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
 
-    public FakeSquadRenderer WithRenderHandler(Func<SquadRenderRequest, SquadRenderResult> handler)
-    {
-        _renderHandler = handler;
-        return this;
-    }
-
-    public FakeSquadRenderer WithRenderFailure(string errorMessage)
-    {
-        _renderFailure = errorMessage;
-        return this;
-    }
-
-    public FakeSquadRenderer WithPermissionWidening(string agent, string capability)
-    {
-        _simulatePermissionWidening = true;
-        _permissionWideningAgent = agent;
-        return this;
-    }
-
-    public FakeSquadRenderer WithMissingDigest(string agent)
-    {
-        _simulateMissingDigest = true;
-        _missingDigestAgent = agent;
-        return this;
-    }
-
-    public FakeSquadRenderer WithCorruptedDigest(string agent)
-    {
-        _simulateCorruptedDigest = true;
-        _corruptedDigestAgent = agent;
-        return this;
-    }
-
-    public FakeSquadRenderer WithDuplicateProjection(string target, string identity)
-    {
-        _simulateDuplicateProjection = true;
-        _duplicateProjectionTarget = target;
-        _duplicateProjectionIdentity = identity;
-        return this;
-    }
-
-    public FakeSquadRenderer WithWarning(string code, string message, string? target = null)
-    {
-        _warnings.Add(new SquadRenderWarning(code, message, target));
-        return this;
-    }
-
     public Task<SquadRenderResult> RenderAsync(
         SquadRenderRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         _renderRequests.Add(request);
-
-        if (_renderFailure is not null)
-        {
-            return Task.FromResult(new SquadRenderResult(
-                Success: false,
-                Files: [],
-                Degradations: [],
-                Warnings: _warnings,
-                Errors: [_renderFailure]));
-        }
-
-        if (_renderHandler is not null)
-        {
-            return Task.FromResult(_renderHandler(request));
-        }
-
-        if (_simulatePermissionWidening)
-        {
-            return Task.FromResult(new SquadRenderResult(
-                Success: false,
-                Files: [],
-                Degradations: [],
-                Warnings: _warnings,
-                Errors: [$"Permission widening detected for agent '{_permissionWideningAgent}': 'deny' widened to 'allow'."]));
-        }
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -206,15 +122,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
                 {
                     string canonicalBody = GetAgentBody(agent);
                     string digest = ComputeSha256(canonicalBody);
-
-                    if (_simulateMissingDigest && string.Equals(agent, _missingDigestAgent, StringComparison.Ordinal))
-                    {
-                        digest = string.Empty;
-                    }
-                    else if (_simulateCorruptedDigest && string.Equals(agent, _corruptedDigestAgent, StringComparison.Ordinal))
-                    {
-                        digest = "0000000000000000000000000000000000000000000000000000000000000000";
-                    }
 
                     if (SharedConductorIdentities.Contains(agent, StringComparer.Ordinal))
                     {
@@ -280,15 +187,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
                     string skillPath = GetTargetSkillFilePath(target, skill);
                     files.Add(new SquadDeploymentFile(skillPath, GetSkillContent(skill), targetToken));
                 }
-
-                // If duplicate projection is simulated:
-                if (_simulateDuplicateProjection &&
-                    (string.IsNullOrEmpty(_duplicateProjectionTarget) || string.Equals(_duplicateProjectionTarget, targetToken, StringComparison.OrdinalIgnoreCase)))
-                {
-                    string dupIdentity = _duplicateProjectionIdentity ?? "conductor";
-                    string dupSkillPath = GetTargetSkillFilePath(target, dupIdentity);
-                    files.Add(new SquadDeploymentFile(dupSkillPath, GetSkillContent(dupIdentity), targetToken));
-                }
             }
         }
 
@@ -296,7 +194,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
             Success: errors.Count == 0,
             Files: files,
             Degradations: degradations,
-            Warnings: _warnings,
+            Warnings: [],
             Errors: errors));
     }
 

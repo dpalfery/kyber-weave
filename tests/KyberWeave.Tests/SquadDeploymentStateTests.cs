@@ -1057,7 +1057,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadTransaction transaction = new SquadTransaction(store, observer);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
 
-        Exception exception = Record.Exception(() => transaction.Execute(updatePlan));
+        Exception? exception = Record.Exception(() => transaction.Execute(updatePlan));
 
         SquadDeploymentConflictException conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
         Assert.Contains("changed", conflict.Message, StringComparison.OrdinalIgnoreCase);
@@ -1079,7 +1079,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "A compare-and-restore conflict must retain its verified journal and backup authority.");
 
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-        Exception recoveryException = Record.Exception(() => transaction.Recover(
+        Exception? recoveryException = Record.Exception(() => transaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -1087,7 +1087,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         AssertTreesEqual(beforeRecovery, CaptureTree(fixturePath));
         Assert.Equal(observer.ExternalBytes, File.ReadAllBytes(observer.ReplacedPath));
 
-        Exception repeatedRecoveryException = Record.Exception(() => transaction.Recover(
+        Exception? repeatedRecoveryException = Record.Exception(() => transaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
         Assert.IsAssignableFrom<SquadDeploymentConflictException>(repeatedRecoveryException);
@@ -1112,7 +1112,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         ExternalChildObserver observer = new ExternalChildObserver(fixturePath, generatedPath, externalPath);
         SquadTransaction transaction = Transaction(fixturePath, observer);
 
-        Exception exception = Record.Exception(() =>
+        Exception? exception = Record.Exception(() =>
             transaction.Execute(plan));
 
         Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
@@ -1156,7 +1156,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
         SquadTransaction transaction = Transaction(fixturePath);
 
-        Exception exception = Record.Exception(() => transaction.Recover(
+        Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -1189,7 +1189,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
         SquadTransaction transaction = Transaction(fixturePath);
 
-        Exception exception = Record.Exception(() => transaction.Recover(
+        Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -1511,7 +1511,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Directory.CreateSymbolicLink(aliasRoot, secondRoot);
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
 
-        Exception exception = Record.Exception(() =>
+        Exception? exception = Record.Exception(() =>
             new SquadTransaction(Store(applicationData)).Execute(plan));
 
         SquadDeploymentConflictException conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
@@ -1556,7 +1556,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     "codex",
                     false))), corruption);
 
-        Exception exception = Record.Exception(() =>
+        Exception? exception = Record.Exception(() =>
         {
             if (documentKind == "lock")
                 _ = store.DeserializeLock(document);
@@ -1595,7 +1595,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
         SquadTransaction transaction = Transaction(fixturePath);
 
-        Exception exception = Record.Exception(() => transaction.Recover(
+        Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -1703,7 +1703,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             relativePath,
             artifact);
 
-        Exception exception = Record.Exception(() => new SquadTransaction(store, observer).Execute(plan));
+        Exception? exception = Record.Exception(() => new SquadTransaction(store, observer).Execute(plan));
 
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
         string reportedArtifact = artifact == "target-file"
@@ -1778,7 +1778,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         LeafRaceObserver observer = new LeafRaceObserver(fixturePath, relativePath, racedNodeKind);
         SquadTransaction transaction = Transaction(fixturePath, observer);
 
-        Exception exception = Record.Exception(() => transaction.Execute(plan));
+        Exception? exception = Record.Exception(() => transaction.Execute(plan));
 
         InvalidOperationException conflict = Assert.IsAssignableFrom<InvalidOperationException>(exception);
         Assert.Contains(Path.GetFileName(relativePath), conflict.Message, StringComparison.Ordinal);
@@ -1851,7 +1851,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
         SquadTransaction transaction = Transaction(fixturePath);
 
-        Exception exception = Record.Exception(() => transaction.Recover(
+        Exception? exception = Record.Exception(() => transaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -1905,7 +1905,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         WriteJsonObject(intentPath, intent);
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixture.Path);
 
-        Exception exception = Record.Exception(() => new SquadTransaction(store).Recover(
+        Exception? exception = Record.Exception(() => new SquadTransaction(store).Recover(
             targetRoot,
             SquadDeploymentScope.Global));
 
@@ -2011,7 +2011,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
                 File.WriteAllText(intentPath, numericJournal, new UTF8Encoding(false));
                 SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
-                Exception exception = Record.Exception(() => transaction.Recover(
+                Exception? exception = Record.Exception(() => transaction.Recover(
                     fixturePath,
                     SquadDeploymentScope.Project));
                 if (exception is not InvalidDataException)
@@ -2109,7 +2109,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
         SquadTransaction transaction = Transaction(fixturePath, observer);
 
-        Exception exception = Record.Exception(() =>
+        Exception? exception = Record.Exception(() =>
             transaction.Execute(updatePlan));
 
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
@@ -2172,7 +2172,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
         SquadTransaction recoveryTransaction = Transaction(fixturePath);
 
-        Exception exception = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? exception = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -2409,7 +2409,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadLock invalid = ReplaceRequiredLockValue(Lock(), field, blankValue);
         string? emitted = null;
 
-        Exception exception = Record.Exception(() => emitted = store.SerializeLock(invalid));
+        Exception? exception = Record.Exception(() => emitted = store.SerializeLock(invalid));
 
         Assert.IsType<InvalidDataException>(exception);
         Assert.Null(emitted);
@@ -2472,7 +2472,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 WriteJsonObject(intentPath, changed);
                 SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
                 SquadTransaction recoveryTransaction = Transaction(fixturePath);
-                Exception exception = Record.Exception(() => recoveryTransaction.Recover(
+                Exception? exception = Record.Exception(() => recoveryTransaction.Recover(
                     fixturePath,
                     SquadDeploymentScope.Project));
                 if (exception is not InvalidDataException)
@@ -2614,7 +2614,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             scenario.MutationBoundary);
         SquadTransaction transaction = Transaction(fixturePath, observer);
 
-        Exception exception = Record.Exception(() =>
+        Exception? exception = Record.Exception(() =>
             transaction.Execute(scenario.Plan));
 
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
@@ -2629,12 +2629,12 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         SortedDictionary<string, TreeEntry> retainedEvidence = CaptureTree(fixturePath);
         SquadTransaction recoveryTransaction = Transaction(fixturePath);
-        Exception firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
         Assert.IsType<InvalidDataException>(firstRecovery);
         AssertTreesEqual(retainedEvidence, CaptureTree(fixturePath));
-        Exception secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
         Assert.IsType<InvalidDataException>(secondRecovery);
@@ -2667,10 +2667,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixturePath);
         SquadTransaction recoveryTransaction = Transaction(fixturePath);
 
-        Exception firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
-        Exception secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -2797,7 +2797,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         foreach ((string? name, SquadReceipt? invalidReceipt) in invalidReceipts)
         {
             string? emitted = null;
-            Exception exception = Record.Exception(() => emitted = store.SerializeReceipt(invalidReceipt));
+            Exception? exception = Record.Exception(() => emitted = store.SerializeReceipt(invalidReceipt));
             if (exception is not InvalidDataException || emitted is not null)
                 accepted.Add(name);
         }
@@ -2867,7 +2867,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
         SquadTransaction transaction = new SquadTransaction(store, observer);
 
-        Exception exception = Record.Exception(() =>
+        Exception? exception = Record.Exception(() =>
             transaction.Execute(updatePlan));
 
         Assert.True(observer.SawOriginalClaimed);
@@ -3067,7 +3067,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             mutation);
         SquadTransaction transaction = Transaction(fixturePath, observer);
 
-        Exception exception = Record.Exception(() =>
+        Exception? exception = Record.Exception(() =>
             transaction.Execute(scenario.Plan));
 
         Assert.True(observer.SawOriginalClaimed);
@@ -3094,11 +3094,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.True(File.Exists(observer.IntentPath));
 
         SquadTransaction recoveryTransaction = Transaction(fixturePath);
-        Exception firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
         SortedDictionary<string, TreeEntry> afterFirstRecovery = CaptureTree(fixturePath);
-        Exception secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 
@@ -3154,11 +3154,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             interrupted[observer.ClaimRelativePath]);
 
         SquadTransaction recoveryTransaction = Transaction(fixturePath);
-        Exception firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? firstRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
         SortedDictionary<string, TreeEntry> afterFirstRecovery = CaptureTree(fixturePath);
-        Exception secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
+        Exception? secondRecovery = Record.Exception(() => recoveryTransaction.Recover(
             fixturePath,
             SquadDeploymentScope.Project));
 

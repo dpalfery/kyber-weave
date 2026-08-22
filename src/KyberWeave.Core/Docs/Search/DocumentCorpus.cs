@@ -233,8 +233,4 @@ public sealed class DocumentCorpus
         // of what was asked is answered and the score collapses.
         return answered / askedFor * score / (score + Saturation);
     }
-
-    /// <summary>The body vector of one document, for callers doing their own comparison.</summary>
-    public IReadOnlyDictionary<string, double> BodyVector(string relativePath) =>
-        _bodyVectors.TryGetValue(relativePath, out Dictionary<string, double>? v) ? v : new Dictionary<string, double>(StringComparer.Ordinal);
 }

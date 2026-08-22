@@ -43,17 +43,19 @@ flowchart TD
     end
 
     Scope --> GR
+    Scope --> DG
     Scope --> Council
 
     subgraph Gates["LAYER 1 — Deterministic gates (no model)"]
         direction LR
         GR["kyber-weave review gates"] --> G1["build"] & G2["tests + coverage"] & G3["analyzers · scanners"]
+        DG["kyber-weave review duplicates"] --> G4["CodeGraph body clusters"]
     end
 
     subgraph Council["LAYER 2 — The council (parallel, auto-skipping)"]
         direction LR
-        RL["review-lens ×11<br/>model-profile: general"]
-        RT["review-triage ×2<br/>model-profile: fast"]
+        RL["review-lens ×12<br/>model-profile: general"]
+        RT["review-triage ×3<br/>model-profile: fast"]
     end
 
     Council -->|"findings"| Confirm["3. Adversarial confirm<br/>one refuter per major or critical finding"]
@@ -74,9 +76,16 @@ flowchart TD
 ```
 
 Gates and council start **together** — they are independent and neither waits on the other.
-Two lenses are the exception: `test-adequacy` consumes the coverage report and
-`static-analysis-triage` consumes the analyzer output, so those two are issued when their gate
-completes rather than behind a barrier on all gates.
+Three lenses are the exception: `test-adequacy` consumes the coverage report,
+`static-analysis-triage` consumes the analyzer output, and `duplicate-implementation` consumes
+the duplicates report, so each is issued when its own gate completes rather than behind a
+barrier on all gates.
+
+`review duplicates` is a second command rather than a declared gate entry because its input is
+not a host command at all: it reads the repository's CodeGraph index and clusters symbols whose
+normalized bodies are identical. Hosts still declare it under `review.gates` so its execution
+is recorded like any other evidence, and it exits 0 whether or not it finds anything — what
+"blocking" buys there is that it must have *run*.
 
 ## The parts, and where they live
 
@@ -86,24 +95,26 @@ completes rather than behind a barrier on all gates.
 | `review-lens` | Canonical agent — one judgement seat, spawned N times | `products/kyber-squad/agents/review-lens.md` |
 | `review-triage` | Canonical agent — one triage seat, `fast` model profile | `products/kyber-squad/agents/review-triage.md` |
 | `code-review` | Skill — the procedure, the lens catalogue, the report format | `products/kyber-squad/skills/code-review/SKILL.md` |
-| Lens files | 13 reference files, one per concern | `products/kyber-squad/skills/code-review/references/lenses/` |
+| Lens files | 15 reference files, one per concern | `products/kyber-squad/skills/code-review/references/lenses/` |
 | Technology checklists | 7 reference files, loaded as lens *modifiers* | `products/kyber-squad/skills/code-review/references/` |
 | `dp-code-reviewer` | Skill — modes and the re-review loop | `products/kyber-squad/skills/dp-code-reviewer/SKILL.md` |
 | `security-review` | Skill — invoked by the security lens, not duplicated | `products/kyber-squad/skills/security-review/SKILL.md` |
 | `GateRunner` | Runs declared gates, normalizes results | `src/KyberWeave.Core/Review/GateRunner.cs` |
+| `DuplicateDetector` | Clusters symbols by normalized body, from the CodeGraph index | `src/KyberWeave.Core/Review/DuplicateDetector.cs` |
+| `ICodeGraphSymbolEnumerator` | Optional CodeGraph port: every indexed symbol of one kind | `src/KyberWeave.Core/CodeGraph/ICodeGraphSymbolEnumerator.cs` |
 | `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Core/Review/VerdictEngine.cs` |
 | `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Core/Review/PathGlob.cs` |
 | `ReviewConfig` | The `review:` host configuration | `src/KyberWeave.Core/Configuration/ReviewConfig.cs` |
 
 ## Why lenses are files, not agents
 
-Thirteen concerns, but only **two** canonical agents carry them. The lens is a reference file;
+Fifteen concerns, but only **two** canonical agents carry them. The lens is a reference file;
 the agent is the seat that reads it.
 
-Thirteen agents would push the canonical roster from 20 to 33, clutter every harness's agent
-picker, and produce thirteen near-identical descriptions that would collide under
+Fifteen agents would push the canonical roster from 20 to 35, clutter every harness's agent
+picker, and produce fifteen near-identical descriptions that would collide under
 `KW-AGENT-LINT-001` and `KW-SKILL-LINT-011`. As files, adding a lens is a Markdown file rather
-than a deployment.
+than a deployment — which is exactly what adding `prior-art` cost.
 
 The two seats exist because they do different work, not because one is cheaper:
 
@@ -122,12 +133,14 @@ flowchart LR
         J9["blast-radius-revertibility"]
         J10["supportability"]
         J11["infra-workflow"]
+        J12["prior-art"]
     end
 
     subgraph T["review-triage — attribution · fast"]
         direction TB
         T1["static-analysis-triage"]
         T2["dependency-supply-chain"]
+        T3["duplicate-implementation"]
     end
 
     Input1["Reads source code<br/>and forms a judgement"] --> J
@@ -136,11 +149,16 @@ flowchart LR
 
 A triage seat's input is something a tool already produced. Its job — deciding which of that
 output *this change* is responsible for — is bounded and checkable, which is what makes it
-safe to run on the `fast` model profile. Eleven lenses are not that, and would produce worse
+safe to run on the `fast` model profile. Twelve lenses are not that, and would produce worse
 findings cheaply, which costs more than it saves.
 
+`prior-art` and `duplicate-implementation` sit on opposite sides of that line while holding one
+concern between them, and the split is by evidence rather than by topic. A body duplicated
+verbatim is a fact a gate established, so attributing it is triage. A *type* that duplicates
+another is a judgement about responsibility that needs both types read, so it is not.
+
 **Every lens auto-skips.** Each lens file opens with an applicability predicate and returns
-`SKIPPED: <reason>` when the diff holds nothing it owns. That is what makes thirteen lenses
+`SKIPPED: <reason>` when the diff holds nothing it owns. That is what makes fifteen lenses
 affordable — and the skip is *recorded*, because a dimension that was deliberately skipped and
 one that was quietly never looked at must not read the same in a report.
 

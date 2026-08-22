@@ -8,7 +8,6 @@ public sealed class AgentSet(IEnumerable<AgentModel> agents)
     private readonly List<AgentModel> _agents = agents.ToList();
 
     public IReadOnlyList<AgentModel> Agents => _agents;
-    public int Count => _agents.Count;
 
     /// <summary>
     /// Returns all unique role names found across any harness.

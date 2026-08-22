@@ -74,12 +74,6 @@ public sealed class DocumentIndexHost
         _documentSetFactory = documentSetFactory;
     }
 
-    /// <summary>Repository root the index is built over.</summary>
-    public string RepoRoot => _repoRoot;
-
-    /// <summary>Documentation roots relative to <see cref="RepoRoot"/> (from ontology / host config).</summary>
-    public IReadOnlyList<string> DocsRelativeRoots => _docsRelativeRoots;
-
     /// <summary>The primary documentation root.</summary>
     public string DocsRelativeRoot =>
         _docsRelativeRoots.Count > 0 ? _docsRelativeRoots[0] : OntologyConfig.DefaultDocsRoot;

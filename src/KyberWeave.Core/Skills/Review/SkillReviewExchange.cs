@@ -108,7 +108,7 @@ public static class SkillReviewExchange
 
         SkillReviewCandidateBundle bundle = new SkillReviewCandidateBundle(CandidateSchema, candidates);
         string json = JsonSerializer.Serialize(bundle, SerializerOptions);
-        return new SkillReviewExportResult(bundle, json, new DiagnosticReport());
+        return new SkillReviewExportResult(bundle, json);
     }
 
     public static SkillReviewImportResult ImportVerdicts(

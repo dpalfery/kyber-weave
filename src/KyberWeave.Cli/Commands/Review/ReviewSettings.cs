@@ -15,6 +15,14 @@ public sealed class ReviewGatesSettings : AnalysisSettings
     public bool StopOnFailure { get; set; }
 }
 
+/// <summary>Settings for <c>review duplicates</c>.</summary>
+public sealed class ReviewDuplicatesSettings : AnalysisSettings
+{
+    [CommandOption("-o|--out <PATH>")]
+    [Description("Write the duplicates report to this path as JSON. Defaults to stdout only.")]
+    public string? Out { get; set; }
+}
+
 /// <summary>Settings for <c>review verdict</c>.</summary>
 public sealed class ReviewVerdictSettings : AnalysisSettings
 {

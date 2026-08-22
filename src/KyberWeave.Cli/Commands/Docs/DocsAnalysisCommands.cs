@@ -1,11 +1,12 @@
+using JetBrains.Annotations;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
-using Spectre.Console;
+using KyberWeave.Core.Docs.Analysis;
 using Spectre.Console.Cli;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
@@ -22,6 +23,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsIntegrityCheckCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
@@ -65,6 +67,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsReviewExportCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsReviewExportCommand(IDocsAnalysisCommandService service) =>
@@ -102,6 +105,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsReviewImportCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsReviewImportCommand(IDocsAnalysisCommandService service) =>
@@ -131,6 +135,7 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
 {
     private readonly IDocsAnalysisCommandService _service;
 
+    [UsedImplicitly]
     public DocsGlossaryCommand() : this(new RepositoryDocsAnalysisCommandService()) { }
 
     internal DocsGlossaryCommand(IDocsAnalysisCommandService service) =>

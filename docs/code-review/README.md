@@ -23,7 +23,7 @@ A single agent reading a whole diff is one attention budget spread across a doze
 concerns, and it produces a verdict that cannot be checked. This splits that into parts that
 fail differently:
 
-- **Thirteen lenses** read the diff in parallel, each owning one concern and each declaring an
+- **Fifteen lenses** read the diff in parallel, each owning one concern and each declaring an
   applicability predicate so it skips diffs holding nothing for it. A change to a Markdown file
   does not pay for a database-migration reviewer to tell it so.
 - **The host's own gates** — build, tests, coverage, analyzers — run as declared commands and
@@ -33,10 +33,11 @@ fail differently:
   `NEEDS_HUMAN` by fixed rule. It is ordinary unit-tested code, so the same inputs give the
   same answer twice and every decision names the rule that made it.
 
-## Two commands
+## Three commands
 
 ```bash
 kyber-weave review gates .                                          # run the declared gates
+kyber-weave review duplicates .                                     # cluster duplicate bodies
 kyber-weave review verdict . --findings findings.json --gates gates.json
 ```
 

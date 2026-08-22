@@ -18,12 +18,7 @@ public sealed record SkillReviewCandidate(
     [property: JsonPropertyName("currentDescription")] string CurrentDescription,
     [property: JsonPropertyName("triggerScore")] int TriggerScore,
     [property: JsonPropertyName("heuristicFlags")] IReadOnlyList<string> HeuristicFlags,
-    [property: JsonPropertyName("filePath")] string? FilePath = null)
-{
-    /// <summary>Alias for Id to support name/id lookup.</summary>
-    [JsonIgnore]
-    public string Name => Id;
-}
+    [property: JsonPropertyName("filePath")] string? FilePath = null);
 
 /// <summary>Versioned candidate exchange document for skill and agent description reviews.</summary>
 public sealed record SkillReviewCandidateBundle(
@@ -33,11 +28,7 @@ public sealed record SkillReviewCandidateBundle(
 /// <summary>Serialized candidate export result.</summary>
 public sealed record SkillReviewExportResult(
     SkillReviewCandidateBundle Bundle,
-    string Json,
-    DiagnosticReport? Diagnostics = null)
-{
-    public DiagnosticReport Diagnostics { get; init; } = Diagnostics ?? new DiagnosticReport();
-}
+    string Json);
 
 /// <summary>One reviewer verdict on a skill or agent description.</summary>
 public sealed record SkillReviewVerdict(

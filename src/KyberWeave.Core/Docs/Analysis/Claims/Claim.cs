@@ -37,5 +37,5 @@ public sealed record Claim(
     string? FenceInfo = null,
     IReadOnlyList<string>? CodeRefs = null)
 {
-    public IReadOnlyList<string> CodeRefs { get; init; } = CodeRefs ?? [];
+    public IReadOnlyList<string> CodeRefs { get; } = CodeRefs ?? [];
 }

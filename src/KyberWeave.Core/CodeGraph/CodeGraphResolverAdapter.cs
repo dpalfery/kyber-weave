@@ -25,7 +25,7 @@ namespace KyberWeave.Core.CodeGraph;
 /// also faster than per-symbol querying would have been.
 /// </para>
 /// </remarks>
-public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNeighborhoodProvider
+public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNeighborhoodProvider, ICodeGraphSymbolEnumerator
 {
     private const char FieldSeparator = '\u001f';
 
@@ -38,6 +38,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     private readonly Dictionary<string, List<CodeGraphNode>> _byName = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<CodeGraphNode>> _byQualifiedName = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CodeGraphNode> _routes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<CodeGraphNode>> _byKind = new(StringComparer.Ordinal);
     private readonly List<string> _filePaths = [];
     private readonly List<CodeGraphEdge> _edges = [];
     private readonly Dictionary<string, int> _edgeDegree = new(StringComparer.Ordinal);
@@ -97,11 +98,11 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         // 'import' nodes and edges are excluded: module imports are too broad to be a
         // useful documentation relationship.
         const string sql = """
-            SELECT 'node', id, kind, name, qualified_name, file_path, language, start_line
+            SELECT 'node', id, kind, name, qualified_name, file_path, language, start_line, end_line
             FROM nodes
             WHERE kind <> 'import'
             UNION ALL
-            SELECT 'edge', source, target, kind, '', '', '', ''
+            SELECT 'edge', source, target, kind, '', '', '', '', ''
             FROM edges
             WHERE kind IN ('contains', 'calls', 'references', 'instantiates', 'extends', 'implements')
             """;
@@ -109,7 +110,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         foreach (string line in RunSqlite(sql))
         {
             string[] parts = line.Split(FieldSeparator);
-            if (parts.Length < 8) continue;
+            if (parts.Length < 9) continue;
 
             if (parts[0] == "edge")
             {
@@ -126,10 +127,12 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
             if (parts[0] != "node") continue;
 
             _ = int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out int startLine);
-            CodeGraphNode node = new CodeGraphNode(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], startLine);
+            _ = int.TryParse(parts[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out int endLine);
+            CodeGraphNode node = new CodeGraphNode(parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], startLine, endLine);
 
             Index(_byName, node.Name, node);
             Index(_byQualifiedName, node.QualifiedName, node);
+            Index(_byKind, node.Kind, node);
 
             if (node.Kind == "route")
             {
@@ -268,5 +271,12 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
                 && _edgeDegree.GetValueOrDefault(edge.SourceId) <= maxDegree
                 && _edgeDegree.GetValueOrDefault(edge.TargetId) <= maxDegree)
             .ToArray();
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<CodeGraphNode> NodesOfKind(string kind)
+    {
+        if (!IsAvailable || string.IsNullOrWhiteSpace(kind)) return [];
+        return _byKind.TryGetValue(kind, out List<CodeGraphNode>? nodes) ? nodes : [];
     }
 }

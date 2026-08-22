@@ -4,6 +4,11 @@
 - **Automation First:** Ensure code adheres to .NET recommended style conventions. Check that the PR doesn't introduce linter warnings or style violations (.editorconfig with .NET code style rules).
 - **ReSharper InspectCode:** The mechanical half of this section is a declared gate, not a reading exercise. Its findings arrive through the `static-analysis-triage` lens; the `resharper-clt` skill owns how the gate is declared and what its inspections mean. Do not re-derive by eye what the tool already reported by rule id.
 
+## Duplication & Dead Code
+- **The analyzer owns the mechanical half, and now actually reports it.** `KyberWeave.sln.DotSettings`-style solution settings promote the redundancy tier — `RedundantOverload.*`, `UnusedMember.Global`, `UnusedType.Global`, `UnusedMethodReturnValue.Global`, `VirtualMemberNeverOverridden.*`, `ClassWithVirtualMembersNeverInherited.*` — from `SUGGESTION` to `WARNING`, because a gate scoped to `--severity=WARNING` otherwise drops the whole family before any lens sees it. Already at `WARNING` by default and needing no promotion: `EmptyConstructor`, `RedundantBaseConstructorCall`, `RedundantDefaultMemberInitializer`, `RedundantOverriddenMember`, `RedundantArgumentDefaultValue`, `DuplicatedStatements`.
+- **Solution-wide rules and reflection.** `ClassNeverInstantiated.Global` is noise on any project whose types a container or a CLI framework constructs reflectively, and belongs in the suppression list rather than the promotion list. `UnusedMember.Global` is worth its false positives; suppress the reflective constructors with `[UsedImplicitly]` at the type, not by disabling the rule.
+- **Cross-file duplication is not the analyzer's.** `DuplicatedStatements` sees one statement's branches and `RedundantOverload` sees one method group; neither looks across files, and JetBrains retired `dupfinder`. The `duplicate-implementation` lens and its CodeGraph-backed gate hold that concern, and `prior-art` holds the type-level version of it.
+
 ## Asynchronous & Concurrency Patterns
 - **Async/Await:** Check correct usage of async/await and task-based patterns. Methods returning tasks should use the `Async` suffix.
 - **No Blocking Calls:** Asynchronous code should never use blocking calls like `Thread.Sleep` – use `Task.Delay` or awaitable alternatives instead.

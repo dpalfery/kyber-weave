@@ -31,7 +31,7 @@ public sealed record Diagnostic(
     public string? Location => FilePath;
 
     /// <summary>Other locations that contribute to the finding.</summary>
-    public IReadOnlyList<DiagnosticLocation> RelatedLocations { get; init; } = RelatedLocations ?? [];
+    public IReadOnlyList<DiagnosticLocation> RelatedLocations { get; } = RelatedLocations ?? [];
 
     public override string ToString() => $"[{Code}] {Severity}: {Message}";
 }

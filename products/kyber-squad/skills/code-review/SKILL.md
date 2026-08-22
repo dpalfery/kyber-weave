@@ -4,7 +4,7 @@ description: "Use when reviewing written code — a diff, a branch, a pull reque
 license: MIT
 metadata:
   author: David R Palfery
-  version: 4.0.0
+  version: 4.1.0
 ---
 
 # Code review
@@ -40,11 +40,18 @@ escalates.
 
 They are independent. Neither waits on the other.
 
-**Gates.** One command, and it is the only thing this skill executes:
+**Gates.** Two commands, and they are the only things this skill executes:
 
 ```bash
 kyber-weave review gates . --out gates.json
+kyber-weave review duplicates . --out duplicates.json
 ```
+
+The second is separate because it is not host-declared work: it reads the repository's
+CodeGraph index and clusters symbols whose bodies are identical, which nothing in a normal
+gate suite does. Where the repository has no `.codegraph/` index it says so and finds
+nothing — indexing is the owner's decision, and the report must not read as though the check
+passed.
 
 It runs what the host declared under `review.gates` in `.kyber-weave/kyber-weave.yml`, in
 declaration order, and normalizes every result into one document. Never substitute an ad-hoc
@@ -58,7 +65,7 @@ passed.
 **Council.** Invoke one seat per applicable lens, all in flight at once, each named with its
 lens file and the review scope. Every lens declares an applicability predicate and returns
 `SKIPPED` with a reason when the diff holds nothing it owns — auto-skipping is what makes
-thirteen lenses affordable.
+fifteen lenses affordable.
 
 The **Runner** column is not advisory. `review-lens` reads code and judges it. `review-triage`
 takes a machine artifact — analyzer diagnostics, a manifest diff — and attributes it to the
@@ -74,6 +81,8 @@ premium for attribution.
 | [authz-tenancy](references/lenses/authz-tenancy.md) | `review-lens` | Authorization per access, tenant scoping, privilege boundaries |
 | [di-composition](references/lenses/di-composition.md) | `review-lens` | Constructor injection, no locally created collaborators, registration |
 | [model-placement](references/lenses/model-placement.md) | `review-lens` | Type classification against the declared coding standard |
+| [prior-art](references/lenses/prior-art.md) | `review-lens` | Does this already exist? Duplicate types, divergent idioms, generality nothing asked for |
+| [duplicate-implementation](references/lenses/duplicate-implementation.md) | **`review-triage`** | Bodies duplicated across the tree, attributed from the duplicates gate |
 | [test-adequacy](references/lenses/test-adequacy.md) | `review-lens` | Would the tests catch this breaking? Behaviour over implementation |
 | [static-analysis-triage](references/lenses/static-analysis-triage.md) | **`review-triage`** | Analyzer output, attributed and reported by rule id |
 | [performance](references/lenses/performance.md) | `review-lens` | Cost at scale, with a named growth dimension |
@@ -82,15 +91,20 @@ premium for attribution.
 | [dependency-supply-chain](references/lenses/dependency-supply-chain.md) | **`review-triage`** | What the change asks the project to newly trust |
 | [infra-workflow](references/lenses/infra-workflow.md) | `review-lens` | Migrations, workflows, infrastructure, and their trust boundaries |
 
-Only two lenses are triage, and that is the honest count rather than a hedge. The rest need a
-judgement about code that a fast model would make badly. `static-analysis-triage` is
+Only three lenses are triage, and that is the honest count rather than a hedge. The rest need
+a judgement about code that a fast model would make badly. `static-analysis-triage` is
 nonetheless the single best candidate in the catalogue: it applies to almost every change that
 builds, and it carries the largest input of any lens, so it is both the most mechanical seat
 and the most frequently expensive one.
 
-Two lenses consume gate output — `test-adequacy` needs the coverage report and
-`static-analysis-triage` needs the analyzer results. Issue those when their gate completes,
-not behind a barrier on all gates.
+Three lenses consume gate output — `test-adequacy` needs the coverage report,
+`static-analysis-triage` needs the analyzer results, and `duplicate-implementation` needs the
+duplicates report. Issue each when its own gate completes, not behind a barrier on all gates.
+
+`prior-art` and `duplicate-implementation` divide one concern by unit and by evidence.
+`duplicate-implementation` reports **bodies**, from a gate artifact, and may not report what
+it found by reading. `prior-art` reports **types**, from reading, and may not report without
+quoting the counterpart it found. Neither may report the other's unit.
 
 **Technology checklists.** The per-technology references —
 [C#](references/csharp.md), [Python](references/python.md), [React](references/react.md),
@@ -200,6 +214,8 @@ review:
   coverage:
     file-line-percent: 85
     class-line-percent: 85
+  duplicates:
+    minimum-lines: 4                       # normalized lines, signature and braces excluded
   policy:
     always-human: ["**/auth/**", "**/*secret*"]
     max-reviewable-lines: 10000

@@ -587,12 +587,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithProbeOutput("apm", "apm, version 0.28.0\n")
-            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -623,7 +619,6 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
 
         SquadInstallCommand command = new(
-            executor: null,
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -659,7 +654,6 @@ public sealed class SquadCliCommandTests : IDisposable
         SquadStateStore stateStore = new(userPaths);
 
         SquadInstallCommand command = new(
-            executor: null,
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -689,9 +683,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-invalid-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -713,9 +706,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-invalid-exclude");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -736,9 +728,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "install-no-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = new SquadInstallCommand(executor, userPaths);
+        SquadInstallCommand command = new SquadInstallCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -764,11 +755,7 @@ public sealed class SquadCliCommandTests : IDisposable
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        FakeProcessExecutor executor = new FakeProcessExecutor()
-            .WithProbeOutput("apm", "apm, version 0.28.0\n")
-            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -799,7 +786,6 @@ public sealed class SquadCliCommandTests : IDisposable
             (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
         SquadUpdateCommand command = new(
-            executor: null,
             userPaths: userPaths,
             stateStore: stateStore,
             releaseSource: releaseSource,
@@ -828,9 +814,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-invalid-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -865,8 +850,7 @@ public sealed class SquadCliCommandTests : IDisposable
             Files: []);
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(emptyReceipt), Encoding.UTF8);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths, stateStore);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths, stateStore);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -885,9 +869,8 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, "update-no-receipt");
         Directory.CreateDirectory(targetDir);
 
-        FakeProcessExecutor executor = new FakeProcessExecutor();
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadUpdateCommand command = new SquadUpdateCommand(executor, userPaths);
+        SquadUpdateCommand command = new SquadUpdateCommand(userPaths);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,

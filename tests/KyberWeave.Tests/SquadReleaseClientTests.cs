@@ -408,38 +408,33 @@ public sealed class SquadReleaseClientTests : IDisposable
     public async Task DownloadAndExtractAsyncWhenCancellationArrivesAfterStagingStartsCancelsBeforePublish()
     {
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
-        CancellationTokenSource cancellation = new CancellationTokenSource();
-        try
-        {
-            bool stagingCreated = false;
-            using RoutingHandler handler = ReleaseHandler(
-                archiveBytes,
-                $"{Sha256(archiveBytes)}  {AssetName}\n");
-            SeedStateOnly();
-            IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
-            using ISquadReleaseSource source = new GitHubSquadReleaseSource(
-                handler,
-                ApiRoot,
-                onStagingCreated: () =>
-                {
-                    stagingCreated = true;
-                    cancellation.Cancel();
-                });
+        using CancellationTokenSource cancellation = new CancellationTokenSource();
+        bool stagingCreated = false;
+        using RoutingHandler handler = ReleaseHandler(
+            archiveBytes,
+            $"{Sha256(archiveBytes)}  {AssetName}\n");
+        SeedStateOnly();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        // ReSharper disable once AccessToDisposedClosure
+        using ISquadReleaseSource source = new GitHubSquadReleaseSource(
+            handler,
+            ApiRoot,
+            onStagingCreated: () =>
+            {
+                stagingCreated = true;
+                // ReSharper disable once AccessToDisposedClosure
+                cancellation.Cancel();
+            });
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                source.DownloadAndExtractAsync(Request(), cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            source.DownloadAndExtractAsync(Request(), cancellation.Token));
 
-            Assert.True(stagingCreated);
-            AssertTreeUnchanged(before);
-            Assert.Empty(Directory.EnumerateDirectories(
-                _temp.Path,
-                ".destination.kyber-squad-*",
-                SearchOption.TopDirectoryOnly));
-        }
-        finally
-        {
-            cancellation.Dispose();
-        }
+        Assert.True(stagingCreated);
+        AssertTreeUnchanged(before);
+        Assert.Empty(Directory.EnumerateDirectories(
+            _temp.Path,
+            ".destination.kyber-squad-*",
+            SearchOption.TopDirectoryOnly));
     }
 
     [Fact]

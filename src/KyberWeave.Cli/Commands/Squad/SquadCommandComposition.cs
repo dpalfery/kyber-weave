@@ -50,7 +50,6 @@ internal static class SquadCommandComposition
         "CA2000:Dispose objects before losing scope",
         Justification = "Collaborator lifecycles are managed across the command execution.")]
     public static SquadLifecycleService CreateLifecycleService(
-        IProcessExecutor? executor = null,
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
         ISquadReleaseSource? releaseSource = null,
