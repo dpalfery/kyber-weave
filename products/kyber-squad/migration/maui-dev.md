@@ -9,7 +9,7 @@ sources:
   .cursor/agents/maui-dev.agent.md: f8f404b37f11eee6882f2a9394cb665056314df1b7be89978122c1cf1eaeae69
   .github/agents/maui-dev.agent.md: 1cb5984dfbf6142e88c464c4f8edd040fa7332ca0956ec299443cf822bb9843b
   .opencode/agents/maui-dev.md: 8c4133b41cd6439d078b1735482a5bdb10602078aa79f19a79b7a3dfe3951261
-final-body-sha256: 3594d07b130679d7b66361b50c86407ddd7f7d91c0bb636a28f9c63c4f9a098f
+final-body-sha256: 48df73acd21c085d7ebd168189e05fd32876d4db3089c57fad0b08b35b4eb6c9
 ---
 # maui-dev migration
 

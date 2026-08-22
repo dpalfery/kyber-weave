@@ -9,7 +9,7 @@ sources:
   .cursor/agents/dotnet-dev.agent.md: 908e5f0813a3a4a0ff6b1d983645744c24b7bce6574cb97dff34dd52b6f0b616
   .github/agents/dotnet-dev.agent.md: ea402133727e2b32d7987871a4aa7edb09fe5240340b2fe1dff8d61affdec72c
   .opencode/agents/dotnet-dev.md: 2190ab5b76e48203bf3250468e35741ec90625402bcf5ab7e2051cd3df3d1bb0
-final-body-sha256: bb28e1cade4504cacbedb7b6a0283b981b5e10cecd4804c429cc9e3b1684123f
+final-body-sha256: 4fbdb87b65739c4c6d9e49549a4c9a101f2455733e53b0034c41d286a3a3623d
 ---
 # csharp-dev migration
 
