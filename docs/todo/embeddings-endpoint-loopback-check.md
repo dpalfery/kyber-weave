@@ -25,7 +25,7 @@ The configuration loads without the expected `YamlException`. The other two rows
 path, and an `ftp://` scheme — are rejected as intended.
 
 Found while working on
-[the standards plan](../plans/2026-08-16-coding-standards-and-config-reg.md); it is unrelated
+[the standards plan](../archive/plans/2026-08-16-coding-standards-and-config-reg.md); it is unrelated
 to that work and predates it, confirmed by re-running the test against a clean tree.
 
 ## What is known

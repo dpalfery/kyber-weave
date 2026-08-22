@@ -11,9 +11,15 @@ last-reviewed: 2026-08-16
 # MAUI coding standard
 
 How .NET MAUI is written in this repository. Agents and skills resolve this document as
-`<maui-coding-standard>`, so it outranks the defaults a portable agent shipped with.
-Language-level C# decisions live in `<csharp-coding-standard>`; this file is the MAUI
-architecture and UI overlay.
+`<maui-coding-standard>`. Language-level C# decisions live in `<csharp-coding-standard>`;
+this file is the MAUI architecture and UI overlay.
+
+## Authority & status
+
+When this standard is in `status: current`, what it says here outranks whatever defaults a
+portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
+template/proposal and does NOT override portable agent defaults until reviewed and promoted
+to `current`.
 
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`. Every choice here is a guess about a repository this template has

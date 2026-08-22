@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-08-22
 ---
 
 # Architecture decision records
@@ -16,12 +16,12 @@ cite it still resolve.
 
 ## Inventory
 
-_No ADR has been written yet._
-
-Decisions in this repository have so far been recorded as `<remarks>` blocks at the point the
-choice is made, and as plans under [`plans/`](../plans/README.md). That works while a decision
-has one obvious home in the code; an ADR earns its place when the decision spans components,
-or when the rejected alternatives are the valuable part.
+| Record | Title | Status | Date | Summary |
+|---|---|---|---|---|
+| [0001](0001-coding-standards-and-configuration-registry.md) | [Decoupled Coding Standards and Derived Configuration Registry](0001-coding-standards-and-configuration-registry.md) | Accepted | 2026-08-22 | Decouple project-specific coding standards from portable agents via `coding-standard` doc-type and derived root `AGENTS.md` Configuration Registry. |
+| [0002](0002-three-layer-review-council-verdict-engine.md) | [Three-Layer Code Review Council with Deterministic Verdict Engine](0002-three-layer-review-council-verdict-engine.md) | Accepted | 2026-08-22 | Replace serial review prompt with deterministic gate scripts (`review.gates`), parallel specialist review lenses, and a deterministic unit-tested verdict engine (`KW-REVIEW-*`). |
+| [0003](0003-cross-file-duplication-and-prior-art-lenses.md) | [Cross-File Duplication Detection and Prior-Art Retrieval in Code Review](0003-cross-file-duplication-and-prior-art-lenses.md) | Accepted | 2026-08-22 | Promote InspectCode redundancies to warnings, introduce `prior-art` lens for CodeGraph pre-lookup, and implement `review duplicates` normalized statement clustering for `duplicate-implementation` lens. |
+| [0004](0004-solution-level-static-analysis-and-noise-suppression.md) | [Solution-Level Static Analysis Configuration and Clean Code Policy](0004-solution-level-static-analysis-and-noise-suppression.md) | Accepted | 2026-08-22 | Eliminate source `#pragma` clutter via root `KyberWeave.sln.DotSettings`, maintain `TreatWarningsAsErrors`, and enforce modern C# 12/13 idioms without `var` collection expressions. |
 
 ## Writing one
 

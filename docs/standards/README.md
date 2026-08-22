@@ -4,16 +4,17 @@ title: Coding standards
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-17
+last-reviewed: 2026-08-22
 ---
 
 # Coding standards
 
 How code is written in this repository, one directory per technology. A standard is
 project-specific; the agents and skills that read it are not, which is why they resolve it
-through the configuration registry rather than carrying their own.
+through the configuration registry rather than carrying their own. Only standards with
+`status: current` outrank portable agent defaults; draft standards do not.
 
-This repository declares C# and the tests that pin it. The authoritative list is the Config
+This repository declares C# and test standards. The authoritative list is the Config
 Reg block in the repository root [`AGENTS.md`](../../AGENTS.md), which is regenerated on
 every `docs init` run — this file is not.
 

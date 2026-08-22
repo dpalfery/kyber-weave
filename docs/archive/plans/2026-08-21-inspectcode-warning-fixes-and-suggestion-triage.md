@@ -1,17 +1,19 @@
 ---
-id: plans/2026-08-21-inspectcode-warning-fixes-and-suggestion-triage
+id: archive/plans/2026-08-21-inspectcode-warning-fixes-and-suggestion-triage
 title: Fix InspectCode Warnings and Triage Suggestions
 doc-type: plan
-status: current
+status: archived
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-08-21
+last-reviewed: 2026-08-22
 ---
 
 # Fix InspectCode Warnings and Triage Suggestions
 
-**Status:** Complete  
+**Status:** Archived  
+**Archive Date:** 2026-08-22  
 **Date:** 2026-08-21  
+**Outcome / Closeout:** Completed. All actionable InspectCode warnings fixed across solution, root `KyberWeave.sln.DotSettings` configured for reflection and test naming noise suppression, and 0 warnings verified. Clean code decisions harvested into [ADR 0004](../../adr/0004-solution-level-static-analysis-and-noise-suppression.md).  
 **Goal:** Resolve all actionable JetBrains InspectCode warnings and high-value code suggestions across `KyberWeave.sln`, establish `KyberWeave.sln.DotSettings` to cleanly filter framework reflection, DTO, and test naming noise, and verify zero regressions across all build, test, and documentation gates.
 
 ---

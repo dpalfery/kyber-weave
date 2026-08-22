@@ -11,9 +11,16 @@ last-reviewed: 2026-08-16
 # Test coding standard
 
 How tests are written in this repository. Agents and skills resolve this document as
-`<test-coding-standard>`, so it outranks the defaults a portable agent shipped with.
-Language-level C# in test files follows `<csharp-coding-standard>`; Python and frontend
-tests follow `<python-coding-standard>` and `<react-coding-standard>` the same way.
+`<test-coding-standard>`. Language-level C# in test files follows
+`<csharp-coding-standard>`; Python and frontend tests follow `<python-coding-standard>`
+and `<react-coding-standard>` the same way.
+
+## Authority & status
+
+When this standard is in `status: current`, what it says here outranks whatever defaults a
+portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
+template/proposal and does NOT override portable agent defaults until reviewed and promoted
+to `current`.
 
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`. Every choice here is a guess about a repository this template has

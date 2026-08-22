@@ -1,17 +1,19 @@
 ---
-id: plans/2026-08-16-coding-standards-and-config-reg
+id: archive/plans/2026-08-16-coding-standards-and-config-reg
 title: Coding Standards and the Configuration Registry
 doc-type: plan
-status: current
+status: archived
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-08-22
 ---
 
 # Coding Standards and the Configuration Registry
 
-**Status:** In progress
-**Date:** 2026-08-16
+**Status:** Archived  
+**Archive Date:** 2026-08-22  
+**Date:** 2026-08-16  
+**Outcome / Closeout:** Completed. The coding standards and configuration registry system is fully implemented and active in the repository. Harvested architectural decisions into [ADR 0001](../../adr/0001-coding-standards-and-configuration-registry.md). All 9 tasks delivered with zero findings in docs validate/drift and test suites.  
 **Goal:** Separate project-specific coding standards from portable agents and skills. Standards become governed documents under `<docs-root>/standards/<technology>/`; agents and skills reach them through a **Configuration Registry** ("Config Reg") of named paths, declared once in host configuration and rendered into the root `AGENTS.md`. `docs init` creates the directory structure in code; no skill is responsible for it.
 
 ---

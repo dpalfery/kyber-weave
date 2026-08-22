@@ -21,10 +21,10 @@ Before opening a PR, verify all of the following:
 - [ ] **All local tests pass.** Run the host test suites. For .NET, `dotnet test -c Release` unless **<csharp-coding-standard>** names a different command. For other stacks, use the matching coding-standard document.
 - [ ] **Code builds clean.** `dotnet build -c Release` completes with no errors (or the host's equivalent).
 - [ ] **Lint and formatting pass.** Markdown files pass `markdownlint-cli2`; C# code follows `.editorconfig` and `dotnet format` conventions; Python follows `ruff` rules in `pyproject.toml`.
-- [ ] **Canonical documentation is updated.** If the change affects a component's public interface, configuration, architecture, runtime, operations, or workflow, the corresponding README and detailed documentation have been updated. See the path defined by the **Documentation Standard** property in the root `AGENTS.md` for the required shape.
-- [ ] **Catalog entry is current.** If the change introduces, moves, renames, or materially alters a component, update the catalog at the path defined by the **Component Catalog** property in the root `AGENTS.md`.
+- [ ] **Canonical documentation is updated.** If the change affects a component's public interface, configuration, architecture, runtime, operations, or workflow, the corresponding README and detailed documentation have been updated. See the documentation ontology declared as **<documentation-ontology>** in the root `AGENTS.md` for the required shape.
+- [ ] **Catalog entry is current.** If the change introduces, moves, renames, or materially alters a component, update the catalog at the path declared as **<component-catalog>** in the root `AGENTS.md`.
 - [ ] **Scoped instructions are followed.** Every subtree has its own `AGENTS.md` with additional rules. Read the nearest scoped `AGENTS.md` before changing files in that subtree.
-- [ ] **Clean Architecture is preserved.** Inner layers never depend on outer layers. Contracts contains interfaces only; `Contracts.Models` contains shared DTOs only. Business invariants belong in Domain; Application services belong in `Services`. See the Clean Architecture rules at the path defined by the **Clean Architecture Rules** property in the root `AGENTS.md`.
+- [ ] **Clean Architecture is preserved.** Inner layers never depend on outer layers. Contracts contains interfaces only; `Contracts.Models` contains shared DTOs only. Business invariants belong in Domain; Application services belong in `Services`. See the architectural rules declared under **<rules-index>** in the root `AGENTS.md`.
 - [ ] **No secrets or credentials.** The change contains no tokens, connection strings, passwords, `.env` files, customer data, or unsafe deployment commands.
 - [ ] **Dev environment is ready.** If setting up from scratch, consult the `setup-dev-environment` skill which covers all tooling.
 
@@ -80,9 +80,9 @@ Select exactly one. If more than one applies, pick the most impactful category a
 
 ### Component and boundaries
 
-- **Component identity:** Look up the owning component in the path defined by the **Component Catalog** property in the root `AGENTS.md`. If the change spans components, list all affected.
+- **Component identity:** Look up the owning component at the path declared as **<component-catalog>** in the root `AGENTS.md`. If the change spans components, list all affected.
 - **Scoped instructions:** Check for a `AGENTS.md` in each affected subtree and verify compliance.
-- **Architecture boundaries:** Verify Clean Architecture layering (see the Clean Architecture rules at the path defined by the **Clean Architecture Rules** property in the root `AGENTS.md`).
+- **Architecture boundaries:** Verify architectural boundaries and layering (see the architectural rules declared under **<rules-index>** in the root `AGENTS.md`).
 
 ### Related Issues
 
@@ -103,7 +103,7 @@ This section drives the docs-dev plan-closeout workflow. Be honest:
 
 - Check "canonical documentation updated" only if you updated it in this PR.
 - If no update was needed, explain why (e.g., "Internal refactor with no public interface change").
-- Documentation updates are required when: public interface, configuration, architecture, runtime, operations, or workflow changes. See the Documentation Standard at the path defined by the **Documentation Standard** property in the root `AGENTS.md`.
+- Documentation updates are required when: public interface, configuration, architecture, runtime, operations, or workflow changes. See the documentation ontology declared as **<documentation-ontology>** in the root `AGENTS.md`.
 
 ### Security and operations
 
@@ -113,30 +113,33 @@ This section drives the docs-dev plan-closeout workflow. Be honest:
 
 ## 5. Required CI checks
 
-The PR Gate workflow (`.github/workflows/pr-gate.yml`) runs automatically on every PR targeting `main` or `develop`. The following jobs must pass or be explicitly waived:
+Continuous integration workflows run automatically on PRs targeting `main` or `develop` (or the repository's configured integration branches). Before requesting review or merging, inspect the repository's active workflows in `.github/workflows/` (such as `ci.yml` or the repository's active PR gate) and verify that all configured checks pass.
 
-| Phase | Job | Trigger | Notes |
-|---|---|---|---|
-| Build & unit | `build-test` | Code or infra changes | Runs all unit test suites (Linux) |
-| Docs quality | `docs-quality` | Documentation changes | Markdown lint, link check, catalog validation, secret scan |
-| Security | `codeql` | Code or infra changes | CodeQL C# analysis with `security-extended` queries |
-| Security | `trivy` | Code or infra changes | Trivy OSS dependency and filesystem scan |
-| Security | `semgrep` | Code or infra changes | Semgrep Community SAST |
-| Security | `iac-scan` | Code or infra changes | Checkov scan of Dockerfiles and workflows |
-| Deep validation | `unit-mobile` | Code or infra changes | MAUI unit tests on macOS |
-| Deep validation | `integration` | Code or infra changes | Integration tests (non-Azure category) |
-| Deep validation | `e2e` | Code or infra changes | End-to-end tests with mock services |
-| Skill quality | `skill-gate` | Code or infra changes | Kyber-Weave skill validate + lint + scan |
+Check status via the GitHub CLI or web UI:
+
+```bash
+gh pr checks <pr-number-or-branch>
+```
+
+### Common CI check categories
+
+Depending on the repository's technology stack and configuration, CI pipelines typically enforce the following check phases:
+
+| Phase | Purpose | Common Tools / Commands |
+|---|---|---|
+| Build & Unit Tests | Verifies clean compilation and passing unit tests across supported platforms | `dotnet build`, `dotnet test`, `npm test`, `pytest` |
+| Documentation & Ontology | Verifies documentation schema, link validity, and catalog alignment | `kyber-weave docs validate .`, `docs drift .`, `markdownlint-cli2` |
+| Security & SAST | Identifies vulnerabilities, insecure dependencies, and hardcoded secrets | CodeQL, Trivy, Semgrep, Gitleaks, Checkov |
+| Skill Quality Gates | Validates agent skill schema, description quality, and security policy | `kyber-weave skill validate`, `skill lint`, `skill scan` |
+| Integration & E2E | Executes cross-service, end-to-end, or platform-specific test suites | Host-specific integration / test runner commands |
 
 ### Handling check failures
 
-1. **Build-test failure:** Inspect the build log. Common causes: missing dependency restore, broken test, or a build error introduced by the change.
-2. **Docs-quality failure:** Run `npx markdownlint-cli2@0.23.2` locally. Fix any broken links (check with `lychee --offline`). Run `kyber-weave docs validate .` (and `docs drift` if the corpus uses code-refs) to verify catalog coverage.
-3. **Security failure (CodeQL/Trivy/Semgrep/Checkov):** Review the SARIF output in the GitHub Security tab. Address HIGH or CRITICAL findings. If a finding is a false positive, annotate it in the PR with a brief explanation referencing the relevant SARIF rule.
-4. **Integration/E2E failure:** Check the test log for the failing test name. Reproduce locally with `dotnet test --filter "FullyQualifiedName=<test-name>"`.
-5. **Skill-gate failure:** Run Kyber-Weave commands locally: `kyber-weave skill validate`, `kyber-weave skill lint`, or `kyber-weave skill scan` on `.agents/skills/`. Fix any validation errors or HIGH+ severity findings.
-
-If a check is consistently failing due to an environment issue (not your change), add a PR comment documenting the failure and tag a maintainer.
+1. **Build or Test failure:** Inspect the failure log from the workflow run or binlog artifact. Reproduce locally using the appropriate build or test command (e.g., `dotnet test --filter "FullyQualifiedName=<test-name>"`).
+2. **Documentation or Lint failure:** Run the relevant validation tools locally. Fix markdown formatting (`markdownlint-cli2`), repair broken relative links, and ensure catalog/ontology alignment via `kyber-weave docs validate .` (and `docs drift .` if code-refs are used).
+3. **Security scan failure (CodeQL / Trivy / Semgrep / Gitleaks):** Review the SARIF output in the GitHub Security tab or runner logs. Remediate HIGH or CRITICAL findings. If a finding is a confirmed false positive, follow repository policy to document and suppress it with an explicit rationale.
+4. **Skill gate failure:** Run Kyber-Weave commands locally: `kyber-weave skill validate <path>`, `kyber-weave skill lint <path>`, or `kyber-weave skill scan <path>`. Address schema violations or findings.
+5. **Environment or Runner flake:** If a failure is definitively caused by runner infrastructure issues (e.g., transient network timeout, external service outage) unrelated to the PR diff, re-run the failed job or document the issue in a PR comment and tag a maintainer.
 
 ## 6. Review process
 
@@ -172,7 +175,7 @@ When the PR is merged, the orchestrator follows the plan closeout process define
 1. The orchestrator assigns a `docs-dev` plan-closeout task.
 2. The documentation specialist verifies the plan's acceptance criteria against the implemented behavior.
 3. The specialist updates the affected canonical documentation (if not already updated in the PR).
-4. The specialist maintains the plan index (at the path defined by the **Plan Index** or **Component Catalog** properties in the root `AGENTS.md`).
+4. The specialist maintains the plan index (at the path declared as **<plan-index>** or **<component-catalog>** in the root `AGENTS.md`).
 5. The plan is archived under `<docs-root>/archive/plans/` with status `Archived`.
 
 The PR is not the final step for plan-backed work — documentation verification and archiving are required before the plan is considered complete.
@@ -198,9 +201,9 @@ The PR is not the final step for plan-backed work — documentation verification
 
 - Pull Request template (`.github/PULL_REQUEST_TEMPLATE.md`) — the template every PR must fill out.
 - `create-pull-request-github` skill — mechanical steps for creating the PR via GitHub MCP or `gh` CLI.
-- PR Gate workflow (`.github/workflows/pr-gate.yml`) — the CI pipeline that validates every PR.
-- Documentation standard — defined by the **Documentation Standard** property in the root `AGENTS.md`.
-- Component catalog — defined by the **Component Catalog** property in the root `AGENTS.md`.
-- Architecture rules — defined by the **Clean Architecture Rules** property in the root `AGENTS.md`.
+- PR CI workflows (`.github/workflows/`) — the CI workflows that validate PRs (e.g. `ci.yml` or active PR gate).
+- Documentation ontology — declared as **<documentation-ontology>** in the root `AGENTS.md`.
+- Component catalog — declared as **<component-catalog>** in the root `AGENTS.md`.
+- Architecture rules — declared under **<rules-index>** in the root `AGENTS.md`.
 - `AGENTS.md` — repository-wide mandatory instructions.
 - `setup-dev-environment` skill — dev environment setup and validation.

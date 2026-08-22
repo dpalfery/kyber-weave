@@ -1,8 +1,8 @@
 ---
-id: plans/2026-08-21-duplication-and-prior-art-lenses
+id: archive/plans/2026-08-21-duplication-and-prior-art-lenses
 title: Duplication lenses — prior art, duplicate implementations, and the redundancy tier the gate was dropping
 doc-type: plan
-status: current
+status: archived
 component: ReviewCouncil
 owner: dpalfery
 last-reviewed: 2026-08-22
@@ -10,8 +10,10 @@ last-reviewed: 2026-08-22
 
 # Duplication lenses
 
-**Status:** Phases 0, 1, 2, 4 done; Phase 3 deferred by its own precondition
-**Date:** 2026-08-21 (revised 2026-08-22 against what shipped)
+**Status:** Archived  
+**Archive Date:** 2026-08-22  
+**Date:** 2026-08-21 (revised 2026-08-22 against what shipped)  
+**Outcome / Closeout:** Completed. Phases 0, 1, 2, and 4 implemented (InspectCode redundancy promotions, prior-art and duplicate-implementation review lenses, and `review duplicates` gate command). Phase 3 deferred by precondition. Decisions harvested into [ADR 0003](../../adr/0003-cross-file-duplication-and-prior-art-lenses.md).  
 **Goal:** Give the review council the three concerns it does not currently hold — code that
 duplicates code, types that duplicate types, and generality nothing asked for. One of the
 three is a settings change and is already done. The other two are new lenses: `prior-art`,

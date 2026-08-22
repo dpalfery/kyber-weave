@@ -6,7 +6,10 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-08-20
+last-reviewed: 2026-08-22
+decided-by:
+  - adr/0002-three-layer-review-council-verdict-engine
+  - adr/0003-cross-file-duplication-and-prior-art-lenses
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -340,4 +343,7 @@ pass in particular is unmeasured and may exceed the council itself on a findings
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-REVIEW-*` id
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — how agents and skills deploy
 - [Agent harness governance](../context-hygiene/agents.md) — capability profiles and parity
-- [The review council plan](../plans/2026-08-20-code-review-council.md) — why it is shaped this way
+- [The review council plan](../archive/plans/2026-08-20-code-review-council.md) — why it is shaped this way
+- [ADR 0002](../adr/0002-three-layer-review-council-verdict-engine.md) — three-layer review council and verdict engine
+- [ADR 0003](../adr/0003-cross-file-duplication-and-prior-art-lenses.md) — cross-file duplication and prior art
+

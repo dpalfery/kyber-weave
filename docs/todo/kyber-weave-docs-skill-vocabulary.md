@@ -22,7 +22,7 @@ accepts:
   [the specs/plans/todos work](../archive/plans/2026-08-16-specs-plans-todos-governance.md) —
   the skill was not updated then;
 - `coding-standard`, added by
-  [the standards work](../plans/2026-08-16-coding-standards-and-config-reg.md), which
+  [the standards work](../archive/plans/2026-08-16-coding-standards-and-config-reg.md), which
   deliberately made no skill changes.
 
 The skill also says *"if nothing fits, the answer is `reference` — never invent a value"*.

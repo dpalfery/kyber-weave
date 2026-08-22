@@ -15,6 +15,13 @@ document as `<data-access-layer-coding-standard>`. Language-level C# is in the p
 declared as **<csharp-coding-standard>**; SQL shape is in **<sql-coding-standard>**.
 Those three must not disagree. Where they would, this document yields to them.
 
+## Authority & status
+
+When this standard is in `status: current`, what it says here outranks whatever defaults a
+portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
+template/proposal and does NOT override portable agent defaults until reviewed and promoted
+to `current`.
+
 > Template. Set `owner` to a row in `catalog.md`, replace `<Solution>` with the host's
 > root namespace, review the decisions below, and promote `status` to `current`.
 

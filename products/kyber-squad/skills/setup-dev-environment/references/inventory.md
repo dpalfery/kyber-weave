@@ -1,6 +1,6 @@
 # Inventory
 
-Read the project-specific file list in the Preflight Inventory section of the document declared as **Developer Setup Standard** in the root `AGENTS.md` Repository Configuration & Paths registry — repository-wide config files, then each component's dependency manifest. This file only covers the generic discovery mechanics; it holds no project-specific paths so it stays valid if the project's layout changes or this skill is reused elsewhere.
+This document defines the generic discovery commands and patterns for inspecting a development machine and repository prerequisites. If a **Developer Setup Standard** (`<developer-setup-standard>`) is declared in the root `AGENTS.md` Repository Configuration & Paths registry, treat it as an optional host overlay that supplements or customizes this discovery inventory and project manifest list. When no host setup standard is declared, discover prerequisites autonomously by inspecting repository manifests (such as `global.json`, `.editorconfig`, `*.csproj`, `package.json`, `requirements.txt`, Dockerfiles, `docs/install.md`, `CONTRIBUTING.md`, `README.md`) and running the discovery checks below.
 
 Use these discovery commands when available:
 
@@ -55,4 +55,4 @@ Get-Command gh
 Get-Command az
 ```
 
-For Azure CLI, use `Get-Command az` or `where.exe az` to check install presence. Do not run any `az` command until the active subscription can be verified against the allowlist in the Developer Setup Standard's Guardrails.
+For Azure CLI, use `Get-Command az` or `where.exe az` to check install presence. Do not run any `az` command until the active subscription can be verified against the allowlist in the host standard's guardrails or repository documentation.

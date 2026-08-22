@@ -1,8 +1,8 @@
 ---
-id: plans/2026-08-22-resolve-inspectcode-warnings-and-actionable-suggestions
+id: archive/plans/2026-08-22-resolve-inspectcode-warnings-and-actionable-suggestions
 title: Resolve InspectCode Warnings and Actionable Suggestions
 doc-type: plan
-status: current
+status: archived
 component: CI Pipelines
 owner: dpalfery
 last-reviewed: 2026-08-22
@@ -10,8 +10,10 @@ last-reviewed: 2026-08-22
 
 # Resolve InspectCode Warnings and Actionable Suggestions
 
-**Status:** Complete  
+**Status:** Archived  
+**Archive Date:** 2026-08-22  
 **Date:** 2026-08-22  
+**Outcome / Closeout:** Completed. Resolved all 34 InspectCode static analysis warnings and high-value actionable suggestions across `KyberWeave.sln` with 0 warnings remaining. Clean code policies harvested into [ADR 0004](../../adr/0004-solution-level-static-analysis-and-noise-suppression.md).  
 **Goal:** Resolve all 34 InspectCode static analysis warnings (`AssignNullToNotNullAttribute`, `AccessToDisposedClosure`, `AccessToModifiedClosure`) and high-value actionable suggestions (accessibility narrowing, collection expressions, domain model immutability, get-only auto-properties) across `KyberWeave.sln`.
 
 ---

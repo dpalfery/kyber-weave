@@ -1,0 +1,15 @@
+schema: kyber-squad.lock/v1
+squad-version: 0.1.7-rc.5
+cli-version: 0.1.7-rc.5
+mcp-version: 0.1.7-rc.5
+bundle: full
+targets:
+  - copilot
+exclusions: []
+translation: best-effort
+bundle-digest: 3ad6a3106330ecaa4e60d57d451fd65b7488b1067a84269875601982b6492df7
+asset-digest: 51f3fe26f0e378620a5cec70cb4f903ba12af34fd8798663d8566316eb9c3fc8
+apm:
+  version: unverified
+  tag-commit: unverified
+  asset-sha256: unverified
