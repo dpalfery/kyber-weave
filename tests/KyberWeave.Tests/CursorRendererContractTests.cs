@@ -90,9 +90,8 @@ public sealed class CursorRendererContractTests
 
             (YamlMappingNode frontmatter, string body) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
             Assert.Equal(agent.Name, RequireScalar(frontmatter, "name"));
-            Assert.Equal(
-                agent.Description,
-                RequireScalar(frontmatter, "description"),
+            Assert.True(
+                string.Equals(agent.Description, RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
             // Model resolution: verify against loaded ModelProfiles
@@ -178,9 +177,8 @@ public sealed class CursorRendererContractTests
             string expectedDescription = string.Join(" ", skill.Description.Split(
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            Assert.Equal(
-                expectedDescription,
-                RequireScalar(frontmatter, "description"),
+            Assert.True(
+                string.Equals(expectedDescription, RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' description mismatch.");
             Assert.Equal("MIT", RequireScalar(frontmatter, "license"));
 
