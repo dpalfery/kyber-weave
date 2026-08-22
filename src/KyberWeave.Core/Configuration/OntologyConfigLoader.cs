@@ -11,6 +11,8 @@ public static class OntologyConfigLoader
 
     internal const string CatalogPathKey = "ontology.catalog-path";
 
+    internal const string TechnologiesKey = "ontology.technologies";
+
     public static OntologyConfig LoadMerged(OntologyConfig defaults, string yamlPath)
     {
         ArgumentNullException.ThrowIfNull(defaults);
@@ -55,7 +57,7 @@ public static class OntologyConfigLoader
                     throw new YamlException(
                         $"Unknown ontology required-keys doc type '{typeName}'. " +
                         "Known types: architecture, onboarding, requirements, adr, plan, spec, todo, " +
-                        "runbook, reference, rule, governance, index.");
+                        "runbook, reference, rule, governance, index, coding-standard.");
                 }
 
                 merged[docType] = keys is null
@@ -75,6 +77,7 @@ public static class OntologyConfigLoader
             catalogOwnerColumn: section.Catalog?.OwnerColumn,
             docTypes: section.DocTypes,
             statuses: section.Statuses,
+            technologies: NormalizeTechnologies(section.Technologies),
             baseRequiredKeys: section.BaseRequiredKeys,
             requiredKeysByType: requiredKeys);
     }
@@ -134,6 +137,41 @@ public static class OntologyConfigLoader
                 "path to the catalog, e.g. 'docs/catalog.md'.");
     }
 
+    /// <summary>
+    /// Validates the declared technology vocabulary. Each value becomes a directory name
+    /// under <c>&lt;docs-root&gt;/standards/</c> and the legal value of a standard's
+    /// <c>technology</c> key, so it is constrained to a slug here — at the point the operator
+    /// wrote it — rather than at the point something tries to create a path out of it.
+    /// </summary>
+    internal static IReadOnlyList<string>? NormalizeTechnologies(List<string>? values)
+    {
+        if (values is null) return null;
+
+        List<string> normalized = new List<string>(values.Count);
+        foreach (string value in values)
+        {
+            string technology = value?.Trim() ?? string.Empty;
+            if (!ConfigSlug.IsValid(technology))
+            {
+                throw new YamlException(
+                    $"{TechnologiesKey} entry '{value}' is not a slug. Use lowercase letters, " +
+                    "digits and single hyphens — 'github-actions', not 'GitHub Actions' or " +
+                    "'standards/github'. The value names a directory and legalizes a " +
+                    "standard's 'technology' key.");
+            }
+
+            if (normalized.Contains(technology, StringComparer.Ordinal))
+            {
+                throw new YamlException(
+                    $"{TechnologiesKey} declares '{technology}' more than once.");
+            }
+
+            normalized.Add(technology);
+        }
+
+        return normalized;
+    }
+
     private static bool TryParseDocType(string name, out DocType docType)
     {
         docType = name?.Trim().ToLowerInvariant() switch
@@ -150,6 +188,7 @@ public static class OntologyConfigLoader
             "rule" => DocType.Rule,
             "governance" => DocType.Governance,
             "index" => DocType.Index,
+            "coding-standard" => DocType.CodingStandard,
             _ => DocType.Unknown
         };
         return docType != DocType.Unknown;

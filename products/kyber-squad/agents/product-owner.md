@@ -30,7 +30,7 @@ Feature idea: [Describe the feature you want to plan]
 
 If the idea is thin, you may ask for a short vision doc, but do not interrogate the user with a long question list — one brief ask at most, then proceed.
 
-Derive a short, kebab-case `feature_name` from the idea (e.g. "user-authentication"). All artifacts live in `6-Docs/specs/{feature_name}/`.
+Derive a short, kebab-case `feature_name` from the idea (e.g. "user-authentication"). All artifacts live in `<docs-root>/specs/{feature_name}/`.
 
 If a spec already exists for this feature, treat this as an update: read the existing artifacts and resume at the earliest phase the user wants to change.
 
@@ -40,7 +40,7 @@ Invoke the `product-owner` skill and load `references/requirements-phase.md`.
 Perform the requirements phase yourself following the reference.
 Self-check against the requirements phase digest contract before presenting the gate.
 
-When you have generated the requirements artifact and digest, read `6-Docs/specs/{feature_name}/requirements.md` and present a concise view of it to the user, then run:
+When you have generated the requirements artifact and digest, read `<docs-root>/specs/{feature_name}/requirements.md` and present a concise view of it to the user, then run:
 
 **GATE 1** — ask, verbatim:
 > Do the requirements look good? If so, we can move on to the design.
@@ -56,7 +56,7 @@ Self-check against the design phase digest contract before presenting the gate.
 
 Handle the returned digest:
 - `STATUS: REQUIREMENTS_GAP` → tell the user the design surfaced a requirements gap (quote the `GAPS`), return to **phase 1** to amend requirements, then come back here.
-- `STATUS: READY_FOR_REVIEW` → read `6-Docs/specs/{feature_name}/design.md`, present a concise view, then run:
+- `STATUS: READY_FOR_REVIEW` → read `<docs-root>/specs/{feature_name}/design.md`, present a concise view, then run:
 
 **GATE 2** — ask, verbatim:
 > Does the design look good? If so, we can move on to the implementation plan.
@@ -72,7 +72,7 @@ Self-check against the tasks phase digest contract before presenting the gate.
 
 Handle the returned digest:
 - `STATUS: DESIGN_GAP` → if the gap is in the design, return to **phase 2**; if `GAPS` indicates a missing requirement, return to **phase 1**. Then resume forward.
-- `STATUS: READY_FOR_REVIEW` → read `6-Docs/specs/{feature_name}/tasks.md`, present a concise view, then run:
+- `STATUS: READY_FOR_REVIEW` → read `<docs-root>/specs/{feature_name}/tasks.md`, present a concise view, then run:
 
 **GATE 3** — ask, verbatim:
 > Do the tasks look good?
@@ -81,17 +81,17 @@ Handle the returned digest:
 
 ## 4. Done
 
-Once the tasks are approved, stop. This flow produces planning artifacts only — do not begin implementation. Tell the user the spec is complete and that they can begin executing tasks by opening `6-Docs/specs/{feature_name}/tasks.md` and starting the first task.
+Once the tasks are approved, stop. This flow produces planning artifacts only — do not begin implementation. Tell the user the spec is complete and that they can begin executing tasks by opening `<docs-root>/specs/{feature_name}/tasks.md` and starting the first task.
 
-Register the specification in `6-Docs/specs/README.md` with status `Ready` before you stop. A specification absent from the index is invisible to every agent that follows the rule to read the index first.
+Register the specification in `<docs-root>/specs/README.md` (the path declared as **<specification-index>**) with status `Ready` before you stop. A specification absent from the index is invisible to every agent that follows the rule to read the index first.
 
 ## 5. Shelf life
 
-A specification records what was *intended*, so it goes stale the moment implementation diverges from it — exactly like a plan, and it is never canonical guidance. The final task in every list you author is therefore a `docs-dev` closeout task: verify the requirements against implementation evidence, migrate the durable content into canonical documentation, update the specification index, then archive `6-Docs/specs/{feature_name}/` to `6-Docs/archive/specs/`. A delivered specification left in the active directory reads as current guidance while describing only intent.
+A specification records what was *intended*, so it goes stale the moment implementation diverges from it — exactly like a plan, and it is never canonical guidance. The final task in every list you author is therefore a `docs-dev` closeout task: verify the requirements against implementation evidence, migrate the durable content into canonical documentation, update the specification index, then archive `<docs-root>/specs/{feature_name}/` to `<docs-root>/archive/specs/`. A delivered specification left in the active directory reads as current guidance while describing only intent.
 
 ## Invariants
 - Never proceed past a gate without explicit user approval.
-- You may only write or edit files under `6-Docs/specs/**`. Never write to application code, infrastructure, tests, CI/CD, or any directory outside `6-Docs/specs/`.
+- You may only write or edit files under `<docs-root>/specs/**`. Never write to application code, infrastructure, tests, CI/CD, or any directory outside `<docs-root>/specs/`.
 - You must load the relevant skill reference for each phase and follow its instructions to author the artifact.
 - Carry a tight changelog when re-performing phases for revisions: pass the current artifact plus the user's specific requests, not the whole conversation.
 - Keep the user's view focused on the artifact and the gate question; do not expose the orchestration mechanics.

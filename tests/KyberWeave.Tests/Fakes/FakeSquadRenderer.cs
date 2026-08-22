@@ -20,9 +20,9 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "code-reviewer",
         "conductor",
         "conductor-v3",
+        "csharp-dev",
         "dal-dev",
         "docs-dev",
-        "dotnet-dev",
         "github-devops",
         "maui-dev",
         "product-owner",
@@ -47,9 +47,9 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "conductor-v3",
         "create-pull-request",
         "create-pull-request-github",
+        "csharp-dev",
         "csp-security",
         "dal-dev",
-        "dotnet-dev",
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
@@ -72,8 +72,8 @@ public sealed class FakeSquadRenderer : ISquadRenderer
 
     public static readonly IReadOnlyList<string> DistinctBodyCollisionIdentities =
     [
+        "csharp-dev",
         "dal-dev",
-        "dotnet-dev",
         "github-devops",
         "maui-dev",
         "product-owner",

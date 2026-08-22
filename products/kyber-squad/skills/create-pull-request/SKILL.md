@@ -1,15 +1,15 @@
 ---
 name: create-pull-request
-description: Guides developers and agents through creating a Pull Request in the MotorcycleRAG repository. Covers the full lifecycle, pre-PR validation, branching conventions, template usage, CI checks, review expectations, and post-merge documentation closeout.
+description: "Guides developers and agents through creating a pull request: pre-PR validation, branching conventions, template usage, CI checks, review expectations, and post-merge documentation closeout. Use when opening or preparing a PR. Do not use for writing the implementation being merged."
 license: MIT
 metadata:
   author: David R Palfery
   version: 1.0.0
 ---
 
-# Create Pull Request — MotorcycleRAG
+# Create Pull Request
 
-Use this skill when preparing or creating a Pull Request in the MotorcycleRAG repository. It describes the project-specific standards, checks, and workflow that PR authors must follow. For the mechanical steps of creating the PR via GitHub or the `gh` CLI, consult the `create-pull-request-github` skill.
+Use this skill when preparing or creating a pull request in the host repository. It describes the checks and workflow that PR authors must follow. For the mechanical steps of creating the PR via GitHub or the `gh` CLI, consult the `create-pull-request-github` skill.
 
 ---
 
@@ -18,12 +18,8 @@ Use this skill when preparing or creating a Pull Request in the MotorcycleRAG re
 Before opening a PR, verify all of the following:
 
 - [ ] **Branch from the correct base.** PRs target `main` (production) or `develop` (integration). Feature and bugfix branches branch from `develop` unless the change is a hotfix targeting `main`. Confirm the parent branch conclusively — consult the `create-pull-request-github` skill.
-- [ ] **All local tests pass.** Run the relevant test suites:
-  - .NET: `dotnet test MotorcycleRAG.sln --configuration Release`
-  - Python (local processor): `cd 2-Application/local-processing-service && poetry run pytest`
-  - Web UI: `cd 1-Presentation/MotorcycleRag.WebUI && npm test`
-  - Admin Desktop: `cd 1-Presentation/MotorcycleRAG.AdminDesktop && npm test`
-- [ ] **Code builds clean.** `dotnet build MotorcycleRAG.sln --configuration Release` completes with no errors.
+- [ ] **All local tests pass.** Run the host test suites. For .NET, `dotnet test -c Release` unless **<csharp-coding-standard>** names a different command. For other stacks, use the matching coding-standard document.
+- [ ] **Code builds clean.** `dotnet build -c Release` completes with no errors (or the host's equivalent).
 - [ ] **Lint and formatting pass.** Markdown files pass `markdownlint-cli2`; C# code follows `.editorconfig` and `dotnet format` conventions; Python follows `ruff` rules in `pyproject.toml`.
 - [ ] **Canonical documentation is updated.** If the change affects a component's public interface, configuration, architecture, runtime, operations, or workflow, the corresponding README and detailed documentation have been updated. See the path defined by the **Documentation Standard** property in the root `AGENTS.md` for the required shape.
 - [ ] **Catalog entry is current.** If the change introduces, moves, renames, or materially alters a component, update the catalog at the path defined by the **Component Catalog** property in the root `AGENTS.md`.
@@ -135,7 +131,7 @@ The PR Gate workflow (`.github/workflows/pr-gate.yml`) runs automatically on eve
 ### Handling check failures
 
 1. **Build-test failure:** Inspect the build log. Common causes: missing dependency restore, broken test, or a build error introduced by the change.
-2. **Docs-quality failure:** Run `npx markdownlint-cli2` locally. Fix any broken links (check with `lychee --offline`). Run `bash 7-Deployment/scripts/validate-docs.sh` to verify catalog coverage.
+2. **Docs-quality failure:** Run `npx markdownlint-cli2@0.23.2` locally. Fix any broken links (check with `lychee --offline`). Run `kyber-weave docs validate .` (and `docs drift` if the corpus uses code-refs) to verify catalog coverage.
 3. **Security failure (CodeQL/Trivy/Semgrep/Checkov):** Review the SARIF output in the GitHub Security tab. Address HIGH or CRITICAL findings. If a finding is a false positive, annotate it in the PR with a brief explanation referencing the relevant SARIF rule.
 4. **Integration/E2E failure:** Check the test log for the failing test name. Reproduce locally with `dotnet test --filter "FullyQualifiedName=<test-name>"`.
 5. **Skill-gate failure:** Run Kyber-Weave commands locally: `kyber-weave skill validate`, `kyber-weave skill lint`, or `kyber-weave skill scan` on `.agents/skills/`. Fix any validation errors or HIGH+ severity findings.
@@ -177,14 +173,14 @@ When the PR is merged, the orchestrator follows the plan closeout process define
 2. The documentation specialist verifies the plan's acceptance criteria against the implemented behavior.
 3. The specialist updates the affected canonical documentation (if not already updated in the PR).
 4. The specialist maintains the plan index (at the path defined by the **Plan Index** or **Component Catalog** properties in the root `AGENTS.md`).
-5. The plan is archived under `6-Docs/archive/plans/` with status `Archived`.
+5. The plan is archived under `<docs-root>/archive/plans/` with status `Archived`.
 
 The PR is not the final step for plan-backed work — documentation verification and archiving are required before the plan is considered complete.
 
 ### For non-plan work
 
 - Verify that the PR description's "Documentation impact" section reflects the final state.
-- If the change introduced new configuration, runtime dependencies, or operational procedures, ensure the relevant `6-Docs/` documentation is updated.
+- If the change introduced new configuration, runtime dependencies, or operational procedures, ensure the relevant documentation under `<docs-root>` is updated.
 - Delete the feature branch after merge (GitHub offers a "Delete branch" button on merged PRs).
 
 ## 8. Common pitfalls

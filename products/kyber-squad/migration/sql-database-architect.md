@@ -9,7 +9,7 @@ sources:
   .cursor/agents/sql-database-architect.agent.md: 57119991dbea2d3a2e7ac9e1d52ea9a612402036a66428807af70dfa86c1a8a2
   .github/agents/sql-database-architect.agent.md: 91a27a358c43ce3719afbf9899d3f4f9942b57ed32e2768b36943475b327b8f8
   .opencode/agents/sql-database-architect.md: da70672b7a0a9eda28e25de01fdc85646e03f4544e0895f0b8ad3be897830b37
-final-body-sha256: da480f811d7b23a8f8943b321918b5d77cd32593745683ce0ca7f54463c9081e
+final-body-sha256: 7c219d53a0c3c8238c64335fc34a53829e379b8586b899a98ae86116923172fb
 ---
 # sql-database-architect migration
 

@@ -62,8 +62,8 @@ public class DatabaseFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var connStr = Environment.GetEnvironmentVariable("MCR_API_SQL_CONNECTION_STRING")
-            ?? "Server=(localdb)\\MSSQLLocalDB;Database=MotorcycleRAG_Test;Integrated Security=true";
+        string? connStr = Environment.GetEnvironmentVariable("SQL_TEST_CONNECTION_STRING")
+            ?? "Server=(localdb)\\MSSQLLocalDB;Database=Host_Test;Integrated Security=true";
         ConnectionFactory = new SqlConnectionFactory(connStr);
         await ApplyMigrationsAsync();
     }
@@ -131,5 +131,4 @@ public class IngestionJobsControllerTests : IClassFixture<WebApplicationFactory<
 ```powershell
 dotnet test --filter "Category=Integration"
 dotnet test --filter FullyQualifiedName~RepositoryTests
-dotnet test 5-Test/MotorcycleRAG.IntegrationTests
 ```

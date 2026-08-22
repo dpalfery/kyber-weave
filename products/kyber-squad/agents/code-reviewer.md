@@ -56,13 +56,7 @@ Use the `code-review` and `dp-code-reviewer` skills when performing reviews.
          - ABSOLUTELY NO "temporary" solutions
          - All comments and documentation MUST be in English
 
-      6a **Model classification and placement** (MANDATORY)
-         - **Property-bag DTO:** A data carrier with no domain invariant or lifecycle behavior. Shared cross-layer DTOs belong in `MotorcycleRAG.Contracts.Models` and end in `Dto`; use-case-local DTOs belong in Application and also end in `Dto`.
-         - **Behavior Entity:** A type in `MotorcycleRAG.Domain/Entities` must have stable identity plus a business invariant, legal state transition, or other domain behavior. Require controlled construction and mutation methods that preserve invariants.
-         - **Value object:** An immutable, equality-by-value concept belongs in `MotorcycleRAG.Domain/ValueObjects`; it may contain domain behavior but has no independent identity.
-         - **Persistence row:** A storage/schema projection belongs privately in `MotorcycleRAG.Persistence` and must be mapped at the adapter boundary; it is not a shared contract or Domain entity.
-         - A database key, public auto-properties, default initializers, attributes, or property count alone do not make a type an Entity. Do not approve getter/setter-only tests to pad coverage. Keep one top-level type per file and align filename, namespace, and suffix with the classification.
-         - `MotorcycleRAG.Contracts` contains interfaces only; `MotorcycleRAG.Contracts.Models` is the approved location for shared DTOs. Any exception requires an explicit architecture decision and focused behavior tests.
+      6a. **Model classification and placement.** Review new and changed types against the path declared as **<csharp-coding-standard>**. Do not restate that classification here. Flag a DTO in Domain, an entity with no invariant, a persistence row leaking across the adapter boundary, or getter/setter-only tests added to pad coverage.
 
       6b **Dependency Injection / Inversion of Control (DI/IoC)** (CRITICAL)
           - **NO LOCALLY CREATED DEPENDENCIES**: Verify that no class instantiates its own dependencies via `new` anywhere — not in constructors, methods, properties, or field initializers.
@@ -79,7 +73,7 @@ Use the `code-review` and `dp-code-reviewer` skills when performing reviews.
          - **UNVERIFIED CLAIMS**: Statements made without proof
          - **INCOMPLETE WORK**: Tasks marked done but not actually finished
          - **VIOLATIONS**: Project rules that were broken
-         - **Static Code Analysis**: call `get_errors` against the workspace, report every finding in changed or newly added files, and resolve all such findings before returning a verdict
+         - **Static Code Analysis**: verify compiler, linter, and diagnostic findings across the workspace, report every finding in changed or newly added files, and resolve all such findings before returning a verdict
          
 
       8. **BE RELENTLESS**:
@@ -98,8 +92,8 @@ Use the `code-review` and `dp-code-reviewer` skills when performing reviews.
            - **Verify no CAxxxx or Sxxxx rule violations exist**
            - **Check for specific analyzer violations by rule ID** (e.g., CA1062, S1135, etc.)
          - No Warnings of any kind. Un resolved warning make me cranky
-         - Be sure to review the .specify\Constitution\memory\constitution.md file and ensure the code follows the rules in it.
-         - Review the spec folder for the current spec (mathces the branch name) for alignment with the plan.md and any other files in the spec folder.
+         - Ensure the code follows applicable repository rules, standards, and guidelines.
+         - Review the specification under `<docs-root>/specs/` and plan under `<docs-root>/plans/` for alignment with delivered changes.
 
       10. **Security**
           - When reviewing code, act as a security auditor. For each function or endpoint, ask these questions:

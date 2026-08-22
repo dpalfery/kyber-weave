@@ -560,6 +560,7 @@ public sealed class AnalysisPersistenceTests
     private static Process StartSqliteLock(string databasePath)
     {
         ProcessStartInfo startInfo = SqliteStartInfo();
+        startInfo.ArgumentList.Add("-batch");
         startInfo.ArgumentList.Add(databasePath);
         Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Could not start sqlite lock fixture.");
@@ -571,10 +572,13 @@ public sealed class AnalysisPersistenceTests
         {
             ProcessResult result = RunSqliteAllowFailure(databasePath, ".timeout 1\nBEGIN IMMEDIATE;");
             if (result.ExitCode != 0
-                && result.StandardError.Contains("locked", StringComparison.OrdinalIgnoreCase))
+                && (result.StandardError.Contains("locked", StringComparison.OrdinalIgnoreCase)
+                    || result.StandardError.Contains("busy", StringComparison.OrdinalIgnoreCase)))
             {
                 return process;
             }
+
+            Thread.Sleep(20);
         }
 
         process.StandardInput.WriteLine("ROLLBACK;");

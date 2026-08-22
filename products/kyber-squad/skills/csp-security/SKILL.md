@@ -17,7 +17,7 @@ This skill MUST be loaded whenever working on:
 - Input validation, sanitization, or output encoding.
 - CORS configuration or cross-origin security.
 - Middleware pipeline ordering in `Program.cs`.
-- Any endpoint in `1-Presentation/MotorcycleRAG.API/` or `1-Presentation/MotorcycleRag.WebUI.BFF/`.
+- API or BFF endpoints, security middleware, or `Program.cs` pipeline ordering.
 
 ---
 
@@ -30,7 +30,7 @@ This project targets **OWASP Application Security Verification Standard (ASVS) L
 ## Security Headers Middleware
 
 ### API: `SecurityHeadersMiddleware.cs`
-Location: `1-Presentation/MotorcycleRAG.API/Middleware/SecurityHeadersMiddleware.cs`
+Location: the API project's security-headers middleware (name it after the host's existing type).
 
 **Required Headers (all responses):**
 | Header | Value | Purpose |
@@ -44,7 +44,7 @@ Location: `1-Presentation/MotorcycleRAG.API/Middleware/SecurityHeadersMiddleware
 | `Permissions-Policy` | Block most features (camera, microphone, geolocation, etc.) | Minimize attack surface |
 
 ### BFF: Inline Security Headers in `Program.cs`
-Location: `1-Presentation/MotorcycleRag.WebUI.BFF/Program.cs`
+Location: the BFF project's `Program.cs`.
 
 **Environment-Dependent CSP:**
 - **Development**: Allows `unsafe-inline` for React HMR hot reload (`script-src 'self' 'unsafe-inline'`)

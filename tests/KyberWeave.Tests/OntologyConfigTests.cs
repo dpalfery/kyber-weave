@@ -17,7 +17,7 @@ public class OntologyConfigTests
     private static readonly string[] ExpectedDocTypes =
     [
         "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
-        "runbook", "reference", "rule", "governance", "index"
+        "runbook", "reference", "rule", "governance", "index", "coding-standard"
     ];
 
     private static readonly string[] ExpectedStatuses =

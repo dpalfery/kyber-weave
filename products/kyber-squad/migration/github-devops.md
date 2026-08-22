@@ -9,7 +9,7 @@ sources:
   .cursor/agents/github-devops.agent.md: d04bef3702c88bb3fe601243ba142e01c4514179e30e2c582af8337c8da26107
   .github/agents/github-devops.agent.md: 9eb691c620287490893255a18bdeafbe0517e908886c300d2064e7dfecd64512
   .opencode/agents/github-devops.md: a66ba87bd4513493f3e8e98884a54a692645b02a272e597852a5f758aba2b2fc
-final-body-sha256: 93b105d4f318bc7995155359f09019a9464aec201cc0bf8d5f76bdb312f22f97
+final-body-sha256: af12af51815171a44b021409f7f303dcda5f9de2cb64c48163132b69098cebad
 ---
 # github-devops migration
 

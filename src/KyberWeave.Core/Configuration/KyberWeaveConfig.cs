@@ -11,6 +11,8 @@ public sealed class KyberWeaveConfig
 
     public SquadConfig Squad { get; init; } = SquadConfig.ProductDefaults;
 
+    public ConfigRegConfig ConfigReg { get; init; } = ConfigRegConfig.ProductDefaults;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -43,16 +45,24 @@ public sealed class KyberWeaveConfig
         return Clone(squad: squad);
     }
 
+    public KyberWeaveConfig WithConfigReg(ConfigRegConfig configReg)
+    {
+        ArgumentNullException.ThrowIfNull(configReg);
+        return Clone(configReg: configReg);
+    }
+
     internal KyberWeaveConfig Clone(
         OntologyConfig? ontology = null,
         HarnessProfileConfig? harness = null,
         DocsAnalysisConfig? docsAnalysis = null,
-        SquadConfig? squad = null) =>
+        SquadConfig? squad = null,
+        ConfigRegConfig? configReg = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
             Harness = harness ?? Harness,
             DocsAnalysis = docsAnalysis ?? DocsAnalysis,
-            Squad = squad ?? Squad
+            Squad = squad ?? Squad,
+            ConfigReg = configReg ?? ConfigReg
         };
 }

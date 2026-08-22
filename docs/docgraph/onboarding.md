@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-17
 ---
 
 # Adopting DocGraph in an existing repository
@@ -45,6 +45,11 @@ closed vocabularies — that the emitted template knows nothing about and would 
 drop. The one key `docs init` will rewrite there is `ontology.docs-root`, in place and only
 when `--docs-root` moves it, so the catalog and the validator never end up reading
 different trees. Comments and every other key survive the edit.
+
+Passing `--kyber-standards` scaffolds the 10 rich Kyber Squad coding standards templates
+under `<docs-root>/standards/`, merges their technologies into `ontology.technologies`
+in `.kyber-weave/kyber-weave.yml`, and registers all 10 `<{tech}-coding-standard>` properties
+in Config Reg.
 
 The same conservative rule applies to `.kyber-weave/.gitignore`: an effective `cache/`
 entry is preserved, a missing one is appended without disturbing other patterns, and a

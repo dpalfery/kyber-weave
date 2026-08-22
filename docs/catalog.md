@@ -24,7 +24,7 @@ answers for it, and where its source lives.
 | KyberSquad | Feature | `src/KyberWeave.Core/Squad` | Unified agent and skill deployment control plane across 10 coding harnesses with transactional recovery. | [kyber-squad/architecture.md](kyber-squad/architecture.md) · [kyber-squad/onboarding.md](kyber-squad/onboarding.md) | dpalfery | 2026-08-15 | current |
 | KyberDash | Feature | `src/KyberWeave.Dash` | Local interactive dashboard consuming OpenTelemetry data from .NET Aspire to observe, analyze, and tune agentic context windows. | [dash/README.md](dash/README.md) | dpalfery | 2026-08-15 | draft |
 | CI Pipelines | Feature | `src/KyberWeave.Core/Diagnostics` | The diagnostic engine every gate reports through: stable rule ids, severity gating, and SARIF. | [ci-pipelines/architecture.md](ci-pipelines/architecture.md) | dpalfery | 2026-08-01 | current |
-| Distribution | Supporting | `scripts` | Self-contained platform binaries and the install path that places them. | [install.md](install.md) · [distribution.md](distribution.md) | dpalfery | 2026-08-01 | current |
+| Distribution | Supporting | `scripts` | Self-contained platform binaries and the install path that places them. | [install.md](install.md) · [distribution.md](distribution.md) | dpalfery | 2026-08-21 | current |
 
 ## How the columns are read
 

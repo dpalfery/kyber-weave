@@ -141,9 +141,9 @@ alternative rather than silently complying.
   back-port it into the project immediately so source and reality don't drift.
 
 
-## Data Layer Handoff — dal-dev and dotnet-dev
+## Data Layer Handoff — dal-dev and csharp-dev
 
-The `dal-dev` agent owns the C# data access layer: ADO.NET repositories, Dapper queries, FluentMigrator migration scripts, and the connection factory. The `dotnet-dev` agent consumes these repositories as `IRepository<T>` interfaces in its service code. Do not write C# code, FluentMigrator scripts, or repositories yourself.
+The `dal-dev` agent owns the C# data access layer: parameterized ADO.NET repositories, FluentMigrator migration scripts, and the connection factory. The `csharp-dev` agent consumes these repositories as `IRepository<T>` interfaces in its service code. Do not write C# code, FluentMigrator scripts, or repositories yourself.
 
 Your responsibility at the data layer boundary:
 - Own schema design end-to-end: table definitions, data types, constraints, clustered key strategy, indexes, and the SDK-style SQL database project (`Microsoft.Build.Sql`) that produces the dacpac artifact.

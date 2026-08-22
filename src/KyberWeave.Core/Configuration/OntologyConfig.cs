@@ -17,8 +17,15 @@ public sealed class OntologyConfig
     private static readonly string[] DefaultDocTypes =
     [
         "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
-        "runbook", "reference", "rule", "governance", "index"
+        "runbook", "reference", "rule", "governance", "index", "coding-standard"
     ];
+
+    /// <summary>
+    /// No repository has a coding standard until it says which technologies it writes code
+    /// in. Seeding a list here would scaffold standards folders for stacks a host does not
+    /// have, and each one is a governed document its own gates then demand frontmatter for.
+    /// </summary>
+    private static readonly string[] DefaultTechnologies = [];
 
     private static readonly string[] DefaultStatuses =
         ["current", "draft", "needs-review", "superseded"];
@@ -41,6 +48,14 @@ public sealed class OntologyConfig
     public IReadOnlyList<string> DocTypes { get; init; } = DefaultDocTypes;
 
     public IReadOnlyList<string> Statuses { get; init; } = DefaultStatuses;
+
+    /// <summary>
+    /// The technologies this repository declares a coding standard for. A closed vocabulary
+    /// like the others, and the single input to three things that must agree: the folders
+    /// <c>docs init</c> creates under <c>standards/</c>, the entries the configuration
+    /// registry exposes, and the legal values of a standard's <c>technology</c> key.
+    /// </summary>
+    public IReadOnlyList<string> Technologies { get; init; } = DefaultTechnologies;
 
     /// <summary>
     /// Every documentation root, in configured order. A repository that documents a
@@ -128,6 +143,7 @@ public sealed class OntologyConfig
         int? catalogOwnerColumn = null,
         IReadOnlyList<string>? docTypes = null,
         IReadOnlyList<string>? statuses = null,
+        IReadOnlyList<string>? technologies = null,
         IReadOnlyList<string>? baseRequiredKeys = null,
         IReadOnlyDictionary<DocType, IReadOnlyList<string>>? requiredKeysByType = null) =>
         new()
@@ -140,6 +156,7 @@ public sealed class OntologyConfig
             CatalogOwnerColumn = catalogOwnerColumn ?? CatalogOwnerColumn,
             DocTypes = docTypes ?? DocTypes,
             Statuses = statuses ?? Statuses,
+            Technologies = technologies ?? Technologies,
             BaseRequiredKeys = baseRequiredKeys ?? BaseRequiredKeys,
             RequiredKeysByType = requiredKeysByType ?? RequiredKeysByType
         };
@@ -153,6 +170,11 @@ public sealed class OntologyConfig
             [DocType.Runbook] = ["component"],
             [DocType.Plan] = ["component"],
             [DocType.Spec] = ["component"],
-            [DocType.Todo] = ["component"]
+            [DocType.Todo] = ["component"],
+
+            // A standard is scoped by technology, not by component: a C# standard governs
+            // code in every component the catalog lists, so requiring one of them would be
+            // a false claim about which code it covers.
+            [DocType.CodingStandard] = ["technology"]
         };
 }

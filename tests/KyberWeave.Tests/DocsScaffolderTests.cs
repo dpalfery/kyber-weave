@@ -655,6 +655,25 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
     }
 
+    /// <summary>
+    /// Rich standards share the same quoting as stub documents. Without it, an accepted
+    /// owner that contains YAML punctuation fails validation only on the --kyber-standards path.
+    /// </summary>
+    [Fact]
+    public void QuotesYamlSpecialCharactersInKyberStandardsFrontmatter()
+    {
+        const string owner = "platform's: \"core\" #1";
+
+        DocsScaffolder.Scaffold(_temp.Path, owner: owner, kyberStandards: true);
+
+        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
+        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
+        Assert.Contains(owner, set.Owners);
+        Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+    }
+
     /// <summary>Owner whitespace is canonicalized once so YAML and catalog agree.</summary>
     [Fact]
     public void TrimsOwnerBeforeWritingFrontmatterAndCatalog()
@@ -734,8 +753,221 @@ public sealed class DocsScaffolderTests : IDisposable
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
 
-        Assert.Equal(2, set.Documents.Count);
+        // The ontology reference, the catalog, the corpus index, and one index per
+        // scaffolded folder — every file the command claims to have written is governed.
+        Assert.Equal(3 + DocsLayout.Folders.Count, set.Documents.Count);
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
         Assert.Equal(result.DocsRoot, ontology.DocsRoot);
+    }
+
+    /// <summary>
+    /// Structure is created by code, not left to a skill: a folder that exists only when
+    /// someone remembered to make it is a folder half the repositories will not have.
+    /// </summary>
+    [Fact]
+    public void CreatesEveryCanonicalFolderWithItsOwnIndex()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        foreach (string folder in DocsLayout.Folders)
+        {
+            Assert.Contains($"id: {folder}/index", Read($"docs/{folder}/README.md"), StringComparison.Ordinal);
+            Assert.Contains("doc-type: index", Read($"docs/{folder}/README.md"), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void PublishesTheRegistryInANewAgentsFileWhenTheRepositoryHasNone()
+    {
+        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        string agents = Read("AGENTS.md");
+        Assert.Contains(ConfigRegMarkdown.StartMarker, agents, StringComparison.Ordinal);
+        Assert.Contains("- **<docs-root>**: `docs`", agents, StringComparison.Ordinal);
+        Assert.Contains("- **<component-catalog>**: `docs/catalog.md`", agents, StringComparison.Ordinal);
+        Assert.Contains(result.Files, f => f.RelativePath == "AGENTS.md" && f.Outcome == ScaffoldOutcome.Created);
+    }
+
+    /// <summary>
+    /// The block is generated and the rest of the file is not. A run rewrites the one and
+    /// returns the other byte for byte — including without <c>--force</c>, because a stale
+    /// registry sends agents to paths that moved.
+    /// </summary>
+    [Fact]
+    public void RewritesOnlyTheGeneratedRegionOfAHandAuthoredAgentsFile()
+    {
+        File.WriteAllText(Path.Combine(_temp.Path, "AGENTS.md"),
+            $"""
+            # Working in this repository
+
+            Hand-authored guidance that must survive.
+
+            {ConfigRegMarkdown.StartMarker}
+            - **<docs-root>**: `somewhere-else`
+            {ConfigRegMarkdown.EndMarker}
+
+            ## House style
+
+            Also hand-authored.
+            """);
+
+        DocsScaffolder.Scaffold(_temp.Path, "docs", force: false);
+
+        string agents = Read("AGENTS.md");
+        Assert.Contains("Hand-authored guidance that must survive.", agents, StringComparison.Ordinal);
+        Assert.Contains("Also hand-authored.", agents, StringComparison.Ordinal);
+        Assert.Contains("- **<docs-root>**: `docs`", agents, StringComparison.Ordinal);
+        Assert.DoesNotContain("somewhere-else", agents, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RerunningLeavesAnAlreadyCurrentRegistryAlone()
+    {
+        DocsScaffolder.Scaffold(_temp.Path, "docs");
+        string first = Read("AGENTS.md");
+
+        ScaffoldResult second = DocsScaffolder.Scaffold(_temp.Path, "docs");
+
+        Assert.Equal(first, Read("AGENTS.md"));
+        Assert.Contains(second.Files, f => f.RelativePath == "AGENTS.md" && f.Outcome == ScaffoldOutcome.Preserved);
+    }
+
+    /// <summary>
+    /// One declared list creates the folder, publishes the registry property, and legalizes
+    /// the frontmatter value — so a freshly scaffolded standard validates without an edit.
+    /// </summary>
+    [Fact]
+    public void ADeclaredTechnologyIsScaffoldedPublishedAndValid()
+    {
+        WriteHostConfig("ontology:\n  docs-root: docs\n  technologies:\n    - github-actions\n");
+
+        DocsScaffolder.Scaffold(_temp.Path);
+
+        string standard = Read("docs/standards/github-actions/README.md");
+        Assert.Contains("doc-type: coding-standard", standard, StringComparison.Ordinal);
+        Assert.Contains("technology: github-actions", standard, StringComparison.Ordinal);
+        Assert.Contains(
+            "- **<github-actions-coding-standard>**: `docs/standards/github-actions/README.md`",
+            Read("AGENTS.md"),
+            StringComparison.Ordinal);
+
+        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology)
+            .Validate(new DocumentLoader(_temp.Path, ontology).Load());
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+    }
+
+    /// <summary>
+    /// Replacing to the end of the file would delete whatever an operator wrote below an
+    /// unclosed marker, and which content that is cannot be known here.
+    /// </summary>
+    [Fact]
+    public void RefusesToGuessAtAnUnclosedMarker()
+    {
+        File.WriteAllText(Path.Combine(_temp.Path, "AGENTS.md"),
+            $"# Working here\n\n{ConfigRegMarkdown.StartMarker}\n\n## Mine\n\nKeep me.\n");
+
+        Assert.Throws<InvalidDataException>(() => DocsScaffolder.Scaffold(_temp.Path, "docs"));
+        Assert.Contains("Keep me.", Read("AGENTS.md"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Initializing with kyberStandards enabled on a fresh repository creates all 10 rich
+    /// coding standards from embedded templates, registers them in ontology.technologies
+    /// and AGENTS.md Config Reg, and passes docs validation cleanly.
+    /// </summary>
+    [Fact]
+    public void ScaffoldWithKyberStandardsOnFreshRepoScaffoldsAllTenRichStandardsAndUpdatesConfig()
+    {
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true);
+
+        // All 10 standards under <docs-root>/standards/<tech>/README.md are created
+        Assert.Equal(KyberStandardsTemplates.All.Count, KyberStandardsTemplates.All.Count(tech =>
+            result.Files.Any(f => f.RelativePath == $"{result.DocsRoot}/standards/{tech}/README.md"
+                && f.Outcome == ScaffoldOutcome.Created
+                && f.Written)));
+
+        // Contents match KyberStandardsTemplates.Render(tech, owner, date)
+        foreach (string tech in KyberStandardsTemplates.All)
+        {
+            string relativePath = $"{result.DocsRoot}/standards/{tech}/README.md";
+            string content = Read(relativePath);
+            string expected = KyberStandardsTemplates.Render(tech, "unassigned", today);
+            Assert.Equal(expected, content);
+        }
+
+        // .kyber-weave/kyber-weave.yml contains all 10 technologies under ontology.technologies
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        Assert.Equal(
+            KyberStandardsTemplates.All.OrderBy(t => t),
+            config.Ontology.Technologies.OrderBy(t => t));
+
+        string configYaml = Read(ConfigPath);
+        Assert.Contains("technologies:", configYaml, StringComparison.Ordinal);
+        foreach (string tech in KyberStandardsTemplates.All)
+        {
+            Assert.Contains($"- {tech}", configYaml, StringComparison.Ordinal);
+        }
+
+        // AGENTS.md Config Reg block has all 10 <{tech}-coding-standard> properties
+        string agents = Read("AGENTS.md");
+        foreach (string tech in KyberStandardsTemplates.All)
+        {
+            Assert.Contains(
+                $"- **<{tech}-coding-standard>**: `{result.DocsRoot}/standards/{tech}/README.md`",
+                agents,
+                StringComparison.Ordinal);
+        }
+
+        // Running DocSpecValidator.Validate yields 0 findings
+        DocumentSet set = new DocumentLoader(_temp.Path, config.Ontology).Load();
+        DiagnosticReport report = new DocSpecValidator(_temp.Path, config.Ontology).Validate(set);
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+        Assert.Equal(3 + DocsLayout.Folders.Count + KyberStandardsTemplates.All.Count, set.Documents.Count);
+    }
+
+    /// <summary>
+    /// Scaffolding with kyberStandards skips pre-existing standard files when force is false,
+    /// and overwrites them with the rich template when force is true.
+    /// </summary>
+    [Fact]
+    public void ScaffoldWithKyberStandardsSkipsExistingWithoutForceAndOverwritesWithForce()
+    {
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        Directory.CreateDirectory(Path.Combine(_temp.Path, "docs", "standards", "csharp"));
+        const string customText =
+            """
+            ---
+            id: standards/csharp
+            title: Custom C# coding standard
+            doc-type: coding-standard
+            status: draft
+            technology: csharp
+            owner: custom-team
+            last-reviewed: 2026-08-01
+            ---
+
+            # Custom C# coding standard
+            Custom rules that must not be overwritten without --force.
+            """;
+        File.WriteAllText(Path.Combine(_temp.Path, "docs", "standards", "csharp", "README.md"), customText);
+
+        // Run without force -> Skipped, file untouched
+        ScaffoldResult result1 = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true, force: false);
+        ScaffoldedFile csharpFile1 = result1.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
+        Assert.Equal(ScaffoldOutcome.Skipped, csharpFile1.Outcome);
+        Assert.False(csharpFile1.Written);
+        Assert.Equal(customText, Read("docs/standards/csharp/README.md"));
+
+        // Run with force -> Updated, file overwritten with rich template
+        ScaffoldResult result2 = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true, force: true);
+        ScaffoldedFile csharpFile2 = result2.Files.Single(f => f.RelativePath == "docs/standards/csharp/README.md");
+        Assert.Equal(ScaffoldOutcome.Updated, csharpFile2.Outcome);
+        Assert.True(csharpFile2.Written);
+        string overwrittenText = Read("docs/standards/csharp/README.md");
+        Assert.NotEqual(customText, overwrittenText);
+        Assert.Equal(KyberStandardsTemplates.Render("csharp", "unassigned", today), overwrittenText);
     }
 }

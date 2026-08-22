@@ -20,7 +20,8 @@ targets:
   - agent-skills
 
 dependencies:
-  apm: []
+  apm:
+    - dpalfery/kyber-weave
   mcp: []
 includes: auto
 scripts: {}

@@ -16,7 +16,7 @@ This skill MUST be loaded whenever working on:
 - Azure AI Search indexing, hybrid search, or semantic ranking.
 - Data ingestion pipelines (CSV, PDF, Web).
 - Query planning, result fusion, or response generation.
-- Any files in `2-Application/MotorcycleRAG.Application/Agents/` or `4-Persistence/MotorcycleRAG.Persistence/Azure/`.
+- Azure OpenAI, Azure AI Search, ingestion, or agent-orchestration code under Application or Persistence.
 
 ---
 
@@ -35,10 +35,10 @@ The system implements a custom multi-agent RAG pattern:
 
 | Agent | Location | Purpose |
 |---|---|---|
-| `QueryPlannerAgent` | `2-Application/.../Agents/` | Analyzes queries via Azure OpenAI chat completions, generates search strategies |
-| `VectorSearchAgent` | `2-Application/.../Agents/` | Hybrid vector/keyword search via Azure AI Search |
-| `WebSearchAgent` | `2-Application/.../Agents/` | Trusted source web scraping with credibility scoring |
-| `AgentOrchestrator` | `2-Application/.../Agents/` | Coordinates sequential agent execution (Vector → Web → PDF) |
+| `QueryPlannerAgent` | Application / Agents | Analyzes queries via Azure OpenAI chat completions, generates search strategies |
+| `VectorSearchAgent` | Application / Agents | Hybrid vector/keyword search via Azure AI Search |
+| `WebSearchAgent` | Application / Agents | Trusted source web scraping with credibility scoring |
+| `AgentOrchestrator` | Application / Agents | Coordinates sequential agent execution (Vector → Web → PDF) |
 
 ### Agent Framework Components
 | Component | Purpose |
@@ -50,8 +50,8 @@ The system implements a custom multi-agent RAG pattern:
 ### Persistence Wrappers
 | Wrapper | Location | Purpose |
 |---|---|---|
-| `AzureOpenAIClientWrapper` | `4-Persistence/.../Azure/` | Resilient Azure OpenAI access with Polly policies and mock support |
-| `AzureSearchClientWrapper` | `4-Persistence/.../Azure/` | Azure AI Search operations with health checks and batch indexing |
+| `AzureOpenAIClientWrapper` | Persistence / Azure | Resilient Azure OpenAI access with retries and mock support |
+| `AzureSearchClientWrapper` | Persistence / Azure | Azure AI Search operations with health checks and batch indexing |
 
 ---
 
@@ -64,7 +64,7 @@ The system implements a custom multi-agent RAG pattern:
 - **Error handling**: Retry on transient failures, continue on individual chunk failures
 
 ### Azure AI Search Index
-- **Index name**: configured via `SearchOptions.IndexName` (`0-Base/MotorcycleRAG.Core/Options/SearchOptions.cs`) — do not hardcode a specific name; the current configuration may be a single index or partitioned per category
+- **Index name**: `SearchOptions.IndexName` is the sole index reference — do not hardcode a host-specific name; the current configuration may be a single index or partitioned per category
 - **Search type**: Hybrid (vector + keyword + semantic ranking)
 - **Vector algorithm**: HNSW (m=4, efConstruction=400, efSearch=500)
 - **Semantic ranker**: Re-ranks top 50 results
@@ -94,7 +94,7 @@ The system implements a custom multi-agent RAG pattern:
 - Hardcode Azure endpoints, keys, or connection strings — use environment variables
 - Skip credibility validation for web search results
 - Bypass rate limiting on web scraping operations
-- Create new Azure AI Search indexes without approval — use the unified `motorcycle-index`
+- Create new Azure AI Search indexes without approval — use the index named by `SearchOptions.IndexName`
 
 ## MUST DO
 - Follow the wrapper pattern: Application layer calls wrapper interfaces, Persistence implements them

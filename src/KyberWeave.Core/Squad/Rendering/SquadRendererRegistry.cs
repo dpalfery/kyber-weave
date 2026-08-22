@@ -23,8 +23,8 @@ public sealed class SquadRendererRegistry : ISquadRenderer
 
     private static readonly string[] DistinctBodyCollisions =
     [
+        "csharp-dev",
         "dal-dev",
-        "dotnet-dev",
         "github-devops",
         "maui-dev",
         "product-owner",

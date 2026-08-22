@@ -9,3 +9,10 @@ ontology:
   # The product defaults exclude five DevOps paths that exist only in the origin
   # repository. An empty list clears them rather than carrying dead exclusions forward.
   excluded-files: []
+
+  # This repository is C# plus the tests that pin it. The list is what creates
+  # docs/standards/<technology>/, publishes <technology-coding-standard> in the registry,
+  # and legalizes the technology value in that standard's frontmatter.
+  technologies:
+    - csharp
+    - test

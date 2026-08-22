@@ -9,7 +9,7 @@ sources:
   .cursor/agents/architect.agent.md: 21530e88dc55fc5b8abb4f64489c56f71b2946fdee126439d6405763df1f3529
   .github/agents/architect.agent.md: f4efb0dc22263c22469cdcfc7a77c172782748f874a69209c869b4ab09001534
   .opencode/agents/architect.md: 986174e95069d9693f98d6358850e6304973868467daca0129549f60cd0ccef5
-final-body-sha256: 2764f709907f38ef2c03ec57920f269a68d583600e46fe7026846ae6059298b3
+final-body-sha256: 2c6a0800dbc913b279724c53e67f28707cb5339e6c2693bd52f7344e50a3b955
 ---
 # architect migration
 

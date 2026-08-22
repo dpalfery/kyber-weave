@@ -20,7 +20,15 @@ public enum DocType
     Reference,
     Rule,
     Governance,
-    Index
+    Index,
+
+    /// <summary>
+    /// A technology's coding standard: how code of one stack is written in this repository.
+    /// Distinct from <see cref="Rule"/>, which governs the repository as a whole, because a
+    /// standard is scoped by the <c>technology</c> key and is what a portable agent looks up
+    /// when it needs the local answer rather than the one it shipped with.
+    /// </summary>
+    CodingStandard
 }
 
 /// <summary>Document currency. Distinct from a plan's implementation lifecycle.</summary>
@@ -47,6 +55,7 @@ public sealed class DocumentFrontmatter
     public string? SourceRoot { get; set; }
     public string? Owner { get; set; }
     public string? LastReviewed { get; set; }
+    public string? Technology { get; set; }
     public Collection<string>? CodeRefs { get; set; }
     public Collection<string>? ApiEndpoints { get; set; }
     public Collection<string>? DecidedBy { get; set; }

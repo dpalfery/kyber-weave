@@ -6,7 +6,7 @@ selected-baseline: .opencode/agents/conductor-v2.md
 sources:
   .github/agents/conductor-v2.agent.md: e82cce130d47eba57ffb1aa1a9b53592e78879ff40f9743158359530375b7ef9
   .opencode/agents/conductor-v2.md: 681ecbd25ebf61ed3d0550bc1f4e3e50639d7c155db1003aaa5b31a64d600180
-final-body-sha256: fbfe7d0b1ea250229e51f557e78a9b4d2dfc7f9c8d1669ed49ae1a2630028f73
+final-body-sha256: 4ec2cb1b9e88d80ede4bd7622b1f7681f6bc427305243e4538ce7a6fb1ed1c68
 ---
 # conductor migration
 

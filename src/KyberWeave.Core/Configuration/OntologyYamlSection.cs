@@ -22,6 +22,8 @@ internal sealed class OntologyYamlSection
 
     public List<string>? Statuses { get; set; }
 
+    public List<string>? Technologies { get; set; }
+
     public List<string>? BaseRequiredKeys { get; set; }
 
     public Dictionary<string, List<string>?>? RequiredKeys { get; set; }

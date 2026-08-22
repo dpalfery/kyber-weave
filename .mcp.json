@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "kyber-weave": {
+      "type": "stdio",
+      "command": "kyber-weave-mcp",
+      "args": ["--repo-root", "."]
+    }
+  }
+}

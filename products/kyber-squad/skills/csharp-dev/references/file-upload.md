@@ -1,5 +1,5 @@
 ---
-name: dotnet-dev/file-upload
+name: csharp-dev/file-upload
 description: ASP.NET Core file upload — dual size limits, magic byte validation, anti-forgery, Guid filenames, IFormFile handling.
 source: https://github.com/dotnet/skills/tree/main/plugins/aspnetcore/skills/minimal-api-file-upload
 ---
@@ -41,7 +41,7 @@ public async Task<Results<Ok<UploadResponse>, BadRequest<ProblemDetails>>> Uploa
     CancellationToken cancellationToken)
 {
     // 1. Extension check (first gate — fast)
-    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+    string extension = Path.GetExtension(file.FileName).ToLowerInvariant();
     if (!_allowedExtensions.Contains(extension))
         return TypedResults.BadRequest(Problem("File type not allowed."));
 
@@ -50,7 +50,7 @@ public async Task<Results<Ok<UploadResponse>, BadRequest<ProblemDetails>>> Uploa
         return TypedResults.BadRequest(Problem("File content does not match declared type."));
 
     // 3. Generate safe filename — NEVER use the client-provided filename
-    var storedName = $"{Guid.NewGuid()}{extension}";
+    string storedName = $"{Guid.NewGuid()}{extension}";
 
     await _storageService.StoreAsync(storedName, file.OpenReadStream(), cancellationToken);
 
@@ -75,12 +75,12 @@ private static readonly Dictionary<string, byte[]> MagicBytes = new()
 
 private static async Task<bool> IsValidMagicBytesAsync(IFormFile file, CancellationToken ct)
 {
-    var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-    if (!MagicBytes.TryGetValue(ext, out var magic)) return false;
+    string ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+    if (!MagicBytes.TryGetValue(ext, out byte[]? magic)) return false;
 
-    var header = new byte[magic.Length];
-    await using var stream = file.OpenReadStream();
-    var read = await stream.ReadAsync(header.AsMemory(0, magic.Length), ct);
+    byte[] header = new byte[magic.Length];
+    await using Stream stream = file.OpenReadStream();
+    int read = await stream.ReadAsync(header.AsMemory(0, magic.Length), ct);
 
     return read == magic.Length && header.SequenceEqual(magic);
 }
@@ -94,10 +94,10 @@ private static async Task<bool> IsValidMagicBytesAsync(IFormFile file, Cancellat
 
 ```csharp
 // WRONG — path traversal vulnerability
-var path = Path.Combine(uploadDir, file.FileName);
+string path = Path.Combine(uploadDir, file.FileName);
 
 // CORRECT — always generate a new name
-var saredName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName).ToLowerInvariant()}";
+string storedName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName).ToLowerInvariant()}";
 ```
 
 Store original filename in a database/metadata record only for display purposes.
@@ -131,8 +131,8 @@ public async Task<Ok<IEnumerable<UploadResponse>>> UploadManyAsync(
     IFormFileCollection files,
     CancellationToken cancellationToken)
 {
-    var results = new List<UploadResponse>();
-    foreach (var file in files)
+    List<UploadResponse> results = new List<UploadResponse>();
+    foreach (IFormFile file in files)
     {
         // validate and store each file independently
     }
@@ -153,15 +153,15 @@ public async Task<IActionResult> UploadStreamAsync()
 {
     if (!Request.HasFormContentType) return BadRequest();
 
-    var reader = new MultipartReader(Request.GetMultipartBoundary(), Request.Body);
+    MultipartReader reader = new MultipartReader(Request.GetMultipartBoundary(), Request.Body);
     MultipartSection? section;
 
     while ((section = await reader.ReadNextSectionAsync()) != null)
     {
-        var header = ContentDispositionHeaderValue.Parse(section.ContentDisposition);
+        ContentDispositionHeaderValue header = ContentDispositionHeaderValue.Parse(section.ContentDisposition);
         if (header.IsFileDisposition())
         {
-            var fileName = $"{Guid.NewGuid()}{Path.GetExtension(header.FileName.Value)}";
+            string fileName = $"{Guid.NewGuid()}{Path.GetExtension(header.FileName.Value)}";
             await _storageService.StoreAsync(fileName, section.Body, HttpContext.RequestAborted);
         }
     }

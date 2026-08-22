@@ -9,7 +9,7 @@ sources:
   .cursor/agents/python-dev.agent.md: f54df2691e7a9eefe39ebc7594c76ad1219b849231db175e7be231d4863bb5c6
   .github/agents/python-dev.agent.md: 99f132c8bcfc21649a115a4d87c000c76b410be147d7c32b1d70d4fb8d8c34ee
   .opencode/agents/python-dev.md: 4992401ae92c611b480b9733d4678fceeadd0d04825a6b3b77b08234a80566eb
-final-body-sha256: 2527867c285025eec03f8fd9b04706f77b5ed25016eccf820c4e0181505f657a
+final-body-sha256: a844c92006903f71a7a2b3103828e82ea813be23040f74b5c531cfef90946c9d
 ---
 # python-dev migration
 

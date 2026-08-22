@@ -58,6 +58,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         AnsiConsole.MarkupLine($"  1. Replace the example row in [grey]{Markup.Escape(result.DocsRoot)}/catalog.md[/] with your real components and owners.");
         AnsiConsole.MarkupLine($"  2. Run [grey]kyber-weave docs validate {Markup.Escape(settings.Path)}[/] to see what the corpus needs.");
         AnsiConsole.MarkupLine("  3. Ask your agent to apply the [grey]kyber-weave-docs[/] skill to the failing documents.");
+        AnsiConsole.MarkupLine($"  4. Declare your stacks in [grey]ontology.technologies[/] and re-run, to scaffold a coding standard per technology under [grey]{Markup.Escape(result.DocsRoot)}/standards/[/].");
 
         return 0;
     }
@@ -69,7 +70,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         try
         {
             ScaffoldResult result = DocsScaffolder.Scaffold(
-                settings.Path, settings.DocsRoot, settings.Owner, settings.Force);
+                settings.Path,
+                settings.DocsRoot,
+                settings.Owner,
+                settings.Force,
+                settings.KyberStandards);
             return (0, result, null);
         }
         catch (Exception ex) when (ex is

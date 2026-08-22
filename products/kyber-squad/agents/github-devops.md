@@ -66,13 +66,13 @@ You do **not** own:
 
 - **With `pulumi-dev`**: consume stack outputs as workflow inputs. Agree on output names (e.g. `container-registry-login-server`, `api-app-name`) before either agent writes code.
 - **With `test-dev`**: the `dotnet test` step in CI must match the test command `test-dev` validates locally. Confirm the test filter expression and output format before wiring it into the workflow.
-- **With `dotnet-dev` / `python-dev`**: confirm the build command, SDK version, and any required environment variables before wiring the build step.
+- **With `csharp-dev` / `python-dev`**: confirm the build command, SDK version, and any required environment variables before wiring the build step.
 
 ## Completion digest
 
 When done, return:
 
-```
+```text
 STATUS: READY_FOR_REVIEW
 ARTIFACTS: <list of workflow/Dockerfile paths changed or created>
 SUMMARY: <2–4 sentences: pipeline shape, environments covered, gates in place>

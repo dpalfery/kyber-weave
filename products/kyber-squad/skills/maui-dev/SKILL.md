@@ -9,6 +9,11 @@ metadata:
 
 # .NET MAUI Developer
 
+Architecture and UI decisions live in the path declared as **<maui-coding-standard>**
+in the repository root `AGENTS.md`. Language-level C# decisions live in the path
+declared as **<csharp-coding-standard>**. Read those before the references below —
+this skill is procedure, not policy.
+
 Identify your sub-task and read ONLY the relevant reference before proceeding.
 
 | Sub-Task | When to Use | Reference |

@@ -39,9 +39,9 @@ products/kyber-squad/
 │   ├── code-reviewer.md
 │   ├── conductor.md
 │   ├── conductor-v3.md
+│   ├── csharp-dev.md
 │   ├── dal-dev.md
 │   ├── docs-dev.md
-│   ├── dotnet-dev.md
 │   ├── github-devops.md
 │   ├── maui-dev.md
 │   ├── product-owner.md
@@ -63,9 +63,9 @@ products/kyber-squad/
 │   ├── conductor-v3/
 │   ├── create-pull-request/
 │   ├── create-pull-request-github/
+│   ├── csharp-dev/
 │   ├── csp-security/
 │   ├── dal-dev/
-│   ├── dotnet-dev/
 │   ├── dp-code-reviewer/
 │   ├── github-cli/
 │   ├── github-devops/
@@ -120,7 +120,7 @@ The 25 canonical skill directories under `skills/` adhere to the Agent Skills op
 
 Agent and skill namespaces intersect at exactly 9 names:
 1. **Shared Identities (`conductor`, `conductor-v3`)**: Canonical agent and skill have byte-identical instruction bodies. Emitted as a native agent on native harnesses, or as a single same-name skill on fallback harnesses. `conductor` is the default orchestrator; `conductor-v3` is explicit.
-2. **Distinct-Body Collisions (`dal-dev`, `dotnet-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**: The canonical skill and canonical agent serve distinct purposes. On fallback harnesses, the skill retains `<name>` and the agent projects to `role-<name>`. `role-` is reserved exclusively for generated projections.
+2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**: The canonical skill and canonical agent serve distinct purposes. On fallback harnesses, the skill retains `<name>` and the agent projects to `role-<name>`. `role-` is reserved exclusively for generated projections.
 
 ### 5. Migration Logs (`migration/`)
 

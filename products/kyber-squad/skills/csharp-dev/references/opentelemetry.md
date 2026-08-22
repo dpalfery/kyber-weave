@@ -1,5 +1,5 @@
 ---
-name: dotnet-dev/opentelemetry
+name: csharp-dev/opentelemetry
 description: OpenTelemetry in .NET — ActivitySource naming, log-trace correlation, high-cardinality pitfalls, OTLP export.
 source: https://github.com/dotnet/skills/tree/main/plugins/aspnetcore/skills/configuring-opentelemetry-dotnet
 ---
@@ -26,14 +26,14 @@ var otelEndpoint = !string.IsNullOrWhiteSpace(otelEndpointStr) && Uri.TryCreate(
     : new Uri("http://localhost:4317");
 
 var resourceBuilder = ResourceBuilder.CreateDefault()
-    .AddService("MotorcycleRAG.API");
+    .AddService("<Solution>.Api");
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .SetResourceBuilder(resourceBuilder)
         .AddAspNetCoreInstrumentation()
         .AddHttpClientInstrumentation()
-        .AddSource("MotorcycleRAG.*")      // register custom ActivitySources
+        .AddSource("<Solution>.*")      // register custom ActivitySources
         .AddOtlpExporter(opts => opts.Endpoint = otelEndpoint))
     .WithMetrics(metrics => metrics
         .SetResourceBuilder(resourceBuilder)
@@ -51,14 +51,14 @@ builder.Services.AddOpenTelemetry()
 
 ## Custom ActivitySource
 
-Register the `ActivitySource` name with `AddSource`. `AddSource` matching is case-insensitive and supports wildcard patterns (e.g., `"MotorcycleRAG.*"` or `"*"`):
+Register the `ActivitySource` name with `AddSource`. `AddSource` matching is case-insensitive and supports wildcard patterns (e.g., `"<Solution>.*"` or `"*"`):
 
 ```csharp
 // Define once — typically as a static on the service class
 public static class Telemetry
 {
     public static readonly ActivitySource Source =
-        new("MotorcycleRAG.Application", "1.0.0");
+        new("<Solution>.Application", "1.0.0");
 }
 
 // Usage
@@ -67,7 +67,7 @@ activity?.SetTag("query.text", searchQuery);
 activity?.SetTag("results.count", results.Count);
 ```
 
-Ensure `AddSource` includes the `ActivitySource` name or a matching wildcard pattern (such as `"MotorcycleRAG.*"`). Matching is case-insensitive, but maintaining consistent naming across your codebase is recommended.
+Ensure `AddSource` includes the `ActivitySource` name or a matching wildcard pattern (such as `"<Solution>.*"`). Matching is case-insensitive, but maintaining consistent naming across your codebase is recommended.
 
 ---
 

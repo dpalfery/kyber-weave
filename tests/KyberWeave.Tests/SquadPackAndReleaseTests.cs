@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -32,9 +33,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "code-reviewer",
         "conductor",
         "conductor-v3",
+        "csharp-dev",
         "dal-dev",
         "docs-dev",
-        "dotnet-dev",
         "github-devops",
         "maui-dev",
         "product-owner",
@@ -59,9 +60,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "conductor-v3",
         "create-pull-request",
         "create-pull-request-github",
+        "csharp-dev",
         "csp-security",
         "dal-dev",
-        "dotnet-dev",
         "dp-code-reviewer",
         "github-cli",
         "github-devops",
@@ -403,13 +404,36 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         foreach (string projPath in projectFilePaths)
         {
             XDocument projDoc = XDocument.Load(projPath);
-            IEnumerable<string?> embeddedResources = projDoc.Descendants("EmbeddedResource").Select(e => e.Attribute("Include")?.Value).Where(v => v is not null);
-            IEnumerable<string?> contents = projDoc.Descendants("Content").Select(e => e.Attribute("Include")?.Value).Where(v => v is not null);
 
-            foreach (string? res in embeddedResources.Concat(contents))
+            foreach (XElement element in projDoc.Descendants("EmbeddedResource").Concat(projDoc.Descendants("Content")))
             {
-                Assert.DoesNotContain("products", res!, StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain("kyber-squad", res!, StringComparison.OrdinalIgnoreCase);
+                string? path = element.Attribute("Include")?.Value;
+                if (path is null)
+                {
+                    continue;
+                }
+
+                // Standalone standards resources (for example LogicalName-style
+                // Standards.*.md) are not the Squad corpus. A path that mentions
+                // products or kyber-squad still is, including
+                // products/kyber-squad/standards/..., and must be checked.
+                if (path.Contains("standards", StringComparison.OrdinalIgnoreCase) &&
+                    !path.Contains("products", StringComparison.OrdinalIgnoreCase) &&
+                    !path.Contains("kyber-squad", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (TryGetAllowedKyberStandardTemplateInclude(path, out string technology))
+                {
+                    Assert.Equal(
+                        $"Standards.{technology}.md",
+                        element.Attribute("LogicalName")?.Value);
+                    continue;
+                }
+
+                Assert.DoesNotContain("products", path, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("kyber-squad", path, StringComparison.OrdinalIgnoreCase);
             }
         }
     }
@@ -419,6 +443,30 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     private static string ComputeSha256(byte[] bytes)
     {
         return Convert.ToHexStringLower(SHA256.HashData(bytes));
+    }
+
+    /// <summary>
+    /// Core may embed the ten coding-standard READMEs from
+    /// <c>products/kyber-squad/standards/&lt;tech&gt;/README.md</c> only when LogicalName
+    /// remaps them to <c>Standards.&lt;tech&gt;.md</c>. Any other products/kyber-squad path
+    /// is the prohibited corpus, even if it contains the substring "standards".
+    /// </summary>
+    private static bool TryGetAllowedKyberStandardTemplateInclude(string path, out string technology)
+    {
+        string normalized = path.Replace('\\', '/');
+        foreach (string candidate in KyberStandardsTemplates.All)
+        {
+            if (normalized.EndsWith(
+                    $"products/kyber-squad/standards/{candidate}/README.md",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                technology = candidate;
+                return true;
+            }
+        }
+
+        technology = string.Empty;
+        return false;
     }
 
     private static bool IsTextFile(string entryName)

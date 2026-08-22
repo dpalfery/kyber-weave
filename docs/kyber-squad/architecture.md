@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-17
 status: current
 code-refs:
   - SquadTransaction
@@ -110,7 +110,7 @@ flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
     
     Intersection -->|"Shared Identities\n(conductor, conductor-v3)"| SharedPath["Byte-Identical Bodies Required"]
-    Intersection -->|"Distinct-Body Collisions\n(dal-dev, dotnet-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
+    Intersection -->|"Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
     Intersection -->|"No Skill Collision\n(e.g. architect)"| UnoccupiedPath["Unoccupied Identity"]
 
     SharedPath --> NativePrimary{"Target has Native\nPrimary Role?"}
@@ -133,7 +133,7 @@ flowchart TD
    - On native-primary harnesses, only the native agent is emitted.
    - On fallback harnesses, only the same-name skill is emitted.
    - `conductor` is the default orchestrator; `conductor-v3` is explicit. `conductor-v2` exists only as an input migration alias.
-2. **Distinct-Body Collisions (`dal-dev`, `dotnet-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**:
+2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**:
    - The canonical skill and agent serve distinct functions.
    - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
@@ -261,6 +261,11 @@ and validates.
   allow-list with no published mapping to the semantic capability vocabulary) records a
   structured degradation instead of a claimed mapping that might silently broaden or narrow
   what the deployed agent can actually do.
+- **Tools flow sequence & MCP allow-listing**: Copilot agent manifests serialize `tools` as an
+  inline YAML flow sequence (e.g. `tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]`).
+  Base tools (`vscode`, `todo`) are granted unconditionally, while capability-governed built-ins
+  and single-quoted MCP server wildcards (`'codegraph/*'`, `'kyber-weave/*'`, `'context7/*'`) are
+  capability-gated (`filesystem.read` for non-orchestrator roles).
 - **Coverage today**: only `copilot` has a renderer. `kyber-weave squad doctor` reports which
   targets are covered; `docs/todo/<target>.md` has what implementing the rest needs.
 

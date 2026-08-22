@@ -67,12 +67,13 @@ Before asserting a best practice, version-specific behavior, or syntax, verify a
 
 ---
 
-## Data Layer Boundary with dotnet-dev
+## Data Layer Boundary with dal-dev and csharp-dev
 
-- This agent owns schema design end-to-end: table definitions, data types, constraints, clustered key strategy, indexes, and the SQL database project producing the dacpac.
-- `dotnet-dev` owns all C# code: ADO.NET repositories, Dapper queries, FluentMigrator migration scripts, and the connection factory.
-- When `dotnet-dev` needs a schema change, they describe the access need → you design the schema → return the approved DDL as the explicit contract artifact.
-- If a FluentMigrator script from `dotnet-dev` diverges from the approved schema, flag the conflict and provide corrected DDL.
+- `sql-database-architect` owns schema design end-to-end: table definitions, data types, constraints, clustered key strategy, indexes, and the SQL database project producing the dacpac.
+- `dal-dev` owns parameterized ADO.NET repositories, FluentMigrator migration scripts, and the connection factory.
+- `csharp-dev` consumes `IRepository<T>` in application services. It does not write SQL or migrations.
+- When `dal-dev` needs a schema change, they describe the access need → you design the schema → return the approved DDL as the explicit contract artifact.
+- If a FluentMigrator script from `dal-dev` diverges from the approved schema, flag the conflict and provide corrected DDL.
 
 Shared contract artifact for parallel work: a table-definition block listing column names, data types, nullability, and key/index declarations.
 

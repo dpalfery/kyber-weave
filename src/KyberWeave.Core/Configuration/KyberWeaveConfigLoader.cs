@@ -116,7 +116,8 @@ public static class KyberWeaveConfigLoader
                 DocsAnalysisConfig.ProductDefaults,
                 document.DocsAnalysis,
                 ontology),
-            Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad)
+            Squad = SquadConfigLoader.Merge(SquadConfig.ProductDefaults, document.Squad),
+            ConfigReg = ConfigRegConfigLoader.Merge(ConfigRegConfig.ProductDefaults, document.ConfigReg)
         };
     }
 }

@@ -263,7 +263,8 @@ internal static partial class HostConfigYaml
         try
         {
             YamlStream stream = new YamlStream();
-            stream.Load(new StringReader(document));
+            using StringReader reader = new StringReader(document);
+            stream.Load(reader);
             YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
             if (!root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node) ||
                 node is not YamlSequenceNode sequence)
@@ -303,7 +304,8 @@ internal static partial class HostConfigYaml
         try
         {
             YamlStream stream = new YamlStream();
-            stream.Load(new StringReader("value: " + token));
+            using StringReader reader = new StringReader("value: " + token);
+            stream.Load(reader);
             YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
             return root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node)
                 && node is YamlScalarNode scalar
@@ -430,6 +432,323 @@ internal static partial class HostConfigYaml
         return lines;
     }
 
+    /// <summary>
+    /// Returns <paramref name="yaml"/> with <paramref name="technologies"/> merged into
+    /// <c>ontology.technologies</c>. If <c>ontology:</c> does not exist, an ontology block
+    /// is created. If <c>ontology.technologies</c> does not exist, it is inserted with proper
+    /// block indentation. Existing technologies and comments are preserved without duplicates.
+    /// </summary>
+    /// <remarks>
+    /// A scalar <c>technologies: csharp</c> is valid YAML, but inserting <c>- item</c> lines
+    /// beneath it leaves a scalar followed by a sequence — the file would still parse as a
+    /// scalar and the new items would be orphaned. Only a flow sequence (value starting with
+    /// <c>[</c>) is merged in place; a non-empty scalar is rejected so the operator can
+    /// replace it with a sequence rather than this command guessing a conversion.
+    /// </remarks>
+    public static string WithTechnologies(string yaml, IReadOnlyList<string> technologies)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentNullException.ThrowIfNull(technologies);
+
+        if (technologies.Count == 0)
+        {
+            return yaml;
+        }
+
+        foreach (string tech in technologies)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(tech);
+            if (tech.Any(char.IsControl))
+            {
+                throw new ArgumentException("Technology names may not contain control characters.", nameof(technologies));
+            }
+        }
+
+        string newline = yaml.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        List<string> lines = yaml.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
+
+        int ontology = IndexOfOntologyKey(lines);
+        if (ontology < 0)
+        {
+            return string.Join(newline, AppendOntologyWithTechnologies(lines, technologies));
+        }
+
+        int blockEnd = EndOfBlock(lines, ontology);
+        string blockIndent = BlockIndent(lines, ontology, blockEnd);
+
+        for (int i = ontology + 1; i < blockEnd; i++)
+        {
+            Match match = TechnologiesKey().Match(lines[i]);
+            if (!match.Success || !string.Equals(
+                    match.Groups["indent"].Value,
+                    blockIndent,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            (string? value, string? suffix) = SplitScalarAndSuffix(match.Groups["rest"].Value);
+
+            if (value.StartsWith('['))
+            {
+                return MergeFlowSequence(yaml, lines, i, value, technologies, newline);
+            }
+
+            if (value.Length > 0)
+            {
+                throw new InvalidDataException(
+                    "ontology.technologies is a scalar, not a sequence. Replace the scalar " +
+                    "with a YAML sequence (a block list or a [...] flow list) before adding " +
+                    "technologies — merging would otherwise leave a scalar followed by " +
+                    "orphaned list items.");
+            }
+
+            return MergeBlockSequence(yaml, lines, i, blockIndent, blockEnd, technologies, newline);
+        }
+
+        return InsertTechnologiesBlock(lines, ontology, blockIndent, blockEnd, technologies, newline);
+    }
+
+    private static string MergeFlowSequence(
+        string originalYaml,
+        List<string> lines,
+        int keyIndex,
+        string value,
+        IReadOnlyList<string> technologies,
+        string newline)
+    {
+        if (!TryCollectFlowSequence(lines, keyIndex, value, out string flow))
+        {
+            throw new InvalidDataException(
+                "ontology.technologies looks like a flow sequence but its brackets do not " +
+                "balance. Fix the list by hand.");
+        }
+
+        if (!TryParseSequenceAllowEmpty("value: " + flow, out IReadOnlyList<string> existingTechs))
+        {
+            throw new InvalidDataException(
+                "ontology.technologies looks like a flow sequence but could not be read. " +
+                "Fix the list by hand.");
+        }
+
+        List<string> toAdd = technologies
+            .Where(t => !existingTechs.Contains(t, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (toAdd.Count == 0)
+        {
+            return originalYaml;
+        }
+
+        int depth = 0;
+        int closeLineIndex = keyIndex;
+        int closeBracketCol = -1;
+
+        for (int i = keyIndex; i < lines.Count; i++)
+        {
+            string lineText = i == keyIndex ? value : lines[i];
+            int prevDepth = depth;
+            depth += FlowBracketDepth(lineText);
+            if ((depth == 0 && prevDepth != 0) || (i == keyIndex && depth == 0))
+            {
+                closeLineIndex = i;
+                closeBracketCol = lines[i].LastIndexOf(']');
+                break;
+            }
+        }
+
+        if (closeBracketCol < 0)
+        {
+            closeLineIndex = keyIndex;
+            closeBracketCol = lines[keyIndex].LastIndexOf(']');
+        }
+
+        string targetLine = lines[closeLineIndex];
+        string beforeBracket = targetLine[..closeBracketCol];
+        string afterBracket = targetLine[closeBracketCol..];
+
+        int openBracketIndex = beforeBracket.LastIndexOf('[');
+        if (existingTechs.Count == 0 && openBracketIndex >= 0)
+        {
+            string prefix = beforeBracket[..(openBracketIndex + 1)];
+            string middle = beforeBracket[(openBracketIndex + 1)..];
+            if (string.IsNullOrWhiteSpace(middle))
+            {
+                lines[closeLineIndex] = prefix + string.Join(", ", toAdd.Select(QuoteScalar)) + afterBracket;
+                return string.Join(newline, lines);
+            }
+        }
+
+        string addition = existingTechs.Count > 0
+            ? ", " + string.Join(", ", toAdd.Select(QuoteScalar))
+            : string.Join(", ", toAdd.Select(QuoteScalar));
+
+        lines[closeLineIndex] = beforeBracket + addition + afterBracket;
+        return string.Join(newline, lines);
+    }
+
+    private static string MergeBlockSequence(
+        string originalYaml,
+        List<string> lines,
+        int keyIndex,
+        string blockIndent,
+        int blockEnd,
+        IReadOnlyList<string> technologies,
+        string newline)
+    {
+        List<string> existingTechs = new List<string>();
+        int lastItemIndex = keyIndex;
+        string itemIndent = blockIndent + DefaultIndent;
+
+        for (int j = keyIndex + 1; j < blockEnd; j++)
+        {
+            string trimmed = lines[j].TrimStart();
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
+            if (trimmed[0] == '#')
+            {
+                continue;
+            }
+
+            int lineIndent = lines[j].Length - trimmed.Length;
+            if (lineIndent < blockIndent.Length)
+            {
+                break;
+            }
+
+            if (trimmed[0] == '-')
+            {
+                lastItemIndex = j;
+                int dashIndex = lines[j].IndexOf('-');
+                itemIndent = lines[j][..dashIndex];
+
+                string afterDash = trimmed[1..].TrimStart();
+                (string itemVal, _) = SplitScalarAndSuffix(afterDash);
+                itemVal = itemVal.Trim('\'', '"');
+                if (!string.IsNullOrEmpty(itemVal))
+                {
+                    existingTechs.Add(itemVal);
+                }
+            }
+            else if (lineIndent <= blockIndent.Length)
+            {
+                break;
+            }
+        }
+
+        List<string> toAdd = technologies
+            .Where(t => !existingTechs.Contains(t, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (toAdd.Count == 0)
+        {
+            return originalYaml;
+        }
+
+        List<string> newLines = new List<string>();
+        foreach (string tech in toAdd)
+        {
+            newLines.Add(itemIndent + "- " + QuoteScalar(tech));
+        }
+
+        lines.InsertRange(lastItemIndex + 1, newLines);
+        return string.Join(newline, lines);
+    }
+
+    private static string InsertTechnologiesBlock(
+        List<string> lines,
+        int ontologyIndex,
+        string blockIndent,
+        int blockEnd,
+        IReadOnlyList<string> technologies,
+        string newline)
+    {
+        int insertIndex = blockEnd;
+        while (insertIndex > ontologyIndex + 1 && string.IsNullOrWhiteSpace(lines[insertIndex - 1]))
+        {
+            insertIndex--;
+        }
+
+        List<string> toInsert = new List<string>
+        {
+            blockIndent + "technologies:"
+        };
+
+        string itemIndent = blockIndent + DefaultIndent;
+        foreach (string tech in technologies.Distinct(StringComparer.Ordinal))
+        {
+            toInsert.Add(itemIndent + "- " + QuoteScalar(tech));
+        }
+
+        lines.InsertRange(insertIndex, toInsert);
+        return string.Join(newline, lines);
+    }
+
+    private static List<string> AppendOntologyWithTechnologies(
+        List<string> lines,
+        IReadOnlyList<string> technologies)
+    {
+        if (lines.Count > 0 && lines[^1].Trim().Length > 0)
+        {
+            lines.Add(string.Empty);
+        }
+
+        lines.Add("ontology:");
+        lines.Add(DefaultIndent + "technologies:");
+        foreach (string tech in technologies.Distinct(StringComparer.Ordinal))
+        {
+            lines.Add(DefaultIndent + DefaultIndent + "- " + QuoteScalar(tech));
+        }
+
+        lines.Add(string.Empty);
+        return lines;
+    }
+
+    private static bool TryParseSequenceAllowEmpty(string document, out IReadOnlyList<string> items)
+    {
+        items = [];
+        try
+        {
+            YamlStream stream = new YamlStream();
+            using StringReader reader = new StringReader(document);
+            stream.Load(reader);
+            if (stream.Documents.Count == 0)
+            {
+                return false;
+            }
+
+            YamlMappingNode root = (YamlMappingNode)stream.Documents[0].RootNode;
+            if (!root.Children.TryGetValue(new YamlScalarNode("value"), out YamlNode? node) ||
+                node is not YamlSequenceNode sequence)
+            {
+                return false;
+            }
+
+            List<string> values = new List<string>();
+            foreach (YamlNode child in sequence.Children)
+            {
+                if (child is not YamlScalarNode { Value: { } scalar })
+                {
+                    return false;
+                }
+
+                values.Add(scalar);
+            }
+
+            items = values;
+            return true;
+        }
+        catch (YamlDotNet.Core.YamlException)
+        {
+            return false;
+        }
+    }
+
     [GeneratedRegex(@"^ontology[ \t]*:[ \t]*(#.*)?$")]
     private static partial Regex OntologyKey();
 
@@ -439,4 +758,10 @@ internal static partial class HostConfigYaml
     /// </summary>
     [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)docs-root[ \t]*:[ \t]*)(?<rest>.*)$")]
     private static partial Regex DocsRootKey();
+
+    /// <summary>
+    /// Splits a <c>technologies</c> line into the part before its value and the remaining text.
+    /// </summary>
+    [GeneratedRegex(@"^(?<prefix>(?<indent>[ \t]+)technologies[ \t]*:[ \t]*)(?<rest>.*)$")]
+    private static partial Regex TechnologiesKey();
 }

@@ -1,6 +1,6 @@
 ---
 name: test-dev
-description: Use when writing xUnit unit tests, integration tests with real databases, E2E Playwright tests, or working in the 5-Test folder.
+description: Use when writing xUnit unit tests, integration tests with real databases, or E2E Playwright tests. Do not use for application or persistence implementation.
 license: MIT
 metadata:
   author: David R Palfery
@@ -8,6 +8,11 @@ metadata:
 ---
 
 # Test Developer
+
+Test policy lives in the path declared as **<test-coding-standard>** in the repository
+root `AGENTS.md`. Language-level C# decisions live in the path declared as
+**<csharp-coding-standard>**. Read those before the references below — this skill is
+procedure, not policy.
 
 Identify your sub-task and read ONLY the relevant reference before proceeding.
 
