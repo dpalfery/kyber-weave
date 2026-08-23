@@ -188,7 +188,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
             SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             IReadOnlyList<string> tools = RequireSequence(frontmatter, "tools", agent.Name);
             Assert.All(tools, tool => Assert.True(IsDocumentedClaudeTool(tool), $"Agent '{agent.Name}' tool '{tool}' is not in the documented vocabulary."));
-            Assert.Equal(tools.Distinct(StringComparer.Ordinal).Count(), tools.Count);
+            Assert.True(
+                tools.Distinct(StringComparer.Ordinal).Count() == tools.Count,
+                $"Agent '{agent.Name}' has duplicate tool entries: {string.Join(", ", tools)}.");
 
             foreach ((string capability, string[] mapped) in CapabilityToolContract)
             {
