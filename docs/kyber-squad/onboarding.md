@@ -62,6 +62,8 @@ Kyber-Squad supports 10 coding harnesses:
 | `warp` | — | `.warp/` | Role-skill lowering |
 | `factory` | `factory-droids` | `.factory/` | Native agents |
 
+**Note:** `gemini` is intentionally excluded from renderer work — no longer a coding harness as of 2026-08-23 (retired; see PR #40). Its target entry remains above until removed from `SquadTargetCatalog`.
+
 **Renderer coverage today**: this is the approved roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native), and
