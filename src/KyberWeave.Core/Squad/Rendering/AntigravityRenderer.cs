@@ -2,6 +2,7 @@ using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -47,12 +48,13 @@ public sealed class AntigravityRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// The identities that exist as both a canonical agent and a canonical skill with
-    /// distinct bodies. Read from the loaded source at render time rather than hardcoded,
-    /// so a corpus change that creates or removes a collision updates the lowering without
-    /// a renderer change — the renderer decides collisions from occupancy, not a snapshot.
+    /// The identities occupied by both a canonical agent and a canonical skill. Read from
+    /// the loaded source at render time rather than hardcoded, so a corpus change that
+    /// creates or removes an occupied identity updates the lowering without a renderer
+    /// change. Shared identities are also occupied, so callers must test the shared branch
+    /// first; otherwise both branches claim the same rendered path.
     /// </summary>
-    private static HashSet<string> ResolveDistinctBodyCollisions(SquadSource source)
+    private static HashSet<string> ResolveOccupiedIdentities(SquadSource source)
     {
         HashSet<string> agentNames = source.Agents
             .Select(agent => agent.Name)
@@ -109,7 +111,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         // Collisions are decided from occupancy of the loaded corpus, not a hardcoded
         // snapshot: an identity emitted as both a canonical skill and a lowered agent
         // role skill must be discovered from the source itself.
-        HashSet<string> distinctBodyCollisions = ResolveDistinctBodyCollisions(source);
+        HashSet<string> occupiedIdentities = ResolveOccupiedIdentities(source);
 
         // Shared identities come from the authoritative fallbacks.yml shared-identities
         // list, not a renderer-local roster — a corpus change to that list is honored
@@ -142,7 +144,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                     InstructionDigest: agent.BodyDigest,
                     Details: "Reused identical shared canonical skill; agent primitive lowered to skill."));
             }
-            else if (distinctBodyCollisions.Contains(agent.Name) &&
+            else if (occupiedIdentities.Contains(agent.Name) &&
                      skillNames.Contains(agent.Name))
             {
                 string outputIdentity = $"role-{agent.Name}";
@@ -192,7 +194,8 @@ public sealed class AntigravityRenderer : ISquadRenderer
         if (string.IsNullOrWhiteSpace(name) ||
             name.Contains('/') ||
             name.Contains('\\') ||
-            name.Contains("..", StringComparison.Ordinal))
+            name.Contains("..", StringComparison.Ordinal) ||
+            name.Trim('.').Length == 0)
         {
             throw new SquadRenderValidationException(
                 $"Canonical name '{name}' is not a valid single-segment path for rendering.");
@@ -203,15 +206,14 @@ public sealed class AntigravityRenderer : ISquadRenderer
     {
         ValidateCanonicalName(name);
 
-        // Insertion order is the frontmatter contract: name, description, license. No model
-        // or permission keys — models.yml has no antigravity entry, and skills cannot express
-        // the capability lattice.
-        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = name,
-            ["description"] = ToSingleLineScalar(description),
-            ["license"] = "MIT"
-        };
+        // Key order is the frontmatter contract: name, description, license.
+        // YamlMappingNode preserves child order; Dictionary does not define one. No model
+        // or permission keys — models.yml has no antigravity entry, and skills cannot
+        // express the capability lattice.
+        YamlMappingNode frontmatter = new();
+        frontmatter.Add("name", name);
+        frontmatter.Add("description", ToSingleLineScalar(description));
+        frontmatter.Add("license", "MIT");
 
         string yaml;
         lock (SerializerLock)
@@ -249,7 +251,11 @@ public sealed class AntigravityRenderer : ISquadRenderer
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
-            return null;
+            throw new SquadRenderValidationException(
+                $"Agent '{agent.Name}' references capability profile '{agent.CapabilityProfile}', " +
+                "which profiles/capabilities.yml does not declare. " +
+                $"Declared profiles: {string.Join(", ", capabilityProfiles.Keys.Order(StringComparer.Ordinal))}. " +
+                "Correct the agent's capability-profile value before rendering.");
         }
 
         // Antigravity skills are instruction-only: any non-deny decision is unenforceable

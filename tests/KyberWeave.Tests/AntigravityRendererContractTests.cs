@@ -134,12 +134,20 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode frontmatter = ReadFrontmatter(file);
             Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
-            Assert.Equal(ToSingleLineScalar(skill.Description), RequireScalar(frontmatter, "description"));
-            Assert.Equal("MIT", RequireScalar(frontmatter, "license"));
-            Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("model")));
+            Assert.True(
+                string.Equals(ToSingleLineScalar(skill.Description), RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
+                $"Skill '{skill.Name}' description mismatch.");
+            Assert.True(
+                string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
+                $"Skill '{skill.Name}' license mismatch.");
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                $"Skill '{skill.Name}' must not declare a model.");
 
             string expectedBody = NormalizeBody(skill.InstructionBody);
-            Assert.Equal(expectedBody, ReadBody(file));
+            Assert.True(
+                string.Equals(expectedBody, ReadBody(file), StringComparison.Ordinal),
+                $"Skill '{skill.Name}' body mismatch.");
         }
 
         foreach (string collision in collisions)
@@ -151,10 +159,18 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             SquadAgent agent = Assert.Single(source.Agents, a => a.Name == collision);
             YamlMappingNode frontmatter = ReadFrontmatter(roleFile);
-            Assert.Equal($"role-{collision}", RequireScalar(frontmatter, "name"));
-            Assert.Equal(ToSingleLineScalar(agent.Description), RequireScalar(frontmatter, "description"));
-            Assert.Equal("MIT", RequireScalar(frontmatter, "license"));
-            Assert.Equal(NormalizeBody(agent.InstructionBody), ReadBody(roleFile));
+            Assert.True(
+                string.Equals($"role-{collision}", RequireScalar(frontmatter, "name"), StringComparison.Ordinal),
+                $"Collision role skill for '{collision}' has the wrong name.");
+            Assert.True(
+                string.Equals(ToSingleLineScalar(agent.Description), RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
+                $"Collision role skill for '{collision}' has the wrong description.");
+            Assert.True(
+                string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
+                $"Collision role skill for '{collision}' has the wrong license.");
+            Assert.True(
+                string.Equals(NormalizeBody(agent.InstructionBody), ReadBody(roleFile), StringComparison.Ordinal),
+                $"Collision role skill for '{collision}' has the wrong body.");
         }
 
         foreach (string conductor in SharedIdentities(source))
@@ -211,13 +227,24 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         foreach (SquadDegradationRecord degradation in result.Degradations.Where(d => d.Code == "permission-not-expressible"))
         {
-            Assert.Equal("antigravity", degradation.Target);
-            Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
+            Assert.True(
+                string.Equals("antigravity", degradation.Target, StringComparison.Ordinal),
+                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
+            Assert.True(
+                string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
+                $"Permission degradation for '{degradation.CanonicalIdentity}' has the wrong output identity.");
             SquadAgent agent = Assert.Single(source.Agents, a => a.Name == degradation.CanonicalIdentity);
-            Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
+            Assert.True(
+                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
+                $"Permission degradation for '{agent.Name}' has the wrong instruction digest.");
             Assert.DoesNotContain("widening", degradation.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-            Assert.NotEqual("widened", degradation.Code, StringComparer.OrdinalIgnoreCase);
         }
+
+        // No render may widen a canonical permission: the fallback records what it cannot
+        // express, it never claims a broader grant.
+        Assert.DoesNotContain(
+            result.Degradations,
+            d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase));
 
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("/agents/", StringComparison.OrdinalIgnoreCase));
     }
@@ -261,6 +288,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // The frontmatter contract is name, description, license — an ordered mapping, not
         // a sequence. Pinned so a serializer change cannot silently reorder keys or emit
         // a list-of-pairs shape.
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string probe = source.Skills
+            .Select(skill => skill.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException($"Corpus at '{ProductRoot}' declares no skills.");
+
         SquadRenderResult result = await new AntigravityRenderer().RenderAsync(new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Antigravity],
@@ -268,16 +302,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         SquadDeploymentFile rendered = Assert.Single(
             result.Files,
-            f => f.RelativePath == ".agents/skills/conductor/SKILL.md");
-        string content = System.Text.Encoding.UTF8.GetString(rendered.Content.Span);
-        Assert.StartsWith("---\n", content, StringComparison.Ordinal);
-        int nameIdx = content.IndexOf("name:", StringComparison.Ordinal);
-        int descIdx = content.IndexOf("description:", StringComparison.Ordinal);
-        int licIdx = content.IndexOf("license:", StringComparison.Ordinal);
-        Assert.True(nameIdx < descIdx && descIdx < licIdx,
-            $"Frontmatter key order wrong: name={nameIdx} description={descIdx} license={licIdx}");
-        Assert.DoesNotContain("Key:", content, StringComparison.Ordinal);
-        Assert.DoesNotContain("- ", content[..licIdx], StringComparison.Ordinal);
+            f => f.RelativePath == $".agents/skills/{probe}/SKILL.md");
+        YamlMappingNode frontmatter = ReadFrontmatter(rendered);
+        string[] keys = frontmatter.Children.Keys
+            .OfType<YamlScalarNode>()
+            .Select(key => key.Value ?? string.Empty)
+            .ToArray();
+        Assert.Equal(["name", "description", "license"], keys);
     }
 
     private static string NormalizeBody(string body)
@@ -316,7 +347,15 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
     private static string RequireScalar(YamlMappingNode node, string key)
     {
-        YamlNode value = node.Children[new YamlScalarNode(key)];
+        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
+        {
+            string presentKeys = string.Join(", ", node.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(existing => existing.Value ?? "<null>"));
+            throw new InvalidOperationException(
+                $"Frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
+        }
+
         return Assert.IsType<YamlScalarNode>(value).Value
             ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
     }
