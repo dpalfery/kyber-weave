@@ -40,6 +40,13 @@ public sealed class CursorRendererContractTests
         "delegate"
     ];
 
+    /// <summary>
+    /// Primary agents are emitted as native subagents, so their same-named canonical skills
+    /// are suppressed by the single-projection rule. Keep the set in one place for both the
+    /// expected file count and per-skill assertions.
+    /// </summary>
+    private static readonly HashSet<string> SuppressedSkillNames = ["conductor", "conductor-v3"];
+
     [Fact]
     public void SupportedTargets_IsExactlyCursor()
     {
@@ -91,9 +98,9 @@ public sealed class CursorRendererContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // 22 agents + (26 skills - conductor - conductor-v3, suppressed by the native
-        // single-projection rule) = 46.
-        int expectedFileCount = source.Agents.Count + source.Skills.Count - 2;
+        // Native primary agents suppress their same-named skills; derive the expected count
+        // from the centralized suppression set rather than a literal subtraction.
+        int expectedFileCount = source.Agents.Count + source.Skills.Count - SuppressedSkillNames.Count;
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("cursor", f.Target));
 
@@ -191,7 +198,7 @@ public sealed class CursorRendererContractTests
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isConductor = skill.Name is "conductor" or "conductor-v3";
+            bool isConductor = SuppressedSkillNames.Contains(skill.Name);
             string path = $".cursor/skills/{skill.Name}/SKILL.md";
             if (isConductor)
             {
@@ -249,11 +256,19 @@ public sealed class CursorRendererContractTests
 
         foreach (SquadDegradationRecord degradation in result.Degradations)
         {
-            Assert.Equal("cursor", degradation.Target);
-            Assert.Equal("permission-not-expressible", degradation.Code);
-            Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
+            Assert.True(
+                string.Equals("cursor", degradation.Target, StringComparison.Ordinal),
+                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
+            Assert.True(
+                string.Equals("permission-not-expressible", degradation.Code, StringComparison.Ordinal),
+                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong code.");
+            Assert.True(
+                string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
+                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong output identity.");
             SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
-            Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
+            Assert.True(
+                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
+                $"Degradation for '{degradation.CanonicalIdentity}' has the wrong instruction digest.");
         }
     }
 

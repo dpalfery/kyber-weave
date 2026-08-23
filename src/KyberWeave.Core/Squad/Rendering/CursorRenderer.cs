@@ -195,17 +195,11 @@ public sealed class CursorRenderer : ISquadRenderer
             return false;
         }
 
-        bool allowsWrite = ReadOnlyEnforcedCapabilities.Contains("filesystem.write", StringComparer.Ordinal) &&
-                           profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
-                           writeDecision == SquadPermissionDecision.Allow;
-
-        bool allowsExecute = ReadOnlyEnforcedCapabilities.Contains("process.execute", StringComparer.Ordinal) &&
-                             profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision executeDecision) &&
-                             executeDecision == SquadPermissionDecision.Allow;
-
-        // If either write or execute is allowed, readonly is omitted (default false).
+        // If either enforced capability is allowed, readonly is omitted (default false).
         // If both are withheld (ask or deny), readonly is set to true.
-        return !allowsWrite && !allowsExecute;
+        return !ReadOnlyEnforcedCapabilities.Any(capability =>
+            profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+            decision == SquadPermissionDecision.Allow);
     }
 
     private static SquadDegradationRecord? BuildDegradationRecord(
