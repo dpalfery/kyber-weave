@@ -1,14 +1,22 @@
 ---
-id: todo/claude-code
+id: archive/todo/claude-code
 title: Add a native Claude Code renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-16
-status: draft
+last-reviewed: 2026-08-23
+status: archived
 ---
 
 # Add a native Claude Code renderer to Kyber-Squad
+
+**Status:** Archived
+**Archive Date:** 2026-08-23
+
+Closed by shipping `ClaudeRenderer` in Core and registering it in
+`SquadCommandComposition.ResolveRenderer()`. See
+[2026-08-23-claude-code-native-renderer.md](../plans/2026-08-23-claude-code-native-renderer.md)
+for the implementation contract and verification harness.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
@@ -21,9 +29,9 @@ implementation.
 only has a renderer registered for `copilot`. Every other approved target — including this
 one — has no `ISquadRenderer` implementation, so requesting it is rejected with a message
 naming the gap and pointing here. See
-[architecture.md §8](../kyber-squad/architecture.md#8-rendering) for how the render pipeline
+[architecture.md §8](../../kyber-squad/architecture.md#8-rendering) for how the render pipeline
 as a whole works, and
-[onboarding.md](../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
+[onboarding.md](../../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
 full target roster and its current coverage.
 
 ## Classification

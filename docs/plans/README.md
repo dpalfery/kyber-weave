@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-08-23
 ---
 
 # Kyber-Weave Plan Inventory
@@ -13,12 +13,15 @@ This inventory tracks architectural and implementation plans across their lifecy
 
 ## Active Plans
 
-_No active plans currently in progress._
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| _(none)_ | | | |
 
 ## Archived Plans
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-08-23-claude-code-native-renderer.md](../archive/plans/2026-08-23-claude-code-native-renderer.md) | Archived | 2026-08-23 | 2026-08-23 | [architecture.md](../kyber-squad/architecture.md), [onboarding.md](../kyber-squad/onboarding.md), [archive/todo/claude-code.md](../archive/todo/claude-code.md) | Implement and register an `ISquadRenderer` for Claude Code (`.claude/agents`, `.claude/skills`) so `squad install --target claude` succeeds. |
 | [2026-08-22-resolve-inspectcode-warnings-and-actionable-suggestions.md](../archive/plans/2026-08-22-resolve-inspectcode-warnings-and-actionable-suggestions.md) | Archived | 2026-08-22 | 2026-08-22 | [standards/csharp/README.md](../standards/csharp/README.md), [ADR 0004](../adr/0004-solution-level-static-analysis-and-noise-suppression.md) | Resolve all 34 InspectCode static analysis warnings and high-value actionable suggestions across KyberWeave.sln. |
 | [2026-08-22-council-reviewer-findings-remediation.md](../archive/plans/2026-08-22-council-reviewer-findings-remediation.md) | Archived | 2026-08-22 | 2026-08-22 | [standards/README.md](../standards/README.md), [kyber-squad/README.md](../kyber-squad/README.md), [ADR 0001](../adr/0001-coding-standards-and-configuration-registry.md) | Remediate all five major and one minor council code reviewer findings across coding standards, repository configuration, scaffolder defaults, and canonical Kyber-Squad skills. |
 | [2026-08-21-duplication-and-prior-art-lenses.md](../archive/plans/2026-08-21-duplication-and-prior-art-lenses.md) | Archived | 2026-08-21 | 2026-08-22 | [code-review/architecture.md](../code-review/architecture.md), [code-review/README.md](../code-review/README.md), [ADR 0003](../adr/0003-cross-file-duplication-and-prior-art-lenses.md) | Give the review council the concerns no lens owns — duplicated code, duplicated types, and speculative generality — via an InspectCode redundancy-tier promotion, a `prior-art` lens, and a CodeGraph-backed `duplicate-implementation` lens with a deterministic duplicates gate. |
