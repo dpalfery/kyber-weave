@@ -91,6 +91,16 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> canonicalSkillNames = source.Skills
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (string identity in shared)
+        {
+            Assert.True(
+                canonicalSkillNames.Contains(identity),
+                $"Shared identity '{identity}' has no canonical skill projection.");
+        }
+
         HashSet<string> collisions = DeriveCollisions(source);
 
         int unoccupiedAgents = source.Agents.Count(a => !shared.Contains(a.Name) && !collisions.Contains(a.Name));
