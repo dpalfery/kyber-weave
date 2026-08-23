@@ -31,12 +31,20 @@ internal static class SquadCommandComposition
 
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
-    /// files. Copilot, Cursor, and Codex are native; Antigravity is fallback role-skill lowering
-    /// to <c>.agents/skills/</c>. Every other approved target fails closed with a pointer
-    /// to its <c>docs/todo/</c> entry rather than being silently dropped from the roster.
+    /// files. Copilot, Cursor, Claude, and Codex are native; Antigravity is fallback
+    /// role-skill lowering to <c>.agents/skills/</c>. Every other approved target fails
+    /// closed with a pointer to its <c>docs/todo/</c> entry rather than being silently
+    /// dropped from the roster.
     /// </summary>
     public static ISquadRenderer ResolveRenderer() =>
-        new SquadRendererRegistry([new CopilotRenderer(), new CursorRenderer(), new AntigravityRenderer(), new CodexRenderer()]);
+        new SquadRendererRegistry(
+        [
+            new CopilotRenderer(),
+            new CursorRenderer(),
+            new ClaudeRenderer(),
+            new AntigravityRenderer(),
+            new CodexRenderer(),
+        ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>
     public static SquadTransaction ResolveTransaction(

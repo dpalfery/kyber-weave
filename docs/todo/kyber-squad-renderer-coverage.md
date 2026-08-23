@@ -4,7 +4,7 @@ title: Kyber-Squad Renderer Coverage
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-08-23
 status: draft
 ---
 
@@ -12,7 +12,7 @@ status: draft
 
 `squad install`/`squad update` render canonical Squad source into a harness's native files
 through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-`copilot` (native), `cursor` (native), `codex` (native), and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have
+`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have
 renderers today; every other approved target fails in preflight, before any network call,
 naming the gap and pointing here.
 
@@ -22,18 +22,20 @@ harness's real documentation, the code seam to implement against, and how to ver
 
 | Target | Kind | Page |
 |---|---|---|
-| `claude` | Native | [claude-code.md](claude-code.md) |
 | `opencode` | Native | [opencode.md](opencode.md) |
 | `kilo` | Native | [kilo.md](kilo.md) |
 | `factory` | Native | [factory.md](factory.md) |
 | `gemini` | Retired 2026-08-23 — no longer a coding harness; no renderer planned (PR #40) | — |
 | `warp` | Fallback (role-skill lowering) | [warp.md](warp.md) |
 
+`gemini` is intentionally excluded — no longer a coding harness as of 2026-08-23.
+
 `copilot` is covered by `CopilotRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`), `cursor` by `CursorRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`), `antigravity` by
-`AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`), and `codex` by
-`CodexRenderer` (`src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`) —
+(`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`), `claude` by `ClaudeRenderer`
+(`src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs`), `codex` by
+`CodexRenderer` (`src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`), and `antigravity` by
+`AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) —
 none is listed above.
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.

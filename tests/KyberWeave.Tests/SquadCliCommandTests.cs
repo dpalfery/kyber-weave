@@ -398,7 +398,9 @@ public sealed class SquadCliCommandTests : IDisposable
         string pendingSection = ExtractDoctorSection(normalizedOutput, "Not yet implemented:", "Kyber-Weave MCP:");
         Assert.Contains("cursor", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("antigravity", availableSection, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("copilot", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
