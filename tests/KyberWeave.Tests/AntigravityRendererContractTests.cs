@@ -144,9 +144,18 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
             YamlMappingNode frontmatter = ReadFrontmatter(file);
             Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
+            string emittedDescription = RequireScalar(frontmatter, "description");
             Assert.True(
-                string.Equals(ToSingleLineScalar(skill.Description), RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
-                $"Skill '{skill.Name}' description mismatch.");
+                !emittedDescription.Contains('\n') &&
+                string.Equals(emittedDescription, emittedDescription.Trim(), StringComparison.Ordinal),
+                $"Skill '{skill.Name}' description must be a trimmed single-line scalar.");
+            foreach (string line in skill.Description.Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                Assert.Contains(line, emittedDescription, StringComparison.Ordinal);
+            }
+
             Assert.True(
                 string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' license mismatch.");
@@ -248,6 +257,23 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
                 $"Permission degradation for '{agent.Name}' has the wrong instruction digest.");
             Assert.DoesNotContain("widening", degradation.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            string[] constrained = source.CapabilityProfiles.Capabilities
+                .Order(StringComparer.Ordinal)
+                .Where(capability =>
+                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                    decision != SquadPermissionDecision.Deny)
+                .ToArray();
+            int previousIndex = -1;
+            foreach (string capability in constrained)
+            {
+                int capabilityIndex = degradation.Details?.IndexOf(capability, StringComparison.Ordinal) ?? -1;
+                Assert.True(
+                    capabilityIndex > previousIndex,
+                    $"Permission degradation for '{agent.Name}' does not list capability '{capability}' in ordinal order.");
+                previousIndex = capabilityIndex;
+            }
         }
 
         // No render may widen a canonical permission: the fallback records what it cannot
@@ -282,9 +308,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.True(first.Files[i].Content.Span.SequenceEqual(second.Files[i].Content.Span));
         }
 
-        // Degradations must be deterministic as well: the renderer sorts the capability
-        // vocabulary precisely so details strings are stable across renders, and a
-        // regression that drops that sort would otherwise leave this suite green.
+        // File paths, targets, contents, and degradation records must remain byte/value
+        // identical across renders of the same canonical source.
         Assert.Equal(first.Degradations.Count, second.Degradations.Count);
         for (int i = 0; i < first.Degradations.Count; i++)
         {
