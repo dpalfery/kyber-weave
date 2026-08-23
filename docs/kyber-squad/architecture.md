@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-08-17
+last-reviewed: 2026-08-23
 status: current
 code-refs:
   - SquadTransaction
@@ -14,6 +14,7 @@ code-refs:
   - SquadSourceLoader
   - ISquadRenderer
   - SquadRendererRegistry
+  - ClaudeRenderer
   - CopilotRenderer
   - CursorRenderer
 ---
@@ -33,7 +34,7 @@ atomic, recoverable deployments across 10 target coding harnesses.
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
         Agents["22 Canonical Agents\n(agents/*.md)"]
-        Skills["25 Canonical Skills\n(skills/*)"]
+        Skills["26 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]
     end
@@ -249,7 +250,8 @@ and validates.
   renderer fails the whole request — install and update are all-or-nothing across the
   requested target set, never a partial render of the targets that happen to be covered.
 - **Dispatch**: each supported target's canonical source goes to the `ISquadRenderer` that
-  owns it — `CopilotRenderer` for `.github/agents/*.agent.md` and `.github/skills/*/SKILL.md`,
+  owns it — `ClaudeRenderer` for `.claude/agents/*.md` and `.claude/skills/*/SKILL.md`,
+  `CopilotRenderer` for `.github/agents/*.agent.md` and `.github/skills/*/SKILL.md`,
   `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
   and `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`.
 - **Validate**: the registry re-checks the merged output — portable paths stay inside the
@@ -268,7 +270,7 @@ and validates.
   Base tools (`vscode`, `todo`) are granted unconditionally, while capability-governed built-ins
   and single-quoted MCP server wildcards (`'codegraph/*'`, `'kyber-weave/*'`, `'context7/*'`) are
   capability-gated (`filesystem.read` for non-orchestrator roles).
-- **Coverage today**: `copilot` (native), `cursor` (native), and `antigravity` (fallback role-skill lowering to
+- **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), and `antigravity` (fallback role-skill lowering to
   `.agents/skills/`) have renderers. `kyber-weave squad doctor` reports which targets are
   covered; `docs/todo/<target>.md` has what implementing the rest needs.
 

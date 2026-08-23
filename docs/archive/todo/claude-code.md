@@ -1,14 +1,22 @@
 ---
-id: todo/claude-code
+id: archive/todo/claude-code
 title: Add a native Claude Code renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-16
-status: draft
+last-reviewed: 2026-08-23
+status: archived
 ---
 
 # Add a native Claude Code renderer to Kyber-Squad
+
+**Status:** Archived
+**Archive Date:** 2026-08-23
+
+Closed by shipping `ClaudeRenderer` in Core and registering it in
+`SquadCommandComposition.ResolveRenderer()` alongside `CopilotRenderer`. See
+[2026-08-23-claude-code-native-renderer.md](../plans/2026-08-23-claude-code-native-renderer.md)
+for the implementation contract and verification harness.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
@@ -21,9 +29,9 @@ implementation.
 only has a renderer registered for `copilot`. Every other approved target — including this
 one — has no `ISquadRenderer` implementation, so requesting it is rejected with a message
 naming the gap and pointing here. See
-[architecture.md §8](../kyber-squad/architecture.md#8-rendering) for how the render pipeline
+[architecture.md §8](../../kyber-squad/architecture.md#8-rendering) for how the render pipeline
 as a whole works, and
-[onboarding.md](../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
+[onboarding.md](../../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
 full target roster and its current coverage.
 
 ## Classification
@@ -34,7 +42,7 @@ full target roster and its current coverage.
 
 - Strong detection marker: `.claude/`
 - Alias(es): none
-- The 22 canonical agents and 25 canonical skills this renderer must cover live under
+- The 22 canonical agents and 26 canonical skills this renderer must cover live under
   `products/kyber-squad/agents/*.md` and `products/kyber-squad/skills/*/SKILL.md`, loaded via
   `SquadSourceLoader.Load` (`src/KyberWeave.Core/Squad/Parsing/SquadSourceLoader.cs`) into a
   `SquadSource` — the same model `CopilotRenderer` renders from.
@@ -85,8 +93,8 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   literals, so the test can't silently drift from the canonical source it's supposed to be
   checking.
 - Confirm `kyber-weave squad install --target claude --dry-run` plans a file for every
-  agent and skill this target should cover (native: 22 agents + 23 non-conductor skills = 45,
+  agent and skill this target should cover (native: 22 agents + 24 non-conductor skills = 46,
   matching Copilot's count, unless this target's own agent-primitive support differs;
-  fallback: 25 skills plus role-lowered skills per the collision rules above).
+  fallback: 26 skills plus role-lowered skills per the collision rules above).
 - Confirm `kyber-weave squad doctor` reports `claude` under renderers available, not
   pending.
