@@ -196,7 +196,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
                                decision == SquadPermissionDecision.Allow;
                 foreach (string tool in mapped)
                 {
-                    Assert.Equal(allowed, tools.Contains(tool, StringComparer.Ordinal));
+                    Assert.True(
+                        allowed == tools.Contains(tool, StringComparer.Ordinal),
+                        $"Agent '{agent.Name}' capability '{capability}' allowed={allowed} tool '{tool}'.");
                 }
             }
 
@@ -232,9 +234,12 @@ public sealed class ClaudeRendererContractTests : IDisposable
             bool hasRead = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
                            readDecision == SquadPermissionDecision.Allow;
             bool expectedMcp = hasRead && !isPureOrchestrator;
-            Assert.Equal(expectedMcp, tools.Contains("mcp__codegraph__*", StringComparer.Ordinal));
-            Assert.Equal(expectedMcp, tools.Contains("mcp__kyber-weave__*", StringComparer.Ordinal));
-            Assert.Equal(expectedMcp, tools.Contains("mcp__context7__*", StringComparer.Ordinal));
+            foreach (string mcpTool in new[] { "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*" })
+            {
+                Assert.True(
+                    expectedMcp == tools.Contains(mcpTool, StringComparer.Ordinal),
+                    $"Agent '{agent.Name}' mcpTool '{mcpTool}'.");
+            }
 
             // Exact comparison: the renderer appends the normalized body verbatim, so a
             // duplicated or padded body must fail, and the message names the offender.

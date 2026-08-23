@@ -28,6 +28,8 @@ harness's real documentation, the code seam to implement against, and how to ver
 | `factory` | Native | [factory.md](factory.md) |
 | `warp` | Fallback (role-skill lowering) | [warp.md](warp.md) |
 
+`gemini` is intentionally excluded — no longer a coding harness as of 2026-08-23.
+
 `copilot` is covered by `CopilotRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`), `cursor` by `CursorRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`), `claude` by `ClaudeRenderer`

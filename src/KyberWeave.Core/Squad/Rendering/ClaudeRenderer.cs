@@ -111,6 +111,13 @@ public sealed class ClaudeRenderer : ISquadRenderer
         .WithTypeConverter(new ClaudeToolsFlowSequenceConverter())
         .Build();
 
+    /// <summary>
+    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
+    /// registry may dispatch renderers concurrently; serialization takes this lock so a
+    /// shared static instance cannot interleave emitter state.
+    /// </summary>
+    private static readonly object SerializerLock = new();
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Claude];
 
@@ -185,7 +192,11 @@ public sealed class ClaudeRenderer : ISquadRenderer
         // Always emit tools: omitting the key inherits every subagent tool (widening).
         frontmatter["tools"] = new ClaudeToolsFlowSequence(ResolveTools(agent, capabilityProfiles));
 
-        string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
+        string content;
+        lock (SerializerLock)
+        {
+            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
+        }
 
         return new SquadDeploymentFile(
             $"{AgentsDirectory}/{agent.Name}.md",
@@ -206,7 +217,11 @@ public sealed class ClaudeRenderer : ISquadRenderer
             ["license"] = "MIT"
         };
 
-        string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
+        string content;
+        lock (SerializerLock)
+        {
+            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
+        }
 
         return new SquadDeploymentFile(
             $"{SkillsDirectory}/{skill.Name}/SKILL.md",
