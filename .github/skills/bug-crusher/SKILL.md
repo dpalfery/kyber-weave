@@ -66,13 +66,13 @@ Note what these have in common: each one means the cost of being wrong is no lon
 1. **Apply the fix** at the file and line the investigator named. If the fix is more than a few lines or sits in a specialist's domain, hand it to that specialist (`csharp-dev`, `python-dev`, `react-dev`, `dal-dev`, …) instead — you are allowed to do the small edit, not obliged to.
 2. **Verify** before claiming anything. Run the exact command that reproduced the failure and show it now passes, then run the surrounding suite or build to show nothing else regressed. "It should work now" is not verification; paste the output.
 3. **Regression test.** If `EXISTING COVERAGE` named a test that already fails on this defect, that test *is* the regression test — you are done, no new test needed. If it said `NONE`, and the root cause was a real code defect rather than a config value, an environment problem, or a wrong test, spawn `test-dev` to add one. Give it the reproduction command and the root cause so it writes a test that fails without the fix.
-4. **Review — always.** Spawn `code-reviewer` on the change, including fixes you applied yourself. Your own edits get *more* scrutiny, not less: you made them without reading the surrounding code, on the investigator's word. `CHANGES REQUESTED` sends the work back with the full feedback attached; cap at 5 cycles and escalate to `architect` on the third, because a fix that cannot survive review was never trivial.
+4. **Review — always.** Spawn `task-reviewer` on the change, including fixes you applied yourself. Your own edits get *more* scrutiny, not less: you made them without reading the surrounding code, on the investigator's word. A `FAIL` sends the work back with the fix list attached; you get two of those passes, and a `FAIL` on the second hands the change to `code-reviewer` for a full pass rather than a third fast one. Escalate to `architect` if that review does not return `APPROVE`, because a fix that cannot survive review was never trivial.
 
 ## 4. Attempt budget
 
 You get **two** fix attempts. A first miss is fair — the investigator's diagnosis was close but incomplete. A second miss means the model of the problem is wrong, not the patch, and further attempts are just sampling from the wrong distribution. On the second failure, escalate to `architect` and carry all evidence with you: both attempted fixes, why each failed, and the investigator's original findings. That accumulated evidence is worth a great deal to the architect — hand it over rather than making it start cold.
 
-Count attempts per defect, not per file, and count a `CHANGES REQUESTED` rework that fails verification as an attempt.
+Count attempts per defect, not per file, and count a `FAIL` rework that fails verification as an attempt.
 
 ## 5. Escalated path — architect, then specialists
 
@@ -82,7 +82,7 @@ You keep ownership when a defect escalates; you do not hand the human off to `co
 2. **A plan file is optional here.** Tell the architect explicitly that this is a bug-crusher escalation and it should write a plan to `6-Docs/plans/` only if the fix warrants one — a real refactor, several coordinated changes, or a decision the human will want a record of. A defect that turned out to need three coordinated edits does not need a planning document; say so, and let it answer in its turn instead.
 3. **Fulfil discovery requests.** The architect cannot spawn agents. When it returns a `DISCOVERY REQUEST`, you spawn the named agent (`Explore` for broad codebase fan-out, `azure-reader` for live Azure state, `research-agent` for external docs) and re-invoke the same architect instance with the findings appended.
 4. **Relay decisions to the human.** When the architect ends a turn with `STATUS: NEEDS_DECISION`, surface every grouped question in one `AskUserQuestion` call with its `RECOMMENDED` option first, then resume the *same* instance via `SendMessage` with the answers keyed by question id. You relay; you do not answer on the human's behalf.
-5. **Execute the plan.** Route each task to its specialist by matching against the live agent descriptions, run independent tasks concurrently, and pipeline `code-reviewer` behind each completion so a worker is never idle waiting on a review. Same rules as `conductor` §3–4 — read that skill if the escalated work grows past a handful of tasks, or hand it to `conductor` outright if the human agrees the scope has changed into a feature.
+5. **Execute the plan.** Route each task to its specialist by matching against the live agent descriptions, run independent tasks concurrently, and pipeline `task-reviewer` behind each completion so a worker is never idle waiting on a review. Same rules as `conductor` §3–4 — read that skill if the escalated work grows past a handful of tasks, or hand it to `conductor` outright if the human agrees the scope has changed into a feature.
 
 ## 6. Report
 

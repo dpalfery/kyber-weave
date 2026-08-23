@@ -45,7 +45,7 @@ narrow to one.
 
 While `agent validate` and `agent sync-check` audit and lint existing on-disk agent definitions
 across individual harnesses, **[Kyber-Squad](../kyber-squad/architecture.md)** provides the
-authoritative, end-to-end deployment control plane. Kyber-Squad maintains 22 canonical agent
+authoritative, end-to-end deployment control plane. Kyber-Squad maintains 23 canonical agent
 definitions in `products/kyber-squad/` and compiles them into target-native configurations
 across 10 supported harnesses (including Codex, Cursor, Claude, Copilot, OpenCode, Kilo, Gemini CLI,
 Antigravity, Warp, and Factory Droids) with transactional rollback and state tracking.

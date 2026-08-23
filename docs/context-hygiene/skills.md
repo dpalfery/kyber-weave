@@ -148,7 +148,7 @@ layout for each runtime is APM's problem rather than a second copy of that mappi
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
 unified multi-harness deployment control plane. Kyber-Squad maintains 25 canonical skills
-(alongside 22 canonical agent roles and lowering rules) under `products/kyber-squad/` and
+(alongside 23 canonical agent roles and lowering rules) under `products/kyber-squad/` and
 manages their transactional deployment, drift tracking, and lifecycle across 10 coding harnesses.
 
 ## Related

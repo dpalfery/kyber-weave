@@ -102,18 +102,19 @@ Don't wait until the current parallel tasks complete to start drafting the promp
 
 Issue all eligible task invocations **together** in a batch rather than finishing one before starting the next. Keep each invocation self-contained — objective, exact files/symbols, acceptance criteria, and required skills from the plan — so any pool worker can execute it cold under context isolation.
 
-## 4. Review & verify — pipelined, non-blocking
+## 4. Review & verify — a three-pass ladder, pipelined and non-blocking
 
-Review is a concurrent pipeline stage, never a barrier that idles the dev pool.
+Review is a concurrent pipeline stage, never a barrier that idles the dev pool. Each task climbs a ladder of at most three passes: two fast passes by `task-reviewer`, then one `code-reviewer` pass. Only tasks that fail twice reach the council, and that is what makes the council affordable at all.
 
-1. When a dev worker claims a task complete, enqueue a `code-reviewer` task for that work **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review.
-2. `code-reviewer` returns per task (engine terms; operators may still say “approved” for `APPROVE`):
-   - **APPROVE** → mark that task commit-ready.
-   - **REQUEST_CHANGES** → create a **rework item** that carries the full review feedback plus the original task's files/symbols and acceptance criteria, and place it back on the ready queue for that agent type.
-   - **NEEDS_HUMAN** → stop that task's review loop and escalate; do not iterate or treat it as `APPROVE`.
-3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. (e.g., while `csharp-dev` #1 is still finishing task two, `csharp-dev` #2 takes the rework from task one's review.) This is why rework items must be self-contained: the reviewer's feedback plus the task spec is the full context.
-4. A reworked task re-enters step 1 (complete → review → approve/rework). Track an iteration count **per task**; cap at 5 review cycles (per the `dp-code-reviewer` skill) and escalate immediately on a critical security/safety finding or when any task exceeds the cap.
-5. The objective is done only when every task — originals and reworks — has reached `APPROVE`.
+1. When a dev worker claims a task complete, enqueue a `task-reviewer` task for that work **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review. The invocation carries the objective, the acceptance criteria, the worker's completion digest, and **the pass number** (1 or 2). One exception: a task touching a path the review policy reserves for human judgement skips the fast pass and goes straight to `code-reviewer`.
+2. `task-reviewer` returns one of two results, and never a verdict:
+   - **PASS** → that task is done to standard. It is not commit-ready; the objective's council review still has to run.
+   - **FAIL** → create a **rework item** carrying the fix list verbatim plus the original task's files/symbols and acceptance criteria, and place it back on the ready queue for that agent type. This is the coding agent's feedback round, and it gets two of them.
+3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. (e.g., while `csharp-dev` #1 is still finishing task two, `csharp-dev` #2 takes the rework from task one's review.) This is why rework items must be self-contained: the fix list plus the task spec is the full context.
+4. A reworked task re-enters step 1 at the next pass number. **A `FAIL` on pass 2 ends the fast loop:** enqueue `code-reviewer` on that one task for pass 3 and report the verdict it returns. There is no pass 4 and no return to `task-reviewer` — the escape hatch is a better reviewer, not another cycle of the same one. Escalate immediately, without finishing the ladder, on a critical security or safety finding.
+5. **Findings collection.** Findings that survive a pass-3 review — anything that task did not resolve — go into a per-objective findings collection you track through task state. You hold no write capability, and a review finding does not by itself authorize a repository change, so this is tracked work rather than a file or a todo document.
+6. **Drain the collection before the council.** Once every task has left the ladder, and before the objective's review, hand the **whole collection** to `architect` for a solution and a plan. That plan enters the approval gate in §2 like any other — a `Draft` plan is not executable, so stop and ask. Once approved, route its tasks to workers; they re-enter the ladder at pass 1, and the collection is drained again on the way out.
+7. With the collection empty, enqueue one `code-reviewer` review over the objective's accumulated change. The five-cycle cap in the `dp-code-reviewer` skill governs that loop. The objective is done only when it reaches `APPROVE`.
 
 ## Plan closeout
 

@@ -74,7 +74,7 @@ public sealed class SquadCanonicalContentTests
     /// trustworthy. They are listed here instead so that a net-new agent is still a
     /// deliberate, reviewed addition rather than a file that appeared.
     /// </summary>
-    private static readonly string[] ExpectedNewAgents = ["review-lens", "review-triage"];
+    private static readonly string[] ExpectedNewAgents = ["review-lens", "review-triage", "task-reviewer"];
 
     private static readonly string[] ExpectedAgents =
         [.. ExpectedMigratedAgents.Concat(ExpectedNewAgents).Order(StringComparer.Ordinal)];

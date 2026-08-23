@@ -5,7 +5,7 @@ source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
 selected-baseline: .opencode/agents/conductor-v3.md
 sources:
   .opencode/agents/conductor-v3.md: 2696d45e25dcc3bbfc0f20445026d5f0213a59e783ba247bd59dc109b112e95c
-final-body-sha256: eb557fde3a24ae0e28155c466300845e7d79ec0981f626b82a7d1c45ffb5d0c0
+final-body-sha256: 8311606d24d3a0d9fdd34b70a8845f467a98367e7123887a04e766c1be845335
 ---
 # conductor-v3 migration
 
@@ -24,5 +24,7 @@ The migration originally recorded filesystem.read=ask to stand for the baseline'
 The instruction body was revised after migration. It asserted that subagents may not spawn other agents — "none of them can, under the current design". That ceased to be true when the reviewer profile gained delegate=allow, and a false invariant in an instruction body is worse than no invariant. The body now states the rule that actually holds: an agent may invoke only the roles named in its own delegates-to, and only where its capability profile grants delegate.
 
 The instruction body was revised after migration, twice. First, the Authority section stopped granting delegation by exception and stated the rule that holds: delegation is a per-role grant carried by each agent's capability profile and its declared delegates-to. Then the architect profile gained that grant, so the request/fulfill discovery loop this body mediated is now a fallback rather than the normal path — architect reaches azure-reader and research-agent itself and folds the findings into its own plan (direct-delegation model), and the conductor fulfils a labeled discovery request only where the harness does not let a subagent delegate or an Azure call fails after one retry, capped at three outer cycles. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires.
+
+The instruction body was revised after migration again, to route per-task review to `task-reviewer` rather than `code-reviewer`. Section 4 now describes a three-pass ladder: two fast passes returning PASS or FAIL with a fix list — checking the test-first discipline as part of the acceptance criteria — then one council pass, with findings surviving that pass tracked in a per-objective collection that routes through architect-v3 before the objective's council review. The rule that a test is never weakened to reach green is unchanged. The orchestrator profile is unchanged, and delegates-to gained task-reviewer. The revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires. See ADR 0005.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

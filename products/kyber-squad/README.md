@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **22 canonical agents** and **26 canonical skills**,
+It maintains a target-neutral, declarative catalog of **23 canonical agents** and **26 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 This canonical tree is the single source of truth from which target-native agent and skill deployments
@@ -31,7 +31,7 @@ products/kyber-squad/
 │   ├── models.yml                      # Model tiers, aliases, and temperature parameters
 │   ├── capabilities.yml                # Capability taxonomy and permission assignments
 │   └── fallbacks.yml                   # Lowering rules and collision resolution for fallback harnesses
-├── agents/                             # 22 canonical agent definition files
+├── agents/                             # 23 canonical agent definition files
 │   ├── architect.md
 │   ├── architect-v3.md
 │   ├── azure-reader.md
@@ -52,6 +52,7 @@ products/kyber-squad/
 │   ├── review-lens.md
 │   ├── review-triage.md
 │   ├── sql-database-architect.md
+│   ├── task-reviewer.md
 │   ├── tauri-dev.md
 │   └── test-dev.md
 ├── skills/                             # 26 canonical skill directories
@@ -88,7 +89,7 @@ products/kyber-squad/
 
 ## Canonical Components
 
-### 1. Agents (22 Canonical Roles)
+### 1. Agents (23 Canonical Roles)
 
 Each agent in `agents/<name>.md` contains LF-normalized UTF-8 Markdown with strict YAML frontmatter conforming to `schemas/agent.schema.json`:
 

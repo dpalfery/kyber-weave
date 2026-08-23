@@ -16,6 +16,7 @@ Parallel code review with an auditable verdict.
 | [Architecture](architecture.md) | The three layers, the two lens seats, the evidence schema, the verdict rules, permissions, configuration |
 | [Rule reference](../ci-pipelines/rule-reference.md#code-review--the-review-council) | Every `KW-REVIEW-*` id |
 | [ADR 0002](../adr/0002-three-layer-review-council-verdict-engine.md) | Three-layer review council and verdict engine decision record |
+| [ADR 0005](../adr/0005-task-level-fast-review.md) | The three-pass ladder: why `task-reviewer` runs first and the council runs once per objective |
 | [Plan](../archive/plans/2026-08-20-code-review-council.md) | Original plan: why it is shaped this way, and what was rejected |
 
 ## The idea in one page
@@ -33,6 +34,30 @@ fail differently:
 - **A verdict engine** turns findings and gate results into `APPROVE`, `REQUEST_CHANGES`, or
   `NEEDS_HUMAN` by fixed rule. It is ordinary unit-tested code, so the same inputs give the
   same answer twice and every decision names the rule that made it.
+
+## Two reviewers, one ladder
+
+The council answers "may this be committed". That is not the question you have after every
+individual task, and paying the council's price to ask it was the reason `task-reviewer` exists.
+
+Each task climbs at most three passes:
+
+| Pass | Reviewer | Answers | On failure |
+|---|---|---|---|
+| 1 | `task-reviewer` | Is the task finished, and does it follow the declared standards? | Fix list back to the worker |
+| 2 | `task-reviewer` | Are those fixes actually in, and did they break anything? | Fix list back to the worker |
+| 3 | `code-reviewer` | Everything the fast pass does not cover | Residual findings go to the conductor's findings collection |
+
+`task-reviewer` is one agent: no lens fan-out, no gate suite, no verdict engine. It returns
+**`PASS` or `FAIL`** and never a verdict — `APPROVE`, `REQUEST_CHANGES`, and `NEEDS_HUMAN` stay
+the engine's, so the two outcomes can never be confused in a transcript. A `PASS` means the task
+is done to standard; it says nothing about merge.
+
+What the fast pass does not cover, and names as uncovered in every report: security modelling,
+authorization and tenancy, performance at scale, blast radius and revertibility, cross-file
+duplication, analyzer triage, dependency supply chain, and test adequacy against coverage. The
+council owns all of them, and runs **once per objective** before any commit or pull request —
+and immediately, skipping the ladder, on any change touching a path `always-human` reserves.
 
 ## Three commands
 

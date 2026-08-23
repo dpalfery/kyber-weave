@@ -10,6 +10,7 @@ last-reviewed: 2026-08-22
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
+  - adr/0005-task-level-fast-review
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -39,7 +40,9 @@ between two runs over one diff. So the last step is arithmetic instead.
 ```mermaid
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
-    Caller["conductor · conductor-v3 · direct invocation"] --> Scope
+    Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
+    Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
+    Ladder -->|"FAIL on pass 2 · once per objective · reserved path"| Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]
@@ -94,6 +97,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 
 | Part | Kind | Location |
 |---|---|---|
+| `task-reviewer` | Canonical agent — the fast per-task pass, ahead of the council | `products/kyber-squad/agents/task-reviewer.md` |
 | `code-reviewer` | Canonical agent — orchestrates, adjudicates, holds the skeptic | `products/kyber-squad/agents/code-reviewer.md` |
 | `review-lens` | Canonical agent — one judgement seat, spawned N times | `products/kyber-squad/agents/review-lens.md` |
 | `review-triage` | Canonical agent — one triage seat, `fast` model profile | `products/kyber-squad/agents/review-triage.md` |
@@ -253,6 +257,7 @@ harness.
 
 | Role | Profile | read | search | write | execute | delegate |
 |---|---|---|---|---|---|---|
+| `task-reviewer` | `investigator` | allow | allow | deny | **allow** | deny |
 | `code-reviewer` | `reviewer` | allow | allow | **ask** | **allow** | **allow** |
 | `review-lens` | `read-only` | allow | allow | deny | deny | deny |
 | `review-triage` | `read-only` | allow | allow | deny | deny | deny |
@@ -266,6 +271,13 @@ structurally forced to make one. It is exercised through a single declared entry
 one artifact — its findings — and on harnesses that cannot express `ask` the lattice safely
 narrows it to `deny` and the findings come back in the response instead. `network.publish`
 stays `deny`. **The role that judges a change never ships it.**
+
+`task-reviewer` holds `investigator`, and the two grants that differ from a lens seat are the
+whole design. It holds `process.execute` because the conductors do not — they cannot produce a
+diff to hand it, so it establishes its own scope with `git diff`; the grant is for reading the
+change, not for building it, and the role runs no gate. It holds `delegate: deny` because one
+agent is the point: a fan-out here would be the council with extra steps and none of its
+evidence.
 
 `delegate` on the reviewer is what lets it fan out the council, and it is also what gives
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
@@ -314,7 +326,14 @@ the review configuration escalates through the review configuration.
 
 ## Modes
 
-Owned by the `dp-code-reviewer` skill, which wraps the review rather than performing it.
+Two of these are the council's, and one is not. Every task climbs a three-pass ladder first:
+`task-reviewer` at passes 1 and 2, returning `PASS` or `FAIL` with a fix list, then
+`code-reviewer` at pass 3. Findings surviving pass 3 enter the conductor's per-objective
+findings collection, which routes through `architect` before the objective's council review.
+See [ADR 0005](../adr/0005-task-level-fast-review.md).
+
+The council's own modes are owned by the `dp-code-reviewer` skill, which wraps the review
+rather than performing it.
 
 | Mode | Behaviour | When |
 |---|---|---|
