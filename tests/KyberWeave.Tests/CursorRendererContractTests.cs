@@ -111,10 +111,12 @@ public sealed class CursorRendererContractTests
                 result.Files,
                 f => f.RelativePath == $".cursor/agents/{agent.Name}.md");
 
-            (YamlMappingNode frontmatter, string body) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
-            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name"));
+            (YamlMappingNode frontmatter, string body) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                agent.Name);
+            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
             Assert.True(
-                string.Equals(agent.Description, RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
+                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
             // Model resolution: verify against loaded ModelProfiles. Every assertion names
@@ -123,13 +125,13 @@ public sealed class CursorRendererContractTests
             if (modelProfile.HarnessModels.TryGetValue("cursor", out string? expectedModel))
             {
                 Assert.True(
-                    string.Equals(expectedModel, RequireScalar(frontmatter, "model"), StringComparison.Ordinal),
+                    string.Equals(expectedModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
                     $"Agent '{agent.Name}' model mismatch: expected '{expectedModel}'.");
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
             {
                 Assert.True(
-                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model"), StringComparison.Ordinal),
+                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
                     $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
             }
             else
@@ -150,7 +152,7 @@ public sealed class CursorRendererContractTests
             if (expectedReadOnly)
             {
                 Assert.True(
-                    string.Equals("true", RequireScalar(frontmatter, "readonly"), StringComparison.Ordinal),
+                    string.Equals("true", RequireScalar(frontmatter, "readonly", agent.Name), StringComparison.Ordinal),
                     $"Agent '{agent.Name}' should carry readonly: true.");
             }
             else
@@ -207,16 +209,18 @@ public sealed class CursorRendererContractTests
             }
 
             SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == path);
-            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
-            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
+            (YamlMappingNode frontmatter, string skillBody) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                skill.Name);
+            Assert.Equal(skill.Name, RequireScalar(frontmatter, "name", skill.Name));
             string expectedDescription = string.Join(" ", skill.Description.Split(
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             Assert.True(
-                string.Equals(expectedDescription, RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
+                string.Equals(expectedDescription, RequireScalar(frontmatter, "description", skill.Name), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' description mismatch.");
             Assert.True(
-                string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
+                string.Equals("MIT", RequireScalar(frontmatter, "license", skill.Name), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' license mismatch.");
 
             // Exact comparison with the normalized canonical body: the renderer appends it
@@ -305,11 +309,13 @@ public sealed class CursorRendererContractTests
             result.Files,
             f => f.RelativePath == $".cursor/agents/{agentName}.md");
 
-        (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agentName);
         if (expectedReadOnly)
         {
             Assert.True(
-                string.Equals("true", RequireScalar(frontmatter, "readonly"), StringComparison.Ordinal),
+                string.Equals("true", RequireScalar(frontmatter, "readonly", agentName), StringComparison.Ordinal),
                 $"Agent '{agentName}' should carry readonly: true.");
         }
         else
@@ -320,12 +326,14 @@ public sealed class CursorRendererContractTests
         }
     }
 
-    private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text)
+    private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
     {
         const string delimiter = "---\n";
-        Assert.StartsWith(delimiter, text, StringComparison.Ordinal);
+        Assert.True(
+            text.StartsWith(delimiter, StringComparison.Ordinal),
+            $"'{identity}' is missing the opening frontmatter delimiter.");
         int end = text.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
-        Assert.True(end > 0, "Expected a closing '---' frontmatter delimiter.");
+        Assert.True(end > 0, $"'{identity}' is missing a closing '---' frontmatter delimiter.");
 
         string yaml = text[delimiter.Length..(end + 1)];
         string body = text[(end + 5)..];
@@ -336,14 +344,18 @@ public sealed class CursorRendererContractTests
         return (root, body);
     }
 
-    private static string RequireScalar(YamlMappingNode node, string key)
+    private static string RequireScalar(YamlMappingNode node, string key, string identity)
     {
         if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
         {
-            throw new InvalidOperationException($"Frontmatter is missing required key '{key}'.");
+            string presentKeys = string.Join(", ", node.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(existing => existing.Value ?? "<null>"));
+            throw new InvalidOperationException(
+                $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
         }
 
         return Assert.IsType<YamlScalarNode>(value).Value
-            ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
+            ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
 }
