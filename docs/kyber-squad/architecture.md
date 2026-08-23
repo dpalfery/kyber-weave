@@ -248,8 +248,8 @@ and validates.
   renderer fails the whole request — install and update are all-or-nothing across the
   requested target set, never a partial render of the targets that happen to be covered.
 - **Dispatch**: each supported target's canonical source goes to the `ISquadRenderer` that
-  owns it (today, only `CopilotRenderer`, for `.github/agents/*.agent.md` and
-  `.github/skills/*/SKILL.md`).
+  owns it — `CopilotRenderer` for `.github/agents/*.agent.md` and `.github/skills/*/SKILL.md`,
+  and `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`.
 - **Validate**: the registry re-checks the merged output — portable paths stay inside the
   extraction root, every file's target was actually requested, the native/fallback
   single-projection rules from [section 3](#3-role-skill-lowering-and-namespace-resolution)
@@ -266,8 +266,9 @@ and validates.
   Base tools (`vscode`, `todo`) are granted unconditionally, while capability-governed built-ins
   and single-quoted MCP server wildcards (`'codegraph/*'`, `'kyber-weave/*'`, `'context7/*'`) are
   capability-gated (`filesystem.read` for non-orchestrator roles).
-- **Coverage today**: only `copilot` has a renderer. `kyber-weave squad doctor` reports which
-  targets are covered; `docs/todo/<target>.md` has what implementing the rest needs.
+- **Coverage today**: `copilot` (native) and `antigravity` (fallback role-skill lowering to
+  `.agents/skills/`) have renderers. `kyber-weave squad doctor` reports which targets are
+  covered; `docs/todo/<target>.md` has what implementing the rest needs.
 
 ---
 

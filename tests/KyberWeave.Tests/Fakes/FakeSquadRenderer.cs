@@ -244,7 +244,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         SquadTarget.OpenCode => $".opencode/skills/{skillName}/SKILL.md",
         SquadTarget.Kilo => $".kilo/skills/{skillName}/SKILL.md",
         SquadTarget.Gemini => $".gemini/skills/{skillName}/SKILL.md",
-        SquadTarget.Antigravity => $".agent/skills/{skillName}/SKILL.md",
+        SquadTarget.Antigravity => $".agents/skills/{skillName}/SKILL.md",
         SquadTarget.Warp => $".warp/skills/{skillName}/SKILL.md",
         SquadTarget.Factory => $".factory/skills/{skillName}/SKILL.md",
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")

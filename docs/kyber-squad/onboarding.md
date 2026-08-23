@@ -64,9 +64,10 @@ Kyber-Squad supports 10 coding harnesses:
 
 **Renderer coverage today**: this is the approved roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
-[architecture.md](architecture.md#8-rendering)) — as of this writing only `copilot` has a
-renderer. Requesting any other target fails before the release is even downloaded, naming
-the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
+[architecture.md](architecture.md#8-rendering)) — as of this writing `copilot` and
+`antigravity` have renderers (`antigravity` is fallback role-skill lowering to
+`.agents/skills/`). Requesting any other target fails before the release is even downloaded,
+naming the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
 implementer needs to add it. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
