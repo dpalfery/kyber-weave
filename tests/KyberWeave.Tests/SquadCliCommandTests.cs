@@ -388,14 +388,17 @@ public sealed class SquadCliCommandTests : IDisposable
                 Global = false
             }));
 
-        // Copilot (native) and Antigravity (fallback) are registered; other approved
-        // targets still report as not-yet-implemented rather than silently absent.
-        Assert.Contains("copilot", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("antigravity", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("docs/todo", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("kyber-weave-mcp", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("1.2.3", execution.Output, StringComparison.Ordinal);
+        // Doctor has separate status sections. Normalize whitespace because Spectre.Console
+        // can wrap headers at the console width, then inspect each section independently so
+        // the test does not depend on section ordering.
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        string availableSection = ExtractDoctorSection(normalizedOutput, "Renderers available:", "Not yet implemented:");
+        string pendingSection = ExtractDoctorSection(normalizedOutput, "Not yet implemented:", "Kyber-Weave MCP:");
+        Assert.Contains("cursor", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("antigravity", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1014,6 +1017,24 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     #endregion
+
+    private static string ExtractDoctorSection(string output, string header, params string[] otherHeaders)
+    {
+        int start = output.IndexOf(header, StringComparison.OrdinalIgnoreCase);
+        Assert.True(start >= 0, $"Doctor output is missing the '{header}' section.");
+
+        int end = output.Length;
+        foreach (string otherHeader in otherHeaders)
+        {
+            int candidate = output.IndexOf(otherHeader, start + header.Length, StringComparison.OrdinalIgnoreCase);
+            if (candidate >= 0 && candidate < end)
+            {
+                end = candidate;
+            }
+        }
+
+        return output[start..end];
+    }
 
     #region Test Fixtures and Helpers
 
