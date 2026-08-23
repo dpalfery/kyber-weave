@@ -195,10 +195,12 @@ public sealed class CursorRenderer : ISquadRenderer
             return false;
         }
 
-        bool allowsWrite = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+        bool allowsWrite = ReadOnlyEnforcedCapabilities.Contains("filesystem.write", StringComparer.Ordinal) &&
+                           profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
                            writeDecision == SquadPermissionDecision.Allow;
 
-        bool allowsExecute = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision executeDecision) &&
+        bool allowsExecute = ReadOnlyEnforcedCapabilities.Contains("process.execute", StringComparer.Ordinal) &&
+                             profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision executeDecision) &&
                              executeDecision == SquadPermissionDecision.Allow;
 
         // If either write or execute is allowed, readonly is omitted (default false).
@@ -231,7 +233,9 @@ public sealed class CursorRenderer : ISquadRenderer
         // For readonly: true agents, filesystem.write and process.execute are enforced by the boolean
         // and excluded from unexpressed capability accounting.
         List<string> unexpressed = isReadOnly
-            ? nonDenyCapabilities.Where(cap => cap is not ("filesystem.write" or "process.execute")).ToList()
+            ? nonDenyCapabilities
+                .Where(cap => !ReadOnlyEnforcedCapabilities.Contains(cap, StringComparer.Ordinal))
+                .ToList()
             : nonDenyCapabilities;
 
         // Without the readonly boolean, Cursor grants file edits and terminal execution. A

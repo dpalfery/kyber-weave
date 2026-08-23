@@ -208,7 +208,9 @@ public sealed class CursorRendererContractTests
             Assert.True(
                 string.Equals(expectedDescription, RequireScalar(frontmatter, "description"), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' description mismatch.");
-            Assert.Equal("MIT", RequireScalar(frontmatter, "license"));
+            Assert.True(
+                string.Equals("MIT", RequireScalar(frontmatter, "license"), StringComparison.Ordinal),
+                $"Skill '{skill.Name}' license mismatch.");
 
             // Exact comparison with the normalized canonical body: the renderer appends it
             // verbatim, so duplication or padding must fail, naming the offender.
@@ -218,7 +220,9 @@ public sealed class CursorRendererContractTests
                 expectedSkillBody += "\n";
             }
 
-            Assert.Equal(expectedSkillBody, skillBody);
+            Assert.True(
+                string.Equals(expectedSkillBody, skillBody, StringComparison.Ordinal),
+                $"Skill '{skill.Name}' body mismatch.");
         }
 
         // Degradations: exactly the non-all-deny agents carry 'permission-not-expressible'
@@ -289,11 +293,15 @@ public sealed class CursorRendererContractTests
         (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span));
         if (expectedReadOnly)
         {
-            Assert.Equal("true", RequireScalar(frontmatter, "readonly"));
+            Assert.True(
+                string.Equals("true", RequireScalar(frontmatter, "readonly"), StringComparison.Ordinal),
+                $"Agent '{agentName}' should carry readonly: true.");
         }
         else
         {
-            Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")));
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("readonly")),
+                $"Agent '{agentName}' should omit readonly.");
         }
     }
 
