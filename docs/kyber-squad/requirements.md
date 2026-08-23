@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-23
 status: current
 ---
 
@@ -18,7 +18,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 22 canonical agent instruction bodies and 25 canonical skill source directories under `products/kyber-squad/`. Generated role-skill projections do not alter the source inventory, and generated APM, plugin, or harness trees are never tracked in source control. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 22 canonical agent instruction bodies and 26 canonical skill source directories under `products/kyber-squad/`. Generated role-skill projections do not alter the source inventory, and generated APM, plugin, or harness trees are never tracked in source control. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. |
 | **KS-003** | **Deterministic Target Resolution**: Resolve deployment targets from explicit CLI flags, saved repository configuration, existing receipts (for update/uninstall), or strong filesystem markers. The `all` keyword expands strictly to the approved 10-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `gemini`, `antigravity`, `warp`, `factory`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. |
@@ -58,7 +58,7 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Kilo** | Native `.kilo/agents` | Supported | Not lowered | Native execution |
 | **Gemini CLI** | No native agent primitive | Single-agent context | Lowered to role-skills (`role-*` on collision) | Safety-narrowed |
 | **Antigravity** | No native agent primitive | Single-agent context | Lowered to role-skills (`role-*` on collision) | Safety-narrowed |
-| **Warp** | Native `.warp/` | Supported | Not lowered | Native execution |
+| **Warp** | No native agent primitive | Single-agent context | Lowered to role-skills (`role-*` on collision) | Safety-narrowed |
 | **Factory Droids** | Native `.factory/` | Supported | Not lowered | Native execution |
 
 ---

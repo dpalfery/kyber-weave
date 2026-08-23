@@ -58,8 +58,8 @@ flowchart TD
     end
 
     subgraph TargetHarnesses["Target Harness Deployments"]
-        NativeTargets["Native Agent Targets\n(Claude, Cursor, Codex, Copilot, OpenCode, Kilo, Warp, Factory)"]
-        FallbackTargets["Role-Skill Targets\n(Gemini, Antigravity)"]
+        NativeTargets["Native Agent Targets\n(Claude, Cursor, Codex, Copilot, OpenCode, Kilo, Factory)"]
+        FallbackTargets["Role-Skill Targets\n(Gemini, Antigravity, Warp)"]
     end
 
     CanonicalSource --> SquadSourceLoader
@@ -103,7 +103,7 @@ graph LR
 
 ## 3. Role-Skill Lowering and Namespace Resolution
 
-Harnesses without native agent primitives (such as Gemini CLI and Antigravity) receive agent capabilities through **agent-to-role-skill lowering**, governed by `profiles/fallbacks.yml`.
+Harnesses without native agent primitives (such as Gemini CLI, Antigravity, and Warp) receive agent capabilities through **agent-to-role-skill lowering**, governed by `profiles/fallbacks.yml`.
 
 The canonical agent and skill namespaces intersect at exactly 9 names:
 
