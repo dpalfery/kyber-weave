@@ -12,9 +12,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <remarks>
 /// <para>
 /// Native agent target: canonical agents render as Codex's native agent TOML primitive at
-/// <c>.codex/agents/&lt;name&gt;.toml</c>. Codex agent TOML files contain top-level fields
-/// including <c>name</c>, <c>description</c>, optional <c>model</c>, and multi-line
-/// <c>developer_instructions</c> (or <c>instructions</c>) containing the agent's body.
+/// <c>.codex/agents/&lt;name&gt;.toml</c>. Codex agent TOML files contain the required
+/// top-level fields <c>name</c>, <c>description</c>, and multi-line
+/// <c>developer_instructions</c>, plus optional <c>model</c>.
 /// </para>
 /// <para>
 /// Canonical skills render as harness skills at <c>.codex/skills/&lt;name&gt;/SKILL.md</c>
@@ -134,7 +134,7 @@ public sealed class CodexRenderer : ISquadRenderer
             normalizedBody += "\n";
         }
 
-        builder.Append("instructions = \"\"\"\n");
+        builder.Append("developer_instructions = \"\"\"\n");
         builder.Append(EscapeTomlMultiline(normalizedBody));
         builder.Append("\"\"\"\n");
 
@@ -204,8 +204,8 @@ public sealed class CodexRenderer : ISquadRenderer
             return null;
         }
 
-        StringBuilder details = new();
-        details.Append($"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Codex agents cannot express capability permissions; the deployed agent's behaviour is governed by the harness default, not the canonical profile.");
+        string details =
+            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Codex agents cannot express capability permissions; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
 
         return new SquadDegradationRecord(
             Target: "codex",
@@ -213,7 +213,7 @@ public sealed class CodexRenderer : ISquadRenderer
             OutputIdentity: agent.Name,
             Code: "permission-not-expressible",
             InstructionDigest: agent.BodyDigest,
-            Details: details.ToString());
+            Details: details);
     }
 
     private static string EscapeTomlString(string value) =>
@@ -223,6 +223,11 @@ public sealed class CodexRenderer : ISquadRenderer
              .Replace("\n", "\\n", StringComparison.Ordinal)
              .Replace("\t", "\\t", StringComparison.Ordinal);
 
+    /// <remarks>
+    /// Backslashes must be escaped before triple quotes: otherwise a body containing
+    /// <c>\"""</c> (or any backslash) produces invalid TOML when quotes are escaped first.
+    /// </remarks>
     private static string EscapeTomlMultiline(string value) =>
-        value.Replace("\"\"\"", "\\\"\\\"\\\"", StringComparison.Ordinal);
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+             .Replace("\"\"\"", "\\\"\\\"\\\"", StringComparison.Ordinal);
 }
