@@ -39,18 +39,14 @@ public sealed class CodexRenderer : ISquadRenderer
 
     private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
 
-    private static readonly string[] GovernedCapabilities =
-    [
-        "filesystem.read",
-        "filesystem.search",
-        "filesystem.write",
-        "process.execute",
-        "network.read",
-        "network.publish",
-        "delegate"
-    ];
-
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+
+    /// <summary>
+    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
+    /// registry may dispatch renderers concurrently; serialization takes this lock so a
+    /// shared static instance cannot interleave emitter state.
+    /// </summary>
+    private static readonly object SerializerLock = new();
 
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Codex];
@@ -80,13 +76,21 @@ public sealed class CodexRenderer : ISquadRenderer
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
+        // The declared vocabulary, not a renderer-local copy: a capability added to
+        // profiles/capabilities.yml must appear in degradation text without a renderer
+        // change. Sorted for deterministic details strings.
+        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
+
         foreach (SquadAgent agent in source.Agents)
         {
             files.Add(RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles));
 
-            SquadDegradationRecord? degradation = BuildDegradationRecord(agent, source.CapabilityProfiles.Profiles);
+            SquadDegradationRecord? degradation = BuildDegradationRecord(
+                agent,
+                source.CapabilityProfiles.Profiles,
+                capabilityVocabulary);
             if (degradation is not null)
             {
                 degradations.Add(degradation);
@@ -158,7 +162,11 @@ public sealed class CodexRenderer : ISquadRenderer
             ["license"] = "MIT"
         };
 
-        string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
+        string content;
+        lock (SerializerLock)
+        {
+            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
+        }
 
         return new SquadDeploymentFile(
             $"{SkillsDirectory}/{skill.Name}/SKILL.md",
@@ -187,14 +195,15 @@ public sealed class CodexRenderer : ISquadRenderer
 
     private static SquadDegradationRecord? BuildDegradationRecord(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> capabilityVocabulary)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
             return null;
         }
 
-        List<string> unexpressed = GovernedCapabilities
+        List<string> unexpressed = capabilityVocabulary
             .Where(cap => profile.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
                           decision != SquadPermissionDecision.Deny)
             .ToList();

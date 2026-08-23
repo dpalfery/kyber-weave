@@ -27,20 +27,6 @@ public sealed class CodexRendererContractTests : IDisposable
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     /// <summary>
-    /// Governed capabilities expected to trigger degradation records when non-deny.
-    /// </summary>
-    private static readonly string[] GovernedCapabilities =
-    [
-        "filesystem.read",
-        "filesystem.search",
-        "filesystem.write",
-        "process.execute",
-        "network.read",
-        "network.publish",
-        "delegate"
-    ];
-
-    /// <summary>
     /// Primary agents emitted as native agents whose same-named canonical skills are suppressed
     /// per the single-projection rule.
     /// </summary>
@@ -199,11 +185,12 @@ public sealed class CodexRendererContractTests : IDisposable
         }
 
         // Degradations: every agent with non-deny capability profile must carry 'permission-not-expressible'
+        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
         string[] expectedDegraded = source.Agents
             .Where(a =>
             {
                 SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                return GovernedCapabilities.Any(cap =>
+                return capabilityVocabulary.Any(cap =>
                     prof.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
                     decision != SquadPermissionDecision.Deny);
             })
