@@ -20,7 +20,7 @@ namespace KyberWeave.Tests;
 /// and structured degradation accounting for <c>safety-narrowed</c> and
 /// <c>permission-not-expressible</c> codes.
 /// </remarks>
-public sealed class ClaudeRendererContractTests
+public sealed class ClaudeRendererContractTests : IDisposable
 {
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
@@ -73,6 +73,12 @@ public sealed class ClaudeRendererContractTests
     /// expected file count and per-skill assertions.
     /// </summary>
     private static readonly HashSet<string> SuppressedSkillNames = ["conductor", "conductor-v3"];
+
+    public void Dispose()
+    {
+        // No disposable state: the suite only reads the checked-in corpus. IDisposable is
+        // implemented per the test-coding-standard so adding fixtures later has a home.
+    }
 
     [Fact]
     public void SupportedTargets_IsExactlyClaude()
@@ -149,11 +155,20 @@ public sealed class ClaudeRendererContractTests
             // Model resolution: verify against loaded ModelProfiles. Every assertion names
             // the agent so a failure identifies the offender out of the 22-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
-            if (modelProfile.HarnessModels.TryGetValue("claude", out string? expectedModel))
+            if (modelProfile.HarnessModels.TryGetValue("claude", out string? claudeHarnessModel))
             {
-                Assert.True(
-                    string.Equals(expectedModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
-                    $"Agent '{agent.Name}' model mismatch: expected '{expectedModel}'.");
+                if (string.Equals(claudeHarnessModel, "inherit", StringComparison.Ordinal))
+                {
+                    Assert.False(
+                        frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                        $"Agent '{agent.Name}' should omit 'model' (claude harness override is inherit).");
+                }
+                else
+                {
+                    Assert.True(
+                        string.Equals(claudeHarnessModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
+                        $"Agent '{agent.Name}' model mismatch: expected '{claudeHarnessModel}'.");
+                }
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
             {
@@ -295,8 +310,9 @@ public sealed class ClaudeRendererContractTests
                 $"Skill '{skill.Name}' body mismatch.");
         }
 
-        // Degradations: 'ask' capabilities produce safety-narrowed; non-empty DelegatesTo
-        // produces permission-not-expressible. An agent may carry both records.
+        // Degradations: 'ask' capabilities produce safety-narrowed; allowed network.publish
+        // and delegate-allow rosters produce permission-not-expressible. An agent may carry
+        // both records, and one permission-not-expressible record may combine both causes.
         string[] expectedSafetyNarrowed = source.Agents
             .Where(a =>
             {
@@ -308,7 +324,16 @@ public sealed class ClaudeRendererContractTests
             .ToArray();
 
         string[] expectedPermissionNotExpressible = source.Agents
-            .Where(a => a.DelegatesTo.Count > 0)
+            .Where(a =>
+            {
+                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool publishAllowed = prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                                      publishDecision == SquadPermissionDecision.Allow;
+                bool rosterLimited = prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                                     delegateDecision == SquadPermissionDecision.Allow &&
+                                     a.DelegatesTo.Count > 0;
+                return publishAllowed || rosterLimited;
+            })
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
@@ -329,6 +354,30 @@ public sealed class ClaudeRendererContractTests
         Assert.Equal(
             expectedPermissionNotExpressible,
             permissionNotExpressible.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+
+        foreach (SquadDegradationRecord degradation in permissionNotExpressible)
+        {
+            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
+            SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            if (prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                publishDecision == SquadPermissionDecision.Allow)
+            {
+                Assert.Contains(
+                    "network.publish",
+                    degradation.Details,
+                    StringComparison.Ordinal);
+            }
+
+            if (prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                delegateDecision == SquadPermissionDecision.Allow &&
+                agent.DelegatesTo.Count > 0)
+            {
+                Assert.Contains(
+                    "Roster:",
+                    degradation.Details,
+                    StringComparison.Ordinal);
+            }
+        }
 
         foreach (SquadDegradationRecord degradation in result.Degradations)
         {

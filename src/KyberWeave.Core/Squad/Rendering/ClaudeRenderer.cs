@@ -342,9 +342,29 @@ public sealed class ClaudeRenderer : ISquadRenderer
                     "'deny' and the corresponding tools are withheld from the agent's 'tools' list.");
         }
 
+        List<string> notExpressibleDetails = [];
+
+        if (profile.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+            publishDecision == SquadPermissionDecision.Allow)
+        {
+            notExpressibleDetails.Add(
+                "Capability 'network.publish' is allowed but no built-in Claude Code tool exists to express it.");
+        }
+
         // Parentheses roster applies for `claude --agent` main-thread use; official docs
         // (2026-08-23) state it is ignored when the same file runs as a nested subagent.
-        if (agent.DelegatesTo.Count > 0)
+        if (profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+            delegateDecision == SquadPermissionDecision.Allow &&
+            agent.DelegatesTo.Count > 0)
+        {
+            notExpressibleDetails.Add(
+                "Claude Code ignores Agent(roster) parentheses when this definition " +
+                "runs as a nested subagent; the permitted delegation roster is not enforced " +
+                "for nested Task/Agent spawns. Roster: " +
+                string.Join(", ", agent.DelegatesTo) + ".");
+        }
+
+        if (notExpressibleDetails.Count > 0)
         {
             yield return new SquadDegradationRecord(
                 Target: "claude",
@@ -352,10 +372,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 OutputIdentity: agent.Name,
                 Code: "permission-not-expressible",
                 InstructionDigest: agent.BodyDigest,
-                Details: "Claude Code ignores Agent(roster) parentheses when this definition " +
-                    "runs as a nested subagent; the permitted delegation roster is not enforced " +
-                    "for nested Task/Agent spawns. Roster: " +
-                    string.Join(", ", agent.DelegatesTo) + ".");
+                Details: string.Join(" ", notExpressibleDetails));
         }
     }
 
