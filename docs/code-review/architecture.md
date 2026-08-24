@@ -51,6 +51,7 @@ flowchart TD
     Ladder -->|"FAIL · council-only"| Scope
     Ladder -->|"FAIL on pass 2 · that task's pass 3"| Scope
     TaskDone -->|"after task completes via ladder or direct review"| ObjReview["objective-level code-reviewer<br/>once per objective"]
+    ObjReview --> Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]
@@ -88,6 +89,11 @@ flowchart TD
     Out -->|"task-level APPROVE"| TaskDone
     Out -->|"REQUEST_CHANGES · residual findings"| Findings["per-objective findings collection"]
     Out -->|"NEEDS_HUMAN · stop"| Human["terminal human handoff"]
+    Out -->|"objective-level APPROVE · all contract tests GREEN"| ObjComplete["objective complete"]
+    Out -->|"objective-level REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
+    ObjRemed --> Worker
+    ObjRemed --> ObjReview
+    ObjRemed -->|"three-cycle / five-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
     Findings -->|"architect drain before objective review"| ObjReview
 
     Cfg -.-> Gates

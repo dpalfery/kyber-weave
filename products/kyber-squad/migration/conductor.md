@@ -6,7 +6,7 @@ selected-baseline: .opencode/agents/conductor-v2.md
 sources:
   .github/agents/conductor-v2.agent.md: e82cce130d47eba57ffb1aa1a9b53592e78879ff40f9743158359530375b7ef9
   .opencode/agents/conductor-v2.md: 681ecbd25ebf61ed3d0550bc1f4e3e50639d7c155db1003aaa5b31a64d600180
-final-body-sha256: fa25ba977c6a1e56709d505e0834326292dad0cd7bb3110bc4373c6df359e9a9
+final-body-sha256: dd1377755b63f3dd6e09c65ad6fe091859b57beb332b9407691cba1279e11136
 ---
 # conductor migration
 
@@ -28,12 +28,14 @@ The instruction body was revised after migration, twice. First, the Authority se
 
 The instruction body was revised after migration again, to route per-task review to `task-reviewer` rather than `code-reviewer`. Section 4 now describes a three-pass ladder: two fast passes returning PASS or FAIL with a fix list, then one council pass, with findings surviving that pass tracked in a per-objective collection that routes through architect before the objective's council review. The orchestrator profile is unchanged — the collection is held in task state precisely because this role holds filesystem.write=deny — and delegates-to gained task-reviewer. The revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires. See ADR 0005.
 
-The instruction body was revised after migration once more to close review-contract gaps: the ladder eligibility statement now names human-reserved and high-risk bypasses plus council-only escalations as council entries alongside a double fast-pass failure; the high-risk bypass list gained tenancy and revertibility; task-reviewer and rework payloads propagate the Test-contract row with RED/GREEN evidence verbatim; and "judgement" was normalized to "judgment" on the human-reserved path. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
+The instruction body was revised after migration once more to close review-contract gaps: the ladder eligibility statement now names human-reserved and high-risk bypasses plus council-only escalations as council entries alongside a double fast-pass failure; the high-risk bypass list gained tenancy and revertibility; task-reviewer invocations carry the Test-contract row with RED/GREEN evidence verbatim; rework items carry the Test-contract row but not stale evidence — before pass 2 the worker or `test-dev` must regenerate fresh RED/GREEN evidence against the current tree; and "judgement" was normalized to "judgment" on the human-reserved path. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again to gate every `task-reviewer` invocation on a Test-contract row with matching RED/GREEN evidence (missing evidence sequences `test-dev` or routes to `code-reviewer`), and to require both `APPROVE` and green contract tests before objective completion. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again to align the objective code-reviewer loop with the three-cycle termination in `dp-code-reviewer`, and to treat `NEEDS_HUMAN` as a terminal human handoff that never enters the findings collection or architect drain. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again to unify the task-level outcome contract: direct `code-reviewer` `REQUEST_CHANGES` findings join pass-3 residuals in the per-objective collection, completion is tracked through the ladder or a direct path, and every residual finding in the collection routes through architect before the objective review. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
+
+The instruction body was revised after migration again to require fresh RED/GREEN evidence before rework pass 2 and to route objective-level `REQUEST_CHANGES` through the `dp-code-reviewer` remediation loop until `APPROVE` or that skill's terminal escalation rules. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.
