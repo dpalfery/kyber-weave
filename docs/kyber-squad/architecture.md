@@ -24,7 +24,7 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments across 10 target coding harnesses.
+atomic, recoverable deployments across 9 target coding harnesses.
 
 ---
 
@@ -45,7 +45,7 @@ flowchart TD
     end
 
     subgraph Compiler["Target Resolution & Lowering"]
-        SquadTargetResolver["SquadTargetResolver\n(10 Harness Targets)"]
+        SquadTargetResolver["SquadTargetResolver\n(9 Harness Targets)"]
         Lattice["Semantic Permission Lattice\n(deny < ask < allow)"]
         Lowering["Role-Skill Lowering\n(Shared vs Collision role-*)"]
     end
@@ -58,8 +58,8 @@ flowchart TD
     end
 
     subgraph TargetHarnesses["Target Harness Deployments"]
-        NativeTargets["Native Agent Targets\n(Claude, Cursor, Codex, Copilot, OpenCode, Kilo, Warp, Factory)"]
-        FallbackTargets["Role-Skill Targets\n(Gemini, Antigravity)"]
+        NativeTargets["Native Agent Targets\n(Claude, Cursor, Codex, Copilot, OpenCode, Kilo, Factory)"]
+        FallbackTargets["Role-Skill Targets\n(Antigravity, Warp)"]
     end
 
     CanonicalSource --> SquadSourceLoader
@@ -103,7 +103,7 @@ graph LR
 
 ## 3. Role-Skill Lowering and Namespace Resolution
 
-Harnesses without native agent primitives (such as Gemini CLI and Antigravity) receive agent capabilities through **agent-to-role-skill lowering**, governed by `profiles/fallbacks.yml`.
+Harnesses without native agent primitives (such as Antigravity and Warp) receive agent capabilities through **agent-to-role-skill lowering**, governed by `profiles/fallbacks.yml`.
 
 The canonical agent and skill namespaces intersect at exactly 9 names:
 

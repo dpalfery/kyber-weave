@@ -79,7 +79,6 @@ public static class SquadTargetResolver
             ],
             [SquadTarget.OpenCode] = [new(".opencode", true)],
             [SquadTarget.Kilo] = [new(".kilo", true)],
-            [SquadTarget.Gemini] = [new(".gemini", true)],
             [SquadTarget.Warp] = [new(".warp", true)],
             [SquadTarget.Factory] = [new(".factory", true)]
         };

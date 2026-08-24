@@ -9,7 +9,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadTargetResolutionTests : IDisposable
 {
-    private static readonly SquadTarget[] TenTargets =
+    private static readonly SquadTarget[] NineTargets =
     [
         SquadTarget.Codex,
         SquadTarget.Cursor,
@@ -17,7 +17,6 @@ public sealed class SquadTargetResolutionTests : IDisposable
         SquadTarget.Copilot,
         SquadTarget.OpenCode,
         SquadTarget.Kilo,
-        SquadTarget.Gemini,
         SquadTarget.Antigravity,
         SquadTarget.Warp,
         SquadTarget.Factory
@@ -37,17 +36,16 @@ public sealed class SquadTargetResolutionTests : IDisposable
         { ".github/hooks", true, SquadTarget.Copilot },
         { ".opencode", true, SquadTarget.OpenCode },
         { ".kilo", true, SquadTarget.Kilo },
-        { ".gemini", true, SquadTarget.Gemini },
         { ".warp", true, SquadTarget.Warp },
         { ".factory", true, SquadTarget.Factory }
     };
 
     [Fact]
-    public void CatalogContainsExactlyTenTargetsInStableOrder()
+    public void CatalogContainsExactlyNineTargetsInStableOrder()
     {
-        Assert.Equal(TenTargets, SquadTargetCatalog.All);
+        Assert.Equal(NineTargets, SquadTargetCatalog.All);
         Assert.Equal(
-            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "gemini", "antigravity", "warp", "factory"],
+            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory"],
             SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
     }
 
@@ -63,11 +61,11 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void ParseAllExpandsToTheApprovedTenTargetRoster()
+    public void ParseAllExpandsToTheApprovedNineTargetRoster()
     {
         IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 
-        Assert.Equal(TenTargets, targets);
+        Assert.Equal(NineTargets, targets);
     }
 
     [Fact]
@@ -133,7 +131,6 @@ public sealed class SquadTargetResolutionTests : IDisposable
             SquadTarget.Claude,
             SquadTarget.OpenCode,
             SquadTarget.Kilo,
-            SquadTarget.Gemini,
             SquadTarget.Antigravity,
             SquadTarget.Factory);
     }
@@ -163,7 +160,6 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [InlineData(".codex", false)]
     [InlineData(".cursor", false)]
     [InlineData(".claude", false)]
-    [InlineData(".gemini", false)]
     public void InstallGenericInstructionAndWrongKindFixturesDoNotSelectATarget(
         string relativePath,
         bool isDirectory)

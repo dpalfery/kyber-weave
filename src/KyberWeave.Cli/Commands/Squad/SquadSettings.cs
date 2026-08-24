@@ -12,9 +12,9 @@ public sealed class SquadInstallSettings : CommandSettings
     [Description("The deployment root directory. Defaults to the current directory.")]
     public string Path { get; set; } = ".";
 
-    /// <summary>Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, gemini, antigravity, warp, factory, all.</summary>
+    /// <summary>Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, all.</summary>
     [CommandOption("-t|--target <TARGETS>")]
-    [Description("Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, gemini, antigravity, warp, factory, all.")]
+    [Description("Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, all.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
@@ -59,7 +59,7 @@ public sealed class SquadUpdateSettings : CommandSettings
 
     /// <summary>Optional harness target(s) to restrict update to.</summary>
     [CommandOption("-t|--target <TARGETS>")]
-    [Description("Harness target(s) to update: codex, cursor, claude, copilot, opencode, kilo, gemini, antigravity, warp, factory, all.")]
+    [Description("Harness target(s) to update: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, all.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]

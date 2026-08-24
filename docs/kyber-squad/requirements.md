@@ -20,7 +20,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 |---|---|
 | **KS-001** | **Canonical Source Governance**: Maintain exactly 22 canonical agent instruction bodies and 25 canonical skill source directories under `products/kyber-squad/`. Generated role-skill projections do not alter the source inventory, and generated APM, plugin, or harness trees are never tracked in source control. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. |
-| **KS-003** | **Deterministic Target Resolution**: Resolve deployment targets from explicit CLI flags, saved repository configuration, existing receipts (for update/uninstall), or strong filesystem markers. The `all` keyword expands strictly to the approved 10-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `gemini`, `antigravity`, `warp`, `factory`). |
+| **KS-003** | **Deterministic Target Resolution**: Resolve deployment targets from explicit CLI flags, saved repository configuration, existing receipts (for update/uninstall), or strong filesystem markers. The `all` keyword expands strictly to the approved 9-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. |
 | **KS-005** | **Version Lockstep**: Enforce exact version equality across the CLI, Squad release asset, and MCP server. Verify all release assets against published SHA-256 checksums without installing external dependencies as side effects. |
 | **KS-006** | **Dual Distribution Packaging**: Provide `squad pack` to build an APM distribution zip containing all agents, skills, and MCP configurations, plus an adjunct Agent Plugins v1 artifact exposing portable skills and MCP surfaces only. Every rendered role embeds its canonical instruction digest. |
@@ -39,7 +39,7 @@ Every non-native translation emits a structured degradation record in `squad.rec
 
 | Code | Meaning | Example |
 |---|---|---|
-| `lowered` | An agent role was projected to a role-skill because the target lacks a native agent primitive or primary agent role. | `architect` lowered to skill `architect` on Gemini CLI. |
+| `lowered` | An agent role was projected to a role-skill because the target lacks a native agent primitive or primary agent role. | `architect` lowered to skill `architect` on Antigravity. |
 | `safety-narrowed` | An interactive confirmation requirement (`ask`) was narrowed to `deny` because the target cannot prompt the user. | A capability requiring `ask` narrowed to `deny` on non-interactive harnesses. |
 | `omitted` | An agent or skill was omitted because a required security or execution constraint cannot be enforced by the target. | A role with unenforceable `deny` constraints omitted to prevent unauthorized execution. |
 | `workspace-binding-required` | An MCP server configuration in an Agent Plugins package requires host-specific repository path bindings. | Client loads portable skills but requires manual MCP workspace binding. |
@@ -56,9 +56,8 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **GitHub Copilot** | Native instructions/agents | Supported | Not lowered | Native execution |
 | **OpenCode** | Native `.opencode/agents` | Supported | Not lowered | Native execution |
 | **Kilo** | Native `.kilo/agents` | Supported | Not lowered | Native execution |
-| **Gemini CLI** | No native agent primitive | Single-agent context | Lowered to role-skills (`role-*` on collision) | Safety-narrowed |
 | **Antigravity** | No native agent primitive | Single-agent context | Lowered to role-skills (`role-*` on collision) | Safety-narrowed |
-| **Warp** | Native `.warp/` | Supported | Not lowered | Native execution |
+| **Warp** | No native agent primitive | Single-agent context | Lowered to role-skills (`role-*` on collision) | Safety-narrowed |
 | **Factory Droids** | Native `.factory/` | Supported | Not lowered | Native execution |
 
 ---

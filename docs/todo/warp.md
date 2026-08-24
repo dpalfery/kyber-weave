@@ -45,7 +45,7 @@ full target roster and its current coverage.
 
 ## What is assumed and needs verification, not trusted as-is
 
-Was mis-documented as a native target in `onboarding.md`'s target table until this pass corrected it — both `SquadRendererRegistry`'s validation (native-target roster: Codex, Cursor, Claude, Copilot, OpenCode, Kilo, Factory) and `FakeSquadRenderer`'s fallback classification (Gemini, Antigravity, Warp) agree Warp is fallback. Same role-skill lowering rules as Gemini apply.
+Was mis-documented as a native target in `onboarding.md`'s target table until this pass corrected it — both `SquadRendererRegistry`'s validation (native-target roster: Codex, Cursor, Claude, Copilot, OpenCode, Kilo, Factory) and `FakeSquadRenderer`'s fallback classification (Antigravity, Warp) agree Warp is fallback. Same role-skill lowering rules as Antigravity apply.
 
 None of this has been checked against this harness's actual, current documentation. The one
 concrete, verified reference implementation in the codebase is `CopilotRenderer`

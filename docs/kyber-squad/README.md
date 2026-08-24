@@ -9,11 +9,11 @@ last-reviewed: 2026-08-15
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 
-> **Deploy, synchronize, and govern canonical AI agent squads and skills across 10 IDE coding harnesses with transactional safety.**
+> **Deploy, synchronize, and govern canonical AI agent squads and skills across 9 IDE coding harnesses with transactional safety.**
 
 Engineering teams increasingly operate across heterogeneous AI development tools—some engineers build in Cursor or Windsurf, others in Claude Code, GitHub Copilot, Cline, or Antigravity. As teams author specialized agent personas (e.g. architects, database engineers, test specialists) and reusable skills, keeping these artifacts in sync across differing IDE configurations becomes an unmanageable maintenance burden.
 
-**Kyber-Squad** is the unified deployment control plane that compiles canonical agent definitions (`AgentIR`) and skill specifications into target-native configurations for 10 coding harnesses, backed by atomic transactional rollback.
+**Kyber-Squad** is the unified deployment control plane that compiles canonical agent definitions (`AgentIR`) and skill specifications into target-native configurations for 9 coding harnesses, backed by atomic transactional rollback.
 
 ---
 
@@ -36,7 +36,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Single source of truth: compiles 22 canonical agents and 25 skills to 10 native harness targets without manual reformatting. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Single source of truth: compiles 22 canonical agents and 25 skills to 9 native harness targets without manual reformatting. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |

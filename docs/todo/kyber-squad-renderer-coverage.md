@@ -25,10 +25,7 @@ harness's real documentation, the code seam to implement against, and how to ver
 | `opencode` | Native | [opencode.md](opencode.md) |
 | `kilo` | Native | [kilo.md](kilo.md) |
 | `factory` | Native | [factory.md](factory.md) |
-| `gemini` | Retired 2026-08-23 — no longer a coding harness; no renderer planned (PR #40) | — |
 | `warp` | Fallback (role-skill lowering) | [warp.md](warp.md) |
-
-`gemini` is intentionally excluded — no longer a coding harness as of 2026-08-23.
 
 `copilot` is covered by `CopilotRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`), `cursor` by `CursorRenderer`
