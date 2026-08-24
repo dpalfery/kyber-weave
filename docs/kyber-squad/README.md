@@ -4,16 +4,16 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-23
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 
-> **Deploy, synchronize, and govern canonical AI agent squads and skills across 10 IDE coding harnesses with transactional safety.**
+> **Deploy, synchronize, and govern canonical AI agent squads and skills across 9 IDE coding harnesses with transactional safety.**
 
 Engineering teams increasingly operate across heterogeneous AI development tools—some engineers build in Cursor or Windsurf, others in Claude Code, GitHub Copilot, Cline, or Antigravity. As teams author specialized agent personas (e.g. architects, database engineers, test specialists) and reusable skills, keeping these artifacts in sync across differing IDE configurations becomes an unmanageable maintenance burden.
 
-**Kyber-Squad** is the unified deployment control plane that compiles canonical agent definitions (`AgentIR`) and skill specifications into target-native configurations for 10 coding harnesses, backed by atomic transactional rollback.
+**Kyber-Squad** is the unified deployment control plane that compiles canonical agent definitions (`AgentIR`) and skill specifications into target-native configurations for 9 coding harnesses, backed by atomic transactional rollback.
 
 ---
 
@@ -22,7 +22,7 @@ Engineering teams increasingly operate across heterogeneous AI development tools
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 20 specialized agent roles and 25 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 20 specialized agent roles and 26 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.
@@ -36,7 +36,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Single source of truth: compiles 22 canonical agents and 25 skills to 10 native harness targets without manual reformatting. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Single source of truth: compiles 22 canonical agents and 26 skills to 9 harness targets without manual reformatting. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |

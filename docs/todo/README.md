@@ -44,7 +44,6 @@ last-reviewed: YYYY-MM-DD
 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | draft | The authoring skill states a doc-type vocabulary missing `todo` and `coding-standard`. |
 | [embeddings-endpoint-loopback-check.md](embeddings-endpoint-loopback-check.md) | DocGraph | draft | A non-loopback HTTPS embeddings endpoint is accepted where the test asserts rejection. |
 | [kyber-squad-renderer-coverage.md](kyber-squad-renderer-coverage.md) | KyberSquad | draft | Overview of remaining Kyber-Squad renderer target coverage and CLI gaps. |
-| [codex.md](codex.md) | KyberSquad | draft | Add a native Codex renderer to Kyber-Squad. |
 | [factory.md](factory.md) | KyberSquad | draft | Add a native Factory (factory-droids) renderer to Kyber-Squad. |
 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | draft | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
 | [mistyped-release-tag.md](mistyped-release-tag.md) | Distribution | draft | The mistyped `v1.0.6-rc.6` tag outranks every real release in version-sorted resolution. |

@@ -15,7 +15,7 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **22 canonical agents** and
-**25 canonical skills** across 10 coding harnesses, with transactional recovery and state governance.
+**26 canonical skills** across 9 coding harnesses, with transactional recovery and state governance.
 
 ---
 
@@ -47,7 +47,7 @@ kyber-weave squad pack --format <apm|plugins|all> --out <directory>
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad supports 10 coding harnesses:
+Kyber-Squad supports 9 coding harnesses:
 
 | Target Token | Input Aliases | Strong Project Marker | Fallback Mode |
 |---|---|---|---|
@@ -57,17 +57,14 @@ Kyber-Squad supports 10 coding harnesses:
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents |
 | `opencode` | — | `.opencode/` | Native agents |
 | `kilo` | — | `.kilo/` | Native agents |
-| `gemini` | — | `.gemini/` | Role-skill lowering |
 | `antigravity` | — | *Explicit or configured target only* | Role-skill lowering |
 | `warp` | — | `.warp/` | Role-skill lowering |
 | `factory` | `factory-droids` | `.factory/` | Native agents |
 
-**Note:** `gemini` is intentionally excluded from renderer work — no longer a coding harness as of 2026-08-23 (retired; see PR #40). Its target entry remains above until removed from `SquadTargetCatalog`.
-
 **Renderer coverage today**: this is the approved roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
-[architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native), and
-`antigravity` (fallback role-skill lowering to `.agents/skills/`) have renderers. Requesting any other target fails before the release is even downloaded,
+[architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
+`codex` (native), and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have renderers. Requesting any other target fails before the release is even downloaded,
 naming the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
 implementer needs to add it. `kyber-weave squad doctor` reports current coverage.
 
@@ -76,7 +73,7 @@ implementer needs to add it. `kyber-weave squad doctor` reports current coverage
 - **Strong markers only**: Detection activates a target only when its designated directory or specific configuration file is present.
 - **Negative fixtures**: Generic files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, generic `.github/` directories, and `.agents/skills/` are negative fixtures that **never** activate a target.
 - **Antigravity**: Requires explicit `--target antigravity` or configuration entry; `.agents/` will not auto-activate it.
-- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 10 targets.
+- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 9 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Update and uninstall**: Always consume the recorded target roster from the existing deployment receipt and never perform re-detection.
 
@@ -158,7 +155,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the ten approved targets can install today) and the Kyber-Weave MCP server:
+Run diagnostic checks on renderer coverage (which of the nine approved targets can install today) and the Kyber-Weave MCP server:
 
 ```bash
 kyber-weave squad doctor

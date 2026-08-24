@@ -82,7 +82,7 @@ kyber-weave docs init . --target claude,cursor,agent-skills
 kyber-weave docs init . --no-skill          # scaffold only
 ```
 
-APM supports `copilot`, `claude`, `cursor`, `opencode`, `codex`, `gemini`, `antigravity`,
+APM supports `copilot`, `claude`, `cursor`, `opencode`, `codex`, `antigravity`,
 `windsurf`, `kiro`, and `agent-skills`.
 
 Deploying the skill is delegated to APM rather than reimplemented because APM already

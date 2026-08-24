@@ -92,7 +92,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
     /// <summary>
     /// The fake renders whatever targets it is asked for — unlike the real registry, it
     /// carries no coverage gate, so existing lifecycle tests that exercise the full
-    /// ten-target roster keep working unchanged.
+    /// nine-target roster keep working unchanged.
     /// </summary>
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
 
@@ -110,7 +110,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         foreach (SquadTarget target in request.Targets)
         {
             string targetToken = SquadTargetCatalog.GetToken(target);
-            bool isFallback = target is SquadTarget.Gemini or SquadTarget.Antigravity or SquadTarget.Warp;
+            bool isFallback = target is SquadTarget.Antigravity or SquadTarget.Warp;
 
             if (isFallback)
             {
@@ -246,7 +246,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         SquadTarget.Copilot => $".github/skills/{skillName}/SKILL.md",
         SquadTarget.OpenCode => $".opencode/skills/{skillName}/SKILL.md",
         SquadTarget.Kilo => $".kilo/skills/{skillName}/SKILL.md",
-        SquadTarget.Gemini => $".gemini/skills/{skillName}/SKILL.md",
         SquadTarget.Antigravity => $".agents/skills/{skillName}/SKILL.md",
         SquadTarget.Warp => $".warp/skills/{skillName}/SKILL.md",
         SquadTarget.Factory => $".factory/skills/{skillName}/SKILL.md",
