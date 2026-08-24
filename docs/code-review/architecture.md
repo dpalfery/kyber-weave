@@ -42,8 +42,10 @@ flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
     Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
     Caller -->|"always-human path"| Scope
+    Caller -->|"high-risk path"| Scope
     Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
     Ladder -->|"PASS · exit ladder"| TaskDone["task done to standard"]
+    Ladder -->|"FAIL · council-only"| Scope
     Ladder -->|"FAIL on pass 2 · that task's pass 3"| Scope
     TaskDone -->|"after every task leaves the ladder"| ObjReview["objective-level code-reviewer<br/>once per objective"]
 
@@ -329,14 +331,16 @@ the review configuration escalates through the review configuration.
 
 ## Modes
 
-Two of these are the council's, and one is not. Every task climbs a three-pass ladder first —
+Two of these are the council's, and one is not. Ordinary tasks climb a three-pass ladder first —
 `task-reviewer` at passes 1 and 2, returning `PASS` or `FAIL` with a fix list. A task that
 `PASS`es on pass 1 or 2 exits the ladder; only a task that fails pass 2 proceeds to its own
 task-level `code-reviewer` pass 3. A task touching a path `review.policy.always-human`
-reserves skips the ladder and goes straight to `code-reviewer`. Findings surviving pass 3 enter
-the conductor's per-objective findings collection, which routes through `architect` before the
-objective's council review — and that objective-level review runs once after the task ladder
-drains, not once per task. See [ADR 0005](../adr/0005-task-level-fast-review.md).
+reserves, or a task with a high-risk concern, skips the ladder and goes straight to
+`code-reviewer`. A `council-only` failure (`ESCALATION: council-only`) also goes directly to
+`code-reviewer`. Findings surviving pass 3 enter the conductor's per-objective findings
+collection, which routes through `architect` before the objective's council review — and that
+objective-level review runs once after the task ladder drains, not once per task. See
+[ADR 0005](../adr/0005-task-level-fast-review.md).
 
 The council's own modes are owned by the `dp-code-reviewer` skill, which wraps the review
 rather than performing it.
