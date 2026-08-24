@@ -43,11 +43,14 @@ flowchart TD
     Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
     Caller -->|"always-human path"| Scope
     Caller -->|"high-risk path"| Scope
+    Worker["dev worker — rework"]
     Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
     Ladder -->|"PASS · exit ladder"| TaskDone["task done to standard"]
+    Ladder -->|"FAIL · fixable"| Worker
+    Worker -->|"re-enter at next pass"| Ladder
     Ladder -->|"FAIL · council-only"| Scope
     Ladder -->|"FAIL on pass 2 · that task's pass 3"| Scope
-    TaskDone -->|"after every task leaves the ladder"| ObjReview["objective-level code-reviewer<br/>once per objective"]
+    TaskDone -->|"after task completes via ladder or direct review"| ObjReview["objective-level code-reviewer<br/>once per objective"]
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]

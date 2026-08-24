@@ -6,7 +6,7 @@ selected-baseline: .opencode/agents/conductor-v2.md
 sources:
   .github/agents/conductor-v2.agent.md: e82cce130d47eba57ffb1aa1a9b53592e78879ff40f9743158359530375b7ef9
   .opencode/agents/conductor-v2.md: 681ecbd25ebf61ed3d0550bc1f4e3e50639d7c155db1003aaa5b31a64d600180
-final-body-sha256: 5bc0cea7844d7e06419dd4f9a159aeee02fff76ce49e7ae4e80a71c5af3cdf37
+final-body-sha256: fa25ba977c6a1e56709d505e0834326292dad0cd7bb3110bc4373c6df359e9a9
 ---
 # conductor migration
 
@@ -33,5 +33,7 @@ The instruction body was revised after migration once more to close review-contr
 The instruction body was revised after migration again to gate every `task-reviewer` invocation on a Test-contract row with matching RED/GREEN evidence (missing evidence sequences `test-dev` or routes to `code-reviewer`), and to require both `APPROVE` and green contract tests before objective completion. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again to align the objective code-reviewer loop with the three-cycle termination in `dp-code-reviewer`, and to treat `NEEDS_HUMAN` as a terminal human handoff that never enters the findings collection or architect drain. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
+
+The instruction body was revised after migration again to unify the task-level outcome contract: direct `code-reviewer` `REQUEST_CHANGES` findings join pass-3 residuals in the per-objective collection, completion is tracked through the ladder or a direct path, and every residual finding in the collection routes through architect before the objective review. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.
