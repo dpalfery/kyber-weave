@@ -6,7 +6,7 @@ selected-baseline: .opencode/agents/conductor-v2.md
 sources:
   .github/agents/conductor-v2.agent.md: e82cce130d47eba57ffb1aa1a9b53592e78879ff40f9743158359530375b7ef9
   .opencode/agents/conductor-v2.md: 681ecbd25ebf61ed3d0550bc1f4e3e50639d7c155db1003aaa5b31a64d600180
-final-body-sha256: fd36fb5659116ef767c6d1878978c437d96c6d06790a2d21d54b2f581784c920
+final-body-sha256: 5bc0cea7844d7e06419dd4f9a159aeee02fff76ce49e7ae4e80a71c5af3cdf37
 ---
 # conductor migration
 
@@ -31,5 +31,7 @@ The instruction body was revised after migration again, to route per-task review
 The instruction body was revised after migration once more to close review-contract gaps: the ladder eligibility statement now names human-reserved and high-risk bypasses plus council-only escalations as council entries alongside a double fast-pass failure; the high-risk bypass list gained tenancy and revertibility; task-reviewer and rework payloads propagate the Test-contract row with RED/GREEN evidence verbatim; and "judgement" was normalized to "judgment" on the human-reserved path. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again to gate every `task-reviewer` invocation on a Test-contract row with matching RED/GREEN evidence (missing evidence sequences `test-dev` or routes to `code-reviewer`), and to require both `APPROVE` and green contract tests before objective completion. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
+
+The instruction body was revised after migration again to align the objective code-reviewer loop with the three-cycle termination in `dp-code-reviewer`, and to treat `NEEDS_HUMAN` as a terminal human handoff that never enters the findings collection or architect drain. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

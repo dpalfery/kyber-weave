@@ -82,6 +82,11 @@ flowchart TD
 
     VE --> Out["APPROVE · REQUEST_CHANGES · NEEDS_HUMAN<br/>+ risk grade + KW-REVIEW-* diagnostics"]
 
+    Out -->|"task-level APPROVE"| TaskDone
+    Out -->|"REQUEST_CHANGES · residual findings"| Findings["per-objective findings collection"]
+    Out -->|"NEEDS_HUMAN · stop"| Human["terminal human handoff"]
+    Findings -->|"architect drain before objective review"| ObjReview
+
     Cfg -.-> Gates
     Cfg -.-> VE
 ```
