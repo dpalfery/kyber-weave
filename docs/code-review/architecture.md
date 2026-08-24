@@ -41,7 +41,7 @@ between two runs over one diff. So the last step is arithmetic instead.
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
     Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
-    Caller -->|"always-human path"| Scope
+    Caller -->|"always-human path"| ObjReview
     Caller -->|"high-risk path"| Scope
     Worker["dev worker — rework"]
     Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
@@ -50,7 +50,7 @@ flowchart TD
     Worker -->|"re-enter at next pass"| Ladder
     Ladder -->|"FAIL · council-only"| Scope
     Ladder -->|"FAIL on pass 2 · that task's pass 3"| Scope
-    TaskDone -->|"after task completes via ladder or direct review"| ObjReview["objective-level code-reviewer<br/>once per objective"]
+    TaskDone -->|"after task completes via ladder"| ObjReview["objective-level code-reviewer<br/>once per objective"]
     ObjReview --> Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
@@ -92,9 +92,9 @@ flowchart TD
     Out -->|"objective-level APPROVE · all contract tests GREEN"| ObjComplete["objective complete"]
     Out -->|"objective-level REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
     ObjRemed --> Worker
-    ObjRemed --> ObjReview
     ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
-    Findings -->|"architect drain before objective review"| ObjReview
+    Findings --> Architect["architect — solution and plan"]
+    Architect --> Worker
 
     Cfg -.-> Gates
     Cfg -.-> VE
