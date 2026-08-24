@@ -33,7 +33,7 @@ atomic, recoverable deployments across 9 target coding harnesses.
 ```mermaid
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
-        Agents["22 Canonical Agents\n(agents/*.md)"]
+        Agents["23 Canonical Agents\n(agents/*.md)"]
         Skills["26 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]

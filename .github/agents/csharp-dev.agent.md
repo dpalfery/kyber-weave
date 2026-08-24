@@ -18,7 +18,7 @@ Use the `csharp-dev` skill when working on .NET implementation.
 
 This routes to: Clean Architecture, ASP.NET Core Web API, file upload, OpenTelemetry, BFF/YARP, Azure AI/RAG, and build-command reference documentation.
 
-Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the InspectCode run that proves the C# you wrote introduced no new analyzer findings, and the remediation for the inspections that turn up most often.
+Use the `resharper-clt` skill before reporting `READY_FOR_REVIEW`. It owns the deterministic fix pass that erases mechanical findings before any reviewer sees them, the InspectCode run that proves the C# you wrote introduced no new analyzer findings, and the remediation for the inspections that turn up most often.
 
 ## Scope
 
@@ -52,6 +52,7 @@ You do **not** own:
 6. **Completion gate — diagnostics.** This is blocking, and it is not satisfied by a green build.
 
    - **Baseline first.** Before the first edit, collect diagnostics for the complete contents of every file you are permitted to change, through the harness's language-diagnostics capability (`get_errors` in VS Code / Copilot). Write the output to the path declared as **<agent-scratchpad>** where the repository declares one, and cite that path in your completion digest. Without a baseline you cannot prove anything is pre-existing.
+   - **Fix deterministically before you sweep.** After the last edit and before re-collecting diagnostics, run the `resharper-clt` deterministic fix pass — `dotnet format` (apply), `dotnet format analyzers` (apply), then `dotnet jb cleanupcode` — each scoped with `--include` to the files you changed. This erases the mechanical findings outright: predefined type keywords, `var` where the standard forbids it, redundant qualifiers, unused usings, formatting. It is idempotent, so a re-run after rework is safe. What survives is the part that needs your judgement, and it is the only part worth a reviewer's pass.
    - **Sweep again after the last edit.** Re-collect diagnostics for the complete contents of every file you edited or created — whole file, not only the changed methods or symbols — and once workspace-wide for the affected projects.
    - **Every diagnostic counts:** compiler errors, nullable analysis, analyzer warnings, style warnings, redundant qualifiers and casts, possible multiple enumeration, namespace and file-location warnings, unused members, and dead-code findings.
    - **Fix every finding in your task scope.** If one is genuinely outside scope or unsafe to fix, escalate it in the completion digest with file, line, and reason. Never leave one silently open.

@@ -116,7 +116,7 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 ## Feature 3 — Kyber-Squad
 
-Unified multi-harness deployment and lifecycle control plane for 22 canonical agents and
+Unified multi-harness deployment and lifecycle control plane for 23 canonical agents and
 26 skills across 9 coding harnesses with transactional rollback.
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.
 

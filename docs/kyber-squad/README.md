@@ -36,7 +36,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Single source of truth: compiles 22 canonical agents and 26 skills to 9 harness targets without manual reformatting. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Single source of truth: compiles 23 canonical agents and 26 skills to 9 harness targets without manual reformatting. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |

@@ -21,6 +21,7 @@ agents:
   - review-lens
   - review-triage
   - sql-database-architect
+  - task-reviewer
   - tauri-dev
   - test-dev
 skills:

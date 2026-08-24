@@ -104,18 +104,25 @@ Don't wait until the current parallel tasks complete to start drafting the promp
 
 Issue all eligible task invocations **together** in a batch rather than finishing one before starting the next. Keep each invocation self-contained — objective, exact files/symbols, acceptance criteria, and required skills from the plan — so any pool worker can execute it cold under context isolation.
 
-## 4. Review & verify — pipelined, non-blocking
+## 4. Review & verify — the task ladder, pipelined and non-blocking
 
-Review is a concurrent pipeline stage, never a barrier that idles the dev pool.
+Review is a concurrent pipeline stage, never a barrier that idles the dev pool. `task-reviewer` is the only reviewer an individual task gets: up to three passes, all of them fast, none of them the council.
 
-1. When a dev worker claims a task complete, enqueue a `code-reviewer` task for that work **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review.
-2. `code-reviewer` returns per task (engine terms; operators may still say “approved” for `APPROVE`):
-   - **APPROVE** → mark that task commit-ready.
-   - **REQUEST_CHANGES** → create a **rework item** that carries the full review feedback plus the original task's files/symbols and acceptance criteria, and place it back on the ready queue for that agent type.
-   - **NEEDS_HUMAN** → stop that task's review loop and escalate; do not iterate or treat it as `APPROVE`.
-3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. (e.g., while `csharp-dev` #1 is still finishing task two, `csharp-dev` #2 takes the rework from task one's review.) This is why rework items must be self-contained: the reviewer's feedback plus the task spec is the full context.
-4. A reworked task re-enters step 1 (complete → review → approve/rework). Track an iteration count **per task**; cap at 5 review cycles (per the `dp-code-reviewer` skill) and escalate immediately on a critical security/safety finding or when any task exceeds the cap.
-5. The objective is done only when every task — originals and reworks — has reached `APPROVE`.
+Most of what a reviewer used to catch never reaches this stage at all. The worker's completion gate runs a deterministic fix pass first — formatter, analyzer code fixes, and `cleanupcode` scoped to the changed files — so mechanical defects are corrected rather than reported. A review pass spent on formatting is a pass, a rework cycle, and a confirmation pass spent to reach an edit a machine had already made.
+
+1. When a dev worker claims a task complete, enqueue a `task-reviewer` task **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review. The invocation carries the objective, the acceptance criteria including the Test-contract row with its RED/GREEN evidence verbatim, the worker's completion digest, and **the pass number** (1, 2, or 3).
+2. `task-reviewer` returns one of two results, and never a verdict:
+   - **PASS** → that task is done to standard. It is not commit-ready; the end-of-run review still has to run.
+   - **FAIL** → create a **rework item** carrying the fix list verbatim plus the original task's files/symbols, the Test-contract row, and acceptance criteria, and place it back on the ready queue for that agent type. This is the coding agent's feedback round, and it gets two of them.
+3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. (e.g., while `csharp-dev` #1 is still finishing task two, `csharp-dev` #2 takes the rework from task one's review.) This is why rework items must be self-contained: the fix list plus the task spec is the full context.
+4. A reworked task re-enters step 1 at the next pass number. **Before pass 2 and pass 3, the worker or `test-dev` must regenerate fresh RED/GREEN evidence against the current tree** — prior evidence is not reused verbatim. **A `FAIL` on pass 3 ends the task's review.** There is no pass 4: the fix list goes to the findings collection below, and the task stops consuming review budget.
+5. **Findings collection.** A `FAIL` on pass 3, and any finding marked `ESCALATION: end-of-run` at any pass, goes into a per-objective **findings collection** you track through task state. You hold no write capability, and a review finding does not by itself authorize a repository change, so this is tracked work rather than a file or a todo document. Nothing in the collection starts a review; the collection is read, once, at the end.
+6. **Drain the collection before the end-of-run review.** Once every task has left the ladder, hand the **whole collection** to `architect` for a solution and a plan. That plan enters the approval gate in §2 like any other — a `Draft` plan is not executable, so stop and ask. Once approved, route its tasks to workers; they re-enter the ladder at pass 1, and the collection is drained again on the way out.
+7. **The end-of-run review — the only automatic `code-reviewer` run there is.** With the collection empty, enqueue one `code-reviewer` review over the run's accumulated change. `REQUEST_CHANGES` routes findings through the `dp-code-reviewer` remediation loop — back to the owning workers, then a verifier-mode re-review — until the run reaches `APPROVE` or that skill's escalation rules terminate the loop, which is a terminal failure: stop and report, do not start another automated cycle. A `NEEDS_HUMAN` is a terminal human handoff. The objective is done only when it reaches `APPROVE`.
+
+**`code-reviewer` never reviews a single task.** Not on a failed pass, not on a reserved path, not on a concern that looks serious. It reviews the whole run at the end, and it reviews one task only when a human explicitly asks for it. Every per-task path to the council is a per-task council bill, and the ladder above exists so that bill is never drawn.
+
+**Reserved paths and human-judgement concerns.** A task touching a path the review policy reserves for human judgement still runs the ladder like any other. Record it in the run report so the human knows it is there, and let the end-of-run review escalate it — that review is where the policy's `NEEDS_HUMAN` rule fires, on path alone, before any finding is weighed.
 
 ## Plan closeout
 

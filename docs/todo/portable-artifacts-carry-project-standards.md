@@ -30,7 +30,7 @@ deferred so that the mechanism and a 27-file content migration did not land toge
 
 Two populations, one defect:
 
-- **The 22 canonical agents** under `products/kyber-squad/agents/`. Several already
+- **The 23 canonical agents** under `products/kyber-squad/agents/`. Several already
   resolve a registry property instead of embedding a standard (`csharp-dev`, `maui-dev`,
   `dal-dev`, `pulumi-dev`, `python-dev`, `test-dev`). Remaining cases include:
   - [`react-dev.md`](../../products/kyber-squad/agents/react-dev.md) defers to "established

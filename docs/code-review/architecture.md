@@ -6,10 +6,11 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-08-23
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
+  - adr/0005-task-level-fast-review
 code-refs:
   - VerdictEngine
   - GateRunner
@@ -39,7 +40,24 @@ between two runs over one diff. So the last step is arithmetic instead.
 ```mermaid
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
-    Caller["conductor · conductor-v3 · direct invocation"] --> Scope
+    Machine["worker completion gate<br/>dotnet format · analyzer fixes · cleanupcode --include<br/>mechanical defects fixed, never reported"]
+    Caller["conductor · conductor-v3"] --> Machine
+    Machine --> Ladder
+    Worker["dev worker — rework"]
+    Ladder["task-reviewer — passes 1-3<br/>one agent · PASS or FAIL + fix list<br/>the only reviewer a task gets"]
+    Ladder -->|"PASS · exit ladder"| TaskDone["task done to standard"]
+    Ladder -->|"FAIL · passes 1-2"| Worker
+    Worker -->|"re-enter at next pass"| Ladder
+    Ladder -->|"FAIL on pass 3 · ESCALATION end-of-run"| Findings["per-objective findings collection"]
+    TaskDone --> Join["run join<br/>every task has left the ladder<br/>findings collection drained"]
+    Findings --> Drain["collection drain"]
+    Drain -->|"residual findings"| Architect["architect — solution and plan"]
+    Architect --> Approval{"plan approval"}
+    Approval -->|"granted"| Worker
+    Approval -->|"denied · stop"| PlanDenied["stop and ask — Draft plan not executable"]
+    Drain -->|"collection empty"| Join
+    Join -->|"end of run · the only automatic council run"| Scope
+    HumanAsk["human asks for a review"] --> Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]
@@ -74,6 +92,14 @@ flowchart TD
 
     VE --> Out["APPROVE · REQUEST_CHANGES · NEEDS_HUMAN<br/>+ risk grade + KW-REVIEW-* diagnostics"]
 
+    Out -->|"NEEDS_HUMAN · stop"| Human["terminal human handoff"]
+    Out -->|"APPROVE"| RunComplete["run complete"]
+    Out -->|"REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
+    ObjRemed --> Worker
+    ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
+    Join --> ObjReview["objective-level code-reviewer<br/>once per objective"]
+    ObjReview --> Scope
+
     Cfg -.-> Gates
     Cfg -.-> VE
 ```
@@ -94,6 +120,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 
 | Part | Kind | Location |
 |---|---|---|
+| `task-reviewer` | Canonical agent — the fast per-task pass, ahead of the council | `products/kyber-squad/agents/task-reviewer.md` |
 | `code-reviewer` | Canonical agent — orchestrates, adjudicates, holds the skeptic | `products/kyber-squad/agents/code-reviewer.md` |
 | `review-lens` | Canonical agent — one judgement seat, spawned N times | `products/kyber-squad/agents/review-lens.md` |
 | `review-triage` | Canonical agent — one triage seat, `fast` model profile | `products/kyber-squad/agents/review-triage.md` |
@@ -253,6 +280,7 @@ harness.
 
 | Role | Profile | read | search | write | execute | delegate |
 |---|---|---|---|---|---|---|
+| `task-reviewer` | `investigator` | allow | allow | deny | **allow** | deny |
 | `code-reviewer` | `reviewer` | allow | allow | **ask** | **allow** | **allow** |
 | `review-lens` | `read-only` | allow | allow | deny | deny | deny |
 | `review-triage` | `read-only` | allow | allow | deny | deny | deny |
@@ -266,6 +294,13 @@ structurally forced to make one. It is exercised through a single declared entry
 one artifact — its findings — and on harnesses that cannot express `ask` the lattice safely
 narrows it to `deny` and the findings come back in the response instead. `network.publish`
 stays `deny`. **The role that judges a change never ships it.**
+
+`task-reviewer` holds `investigator`, and the one grant that differs from a lens seat —
+`process.execute` — is the whole design. It holds `process.execute` because the conductors do
+not — they cannot produce a diff to hand it, so it establishes its own scope with `git diff`;
+the grant is for reading the change, not for building it, and the role runs no gate. It holds
+`delegate: deny` (same as a lens seat) because one agent is the point: a fan-out here would be
+the council with extra steps and none of its evidence.
 
 `delegate` on the reviewer is what lets it fan out the council, and it is also what gives
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
@@ -314,7 +349,30 @@ the review configuration escalates through the review configuration.
 
 ## Modes
 
-Owned by the `dp-code-reviewer` skill, which wraps the review rather than performing it.
+The two principles this area answers to are stated in the
+[review index](README.md#principles); this section is how they are implemented.
+
+**Two reviewers, and they never trade places.** `task-reviewer` reviews single tasks; it gets up
+to three passes and is the only reviewer an individual task sees. `code-reviewer` reviews the
+whole run, once, at the end — and one task only when a human explicitly asks. There is no
+condition under which a task summons the council: not a failed pass, not a reserved path, not a
+concern that looks serious. Each of those would be a per-task council bill, and avoiding that
+bill is the entire point of the split.
+
+A `FAIL` on pass 3, and any finding marked `ESCALATION: end-of-run`, goes into the conductor's
+per-objective findings collection. `architect` plans against the whole collection before the
+end-of-run review runs. See [ADR 0005](../adr/0005-task-level-fast-review.md).
+
+**Ahead of both sits a layer with no model in it at all.** The worker's completion gate runs
+`dotnet format`, analyzer code fixes, and `cleanupcode` scoped to the changed files before either
+reviewer sees the change, so mechanical defects are corrected rather than reported. A formatting
+issue that reaches a reviewer costs a pass to write up, a rework cycle to apply, and another pass
+to confirm — to reach an edit a machine had already made for free. `task-reviewer` is
+correspondingly forbidden from reporting anything those tools own; if it sees such a defect, the
+finding is that the gate did not run.
+
+The council's own modes are owned by the `dp-code-reviewer` skill, which wraps the review
+rather than performing it.
 
 | Mode | Behaviour | When |
 |---|---|---|

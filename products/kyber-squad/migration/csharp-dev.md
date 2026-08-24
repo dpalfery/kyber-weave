@@ -9,7 +9,7 @@ sources:
   .cursor/agents/dotnet-dev.agent.md: 908e5f0813a3a4a0ff6b1d983645744c24b7bce6574cb97dff34dd52b6f0b616
   .github/agents/dotnet-dev.agent.md: ea402133727e2b32d7987871a4aa7edb09fe5240340b2fe1dff8d61affdec72c
   .opencode/agents/dotnet-dev.md: 2190ab5b76e48203bf3250468e35741ec90625402bcf5ab7e2051cd3df3d1bb0
-final-body-sha256: 4fbdb87b65739c4c6d9e49549a4c9a101f2455733e53b0034c41d286a3a3623d
+final-body-sha256: 43ef641804327e6a71b7819fcbcb7f8455e018823a08272b8364c24b4fe9f8fd
 ---
 # csharp-dev migration
 
@@ -26,5 +26,7 @@ The worker profile is the conservative intersection of effective live permission
 The instruction body was revised after migration. A blocking completion gate on language diagnostics was added: a baseline sweep before the first edit, a full-file and workspace sweep after the last one, a rule that every diagnostic class counts, and a `DIAGNOSTICS` line in the completion digest. The gate exists because a green build measures a different thing than a clean Problems list, and "pre-existing" was being asserted rather than proven. Capability profile and delegation are unchanged.
 
 The body now routes to the `resharper-clt` skill and folds a ReSharper InspectCode run into the completion gate, at the baseline and again before `READY_FOR_REVIEW`. ReSharper's inspection set and the compiler's overlap only partially — a suggestion-severity inspection never reaches `dotnet build` — so a green build was clearing a gate it does not actually measure.
+
+The instruction body was revised after migration to add the deterministic fix step to the completion gate. After the last edit and before re-collecting diagnostics, the role now runs `dotnet format`, `dotnet format analyzers`, and `dotnet jb cleanupcode`, each scoped with `--include` to the files it changed, per the `resharper-clt` skill. The gate previously only measured; it now fixes what a machine can fix, so that mechanical defects are corrected rather than reported to a reviewer at the cost of a review pass, a rework cycle, and a confirmation pass. No permission changed — the role already held process.execute. See ADR 0005.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

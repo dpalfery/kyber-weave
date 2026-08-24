@@ -24,7 +24,7 @@ Do not use execution, editing, or search capabilities to perform the work. Use o
 
 ## How you operate
 
-- **Delegate work** through the harness's agent-orchestration capability, selecting the specialist (`architect-v3`, `csharp-dev`, `python-dev`, `test-dev`, `code-reviewer`, `docs-dev`, …). Run instances in the background so multiple are in flight at once.
+- **Delegate work** through the harness's agent-orchestration capability, selecting the specialist (`architect-v3`, `csharp-dev`, `python-dev`, `test-dev`, `task-reviewer`, `code-reviewer`, `docs-dev`, …). Run instances in the background so multiple are in flight at once.
 - **Track work** through the harness's task-management capability — one item per unit of work, with status, ownership, dependencies, **and its TDD phase (RED / GREEN / REFACTOR)**.
 - **Read** only files under `<docs-root>/plans/`, `<docs-root>/specs/`, and `<docs-root>/todo/` for status/documentation lookups — no other project files, and no other directory under `<docs-root>/`. You have no search capability: open a document by path, either one you were given or one the relevant `README.md` index in those three folders names. Route all other discovery, searching, technical analysis, and file operations to `architect`/`architect-v3`.
 - **Discovery agents:** `architect` invokes `research-agent` and `azure-reader` itself and folds their findings into its own plan. Do not run discovery on its behalf, and do not call a discovery role directly. Where the harness does not let a subagent delegate, `architect` falls back to handing you a labeled discovery request; fulfil that request and re-invoke it. See §2.
@@ -106,19 +106,26 @@ Don't wait until the current parallel tasks complete to start drafting the promp
 
 Issue all eligible task invocations **together** as background delegations rather than finishing one before starting the next. Keep each invocation self-contained — objective, exact files/symbols, the Test-contract row, acceptance criteria, and required skills from the plan — so any pool worker can execute it cold under context isolation.
 
-## 4. Review & verify — pipelined, non-blocking
+## 4. Review & verify — the task ladder, pipelined and non-blocking
 
-Review is a concurrent pipeline stage (the REFACTOR phase), never a barrier that idles the dev pool.
+Review is a concurrent pipeline stage (the REFACTOR phase), never a barrier that idles the dev pool. `task-reviewer` is the only reviewer an individual task gets: up to three passes, all of them fast, none of them the council.
 
-1. When a dev worker claims a task complete (GREEN), spawn a `code-reviewer` task for that work **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review.
-2. `code-reviewer` checks both the implementation **and the test-first discipline**: were the contract tests written first and observed red? Do they assert behavior, not wiring? Are they green now? Then the per-task verdict (engine terms; operators may still say “approved” for `APPROVE`):
-   - **APPROVE** → mark that task commit-ready (phase = REFACTOR done).
-   - **REQUEST_CHANGES** → create a **rework item** that carries the full review feedback plus the original task's files/symbols, Test-contract row, and acceptance criteria, and place it back on the ready queue for that agent type.
-   - **NEEDS_HUMAN** → stop that task's review loop and escalate; do not iterate or treat it as `APPROVE`.
-3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. This is why rework items must be self-contained: the reviewer's feedback plus the task spec (including its Test-contract row) is the full context.
-4. A reworked task re-enters at step 1 (complete → review → approve/rework). Track an iteration count **per task**; cap at 5 review cycles (per the `dp-code-reviewer` skill) and escalate immediately on a critical security/safety finding or when any task exceeds the cap.
+Most of what a reviewer used to catch never reaches this stage at all. The worker's completion gate runs a deterministic fix pass first — formatter, analyzer code fixes, and `cleanupcode` scoped to the changed files — so mechanical defects are corrected rather than reported. A review pass spent on formatting is a pass, a rework cycle, and a confirmation pass spent to reach an edit a machine had already made.
+
+1. When a dev worker claims a task complete (GREEN), spawn a `task-reviewer` task **and immediately release the worker to pull the next ready task**. Development of one task and review of another run at the same time — a worker never sits idle waiting on a review. The invocation carries the objective, the acceptance criteria including the Test-contract row with its RED/GREEN evidence verbatim, the worker's completion digest, and **the pass number** (1, 2, or 3).
+2. `task-reviewer` checks the implementation **and the test-first discipline** — the contract tests are acceptance criteria, so it asks whether they were written first and observed red, whether they assert behavior rather than wiring, and whether they are green now. It returns one of two results, and never a verdict:
+   - **PASS** → that task is done to standard (phase = REFACTOR done). It is not commit-ready; the end-of-run review still has to run.
+   - **FAIL** → create a **rework item** carrying the fix list verbatim plus the original task's files/symbols, Test-contract row, and acceptance criteria, and place it back on the ready queue for that agent type. This is the coding agent's feedback round, and it gets two of them.
+3. **Any available worker of that type** picks up the rework item — not necessarily the agent that first wrote it. This is why rework items must be self-contained: the fix list plus the task spec (including its Test-contract row) is the full context.
+4. A reworked task re-enters at step 1 with the next pass number. **Before pass 2 and pass 3, the worker or `test-dev` must regenerate fresh RED/GREEN evidence against the current tree** — prior evidence is not reused verbatim. **A `FAIL` on pass 3 ends the task's review.** There is no pass 4: the fix list goes to the findings collection below, and the task stops consuming review budget.
 5. **Never weaken a test to reach green.** If a review or rework suggests softening a Test-contract assertion, treat it as a scope change: route it back to `architect-v3` to revise the Test contract, then re-sequence. The orchestrator does not edit tests or contracts unilaterally.
-6. The objective is done only when every task — originals and reworks — has reached `APPROVE` **and all contract tests are GREEN**.
+6. **Findings collection.** A `FAIL` on pass 3, and any finding marked `ESCALATION: end-of-run` at any pass, goes into a per-objective **findings collection** you track through task state. You hold no write capability, and a review finding does not by itself authorize a repository change, so this is tracked work rather than a file or a todo document. Nothing in the collection starts a review; the collection is read, once, at the end.
+7. **Drain the collection before the end-of-run review.** Once every task has left the ladder, hand the **whole collection** to `architect-v3` for a solution and a plan. That plan enters the approval gate in §2 like any other — a `Draft` plan is not executable, so stop and ask. Once approved, route its tasks to workers; they re-enter the ladder at pass 1, and the collection is drained again on the way out.
+8. **The end-of-run review — the only automatic `code-reviewer` run there is.** With the collection empty, spawn one `code-reviewer` review over the run's accumulated change. `REQUEST_CHANGES` routes findings through the `dp-code-reviewer` remediation loop — back to the owning workers, then a verifier-mode re-review — until the run reaches `APPROVE` or that skill's escalation rules terminate the loop, which is a terminal failure: stop and report, do not start another automated cycle. A `NEEDS_HUMAN` is a terminal human handoff. The objective is done only when it reaches `APPROVE` **and all contract tests are GREEN**.
+
+**`code-reviewer` never reviews a single task.** Not on a failed pass, not on a reserved path, not on a concern that looks serious. It reviews the whole run at the end, and it reviews one task only when a human explicitly asks for it. Every per-task path to the council is a per-task council bill, and the ladder above exists so that bill is never drawn.
+
+**Reserved paths and human-judgement concerns.** A task touching a path the review policy reserves for human judgement still runs the ladder like any other. Record it in the run report so the human knows it is there, and let the end-of-run review escalate it — that review is where the policy's `NEEDS_HUMAN` rule fires, on path alone, before any finding is weighed.
 
 ## Plan closeout
 
