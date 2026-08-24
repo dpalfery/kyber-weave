@@ -93,7 +93,7 @@ flowchart TD
     Out -->|"objective-level REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
     ObjRemed --> Worker
     ObjRemed --> ObjReview
-    ObjRemed -->|"three-cycle / five-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
+    ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
     Findings -->|"architect drain before objective review"| ObjReview
 
     Cfg -.-> Gates
