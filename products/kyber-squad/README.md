@@ -109,7 +109,7 @@ aliases: []
 
 The normalized Markdown body following the second `---` delimiter is the authoritative instruction body.
 
-### 2. Skills (25 Canonical Skills)
+### 2. Skills (26 Canonical Skills)
 
 The 26 canonical skill directories under `skills/` adhere to the Agent Skills open standard (`SKILL.md`, optional `scripts/`, `references/`, and asset files). Note that `kyber-weave-docs` is intentionally managed separately under `.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.
 

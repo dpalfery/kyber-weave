@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-08-23
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -41,8 +41,9 @@ between two runs over one diff. So the last step is arithmetic instead.
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
     Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
+    Caller -->|"always-human path"| Scope
     Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
-    Ladder -->|"FAIL on pass 2 · once per objective · reserved path"| Scope
+    Ladder -->|"FAIL on pass 2 · once per objective"| Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]
@@ -272,12 +273,12 @@ one artifact — its findings — and on harnesses that cannot express `ask` the
 narrows it to `deny` and the findings come back in the response instead. `network.publish`
 stays `deny`. **The role that judges a change never ships it.**
 
-`task-reviewer` holds `investigator`, and the two grants that differ from a lens seat are the
-whole design. It holds `process.execute` because the conductors do not — they cannot produce a
-diff to hand it, so it establishes its own scope with `git diff`; the grant is for reading the
-change, not for building it, and the role runs no gate. It holds `delegate: deny` because one
-agent is the point: a fan-out here would be the council with extra steps and none of its
-evidence.
+`task-reviewer` holds `investigator`, and the one grant that differs from a lens seat —
+`process.execute` — is the whole design. It holds `process.execute` because the conductors do
+not — they cannot produce a diff to hand it, so it establishes its own scope with `git diff`;
+the grant is for reading the change, not for building it, and the role runs no gate. It holds
+`delegate: deny` (same as a lens seat) because one agent is the point: a fan-out here would be
+the council with extra steps and none of its evidence.
 
 `delegate` on the reviewer is what lets it fan out the council, and it is also what gives
 `delegate: deny` on the other subagent profiles a meaning it previously lacked: delegation is a
@@ -326,11 +327,13 @@ the review configuration escalates through the review configuration.
 
 ## Modes
 
-Two of these are the council's, and one is not. Every task climbs a three-pass ladder first:
+Two of these are the council's, and one is not. Every task climbs a three-pass ladder first —
 `task-reviewer` at passes 1 and 2, returning `PASS` or `FAIL` with a fix list, then
-`code-reviewer` at pass 3. Findings surviving pass 3 enter the conductor's per-objective
-findings collection, which routes through `architect` before the objective's council review.
-See [ADR 0005](../adr/0005-task-level-fast-review.md).
+`code-reviewer` at pass 3 — except a task touching a path `review.policy.always-human`
+reserves, which skips the ladder and goes straight to `code-reviewer`. Findings surviving
+pass 3 enter the conductor's per-objective findings collection, which routes through
+`architect` before the objective's council review. See
+[ADR 0005](../adr/0005-task-level-fast-review.md).
 
 The council's own modes are owned by the `dp-code-reviewer` skill, which wraps the review
 rather than performing it.

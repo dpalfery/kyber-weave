@@ -5,7 +5,7 @@ source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
 selected-baseline: .opencode/agents/conductor-v3.md
 sources:
   .opencode/agents/conductor-v3.md: 2696d45e25dcc3bbfc0f20445026d5f0213a59e783ba247bd59dc109b112e95c
-final-body-sha256: 8311606d24d3a0d9fdd34b70a8845f467a98367e7123887a04e766c1be845335
+final-body-sha256: 65fda2424cfe75c0979ece740ace69d2fc154cc4342ce50b38dc92a1fdb24bfd
 ---
 # conductor-v3 migration
 

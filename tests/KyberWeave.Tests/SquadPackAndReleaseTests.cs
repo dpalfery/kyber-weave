@@ -47,6 +47,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "review-lens",
         "review-triage",
         "sql-database-architect",
+        "task-reviewer",
         "tauri-dev",
         "test-dev"
     ];
@@ -147,8 +148,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 22 canonical agents
-        Assert.Equal(22, CanonicalAgents.Length);
+        // Presence of all 23 canonical agents
+        Assert.Equal(23, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
@@ -500,7 +501,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             // Solution marker
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
-            // Copy product source from real repo if available, or write all 22 agents and 26 skills
+            // Copy product source from real repo if available, or write all 23 agents and 26 skills
             string realSquadSource = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             if (Directory.Exists(realSquadSource))
             {
