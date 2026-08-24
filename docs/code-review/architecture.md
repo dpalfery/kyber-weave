@@ -93,7 +93,7 @@ flowchart TD
     Out -->|"objective-level REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
     ObjRemed --> Worker
     ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
-    Findings --> Drain["collection drain<br/>wait until every task has completed review<br/>ladder AND direct task-level code-reviewer"]
+    Findings --> Drain["collection drain<br/>wait until every task has reached its applicable completion<br/>ladder tasks via ladder PASS · direct-path tasks via their direct task-level code-reviewer"]
     Drain -->|"complete collection"| Architect["architect — solution and plan"]
     Architect --> Approval{"plan approval"}
     Approval -->|"granted"| Worker
