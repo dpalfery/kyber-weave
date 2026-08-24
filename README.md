@@ -26,7 +26,7 @@ Kyber-Weave provides four integrated features for agent governance and lifecycle
 
 1. **[DocGraph (Kyber-Docs)](#feature-1--docgraph)** — Typed, governed documentation corpus, drift detection, integrity analysis, and MCP graph retrieval.
 2. **[ContextHygiene](#feature-2--contexthygiene)** — Skill and harness agent linting, routing readiness scoring, parity drift detection, and security scanning.
-3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 10 IDE/CLI harnesses with transactional recovery.
+3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 9 IDE/CLI harnesses with transactional recovery.
 4. **[CI Pipelines](#feature-4--ci-pipelines)** — Unified diagnostic engine with stable `KW-*` rules, SARIF reporting, and GitHub Actions workflows.
 
 ---
@@ -144,7 +144,7 @@ that was fixed in `.claude` and left broken in `.cursor`.
 Managing agent roles and skill sets across disparate developer environments leads to
 configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
 **single, unified lifecycle and deployment control plane** for deploying 23 canonical agents
-and 26 skills across 10 coding harnesses.
+and 26 skills across 9 coding harnesses.
 
 **The canonical tree.** Maintains 23 canonical agent bodies and 26 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
@@ -160,7 +160,7 @@ leasing (`kyber-weave-squad-<root-key>`), same-filesystem no-overwrite leaf clai
 and compare-and-restore recovery that safely preserves local operator modifications.
 
 ```bash
-kyber-weave squad install                    # auto-detects targets across 10 harnesses
+kyber-weave squad install                    # auto-detects targets across 9 harnesses
 kyber-weave squad update                     # updates deployments while preserving local edits
 kyber-weave squad status                     # verifies file integrity and reports drift
 kyber-weave squad doctor                     # checks toolchain prerequisites
@@ -169,8 +169,8 @@ kyber-weave squad pack --format all --out ./dist # builds APM and Agent Plugins 
 
 | Harness Class | Supported Targets |
 |---|---|
-| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Warp (`.warp`), Factory Droids (`.factory`) |
-| Role-Skill Lowering | Gemini CLI (`.gemini`), Antigravity |
+| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Factory Droids (`.factory`) |
+| Role-Skill Lowering | Antigravity, Warp |
 
 [Adoption & usage guide →](docs/kyber-squad/onboarding.md) · [Architecture →](docs/kyber-squad/architecture.md) · [Requirements & degradation →](docs/kyber-squad/requirements.md)
 

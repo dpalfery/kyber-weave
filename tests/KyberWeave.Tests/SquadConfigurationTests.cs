@@ -127,13 +127,13 @@ public sealed class SquadConfigurationTests : IDisposable
         string path = WriteConfig("""
             squad:
               targets: [claude]
-              exclusions: [kilo, gemini]
+              exclusions: [kilo, warp]
             """);
 
         SquadConfig config = SquadConfigLoader.LoadMerged(defaults, path);
 
         Assert.Equal([SquadTarget.Claude], config.Targets);
-        Assert.Equal([SquadTarget.Kilo, SquadTarget.Gemini], config.Exclusions);
+        Assert.Equal([SquadTarget.Kilo, SquadTarget.Warp], config.Exclusions);
     }
 
     [Fact]

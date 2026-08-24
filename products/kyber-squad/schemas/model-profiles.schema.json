@@ -20,7 +20,6 @@
           "copilot": { "type": "string", "minLength": 1 },
           "opencode": { "type": "string", "minLength": 1 },
           "kilo": { "type": "string", "minLength": 1 },
-          "gemini": { "type": "string", "minLength": 1 },
           "antigravity": { "type": "string", "minLength": 1 },
           "warp": { "type": "string", "minLength": 1 },
           "factory": { "type": "string", "minLength": 1 }

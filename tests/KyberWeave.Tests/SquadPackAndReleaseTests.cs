@@ -167,7 +167,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             name.StartsWith(".codex/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".claude/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".cursor/", StringComparison.OrdinalIgnoreCase) ||
-            name.StartsWith(".gemini/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".opencode/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".kilo/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".warp/", StringComparison.OrdinalIgnoreCase) ||

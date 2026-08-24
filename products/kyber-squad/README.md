@@ -5,8 +5,8 @@ It maintains a target-neutral, declarative catalog of **23 canonical agents** an
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 This canonical tree is the single source of truth from which target-native agent and skill deployments
-are rendered across 10 supported coding harnesses: Codex, Cursor, Claude, GitHub Copilot, OpenCode,
-Kilo, Gemini CLI, Antigravity, Warp, and Factory Droids.
+are rendered across 9 supported coding harnesses: Codex, Cursor, Claude, GitHub Copilot, OpenCode,
+Kilo, Antigravity, Warp, and Factory Droids.
 
 ---
 

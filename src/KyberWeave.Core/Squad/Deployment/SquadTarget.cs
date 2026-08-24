@@ -9,7 +9,6 @@ public enum SquadTarget
     Copilot,
     OpenCode,
     Kilo,
-    Gemini,
     Antigravity,
     Warp,
     Factory
@@ -27,7 +26,6 @@ public static class SquadTargetCatalog
             SquadTarget.Copilot,
             SquadTarget.OpenCode,
             SquadTarget.Kilo,
-            SquadTarget.Gemini,
             SquadTarget.Antigravity,
             SquadTarget.Warp,
             SquadTarget.Factory
@@ -43,7 +41,6 @@ public static class SquadTargetCatalog
             ["github-copilot"] = SquadTarget.Copilot,
             ["opencode"] = SquadTarget.OpenCode,
             ["kilo"] = SquadTarget.Kilo,
-            ["gemini"] = SquadTarget.Gemini,
             ["antigravity"] = SquadTarget.Antigravity,
             ["warp"] = SquadTarget.Warp,
             ["factory"] = SquadTarget.Factory,
@@ -62,7 +59,6 @@ public static class SquadTargetCatalog
         SquadTarget.Copilot => "copilot",
         SquadTarget.OpenCode => "opencode",
         SquadTarget.Kilo => "kilo",
-        SquadTarget.Gemini => "gemini",
         SquadTarget.Antigravity => "antigravity",
         SquadTarget.Warp => "warp",
         SquadTarget.Factory => "factory",

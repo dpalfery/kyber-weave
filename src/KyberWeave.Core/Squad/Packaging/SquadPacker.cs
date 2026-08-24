@@ -105,7 +105,6 @@ public static class SquadPacker
             if (relPath.StartsWith(".codex/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".claude/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".cursor/", StringComparison.OrdinalIgnoreCase) ||
-                relPath.StartsWith(".gemini/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".opencode/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".kilo/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".warp/", StringComparison.OrdinalIgnoreCase) ||
