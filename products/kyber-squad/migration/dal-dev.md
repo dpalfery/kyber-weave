@@ -9,7 +9,7 @@ sources:
   .cursor/agents/dal-dev.agent.md: f55c14cc1dbca99edca8912e4094f0696837289764a577d56ffb0521a8cbb43f
   .github/agents/dal-dev.agent.md: 5a9e1b9ef11c9e62c4f7ce71776c7ea88009041fe79aca0fa9002e13fd427d51
   .opencode/agents/dal-dev.md: 9f3fd875d63276e02b0219fbed33e084f0fd3c95e7090cd7152b98ad120f9adf
-final-body-sha256: 3a3740a7c7806848153517839c7644fca5b13a79c2d49a00f3c553f86ed69a63
+final-body-sha256: fcae7be8a4e79c84af5465d28d12c99c9c1b824ba721ccc6c62498ac94195bc4
 ---
 # dal-dev migration
 
@@ -26,5 +26,7 @@ The worker profile is the conservative intersection of effective live permission
 The instruction body was revised after migration. A blocking completion gate on language diagnostics was added: a baseline sweep before the first edit, a full-file and workspace sweep after the last one, a rule that every diagnostic class counts, and a `DIAGNOSTICS` line in the completion digest. The gate exists because a green build measures a different thing than a clean Problems list, and "pre-existing" was being asserted rather than proven. Capability profile and delegation are unchanged.
 
 The body now routes to the `resharper-clt` skill and folds a ReSharper InspectCode run into the completion gate, at the baseline and again before `READY_FOR_REVIEW`. ReSharper's inspection set and the compiler's overlap only partially — a suggestion-severity inspection never reaches `dotnet build` — so a green build was clearing a gate it does not actually measure.
+
+The instruction body was revised after migration to add the deterministic fix step to the completion gate. After the last edit and before re-collecting diagnostics, the role now runs `dotnet format`, `dotnet format analyzers`, and `dotnet jb cleanupcode`, each scoped with `--include` to the files it changed, per the `resharper-clt` skill. The gate previously only measured; it now fixes what a machine can fix, so that mechanical defects are corrected rather than reported to a reviewer at the cost of a review pass, a rework cycle, and a confirmation pass. No permission changed — the role already held process.execute. See ADR 0005.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

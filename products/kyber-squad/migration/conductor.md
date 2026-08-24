@@ -6,7 +6,7 @@ selected-baseline: .opencode/agents/conductor-v2.md
 sources:
   .github/agents/conductor-v2.agent.md: e82cce130d47eba57ffb1aa1a9b53592e78879ff40f9743158359530375b7ef9
   .opencode/agents/conductor-v2.md: 681ecbd25ebf61ed3d0550bc1f4e3e50639d7c155db1003aaa5b31a64d600180
-final-body-sha256: dd1377755b63f3dd6e09c65ad6fe091859b57beb332b9407691cba1279e11136
+final-body-sha256: 7f8b942dc992282f93288b49565da078bbcafb88aff2f17efd34a6d4c8f506dd
 ---
 # conductor migration
 
@@ -37,5 +37,7 @@ The instruction body was revised after migration again to align the objective co
 The instruction body was revised after migration again to unify the task-level outcome contract: direct `code-reviewer` `REQUEST_CHANGES` findings join pass-3 residuals in the per-objective collection, completion is tracked through the ladder or a direct path, and every residual finding in the collection routes through architect before the objective review. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again to require fresh RED/GREEN evidence before rework pass 2 and to route objective-level `REQUEST_CHANGES` through the `dp-code-reviewer` remediation loop until `APPROVE` or that skill's terminal escalation rules. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
+
+The instruction body was revised after migration again, to remove every per-task route to the council. Section 4 now runs one ladder: `task-reviewer` for up to three passes, a findings collection for what does not converge, `architect` planning against that collection, and exactly one `code-reviewer` review over the run at the end. The previous revision routed a task to the council on a failed second pass, on a reserved path, and on any high-risk concern — three per-task council bills the split existed to avoid. Reserved-path tasks now run the ladder and are flagged in the run report, where the policy's own escalation rule fires on path alone. The section also states that the worker completion gate fixes mechanical defects deterministically before review. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires. See ADR 0005.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

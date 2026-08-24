@@ -5,7 +5,7 @@ source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
 selected-baseline: .opencode/agents/conductor-v3.md
 sources:
   .opencode/agents/conductor-v3.md: 2696d45e25dcc3bbfc0f20445026d5f0213a59e783ba247bd59dc109b112e95c
-final-body-sha256: 4b351dce6ad644ffe6b627c2b71288353c5723105426c5f7d2dd1af2c0467076
+final-body-sha256: 9de5c01770e6f4d191866b1a53e985de328f64dc07d677f9b42454ca7ab904dd
 ---
 # conductor-v3 migration
 
@@ -28,5 +28,7 @@ The instruction body was revised after migration, twice. First, the Authority se
 The instruction body was revised after migration again, to route per-task review to `task-reviewer` rather than `code-reviewer`. Section 4 now describes a three-pass ladder: two fast passes returning PASS or FAIL with a fix list — checking the test-first discipline as part of the acceptance criteria — then one council pass, with findings surviving that pass tracked in a per-objective collection that routes through architect-v3 before the objective's council review. The rule that a test is never weakened to reach green is unchanged. The orchestrator profile is unchanged, and delegates-to gained task-reviewer. The revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires. See ADR 0005.
 
 The instruction body was revised after migration once more to close review-contract gaps: the ladder eligibility statement now names human-reserved and high-risk bypasses plus council-only escalations as council entries alongside a double fast-pass failure; the high-risk bypass list gained tenancy and revertibility; task-reviewer and rework payloads propagate the Test-contract row with RED/GREEN evidence verbatim; and "judgement" was normalized to "judgment" on the human-reserved path. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires.
+
+The instruction body was revised after migration again, to remove every per-task route to the council. Section 4 now runs one ladder: `task-reviewer` for up to three passes — checking the test-first discipline as part of the acceptance criteria — a findings collection for what does not converge, `architect-v3` planning against that collection, and exactly one `code-reviewer` review over the run at the end. The previous revision routed a task to the council on a failed second pass, on a reserved path, and on any high-risk concern. The rule that a test is never weakened to reach green is unchanged, as is the requirement to regenerate RED/GREEN evidence before each re-check. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires. See ADR 0005.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

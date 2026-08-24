@@ -40,17 +40,24 @@ between two runs over one diff. So the last step is arithmetic instead.
 ```mermaid
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
-    Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
-    Caller -->|"always-human path"| Scope
-    Caller -->|"high-risk path"| Scope
+    Machine["worker completion gate<br/>dotnet format · analyzer fixes · cleanupcode --include<br/>mechanical defects fixed, never reported"]
+    Caller["conductor · conductor-v3"] --> Machine
+    Machine --> Ladder
     Worker["dev worker — rework"]
-    Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
+    Ladder["task-reviewer — passes 1-3<br/>one agent · PASS or FAIL + fix list<br/>the only reviewer a task gets"]
     Ladder -->|"PASS · exit ladder"| TaskDone["task done to standard"]
-    Ladder -->|"FAIL · fixable"| Worker
+    Ladder -->|"FAIL · passes 1-2"| Worker
     Worker -->|"re-enter at next pass"| Ladder
-    Ladder -->|"FAIL · council-only"| Scope
-    Ladder -->|"FAIL on pass 2 · that task's pass 3"| Scope
-    TaskDone --> Join["objective join<br/>every task at applicable completion<br/>· ladder PASS · direct task-level code-reviewer<br/>· pass-3 · council-only escalations<br/>· findings collection drained"]
+    Ladder -->|"FAIL on pass 3 · ESCALATION end-of-run"| Findings["per-objective findings collection"]
+    TaskDone --> Join["run join<br/>every task has left the ladder<br/>findings collection drained"]
+    Findings --> Drain["collection drain"]
+    Drain -->|"residual findings"| Architect["architect — solution and plan"]
+    Architect --> Approval{"plan approval"}
+    Approval -->|"granted"| Worker
+    Approval -->|"denied · stop"| PlanDenied["stop and ask — Draft plan not executable"]
+    Drain -->|"collection empty"| Join
+    Join -->|"end of run · the only automatic council run"| Scope
+    HumanAsk["human asks for a review"] --> Scope
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]
@@ -85,19 +92,11 @@ flowchart TD
 
     VE --> Out["APPROVE · REQUEST_CHANGES · NEEDS_HUMAN<br/>+ risk grade + KW-REVIEW-* diagnostics"]
 
-    Out -->|"task-level APPROVE"| TaskDone
-    Out -->|"REQUEST_CHANGES · residual findings"| Findings["per-objective findings collection"]
     Out -->|"NEEDS_HUMAN · stop"| Human["terminal human handoff"]
-    Out -->|"objective-level APPROVE · all contract tests GREEN"| ObjComplete["objective complete"]
-    Out -->|"objective-level REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
+    Out -->|"APPROVE"| RunComplete["run complete"]
+    Out -->|"REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
     ObjRemed --> Worker
     ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
-    Findings --> Drain["collection drain<br/>wait until every task has reached its applicable completion<br/>· ladder PASS · direct-path task-level code-reviewer<br/>· pass-2 fail pass-3 · council-only escalations"]
-    Drain -->|"residual findings · all tasks reviewed"| Architect["architect — solution and plan"]
-    Architect --> Approval{"plan approval"}
-    Approval -->|"granted"| Worker
-    Approval -->|"denied · stop"| PlanDenied["stop and ask — Draft plan not executable"]
-    Drain -->|"collection empty · all tasks complete"| Join
     Join --> ObjReview["objective-level code-reviewer<br/>once per objective"]
     ObjReview --> Scope
 
@@ -350,16 +349,27 @@ the review configuration escalates through the review configuration.
 
 ## Modes
 
-Two of these are the council's, and one is not. Ordinary tasks climb a three-pass ladder first —
-`task-reviewer` at passes 1 and 2, returning `PASS` or `FAIL` with a fix list. A task that
-`PASS`es on pass 1 or 2 exits the ladder; only a task that fails pass 2 proceeds to its own
-task-level `code-reviewer` pass 3. A task touching a path `review.policy.always-human`
-reserves, or a task with a high-risk concern, skips the ladder and goes straight to
-`code-reviewer`. A `council-only` failure (`ESCALATION: council-only`) also goes directly to
-`code-reviewer`. Findings surviving pass 3 enter the conductor's per-objective findings
-collection, which routes through `architect` before the objective's council review — and that
-objective-level review runs once after the task ladder drains, not once per task. See
-[ADR 0005](../adr/0005-task-level-fast-review.md).
+The two principles this area answers to are stated in the
+[review index](README.md#principles); this section is how they are implemented.
+
+**Two reviewers, and they never trade places.** `task-reviewer` reviews single tasks; it gets up
+to three passes and is the only reviewer an individual task sees. `code-reviewer` reviews the
+whole run, once, at the end — and one task only when a human explicitly asks. There is no
+condition under which a task summons the council: not a failed pass, not a reserved path, not a
+concern that looks serious. Each of those would be a per-task council bill, and avoiding that
+bill is the entire point of the split.
+
+A `FAIL` on pass 3, and any finding marked `ESCALATION: end-of-run`, goes into the conductor's
+per-objective findings collection. `architect` plans against the whole collection before the
+end-of-run review runs. See [ADR 0005](../adr/0005-task-level-fast-review.md).
+
+**Ahead of both sits a layer with no model in it at all.** The worker's completion gate runs
+`dotnet format`, analyzer code fixes, and `cleanupcode` scoped to the changed files before either
+reviewer sees the change, so mechanical defects are corrected rather than reported. A formatting
+issue that reaches a reviewer costs a pass to write up, a rework cycle to apply, and another pass
+to confirm — to reach an edit a machine had already made for free. `task-reviewer` is
+correspondingly forbidden from reporting anything those tools own; if it sees such a defect, the
+finding is that the gate did not run.
 
 The council's own modes are owned by the `dp-code-reviewer` skill, which wraps the review
 rather than performing it.

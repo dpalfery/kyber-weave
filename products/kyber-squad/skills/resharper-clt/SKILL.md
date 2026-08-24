@@ -67,14 +67,48 @@ enough while iterating.
 Any agent implementing, modifying, or refactoring C# MUST run this before reporting
 `READY_FOR_REVIEW`.
 
+The order matters, and step 2 is the point of the whole gate: **fix mechanically first, then
+inspect what is left.** A defect a machine can fix is not a defect worth a reviewer's attention.
+Every mechanical finding that reaches a reviewer costs a review pass to report, a rework cycle to
+fix, and another pass to confirm — to arrive at the same edit `cleanupcode` would have made for
+free.
+
 1. **Baseline.** Before the first edit, inspect the projects you are permitted to change and
    keep the report. Without it you cannot distinguish a diagnostic you introduced from one
    that was already there, and "pre-existing" is a claim that needs proof.
-2. **Inspect again after the last edit**, over the same scope.
-3. **Fix every ERROR and WARNING the change introduced.** Compare against the baseline; do
-   not dismiss a finding merely because its line is untouched.
-4. **Report the result.** `dotnet build` and `dotnet jb inspectcode` both at zero errors and
+2. **Fix deterministically, scoped to the files you changed.** Three commands, in this order,
+   each applying rather than verifying:
+
+   ```bash
+   dotnet format <solution> --include <changed files>
+   dotnet format <solution> analyzers --include <changed files>
+   dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include="<changed files>"
+   ```
+
+   `--include` is not optional. Unscoped, these rewrite files the task never touched, and the
+   change under review stops being the change you made. The pass is idempotent: running it twice
+   produces no second diff, so a re-run after a rework cycle is safe.
+
+3. **Inspect again after the last edit**, over the same scope.
+4. **Fix every ERROR and WARNING the change introduced that step 2 could not.** Compare against
+   the baseline; do not dismiss a finding merely because its line is untouched. What survives
+   step 2 is the genuinely non-mechanical remainder — a possible multiple enumeration, a
+   contradictory null contract — and that is the part worth your judgement.
+5. **Report the result.** `dotnet build` and `dotnet jb inspectcode` both at zero errors and
    zero code or logic warnings, or an explicit list of what remains with baseline proof.
+
+### What the cleanup profile should and should not do
+
+Fix what the repository's own standards and analyzers already require: predefined type keywords,
+explicit types where the standard forbids `var`, redundant qualifiers and parentheses, unused
+usings, fields that can be `readonly`, formatting. Those are settled decisions, and re-arguing one
+in review is waste.
+
+Leave everything the repository has **not** declared. Brace style with no `.editorconfig` rule
+behind it, member reordering, and file layout are the tool's opinion rather than the project's
+standard — and reordering members in particular buries the actual change under churn a reviewer
+then has to read past. A cleanup profile that imposes undeclared preferences trades review cost
+for diff noise, which is not the trade this gate exists to make.
 
 A green build does not clear this. The compiler and ReSharper's inspection set overlap
 partially and disagree at the edges by design — a suggestion-severity inspection is invisible
@@ -170,7 +204,10 @@ rather than asserting "pre-existing".
 
 - .NET solutions only. There is no ReSharper CLT for other languages; say so rather than
   substituting a different tool under this skill's name.
-- `cleanupcode` rewrites source. Run it deliberately, and NEVER as part of a review — a
-  reviewer that edits the code it is judging has stopped being a reviewer.
-- Formatter output is not a review finding. Whitespace differences belong to `cleanupcode`,
-  not to the findings list.
+- `cleanupcode` rewrites source. It belongs to the completion gate above, run by the agent that
+  wrote the code, before any reviewer sees it — and NEVER as part of a review itself. A reviewer
+  that edits the code it is judging has stopped being a reviewer.
+- Formatter output is not a review finding. Whitespace differences belong to `cleanupcode`, not
+  to the findings list. A reviewer that finds mechanical issues is looking at a change whose
+  completion gate did not run: the correct report is that single fact, not a list of nits the
+  gate would have erased.

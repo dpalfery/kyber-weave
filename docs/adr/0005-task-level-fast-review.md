@@ -1,13 +1,13 @@
 ---
 id: adr/0005-task-level-fast-review
-title: Task-Level Fast Review Ahead of the Council
+title: Deterministic Fixes and Task-Level Review Ahead of the Council
 doc-type: adr
 status: current
 owner: dpalfery
 last-reviewed: 2026-08-22
 ---
 
-# ADR 0005: Task-Level Fast Review Ahead of the Council
+# ADR 0005: Deterministic Fixes and Task-Level Review Ahead of the Council
 
 ## Status
 
@@ -38,39 +38,74 @@ Two distinct questions had been collapsed into one instrument:
 
 ## Decision
 
-Introduce `task-reviewer`, a standalone single-agent reviewer, and run every task up a
-**three-pass ladder**:
+The two principles this record establishes are stated for day-to-day reference in the
+[review index](../code-review/README.md#principles):
 
-| Pass | Reviewer | On failure |
+1. **`code-reviewer` reviews all the code at the end of the run; `task-reviewer` reviews single
+   tasks.** The council never runs per task unless a human specifically asks.
+2. **Review cost is a budget.** Cap the passes both reviewers make, and use deterministic tooling
+   — the ReSharper command line tools and the Roslyn compiler checks — to find *and fix*
+   formatting and code-quality issues before either reviewer is invoked.
+
+
+Two changes, and the cheap one comes first.
+
+### 1. A deterministic fix pass, before any reviewer
+
+The worker's completion gate applies fixes rather than only measuring. Scoped with `--include` to
+the files the task changed:
+
+```bash
+dotnet format <solution> --include <changed files>
+dotnet format <solution> analyzers --include <changed files>
+dotnet jb cleanupcode <solution> --profile="<cleanup profile>" --include="<changed files>"
+```
+
+Predefined type keywords, `var` where the standard forbids it, redundant qualifiers, unused
+usings, fields that can be `readonly`, formatting — all corrected, never reported. The pass is
+idempotent, so re-running it after a rework cycle is safe, and `--include` keeps the diff equal to
+the task.
+
+The profile fixes only what the repository already declares. Brace style with no `.editorconfig`
+rule behind it, member reordering, and file layout stay out: those are the tool's opinion, and
+reordering members in particular buries the change under churn a reviewer must read past.
+
+`task-reviewer` is correspondingly **forbidden** from reporting anything those tools own. A
+mechanical finding in its list means the gate did not run, and that single fact is the finding.
+
+### 2. `task-reviewer` owns single tasks; `code-reviewer` owns the run
+
+| Scope | Reviewer | Passes |
 |---|---|---|
-| 1 | `task-reviewer` | Fix list returns to the worker — feedback round 1 |
-| 2 | `task-reviewer` | Fix list returns to the worker — feedback round 2 |
-| 3 | `code-reviewer` | Unresolved findings enter the conductor's findings collection; the task loop ends |
+| One completed task | `task-reviewer` | up to 3 |
+| The whole run, at the end | `code-reviewer` | once |
+| One task, on explicit human request | `code-reviewer` | on demand |
 
 1. **The fast pass is one agent, not a council.** No fan-out, no gate suite, no verdict engine.
-   It holds `capability-profile: investigator`, so it establishes its own scope with `git diff`
-   and reads files — the conductors hold `process.execute: deny` and cannot hand it one.
+   It holds `capability-profile: investigator`, so it establishes its own scope with `git diff` —
+   the conductors hold `process.execute: deny` and cannot hand it one.
 
 2. **Its outcome is `PASS` or `FAIL`, never a verdict.** `APPROVE`, `REQUEST_CHANGES`, and
    `NEEDS_HUMAN` remain the verdict engine's, and a single agent cannot compute them — only feel
-   them. Two vocabularies that cannot be confused on sight is the point: a `PASS` says this task
-   is done to standard, and says nothing about merge.
+   them.
 
-3. **The escape hatch is a better reviewer, not another cycle.** A task that fails twice goes to
-   `code-reviewer`, which has the lenses and the gate evidence the fast pass deliberately lacks.
-   There is no third fast pass.
+3. **Nothing a task does summons the council.** Not a failed pass, not a reserved path, not a
+   concern that looks serious. Each such route is a per-task council bill, and it is the bill
+   this ADR exists to stop drawing. A `FAIL` on pass 3, or an `ESCALATION: end-of-run`, records
+   the finding; it does not start a review.
 
-4. **Residual findings are tracked, then planned.** Findings surviving pass 3 enter a
-   per-objective findings collection the conductor holds in task state. Before the objective's
-   council review, the whole collection goes to `architect` for a solution and a plan; those
-   tasks re-enter the ladder at pass 1.
+4. **Residual findings are tracked, then planned.** The per-objective findings collection lives
+   in the conductor's task state. Before the end-of-run review, the whole collection goes to
+   `architect` for a solution and a plan; those tasks re-enter the ladder at pass 1.
 
-5. **The council still runs, once per objective**, before any commit or pull request — and
-   immediately, skipping the ladder, for any task touching a path
-   `review.policy.always-human` reserves.
+5. **Reserved paths still escalate — at the end.** A task touching a
+   `review.policy.always-human` path runs the ladder like any other and is flagged in the run
+   report. The policy's `NEEDS_HUMAN` rule fires where it always did: in the end-of-run review,
+   on path alone, before any finding is weighed.
 
 This ADR does not supersede ADR 0002. The council, its lenses, its gates, and its verdict engine
-are unchanged; what changes is where they are pointed.
+are unchanged; what changes is that it is pointed at runs instead of tasks, and that a
+deterministic layer now runs ahead of it.
 
 ## Alternatives Considered
 
@@ -83,8 +118,7 @@ are unchanged; what changes is where they are pointed.
   drop-in for the conductors' existing branches, which is exactly the problem — two producers of
   `APPROVE` with materially different confidence behind them, indistinguishable in a transcript.
 
-- **More fast passes before escalating.** Rejected. A defect the fast pass cannot get fixed in
-  two rounds is usually one it cannot see; a third round samples the same limited view again.
+- **Escalating to the council after two fast passes.** Rejected, and it is the change this record exists to correct: a per-task council run costs fifteen lenses and a full gate suite to settle a question about one task, and it recurs on every task that fails twice. A third fast pass costs one agent; a finding that survives it needs a plan, not a more expensive reader.
 
 - **A `task-reviewer` skill holding the procedure.** Rejected. `review-lens` and `review-triage`
   carry their whole procedure in the agent body; a fast pass that must load a second file to
@@ -94,6 +128,10 @@ are unchanged; what changes is where they are pointed.
 
 - The common case — a task that is finished and follows the standard — costs one agent pass
   instead of a council run, and the worker is released immediately either way.
+- Mechanical defects cost nothing at all: no review pass to report them, no rework cycle to fix
+  them, no confirmation pass. They are corrected before a reviewer is invoked.
+- The council's cost per run is now bounded and predictable: once, plus whatever a human asks
+  for. It no longer scales with task count, which is what made it expensive.
 - Deep concerns (security, authorization, performance at scale, blast radius, duplication,
   analyzer triage, supply chain, coverage-backed test adequacy) are covered once per objective
   rather than once per task. `task-reviewer` names each of them as out of scope in every report, so
