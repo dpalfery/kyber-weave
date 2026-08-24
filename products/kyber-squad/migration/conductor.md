@@ -6,7 +6,7 @@ selected-baseline: .opencode/agents/conductor-v2.md
 sources:
   .github/agents/conductor-v2.agent.md: e82cce130d47eba57ffb1aa1a9b53592e78879ff40f9743158359530375b7ef9
   .opencode/agents/conductor-v2.md: 681ecbd25ebf61ed3d0550bc1f4e3e50639d7c155db1003aaa5b31a64d600180
-final-body-sha256: ea03322f008ea5e40ab5034ff713ebf3d22bc68333adf018bcbc88f0f64c630f
+final-body-sha256: 177a63d7317c79d7ac3bfdbfcc80ea318c2dbb0a3e1dd755af38feb4df5f582c
 ---
 # conductor migration
 
@@ -27,5 +27,7 @@ The instruction body was revised after migration. The Authority section granted 
 The instruction body was revised after migration, twice. First, the Authority section stopped granting delegation by exception and stated the rule that holds: delegation is a per-role grant carried by each agent's capability profile and its declared delegates-to. Then the architect profile gained that grant, so discovery is no longer mediated here — the conductor fulfils a discovery request only as a fallback where the harness does not let a subagent delegate. Added in the same pass: a mandatory-precedence block and hard stops that state the orchestration-only boundary as enforceable rules; a blocking approval gate that refuses to execute a plan still in Draft or otherwise unapproved; a fast path that begins orchestration immediately on an already-approved plan rather than routing it back to architect; and the rule that after approval the architect is an escalation path for a specific blocking conflict, not a routine stop. The orchestrator profile is unchanged, and every revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again, to route per-task review to `task-reviewer` rather than `code-reviewer`. Section 4 now describes a three-pass ladder: two fast passes returning PASS or FAIL with a fix list, then one council pass, with findings surviving that pass tracked in a per-objective collection that routes through architect before the objective's council review. The orchestrator profile is unchanged — the collection is held in task state precisely because this role holds filesystem.write=deny — and delegates-to gained task-reviewer. The revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires. See ADR 0005.
+
+The instruction body was revised after migration once more to close review-contract gaps: the ladder eligibility statement now names human-reserved and high-risk bypasses plus council-only escalations as council entries alongside a double fast-pass failure; the high-risk bypass list gained tenancy and revertibility; task-reviewer and rework payloads propagate the Test-contract row with RED/GREEN evidence verbatim; and "judgement" was normalized to "judgment" on the human-reserved path. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor skill body, which the shared-identity rule requires.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

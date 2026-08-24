@@ -141,7 +141,7 @@ soften a finding to avoid one — the escape hatch is a better reviewer, not a m
 
 # Output
 
-Return this block and nothing else:
+Return exactly this block:
 
 ```text
 TASK REVIEW — pass {1|2}
@@ -152,10 +152,11 @@ NOT COVERED: <the concerns above, in one line>
 FIXES:    <numbered list, or "none">
 ```
 
-A `PASS` closes with one sentence on what you checked and why it is clean. That sentence is the
-only thing separating a pass that ran from a pass that gave up. `ESCALATION` is `none` on every
-`PASS` and on an ordinary fixable `FAIL`; set `council-only` only when the sole required fix is a
-council review.
+On a `PASS`, follow the block with one sentence on what you checked and why it is clean —
+that sentence sits **outside** the block and is the only permitted addition. On a `FAIL`,
+return the block alone. That PASS sentence is the only thing separating a pass that ran from a
+pass that gave up. `ESCALATION` is `none` on every `PASS` and on an ordinary fixable `FAIL`;
+set `council-only` only when the sole required fix is a council review.
 
 # Boundaries
 

@@ -5,7 +5,7 @@ source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
 selected-baseline: .opencode/agents/conductor-v3.md
 sources:
   .opencode/agents/conductor-v3.md: 2696d45e25dcc3bbfc0f20445026d5f0213a59e783ba247bd59dc109b112e95c
-final-body-sha256: 65fda2424cfe75c0979ece740ace69d2fc154cc4342ce50b38dc92a1fdb24bfd
+final-body-sha256: 4b351dce6ad644ffe6b627c2b71288353c5723105426c5f7d2dd1af2c0467076
 ---
 # conductor-v3 migration
 
@@ -26,5 +26,7 @@ The instruction body was revised after migration. It asserted that subagents may
 The instruction body was revised after migration, twice. First, the Authority section stopped granting delegation by exception and stated the rule that holds: delegation is a per-role grant carried by each agent's capability profile and its declared delegates-to. Then the architect profile gained that grant, so the request/fulfill discovery loop this body mediated is now a fallback rather than the normal path — architect reaches azure-reader and research-agent itself and folds the findings into its own plan (direct-delegation model), and the conductor fulfils a labeled discovery request only where the harness does not let a subagent delegate or an Azure call fails after one retry, capped at three outer cycles. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires.
 
 The instruction body was revised after migration again, to route per-task review to `task-reviewer` rather than `code-reviewer`. Section 4 now describes a three-pass ladder: two fast passes returning PASS or FAIL with a fix list — checking the test-first discipline as part of the acceptance criteria — then one council pass, with findings surviving that pass tracked in a per-objective collection that routes through architect-v3 before the objective's council review. The rule that a test is never weakened to reach green is unchanged. The orchestrator profile is unchanged, and delegates-to gained task-reviewer. The revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires. See ADR 0005.
+
+The instruction body was revised after migration once more to close review-contract gaps: the ladder eligibility statement now names human-reserved and high-risk bypasses plus council-only escalations as council entries alongside a double fast-pass failure; the high-risk bypass list gained tenancy and revertibility; task-reviewer and rework payloads propagate the Test-contract row with RED/GREEN evidence verbatim; and "judgement" was normalized to "judgment" on the human-reserved path. The orchestrator profile is unchanged, and the revision was applied byte-identically to the paired conductor-v3 skill body, which the shared-identity rule requires.
 
 The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.

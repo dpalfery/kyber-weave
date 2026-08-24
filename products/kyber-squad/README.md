@@ -77,6 +77,7 @@ products/kyber-squad/
 │   ├── pr-review-fix-comments/
 │   ├── product-owner/
 │   ├── python-dev/
+│   ├── resharper-clt/
 │   ├── second-brain/
 │   ├── security-review/
 │   ├── setup-dev-environment/

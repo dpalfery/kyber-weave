@@ -43,7 +43,9 @@ flowchart TD
     Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
     Caller -->|"always-human path"| Scope
     Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
-    Ladder -->|"FAIL on pass 2 · once per objective"| Scope
+    Ladder -->|"PASS · exit ladder"| TaskDone["task done to standard"]
+    Ladder -->|"FAIL on pass 2 · that task's pass 3"| Scope
+    TaskDone -->|"after every task leaves the ladder"| ObjReview["objective-level code-reviewer<br/>once per objective"]
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]
@@ -328,12 +330,13 @@ the review configuration escalates through the review configuration.
 ## Modes
 
 Two of these are the council's, and one is not. Every task climbs a three-pass ladder first —
-`task-reviewer` at passes 1 and 2, returning `PASS` or `FAIL` with a fix list, then
-`code-reviewer` at pass 3 — except a task touching a path `review.policy.always-human`
-reserves, which skips the ladder and goes straight to `code-reviewer`. Findings surviving
-pass 3 enter the conductor's per-objective findings collection, which routes through
-`architect` before the objective's council review. See
-[ADR 0005](../adr/0005-task-level-fast-review.md).
+`task-reviewer` at passes 1 and 2, returning `PASS` or `FAIL` with a fix list. A task that
+`PASS`es on pass 1 or 2 exits the ladder; only a task that fails pass 2 proceeds to its own
+task-level `code-reviewer` pass 3. A task touching a path `review.policy.always-human`
+reserves skips the ladder and goes straight to `code-reviewer`. Findings surviving pass 3 enter
+the conductor's per-objective findings collection, which routes through `architect` before the
+objective's council review — and that objective-level review runs once after the task ladder
+drains, not once per task. See [ADR 0005](../adr/0005-task-level-fast-review.md).
 
 The council's own modes are owned by the `dp-code-reviewer` skill, which wraps the review
 rather than performing it.
