@@ -41,7 +41,7 @@ between two runs over one diff. So the last step is arithmetic instead.
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
     Caller["conductor · conductor-v3 · direct invocation"] --> Ladder
-    Caller -->|"always-human path"| ObjReview
+    Caller -->|"always-human path"| Scope
     Caller -->|"high-risk path"| Scope
     Worker["dev worker — rework"]
     Ladder["task-reviewer — passes 1-2<br/>one agent · PASS or FAIL + fix list"]
@@ -50,8 +50,7 @@ flowchart TD
     Worker -->|"re-enter at next pass"| Ladder
     Ladder -->|"FAIL · council-only"| Scope
     Ladder -->|"FAIL on pass 2 · that task's pass 3"| Scope
-    TaskDone -->|"after task completes via ladder"| ObjReview["objective-level code-reviewer<br/>once per objective"]
-    ObjReview --> Scope
+    TaskDone --> Join["objective join<br/>every task at applicable completion<br/>· ladder PASS · direct task-level code-reviewer<br/>· pass-3 · council-only escalations<br/>· findings collection drained"]
 
     subgraph CR["code-reviewer — orchestrator and adjudicator"]
         Scope["1. Scope<br/>diff · technologies · stated intent · touched paths"]
@@ -93,11 +92,14 @@ flowchart TD
     Out -->|"objective-level REQUEST_CHANGES"| ObjRemed["remediation loop — workers then verifier re-review"]
     ObjRemed --> Worker
     ObjRemed -->|"three-cycle cap · terminal failure"| ObjFailed["terminal failure — stop and report"]
-    Findings --> Drain["collection drain<br/>wait until every task has reached its applicable completion<br/>ladder tasks via ladder PASS · direct-path tasks via their direct task-level code-reviewer"]
-    Drain -->|"complete collection"| Architect["architect — solution and plan"]
+    Findings --> Drain["collection drain<br/>wait until every task has reached its applicable completion<br/>· ladder PASS · direct-path task-level code-reviewer<br/>· pass-2 fail pass-3 · council-only escalations"]
+    Drain -->|"residual findings · all tasks reviewed"| Architect["architect — solution and plan"]
     Architect --> Approval{"plan approval"}
     Approval -->|"granted"| Worker
     Approval -->|"denied · stop"| PlanDenied["stop and ask — Draft plan not executable"]
+    Drain -->|"collection empty · all tasks complete"| Join
+    Join --> ObjReview["objective-level code-reviewer<br/>once per objective"]
+    ObjReview --> Scope
 
     Cfg -.-> Gates
     Cfg -.-> VE
