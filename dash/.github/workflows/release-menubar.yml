@@ -1,0 +1,75 @@
+name: Release macOS Menubar
+
+# Triggers on a `mac-v*` tag push (e.g. `git tag mac-v0.8.0 && git push origin mac-v0.8.0`),
+# or manually via the Actions tab. Builds a universal arm64+x86_64 bundle, ad-hoc signs it,
+# zips via `ditto`, and uploads the zip to the GitHub Release. The installer verifies
+# the checksum and bundle identity before replacing the local app.
+on:
+  push:
+    tags:
+      - 'mac-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for the bundle (e.g. v0.8.0 or dev-preview)'
+        required: true
+        default: 'dev-preview'
+
+permissions:
+  contents: write  # Needed to create the release + upload assets.
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve version label
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/mac-v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/mac-}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Show Swift toolchain
+        run: swift --version
+
+      - name: Build + bundle + zip
+        run: mac/Scripts/package-app.sh "${{ steps.version.outputs.value }}"
+
+      - name: Upload artifact (for manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: CodeBurnMenubar-${{ steps.version.outputs.value }}
+          path: |
+            mac/.build/dist/CodeBurnMenubar-${{ steps.version.outputs.value }}.zip
+            mac/.build/dist/CodeBurnMenubar-${{ steps.version.outputs.value }}.zip.sha256
+          if-no-files-found: error
+
+      - name: Create / update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/mac-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Menubar ${{ steps.version.outputs.value }}
+          body: |
+            Install with:
+
+            ```
+            npm install -g codeburn
+            codeburn menubar
+            ```
+
+            That command drops the app into `~/Applications`, records the persistent
+            `codeburn` CLI path used by the menubar, verifies the downloaded checksum,
+            clears quarantine after bundle verification, and launches it. If you download
+            the zip from this page directly and macOS shows "cannot verify developer",
+            right-click the app in Finder and pick Open to whitelist it once.
+          files: |
+            mac/.build/dist/CodeBurnMenubar-${{ steps.version.outputs.value }}.zip
+            mac/.build/dist/CodeBurnMenubar-${{ steps.version.outputs.value }}.zip.sha256
+          fail_on_unmatched_files: true

@@ -1,0 +1,58 @@
+name: Build Snap package
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload to the Snap Store (stable channel)
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/build-snap.yml
+      - app/**
+      - src/**
+      - package.json
+      - package-lock.json
+
+permissions:
+  contents: read
+
+jobs:
+  snap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+
+      - name: Install CLI dependencies
+        run: npm ci
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix app
+
+      - name: Build snap
+        run: npm --prefix app run package:snap
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: CodeBurn-Snap
+          path: app/release/codeburn_*.snap
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish to Snap Store
+        if: github.event_name == 'workflow_dispatch' && inputs.publish
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          sudo snap install snapcraft --classic
+          snapcraft upload --release=stable app/release/codeburn_*.snap

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/codeburn-logo.png" />
+    <title>CodeBurn - Local Dashboard</title>
+    <script>
+      // Apply the saved theme before first paint so the dashboard never flashes light.
+      (function () {
+        var saved = null
+        try {
+          saved = localStorage.getItem('codeburn-theme')
+        } catch (e) {
+          // storage disabled (some embeds/webviews): fall back to OS theme
+        }
+        var dark = saved === 'dark' || (saved !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

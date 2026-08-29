@@ -1,0 +1,53 @@
+name: Upgrade path
+
+# Every existing user upgrading from the last published CLI (0.9.20) crosses the
+# session-cache v7 -> v9 re-layout and the daily-cache v17 -> v19 re-derivation on
+# their first run. Unit tests cover the migration in isolation on one platform; this
+# job proves it against a cache that the REAL 0.9.20 binary wrote, on all three
+# platforms, at both the package floor and the newest 22.x.
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'scripts/upgrade-path/**'
+      - '.github/workflows/upgrade-path.yml'
+  workflow_dispatch:
+
+jobs:
+  upgrade-path:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Package floor, and the newest 22.x. The floor matters here: node:zlib
+        # gained zstd in 22.15, so dsh degrades below it (the corpus writes the
+        # uncompressed dsh variant so both legs still count the same numbers).
+        node-version: [22.13.0, 22]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      # dist/cli.js + dist/parse-worker.js. The dash bundle is not exercised by
+      # any command this job runs, so the full `npm run build` is not paid for.
+      - run: npm run build:cli
+
+      - name: Upgrade path from codeburn@0.9.20
+        run: npm run verify:upgrade
+        env:
+          # Under runner.temp so the artifact step below can find it. The space
+          # is deliberate: a real Windows HOME almost always has one.
+          UPGRADE_PATH_WORK: ${{ runner.temp }}/codeburn upgrade path
+
+      - name: Upload payloads on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upgrade-path-${{ matrix.os }}-node${{ matrix.node-version }}
+          path: ${{ runner.temp }}/codeburn upgrade path/payloads
+          if-no-files-found: ignore
