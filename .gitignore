@@ -32,3 +32,20 @@ apm_modules/
 node_modules/
 
 .local-release/
+
+# --- dash/ subtree (vendored from getagentseal/codeburn via git subtree) ---
+# The upstream's own dash/.gitignore already lists its build output, but the
+# same patterns live here so the rule survives a vendor-side change and is
+# visible to anyone scanning repo-root ignores. Vendored code is never built
+# by KyberWeave itself — KyberDash consumes upstream's published output.
+dash/dist/
+dash/**/dist/
+dash/build/
+dash/.tsbuildinfo
+dash/**/*.tsbuildinfo
+dash/**/*.tgz
+
+# The root `**/bin/` rule targets .NET project output. Vendored upstream has
+# no `bin/` directory currently, so the rule does not swallow an upstream
+# directory. If upstream ever ships a directory named `bin/` it would be
+# ignored — that is desirable, since it would be build artifact there too.
