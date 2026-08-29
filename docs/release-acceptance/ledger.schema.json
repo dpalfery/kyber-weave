@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codeburn.dev/schemas/release-acceptance-run.json",
+  "title": "CodeBurn release acceptance run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "started_at", "candidate", "environment", "verdict", "surfaces", "evidence", "limitations"],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 8 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": ["string", "null"], "format": "date-time" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "parent", "version", "artifacts"],
+      "properties": {
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "parent": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "version": { "type": "string" },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["surface", "name", "sha256"],
+            "properties": {
+              "surface": { "type": "string" },
+              "name": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["os", "arch", "hardware", "node", "npm"],
+      "properties": {
+        "os": { "type": "string" },
+        "arch": { "type": "string" },
+        "hardware": { "type": "string" },
+        "memory_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "node": { "type": "string" },
+        "npm": { "type": "string" },
+        "swift": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "verdict": { "enum": ["ready", "conditional", "not-ready", "incomplete"] },
+    "surfaces": {
+      "type": "object",
+      "additionalProperties": { "enum": ["pass", "fail", "conditional", "blocked", "not-shipped"] }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["pass", "fail", "blocked", "skipped"] },
+          "duration_ms": { "type": ["number", "null"], "minimum": 0 },
+          "evidence": { "type": ["string", "null"] },
+          "notes": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "invariants": { "type": "object", "additionalProperties": true },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "severity": { "enum": ["P0", "P1", "P2", "P3"] },
+          "status": { "enum": ["open", "fixed", "not-reproduced", "downgraded"] },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["root", "timings", "click_through", "accuracy", "residue"],
+      "properties": {
+        "root": { "type": "string" },
+        "timings": { "type": "string" },
+        "click_through": { "type": "string" },
+        "accuracy": { "type": "string" },
+        "residue": { "type": "string" }
+      }
+    },
+    "review": {
+      "type": "object",
+      "properties": {
+        "independent_review": { "type": ["string", "null"] },
+        "affected_machine": { "type": ["string", "null"] }
+      }
+    },
+    "limitations": { "type": "array", "items": { "type": "string" } },
+    "previous_run_id": { "type": ["string", "null"] }
+  }
+}
