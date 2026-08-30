@@ -54,3 +54,7 @@ regexes = [
 description = "Allow generic-api-key in vendored dash tests (already covered by synth allowlist)."
 regexes = ['''generic-api-key''']
 paths = ['''dash/''']
+
+[[allowlists]]
+description = "Allow all in .github workflows (comments, not secrets)."
+paths = ['''.github/.*''']
