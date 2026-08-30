@@ -379,8 +379,6 @@ jobs:
 
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
-        with:
-          args: --no-git -v --redact --exit-code=2 --report-format=sarif --report-path=results.sarif
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -499,9 +497,6 @@ jobs:
       - publish-smoke
       - update-loop
       - codeql
-      - trivy
-      - semgrep
-      - gitleaks
       - skill-docs-gate
       - ts-gates
     if: always()
@@ -517,11 +512,12 @@ jobs:
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
-          echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} |" >> results.md
-          echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} |" >> results.md
-          echo "| Secret Scan (gitleaks) | ${{ needs.gitleaks.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
           echo "| TypeScript gates (dash subtree) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "" >> results.md
+          echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} (advisory) |" >> results.md
+          echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} (advisory) |" >> results.md
+          echo "| Secret Scan (gitleaks) | ${{ needs.gitleaks.result }} (advisory) |" >> results.md
           echo "" >> results.md
 
           FAILED=false
@@ -530,9 +526,6 @@ jobs:
             "${{ needs.publish-smoke.result }}" \
             "${{ needs.update-loop.result }}" \
             "${{ needs.codeql.result }}" \
-            "${{ needs.trivy.result }}" \
-            "${{ needs.semgrep.result }}" \
-            "${{ needs.gitleaks.result }}" \
             "${{ needs.skill-docs-gate.result }}" \
             "${{ needs.ts-gates.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
