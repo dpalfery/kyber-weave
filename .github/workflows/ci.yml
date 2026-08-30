@@ -48,7 +48,7 @@ jobs:
       - name: Restore
         run: dotnet restore KyberWeave.sln
 
-      # Curated packs only — whitespace + a small style set from .editorconfig.
+      # Curated packs only — whitespace + a small style set from .editorconfig. # gitleaks:allow
       # Skip `dotnet format analyzers`: CA quality rules already fail the build via
       # TreatWarningsAsErrors / AnalysisMode=all.
       - name: Format (whitespace)
