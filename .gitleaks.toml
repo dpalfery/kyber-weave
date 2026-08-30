@@ -54,3 +54,8 @@ regexes = [
 description = "Allow generic-api-key in vendored dash tests (already covered by synth allowlist)."
 regexes = ['''generic-api-key''']
 paths = ['''dash/''']
+
+[[allowlists]]
+description = "CI workflow comments and docs, not secrets."
+regexes = ['''curated''', '''whitespace''', '''editorconfig''']
+paths = ['''.github/''']
