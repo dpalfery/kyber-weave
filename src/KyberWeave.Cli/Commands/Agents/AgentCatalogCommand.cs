@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Rendering;
+using System.Threading;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Configuration;
@@ -10,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Agents;
 
 public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
 {
-    public override int Execute(CommandContext context, AgentCatalogSettings settings)
+    protected override int Execute(CommandContext context, AgentCatalogSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig config))
@@ -59,4 +60,6 @@ public sealed class AgentCatalogCommand : Command<AgentCatalogSettings>
         AnsiConsole.MarkupLine($"\nTotal agent roles: [bold]{matrix.Count}[/]");
         return 0;
     }
+
+    public int Execute(CommandContext context, AgentCatalogSettings settings) => Execute(context, settings, CancellationToken.None);
 }

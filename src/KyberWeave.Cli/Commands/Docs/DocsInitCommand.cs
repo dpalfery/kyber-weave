@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
 using Spectre.Console;
@@ -21,7 +22,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
     private const string SkillPackage = "dpalfery/kyber-weave";
 
-    public override int Execute(CommandContext context, DocsInitSettings settings)
+    protected override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
     {
         (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(settings);
         if (attempt.ExitCode != 0)
@@ -62,6 +63,8 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         return 0;
     }
+
+    public int Execute(CommandContext context, DocsInitSettings settings) => Execute(context, settings, CancellationToken.None);
 
     /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>
     internal static (int ExitCode, ScaffoldResult? Result, string? Error) TryScaffold(

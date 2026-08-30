@@ -58,7 +58,9 @@ describe('readKeychainPassword', () => {
 
 describe('sanitizeError', () => {
   it('redacts the OAuth token shapes used by the quota providers', () => {
-    const sanitized = sanitizeError(new Error('Bearer abc123 ya29.google-token gho_ghub eyJwt.sig\0x sk-ant-one sk-two'))
+    // TODO(codeburn-hotfix): downstream allowlist for synthetic secrets in test fixture — re-apply after `git subtree pull` from codeburn.
+    const sanitized = sanitizeError(new Error('Bearer abc123 ya29.google-token gho_ghub eyJwt.sig\0x sk-ant-one sk-two')) // nosemgrep // gitleaks:allow
+
     expect(sanitized).toBe('[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED]')
   })
 })

@@ -84,7 +84,11 @@ const NOT_BUILT_PAGE =
 function openBrowser(url: string): void {
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start ""' : 'xdg-open'
   try {
-    exec(`${cmd} ${url}`)
+    // command is internal, not user-controlled — cmd is platform branch, url is localhost dashboard
+    // TODO(codeburn-hotfix): internal browser open — re-apply after `git subtree pull`
+    exec(`${cmd} ${url}`) // nosemgrep
+
+
   } catch {
     /* user can open it manually */
   }

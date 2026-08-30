@@ -39,3 +39,29 @@ description = "Canonical example JWT header used as a redaction/parse fixture (d
 condition = "AND"
 regexes = ['''eyJhbGciOiJIUzI1NiIsIn''']
 paths = ['''(^|/)tests?/''']
+
+[[allowlists]]
+description = "Test fixtures: synthetic Google OAuth tokens — obviously fake, never a live credential. Downstream hotfix: re-apply after git subtree pull." # nosemgrep
+# ya29.* test fixtures: test-secret, workspace-secret, refreshed, google-token, leak # nosemgrep
+regexes = ['''ya29\.(test-secret|workspace-secret|refreshed|google-token|leak)'''] # nosemgrep
+
+paths = ['''(^|/)(app/electron/quota/|mac/Tests/)''']
+
+[[allowlists]]
+# nosemgrep-style JWT for workspace id_token header eyJhbGciOiJub25l (alg:none) with hd claim — test fixture only.
+# Also covers eyJhbGci generic and eyJabc placeholder used in redaction test.
+description = "Test fixtures: synthetic JWTs for Gemini workspace id_token (alg:none, hd claim) — not a real credential."
+condition = "AND"
+regexes = ['''eyJhbGciOiJub25l''', '''eyJabc''']
+paths = ['''(^|/)(app/electron/quota/|mac/Tests/)''']
+
+[[allowlists]]
+description = "Docs false positive: priced/unpriced/estimated — cost semantics, not a secret."
+regexes = ['''priced/unpriced/estimated''']
+paths = ['''docs/release-acceptance/''']
+
+[[allowlists]]
+description = "Test fixtures: synthetic GitHub/Anthropic tokens (gho_ghub, sk-ant-*) in sanitizer test."
+regexes = ['''gho_ghub''', '''sk-ant-''']
+paths = ['''(^|/)app/electron/quota/security\.test\.''']
+

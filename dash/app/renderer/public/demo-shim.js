@@ -4,7 +4,11 @@
 // unsubscribers, and anything unimplemented resolves null via the Proxy.
 (() => {
   const call = (channel) => (...args) =>
-    fetch('http://127.0.0.1:4900/call', {
+    // localhost demo shim, not prod — demo harness only, never shipped to users
+    // TODO(codeburn-hotfix): localhost demo shim exception — re-apply after `git subtree pull`
+    fetch('http://127.0.0.1:4900/call', { // nosemgrep
+
+
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ channel, args }),

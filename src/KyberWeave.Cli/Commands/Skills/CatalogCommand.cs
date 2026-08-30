@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Threading;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -23,7 +24,7 @@ public sealed class CatalogSettings : CommandSettings
 
 public sealed class CatalogCommand : Command<CatalogSettings>
 {
-    public override int Execute(CommandContext context, CatalogSettings settings)
+    protected override int Execute(CommandContext context, CatalogSettings settings, CancellationToken cancellationToken)
     {
         SkillSet set = SkillLoader.LoadSet(settings.Path);
         if (set.Count == 0)
@@ -74,4 +75,6 @@ public sealed class CatalogCommand : Command<CatalogSettings>
         AnsiConsole.MarkupLine($"[grey]{set.Count} skill(s) catalogued.[/]");
         return 0;
     }
+
+    public int Execute(CommandContext context, CatalogSettings settings) => Execute(context, settings, CancellationToken.None);
 }

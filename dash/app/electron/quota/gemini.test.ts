@@ -2,16 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { decodeGeminiUsage, fetchGeminiQuota } from './gemini'
 
+// TODO(codeburn-hotfix): downstream allowlist for synthetic OAuth fixtures — re-apply after `git subtree pull` from codeburn.
 const credential = JSON.stringify({
-  access_token: 'ya29.test-secret',
+  access_token: 'ya29.test-secret', // nosemgrep // gitleaks:allow
+
   refresh_token: '1//refresh-secret',
   expiry_date: Date.now() + 3_600_000,
 })
 
 // A Google Workspace id_token carries the hosted-domain (`hd`) JWT claim.
 const workspaceCredential = JSON.stringify({
-  access_token: 'ya29.workspace-secret',
-  id_token: `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ hd: 'example.com' })).toString('base64url')}.sig`,
+  access_token: 'ya29.workspace-secret', // nosemgrep // gitleaks:allow
+  id_token: `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ hd: 'example.com' })).toString('base64url')}.sig`, // nosemgrep // gitleaks:allow
+
   expiry_date: Date.now() + 3_600_000,
 })
 
@@ -64,7 +67,8 @@ describe('Gemini quota fetch', () => {
     const [, quotaInit] = fetchMock.mock.calls[1]! as unknown as [string, RequestInit]
     expect(JSON.parse(String(quotaInit.body))).toEqual({ project: 'gen-lang-client-1' })
     expect(quotaInit.headers).toMatchObject({
-      Authorization: 'Bearer ya29.test-secret',
+      Authorization: 'Bearer ya29.test-secret', // nosemgrep // gitleaks:allow
+
       'Content-Type': 'application/json',
       'User-Agent': 'CodeBurn',
     })
@@ -82,7 +86,8 @@ describe('Gemini quota fetch', () => {
     vi.stubEnv('GEMINI_OAUTH_CLIENT_SECRET', 'client-secret')
     const stale = JSON.stringify({ ...JSON.parse(credential), expiry_date: Date.now() - 1000 })
     const fetchMock = vi.fn(async (url: string | URL | RequestInfo) => String(url).includes('oauth2.googleapis.com')
-      ? okJson({ access_token: 'ya29.refreshed' })
+      ? okJson({ access_token: 'ya29.refreshed' }) // nosemgrep // gitleaks:allow
+
       : String(url).includes('loadCodeAssist')
         ? okJson({ paidTier: { name: 'standard-tier' } })
         : okJson(quotaBody))
@@ -93,7 +98,9 @@ describe('Gemini quota fetch', () => {
     expect(tokenInit.method).toBe('POST')
     expect(String(tokenInit.body)).toContain('grant_type=refresh_token')
     const init = (fetchMock.mock.calls.at(-1)! as unknown as [string, RequestInit])[1]
-    expect(init.headers).toMatchObject({ Authorization: 'Bearer ya29.refreshed' })
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer ya29.refreshed' }) // nosemgrep // gitleaks:allow
+
+
   })
 
   it('uses the Retry-After header for 429 backoff', async () => {
@@ -139,7 +146,9 @@ describe('Gemini quota fetch', () => {
 
   it('redacts tokens and NUL from diagnostics without surfacing them', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const fetchMock = vi.fn(async () => { throw new Error('Bearer rawtoken ya29.leak eyJabc.def.ghi\0tail') })
+    const fetchMock = vi.fn(async () => { throw new Error('Bearer rawtoken ya29.leak eyJabc.def.ghi\0tail') }) // nosemgrep // gitleaks:allow
+
+
     const result = await fetchGeminiQuota({ fetch: fetchMock, readFile: vi.fn(async () => credential) })
     const logged = warn.mock.calls.flat().join(' ')
     expect(result.quota).not.toHaveProperty('error')

@@ -17,18 +17,15 @@ final class GeminiQuotaTests: XCTestCase {
 
     private static let now = Date(timeIntervalSince1970: 1_786_000_000)
 
+    // TODO(codeburn-hotfix): downstream allowlist for synthetic OAuth fixtures — re-apply after `git subtree pull` from codeburn.
     private static var credential: String {
-        """
-        {"access_token":"ya29.test-secret","refresh_token":"1//refresh-secret","expiry_date":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}
-        """
+        "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}" // nosemgrep // gitleaks:allow
     }
 
     /// A Google Workspace id_token carries the hosted-domain (`hd`) JWT claim.
     private static var workspaceCredential: String {
         // base64url(JSON {"hd":"example.com"})
-        """
-        {"access_token":"ya29.workspace-secret","id_token":"eyJhbGciOiJub25lIn0.eyJoZCI6ImV4YW1wbGUuY29tIn0.sig","expiry_date":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}
-        """
+        "{\"access_token\":\"ya29.workspace-secret\",\"id_token\":\"eyJhbGciOiJub25lIn0.eyJoZCI6ImV4YW1wbGUuY29tIn0.sig\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}" // nosemgrep // gitleaks:allow
     }
 
     private static let quotaBody = """
@@ -123,7 +120,8 @@ final class GeminiQuotaTests: XCTestCase {
         XCTAssertEqual(recorder.requests.count, 2)
         for request in recorder.requests {
             XCTAssertTrue(request.url?.absoluteString.hasPrefix("https://cloudcode-pa.googleapis.com/v1internal:") == true)
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer ya29.test-secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer ya29.test-secret") // nosemgrep // gitleaks:allow
+
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
             XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "CodeBurn")
         }
@@ -145,9 +143,9 @@ final class GeminiQuotaTests: XCTestCase {
     }
 
     func testExpiredTokenWithoutClientCredentialsIsTerminal() async {
-        let stale = """
-        {"access_token":"ya29.test-secret","refresh_token":"1//refresh-secret","expiry_date":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}
-        """
+        let stale = "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}" // nosemgrep // gitleaks:allow
+
+
         let recorder = RequestRecorder()
         let deps = Self.makeDeps(credential: stale, recorder: recorder) { request in
             Self.okJson(request, "{}")
@@ -167,9 +165,9 @@ final class GeminiQuotaTests: XCTestCase {
     }
 
     func testExpiredTokenRefreshesInMemoryViaEnvOverrides() async throws {
-        let stale = """
-        {"access_token":"ya29.test-secret","refresh_token":"1//refresh-secret","expiry_date":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}
-        """
+        let stale = "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}" // nosemgrep // gitleaks:allow
+
+
         let recorder = RequestRecorder()
         let deps = Self.makeDeps(
             credential: stale,
@@ -178,7 +176,9 @@ final class GeminiQuotaTests: XCTestCase {
         ) { request in
             let url = request.url?.absoluteString ?? ""
             if url.contains("oauth2.googleapis.com") {
-                return Self.okJson(request, #"{"access_token":"ya29.refreshed"}"#)
+                return Self.okJson(request, #"{"access_token":"ya29.refreshed"}"#) // nosemgrep // gitleaks:allow
+
+
             }
             if url.contains("loadCodeAssist") {
                 return Self.okJson(request, #"{"paidTier":{"name":"standard-tier"}}"#)
@@ -193,7 +193,9 @@ final class GeminiQuotaTests: XCTestCase {
         XCTAssertTrue(tokenBody.contains("grant_type=refresh_token"))
         XCTAssertEqual(
             recorder.requests.last?.value(forHTTPHeaderField: "Authorization"),
-            "Bearer ya29.refreshed")
+            "Bearer ya29.refreshed") // nosemgrep // gitleaks:allow
+
+
     }
 
     func testRateLimitedUsesRetryAfterHeader() async {

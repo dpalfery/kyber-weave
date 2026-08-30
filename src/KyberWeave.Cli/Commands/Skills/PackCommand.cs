@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Threading;
 using System.IO.Compression;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
@@ -26,7 +27,7 @@ public sealed class PackSettings : CommandSettings
 
 public sealed class PackCommand : Command<PackSettings>
 {
-    public override int Execute(CommandContext context, PackSettings settings)
+    protected override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
     {
         string skillFile = Path.Combine(settings.Path, "SKILL.md");
         if (!File.Exists(skillFile))
@@ -70,6 +71,8 @@ public sealed class PackCommand : Command<PackSettings>
         AnsiConsole.MarkupLine($"[green]Packed[/] [bold]{Markup.Escape(name)}[/] → {Markup.Escape(output)} ({skill.Resources.Count} bundled file(s)).");
         return 0;
     }
+
+    public int Execute(CommandContext context, PackSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static void ReportRenderer_RenderErrors(DiagnosticReport report)
     {

@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Update;
+using System.Threading;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -12,7 +13,7 @@ public sealed class UpdateCommand : Command<UpdateSettings>
 
     internal Func<string, string?>? ReadEnvironment { get; init; }
 
-    public override int Execute(CommandContext context, UpdateSettings settings)
+    protected override int Execute(CommandContext context, UpdateSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -35,6 +36,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, UpdateSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static void Log(string message) =>
         AnsiConsole.MarkupLine($"[grey]{Markup.Escape(message)}[/]");

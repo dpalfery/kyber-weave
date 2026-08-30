@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Threading;
 using KyberWeave.Core.Squad.Deployment;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -28,7 +29,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadStatusSettings settings)
+    protected override int Execute(CommandContext context, SquadStatusSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -91,4 +92,6 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         AnsiConsole.MarkupLine("[green]All deployed files match the recorded receipt.[/]");
         return 0;
     }
+
+    public int Execute(CommandContext context, SquadStatusSettings settings) => Execute(context, settings, CancellationToken.None);
 }

@@ -124,7 +124,11 @@ export async function removeSchedule(): Promise<void> {
 
 function runCommand(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, { stdio: 'pipe' })
+    // command is internal, not user-controlled — only /bin/launchctl with static args
+    // TODO(codeburn-hotfix): internal launchctl invocation — re-apply after `git subtree pull`
+    const proc = spawn(command, args, { stdio: 'pipe' }) // nosemgrep
+
+
     let stderr = ''
     proc.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString()

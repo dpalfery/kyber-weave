@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Threading;
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -32,7 +33,7 @@ public sealed class NewSettings : CommandSettings
 
 public sealed partial class NewCommand : Command<NewSettings>
 {
-    public override int Execute(CommandContext context, NewSettings settings)
+    protected override int Execute(CommandContext context, NewSettings settings, CancellationToken cancellationToken)
     {
         string name = settings.Name;
         if (!MyRegex().IsMatch(name))
@@ -58,6 +59,8 @@ public sealed partial class NewCommand : Command<NewSettings>
         AnsiConsole.MarkupLine($"Next: [grey]kyber-weave skill validate {Markup.Escape(dir)} && kyber-weave skill lint {Markup.Escape(dir)} --explain[/]");
         return 0;
     }
+
+    public int Execute(CommandContext context, NewSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static string Template(string template, string name, bool includeLicense, bool includeMetadata)
     {

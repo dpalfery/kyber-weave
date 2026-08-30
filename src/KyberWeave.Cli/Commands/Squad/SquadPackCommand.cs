@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Threading;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Packaging;
@@ -29,7 +30,7 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadPackSettings settings)
+    protected override int Execute(CommandContext context, SquadPackSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -92,6 +93,8 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, SquadPackSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static string ResolveVersion()
     {

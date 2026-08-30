@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using System.Threading;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Model;
@@ -11,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Schema tier: frontmatter conformance. Needs no code index.</summary>
 public sealed class DocsValidateCommand : Command<DocsSettings>
 {
-    public override int Execute(CommandContext context, DocsSettings settings)
+    protected override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
@@ -43,4 +44,6 @@ public sealed class DocsValidateCommand : Command<DocsSettings>
         CommandHelpers.Finish(report, settings, "docs validate", "Document");
         return report.HasErrors ? 1 : 0;
     }
+
+    public int Execute(CommandContext context, DocsSettings settings) => Execute(context, settings, CancellationToken.None);
 }

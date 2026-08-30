@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using System.Threading;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
@@ -12,7 +13,7 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
     private const string ReportWriteFailed = "KW-REVIEW-025";
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, ReviewGatesSettings settings)
+    protected override int Execute(CommandContext context, ReviewGatesSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -62,6 +63,8 @@ public sealed class ReviewGatesCommand : Command<ReviewGatesSettings>
         // Non-blocking gate failures stay Warning and do not fail the process.
         return report.HasErrors ? 1 : 0;
     }
+
+    public int Execute(CommandContext context, ReviewGatesSettings settings) => Execute(context, settings, CancellationToken.None);
 }
 
 /// <summary>Rule identifiers for individual gate outcomes.</summary>
