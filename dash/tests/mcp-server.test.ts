@@ -28,11 +28,21 @@ async function connect(aggregate: (p: unknown, o: unknown) => Promise<MenubarPay
 }
 
 describe('mcp server', () => {
-  it('exposes exactly two read-only tools', async () => {
+  it('exposes usage/savings plus six KyberDash analysis tools, all read-only', async () => {
     const client = await connect(async () => fakePayload())
     const { tools } = await client.listTools()
-    expect(tools.map(t => t.name).sort()).toEqual(['get_savings', 'get_usage'])
+    expect(tools.map(t => t.name).sort()).toEqual([
+      'get_comparison',
+      'get_context_analysis',
+      'get_problems',
+      'get_quarantine',
+      'get_savings',
+      'get_schema_cost',
+      'get_timeline',
+      'get_usage',
+    ])
     expect(tools.find(t => t.name === 'get_usage')!.annotations?.readOnlyHint).toBe(true)
+    for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(true)
   })
   it('get_usage hashes project names by default', async () => {
     const client = await connect(async () => fakePayload())

@@ -99,7 +99,7 @@ public sealed class SquadPackCommand : Command<SquadPackSettings>
         string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(infoVersion))
         {
-            int plusIdx = infoVersion.IndexOf('+');
+            int plusIdx = infoVersion.IndexOf('+', StringComparison.Ordinal);
             return plusIdx > 0 ? infoVersion[..plusIdx] : infoVersion;
         }
 

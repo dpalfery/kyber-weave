@@ -30,7 +30,7 @@ public sealed class DocsCatalogCommand : Command<DocsSettings>
         {
             IOrderedEnumerable<string> types = documents
                 .Where(d => d.DocType != DocType.Unknown)
-                .Select(d => d.DocType.ToString().ToLowerInvariant())
+                .Select(d => d.DocType.ToString().ToUpperInvariant())
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(t => t, StringComparer.Ordinal);
 

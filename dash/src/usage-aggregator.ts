@@ -166,6 +166,13 @@ export type AggregateOpts = {
   /// true. The desktop app never renders it, so it passes `--no-timeline` to
   /// skip the buildGranularHistory pass on every menubar poll.
   timeline?: boolean
+  /// KyberDash analyses carried through the status contract (R11.4, R11.5).
+  /// When present the aggregator forwards it verbatim into the MenubarPayload's
+  /// `kyber` field; when absent the field is omitted so older native clients
+  /// that predate the analyses still decode. Extending the contract is
+  /// sufficient to carry a new analysis into the menu bar and Electron
+  /// without modifying the clients themselves.
+  kyber?: import('./menubar-json.js').KyberPayload
 }
 
 type ConfigOption = { id: string; label: string; path: string }
@@ -1137,7 +1144,7 @@ export async function buildMenubarPayloadForRange(periodInfo: PeriodInfo, opts: 
   // instead, so the two are never conflated.
   const partialFirstPaint = hydration?.deferredForFirstPaint === true
   const stale = hydration?.complete === false && !partialFirstPaint ? true : undefined
-  const payload = buildMenubarPayload(currentData, providers, optimize, dailyHistory, retryTax, routingWaste, breakdowns, claudeConfigs, granularHistory, stale, hydrationStateFor(hydration))
+  const payload = buildMenubarPayload(currentData, providers, optimize, dailyHistory, retryTax, routingWaste, breakdowns, claudeConfigs, granularHistory, stale, hydrationStateFor(hydration), opts.kyber)
   // Plugin socket: add-only sections from loaded plugins (empty socket by
   // default, so the payload is byte-identical without plugins installed).
   const pluginSections = await pluginPayloadSections(await loadPlugins())

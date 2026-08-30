@@ -202,7 +202,11 @@ export function shutdownAll(): Promise<void> {
 }
 
 // Homebrew + common Node version managers, mirroring mac/CodeburnCLI.swift so a
-// GUI-launched app (minimal PATH) still finds a globally-installed `codeburn`.
+// GUI-launched app (minimal PATH) still finds a globally-installed CLI.
+// The canonical binary is `kyber-weave` (renamed from `codeburn`); the
+// resolver tries `kyber-weave` first and falls back to `codeburn` so an
+// older globally-installed CLI is still found during migration (R11.5,
+// R14.3 — binary rename only, no analysis logic duplicated in the client).
 export function nodeManagerDirs(): string[] {
   const home = homedir()
   const dirs = [
@@ -216,12 +220,13 @@ export function nodeManagerDirs(): string[] {
   const nvmVersions = join(nvmDir, 'versions', 'node')
   try {
     // Scan version dirs newest-first and take the first whose bin actually holds
-    // `codeburn`. A lexicographic max ("v9" > "v22") is not a real "newest", and
-    // the top dir may not even contain the CLI — so verify, matching CodeburnCLI.swift.
+    // the CLI (`kyber-weave` preferred, `codeburn` fallback). A lexicographic
+    // max ("v9" > "v22") is not a real "newest", and the top dir may not
+    // even contain the CLI — so verify, matching CodeburnCLI.swift.
     const entries = readdirSync(nvmVersions).sort().reverse()
     for (const entry of entries) {
       const bin = join(nvmVersions, entry, 'bin')
-      if (isExecutableFile(join(bin, 'codeburn'))) {
+      if (isExecutableFile(join(bin, 'kyber-weave')) || isExecutableFile(join(bin, 'codeburn'))) {
         dirs.push(bin)
         break
       }
@@ -232,7 +237,7 @@ export function nodeManagerDirs(): string[] {
   return dirs
 }
 
-/** The dirs searched for a `codeburn` executable. `CODEBURN_PATH_DIRS` overrides
+/** The dirs searched for a CLI executable (`kyber-weave` preferred, `codeburn` fallback). `CODEBURN_PATH_DIRS` overrides
  *  the whole search space (delimiter-separated) — used by tests and advanced setups. */
 function searchDirs(): string[] {
   const override = process.env.CODEBURN_PATH_DIRS
@@ -365,8 +370,15 @@ export function resolveTarget(): CliTarget | null {
   const persisted = readPersistedPath()
   if (persisted) return { kind: 'external', bin: persisted }
 
-  for (const bin of searchDirs().map(dir => join(dir, 'codeburn'))) {
-    if (isExecutableFile(bin)) return { kind: 'external', bin }
+  // Binary rename (codeburn → kyber-weave): try the canonical name first,
+  // fallback to the legacy name so an older global install is still found.
+  // Only the name changes; the status contract decode path is unchanged
+  // (R11.5 — native clients hold no analysis logic).
+  for (const dir of searchDirs()) {
+    for (const name of ['kyber-weave', 'codeburn'] as const) {
+      const bin = join(dir, name)
+      if (isExecutableFile(bin)) return { kind: 'external', bin }
+    }
   }
   return null
 }

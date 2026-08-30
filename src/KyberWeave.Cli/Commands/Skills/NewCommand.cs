@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -60,8 +61,8 @@ public sealed partial class NewCommand : Command<NewSettings>
 
     private static string Template(string template, string name, bool includeLicense, bool includeMetadata)
     {
-        string title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0]) + w[1..]));
-        (string description, string instructions) = template.ToLowerInvariant() switch
+        string title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0], CultureInfo.InvariantCulture) + w[1..]));
+        (string description, string instructions) = template.ToUpperInvariant() switch
         {
             "sop" => (
                 $"Use to perform {title} the same compliant way every time. Use when a request matches this procedure. Do NOT use for unrelated tasks or when approval limits are exceeded.",

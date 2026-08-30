@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -245,7 +246,7 @@ public sealed class CursorRenderer : ISquadRenderer
         StringBuilder details = new();
         if (unexpressed.Count > 0)
         {
-            details.Append($"Cursor subagent configuration cannot express fine-grained permissions for: {string.Join(", ", unexpressed)}.");
+            details.Append(CultureInfo.InvariantCulture, $"Cursor subagent configuration cannot express fine-grained permissions for: {string.Join(", ", unexpressed)}.");
         }
         else
         {
@@ -254,7 +255,7 @@ public sealed class CursorRenderer : ISquadRenderer
 
         if (unenforcedDenials.Count > 0)
         {
-            details.Append($" Canonical denies not enforced without readonly: {string.Join(", ", unenforcedDenials)}.");
+            details.Append(CultureInfo.InvariantCulture, $" Canonical denies not enforced without readonly: {string.Join(", ", unenforcedDenials)}.");
         }
 
         if (agent.DelegatesTo.Count > 0)

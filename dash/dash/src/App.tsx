@@ -23,6 +23,12 @@ import { DeviceSearchModal } from '@/components/DeviceSearchModal'
 import { ContextExplorer } from '@/components/ContextExplorer'
 import { WorkflowPanel, hasWorkflowContent } from '@/components/WorkflowPanel'
 import { Punchcard } from '@/components/Punchcard'
+import { ContextView } from '@/components/kyber/ContextView'
+import { SchemaView } from '@/components/kyber/SchemaView'
+import { TimelineView } from '@/components/kyber/TimelineView'
+import { CompareView } from '@/components/kyber/CompareView'
+import { QuarantineView } from '@/components/kyber/QuarantineView'
+import { ProblemsView } from '@/components/kyber/ProblemsView'
 
 const n = (v: number | undefined): number => v ?? 0
 
@@ -449,8 +455,119 @@ function ThemeToggle() {
   )
 }
 
+type KyberPage = 'usage' | 'context' | 'kyber-context' | 'schema' | 'timeline' | 'compare' | 'quarantine' | 'problems'
+
+function KyberContextPanel() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['kyber-context'],
+    queryFn: async () => {
+      const r = await fetch('/api/kyber/context')
+      if (!r.ok) throw new Error(String(r.status))
+      return r.json()
+    },
+    retry: false,
+  })
+  if (isLoading) return <Skeleton className="h-40" />
+  if (isError || !data) {
+    return (
+      <ContextView
+        analysis={{
+          measurable: false,
+          reason: 'declared_not_measurable',
+          turns: 0,
+          contextLimit: 200_000,
+        }}
+      />
+    )
+  }
+  return <ContextView analysis={data} />
+}
+function KyberSchemaPanel() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['kyber-schema'],
+    queryFn: async () => {
+      const r = await fetch('/api/kyber/schema')
+      if (!r.ok) throw new Error(String(r.status))
+      return r.json()
+    },
+    retry: false,
+  })
+  if (isLoading) return <Skeleton className="h-40" />
+  if (isError || !data) {
+    return <SchemaView analysis={{ measurable: false, invocationCount: 0, reason: 'declared_not_measurable' }} />
+  }
+  return <SchemaView analysis={data} />
+}
+function KyberTimelinePanel() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['kyber-timeline'],
+    queryFn: async () => {
+      const r = await fetch('/api/kyber/timeline')
+      if (!r.ok) throw new Error(String(r.status))
+      return r.json()
+    },
+    retry: false,
+  })
+  if (isLoading) return <Skeleton className="h-40" />
+  if (isError || !data) return <TimelineView root={null} />
+  return <TimelineView root={data} />
+}
+function KyberComparePanel() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['kyber-compare'],
+    queryFn: async () => {
+      const r = await fetch('/api/kyber/compare')
+      if (!r.ok) throw new Error(String(r.status))
+      return r.json()
+    },
+    retry: false,
+  })
+  if (isLoading) return <Skeleton className="h-40" />
+  if (isError || !data)
+    return (
+      <CompareView
+        table={{
+          harnesses: [],
+          rows: [],
+          problems: [{ severity: 'warning', code: 'no_data', message: 'No comparison data available' }],
+        }}
+      />
+    )
+  return <CompareView table={data} />
+}
+function KyberQuarantinePanel() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['kyber-quarantine'],
+    queryFn: async () => {
+      const r = await fetch('/api/kyber/quarantine')
+      if (!r.ok) throw new Error(String(r.status))
+      return r.json()
+    },
+    retry: false,
+  })
+  if (isLoading) return <Skeleton className="h-20" />
+  if (isError || !data) return <QuarantineView entries={[]} />
+  const entries = Array.isArray(data) ? (data as unknown[]) : (data as { entries?: unknown }).entries ?? data
+  return <QuarantineView entries={(entries as { spanId: string; namespaces: string[]; reason: string }[]) ?? []} />
+}
+function KyberProblemsPanel() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['kyber-problems'],
+    queryFn: async () => {
+      const r = await fetch('/api/kyber/problems')
+      if (!r.ok) throw new Error(String(r.status))
+      return r.json()
+    },
+    retry: false,
+  })
+  if (isLoading) return <Skeleton className="h-20" />
+  if (isError || !data) return <ProblemsView problems={[]} />
+  const problems = Array.isArray(data) ? (data as unknown[]) : (data as { problems?: unknown }).problems ?? data
+  return <ProblemsView problems={(problems as { severity: string; code: string; message: string }[]) as never} />
+}
+
 export function App() {
-  const [page, setPage] = useState<'usage' | 'context'>('usage')
+  const [page, setPage] = useState<KyberPage>('usage')
   const [period, setPeriod] = useState<Period>('today')
   const [provider, setProvider] = useState('all')
   const [view, setView] = useState<string>('all')
@@ -591,17 +708,26 @@ export function App() {
           </div>
 
           <div className="ml-6 flex rounded-md border border-border bg-interactive-secondary p-0.5 max-md:ml-2 max-md:shrink-0">
-            {(['usage', 'context'] as const).map((pg) => (
+            {( [
+              { key: 'usage', label: 'Usage' },
+              { key: 'context', label: 'Context' },
+              { key: 'kyber-context', label: 'Buckets' },
+              { key: 'schema', label: 'Schema' },
+              { key: 'timeline', label: 'Timeline' },
+              { key: 'compare', label: 'Compare' },
+              { key: 'quarantine', label: 'Quarantine' },
+              { key: 'problems', label: 'Problems' },
+            ] as const).map((pg) => (
               <button
-                key={pg}
+                key={pg.key}
                 type="button"
-                onClick={() => setPage(pg)}
+                onClick={() => setPage(pg.key)}
                 className={cn(
                   'rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
-                  page === pg ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
+                  page === pg.key ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
                 )}
               >
-                {pg === 'usage' ? 'Usage' : 'Context'}
+                {pg.label}
               </button>
             ))}
           </div>
@@ -796,7 +922,23 @@ export function App() {
 
           <main className="min-w-0 flex-1 overflow-y-auto pr-0.5">
             <div className="mb-3 flex items-baseline justify-between">
-              <h1 className="font-display text-xl tracking-tight text-foreground">{page === 'context' ? 'Context' : viewTitle}</h1>
+              <h1 className="font-display text-xl tracking-tight text-foreground">
+                {page === 'context'
+                  ? 'Context'
+                  : page === 'kyber-context'
+                    ? 'Context buckets'
+                    : page === 'schema'
+                      ? 'Schema cost'
+                      : page === 'timeline'
+                        ? 'Timeline'
+                        : page === 'compare'
+                          ? 'Compare'
+                          : page === 'quarantine'
+                            ? 'Quarantine'
+                            : page === 'problems'
+                              ? 'Problems'
+                              : viewTitle}
+              </h1>
               <span className="text-xs text-tertiary-foreground">{page === 'usage' ? label : ''}</span>
             </div>
 
@@ -804,6 +946,18 @@ export function App() {
 
             {page === 'context' ? (
               <ContextExplorer />
+            ) : page === 'kyber-context' ? (
+              <KyberContextPanel />
+            ) : page === 'schema' ? (
+              <KyberSchemaPanel />
+            ) : page === 'timeline' ? (
+              <KyberTimelinePanel />
+            ) : page === 'compare' ? (
+              <KyberComparePanel />
+            ) : page === 'quarantine' ? (
+              <KyberQuarantinePanel />
+            ) : page === 'problems' ? (
+              <KyberProblemsPanel />
             ) : showCombined ? (
               <CombinedView devices={devices} unit={unit} />
             ) : (

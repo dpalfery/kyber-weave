@@ -46,6 +46,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
         }
     }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static int FindingExitCode(DiagnosticReport report, string failOn) =>
         failOn.Trim().ToLowerInvariant() switch
         {
@@ -54,6 +55,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
             "error" => report.HasErrors ? 1 : 0,
             _ => throw new ArgumentException("--fail-on must be none, warning, or error.", nameof(failOn))
         };
+#pragma warning restore CA1308
 
     private static bool HasOperationalErrors(DiagnosticReport report) =>
         report.Items.Any(item =>

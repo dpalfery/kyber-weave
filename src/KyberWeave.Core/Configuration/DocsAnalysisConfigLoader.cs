@@ -78,6 +78,7 @@ public static class DocsAnalysisConfigLoader
             apiKeyEnv: section.ApiKeyEnv);
     }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static DocsAnalysisSearchMode? ParseSearchMode(string? value)
     {
         if (value is null)
@@ -107,6 +108,7 @@ public static class DocsAnalysisConfigLoader
                 $"Unknown docs-analysis.embeddings.mode '{value}'. Known modes: off, prefer, required.")
         };
     }
+#pragma warning restore CA1308
 
     private static Uri? ParseEndpoint(string? value)
     {

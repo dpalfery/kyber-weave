@@ -21,6 +21,8 @@
     "test": "vitest run tests --exclude \"tests/cache-refresh-lock*\"",
     "test:locks": "vitest run tests/cache-refresh-lock.test.ts tests/cache-refresh-lock-corrupt-body.test.ts tests/cache-refresh-lock-process.test.ts tests/cache-refresh-lock-status-snapshot.test.ts --poolOptions.forks.singleFork=true",
     "test:watch": "vitest tests --exclude \"tests/cache-refresh-lock*\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
     "prepublishOnly": "npm run build"
   },
@@ -68,13 +70,16 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@eslint/js": "^9.18.0",
     "@types/node": "^22.19.17",
     "@types/react": "^19.2.14",
     "@types/selfsigned": "^2.0.4",
+    "eslint": "^9.18.0",
     "playwright": "^1.61.1",
     "tsup": "^8.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
+    "typescript-eslint": "^8.20.0",
     "vitest": "^3.1.0"
   }
 }

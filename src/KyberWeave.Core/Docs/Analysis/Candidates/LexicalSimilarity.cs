@@ -11,6 +11,7 @@ internal static partial class LexicalSimilarity
             ["consumption"] = "usage"
         };
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     internal static IReadOnlySet<string> Tokens(string text)
     {
         HashSet<string> tokens = new HashSet<string>(StringComparer.Ordinal);
@@ -23,6 +24,7 @@ internal static partial class LexicalSimilarity
 
         return tokens;
     }
+#pragma warning restore CA1308
 
     internal static double Score(string left, string right) =>
         Score(Tokens(left), Tokens(right));

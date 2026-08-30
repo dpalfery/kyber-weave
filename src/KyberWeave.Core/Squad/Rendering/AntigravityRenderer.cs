@@ -192,8 +192,8 @@ public sealed class AntigravityRenderer : ISquadRenderer
     private static void ValidateCanonicalName(string name)
     {
         if (string.IsNullOrWhiteSpace(name) ||
-            name.Contains('/') ||
-            name.Contains('\\') ||
+            name.Contains('/', StringComparison.Ordinal) ||
+            name.Contains('\\', StringComparison.Ordinal) ||
             name.Contains("..", StringComparison.Ordinal) ||
             name.Trim('.').Length == 0)
         {
@@ -231,7 +231,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         builder.Append("---\n");
 
-        string normalizedBody = instructionBody.Replace("\r\n", "\n");
+        string normalizedBody = instructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
         builder.Append(normalizedBody);
         if (!normalizedBody.EndsWith('\n'))
         {

@@ -12,23 +12,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class MergeBoundaryTests
 {
-    private static readonly string[] UpstreamReadOnlyRoots =
-    [
-        "src",
-        "tests",
-    ];
-
     private static readonly string[] UnshippedUpstreamSurfaces =
     [
         "windows",
         "gnome",
-    ];
-
-    private static readonly string[] UpstreamExtendedSurfaces =
-    [
-        "dash",
-        "app",
-        "mac",
     ];
 
     [Fact]

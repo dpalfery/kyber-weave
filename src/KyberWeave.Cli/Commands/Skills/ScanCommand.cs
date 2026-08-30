@@ -27,7 +27,7 @@ public sealed class ScanCommand : Command<ScanSettings>
 
         CommandHelpers.Finish(report, settings, "skill scan", "Skill");
 
-        return settings.FailOn.ToLowerInvariant() switch
+        return settings.FailOn.ToUpperInvariant() switch
         {
             "warning" => report.Warnings > 0 || report.HasErrors ? 1 : 0,
             "error" => report.HasErrors ? 1 : 0,

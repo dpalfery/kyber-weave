@@ -294,9 +294,11 @@ public sealed partial class ClaimExtractor
 
     private static string DisplayProse(string text) => WhitespacePattern().Replace(text, " ").Trim();
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static string NormalizeProse(string text)
     {
         string decomposed = text.Normalize(NormalizationForm.FormKD).ToLowerInvariant();
+#pragma warning restore CA1308
         string withoutPunctuation = ProseSeparatorPattern().Replace(decomposed, " ");
         return WhitespacePattern().Replace(withoutPunctuation, " ").Trim();
     }

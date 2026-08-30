@@ -229,7 +229,7 @@ public sealed class DocsTools(DocumentIndexHost host)
         {
             sb.AppendLine(parsedKind is null
                 ? "No documentation-analysis candidates are pending."
-                : $"No {parsedKind.Value.ToString().ToLowerInvariant()} candidates are pending.");
+                : $"No {parsedKind.Value.ToString().ToUpperInvariant()} candidates are pending.");
             return CapToBudget(sb.ToString(), effectiveBudget);
         }
 
@@ -318,7 +318,7 @@ public sealed class DocsTools(DocumentIndexHost host)
         {
             sb.AppendLine();
             sb.Append("sense: ").AppendLine(sense.Id);
-            sb.Append("status: ").AppendLine(sense.Status.ToString().ToLowerInvariant());
+            sb.Append("status: ").AppendLine(sense.Status.ToString().ToUpperInvariant());
             sb.Append("definition: ").AppendLine(
                 string.IsNullOrWhiteSpace(sense.Definition)
                     ? "(not yet defined)"
@@ -338,7 +338,7 @@ public sealed class DocsTools(DocumentIndexHost host)
         }
 
         if (result.Senses.Count > AnalysisCandidateCap)
-            sb.AppendLine($"… {result.Senses.Count - AnalysisCandidateCap} more senses omitted by the hard cap.");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"… {result.Senses.Count - AnalysisCandidateCap} more senses omitted by the hard cap.");
         return CapToBudget(sb.ToString(), AnalysisCharCap);
     }
 
@@ -399,7 +399,7 @@ public sealed class DocsTools(DocumentIndexHost host)
                      .Take(3))
         {
             sb.Append("  ").Append(diagnostic.Code).Append(" [")
-              .Append(diagnostic.Severity.ToString().ToLowerInvariant()).Append("]: ")
+              .Append(diagnostic.Severity.ToString().ToUpperInvariant()).Append("]: ")
               .AppendLine(CapToBudget(diagnostic.Message.ReplaceLineEndings(" "), 240));
         }
         sb.AppendLine();
@@ -420,7 +420,7 @@ public sealed class DocsTools(DocumentIndexHost host)
     {
         StringBuilder sb = new();
         sb.Append("candidate: ").AppendLine(candidate.Id);
-        sb.Append("kind: ").AppendLine(candidate.Kind.ToString().ToLowerInvariant());
+        sb.Append("kind: ").AppendLine(candidate.Kind.ToString().ToUpperInvariant());
         if (!string.IsNullOrWhiteSpace(candidate.Term))
             sb.Append("term: ").AppendLine(Truncate(candidate.Term.ReplaceLineEndings(" "), 240));
         sb.Append("evidence: ").AppendLine(string.Join(
@@ -442,11 +442,11 @@ public sealed class DocsTools(DocumentIndexHost host)
                 ", ",
                 candidate.Sources
                     .OrderBy(source => source)
-                    .Select(source => source.ToString().ToLowerInvariant())));
+                    .Select(source => source.ToString().ToUpperInvariant())));
         }
         if (candidate.Verdict is not null)
         {
-            sb.Append("verdict: ").Append(candidate.Verdict.Label.ToString().ToLowerInvariant())
+            sb.Append("verdict: ").Append(candidate.Verdict.Label.ToString().ToUpperInvariant())
               .Append(" at ")
               .AppendLine(candidate.Verdict.Confidence.ToString("0.00", CultureInfo.InvariantCulture));
         }
@@ -482,8 +482,8 @@ public sealed class DocsTools(DocumentIndexHost host)
         sb.Append("### ").AppendLine(doc.Frontmatter.Title ?? doc.RelativePath);
         sb.Append("path: ").AppendLine(doc.RelativePath);
         sb.Append("id: ").AppendLine(doc.Frontmatter.Id ?? "(none)");
-        sb.Append("doc-type: ").Append(doc.DocType.ToString().ToLowerInvariant())
-          .Append("  status: ").Append(doc.Status.ToString().ToLowerInvariant())
+        sb.Append("doc-type: ").Append(doc.DocType.ToString().ToUpperInvariant())
+          .Append("  status: ").Append(doc.Status.ToString().ToUpperInvariant())
           .Append("  component: ").AppendLine(doc.Frontmatter.Component ?? "(none)");
     }
 

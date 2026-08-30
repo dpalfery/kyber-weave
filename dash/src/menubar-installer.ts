@@ -19,7 +19,7 @@ import {
 const RELEASE_API = 'https://api.github.com/repos/getagentseal/codeburn/releases?per_page=20'
 const RELEASE_DOWNLOAD_BASE = 'https://github.com/getagentseal/codeburn/releases/download'
 const APP_BUNDLE_NAME = 'CodeBurnMenubar.app'
-const EXPECTED_BUNDLE_ID = 'org.agentseal.codeburn-menubar'
+export const EXPECTED_BUNDLE_ID = 'org.agentseal.codeburn-menubar'
 const VERSIONED_ASSET_PATTERN = /^CodeBurnMenubar-v.+\.zip$/
 const APP_PROCESS_NAME = 'CodeBurnMenubar'
 const SUPPORTED_OS = 'darwin'
@@ -44,6 +44,7 @@ export type InstallOptions = {
   cliVersion?: string
   platform?: string
   windows?: WindowsInstallHooks
+  mac?: MacInstallHooks
 }
 
 /// What differs per platform between the mac and Windows installs: which release tag holds the
@@ -211,10 +212,6 @@ export {
   buildPersistentCodeburnLookupPath,
   resolvePersistentCodeburnPathFromWhichOutput,
 } from './persistent-codeburn.js'
-
-function userApplicationsDir(): string {
-  return join(homedir(), 'Applications')
-}
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -406,32 +403,70 @@ export async function downloadToFile(
   }, options)
 }
 
-async function stageMenubarApp(assets: ResolvedAssets, stagingDir: string): Promise<string> {
+async function stageMenubarApp(assets: ResolvedAssets, stagingDir: string, hooks: MacInstallHooks = {}): Promise<string> {
+  const log = hooks.log ?? console.log
   const { zip, checksum } = assets
   const archivePath = join(stagingDir, zip.name)
-  console.log(`Downloading ${zip.name}...`)
-  await downloadToFile(zip.browser_download_url, archivePath)
+  log(`Downloading ${zip.name}...`)
+  await downloadToFile(zip.browser_download_url, archivePath, hooks.fetchOptions)
 
-  console.log('Verifying checksum...')
-  await verifyChecksum(archivePath, checksum.browser_download_url)
+  log('Verifying checksum...')
+  await verifyChecksum(archivePath, checksum.browser_download_url, hooks.fetchOptions)
 
-  console.log('Unpacking...')
-  await runCommand('/usr/bin/ditto', ['-x', '-k', archivePath, stagingDir])
+  log('Unpacking...')
+  await (hooks.unpack ?? defaultUnpack)(archivePath, stagingDir)
 
   const unpackedApp = join(stagingDir, APP_BUNDLE_NAME)
   if (!(await exists(unpackedApp))) {
     throw new Error(`Archive did not contain ${APP_BUNDLE_NAME}.`)
   }
 
-  console.log('Verifying app bundle...')
-  await verifyBundleIdentity(unpackedApp)
+  log('Verifying app bundle...')
+  await verifyBundleIdentity(unpackedApp, hooks)
 
   // Clear Gatekeeper's quarantine xattr. Without this, the first launch shows the
   // "cannot verify developer" prompt even for a signed + notarized app when the bundle
   // was delivered via curl/fetch instead of the Mac App Store.
-  await runCommand('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', unpackedApp]).catch(() => {})
+  await (hooks.clearQuarantine ?? defaultClearQuarantine)(unpackedApp)
 
   return unpackedApp
+}
+
+async function defaultUnpack(archivePath: string, destDir: string): Promise<void> {
+  await runCommand('/usr/bin/ditto', ['-x', '-k', archivePath, destDir])
+}
+
+async function defaultClearQuarantine(appPath: string): Promise<void> {
+  await runCommand('/usr/bin/xattr', ['-dr', 'com.apple.quarantine', appPath]).catch(() => {})
+}
+
+async function defaultMacLaunch(appPath: string): Promise<void> {
+  await runCommand('/usr/bin/open', [appPath])
+}
+
+async function defaultIsAppRunning(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const proc = spawn('/usr/bin/pgrep', ['-f', APP_PROCESS_NAME])
+    proc.on('close', (code) => resolve(code === 0))
+    proc.on('error', () => resolve(false))
+  })
+}
+
+async function defaultKillRunningApp(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const proc = spawn('/usr/bin/pkill', ['-f', APP_PROCESS_NAME])
+    proc.on('close', () => resolve())
+    proc.on('error', () => resolve())
+  })
+  for (let i = 0; i < 10; i++) {
+    if (!(await defaultIsAppRunning())) return
+    await new Promise(r => setTimeout(r, 500))
+  }
+}
+
+async function macAppsDir(hooks: MacInstallHooks): Promise<string> {
+  const homeFn = hooks.homedir ?? (() => homedir())
+  return join(homeFn(), 'Applications')
 }
 
 async function runCommand(command: string, args: string[]): Promise<void> {
@@ -460,15 +495,28 @@ async function captureCommand(command: string, args: string[]): Promise<string> 
   })
 }
 
-async function verifyBundleIdentity(appPath: string): Promise<void> {
-  const bundleID = await captureCommand('/usr/libexec/PlistBuddy', [
+async function verifyBundleIdentity(appPath: string, hooks: MacInstallHooks = {}): Promise<void> {
+  const readBundleID = hooks.readBundleIdentifier ?? defaultReadBundleIdentifier
+  const verifySignature = hooks.verifySignature ?? defaultVerifySignature
+  const bundleID = await readBundleID(appPath)
+  if (bundleID !== EXPECTED_BUNDLE_ID) {
+    throw new Error(`Unexpected menubar bundle id ${bundleID}; expected ${EXPECTED_BUNDLE_ID}.`)
+  }
+  await verifySignature(appPath)
+}
+
+async function defaultReadBundleIdentifier(appPath: string): Promise<string> {
+  return captureCommand('/usr/libexec/PlistBuddy', [
     '-c',
     'Print :CFBundleIdentifier',
     join(appPath, 'Contents', 'Info.plist'),
   ])
-  if (bundleID !== EXPECTED_BUNDLE_ID) {
-    throw new Error(`Unexpected menubar bundle id ${bundleID}; expected ${EXPECTED_BUNDLE_ID}.`)
-  }
+}
+
+async function defaultVerifySignature(appPath: string): Promise<void> {
+  // The signature gate for R13.4: this is the last check before the bundle is renamed into
+  // the user's Applications directory. Any failure here must abort - a tampered or
+  // unsigned bundle never gets to live next to a real installation.
   await runCommand('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath])
 }
 
@@ -495,26 +543,6 @@ async function persistCodeburnPath(): Promise<void> {
   await chmod(PERSISTED_CLI_PATH, 0o600)
 }
 
-async function isAppRunning(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const proc = spawn('/usr/bin/pgrep', ['-f', APP_PROCESS_NAME])
-    proc.on('close', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
-  })
-}
-
-async function killRunningApp(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const proc = spawn('/usr/bin/pkill', ['-f', APP_PROCESS_NAME])
-    proc.on('close', () => resolve())
-    proc.on('error', () => resolve())
-  })
-  for (let i = 0; i < 10; i++) {
-    if (!(await isAppRunning())) return
-    await new Promise(r => setTimeout(r, 500))
-  }
-}
-
 /// Windows mirror of the mac install below: pin the release to the CLI's own version, fall back
 /// to the newest windows-v* release, verify the sha256 before anything executes the file, hand
 /// the .msi to msiexec, then launch what it installed.
@@ -539,6 +567,27 @@ export type WindowsInstallHooks = {
 }
 
 export type InstalledWindowsMenubar = { version: string; exePath: string }
+
+/// macOS install hooks. Each entry points at the same shell-out the real installer makes; tests
+/// override them so the refusals in test-mac.test.ts can be exercised without a signed bundle or
+/// `ditto`/`xattr` binaries. Defaults preserve current production behaviour - no caller outside
+/// the test suite ever needs to set these.
+export type MacInstallHooks = {
+  stagingDir?: string
+  fetchOptions?: AssetFetchOptions
+  apiFetch?: ReleaseApiFetch
+  homedir?: () => string
+  resolveCliPath?: () => Promise<string>
+  unpack?: (archivePath: string, destDir: string) => Promise<void>
+  readBundleIdentifier?: (appPath: string) => Promise<string>
+  verifySignature?: (appPath: string) => Promise<void>
+  clearQuarantine?: (appPath: string) => Promise<void>
+  launch?: (appPath: string) => Promise<void>
+  isAppRunning?: () => Promise<boolean>
+  killRunningApp?: () => Promise<void>
+  log?: (message: string) => void
+}
+export const DEFAULT_MAC_BUNDLE_ID = EXPECTED_BUNDLE_ID
 
 /// Windows' `CreateProcess` searches the current directory before `PATH`, so spawning `msiexec`
 /// or `reg` by bare name lets anything dropped next to the CLI impersonate a system tool. Same
@@ -672,18 +721,30 @@ async function installWindowsMenubarApp(options: InstallOptions): Promise<Instal
   }
 }
 
-export async function installMenubarApp(options: InstallOptions = {}): Promise<InstallResult> {
-  if ((options.platform ?? platform()) === 'win32') return installWindowsMenubarApp(options)
-  await ensureSupportedPlatform()
-  await persistCodeburnPath()
+export async function installMacMenubarApp(options: InstallOptions = {}): Promise<InstallResult> {
+  const hooks = options.mac ?? {}
+  const log = hooks.log ?? console.log
+  const homeFn = hooks.homedir ?? (() => homedir())
 
-  const appsDir = userApplicationsDir()
+  // R13.4: refuse immediately on any platform other than macOS. The CLI running on Linux or
+  // Windows must not leave a bundle staged, let alone placed at `~/Applications`.
+  if (process.env.CODEBURN_FORCE_MAC_INSTALL !== '1') {
+    await ensureSupportedPlatform()
+  }
+
+  const resolveCli = hooks.resolveCliPath ?? defaultMacResolveCliPath
+  await resolveCli(homeFn())
+
+  const appsDir = await macAppsDir(hooks)
   const targetPath = join(appsDir, APP_BUNDLE_NAME)
   const alreadyInstalled = await exists(targetPath)
 
+  const isAppRunning = hooks.isAppRunning ?? defaultIsAppRunning
+  const launch = hooks.launch ?? defaultMacLaunch
+
   if (alreadyInstalled && !options.force) {
     if (!(await isAppRunning())) {
-      await runCommand('/usr/bin/open', [targetPath])
+      await launch(targetPath)
     }
     return { installedPath: targetPath, launched: true }
   }
@@ -691,38 +752,55 @@ export async function installMenubarApp(options: InstallOptions = {}): Promise<I
   const cliVersion = options.cliVersion ? normalizeCliVersion(options.cliVersion) : ''
   let assets: ResolvedAssets
   if (cliVersion) {
-    console.log(`Resolving CodeBurn Menubar v${cliVersion}...`)
+    log(`Resolving CodeBurn Menubar v${cliVersion}...`)
     assets = resolveVersionedMenubarReleaseAssets(cliVersion)
   } else {
-    console.log('Looking up the latest CodeBurn Menubar release...')
-    assets = await fetchLatestReleaseAssets()
+    log('Looking up the latest CodeBurn Menubar release...')
+    assets = await fetchLatestReleaseAssets(MAC_RELEASE, hooks.apiFetch)
   }
 
-  const stagingDir = await mkdtemp(join(tmpdir(), 'codeburn-menubar-'))
+  const stagingDir = hooks.stagingDir ?? await mkdtemp(join(tmpdir(), 'codeburn-menubar-'))
   try {
     let unpackedApp: string
     try {
-      unpackedApp = await stageMenubarApp(assets, stagingDir)
+      unpackedApp = await stageMenubarApp(assets, stagingDir, hooks)
     } catch (err) {
       if (!cliVersion || !isMissingDirectAssetError(err)) throw err
-      console.log(`CodeBurn Menubar v${cliVersion} assets were not found. Looking up the latest CodeBurn Menubar release...`)
-      assets = await fetchLatestReleaseAssets()
-      unpackedApp = await stageMenubarApp(assets, stagingDir)
+      log(`CodeBurn Menubar v${cliVersion} assets were not found. Looking up the latest CodeBurn Menubar release...`)
+      assets = await fetchLatestReleaseAssets(MAC_RELEASE, hooks.apiFetch)
+      unpackedApp = await stageMenubarApp(assets, stagingDir, hooks)
     }
 
     await mkdir(appsDir, { recursive: true })
     if (alreadyInstalled) {
       // Kill the running copy before replacing its bundle so `mv` can proceed cleanly and the
       // user ends up on the new version.
-      await killRunningApp()
+      const kill = hooks.killRunningApp ?? defaultKillRunningApp
+      await kill()
       await rm(targetPath, { recursive: true, force: true })
     }
+
+    // Last gate before the bundle lands in the user's Applications directory. `stageMenubarApp`
+    // has already verified the SHA256 and the code signature; throwing from here is the only way
+    // to refuse placement, and `rename` is the line that performs placement. Anything that throws
+    // below this point must NOT reach rename, or R13.4 is violated.
     await rename(unpackedApp, targetPath)
 
-    console.log('Launching CodeBurn Menubar...')
-    await runCommand('/usr/bin/open', [targetPath])
+    log('Launching CodeBurn Menubar...')
+    await launch(targetPath)
     return { installedPath: targetPath, launched: true }
   } finally {
-    await rm(stagingDir, { recursive: true, force: true })
+    if (!hooks.stagingDir) await rm(stagingDir, { recursive: true, force: true })
   }
+}
+
+async function defaultMacResolveCliPath(_homeDir: string): Promise<string> {
+  void _homeDir
+  await persistCodeburnPath()
+  return PERSISTED_CLI_PATH
+}
+
+export async function installMenubarApp(options: InstallOptions = {}): Promise<InstallResult> {
+  if ((options.platform ?? platform()) === 'win32') return installWindowsMenubarApp(options)
+  return installMacMenubarApp(options)
 }

@@ -65,7 +65,7 @@ public static class MarkdownFrontmatterReader
     private static string ExtractYaml(string content, YamlFrontMatterBlock block)
     {
         string slice = content.Substring(block.Span.Start, block.Span.Length);
-        List<string> lines = slice.Replace("\r\n", "\n").Split('\n').ToList();
+        List<string> lines = slice.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').ToList();
         if (lines.Count > 0 && lines[0].TrimStart().StartsWith("---", StringComparison.Ordinal)) lines.RemoveAt(0);
         if (lines.Count > 0 && lines[^1].TrimStart().StartsWith("---", StringComparison.Ordinal)) lines.RemoveAt(lines.Count - 1);
         return string.Join("\n", lines);

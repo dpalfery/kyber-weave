@@ -71,6 +71,7 @@ public sealed class DocGraphProjection
             string documentId = DocId(document.Subject);
             documentIds.Add(documentId);
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
             AddNode(nodes, emittedNodeIds, new DocGraphNode(
                 documentId,
                 "Document",
@@ -81,6 +82,7 @@ public sealed class DocGraphProjection
                     ["title"] = document.Frontmatter.Title,
                     ["path"] = document.RelativePath
                 }));
+#pragma warning restore CA1308
 
             AddConcept(nodes, emittedNodeIds, "Component", document.Frontmatter.Component);
             AddConcept(nodes, emittedNodeIds, "Team", document.Frontmatter.Owner);
@@ -314,6 +316,7 @@ public sealed class DocGraphProjection
         return normalized.StartsWith("./", StringComparison.Ordinal) ? normalized[2..] : normalized;
     }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static void AddConcept(
         ICollection<DocGraphNode> nodes,
         ISet<string> emittedNodeIds,
@@ -326,6 +329,7 @@ public sealed class DocGraphProjection
             label,
             new Dictionary<string, string?>(StringComparer.Ordinal) { ["name"] = name }));
     }
+#pragma warning restore CA1308
 
     private static void AddNode(
         ICollection<DocGraphNode> nodes,
@@ -349,8 +353,10 @@ public sealed class DocGraphProjection
 
     private static string DocId(string id) => $"doc:{id}";
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static string? ConceptId(string label, string? name) =>
         string.IsNullOrWhiteSpace(name) ? null : $"{label.ToLowerInvariant()}:{name}";
+#pragma warning restore CA1308
 
     /// <summary>Resolves a relative link against the linking document's directory.</summary>
     internal static string? ResolveLink(string fromRelativePath, string link)

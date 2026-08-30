@@ -176,6 +176,219 @@ export type ClaudeConfigSelector = {
   options: ClaudeConfigOption[]
 }
 
+// ---------------------------------------------------------------------------
+// KyberDash extension — analyses carried through the status contract
+// (R11.4, R11.5). Every field is optional so a payload produced without
+// the canonical store still decodes in an older native client; new clients
+// render what is present and ignore what is absent. Adding fields here is
+// sufficient to carry a new analysis into the menu bar and Electron
+// without modifying the clients themselves.
+// ---------------------------------------------------------------------------
+
+export type KyberContextPayload =
+  | {
+      measurable: false
+      reason: 'no_message_structure' | 'declared_not_measurable'
+      turns: number
+      contextLimit: number
+    }
+  | {
+      measurable: true
+      contextLimit: number
+      turns: Array<{
+        index: number
+        buckets: Record<string, number>
+        toolDefinitionsByServer: Record<string, number>
+        builtinToolDefinitionTokens: number
+        strippedInstructionBlocks: { count: number; tokens: number }
+        bucketedTokens: number
+        residual: { tokens: number; attribution: 'tokenizer_drift' | 'unattributed' }
+        headroom: number
+        pressure: number
+        accumulationRate: number
+        freshInput: number
+        freshInputJump?: { previous: number; factor: number }
+      }>
+      residualTotal: number
+      derivedCounts: boolean
+      freshJumpFactor: number
+      flaggedTurns: number[]
+      sessionAccumulationRate: number
+    }
+
+export type KyberRankedTool = {
+  name: string
+  server?: string
+  cost: number
+  invoked: boolean
+}
+
+export type KyberSchemaPayload =
+  | {
+      measurable: false
+      invocationCount: number
+      reason?: 'declared_not_measurable'
+    }
+  | {
+      measurable: true
+      ranked: KyberRankedTool[]
+      neverInvoked: KyberRankedTool[]
+      byServer: Record<string, number>
+      unusedRange: { tokenResidencies: number; floor: number; ceiling: number; currency?: string }
+      turns: number
+    }
+
+export type KyberTimelineNode = {
+  spanId: string
+  parentId: string | null
+  children: KyberTimelineNode[]
+  startMs: number
+  durationMs: number
+  kind: string
+  name: string
+  attributes: Record<string, unknown>
+  isSubagent: boolean
+  isAuxiliary: boolean
+  cost: { basis: string; status: string; value?: number; currency?: string; byModel?: Record<string, number> }
+}
+
+export type KyberComparePayload = {
+  harnesses: string[]
+  rows: Array<{
+    metric: string
+    kind: 'per_turn' | 'total'
+    label: string
+    unit: string
+    cells: Record<
+      string,
+      { measurable: boolean; availability: string; value?: number; basis?: string; currency?: string; render: string }
+    >
+  }>
+  problems: Array<{ severity: string; code: string; message: string; location?: string }>
+}
+
+export type KyberProblemPayload = {
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  location?: string
+}
+
+export type KyberPayload = {
+  /** Context composition and pressure (R7). Optional for backward compat. */
+  context?: KyberContextPayload
+  /** Tool/schema cost ranking (R8). */
+  schema?: KyberSchemaPayload
+  /** Execution-structure timeline (R9). */
+  timeline?: KyberTimelineNode
+  /** Cross-harness comparison table (R10). */
+  compare?: KyberComparePayload
+  /** Quarantined spans that matched no adapter (R6). */
+  quarantineCount?: number
+  /** Validation and ingest problems surfaced, not guessed (R4.4, R6). */
+  problems?: KyberProblemPayload[]
+}
+
+/** Serialize helpers — Map fields become plain records for JSON. */
+export function serializeKyberContext(
+  analysis: {
+    measurable: boolean
+    reason?: string
+    turns: number | Array<{
+      index: number
+      buckets: Record<string, number>
+      toolDefinitionsByServer: Map<string, number> | Record<string, number>
+      builtinToolDefinitionTokens: number
+      strippedInstructionBlocks: { count: number; tokens: number }
+      bucketedTokens: number
+      residual: { tokens: number; attribution: string }
+      headroom: number
+      pressure: number
+      accumulationRate: number
+      freshInput: number
+      freshInputJump?: { previous: number; factor: number }
+    }>
+    contextLimit: number
+    residualTotal?: number
+    derivedCounts?: boolean
+    freshJumpFactor?: number
+    flaggedTurns?: number[]
+    sessionAccumulationRate?: number
+  },
+): KyberContextPayload {
+  if (!analysis.measurable) {
+    const reason =
+      analysis.reason === 'declared_not_measurable' ? 'declared_not_measurable' : 'no_message_structure'
+    return {
+      measurable: false,
+      reason,
+      turns: analysis.turns as number,
+      contextLimit: analysis.contextLimit,
+    }
+  }
+  const turns = (analysis.turns as Array<{
+    index: number
+    buckets: Record<string, number>
+    toolDefinitionsByServer: Map<string, number> | Record<string, number>
+    builtinToolDefinitionTokens: number
+    strippedInstructionBlocks: { count: number; tokens: number }
+    bucketedTokens: number
+    residual: { tokens: number; attribution: 'tokenizer_drift' | 'unattributed' }
+    headroom: number
+    pressure: number
+    accumulationRate: number
+    freshInput: number
+    freshInputJump?: { previous: number; factor: number }
+  }>).map(t => ({
+    ...t,
+    toolDefinitionsByServer:
+      t.toolDefinitionsByServer instanceof Map
+        ? Object.fromEntries(t.toolDefinitionsByServer)
+        : (t.toolDefinitionsByServer as Record<string, number>),
+  }))
+  return {
+    measurable: true,
+    contextLimit: analysis.contextLimit,
+    turns,
+    residualTotal: analysis.residualTotal ?? 0,
+    derivedCounts: analysis.derivedCounts ?? false,
+    freshJumpFactor: analysis.freshJumpFactor ?? 2,
+    flaggedTurns: analysis.flaggedTurns ?? [],
+    sessionAccumulationRate: analysis.sessionAccumulationRate ?? 0,
+  }
+}
+
+export function serializeKyberSchema(analysis: {
+  measurable: boolean
+  invocationCount?: number
+  reason?: string
+  ranked?: KyberRankedTool[]
+  neverInvoked?: KyberRankedTool[]
+  byServer?: Map<string, number> | Record<string, number>
+  unusedRange?: { tokenResidencies: number; floor: number; ceiling: number; currency?: string }
+  turns?: number
+}): KyberSchemaPayload {
+  if (!analysis.measurable) {
+    return {
+      measurable: false,
+      invocationCount: analysis.invocationCount ?? 0,
+      ...(analysis.reason ? { reason: analysis.reason as 'declared_not_measurable' } : {}),
+    }
+  }
+  const byServer =
+    analysis.byServer instanceof Map
+      ? Object.fromEntries(analysis.byServer)
+      : (analysis.byServer as Record<string, number> | undefined) ?? {}
+  return {
+    measurable: true,
+    ranked: analysis.ranked ?? [],
+    neverInvoked: analysis.neverInvoked ?? [],
+    byServer,
+    unusedRange: analysis.unusedRange ?? { tokenResidencies: 0, floor: 0, ceiling: 0 },
+    turns: analysis.turns ?? 0,
+  }
+}
+
 /// How much of the corpus is behind the numbers in this payload (#1110).
 /// `complete: false` means the totals cover only the files indexed so far and
 /// a later poll will return more. The counts are progress indicators, not
@@ -377,6 +590,12 @@ export type MenubarPayload = {
   currency: { code: string; symbol: string; rate: number }
   combined?: CombinedUsage
   claudeConfigs?: ClaudeConfigSelector
+  /// KyberDash analyses carried through the status contract (R11.4, R11.5).
+  /// Optional so a payload from a CLI that predates an analysis still
+  /// decodes; a native client renders what is present and ignores the rest.
+  /// Extending this field is sufficient to carry a new analysis into the
+  /// menu bar and Electron without modifying the clients themselves.
+  kyber?: KyberPayload
 }
 
 function oneShotRateFor(editTurns: number, oneShotTurns: number): number | null {
@@ -551,6 +770,7 @@ export function buildMenubarPayload(
   granularHistory?: GranularHistory,
   stale?: boolean,
   hydration?: HydrationState,
+  kyber?: KyberPayload,
 ): MenubarPayload {
   const payload: MenubarPayload = {
     generated: new Date().toISOString(),
@@ -606,6 +826,9 @@ export function buildMenubarPayload(
   }
   if (hydration) {
     payload.hydration = hydration
+  }
+  if (kyber !== undefined) {
+    payload.kyber = kyber
   }
   return payload
 }

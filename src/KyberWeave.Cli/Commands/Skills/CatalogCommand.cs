@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -67,7 +68,7 @@ public sealed class CatalogCommand : Command<CatalogSettings>
         {
             string scoreColor = r.Score >= 70 ? "green" : r.Score >= 50 ? "yellow" : "red";
             table.AddRow(Markup.Escape(r.Name), Markup.Escape(r.Version), Markup.Escape(r.Author),
-                $"[{scoreColor}]{r.Score}[/]", r.Tokens.ToString(), r.Resources.ToString());
+                $"[{scoreColor}]{r.Score}[/]", r.Tokens.ToString(CultureInfo.InvariantCulture), r.Resources.ToString(CultureInfo.InvariantCulture));
         }
         AnsiConsole.Write(table);
         AnsiConsole.MarkupLine($"[grey]{set.Count} skill(s) catalogued.[/]");

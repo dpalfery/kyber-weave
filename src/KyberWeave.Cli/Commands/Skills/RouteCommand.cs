@@ -55,7 +55,7 @@ public sealed class RouteCommand : Command<RouteSettings>
             return 2;
         }
 
-        IRoutingStrategy strategy = settings.Strategy.ToLowerInvariant() switch
+        IRoutingStrategy strategy = settings.Strategy.ToUpperInvariant() switch
         {
             // Hook for embedding / llm-judge strategies; lexical is the offline default.
             _ => new LexicalRoutingStrategy { FireThreshold = settings.Threshold }

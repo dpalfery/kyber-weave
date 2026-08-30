@@ -119,10 +119,12 @@ public static class AnalysisCandidateId
         ArgumentException.ThrowIfNullOrWhiteSpace(analyzerVersion);
         ArgumentException.ThrowIfNullOrWhiteSpace(rubricVersion);
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         IOrderedEnumerable<string> hashes = claimContentHashes.Order(StringComparer.Ordinal);
         string identity = string.Join('\n',
             kind.ToString().ToLowerInvariant(),
             normalizedTerm?.Trim().ToLowerInvariant() ?? string.Empty,
+#pragma warning restore CA1308
             analyzerVersion,
             rubricVersion,
             string.Join('\n', hashes));

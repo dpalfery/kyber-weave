@@ -37,7 +37,7 @@ enum CodeburnCLI {
         if let entries = try? FileManager.default.contentsOfDirectory(atPath: versionsDir) {
             for entry in entries.sorted().reversed() {
                 let bin = "\(versionsDir)/\(entry)/bin"
-                if FileManager.default.isExecutableFile(atPath: "\(bin)/codeburn") {
+                if FileManager.default.isExecutableFile(atPath: "\(bin)/kyber-weave") || FileManager.default.isExecutableFile(atPath: "\(bin)/codeburn") {
                     paths.append(bin)
                     break
                 }
@@ -75,12 +75,18 @@ enum CodeburnCLI {
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
             environment: environment
         )
-        for candidate in (additionalPathEntries + userPaths).map({ "\($0)/codeburn" }) {
-            if isSafe(candidate), FileManager.default.isExecutableFile(atPath: candidate) {
-                return [candidate]
+        // Binary rename (codeburn → kyber-weave): try canonical name first,
+        // fallback to legacy name so an older global install is still found.
+        // Only the name changes; decode path is unchanged (R11.5).
+        for dir in (additionalPathEntries + userPaths) {
+            for name in ["kyber-weave", "codeburn"] {
+                let candidate = "\(dir)/\(name)"
+                if isSafe(candidate), FileManager.default.isExecutableFile(atPath: candidate) {
+                    return [candidate]
+                }
             }
         }
-        return ["codeburn"]
+        return ["kyber-weave"]
     }
 
     private static func persistedCLIPath() -> String? {
