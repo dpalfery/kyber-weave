@@ -254,6 +254,7 @@ describe('installMacMenubarApp - staging tmp cleanup', () => {
 
   it('removes the staging tmp dir after the install was refused on a bad checksum', async () => {
     const { readdir } = await import('node:fs/promises')
+    const beforeEntries = new Set(await readdir(tmpdir()))
     await expect(installMacMenubarApp({
       cliVersion: VERSION,
       mac: {
@@ -283,10 +284,11 @@ describe('installMacMenubarApp - staging tmp cleanup', () => {
       },
     })).rejects.toThrow(/Checksum mismatch/)
 
-    // tmpdir() is shared, so we cannot assert "no codeburn-menubar-* dirs remain" globally,
-    // but we can assert the install did not leak a folder next to the app or staging sbx.
-    const tmpEntries = await readdir(tmpdir())
-    expect(tmpEntries.some(e => e.startsWith('codeburn-menubar-'))).toBe(false)
+    // tmpdir() is shared across parallel tests, so we cannot assert "no codeburn-menubar-* dirs remain"
+    // globally. Instead assert this test did not leak a *new* staging dir.
+    const afterEntries = await readdir(tmpdir())
+    const leaked = [...afterEntries].filter(e => e.startsWith('codeburn-menubar-') && !beforeEntries.has(e))
+    expect(leaked).toEqual([])
   })
 })
 
