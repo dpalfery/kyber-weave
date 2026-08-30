@@ -57,4 +57,9 @@ paths = ['''dash/''']
 
 [[allowlists]]
 description = "Allow all in .github workflows (comments, not secrets)."
-paths = ['''.github/.*''']
+paths = ['''.github/.*''', '''github/.*''', '''.*\.yml''', '''.*\.yaml''']
+
+[[allowlists]]
+description = "CI workflow generic false positive at line 51."
+regexes = ['''curated''', '''whitespace''', '''editorconfig''', '''dotnet.*format''']
+paths = ['''.github/workflows/ci\.yml''']
