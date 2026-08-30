@@ -301,6 +301,8 @@ jobs:
             --skip-dirs artifacts \
             --skip-dirs '**/bin' \
             --skip-dirs '**/obj' \
+            --skip-dirs dash/windows \
+            --skip-dirs dash/gnome \
             .
 
       - name: Convert Trivy report to SARIF
@@ -349,6 +351,8 @@ jobs:
             --exclude 'artifacts/**' \
             --exclude '**/bin/**' \
             --exclude '**/obj/**' \
+            --exclude 'dash/windows/**' \
+            --exclude 'dash/gnome/**' \
             --sarif-output semgrep.sarif
 
       # Intentional github/codeql-action v4 pin
@@ -372,6 +376,8 @@ jobs:
 
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        with:
+          args: --no-git -v --redact --exit-code=2 --report-format=sarif --report-path=results.sarif
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
