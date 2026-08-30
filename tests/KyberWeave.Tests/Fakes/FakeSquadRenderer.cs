@@ -33,6 +33,8 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "review-lens",
         "review-triage",
         "sql-database-architect",
+        "task-reviewer",
+        "task-reviewer-v3",
         "tauri-dev",
         "test-dev"
     ];
@@ -45,8 +47,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "azure-naming",
         "bug-crusher",
         "code-review",
-        "conductor",
-        "conductor-v3",
         "create-pull-request",
         "create-pull-request-github",
         "csharp-dev",
@@ -65,12 +65,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "security-review",
         "setup-dev-environment",
         "test-dev"
-    ];
-
-    private static readonly IReadOnlyList<string> SharedConductorIdentities =
-    [
-        "conductor",
-        "conductor-v3"
     ];
 
     private static readonly IReadOnlyList<string> DistinctBodyCollisionIdentities =
@@ -126,18 +120,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
                     string canonicalBody = GetAgentBody(agent);
                     string digest = ComputeSha256(canonicalBody);
 
-                    if (SharedConductorIdentities.Contains(agent, StringComparer.Ordinal))
-                    {
-                        // Conductor shared identity: already emitted as canonical skill; single-projection rule applies.
-                        degradations.Add(new SquadDegradationRecord(
-                            Target: targetToken,
-                            CanonicalIdentity: agent,
-                            OutputIdentity: agent,
-                            Code: "role-skill-fallback",
-                            InstructionDigest: digest,
-                            Details: "Reused identical shared canonical skill; agent primitive lowered to skill."));
-                    }
-                    else if (DistinctBodyCollisionIdentities.Contains(agent, StringComparer.Ordinal))
+                    if (DistinctBodyCollisionIdentities.Contains(agent, StringComparer.Ordinal))
                     {
                         // Collision identity: lowered to role-<name> skill
                         string outputIdentity = $"role-{agent}";
@@ -180,13 +163,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
 
                 foreach (string skill in CanonicalSkills)
                 {
-                    // Conductor single-projection rule on native targets:
-                    // conductor and conductor-v3 are native primary agents; suppress duplicate skill projection.
-                    if (SharedConductorIdentities.Contains(skill, StringComparer.Ordinal))
-                    {
-                        continue;
-                    }
-
                     string skillPath = GetTargetSkillFilePath(target, skill);
                     files.Add(new SquadDeploymentFile(skillPath, GetSkillContent(skill), targetToken));
                 }

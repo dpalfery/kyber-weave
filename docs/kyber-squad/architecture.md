@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-08-23
+last-reviewed: 2026-08-30
 status: current
 code-refs:
   - SquadTransaction
@@ -17,6 +17,8 @@ code-refs:
   - ClaudeRenderer
   - CopilotRenderer
   - CursorRenderer
+  - CodexRenderer
+  - AntigravityRenderer
 ---
 
 # Kyber-Squad architecture
@@ -24,7 +26,8 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments across 9 target coding harnesses.
+atomic, recoverable deployments. Its catalog declares nine target coding harnesses; five have
+implemented and registered renderers today.
 
 ---
 
@@ -33,8 +36,8 @@ atomic, recoverable deployments across 9 target coding harnesses.
 ```mermaid
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
-        Agents["23 Canonical Agents\n(agents/*.md)"]
-        Skills["26 Canonical Skills\n(skills/*)"]
+        Agents["24 Canonical Agents\n(agents/*.md)"]
+        Skills["24 SKILL.md Files\n+ 64 Resources"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]
     end
@@ -47,7 +50,7 @@ flowchart TD
     subgraph Compiler["Target Resolution & Lowering"]
         SquadTargetResolver["SquadTargetResolver\n(9 Harness Targets)"]
         Lattice["Semantic Permission Lattice\n(deny < ask < allow)"]
-        Lowering["Role-Skill Lowering\n(Shared vs Collision role-*)"]
+        Lowering["Role-Skill Lowering\n(Unoccupied vs Collision role-*)"]
     end
 
     subgraph DeploymentEngine["Transactional Deployment Engine"]
@@ -57,9 +60,9 @@ flowchart TD
         StateStore["SquadStateStore\n(squad.lock.yml / squad.receipt.json)"]
     end
 
-    subgraph TargetHarnesses["Target Harness Deployments"]
-        NativeTargets["Native Agent Targets\n(Claude, Cursor, Codex, Copilot, OpenCode, Kilo, Factory)"]
-        FallbackTargets["Role-Skill Targets\n(Antigravity, Warp)"]
+    subgraph TargetHarnesses["Declared Target Harnesses"]
+        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity)"]
+        UnsupportedTargets["Coverage Preflight Failure\n(OpenCode, Kilo, Warp, Factory)"]
     end
 
     CanonicalSource --> SquadSourceLoader
@@ -67,8 +70,8 @@ flowchart TD
     AgentIR --> Compiler
     Profiles --> Compiler
     Compiler --> DeploymentEngine
-    DeploymentEngine --> NativeTargets
-    DeploymentEngine --> FallbackTargets
+    DeploymentEngine --> RegisteredTargets
+    Compiler --> UnsupportedTargets
 ```
 
 ---
@@ -80,6 +83,9 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 24 top-level `SKILL.md`
+  identities. The canonical tree separately retains 64 supplemental files, giving 88 recursive
+  skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
 
@@ -103,21 +109,19 @@ graph LR
 
 ## 3. Role-Skill Lowering and Namespace Resolution
 
-Harnesses without native agent primitives (such as Antigravity and Warp) receive agent capabilities through **agent-to-role-skill lowering**, governed by `profiles/fallbacks.yml`.
+Targets without native agent primitives use **agent-to-role-skill lowering**, governed by
+`profiles/fallbacks.yml`. Antigravity has an implemented renderer for this projection. Warp is
+declared with the same projection model but remains unsupported until its renderer is implemented.
 
-The canonical agent and skill namespaces intersect at exactly 9 names:
+The current canonical agent and skill namespaces intersect at exactly seven names. Every
+intersection is a distinct-body collision; the product declares no shared identities:
 
 ```mermaid
 flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
     
-    Intersection -->|"Shared Identities\n(conductor, conductor-v3)"| SharedPath["Byte-Identical Bodies Required"]
-    Intersection -->|"Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
-    Intersection -->|"No Skill Collision\n(e.g. architect)"| UnoccupiedPath["Unoccupied Identity"]
-
-    SharedPath --> NativePrimary{"Target has Native\nPrimary Role?"}
-    NativePrimary -->|"Yes"| EmitAgentOnly["Emit Native Agent\n(Suppress Skill Projection)"]
-    NativePrimary -->|"No"| EmitSkillOnly["Emit Same-Name Skill\n(Suppress Native Agent)"]
+    Intersection -->|"Seven Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
+    Intersection -->|"No Skill Collision\n(including conductors)"| UnoccupiedPath["Unoccupied Identity"]
 
     CollisionPath --> FallbackCheck{"Target has Native\nAgent Support?"}
     FallbackCheck -->|"Yes"| NativeBoth["Emit Native Agent + Canonical Skill\n(Different Namespaces)"]
@@ -130,17 +134,15 @@ flowchart TD
 
 ### Resolution Rules
 
-1. **Shared Identities (`conductor`, `conductor-v3`)**:
-   - The canonical agent and canonical skill have byte-identical instruction bodies.
-   - On native-primary harnesses, only the native agent is emitted.
-   - On fallback harnesses, only the same-name skill is emitted.
-   - `conductor` is the default orchestrator; `conductor-v3` is explicit. `conductor-v2` exists only as an input migration alias.
-2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**:
+1. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `maui-dev`, `product-owner`, `python-dev`, `test-dev`)**:
    - The canonical skill and agent serve distinct functions.
    - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
-3. **Unoccupied Identities**:
+2. **Unoccupied Identities**:
    - Agents with no matching skill name lower directly to `<name>` as a skill on fallback targets.
+   - `conductor` and `conductor-v3` follow this rule because neither has a canonical skill.
+     The fallback profile's `shared-identities` list is empty; `conductor-v2` exists only as an
+     input migration alias for `conductor`.
 
 ---
 
@@ -255,6 +257,11 @@ and validates.
   `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
   `CodexRenderer` for `.codex/agents/*.toml` and `.codex/skills/*/SKILL.md`,
   and `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`.
+- **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
+  may name a target-scoped `copilot-capability-profile`. These fields validate and render the
+  Copilot allow-list and safety degradation only. They do not replace or widen the shared
+  `capability-profile`, fallback metadata, description, or instruction body consumed by other
+  renderers.
 - **Validate**: the registry re-checks the merged output — portable paths stay inside the
   extraction root, every file's target was actually requested, the native/fallback
   single-projection rules from [section 3](#3-role-skill-lowering-and-namespace-resolution)
@@ -271,9 +278,25 @@ and validates.
   Base tools (`vscode`, `todo`) are granted unconditionally, while capability-governed built-ins
   and single-quoted MCP server wildcards (`'codegraph/*'`, `'kyber-weave/*'`, `'context7/*'`) are
   capability-gated (`filesystem.read` for non-orchestrator roles).
+- **Copilot golden boundary**: Copilot emits exactly 48 files: 24
+  `.github/agents/<name>.agent.md` files and 24 `.github/skills/<name>/SKILL.md` files. All 24
+  raw canonical `SKILL.md` files are Hotshot golden bytes. Supplemental resources are not
+  rendered, even though the Hotshot tree consequently has 61 dangling local references.
+  Canonical source and both recursive package formats retain all 64 resources and resolve the
+  retained references. They remain until the
+  [content-preserving migration todo](../todo/migrate-skill-resources-into-standards.md) passes.
+- **Generated-output boundary**: target-rendered `.github` files are deployment output, not
+  canonical product or package source, and this synchronization does not add a generated target
+  tree to `products/kyber-squad/`.
 - **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), and `antigravity` (fallback role-skill lowering to
-  `.agents/skills/`) have renderers. `kyber-weave squad doctor` reports which targets are
-  covered; `docs/todo/<target>.md` has what implementing the rest needs.
+  `.agents/skills/`) are implemented and registered. The remaining declared targets—`opencode`,
+  `kilo`, `warp`, and `factory`—fail coverage preflight. `kyber-weave squad doctor` reports which
+  targets are covered; `docs/todo/<target>.md` has what implementing the rest needs.
+- **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
+  authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
+  `.kyber-weave/squad.receipt.json` are an intentional stale self-deployment, not inputs to source
+  loading or packaging. They remain untouched until a human refreshes them after a fresh release
+  candidate.
 
 ---
 

@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: bug-crusher-investigator
-description: "Triage a reported defect read-only: reproduce the failure, identify its root cause and blast radius, and return a structured TRIVIAL / NEEDS_ARCHITECT verdict the orchestrator routes on. Use when the bug-crusher workflow needs a defect diagnosed before anything is fixed. Do not use for implementing the fix, writing tests, or planning a refactor — it diagnoses only and never edits files."
+description: "Diagnoses a reported defect: reproduces the failure, finds root cause and blast radius, returns a TRIVIAL / NEEDS_ARCHITECT verdict. Use when the bug-crusher workflow needs a defect diagnosed before anything is fixed. Diagnoses only, edits no files."
 invocation: subagent
-model-profile: fast
+model-profile: deep-planning
 capability-profile: investigator
+copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

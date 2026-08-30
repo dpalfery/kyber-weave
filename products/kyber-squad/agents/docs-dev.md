@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: docs-dev
-description: "Technical documentation: READMEs, API docs, ADRs, runbooks, and inline code docs in Markdown/Mermaid. Use when the deliverable is documentation. Does not write implementation code, tests, CI/CD config, or spec-flow documents."
+description: "Writes technical documentation: READMEs, API docs, ADRs, runbooks, and inline docs in Markdown/Mermaid. Use when the deliverable is a .md file. Do not use when the deliverable is a formal requirements/design/tasks spec rather than reference documentation."
 invocation: subagent
 model-profile: fast
 capability-profile: documentation
+copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

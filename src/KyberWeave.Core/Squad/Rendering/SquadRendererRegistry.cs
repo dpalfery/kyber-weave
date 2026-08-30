@@ -19,19 +19,6 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </remarks>
 public sealed class SquadRendererRegistry : ISquadRenderer
 {
-    private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
-
-    private static readonly string[] DistinctBodyCollisions =
-    [
-        "csharp-dev",
-        "dal-dev",
-        "github-devops",
-        "maui-dev",
-        "product-owner",
-        "python-dev",
-        "test-dev"
-    ];
-
     private readonly IReadOnlyDictionary<SquadTarget, ISquadRenderer> _byTarget;
 
     public SquadRendererRegistry(IEnumerable<ISquadRenderer> renderers)
@@ -128,6 +115,19 @@ public sealed class SquadRendererRegistry : ISquadRenderer
     {
         Dictionary<string, SquadAgent> agentMap = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
         HashSet<string> targetTokens = targets.Select(SquadTargetCatalog.GetToken).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> agentNames = source.Agents
+            .Select(agent => agent.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> occupiedIdentities = source.Skills
+            .Where(skill => agentNames.Contains(skill.Name))
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> distinctBodyCollisions = occupiedIdentities
+            .Except(sharedIdentities, StringComparer.Ordinal)
+            .ToHashSet(StringComparer.Ordinal);
 
         foreach (SquadDeploymentFile file in files)
         {
@@ -175,24 +175,24 @@ public sealed class SquadRendererRegistry : ISquadRenderer
                     }
                 }
 
-                foreach (string conductor in SharedConductorIdentities)
+                foreach (string sharedIdentity in sharedIdentities)
                 {
-                    List<SquadDeploymentFile> conductorFiles = targetFiles.Where(f =>
-                        f.RelativePath.EndsWith($"/{conductor}.toml", StringComparison.Ordinal) ||
-                        f.RelativePath.EndsWith($"/{conductor}.md", StringComparison.Ordinal) ||
-                        f.RelativePath.EndsWith($"/{conductor}.agent.md", StringComparison.Ordinal) ||
-                        f.RelativePath.Contains($"/{conductor}/SKILL.md", StringComparison.Ordinal)).ToList();
+                    List<SquadDeploymentFile> sharedIdentityFiles = targetFiles.Where(f =>
+                        f.RelativePath.EndsWith($"/{sharedIdentity}.toml", StringComparison.Ordinal) ||
+                        f.RelativePath.EndsWith($"/{sharedIdentity}.md", StringComparison.Ordinal) ||
+                        f.RelativePath.EndsWith($"/{sharedIdentity}.agent.md", StringComparison.Ordinal) ||
+                        f.RelativePath.Contains($"/{sharedIdentity}/SKILL.md", StringComparison.Ordinal)).ToList();
 
-                    if (conductorFiles.Count > 1)
+                    if (sharedIdentityFiles.Count > 1)
                     {
                         throw new SquadRenderValidationException(
-                            $"Duplicate projection detected for '{conductor}' on native target '{token}'.");
+                            $"Duplicate projection detected for '{sharedIdentity}' on native target '{token}'.");
                     }
 
-                    if (conductorFiles.Any(f => f.RelativePath.Contains("/skills/", StringComparison.OrdinalIgnoreCase)))
+                    if (sharedIdentityFiles.Any(f => f.RelativePath.Contains("/skills/", StringComparison.OrdinalIgnoreCase)))
                     {
                         throw new SquadRenderValidationException(
-                            $"Native target '{token}' emitted skill for primary agent '{conductor}', violating single-projection rule.");
+                            $"Native target '{token}' emitted skill for shared agent '{sharedIdentity}', violating single-projection rule.");
                     }
                 }
             }
@@ -204,31 +204,29 @@ public sealed class SquadRendererRegistry : ISquadRenderer
                         $"Fallback target '{token}' emitted native agent file, which is not supported.");
                 }
 
-                foreach (string conductor in SharedConductorIdentities)
+                foreach (string sharedIdentity in sharedIdentities)
                 {
-                    List<SquadDeploymentFile> conductorFiles = targetFiles.Where(f =>
-                        f.RelativePath.Contains($"/{conductor}/SKILL.md", StringComparison.Ordinal)).ToList();
+                    List<SquadDeploymentFile> sharedIdentityFiles = targetFiles.Where(f =>
+                        f.RelativePath.Contains($"/{sharedIdentity}/SKILL.md", StringComparison.Ordinal)).ToList();
 
-                    if (conductorFiles.Count > 1)
+                    if (sharedIdentityFiles.Count > 1)
                     {
                         throw new SquadRenderValidationException(
-                            $"Duplicate skill projection detected for '{conductor}' on fallback target '{token}'.");
+                            $"Duplicate skill projection detected for '{sharedIdentity}' on fallback target '{token}'.");
                     }
                 }
 
-                foreach (string collision in DistinctBodyCollisions)
+                foreach (string collision in distinctBodyCollisions)
                 {
-                    if (source.Agents.Any(a => string.Equals(a.Name, collision, StringComparison.Ordinal)) &&
-                        source.Skills.Any(s => string.Equals(s.Name, collision, StringComparison.Ordinal)))
-                    {
-                        bool hasCanonicalSkill = targetFiles.Any(f => f.RelativePath.Contains($"/{collision}/SKILL.md", StringComparison.Ordinal));
-                        bool hasRoleSkill = targetFiles.Any(f => f.RelativePath.Contains($"/role-{collision}/SKILL.md", StringComparison.Ordinal));
+                    bool hasCanonicalSkill = targetFiles.Any(f =>
+                        f.RelativePath.Contains($"/{collision}/SKILL.md", StringComparison.Ordinal));
+                    bool hasRoleSkill = targetFiles.Any(f =>
+                        f.RelativePath.Contains($"/role-{collision}/SKILL.md", StringComparison.Ordinal));
 
-                        if (!hasCanonicalSkill || !hasRoleSkill)
-                        {
-                            throw new SquadRenderValidationException(
-                                $"Fallback target '{token}' must contain both canonical skill '{collision}' and lowered role skill 'role-{collision}'.");
-                        }
+                    if (!hasCanonicalSkill || !hasRoleSkill)
+                    {
+                        throw new SquadRenderValidationException(
+                            $"Fallback target '{token}' must contain both canonical skill '{collision}' and lowered role skill 'role-{collision}'.");
                     }
                 }
             }

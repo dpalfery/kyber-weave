@@ -1,10 +1,7 @@
 ---
 name: code-review
-description: "Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for writing or fixing code, for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that."
+description: Use when reviewing written code — a diff, a branch, a pull request, or work an agent claims is finished. Fans out a parallel council of specialist review lenses over the change, runs the host's declared deterministic gates, and computes an auditable Approve / Request-changes / Needs-human verdict. Do NOT use for writing or fixing code, for authoring tests, or for a standalone vulnerability scan — invoke the security-review skill for that.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 4.1.0
 ---
 
 # Code review

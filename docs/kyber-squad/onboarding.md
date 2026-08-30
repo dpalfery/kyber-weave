@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-08-23
+last-reviewed: 2026-08-30
 status: current
 code-refs:
   - SquadDeploymentPlan
@@ -14,8 +14,9 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **23 canonical agents** and
-**26 canonical skills** across 9 coding harnesses, with transactional recovery and state governance.
+It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
+**24 canonical skills**, with transactional recovery and state governance. Nine harness targets
+are declared; five are currently implemented and registered.
 
 ---
 
@@ -47,21 +48,21 @@ kyber-weave squad pack --format <apm|plugins|all> --out <directory>
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad supports 9 coding harnesses:
+Kyber-Squad declares nine coding-harness targets:
 
-| Target Token | Input Aliases | Strong Project Marker | Fallback Mode |
-|---|---|---|---|
-| `codex` | — | `.codex/` | Native agents |
-| `cursor` | — | `.cursor/` | Native agents |
-| `claude` | — | `.claude/` | Native agents |
-| `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents |
-| `opencode` | — | `.opencode/` | Native agents |
-| `kilo` | — | `.kilo/` | Native agents |
-| `antigravity` | — | *Explicit or configured target only* | Role-skill lowering |
-| `warp` | — | `.warp/` | Role-skill lowering |
-| `factory` | `factory-droids` | `.factory/` | Native agents |
+| Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
+|---|---|---|---|---|
+| `codex` | — | `.codex/` | Native agents | Implemented and registered |
+| `cursor` | — | `.cursor/` | Native agents | Implemented and registered |
+| `claude` | — | `.claude/` | Native agents | Implemented and registered |
+| `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
+| `opencode` | — | `.opencode/` | Native agents | Unsupported; fails coverage preflight |
+| `kilo` | — | `.kilo/` | Native agents | Unsupported; fails coverage preflight |
+| `antigravity` | — | *Explicit or configured target only* | Role-skill lowering | Implemented and registered |
+| `warp` | — | `.warp/` | Role-skill lowering | Unsupported; fails coverage preflight |
+| `factory` | `factory-droids` | `.factory/` | Native agents | Unsupported; fails coverage preflight |
 
-**Renderer coverage today**: this is the approved roster, not the set that currently installs.
+**Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
 `codex` (native), and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have renderers. Requesting any other target fails before the release is even downloaded,
@@ -155,7 +156,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the nine approved targets can install today) and the Kyber-Weave MCP server:
+Run diagnostic checks on renderer coverage (which of the nine declared targets can install today) and the Kyber-Weave MCP server:
 
 ```bash
 kyber-weave squad doctor
@@ -189,6 +190,22 @@ kyber-weave squad pack --format all --out ./artifacts
 ```
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
+
+Both archive formats recurse through each skill directory. They contain all 24 canonical
+`SKILL.md` files plus the 64 retained supplemental resources, and retained local skill references
+must resolve in the extracted package. The narrower Copilot deployment contains exactly 48 files:
+24 agents and 24 `SKILL.md` files, with no supplemental resources. That exact render matches the
+Hotshot golden surface but inherits its known omission of 61 referenced files; canonical source
+and packages keep the missing knowledge until the
+[resource-migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted.
+
+Rendered `.github` trees are deployment output and are not added to the canonical product tree by
+`squad pack` or the golden synchronization.
+
+`products/kyber-squad/` is the canonical and package authority. The repository root
+`.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
+`.kyber-weave/squad.receipt.json` form an intentional stale self-deployment. This synchronization
+leaves them untouched; a human will refresh them after a fresh Kyber-Weave release candidate.
 
 ---
 

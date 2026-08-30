@@ -1,10 +1,12 @@
 ---
 schema: kyber-squad.agent/v1
 name: architect-v3
-description: "Test-first planning agent: produces an implementation plan before coding, decomposed so the failing tests that define each task's done-ness are specified first (Test contract). Resolves design decisions, negotiates scope, and emits a plan the conductor-v3 skill executes as a Red→Green pipeline. Plans only — does not write source code, run mutating commands, or author formal spec documents."
+description: "Produces a test-first implementation plan in which every task names the failing test that defines its done-ness (Test contract) before any code. Use when planning inside a conductor-v3 Red-Green run, and only there. Plans only, writes no source code."
 invocation: subagent
 model-profile: deep-planning
 capability-profile: architect
+copilot-capability-profile: architect-copilot
+copilot-tools: [vscode, execute, read, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, search, web, codegraph/*, kyber-weave/*, context7/*, todo]
 delegates-to: [azure-reader, research-agent]
 fallback: role-skill
 aliases: []

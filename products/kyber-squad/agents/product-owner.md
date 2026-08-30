@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: product-owner
-description: "Single-owner spec planning; produces requirements/design/tasks behind approval gates; planning artifacts only, does not implement."
+description: "Runs the three-phase spec flow for one feature (requirements, design, tasks) behind an approval gate at each phase. Use when the deliverable is a formal spec under specs/, before any implementation plan exists. Produces planning artifacts only, implements nothing."
 invocation: subagent
 model-profile: general
 capability-profile: product-planning
+copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, search, agent, web, todo]
 delegates-to: [research-agent]
 fallback: role-skill
 aliases: []

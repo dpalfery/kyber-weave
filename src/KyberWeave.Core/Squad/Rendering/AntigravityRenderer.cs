@@ -20,9 +20,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// Antigravity is a fallback target in <see cref="SquadRendererRegistry"/>: every agent
-/// lowers to a skill, conductors reuse their shared canonical skill identity, and
-/// distinct-body collisions emit both the canonical skill and a <c>role-</c>-prefixed
-/// skill. Deployed <c>SKILL.md</c> files carry no capability enforcement, so non-deny
+/// lowers to a skill, profile-declared shared identities reuse their canonical skill,
+/// and distinct-body collisions emit both the canonical skill and a
+/// <c>role-</c>-prefixed skill. Unoccupied identities, including conductors when no
+/// same-name canonical skill exists, lower directly to their agent name. Deployed
+/// <c>SKILL.md</c> files carry no capability enforcement, so non-deny
 /// profile decisions are recorded as <c>permission-not-expressible</c> rather than
 /// invented into frontmatter.
 /// </para>

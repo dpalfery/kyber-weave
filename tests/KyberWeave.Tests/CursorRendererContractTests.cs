@@ -15,8 +15,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// Validates that canonical agents lower to Cursor subagents at <c>.cursor/agents/&lt;name&gt;.md</c>
-/// and skills lower to <c>.cursor/skills/&lt;name&gt;/SKILL.md</c>. Verifies single-projection suppression
-/// for primary conductors, permission lowering to Cursor's <c>readonly</c> boolean flag, model resolution
+/// and skills lower to <c>.cursor/skills/&lt;name&gt;/SKILL.md</c>. Verifies profile-declared
+/// shared-identity suppression, permission lowering to Cursor's <c>readonly</c> boolean flag, model resolution
 /// from <c>models.yml</c>, and structured degradation accounting.
 /// </remarks>
 public sealed class CursorRendererContractTests
@@ -41,11 +41,13 @@ public sealed class CursorRendererContractTests
     ];
 
     /// <summary>
-    /// Primary agents are emitted as native subagents, so their same-named canonical skills
-    /// are suppressed by the single-projection rule. Keep the set in one place for both the
-    /// expected file count and per-skill assertions.
+    /// Shared identities are read from the loaded fallback profile so the test follows the
+    /// same generic single-projection contract as the renderer.
     /// </summary>
-    private static readonly HashSet<string> SuppressedSkillNames = ["conductor", "conductor-v3"];
+    private static HashSet<string> SharedIdentities(SquadSource source) =>
+        source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
 
     [Fact]
     public void SupportedTargets_IsExactlyCursor()
@@ -88,6 +90,7 @@ public sealed class CursorRendererContractTests
     public async Task RenderAsync_Cursor_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        HashSet<string> sharedIdentities = SharedIdentities(source);
         SquadRendererRegistry registry = new([new CursorRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -98,9 +101,8 @@ public sealed class CursorRendererContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // Native primary agents suppress their same-named skills; derive the expected count
-        // from the centralized suppression set rather than a literal subtraction.
-        int expectedFileCount = source.Agents.Count + source.Skills.Count - SuppressedSkillNames.Count;
+        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        int expectedFileCount = source.Agents.Count + source.Skills.Count - suppressedSkillCount;
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("cursor", f.Target));
 
@@ -120,7 +122,7 @@ public sealed class CursorRendererContractTests
                 $"Agent '{agent.Name}' description mismatch.");
 
             // Model resolution: verify against loaded ModelProfiles. Every assertion names
-            // the agent so a failure identifies the offender out of the 22-agent corpus.
+            // the agent so a failure identifies the offender out of the 24-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             if (modelProfile.HarnessModels.TryGetValue("cursor", out string? expectedModel))
             {
@@ -189,20 +191,18 @@ public sealed class CursorRendererContractTests
         Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
         AssertReadOnly(result, "bug-crusher-investigator", expectedReadOnly: false);
 
-        // Conductor and conductor-v3 are native primary agents on Cursor: present as
-        // .cursor/agents/<name>.md and never duplicated as skills.
-        foreach (string conductor in new[] { "conductor", "conductor-v3" })
+        foreach (string sharedIdentity in sharedIdentities)
         {
-            Assert.Contains(result.Files, f => f.RelativePath == $".cursor/agents/{conductor}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".cursor/skills/{conductor}/SKILL.md");
+            Assert.Contains(result.Files, f => f.RelativePath == $".cursor/agents/{sharedIdentity}.md");
+            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".cursor/skills/{sharedIdentity}/SKILL.md");
         }
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isConductor = SuppressedSkillNames.Contains(skill.Name);
+            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
             string path = $".cursor/skills/{skill.Name}/SKILL.md";
-            if (isConductor)
+            if (isSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;

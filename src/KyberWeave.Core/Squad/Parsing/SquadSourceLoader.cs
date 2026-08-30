@@ -246,7 +246,18 @@ public static class SquadSourceLoader
         foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
             YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
-            EnsureOnlyFields(profile, ["permissions"], file.RelativePath);
+            EnsureOnlyFields(profile, ["target", "permissions"], file.RelativePath);
+            string? target = TryGetScalar(profile, "target", file.RelativePath);
+            if (target is not null)
+            {
+                RequireLiteral(
+                    target,
+                    $"profiles.{name}.target",
+                    "copilot",
+                    file.RelativePath,
+                    "Use 'copilot' for a target-specific capability profile or omit target for a shared profile.");
+            }
+
             YamlMappingNode permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);
             SortedDictionary<string, SquadPermissionDecision> permissions = new SortedDictionary<string, SquadPermissionDecision>(StringComparer.Ordinal);
 
@@ -288,7 +299,7 @@ public static class SquadSourceLoader
                     StartLine(permissionsNode));
             }
 
-            profiles.Add(name, new SquadCapabilityProfile(permissions));
+            profiles.Add(name, new SquadCapabilityProfile(target, permissions));
         }
 
         return new SquadCapabilityProfiles(schema, vocabulary, profiles, file.RelativePath);
@@ -462,7 +473,7 @@ public static class SquadSourceLoader
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
-            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "delegates-to", "fallback", "aliases"],
+            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "delegates-to", "fallback", "aliases"],
             file.RelativePath,
             frontmatter.LineOffset);
 
@@ -475,8 +486,31 @@ public static class SquadSourceLoader
         };
         IReadOnlyList<string> delegates = RequireStringSequence(root, "delegates-to", file.RelativePath, frontmatter.LineOffset);
         IReadOnlyList<string> aliases = RequireStringSequence(root, "aliases", file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> copilotTools = RequireStringSequence(root, "copilot-tools", file.RelativePath, frontmatter.LineOffset);
         EnsureDistinct(delegates, "delegated agent", file.RelativePath);
         EnsureDistinct(aliases, "alias", file.RelativePath);
+        EnsureDistinct(copilotTools, "Copilot tool", file.RelativePath);
+
+        if (copilotTools.Count == 0)
+        {
+            SquadSourceValidator.Throw(
+                "Field 'copilot-tools' must declare at least one known tool.",
+                "copilot-tools",
+                file.RelativePath,
+                $"Add one or more tools from: {string.Join(", ", CopilotToolCatalog.OrderedTools)}.");
+        }
+
+        foreach (string tool in copilotTools)
+        {
+            if (!CopilotToolCatalog.RequiredCapabilities.ContainsKey(tool))
+            {
+                SquadSourceValidator.Throw(
+                    $"Copilot tool '{tool}' is not in the known tool catalog.",
+                    tool,
+                    file.RelativePath,
+                    $"Use one of: {string.Join(", ", CopilotToolCatalog.OrderedTools)}.");
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(frontmatter.Body))
         {
@@ -494,6 +528,8 @@ public static class SquadSourceLoader
             invocation,
             RequireScalar(root, "model-profile", file.RelativePath, frontmatter.LineOffset),
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
+            TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
+            copilotTools,
             delegates,
             RequireScalar(root, "fallback", file.RelativePath, frontmatter.LineOffset),
             aliases,

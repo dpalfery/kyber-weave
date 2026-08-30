@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-30
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -147,9 +147,24 @@ layout for each runtime is APM's problem rather than a second copy of that mappi
 
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
-unified multi-harness deployment control plane. Kyber-Squad maintains 25 canonical skills
-(alongside 23 canonical agent roles and lowering rules) under `products/kyber-squad/` and
-manages their transactional deployment, drift tracking, and lifecycle across 9 coding harnesses.
+unified multi-harness deployment control plane. Kyber-Squad maintains 24 canonical skills
+(alongside 24 canonical agent roles and lowering rules) under `products/kyber-squad/` and
+manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares nine
+harness targets. Five renderers are implemented and registered (`copilot`, `cursor`, `claude`,
+`codex`, and `antigravity`); `opencode`, `kilo`, `warp`, and `factory` fail renderer-coverage
+preflight until their renderers are implemented.
+
+The 24 raw `SKILL.md` files match the Hotshot golden bytes. Canonical storage and recursive Squad
+packages also preserve 64 supplemental resources, for 88 skill-tree files, while Copilot renders
+only the 24 `SKILL.md` files. The golden tree omits 61 referenced resources, so its rendered skill
+surface has known dangling links; canonical and packaged references remain intact. The resources
+stay packaged until the
+[content-preserving migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted.
+
+The agent and skill namespaces intersect at seven names, all distinct-body collisions. No product
+identity is shared. Fallback rendering keeps each colliding skill at `<name>` and lowers its agent
+to `role-<name>`; agents with unoccupied skill identities, including both conductors, lower to
+same-name role skills.
 
 ## Related
 

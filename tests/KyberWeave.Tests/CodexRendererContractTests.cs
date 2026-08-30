@@ -17,7 +17,7 @@ namespace KyberWeave.Tests;
 /// <remarks>
 /// Validates that canonical agents render as Codex native agent TOML primitives at
 /// <c>.codex/agents/&lt;name&gt;.toml</c> and skills render at <c>.codex/skills/&lt;name&gt;/SKILL.md</c>.
-/// Verifies single-projection suppression for primary conductors (<c>conductor</c> and <c>conductor-v3</c>),
+/// Verifies profile-declared shared-identity suppression,
 /// model resolution from <c>models.yml</c>, TOML structure and instruction encoding,
 /// and structured degradation accounting (<c>permission-not-expressible</c> with matching <c>InstructionDigest</c>).
 /// </remarks>
@@ -27,10 +27,13 @@ public sealed class CodexRendererContractTests : IDisposable
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     /// <summary>
-    /// Primary agents emitted as native agents whose same-named canonical skills are suppressed
-    /// per the single-projection rule.
+    /// Shared identities are read from the loaded fallback profile so the test follows the
+    /// same generic single-projection contract as the renderer.
     /// </summary>
-    private static readonly HashSet<string> SuppressedSkillNames = ["conductor", "conductor-v3"];
+    private static HashSet<string> SharedIdentities(SquadSource source) =>
+        source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
 
     private readonly TempDirectory _temp = new();
 
@@ -77,6 +80,7 @@ public sealed class CodexRendererContractTests : IDisposable
     public async Task RenderAsync_Codex_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        HashSet<string> sharedIdentities = SharedIdentities(source);
         SquadRendererRegistry registry = new([new CodexRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -87,9 +91,7 @@ public sealed class CodexRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // Derive expected counts from the loaded corpus: every skill whose name is in the
-        // conductor suppression set is omitted, rather than assuming a literal count of 2.
-        int suppressedSkillCount = source.Skills.Count(s => SuppressedSkillNames.Contains(s.Name));
+        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
         int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
         int expectedFileCount = source.Agents.Count + expectedSkillCount;
         Assert.Equal(expectedFileCount, result.Files.Count);
@@ -143,20 +145,18 @@ public sealed class CodexRendererContractTests : IDisposable
             Assert.Equal(expectedBody, parsed.DeveloperInstructions);
         }
 
-        // Single-projection rule for primary orchestrators:
-        // conductor and conductor-v3 must exist as native agents and NOT as skills
-        foreach (string conductor in SuppressedSkillNames)
+        foreach (string sharedIdentity in sharedIdentities)
         {
-            Assert.Contains(result.Files, f => f.RelativePath == $".codex/agents/{conductor}.toml");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".codex/skills/{conductor}/SKILL.md");
+            Assert.Contains(result.Files, f => f.RelativePath == $".codex/agents/{sharedIdentity}.toml");
+            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".codex/skills/{sharedIdentity}/SKILL.md");
         }
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isConductor = SuppressedSkillNames.Contains(skill.Name);
+            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
             string path = $".codex/skills/{skill.Name}/SKILL.md";
-            if (isConductor)
+            if (isSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -259,9 +259,10 @@ public sealed class CodexRendererContractTests : IDisposable
     public async Task RenderSkill_FrontmatterKeyOrderIsStable()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        HashSet<string> sharedIdentities = SharedIdentities(source);
         string probe = source.Skills
             .Select(skill => skill.Name)
-            .Where(name => !SuppressedSkillNames.Contains(name))
+            .Where(name => !sharedIdentities.Contains(name))
             .OrderBy(name => name, StringComparer.Ordinal)
             .FirstOrDefault()
             ?? throw new InvalidOperationException(
@@ -523,6 +524,7 @@ public sealed class CodexRendererContractTests : IDisposable
             "invocation: subagent\n" +
             "model-profile: general\n" +
             "capability-profile: worker\n" +
+            "copilot-tools: [vscode]\n" +
             "delegates-to: []\n" +
             "fallback: role-skill\n" +
             "aliases: []\n" +

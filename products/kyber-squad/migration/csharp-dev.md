@@ -1,32 +1,23 @@
 ---
 schema: kyber-squad.migration/v1
 agent: csharp-dev
-source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
-selected-baseline: .claude/agents/dotnet-dev.md
+source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
+selected-baseline: .github/agents/csharp-dev.agent.md
 sources:
-  .claude/agents/dotnet-dev.md: 36de7a9673c75b7d9ee35c47a9df44972b98d49e9944e701e7103f31b94352b1
-  .codex/agents/dotnet-dev.toml: aa7612e3bd3ffa6ec76ca907aeb58bc6aa60c54cecd424efe3abe048bf87620e
-  .cursor/agents/dotnet-dev.agent.md: 908e5f0813a3a4a0ff6b1d983645744c24b7bce6574cb97dff34dd52b6f0b616
-  .github/agents/dotnet-dev.agent.md: ea402133727e2b32d7987871a4aa7edb09fe5240340b2fe1dff8d61affdec72c
-  .opencode/agents/dotnet-dev.md: 2190ab5b76e48203bf3250468e35741ec90625402bcf5ab7e2051cd3df3d1bb0
-final-body-sha256: 43ef641804327e6a71b7819fcbcb7f8455e018823a08272b8364c24b4fe9f8fd
+  .github/agents/csharp-dev.agent.md: 09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146
+final-body-sha256: 2fe9f41566f10639b97532b51b1bd8a01ae29b64a31b76d6ffb45c3654fff1a0
 ---
 # csharp-dev migration
 
-## Baseline and reconciliation
+## Hotshot golden baseline
 
-The canonical body starts from .claude/agents/dotnet-dev.md at the locked source commit. No alternate harness body is retained. Other live variants were compared for harness-independent behavior; none added behavior that could be merged without changing the selected role contract.
+The canonical agent description and instruction body were synchronized from `.github/agents/csharp-dev.agent.md` at
+Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source file's SHA-256 is recorded in frontmatter,
+while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
+YAML frontmatter is removed.
 
-Source frontmatter, provider model identifiers, tool allowlists, and command-shaped invocation syntax are excluded from the instruction body. Equivalent intent is represented by canonical invocation, model, capability, delegation, fallback, and alias metadata.
+## Canonical projection
 
-## Permission resolution
-
-The worker profile is the conservative intersection of effective live permissions after unsupported capabilities are marked unavailable: filesystem.read=allow, filesystem.write=allow, process.execute=allow, network.read=deny, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
-
-The instruction body was revised after migration. A blocking completion gate on language diagnostics was added: a baseline sweep before the first edit, a full-file and workspace sweep after the last one, a rule that every diagnostic class counts, and a `DIAGNOSTICS` line in the completion digest. The gate exists because a green build measures a different thing than a clean Problems list, and "pre-existing" was being asserted rather than proven. Capability profile and delegation are unchanged.
-
-The body now routes to the `resharper-clt` skill and folds a ReSharper InspectCode run into the completion gate, at the baseline and again before `READY_FOR_REVIEW`. ReSharper's inspection set and the compiler's overlap only partially — a suggestion-severity inspection never reaches `dotnet build` — so a green build was clearing a gate it does not actually measure.
-
-The instruction body was revised after migration to add the deterministic fix step to the completion gate. After the last edit and before re-collecting diagnostics, the role now runs `dotnet format`, `dotnet format analyzers`, and `dotnet jb cleanupcode`, each scoped with `--include` to the files it changed, per the `resharper-clt` skill. The gate previously only measured; it now fixes what a machine can fix, so that mechanical defects are corrected rather than reported to a reviewer at the cost of a review pass, a rework cycle, and a confirmation pass. No permission changed — the role already held process.execute. See ADR 0005.
-
-The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.
+Target-neutral `invocation`, `model-profile`, `capability-profile`, `delegates-to`, `fallback`,
+and `aliases` remain canonical lifecycle fields. The `copilot-tools` field preserves exact golden
+membership; Copilot rendering applies only the approved deterministic ordering.

@@ -25,41 +25,6 @@ public sealed class SquadRenderingContractTests
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    /// <summary>
-    /// Copilot's built-in tool vocabulary, transcribed from GitHub's custom-agent
-    /// configuration reference. A tool outside this set would be silently ignored by the
-    /// harness, turning an intended grant into a missing capability at runtime.
-    /// </summary>
-    private static readonly string[] DocumentedCopilotTools =
-    [
-        "vscode",
-        "execute",
-        "read",
-        "codegraph/*",
-        "kyber-weave/*",
-        "context7/*",
-        "edit",
-        "search",
-        "agent",
-        "web",
-        "todo"
-    ];
-
-    /// <summary>
-    /// The capability→tool lowering this suite pins. Declared independently of the renderer
-    /// so a change to either side has to be made deliberately in both.
-    /// <c>network.publish</c> is absent because no built-in tool publishes.
-    /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityToolContract =
-    [
-        ("process.execute", ["execute"]),
-        ("filesystem.read", ["read"]),
-        ("filesystem.search", ["search"]),
-        ("filesystem.write", ["edit"]),
-        ("delegate", ["agent"]),
-        ("network.read", ["web"]),
-    ];
-
     [Fact]
     public void SupportedTargets_IsExactlyCopilotToday()
     {
@@ -89,6 +54,9 @@ public sealed class SquadRenderingContractTests
     public async Task RenderAsync_Copilot_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -99,9 +67,8 @@ public sealed class SquadRenderingContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // 22 agents + (26 skills - conductor - conductor-v3, suppressed by the native
-        // single-projection rule) = 46.
-        Assert.Equal(source.Agents.Count + source.Skills.Count - 2, result.Files.Count);
+        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+        Assert.Equal(source.Agents.Count + source.Skills.Count - suppressedSkillCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("copilot", f.Target));
 
         Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
@@ -124,62 +91,26 @@ public sealed class SquadRenderingContractTests
                 Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("user-invocable")));
             }
 
-            // 'tools' is where the capability lattice actually lands on Copilot. Omitting the
-            // key means "all available tools", so an absent or over-full list is a silent
-            // grant of everything — assert presence *and* both directions of the mapping.
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             IReadOnlyList<string> tools = RequireSequence(frontmatter, "tools");
-            Assert.All(tools, tool => Assert.Contains(tool, DocumentedCopilotTools));
+            Assert.Equal(CopilotToolCatalog.Normalize(agent.CopilotTools), tools);
             Assert.Equal(tools.Distinct(StringComparer.Ordinal).Count(), tools.Count);
-
-            foreach ((string capability, string[] mapped) in CapabilityToolContract)
-            {
-                bool allowed = profile.Permissions[capability] == SquadPermissionDecision.Allow;
-                foreach (string tool in mapped)
-                {
-                    Assert.Equal(allowed, tools.Contains(tool, StringComparer.Ordinal));
-                }
-            }
-
-            // 'vscode' and 'todo' lower from no capability, so every agent keeps them.
-            Assert.Contains("vscode", tools);
-            Assert.Contains("todo", tools);
-
-            // MCP wildcards are granted if filesystem.read is allowed AND the agent is not a pure orchestrator.
-            bool isOrchestrator = agent.Name is "conductor" or "conductor-v3";
-            bool hasRead = profile.Permissions["filesystem.read"] == SquadPermissionDecision.Allow;
-            bool expectedMcp = hasRead && !isOrchestrator;
-            Assert.Equal(expectedMcp, tools.Contains("codegraph/*", StringComparer.Ordinal));
-            Assert.Equal(expectedMcp, tools.Contains("kyber-weave/*", StringComparer.Ordinal));
-            Assert.Equal(expectedMcp, tools.Contains("context7/*", StringComparer.Ordinal));
 
             string body = ReadBody(file);
             Assert.True(body.Length <= 30_000, $"'{agent.Name}' body is {body.Length} characters; Copilot caps agent files at 30,000.");
             Assert.Contains(agent.InstructionBody.Trim(), body, StringComparison.Ordinal);
         }
 
-        // Concrete lowerings, so a capability→tool map change is caught here even if the
-        // renderer and the profiles drift together.
-        AssertTools(result, "research-agent", ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"]);
-        // The orchestrator profile is the reason filesystem.search exists separately: the
-        // conductor may open a plan it is pointed at, but never sweep the tree for one.
-        AssertTools(result, "conductor", ["vscode", "read", "agent", "todo"]);
-        AssertTools(result, "conductor-v3", ["vscode", "read", "agent", "todo"]);
-        AssertTools(result, "github-devops", ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "web", "todo"]);
-
-        // Conductor and conductor-v3 are native primary agents on Copilot: present as
-        // .agent.md, and never duplicated as a skill (the single-projection rule).
-        foreach (string conductor in new[] { "conductor", "conductor-v3" })
+        foreach (string sharedIdentity in sharedIdentities)
         {
-            Assert.Contains(result.Files, f => f.RelativePath == $".github/agents/{conductor}.agent.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".github/skills/{conductor}/SKILL.md");
+            Assert.Contains(result.Files, f => f.RelativePath == $".github/agents/{sharedIdentity}.agent.md");
+            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".github/skills/{sharedIdentity}/SKILL.md");
         }
 
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isConductor = skill.Name is "conductor" or "conductor-v3";
+            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
             string path = $".github/skills/{skill.Name}/SKILL.md";
-            if (isConductor)
+            if (isSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -196,7 +127,7 @@ public sealed class SquadRenderingContractTests
         // Only 'ask' still loses meaning — Copilot has no per-tool confirmation gate — and
         // exactly the agents on an ask-bearing profile carry a safety-narrowed degradation.
         string[] expectedNarrowed = source.Agents
-            .Where(a => source.CapabilityProfiles.Profiles[a.CapabilityProfile]
+            .Where(a => source.CapabilityProfiles.Profiles[a.CopilotCapabilityProfile ?? a.CapabilityProfile]
                 .Permissions.Values.Any(d => d == SquadPermissionDecision.Ask))
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
@@ -264,15 +195,6 @@ public sealed class SquadRenderingContractTests
             .Select(child => Assert.IsType<YamlScalarNode>(child).Value
                 ?? throw new InvalidOperationException($"Key '{key}' has a null sequence entry."))
             .ToArray();
-    }
-
-    private static void AssertTools(SquadRenderResult result, string agent, string[] expected)
-    {
-        SquadDeploymentFile file = Assert.Single(
-            result.Files,
-            f => f.RelativePath == $".github/agents/{agent}.agent.md");
-
-        Assert.Equal(expected, RequireSequence(ReadFrontmatter(file), "tools"));
     }
 
     private static YamlMappingNode ReadFrontmatter(SquadDeploymentFile file) =>

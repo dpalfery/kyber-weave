@@ -1,10 +1,7 @@
 ---
 name: resharper-clt
-description: Use when running JetBrains ReSharper Command Line Tools — InspectCode static analysis or CleanupCode formatting — over a .NET solution, to verify C# work before claiming it complete or to produce the analyzer gate output a code review triages. Do NOT use for non-.NET languages, for judging design or correctness by reading code, or as a substitute for the compiler and test gates.
+description: Use when running JetBrains ReSharper Command Line Tools over a .NET solution — the CleanupCode/format fix pass an agent runs before claiming C# work complete, or the once-per-run InspectCode gate whose output a code review triages. Do NOT use for non-.NET languages, for judging design or correctness by reading code, as a substitute for the compiler and test gates, or to run InspectCode from inside a per-task completion gate.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.1.0
 ---
 
 # ReSharper Command Line Tools
@@ -58,24 +55,40 @@ the path declared as **<agent-scratchpad>** where the repository declares one. S
 | SARIF for CI or automated scanning | `dotnet jb inspectcode <solution> --output=<scratchpad>/results.sarif --format=Sarif --severity=WARNING` |
 | Formatting and cleanup | `dotnet jb cleanupcode <solution>` |
 
-Scope the run to the affected projects when the solution is large. A full-solution pass is
-correct for a completion gate and for a review of a broad change; a project-scoped pass is
-enough while iterating.
+Scope the run to the affected projects when the solution is large and you are iterating by
+hand. The once-per-run review gate takes the full solution: it is the only inspection pass in
+the run, so narrowing it drops coverage nothing else replaces.
 
-## Running it before you claim work is complete
+## Two cadences, and which one you are in
+
+This skill has two commands and they run at different times. Getting them the wrong way round is
+the mistake this section exists to prevent.
+
+| | Command | Who runs it | When |
+|---|---|---|---|
+| **Fix pass** | `dotnet format`, `dotnet format analyzers`, `cleanupcode` | the agent that wrote the code | every task, before `READY_FOR_REVIEW` |
+| **Inspection** | `inspectcode` | the review gate runner | once per run, over the whole accumulated change |
+
+The reason is contention and cost. `inspectcode` loads the entire solution; run at baseline and
+again at the end by every worker, it was both the slowest part of a completion gate and the part
+most likely to collide with a concurrent worker's build output. Run once, on a quiescent tree, it
+costs a single solution load and reports against a change that is finished. **A worker that runs
+`inspectcode` is doing the council's job at N times the price.**
+
+## Running the fix pass before you claim work is complete
 
 Any agent implementing, modifying, or refactoring C# MUST run this before reporting
 `READY_FOR_REVIEW`.
 
-The order matters, and step 2 is the point of the whole gate: **fix mechanically first, then
-inspect what is left.** A defect a machine can fix is not a defect worth a reviewer's attention.
-Every mechanical finding that reaches a reviewer costs a review pass to report, a rework cycle to
-fix, and another pass to confirm — to arrive at the same edit `cleanupcode` would have made for
-free.
+**Fix mechanically, then stop.** A defect a machine can fix is not a defect worth a reviewer's
+attention. Every mechanical finding that reaches a reviewer costs a review pass to report, a
+rework cycle to fix, and another pass to confirm — to arrive at the same edit `cleanupcode` would
+have made for free. Erasing them here is the whole point.
 
-1. **Baseline.** Before the first edit, inspect the projects you are permitted to change and
-   keep the report. Without it you cannot distinguish a diagnostic you introduced from one
-   that was already there, and "pre-existing" is a claim that needs proof.
+1. **Baseline.** Before the first edit, collect language diagnostics for the files you are
+   permitted to change and keep the output. Without it you cannot distinguish a diagnostic you
+   introduced from one that was already there, and "pre-existing" is a claim that needs proof.
+   Do **not** take an `inspectcode` baseline; that comparison now belongs to the review gate.
 2. **Fix deterministically, scoped to the files you changed.** Three commands, in this order,
    each applying rather than verifying:
 
@@ -89,13 +102,16 @@ free.
    change under review stops being the change you made. The pass is idempotent: running it twice
    produces no second diff, so a re-run after a rework cycle is safe.
 
-3. **Inspect again after the last edit**, over the same scope.
-4. **Fix every ERROR and WARNING the change introduced that step 2 could not.** Compare against
-   the baseline; do not dismiss a finding merely because its line is untouched. What survives
-   step 2 is the genuinely non-mechanical remainder — a possible multiple enumeration, a
-   contradictory null contract — and that is the part worth your judgement.
-5. **Report the result.** `dotnet build` and `dotnet jb inspectcode` both at zero errors and
-   zero code or logic warnings, or an explicit list of what remains with baseline proof.
+   All three load MSBuild and write into `obj/`. Where concurrent workers may run them against the
+   same projects, give each an isolated artifacts path — see the host's per-agent completion gate.
+
+3. **Re-collect diagnostics over the files you changed** — whole file, not only the changed
+   members. Not workspace-wide: while other workers are in flight, a workspace-wide pass reads
+   their half-finished state and attributes it to you.
+4. **Fix every finding in your change set that step 2 could not.** What survives the fix pass is
+   the genuinely non-mechanical remainder, and that is the part worth your judgement.
+5. **Report the result.** The fix pass applied, diagnostics clean on your files, and the isolated
+   artifacts path you used — or an explicit list of what remains with baseline proof.
 
 ### What the cleanup profile should and should not do
 
@@ -110,9 +126,10 @@ standard — and reordering members in particular buries the actual change under
 then has to read past. A cleanup profile that imposes undeclared preferences trades review cost
 for diff noise, which is not the trade this gate exists to make.
 
-A green build does not clear this. The compiler and ReSharper's inspection set overlap
+A green build is not the same measurement. The compiler and ReSharper's inspection set overlap
 partially and disagree at the edges by design — a suggestion-severity inspection is invisible
-to `dotnet build` and still a real finding.
+to `dotnet build` and still a real finding. That is why the review gate pins InspectCode at
+`--severity=SUGGESTION` rather than trusting the build.
 
 ### Frequently introduced inspections, and what to do
 
@@ -141,10 +158,18 @@ improvising a command:
 ```yaml
 review:
   gates:
+    - id: dotnet-tool-restore
+      run: [dotnet, tool, restore]
+      blocking: true
     - id: inspectcode
-      run: [dotnet, jb, inspectcode, <solution>, --output=<scratchpad>/inspectcode.xml, --format=Xml]
+      run: [dotnet, jb, inspectcode, <solution>, --output=<scratchpad>/inspectcode.xml, --format=Xml, --severity=SUGGESTION, --caches-home=<scratchpad>/gates/inspectcode-cache]
       blocking: true
 ```
+
+`dotnet-tool-restore` provisions the pinned `jb` command; without it the inspection gate fails
+on a missing tool rather than on a finding. `--severity=SUGGESTION` states the tool's current
+default rather than changing it — pinned, because the suggestion-level inspections are exactly
+the ones the compiler cannot see, and a default that moves would silently drop them.
 
 `run` is argv, never a command line — the gate runner refuses a shell.
 
@@ -176,29 +201,36 @@ The reviewer's own obligations around that output:
 A change adds a service that filters an `IEnumerable<Load>` and iterates the result twice.
 `dotnet build` is green — nothing here is a compiler error.
 
+**At the task.** The worker runs the fix pass, scoped to its own files and its own build output:
+
 ```bash
-dotnet tool restore
-dotnet jb inspectcode Hauling.sln --project="Hauling.Application"   --output=.scratch/inspect-after.xml --format=Xml
+dotnet format Hauling.sln --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
+  -p:BaseIntermediateOutputPath=.agents-scratchpad/T3/artifacts/obj/
+dotnet format Hauling.sln analyzers --include 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs \
+  -p:BaseIntermediateOutputPath=.agents-scratchpad/T3/artifacts/obj/
+dotnet jb cleanupcode Hauling.sln --profile="<cleanup profile>" --include="2-Application/Hauling.Application/Dispatch/LoadPlanner.cs"
 ```
 
-The report names one inspection the baseline did not have:
+Formatting, redundant qualifiers, and unused usings are gone. The multiple enumeration is not —
+no formatter can decide that materializing the sequence is the right fix. The worker reports:
+
+```text
+DIAGNOSTICS: clean on 2-Application/Hauling.Application/Dispatch/LoadPlanner.cs | fix pass: format, format analyzers, cleanupcode — all applied | artifacts: .agents-scratchpad/T3/artifacts | baseline: .agents-scratchpad/T3/diagnostics-baseline.md | remaining: none
+```
+
+**At the end of the run.** The `inspectcode` gate runs once over the whole solution:
 
 ```xml
 <Issue TypeId="PossibleMultipleEnumeration"
-       File="Hauling.Application/Dispatch/LoadPlanner.cs" Line="47"
+       File="2-Application/Hauling.Application/Dispatch/LoadPlanner.cs" Line="47"
        Message="Possible multiple enumeration" />
 ```
 
-Compare it against the baseline report to confirm the change introduced it, materialize the
-sequence once with `.ToList()` before the first iteration, and re-run the same scoped
-command. Then report it:
-
-```text
-DIAGNOSTICS: clean on Hauling.Application/Dispatch/LoadPlanner.cs | inspectcode: 0 errors / 0 warnings | baseline: .scratch/inspect-before.xml | remaining: none
-```
-
-Had the finding predated the change, the baseline report is the proof — cite it by path
-rather than asserting "pre-existing".
+`static-analysis-triage` checks that line against the accumulated diff, finds it inside T3's
+change, and reports it by rule id and location. It becomes a review finding routed back to a
+worker of that type — `.ToList()` before the first iteration — rather than something every worker
+paid a solution load to look for. Findings on lines the run did not touch are pre-existing and the
+lens drops them; that attribution, not the worker's baseline, is what "pre-existing" now means.
 
 ## Boundaries
 
@@ -207,6 +239,9 @@ rather than asserting "pre-existing".
 - `cleanupcode` rewrites source. It belongs to the completion gate above, run by the agent that
   wrote the code, before any reviewer sees it — and NEVER as part of a review itself. A reviewer
   that edits the code it is judging has stopped being a reviewer.
+- `inspectcode` is the mirror image: it belongs to the review gate, once per run, and NEVER to a
+  per-task completion gate. A worker that runs it loads the whole solution to analyze a tree its
+  peers are still editing, and pays that cost once per task instead of once per run.
 - Formatter output is not a review finding. Whitespace differences belong to `cleanupcode`, not
   to the findings list. A reviewer that finds mechanical issues is looking at a change whose
   completion gate did not run: the correct report is that single fact, not a list of nits the

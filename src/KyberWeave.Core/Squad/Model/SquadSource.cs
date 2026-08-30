@@ -46,6 +46,8 @@ public sealed record SquadAgent(
     SquadInvocation Invocation,
     string ModelProfile,
     string CapabilityProfile,
+    string? CopilotCapabilityProfile,
+    IReadOnlyList<string> CopilotTools,
     IReadOnlyList<string> DelegatesTo,
     string Fallback,
     IReadOnlyList<string> Aliases,
@@ -85,8 +87,9 @@ public sealed record SquadCapabilityProfiles(
     IReadOnlyDictionary<string, SquadCapabilityProfile> Profiles,
     string SourcePath);
 
-/// <summary>Resolved permission decisions for one named capability profile.</summary>
+/// <summary>Resolved permission decisions for one shared or explicitly target-specific profile.</summary>
 public sealed record SquadCapabilityProfile(
+    string? Target,
     IReadOnlyDictionary<string, SquadPermissionDecision> Permissions);
 
 /// <summary>A permission lattice ordered from most to least restrictive.</summary>

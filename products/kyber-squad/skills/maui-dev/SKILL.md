@@ -2,9 +2,6 @@
 name: maui-dev
 description: Use when writing .NET MAUI UI code, XAML pages, Shell navigation, MVVM/CommunityToolkit patterns, CollectionView, data binding, or cross-platform mobile/desktop features.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # .NET MAUI Developer

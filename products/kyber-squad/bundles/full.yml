@@ -22,6 +22,7 @@ agents:
   - review-triage
   - sql-database-architect
   - task-reviewer
+  - task-reviewer-v3
   - tauri-dev
   - test-dev
 skills:
@@ -31,8 +32,6 @@ skills:
   - azure-naming
   - bug-crusher
   - code-review
-  - conductor
-  - conductor-v3
   - create-pull-request
   - create-pull-request-github
   - csharp-dev

@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-23
+last-reviewed: 2026-08-29
 ---
 
 # Kyber-Weave Plan Inventory
@@ -15,7 +15,7 @@ This inventory tracks architectural and implementation plans across their lifecy
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| _(none)_ | | | |
+| [2026-08-29-kyber-squad-hotshot-golden-sync.md](2026-08-29-kyber-squad-hotshot-golden-sync.md) | Approved | 2026-08-29 | Synchronize Kyber-Squad's GitHub Copilot deployment with the current Hotshot Logistics golden agent and skill trees while preserving deterministic cross-agent tool ordering. |
 
 ## Archived Plans
 

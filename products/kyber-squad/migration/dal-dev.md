@@ -1,32 +1,23 @@
 ---
 schema: kyber-squad.migration/v1
 agent: dal-dev
-source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
-selected-baseline: .claude/agents/dal-dev.md
+source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
+selected-baseline: .github/agents/dal-dev.agent.md
 sources:
-  .claude/agents/dal-dev.md: 09f9d6f1a5f4311a29934049bb0d4e5e91814a7ebf29eb864f68db3378894f4b
-  .codex/agents/dal-dev.toml: 416ce76e948cd447bb3fb97c6585fa87f23d36b57da8d74429cada745fe71c9d
-  .cursor/agents/dal-dev.agent.md: f55c14cc1dbca99edca8912e4094f0696837289764a577d56ffb0521a8cbb43f
-  .github/agents/dal-dev.agent.md: 5a9e1b9ef11c9e62c4f7ce71776c7ea88009041fe79aca0fa9002e13fd427d51
-  .opencode/agents/dal-dev.md: 9f3fd875d63276e02b0219fbed33e084f0fd3c95e7090cd7152b98ad120f9adf
-final-body-sha256: fcae7be8a4e79c84af5465d28d12c99c9c1b824ba721ccc6c62498ac94195bc4
+  .github/agents/dal-dev.agent.md: efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a
+final-body-sha256: 03153aa8fc3ac5fa24d68ac81df675912d1b57fb1df24006277958ac3668bee7
 ---
 # dal-dev migration
 
-## Baseline and reconciliation
+## Hotshot golden baseline
 
-The canonical body starts from .claude/agents/dal-dev.md at the locked source commit. No alternate harness body is retained. Other live variants were compared for harness-independent behavior; none added behavior that could be merged without changing the selected role contract.
+The canonical agent description and instruction body were synchronized from `.github/agents/dal-dev.agent.md` at
+Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source file's SHA-256 is recorded in frontmatter,
+while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
+YAML frontmatter is removed.
 
-Source frontmatter, provider model identifiers, tool allowlists, and command-shaped invocation syntax are excluded from the instruction body. Equivalent intent is represented by canonical invocation, model, capability, delegation, fallback, and alias metadata.
+## Canonical projection
 
-## Permission resolution
-
-The worker profile is the conservative intersection of effective live permissions after unsupported capabilities are marked unavailable: filesystem.read=allow, filesystem.write=allow, process.execute=allow, network.read=deny, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
-
-The instruction body was revised after migration. A blocking completion gate on language diagnostics was added: a baseline sweep before the first edit, a full-file and workspace sweep after the last one, a rule that every diagnostic class counts, and a `DIAGNOSTICS` line in the completion digest. The gate exists because a green build measures a different thing than a clean Problems list, and "pre-existing" was being asserted rather than proven. Capability profile and delegation are unchanged.
-
-The body now routes to the `resharper-clt` skill and folds a ReSharper InspectCode run into the completion gate, at the baseline and again before `READY_FOR_REVIEW`. ReSharper's inspection set and the compiler's overlap only partially — a suggestion-severity inspection never reaches `dotnet build` — so a green build was clearing a gate it does not actually measure.
-
-The instruction body was revised after migration to add the deterministic fix step to the completion gate. After the last edit and before re-collecting diagnostics, the role now runs `dotnet format`, `dotnet format analyzers`, and `dotnet jb cleanupcode`, each scoped with `--include` to the files it changed, per the `resharper-clt` skill. The gate previously only measured; it now fixes what a machine can fix, so that mechanical defects are corrected rather than reported to a reviewer at the cost of a review pass, a rework cycle, and a confirmation pass. No permission changed — the role already held process.execute. See ADR 0005.
-
-The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.
+Target-neutral `invocation`, `model-profile`, `capability-profile`, `delegates-to`, `fallback`,
+and `aliases` remain canonical lifecycle fields. The `copilot-tools` field preserves exact golden
+membership; Copilot rendering applies only the approved deterministic ordering.

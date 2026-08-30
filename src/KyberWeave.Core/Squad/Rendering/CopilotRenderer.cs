@@ -47,47 +47,6 @@ public sealed class CopilotRenderer : ISquadRenderer
     private const string SkillsDirectory = ".github/skills";
     private const int MaxAgentBodyCharacters = 30_000;
 
-    private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
-
-    private static readonly string[] BaseUngovernedTools = ["vscode", "todo"];
-
-    private static readonly string[] StandardMcpTools = ["'codegraph/*'", "'kyber-weave/*'", "'context7/*'"];
-
-    /// <summary>
-    /// Lowers the semantic capability vocabulary onto Copilot's built-in tool names,
-    /// verified against GitHub's custom-agent configuration reference on 2026-08-16.
-    /// <c>network.publish</c> is absent deliberately: no built-in tool publishes, so it is
-    /// reachable only via MCP servers that a closed allow-list already withholds.
-    /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
-    [
-        ("process.execute", ["execute"]),
-        ("filesystem.read", ["read"]),
-        ("filesystem.search", ["search"]),
-        ("filesystem.write", ["edit"]),
-        ("delegate", ["agent"]),
-        ("network.read", ["web"]),
-    ];
-
-    /// <summary>
-    /// Emission order, fixed to Copilot's documented convention and deterministic ordering
-    /// so a rendered agent file is byte-stable regardless of how the profile's permissions enumerate.
-    /// </summary>
-    private static readonly string[] ToolOrder =
-    [
-        "vscode",
-        "execute",
-        "read",
-        "'codegraph/*'",
-        "'kyber-weave/*'",
-        "'context7/*'",
-        "edit",
-        "search",
-        "agent",
-        "web",
-        "todo"
-    ];
-
     private static readonly ISerializer YamlSerializer = new SerializerBuilder()
         .WithTypeConverter(new CopilotToolsFlowSequenceConverter())
         .WithTypeConverter(new CopilotAgentsFlowSequenceConverter())
@@ -117,6 +76,9 @@ public sealed class CopilotRenderer : ISquadRenderer
         }
 
         SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -127,7 +89,6 @@ public sealed class CopilotRenderer : ISquadRenderer
             files.Add(RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles,
                 warnings));
 
             SquadDegradationRecord? degradation = BuildPermissionDegradation(agent, source.CapabilityProfiles.Profiles);
@@ -139,10 +100,10 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         foreach (SquadSkill skill in source.Skills)
         {
-            // Conductor and conductor-v3 are native primary agents on Copilot; suppressing
-            // their skill projection here is the single-projection rule
-            // SquadRendererRegistry enforces on every native target.
-            if (SharedConductorIdentities.Contains(skill.Name, StringComparer.Ordinal))
+            // A profile-declared shared identity has one canonical projection. Resolve the
+            // set from source so removing or adding a shared identity never requires a
+            // renderer-local roster change.
+            if (sharedIdentities.Contains(skill.Name))
             {
                 continue;
             }
@@ -156,7 +117,6 @@ public sealed class CopilotRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         List<SquadRenderWarning> warnings)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -171,7 +131,7 @@ public sealed class CopilotRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        frontmatter["tools"] = new CopilotToolsFlowSequence(ResolveTools(agent, capabilityProfiles));
+        frontmatter["tools"] = new CopilotToolsFlowSequence(CopilotToolCatalog.Normalize(agent.CopilotTools));
 
         if (agent.Invocation == SquadInvocation.Subagent)
         {
@@ -298,62 +258,12 @@ public sealed class CopilotRenderer : ISquadRenderer
             : profile.Default;
     }
 
-    /// <summary>
-    /// Lowers a capability profile onto Copilot's closed tool allow-list. Only
-    /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
-    /// withhold, which keeps the lowering non-broadening by construction.
-    /// Standard MCP wildcards (<c>'codegraph/*'</c>, <c>'kyber-weave/*'</c>, <c>'context7/*'</c>)
-    /// are granted when <c>filesystem.read</c> is allowed unless the agent is a pure orchestrator
-    /// (profile id <c>orchestrator</c> or name in <see cref="SharedConductorIdentities"/>).
-    /// <c>vscode</c> and <c>todo</c> are ungoverned base tools granted to all custom agents.
-    /// </summary>
-    private static IReadOnlyList<string> ResolveTools(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
-    {
-        HashSet<string> granted = new(BaseUngovernedTools, StringComparer.Ordinal);
-
-        // An unresolvable profile grants nothing beyond the ungoverned tools. SquadSourceValidator
-        // already rejects an agent naming an undeclared profile, so this is unreachable in a
-        // validated bundle — but falling back to "grant everything" here would turn a source
-        // error into a silent permission widening.
-        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
-        {
-            foreach ((string capability, string[] tools) in CapabilityTools)
-            {
-                if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
-                    decision == SquadPermissionDecision.Allow)
-                {
-                    foreach (string tool in tools)
-                    {
-                        granted.Add(tool);
-                    }
-                }
-            }
-
-            bool isPureOrchestrator =
-                string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal) ||
-                SharedConductorIdentities.Contains(agent.Name, StringComparer.Ordinal);
-
-            if (!isPureOrchestrator &&
-                profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
-                readDecision == SquadPermissionDecision.Allow)
-            {
-                foreach (string mcpTool in StandardMcpTools)
-                {
-                    granted.Add(mcpTool);
-                }
-            }
-        }
-
-        return ToolOrder.Where(granted.Contains).ToArray();
-    }
-
     private static SquadDegradationRecord? BuildPermissionDegradation(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
-        if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
+        string profileName = agent.CopilotCapabilityProfile ?? agent.CapabilityProfile;
+        if (!capabilityProfiles.TryGetValue(profileName, out SquadCapabilityProfile? profile))
         {
             return null;
         }
@@ -378,7 +288,7 @@ public sealed class CopilotRenderer : ISquadRenderer
             OutputIdentity: agent.Name,
             Code: "safety-narrowed",
             InstructionDigest: agent.BodyDigest,
-            Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
+            Details: $"Copilot capability profile '{profileName}' requires 'ask' for " +
                 $"{string.Join(", ", narrowed)}. Copilot's tool allow-list is binary and " +
                 "cannot prompt for confirmation, so these narrow to 'deny' and the " +
                 "corresponding tools are withheld from the agent's 'tools' list.");

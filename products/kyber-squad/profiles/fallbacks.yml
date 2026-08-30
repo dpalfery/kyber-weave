@@ -9,6 +9,4 @@ profiles:
       shared: reuse-skill
       collision: role-prefixed-agent-name
       prefix: role-
-    shared-identities:
-      - conductor
-      - conductor-v3
+    shared-identities: []

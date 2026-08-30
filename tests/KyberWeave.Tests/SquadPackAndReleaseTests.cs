@@ -48,6 +48,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "review-triage",
         "sql-database-architect",
         "task-reviewer",
+        "task-reviewer-v3",
         "tauri-dev",
         "test-dev"
     ];
@@ -60,8 +61,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "azure-naming",
         "bug-crusher",
         "code-review",
-        "conductor",
-        "conductor-v3",
         "create-pull-request",
         "create-pull-request-github",
         "csharp-dev",
@@ -148,15 +147,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 23 canonical agents
-        Assert.Equal(23, CanonicalAgents.Length);
+        // Presence of all 24 canonical agents
+        Assert.Equal(24, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 26 canonical skills
-        Assert.Equal(26, CanonicalSkills.Length);
+        // Presence of all 24 canonical skills
+        Assert.Equal(24, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -230,7 +229,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: Contains all 26 canonical skills
+        // Portable components only: contains all 24 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -500,7 +499,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             // Solution marker
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
-            // Copy product source from real repo if available, or write all 23 agents and 26 skills
+            // Copy product source from real repo if available, or write all 24 agents and 24 skills
             string realSquadSource = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             if (Directory.Exists(realSquadSource))
             {
@@ -652,6 +651,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     "invocation: subagent\n" +
                     "model-profile: general\n" +
                     "capability-profile: worker\n" +
+                    "copilot-tools: [vscode]\n" +
                     "delegates-to: []\n" +
                     "fallback: role-skill\n" +
                     "aliases: []\n" +

@@ -37,6 +37,21 @@ profiles:
       # delegates-to, not the implementation roster — and it does not let the architect
       # hand work back: discovery agents return findings, never tasks.
       delegate: allow
+  # This target-specific validation envelope exists only because Copilot represents the
+  # imported Hotshot architect contract as an exact tool allow-list without an ask state.
+  # Agents reference it through copilot-capability-profile; validation rejects assigning it
+  # as a shared capability-profile, so Claude, Cursor, Codex, and other targets retain the
+  # architect profile's ask semantics.
+  architect-copilot:
+    target: copilot
+    permissions:
+      filesystem.read: allow
+      filesystem.search: allow
+      filesystem.write: allow
+      process.execute: allow
+      network.read: allow
+      network.publish: deny
+      delegate: allow
   documentation:
     permissions:
       filesystem.read: allow

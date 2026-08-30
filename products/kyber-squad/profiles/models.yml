@@ -21,6 +21,9 @@ profiles:
     copilot: Grok 4.5 (copilot)
     cursor: grok-4.5[]
     opencode: zai-coding-plan/glm-5.2
+  mai-code-flash:
+    default: inherit
+    copilot: MAI-Code-1.1-Flash (copilot)
   orchestration:
     default: inherit
     opencode: opencode/big-pickle

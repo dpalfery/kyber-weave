@@ -28,15 +28,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// Skills are rendered to <c>.cursor/skills/&lt;name&gt;/SKILL.md</c> with frontmatter containing
 /// <c>name</c>, <c>description</c>, and <c>license: MIT</c>. Per the native single-projection rule,
-/// primary agents (<c>conductor</c> and <c>conductor-v3</c>) suppress their skill projections.
+/// profile-declared shared identities suppress their skill projections.
 /// </para>
 /// </remarks>
 public sealed class CursorRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".cursor/agents";
     private const string SkillsDirectory = ".cursor/skills";
-
-    private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
 
     private static readonly string[] GovernedCapabilities =
     [
@@ -81,6 +79,9 @@ public sealed class CursorRenderer : ISquadRenderer
         }
 
         SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -101,10 +102,10 @@ public sealed class CursorRenderer : ISquadRenderer
 
         foreach (SquadSkill skill in source.Skills)
         {
-            // Primary agents (conductor and conductor-v3) are native agents on Cursor;
-            // suppressing their skill projection adheres to the single-projection rule
-            // enforced by SquadRendererRegistry.
-            if (SharedConductorIdentities.Contains(skill.Name, StringComparer.Ordinal))
+            // A profile-declared shared identity has one canonical projection. Resolve the
+            // set from source so removing or adding a shared identity never requires a
+            // renderer-local roster change.
+            if (sharedIdentities.Contains(skill.Name))
             {
                 continue;
             }

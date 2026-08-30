@@ -1,34 +1,23 @@
 ---
 schema: kyber-squad.migration/v1
 agent: architect
-source-commit: d7547f46ab6bb8e447096345abbe5d4c7840bfc0
-selected-baseline: .claude/agents/architect.md
+source-commit: 677c3a876ba9c62f1083608596b238c9deaff167
+selected-baseline: .github/agents/architect.agent.md
 sources:
-  .claude/agents/architect.md: c003c4d9061d41c670676f4379bf96726c69f1cec243422370a66863360a5910
-  .codex/agents/architect.toml: ea0fce1e9c51ffe9aefe4a0c051e40faa13a0ae0526e89b0ff1329ae17533520
-  .cursor/agents/architect.agent.md: 21530e88dc55fc5b8abb4f64489c56f71b2946fdee126439d6405763df1f3529
-  .github/agents/architect.agent.md: f4efb0dc22263c22469cdcfc7a77c172782748f874a69209c869b4ab09001534
-  .opencode/agents/architect.md: 986174e95069d9693f98d6358850e6304973868467daca0129549f60cd0ccef5
-final-body-sha256: 748e30349007487a062bd86750cb0f8a8ee27173f28fb122421fc76c3d77f970
+  .github/agents/architect.agent.md: 16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c
+final-body-sha256: 1e81c386a95a253ef984094d8a0a5a2df203a08500cb5665997b1aa3d2862dc0
 ---
 # architect migration
 
-## Baseline and reconciliation
+## Hotshot golden baseline
 
-The canonical body starts from .claude/agents/architect.md at the locked source commit. No alternate harness body is retained. Other live variants were compared for harness-independent behavior; none added behavior that could be merged without changing the selected role contract.
+The canonical agent description and instruction body were synchronized from `.github/agents/architect.agent.md` at
+Hotshot commit `677c3a876ba9c62f1083608596b238c9deaff167`. The selected source file's SHA-256 is recorded in frontmatter,
+while `final-body-sha256` is the SHA-256 of the UTF-8, LF-normalized instruction body after
+YAML frontmatter is removed.
 
-Source frontmatter, provider model identifiers, tool allowlists, and command-shaped invocation syntax are excluded from the instruction body. Equivalent intent is represented by canonical invocation, model, capability, delegation, fallback, and alias metadata.
+## Canonical projection
 
-## Permission resolution
-
-The architect profile's historical conservative intersection after unsupported capabilities were marked unavailable was: filesystem.read=allow, filesystem.write=deny, process.execute=deny, network.read=allow, network.publish=deny, delegate=deny. Scoped source grants resolve to ask when a broad allow would widen access; explicit denials remain deny.
-
-The effective profile is no longer that intersection. Discovery changed from a request/fulfill loop mediated by the orchestrator to direct delegation: the profile grants `delegate=allow`, and `delegates-to` names the two read-only discovery roles, `azure-reader` and `research-agent`. Mediation cost a full orchestrator round trip per question and made the conductor a relay for work it has no opinion about. The labeled `DISCOVERY REQUEST` hand-up survives as the fallback for a harness that does not let a subagent delegate, and for an Azure call that fails after one retry.
-
-The body requires writing the plan file under `<docs-root>/plans/` (plus its index row) and running `docs validate` / `docs drift` so the corpus stays at zero findings. The lattice has no path scoping, so those grants are `filesystem.write=ask` and `process.execute=ask` rather than allow — instruction-only scope is the plans directory, the plan index, and those two commands. Source edits stay denied.
-
-An earlier post-migration revision attributed "cannot spawn other agents" to the then-current `delegate=deny`. That record is historical: the architect profile now grants delegation, but only to the two discovery roles named above.
-
-Governed-documentation lookup is a first-class discovery source, and an explicit edit-permission section bounds writes to a plan file under the plans folder and its index row.
-
-The final digest is calculated from the UTF-8, LF-normalized body loaded from the canonical agent file.
+Target-neutral `invocation`, `model-profile`, `capability-profile`, `delegates-to`, `fallback`,
+and `aliases` remain canonical lifecycle fields. The `copilot-tools` field preserves exact golden
+membership; Copilot rendering applies only the approved deterministic ordering.
