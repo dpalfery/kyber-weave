@@ -54,15 +54,3 @@ regexes = [
 description = "Allow generic-api-key in vendored dash tests (already covered by synth allowlist)."
 regexes = ['''generic-api-key''']
 paths = ['''dash/''']
-
-[[allowlists]]
-description = "CI workflow and docs false positives (generic-api-key on comments)."
-regexTarget = "secret"
-regexes = ['''.*''']
-paths = ['''.github/''', '''docs/''']
-
-[[allowlists]]
-description = "Vendored code and test fixtures are not secrets."
-regexTarget = "secret"
-regexes = ['''.*''']
-paths = ['''dash/''', '''tests/''']
