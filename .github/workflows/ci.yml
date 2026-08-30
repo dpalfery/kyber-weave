@@ -48,7 +48,7 @@ jobs:
       - name: Restore
         run: dotnet restore KyberWeave.sln
 
-      # Curated packs only — whitespace + a small style set from .editorconfig. # gitleaks:allow
+      # Curated packs only — whitespace + a small style set from .editorconfig.
       # Skip `dotnet format analyzers`: CA quality rules already fail the build via
       # TreatWarningsAsErrors / AnalysisMode=all.
       - name: Format (whitespace)
@@ -112,6 +112,15 @@ jobs:
           name: nupkg-artifacts
           path: artifacts/nupkg/
           retention-days: 14
+
+      - name: Setup Node (npm package layout check)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      - name: npm pack dry-run
+        working-directory: npm
+        run: KYBER_WEAVE_SKIP_DOWNLOAD=1 npm pack --dry-run
 
   squad-filesystem-contract:
     name: Squad filesystem contract (${{ matrix.os }})
@@ -266,7 +275,6 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -302,8 +310,6 @@ jobs:
             --skip-dirs artifacts \
             --skip-dirs '**/bin' \
             --skip-dirs '**/obj' \
-            --skip-dirs dash/windows \
-            --skip-dirs dash/gnome \
             .
 
       - name: Convert Trivy report to SARIF
@@ -329,7 +335,6 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -353,8 +358,6 @@ jobs:
             --exclude 'artifacts/**' \
             --exclude '**/bin/**' \
             --exclude '**/obj/**' \
-            --exclude 'dash/windows/**' \
-            --exclude 'dash/gnome/**' \
             --sarif-output semgrep.sarif
 
       # Intentional github/codeql-action v4 pin
@@ -370,29 +373,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - name: Install gitleaks
-        run: |
-          set -euo pipefail
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp
-          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
-          gitleaks version
       - name: Run gitleaks
-        run: gitleaks detect --source . --no-git --verbose --redact --exit-code 2 --report-format sarif --report-path results.sarif --log-level debug
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload gitleaks SARIF
-        uses: github/codeql-action/upload-sarif@eec0bff2f6c15bf3f1e8a0152f94d17664a06a06 # v4
-        if: always() && hashFiles('results.sarif') != ''
-        with:
-          sarif_file: results.sarif
-          category: gitleaks
 
   skill-docs-gate:
     name: Skill and docs gate
@@ -449,58 +439,6 @@ jobs:
       # fail closed on KW-DOC-DRIFT-001. Defer drift until an index is provisioned in CI.
       # Local/PR authors still run: docs drift . (see AGENTS.md).
 
-  ts-gates:
-    name: TypeScript gates (dash subtree)
-    runs-on: ubuntu-latest
-    needs: build-test
-    # Mirrors the same three gates declared in .kyber-weave/kyber-weave.yml as
-    # `ts-typecheck`, `ts-test`, `ts-lint`. The commands here are the exact
-    # argv the gates emit; if a future change to the gate config or to the
-    # dash/package.json scripts drifts away from the CI commands, this job
-    # will not catch it. Aligning them explicitly in workflow-as-code is the
-    # gate's source-of-truth counterpart to the argv-only entries there.
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      # engines.node in dash/package.json is >=22.13.0 and dash/.nvmrc pins
-      # the same value. Loading from .nvmrc means the runner matches what a
-      # local contributor with nvm has installed, with no second place to
-      # update when the floor bumps. `cache: npm` reuses actions/setup-node's
-      # ~350 MB built-in cache keyed on dash/package-lock.json so a cold
-      # runner is the only cold one.
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: dash/.nvmrc
-          cache: npm
-          cache-dependency-path: dash/package-lock.json
-
-      # npm ci (not `npm install`): package-lock.json is committed so a CI
-      # run reproduces the same devDependency graph a contributor's local
-      # install produces. Without this knob, a future PR that bumps an
-      # indirect dep silently forks the lint behaviour between dev and CI.
-      - name: Install dash dependencies
-        working-directory: dash
-        run: npm ci --no-audit --no-fund
-
-      - name: TypeScript type check (ts-typecheck gate)
-        working-directory: dash
-        run: npm run typecheck
-
-      # `test` excludes the cache-refresh-lock* files because vitest's
-      # default pool forks them concurrently and writes to the same lock
-      # file; upstream schedules those under `test:locks` instead.
-      - name: TypeScript test (ts-test gate)
-        working-directory: dash
-        run: npm test
-
-      - name: TypeScript lint (ts-lint gate)
-        working-directory: dash
-        run: npm run lint
-
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
@@ -509,8 +447,10 @@ jobs:
       - publish-smoke
       - update-loop
       - codeql
+      - trivy
+      - semgrep
+      - gitleaks
       - skill-docs-gate
-      - ts-gates
     if: always()
     steps:
       - name: Evaluate gate results
@@ -524,12 +464,10 @@ jobs:
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
+          echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} |" >> results.md
+          echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} |" >> results.md
+          echo "| Secret Scan (gitleaks) | ${{ needs.gitleaks.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
-          echo "| TypeScript gates (dash subtree) | ${{ needs.ts-gates.result }} |" >> results.md
-          echo "" >> results.md
-          echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} (advisory) |" >> results.md
-          echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} (advisory) |" >> results.md
-          echo "| Secret Scan (gitleaks) | ${{ needs.gitleaks.result }} (advisory) |" >> results.md
           echo "" >> results.md
 
           FAILED=false
@@ -538,8 +476,10 @@ jobs:
             "${{ needs.publish-smoke.result }}" \
             "${{ needs.update-loop.result }}" \
             "${{ needs.codeql.result }}" \
-            "${{ needs.skill-docs-gate.result }}" \
-            "${{ needs.ts-gates.result }}"; do
+            "${{ needs.trivy.result }}" \
+            "${{ needs.semgrep.result }}" \
+            "${{ needs.gitleaks.result }}" \
+            "${{ needs.skill-docs-gate.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               FAILED=true
               break
