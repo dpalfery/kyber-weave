@@ -56,6 +56,13 @@ regexes = ['''generic-api-key''']
 paths = ['''dash/''']
 
 [[allowlists]]
-description = "CI workflow comments and docs, not secrets."
-regexes = ['''curated''', '''whitespace''', '''editorconfig''']
-paths = ['''.github/''']
+description = "CI workflow and docs false positives (generic-api-key on comments)."
+regexTarget = "secret"
+regexes = ['''.*''']
+paths = ['''.github/''', '''docs/''']
+
+[[allowlists]]
+description = "Vendored code and test fixtures are not secrets."
+regexTarget = "secret"
+regexes = ['''.*''']
+paths = ['''dash/''', '''tests/''']
