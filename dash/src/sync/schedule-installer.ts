@@ -126,7 +126,7 @@ function runCommand(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     // command is internal, not user-controlled — only /bin/launchctl with static args
     // TODO(codeburn-hotfix): internal launchctl invocation — re-apply after `git subtree pull`
-    const proc = spawn(command, args, { stdio: 'pipe' }) // nosemgrep
+    const proc = spawn(command, args, { stdio: 'pipe' }) // nosemgrep: javascript.lang.security.detect-child-process, detect-child-process
 
 
     let stderr = ''

@@ -86,7 +86,7 @@ function openBrowser(url: string): void {
   try {
     // command is internal, not user-controlled — cmd is platform branch, url is localhost dashboard
     // TODO(codeburn-hotfix): internal browser open — re-apply after `git subtree pull`
-    exec(`${cmd} ${url}`) // nosemgrep
+    exec(`${cmd} ${url}`) // nosemgrep: javascript.lang.security.detect-child-process, detect-child-process
 
 
   } catch {

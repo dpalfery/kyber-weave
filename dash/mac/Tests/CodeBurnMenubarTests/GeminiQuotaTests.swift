@@ -19,13 +19,13 @@ final class GeminiQuotaTests: XCTestCase {
 
     // TODO(codeburn-hotfix): downstream allowlist for synthetic OAuth fixtures — re-apply after `git subtree pull` from codeburn.
     private static var credential: String {
-        "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}" // nosemgrep // gitleaks:allow
+        "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}" // nosemgrep: generic.secrets.security.detected-google-oauth-access-token, detected-google-oauth-access-token // gitleaks:allow
     }
 
     /// A Google Workspace id_token carries the hosted-domain (`hd`) JWT claim.
     private static var workspaceCredential: String {
         // base64url(JSON {"hd":"example.com"})
-        "{\"access_token\":\"ya29.workspace-secret\",\"id_token\":\"eyJhbGciOiJub25lIn0.eyJoZCI6ImV4YW1wbGUuY29tIn0.sig\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}" // nosemgrep // gitleaks:allow
+        "{\"access_token\":\"ya29.workspace-secret\",\"id_token\":\"eyJhbGciOiJub25lIn0.eyJoZCI6ImV4YW1wbGUuY29tIn0.sig\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) + 3_600_000)}" // nosemgrep: generic.secrets.security.detected-google-oauth-access-token, generic.secrets.security.detected-jwt-token, detected-google-oauth-access-token, detected-jwt-token // gitleaks:allow
     }
 
     private static let quotaBody = """
@@ -120,7 +120,7 @@ final class GeminiQuotaTests: XCTestCase {
         XCTAssertEqual(recorder.requests.count, 2)
         for request in recorder.requests {
             XCTAssertTrue(request.url?.absoluteString.hasPrefix("https://cloudcode-pa.googleapis.com/v1internal:") == true)
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer ya29.test-secret") // nosemgrep // gitleaks:allow
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer ya29.test-secret") // nosemgrep: generic.secrets.security.detected-google-oauth-access-token, detected-google-oauth-access-token // gitleaks:allow
 
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
             XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "CodeBurn")
@@ -143,7 +143,7 @@ final class GeminiQuotaTests: XCTestCase {
     }
 
     func testExpiredTokenWithoutClientCredentialsIsTerminal() async {
-        let stale = "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}" // nosemgrep // gitleaks:allow
+        let stale = "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}" // nosemgrep: generic.secrets.security.detected-google-oauth-access-token, detected-google-oauth-access-token // gitleaks:allow
 
 
         let recorder = RequestRecorder()
@@ -165,7 +165,7 @@ final class GeminiQuotaTests: XCTestCase {
     }
 
     func testExpiredTokenRefreshesInMemoryViaEnvOverrides() async throws {
-        let stale = "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}" // nosemgrep // gitleaks:allow
+        let stale = "{\"access_token\":\"ya29.test-secret\",\"refresh_token\":\"1//refresh-secret\",\"expiry_date\":\(Int(Self.now.timeIntervalSince1970 * 1000) - 1000)}" // nosemgrep: generic.secrets.security.detected-google-oauth-access-token, detected-google-oauth-access-token // gitleaks:allow
 
 
         let recorder = RequestRecorder()
@@ -176,7 +176,7 @@ final class GeminiQuotaTests: XCTestCase {
         ) { request in
             let url = request.url?.absoluteString ?? ""
             if url.contains("oauth2.googleapis.com") {
-                return Self.okJson(request, #"{"access_token":"ya29.refreshed"}"#) // nosemgrep // gitleaks:allow
+                return Self.okJson(request, #"{"access_token":"ya29.refreshed"}"#) // nosemgrep: generic.secrets.security.detected-google-oauth-access-token, detected-google-oauth-access-token // gitleaks:allow
 
 
             }
@@ -193,7 +193,7 @@ final class GeminiQuotaTests: XCTestCase {
         XCTAssertTrue(tokenBody.contains("grant_type=refresh_token"))
         XCTAssertEqual(
             recorder.requests.last?.value(forHTTPHeaderField: "Authorization"),
-            "Bearer ya29.refreshed") // nosemgrep // gitleaks:allow
+            "Bearer ya29.refreshed") // nosemgrep: generic.secrets.security.detected-google-oauth-access-token, detected-google-oauth-access-token // gitleaks:allow
 
 
     }

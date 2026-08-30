@@ -6,7 +6,7 @@
   const call = (channel) => (...args) =>
     // localhost demo shim, not prod — demo harness only, never shipped to users
     // TODO(codeburn-hotfix): localhost demo shim exception — re-apply after `git subtree pull`
-    fetch('http://127.0.0.1:4900/call', { // nosemgrep
+    fetch('http://127.0.0.1:4900/call', { // nosemgrep: typescript.react.security.react-insecure-request, react-insecure-request
 
 
       method: 'POST',

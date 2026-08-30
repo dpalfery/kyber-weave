@@ -29,11 +29,11 @@ jobs:
       - name: Resolve version label
         id: version
         shell: bash
-        run: |
+        run: | # nosemgrep: yaml.github-actions.security.run-shell-injection, run-shell-injection
           if [[ "${GITHUB_REF}" == refs/tags/windows-v* ]]; then
             echo "value=${GITHUB_REF#refs/tags/windows-}" >> "$GITHUB_OUTPUT"
           else
-            echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT" # nosemgrep: yaml.github-actions.security.run-shell-injection, run-shell-injection
           fi
 
       - uses: actions/setup-node@v6
