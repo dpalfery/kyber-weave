@@ -4,7 +4,7 @@ title: Add a native Warp renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-08-31
 status: draft
 ---
 
@@ -28,13 +28,13 @@ full target roster and its current coverage.
 
 ## Classification
 
-**Fallback (role-skill lowering) target.** No native agent primitive is assumed. All 24 canonical agents lower to skills per the role-skill rules in `products/kyber-squad/profiles/fallbacks.yml`: seven distinct-body collisions use `role-<name>`, while unoccupied identities, including both conductors, use `<name>`.
+**Fallback (role-skill lowering) target.** No native agent primitive is assumed. All 21 canonical agents lower to skills per the role-skill rules in `products/kyber-squad/profiles/fallbacks.yml`: seven distinct-body collisions use `role-<name>`, while unoccupied identities, including `conductor`, use `<name>`.
 
 ## What is known (from the canonical source and the codebase)
 
 - Strong detection marker: `.warp/`
 - Alias(es): none
-- The 24 canonical agents and 24 canonical skills this renderer must cover live under
+- The 21 canonical agents and 24 canonical skills this renderer must cover live under
   `products/kyber-squad/agents/*.md` and `products/kyber-squad/skills/*/SKILL.md`, loaded via
   `SquadSourceLoader.Load` (`src/KyberWeave.Core/Squad/Parsing/SquadSourceLoader.cs`) into a
   `SquadSource` — the same model `CopilotRenderer` renders from.
@@ -85,8 +85,8 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   literals, so the test can't silently drift from the canonical source it's supposed to be
   checking.
 - Confirm `kyber-weave squad install --target warp --dry-run` plans a file for every
-  agent and skill this target should cover (native: 24 agents + 24 skills = 48; fallback:
-  24 skills + 24 role-lowered agents = 48, with seven `role-` collisions and the remaining
+  agent and skill this target should cover (native: 21 agents + 24 skills = 45; fallback:
+  24 skills + 21 role-lowered agents = 45, with seven `role-` collisions and the remaining
   unoccupied identities emitted under their own names).
 - Confirm `kyber-weave squad doctor` reports `warp` under renderers available, not
   pending.

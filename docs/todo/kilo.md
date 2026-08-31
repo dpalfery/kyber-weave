@@ -4,7 +4,7 @@ title: Add a native Kilo renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-08-31
 status: draft
 ---
 
@@ -34,7 +34,7 @@ full target roster and its current coverage.
 
 - Strong detection marker: `.kilo/`
 - Alias(es): none
-- The 24 canonical agents and 24 canonical skills this renderer must cover live under
+- The 21 canonical agents and 24 canonical skills this renderer must cover live under
   `products/kyber-squad/agents/*.md` and `products/kyber-squad/skills/*/SKILL.md`, loaded via
   `SquadSourceLoader.Load` (`src/KyberWeave.Core/Squad/Parsing/SquadSourceLoader.cs`) into a
   `SquadSource` — the same model `CopilotRenderer` renders from.
@@ -85,9 +85,9 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   literals, so the test can't silently drift from the canonical source it's supposed to be
   checking.
 - Confirm `kyber-weave squad install --target kilo --dry-run` plans a file for every
-  agent and skill this target should cover (native: 24 agents + 24 skills = 48, matching
+  agent and skill this target should cover (native: 21 agents + 24 skills = 45, matching
   Copilot's count, unless this target's own agent-primitive support differs; fallback: 24
-  skills + 24 role-lowered agents = 48, with seven `role-` collisions and the remaining
+  skills + 21 role-lowered agents = 45, with seven `role-` collisions and the remaining
   unoccupied identities emitted under their own names).
 - Confirm `kyber-weave squad doctor` reports `kilo` under renderers available, not
   pending.

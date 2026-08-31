@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-29
+last-reviewed: 2026-08-30
 ---
 
 # Kyber-Weave Plan Inventory
@@ -21,6 +21,7 @@ This inventory tracks architectural and implementation plans across their lifecy
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-08-30-unified-conductor-orchestration.md](../archive/plans/2026-08-30-unified-conductor-orchestration.md) | Archived | 2026-08-30 | 2026-08-31 | [architecture.md](../kyber-squad/architecture.md), [requirements.md](../kyber-squad/requirements.md), [onboarding.md](../kyber-squad/onboarding.md), [product README](../../products/kyber-squad/README.md) | Consolidate conductor, architect, and task reviewer into one test-first-default orchestration stack with plan/spec/todo intake and progressively disclosed, renderable resource closures. |
 | [2026-08-23-claude-code-native-renderer.md](../archive/plans/2026-08-23-claude-code-native-renderer.md) | Archived | 2026-08-23 | 2026-08-23 | [architecture.md](../kyber-squad/architecture.md), [onboarding.md](../kyber-squad/onboarding.md), [archive/todo/claude-code.md](../archive/todo/claude-code.md) | Implement and register an `ISquadRenderer` for Claude Code (`.claude/agents`, `.claude/skills`) so `squad install --target claude` succeeds. |
 | [2026-08-22-resolve-inspectcode-warnings-and-actionable-suggestions.md](../archive/plans/2026-08-22-resolve-inspectcode-warnings-and-actionable-suggestions.md) | Archived | 2026-08-22 | 2026-08-22 | [standards/csharp/README.md](../standards/csharp/README.md), [ADR 0004](../adr/0004-solution-level-static-analysis-and-noise-suppression.md) | Resolve all 34 InspectCode static analysis warnings and high-value actionable suggestions across KyberWeave.sln. |
 | [2026-08-22-council-reviewer-findings-remediation.md](../archive/plans/2026-08-22-council-reviewer-findings-remediation.md) | Archived | 2026-08-22 | 2026-08-22 | [standards/README.md](../standards/README.md), [kyber-squad/README.md](../kyber-squad/README.md), [ADR 0001](../adr/0001-coding-standards-and-configuration-registry.md) | Remediate all five major and one minor council code reviewer findings across coding standards, repository configuration, scaffolder defaults, and canonical Kyber-Squad skills. |

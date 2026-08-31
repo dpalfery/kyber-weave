@@ -148,10 +148,12 @@ public sealed class ClaudeRenderer : ISquadRenderer
 
         foreach (SquadAgent agent in source.Agents)
         {
-            files.Add(RenderAgent(
+            SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles));
+                source.CapabilityProfiles.Profiles);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, agent.Resources);
 
             degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
         }
@@ -166,7 +168,9 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 continue;
             }
 
-            files.Add(RenderSkill(skill));
+            SquadDeploymentFile principal = RenderSkill(skill);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));

@@ -27,6 +27,3 @@ profiles:
   orchestration:
     default: inherit
     opencode: opencode/big-pickle
-  test-first-orchestration:
-    default: inherit
-    opencode: opencode-go/gpt-5.6-luna

@@ -18,12 +18,12 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 24 canonical agent instruction bodies and 24 canonical skill identities under `products/kyber-squad/`. The skill tree also retains 64 supplemental resources, for 88 files total, until their content-preserving migration is accepted. Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 21 canonical agent instruction bodies and 24 canonical skill identities under `products/kyber-squad/`. The skill tree retains 64 supplemental resources, for 88 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, all retained until the skill-resource content-preserving migration is accepted. Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A Copilot-only internal capability profile may validate exact target tool membership but must not replace or widen the shared capability profile or metadata. |
 | **KS-003** | **Deterministic Target Resolution**: Resolve deployment targets from explicit CLI flags, saved repository configuration, existing receipts (for update/uninstall), or strong filesystem markers. The `all` keyword expands strictly to the approved 9-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. |
 | **KS-005** | **Version Lockstep**: Enforce exact version equality across the CLI, Squad release asset, and MCP server. Verify all release assets against published SHA-256 checksums without installing external dependencies as side effects. |
-| **KS-006** | **Dual Distribution Packaging**: Provide `squad pack` to build an APM distribution zip containing all agents, skills, recursive skill resources, and MCP configurations, plus an adjunct Agent Plugins v1 artifact exposing the complete recursive portable skill tree and MCP surfaces only. Every rendered role embeds its canonical instruction digest. |
+| **KS-006** | **Dual Distribution Packaging**: Provide `squad pack` to build an APM distribution zip containing all agents with their owned resources, all skills with their resources, and MCP configurations, plus an adjunct Agent Plugins v1 artifact exposing the complete recursive portable skill tree and MCP surfaces only — never agents or agent-owned resources. Every rendered role embeds its canonical instruction digest. |
 | **KS-007** | **Release Pipeline Publishing**: Publish versioned `kyber-squad-X.Y.Z.zip` and `kyber-squad-plugin-X.Y.Z.zip` artifacts in GitHub Releases, validated against the pinned APM release. |
 | **KS-008** | **Documentation & Plan Closeout**: Maintain canonical architecture, onboarding, requirements, configuration, and distribution documentation, keeping the governed corpus at zero validation findings. |
 
@@ -35,8 +35,8 @@ Harnesses differ in their native capabilities (e.g. support for primary agents, 
 
 The product currently has seven agent/skill intersections, all distinct-body collisions, and no
 shared identities. Fallback targets preserve each of those skills and emit the matching agent as
-`role-<name>`. `conductor` and `conductor-v3` have unoccupied skill identities and therefore lower
-to same-name role skills.
+`role-<name>`. `conductor` has an unoccupied skill identity and therefore lowers to a same-name
+role skill.
 
 ### Degradation Taxonomy
 
@@ -81,11 +81,13 @@ If a target harness cannot guarantee the containment or authorization boundaries
 
 ## Golden-render and knowledge-retention requirement
 
-All 24 canonical raw `SKILL.md` files match the Hotshot golden bytes. Copilot renders those files
-and the 24 native agents—exactly 48 files—but not supplemental resources. The Hotshot golden tree's
-omission leaves 61 local references dangling in that render. Canonical source and both recursive
-package formats retain all 64 supplemental resources and must resolve retained local references.
-Those files remain until the
+Every canonical raw `SKILL.md` except the two explicitly evolved skills (`product-owner`,
+`bug-crusher`) matches the Hotshot golden bytes, as does every non-evolved agent body; the three
+retired `-v3` identities survive only as folded provenance in their canonical migration reports.
+Renderers project each owner's validated resource closure beside its principal output, so a fresh
+Copilot render emits 113 files with no dangling local references. The tracked root `.github/`
+self-deployment predates resource delivery and is refreshed only by a release. Both recursive
+package formats retain all supplemental resources. Surplus content remains until the
 [skill-resource migration todo](../todo/migrate-skill-resources-into-standards.md) satisfies its
 content-preservation, routing, and deployment acceptance criteria.
 

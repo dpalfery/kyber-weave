@@ -52,7 +52,6 @@ public sealed class CopilotRendererTests
 
     [Theory]
     [InlineData("architect")]
-    [InlineData("architect-v3")]
     public void ArchitectCopilotProjectionDoesNotWidenSharedCrossHarnessProfile(string agentName)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -76,7 +75,6 @@ public sealed class CopilotRendererTests
 
     [Theory]
     [InlineData("architect")]
-    [InlineData("architect-v3")]
     public async Task ArchitectRenderedMetadataKeepsSharedCapabilityProfile(string agentName)
     {
         string frontmatter = await RenderFrontmatterAsync(agentName);
@@ -181,12 +179,10 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("architect-v3", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename]")]
     [InlineData("architect", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, vscodeGeneral/rename]")]
     [InlineData("azure-reader", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
     [InlineData("bug-crusher-investigator", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
     [InlineData("code-reviewer", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent]")]
-    [InlineData("conductor-v3", "tools: [vscode, read, todo, agent]")]
     [InlineData("conductor", "tools: [vscode, read, todo, agent]")]
     [InlineData("csharp-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
     [InlineData("dal-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
@@ -452,7 +448,6 @@ public sealed class CopilotRendererTests
     /// </summary>
     [Theory]
     [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
-    [InlineData("architect-v3", "agents: ['azure-reader', 'research-agent']")]
     [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
@@ -478,7 +473,6 @@ public sealed class CopilotRendererTests
     [InlineData("review-lens")]
     [InlineData("azure-reader")]
     [InlineData("conductor")]
-    [InlineData("conductor-v3")]
     public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
     {
         string frontmatter = await RenderFrontmatterAsync(agentName);

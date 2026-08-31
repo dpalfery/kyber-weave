@@ -40,11 +40,11 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 24 canonical agents and 24 skills for five registered renderers while retaining a governed nine-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 24 skills — each projecting its validated resource closure beside the rendered principal — for five registered renderers while retaining a governed nine-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
-| **Portable Offline Packaging** | Bundles all canonical agent manifests, skills, and schemas into a self-contained archive for air-gapped or CI distribution. | `kyber-weave squad pack` |
+| **Portable Offline Packaging** | Bundles all canonical agents, skills, resources, and schemas into self-contained APM and Agent Plugins archives for air-gapped or CI distribution. | `kyber-weave squad pack` |
 
 ---
 

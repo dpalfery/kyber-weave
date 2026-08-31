@@ -32,8 +32,30 @@ public sealed partial class HotshotGoldenContractTests
     private const int ExpectedCopilotRenderFileCount = 48;
     private const string ExpectedSchema = "kyber-squad.hotshot-golden/v1";
     private const string ExpectedSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
+    private const string ExpectedManifestSha256 = "27a4ce4886c5d6a6b7c9829f77a6f5f468b765970c5e4bb8173f29b2850c1d20";
     private const string ExternalGoldenRootVariable = "KYBER_SQUAD_HOTSHOT_GOLDEN_ROOT";
     private const string MaiCodeCopilotModel = "MAI-Code-1.1-Flash (copilot)";
+
+    private static readonly string[] EvolvedAgentIdentities =
+    [
+        "architect",
+        "conductor",
+        "product-owner",
+        "task-reviewer"
+    ];
+
+    private static readonly string[] EvolvedSkillIdentities =
+    [
+        "bug-crusher",
+        "product-owner"
+    ];
+
+    private static readonly string[] RetiredAgentIdentities =
+    [
+        "architect-v3",
+        "conductor-v3",
+        "task-reviewer-v3"
+    ];
 
     private static readonly string[] ApprovedToolOrder =
     [
@@ -85,6 +107,7 @@ public sealed partial class HotshotGoldenContractTests
 
         AddMismatch(mismatches, "schema", ExpectedSchema, manifest.Schema);
         AddMismatch(mismatches, "source commit", ExpectedSourceCommit, manifest.SourceCommit);
+        AddMismatch(mismatches, "manifest SHA-256", ExpectedManifestSha256, Sha256(File.ReadAllBytes(ManifestPath)));
         AddSequenceMismatch(mismatches, "approved tool order", ApprovedToolOrder, manifest.ApprovedToolOrder);
         AddSequenceMismatch(
             mismatches,
@@ -175,13 +198,17 @@ public sealed partial class HotshotGoldenContractTests
     }
 
     [Fact]
-    public void CanonicalSourceMatchesCheckedInHotshotGoldenContract()
+    public void CanonicalSourcePreservesGoldenContractOutsideReviewedEvolution()
     {
         HotshotGoldenManifest manifest = ReadManifest();
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         List<string> mismatches = [];
 
-        string[] expectedAgents = manifest.Agents.Select(entry => AgentName(entry.Path)).Order(StringComparer.Ordinal).ToArray();
+        string[] expectedAgents = manifest.Agents
+            .Select(entry => AgentName(entry.Path))
+            .Except(RetiredAgentIdentities, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
         string[] expectedSkills = manifest.Skills.Select(entry => SkillName(entry.Path)).Order(StringComparer.Ordinal).ToArray();
         AddSequenceMismatch(mismatches, "canonical agents", expectedAgents, source.Agents.Select(agent => agent.Name));
         AddSequenceMismatch(mismatches, "bundle agents", expectedAgents, source.Bundle.AgentNames.Order(StringComparer.Ordinal));
@@ -192,9 +219,24 @@ public sealed partial class HotshotGoldenContractTests
         foreach (GoldenAgentEntry expected in manifest.Agents)
         {
             string name = AgentName(expected.Path);
+            if (RetiredAgentIdentities.Contains(name, StringComparer.Ordinal))
+            {
+                if (actualAgents.ContainsKey(name))
+                {
+                    mismatches.Add($"retired golden agent '{name}' remains canonical");
+                }
+
+                continue;
+            }
+
             if (!actualAgents.TryGetValue(name, out SquadAgent? actual))
             {
                 mismatches.Add($"missing canonical agent '{name}'");
+                continue;
+            }
+
+            if (EvolvedAgentIdentities.Contains(name, StringComparer.Ordinal))
+            {
                 continue;
             }
 
@@ -219,17 +261,25 @@ public sealed partial class HotshotGoldenContractTests
         string skillRoot = Path.Combine(ProductRoot, "skills");
         string[] actualSkillFiles = Directory.EnumerateFiles(skillRoot, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
+            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
         string[] expectedSkillFiles = manifest.Skills
             .Select(entry => entry.Path.Replace(".github/", string.Empty, StringComparison.Ordinal))
             .Concat(manifest.CanonicalResources)
+            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
-        AddSequenceMismatch(mismatches, "recursive canonical skill files", expectedSkillFiles, actualSkillFiles);
+        AddSequenceMismatch(mismatches, "non-evolved recursive canonical skill files", expectedSkillFiles, actualSkillFiles);
 
         foreach (GoldenSkillEntry expected in manifest.Skills)
         {
+            string name = SkillName(expected.Path);
+            if (EvolvedSkillIdentities.Contains(name, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             string canonicalPath = Path.Combine(
                 ProductRoot,
                 expected.Path.Replace(".github/", string.Empty, StringComparison.Ordinal).Replace('/', Path.DirectorySeparatorChar));
@@ -362,13 +412,27 @@ public sealed partial class HotshotGoldenContractTests
 
         Dictionary<string, SquadDeploymentFile> files = result.Files.ToDictionary(file => file.RelativePath, StringComparer.Ordinal);
         string[] expectedPaths = manifest.Agents.Select(entry => entry.Path)
+            .Where(path => !RetiredAgentIdentities.Contains(AgentName(path), StringComparer.Ordinal))
             .Concat(manifest.Skills.Select(entry => entry.Path))
             .Order(StringComparer.Ordinal)
             .ToArray();
-        AddSequenceMismatch(mismatches, "rendered paths", expectedPaths, files.Keys.Order(StringComparer.Ordinal));
+        string[] missingPaths = expectedPaths.Where(path => !files.ContainsKey(path)).ToArray();
+        AddSequenceMismatch(mismatches, "missing required rendered paths", [], missingPaths);
+        string[] retiredPaths = RetiredAgentIdentities
+            .Select(name => $".github/agents/{name}.agent.md")
+            .Where(files.ContainsKey)
+            .ToArray();
+        AddSequenceMismatch(mismatches, "retired rendered paths", [], retiredPaths);
 
         foreach (GoldenAgentEntry expected in manifest.Agents)
         {
+            string name = AgentName(expected.Path);
+            if (RetiredAgentIdentities.Contains(name, StringComparer.Ordinal) ||
+                EvolvedAgentIdentities.Contains(name, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             if (!files.TryGetValue(expected.Path, out SquadDeploymentFile? file))
             {
                 continue;
@@ -382,6 +446,11 @@ public sealed partial class HotshotGoldenContractTests
 
         foreach (GoldenSkillEntry expected in manifest.Skills)
         {
+            if (EvolvedSkillIdentities.Contains(SkillName(expected.Path), StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             if (files.TryGetValue(expected.Path, out SquadDeploymentFile? file))
             {
                 AddMismatch(
@@ -677,6 +746,9 @@ public sealed partial class HotshotGoldenContractTests
 
     private static string SkillName(string path) =>
         path.Split('/', StringSplitOptions.RemoveEmptyEntries)[2];
+
+    private static string CanonicalSkillName(string path) =>
+        path.Split('/', StringSplitOptions.RemoveEmptyEntries)[1];
 
     private static string NormalizeLf(string text) =>
         text.TrimStart('\uFEFF').Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');

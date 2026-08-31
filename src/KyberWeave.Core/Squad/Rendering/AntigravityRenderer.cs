@@ -104,6 +104,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
+        List<(SquadAgent Agent, string OutputIdentity)> loweredAgents = [];
 
         // The declared vocabulary, not a renderer-local copy: a capability added to
         // profiles/capabilities.yml must appear in degradation text without a renderer
@@ -145,6 +146,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                     Code: "role-skill-fallback",
                     InstructionDigest: agent.BodyDigest,
                     Details: "Reused identical shared canonical skill; agent primitive lowered to skill."));
+                loweredAgents.Add((agent, agent.Name));
             }
             else if (occupiedIdentities.Contains(agent.Name) &&
                      skillNames.Contains(agent.Name))
@@ -158,6 +160,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                     Code: "role-skill-fallback",
                     InstructionDigest: agent.BodyDigest,
                     Details: "Agent lowered to role-prefixed skill to preserve distinct canonical skill."));
+                loweredAgents.Add((agent, outputIdentity));
             }
             else
             {
@@ -169,6 +172,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                     Code: "role-skill-fallback",
                     InstructionDigest: agent.BodyDigest,
                     Details: "Agent lowered to role skill."));
+                loweredAgents.Add((agent, agent.Name));
             }
 
             SquadDegradationRecord? permission = BuildPermissionDegradation(
@@ -179,6 +183,29 @@ public sealed class AntigravityRenderer : ISquadRenderer
             {
                 degradations.Add(permission);
             }
+        }
+
+        // Canonical skills are emitted before lowered agents to preserve the established
+        // Antigravity principal ordering. Resource projection follows canonical source
+        // ownership instead: agents first, then skills, with each closure already sorted
+        // by the loader. The extra agent-relative segment keeps authored links valid when
+        // an agent is lowered beneath a role-skill directory.
+        foreach ((SquadAgent agent, string outputIdentity) in loweredAgents)
+        {
+            SquadResourceProjection.Append(
+                files,
+                $"{SkillsDirectory}/{outputIdentity}/SKILL.md",
+                agent.Resources,
+                "antigravity");
+        }
+
+        foreach (SquadSkill skill in source.Skills)
+        {
+            SquadResourceProjection.Append(
+                files,
+                $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+                skill.Resources,
+                "antigravity");
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));

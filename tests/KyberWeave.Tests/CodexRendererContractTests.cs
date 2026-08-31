@@ -93,7 +93,13 @@ public sealed class CodexRendererContractTests : IDisposable
 
         int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
         int expectedSkillCount = source.Skills.Count - suppressedSkillCount;
-        int expectedFileCount = source.Agents.Count + expectedSkillCount;
+
+        // C3: every rendered owner also projects its validated resource closure beside its
+        // principal output, so the corpus count is principals plus emitted closures.
+        int expectedFileCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+            + expectedSkillCount
+            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+                .Sum(skill => skill.Resources.Count);
         Assert.Equal(expectedFileCount, result.Files.Count);
 
         Assert.All(result.Files, f =>
@@ -253,6 +259,17 @@ public sealed class CodexRendererContractTests : IDisposable
         {
             Assert.Equal(first.Degradations[i], second.Degradations[i]);
         }
+    }
+
+    [Fact]
+    public async Task RenderAsync_Codex_ProjectsLinkedAgentAndSkillResourcesDeterministically()
+    {
+        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
+            new CodexRenderer(),
+            SquadTarget.Codex,
+            ".codex/agents/bug-crusher-investigator.toml",
+            ".codex/agents",
+            ".codex/skills");
     }
 
     [Fact]

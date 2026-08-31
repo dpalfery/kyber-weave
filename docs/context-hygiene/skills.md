@@ -148,22 +148,22 @@ layout for each runtime is APM's problem rather than a second copy of that mappi
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
 unified multi-harness deployment control plane. Kyber-Squad maintains 24 canonical skills
-(alongside 24 canonical agent roles and lowering rules) under `products/kyber-squad/` and
+(alongside 21 canonical agent roles and lowering rules) under `products/kyber-squad/` and
 manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares nine
 harness targets. Five renderers are implemented and registered (`copilot`, `cursor`, `claude`,
 `codex`, and `antigravity`); `opencode`, `kilo`, `warp`, and `factory` fail renderer-coverage
 preflight until their renderers are implemented.
 
-The 24 raw `SKILL.md` files match the Hotshot golden bytes. Canonical storage and recursive Squad
-packages also preserve 64 supplemental resources, for 88 skill-tree files, while Copilot renders
-only the 24 `SKILL.md` files. The golden tree omits 61 referenced resources, so its rendered skill
-surface has known dangling links; canonical and packaged references remain intact. The resources
-stay packaged until the
+Every raw `SKILL.md` except the explicitly evolved `product-owner` and `bug-crusher` matches the
+Hotshot golden bytes. Canonical storage and recursive Squad packages preserve 64 supplemental
+resources, for 88 skill-tree files, and renderers project them beside the rendered principal, so
+deployed skill references resolve. The tracked root `.github/` self-deployment predates resource
+delivery; surplus packaged content remains until the
 [content-preserving migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted.
 
 The agent and skill namespaces intersect at seven names, all distinct-body collisions. No product
 identity is shared. Fallback rendering keeps each colliding skill at `<name>` and lowers its agent
-to `role-<name>`; agents with unoccupied skill identities, including both conductors, lower to
+to `role-<name>`; agents with unoccupied skill identities, including `conductor`, lower to
 same-name role skills.
 
 ## Related

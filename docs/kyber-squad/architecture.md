@@ -140,9 +140,8 @@ flowchart TD
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
 2. **Unoccupied Identities**:
    - Agents with no matching skill name lower directly to `<name>` as a skill on fallback targets.
-   - `conductor` and `conductor-v3` follow this rule because neither has a canonical skill.
-     The fallback profile's `shared-identities` list is empty; `conductor-v2` exists only as an
-     input migration alias for `conductor`.
+   - `conductor` follows this rule because it has no canonical skill. The fallback profile's
+     `shared-identities` list is empty, and the canonical catalog carries no version aliases.
 
 ---
 
@@ -262,6 +261,10 @@ and validates.
   Copilot allow-list and safety degradation only. They do not replace or widen the shared
   `capability-profile`, fallback metadata, description, or instruction body consumed by other
   renderers.
+- **Resource projection**: after each principal file, the renderer appends the owner's validated
+  resource closure beside it — each resource at its artifact-relative path under the principal's
+  directory — so authored relative links resolve verbatim in the deployed tree. A resource that
+  would alias another principal's output is a validation error, never an overwrite.
 - **Validate**: the registry re-checks the merged output — portable paths stay inside the
   extraction root, every file's target was actually requested, the native/fallback
   single-projection rules from [section 3](#3-role-skill-lowering-and-namespace-resolution)

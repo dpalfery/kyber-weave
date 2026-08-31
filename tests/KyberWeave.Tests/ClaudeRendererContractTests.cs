@@ -135,7 +135,14 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
-        int expectedFileCount = source.Agents.Count + source.Skills.Count - suppressedSkillCount;
+
+        // C3: every rendered owner also projects its validated resource closure beside its
+        // principal output, so the corpus count is principals plus emitted closures.
+        int expectedFileCount =
+            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+            + source.Skills.Count - suppressedSkillCount
+            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+                .Sum(skill => skill.Resources.Count);
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("claude", f.Target));
 
@@ -155,7 +162,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 $"Agent '{agent.Name}' description mismatch.");
 
             // Model resolution: verify against loaded ModelProfiles. Every assertion names
-            // the agent so a failure identifies the offender out of the 24-agent corpus.
+            // the agent so a failure identifies the offender out of the 21-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             if (modelProfile.HarnessModels.TryGetValue("claude", out string? claudeHarnessModel))
             {
@@ -430,6 +437,17 @@ public sealed class ClaudeRendererContractTests : IDisposable
             Assert.Equal(file1.Target, file2.Target);
             Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span), $"Content differed for file '{file1.RelativePath}'.");
         }
+    }
+
+    [Fact]
+    public async Task RenderAsync_Claude_ProjectsLinkedAgentAndSkillResourcesDeterministically()
+    {
+        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
+            new ClaudeRenderer(),
+            SquadTarget.Claude,
+            ".claude/agents/bug-crusher-investigator.md",
+            ".claude/agents",
+            ".claude/skills");
     }
 
     private static bool IsDocumentedClaudeTool(string tool) =>

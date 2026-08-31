@@ -10,7 +10,13 @@ public sealed class SquadCanonicalContentTests
     private const string MigrationSchema = "kyber-squad.migration/v1";
     private const string MigrationSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
     private const string DefaultOrchestrationTrigger = "default entry point";
-    private const string TestFirstOrchestrationTrigger = "test-first";
+
+    private static readonly string[] RetiredAgentIdentities =
+    [
+        "architect-v3",
+        "conductor-v3",
+        "task-reviewer-v3"
+    ];
 
     /// <summary>
     /// Agents imported from the designated Hotshot Copilot golden tree. Each carries a
@@ -20,12 +26,10 @@ public sealed class SquadCanonicalContentTests
     private static readonly string[] ExpectedMigratedAgents =
     [
         "architect",
-        "architect-v3",
         "azure-reader",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
-        "conductor-v3",
         "csharp-dev",
         "dal-dev",
         "docs-dev",
@@ -38,7 +42,6 @@ public sealed class SquadCanonicalContentTests
         "research-agent",
         "sql-database-architect",
         "task-reviewer",
-        "task-reviewer-v3",
         "tauri-dev",
         "test-dev",
     ];
@@ -184,27 +187,41 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void LoadConductorsHaveUnoccupiedFallbackIdentities()
+    public void LoadConductorHasOneUnoccupiedFallbackIdentity()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        string[] conductorNames = ["conductor", "conductor-v3"];
 
-        Assert.All(conductorNames, name => Assert.Contains(source.Agents, agent => agent.Name == name));
-        Assert.All(conductorNames, name => Assert.DoesNotContain(source.Skills, skill => skill.Name == name));
+        Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.DoesNotContain(source.Skills, skill => skill.Name == "conductor");
         Assert.Empty(source.FallbackProfiles.Profiles["role-skill"].SharedIdentities);
     }
 
     [Fact]
-    public void LoadConductorV2MigrationNameResolvesOnlyToConductorAlias()
+    public void LoadUnifiedOrchestrationStackContainsNoVersionedIdentityOrAlias()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         (string Alias, string Canonical)[] aliases = source.Agents
             .SelectMany(agent => agent.Aliases.Select(alias => (Alias: alias, Canonical: agent.Name)))
             .OrderBy(pair => pair.Alias, StringComparer.Ordinal)
             .ToArray();
+        string[] versionedDelegates = source.Agents
+            .SelectMany(agent => agent.DelegatesTo)
+            .Where(IsVersionedIdentity)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        string migrationRoot = Path.Combine(ProductRoot, "migration");
 
-        Assert.Equal([("conductor-v2", "conductor")], aliases);
-        Assert.DoesNotContain(source.Agents, agent => agent.Name == "conductor-v2");
+        Assert.Empty(aliases);
+        Assert.DoesNotContain(source.Agents, agent => IsVersionedIdentity(agent.Name));
+        Assert.DoesNotContain(source.Bundle.AgentNames, IsVersionedIdentity);
+        Assert.Empty(versionedDelegates);
+        Assert.DoesNotContain("test-first-orchestration", source.ModelProfiles.Profiles.Keys);
+        Assert.All(
+            RetiredAgentIdentities,
+            name => Assert.False(
+                File.Exists(Path.Combine(migrationRoot, $"{name}.md")),
+                $"Retired identity '{name}' must not retain an active migration report."));
     }
 
     [Fact]
@@ -223,7 +240,7 @@ public sealed class SquadCanonicalContentTests
     }
 
     [Fact]
-    public void LoadPrimaryOrchestratorsDeclareOneGeneralDefaultAndExplicitTestFirstAlternative()
+    public void LoadUnifiedOrchestrationStackDeclaresCanonicalDelegationAndModelProfiles()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         string[] defaultAgents = source.Agents
@@ -232,17 +249,65 @@ public sealed class SquadCanonicalContentTests
                 StringComparison.OrdinalIgnoreCase))
             .Select(agent => agent.Name)
             .ToArray();
-        SquadAgent testFirst = Assert.Single(source.Agents, agent => agent.Name == "conductor-v3");
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+        SquadAgent taskReviewer = Assert.Single(source.Agents, agent => agent.Name == "task-reviewer");
 
         Assert.Equal(["conductor"], defaultAgents);
-        Assert.Contains(
-            TestFirstOrchestrationTrigger,
-            testFirst.Description,
-            StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(
-            DefaultOrchestrationTrigger,
-            testFirst.Description,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("orchestration", conductor.ModelProfile);
+        Assert.Equal("deep-planning", architect.ModelProfile);
+        Assert.Equal("mai-code-flash", taskReviewer.ModelProfile);
+        Assert.Contains("architect", conductor.DelegatesTo);
+        Assert.Contains("product-owner", conductor.DelegatesTo);
+        Assert.Contains("task-reviewer", conductor.DelegatesTo);
+        Assert.Contains("code-reviewer", conductor.DelegatesTo);
+        Assert.Contains("docs-dev", conductor.DelegatesTo);
+    }
+
+    [Fact]
+    public void LoadConductorDefinesThreeIntakePathsAndModeAwareExecution()
+    {
+        string contract = ReadAgentContract("conductor");
+
+        Assert.Contains("plan path", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("spec path", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("intake path", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("development-mode", contract, StringComparison.Ordinal);
+        Assert.Contains("test-first", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("standard", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("approve and execute", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Ready", contract, StringComparison.Ordinal);
+        Assert.Contains("Draft", contract, StringComparison.Ordinal);
+        Assert.Contains("superseded", contract, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadProductOwnerIsHeadlessAndReturnsStructuredPhaseAndGapMarkers()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
+        string skillContract = ReadSkillContract("product-owner");
+
+        Assert.DoesNotContain("ask, verbatim", productOwner.InstructionBody, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GATE 1", productOwner.InstructionBody, StringComparison.Ordinal);
+        Assert.Contains("STATUS: READY_FOR_REVIEW", skillContract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: REQUIREMENTS_GAP", skillContract, StringComparison.Ordinal);
+        Assert.Contains("STATUS: DESIGN_GAP", skillContract, StringComparison.Ordinal);
+        Assert.Contains("GAPS:", skillContract, StringComparison.Ordinal);
+        Assert.Contains("OPEN_QUESTIONS:", skillContract, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadTaskReviewerDefinesThreePassesForBothDevelopmentModes()
+    {
+        string contract = ReadAgentContract("task-reviewer");
+
+        Assert.Contains("pass 3", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("test-first", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("standard", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("RED/GREEN", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("verification contract", contract, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("code-reviewer", contract, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -310,6 +375,43 @@ public sealed class SquadCanonicalContentTests
     private static string ProductRoot =>
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
+    private static bool IsVersionedIdentity(string name) =>
+        name.EndsWith("-v2", StringComparison.Ordinal) ||
+        name.EndsWith("-v3", StringComparison.Ordinal);
+
+    private static string ReadAgentContract(string name)
+    {
+        string agentRoot = Path.Combine(ProductRoot, "agents");
+        string principal = File.ReadAllText(Path.Combine(agentRoot, $"{name}.md"));
+        string referencesRoot = Path.Combine(agentRoot, name, "references");
+        Assert.True(
+            Directory.Exists(referencesRoot),
+            $"Agent '{name}' must progressively disclose its conditional contract from '{referencesRoot}'.");
+
+        string[] references = Directory.EnumerateFiles(referencesRoot, "*.md", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.NotEmpty(references);
+        Assert.All(
+            references,
+            path => Assert.Contains(
+                Path.GetRelativePath(agentRoot, path).Replace(Path.DirectorySeparatorChar, '/'),
+                principal,
+                StringComparison.Ordinal));
+
+        return string.Join("\n", references.Prepend(Path.Combine(agentRoot, $"{name}.md")).Select(File.ReadAllText));
+    }
+
+    private static string ReadSkillContract(string name)
+    {
+        string skillRoot = Path.Combine(ProductRoot, "skills", name);
+        return string.Join(
+            "\n",
+            Directory.EnumerateFiles(skillRoot, "*.md", SearchOption.AllDirectories)
+                .Order(StringComparer.Ordinal)
+                .Select(File.ReadAllText));
+    }
+
     private static RoleSkillProfile ReadRoleSkillProfile()
     {
         string path = Path.Combine(ProductRoot, "profiles", "fallbacks.yml");
@@ -371,7 +473,10 @@ public sealed class SquadCanonicalContentTests
         return name switch
         {
             "conductor-v2" => "conductor",
+            "architect-v3" => "architect",
+            "conductor-v3" => "conductor",
             "dotnet-dev" => "csharp-dev",
+            "task-reviewer-v3" => "task-reviewer",
             _ => name
         };
     }

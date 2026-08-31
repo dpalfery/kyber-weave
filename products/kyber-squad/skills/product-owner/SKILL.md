@@ -1,26 +1,49 @@
 ---
 name: product-owner
-description: Use when authoring a feature spec's requirements (EARS), technical design, or test-driven task list — the phase playbooks for the product-owner planning flow.
+description: Use when authoring or revising one formal feature-spec phase—EARS requirements, technical design, mode-aware implementation tasks, or closeout—and return a headless digest to conductor. Do NOT use for bounded implementation plans or delivery execution.
 license: MIT
 ---
 
 # Product Owner Skill
 
-Identify your sub-task and read ONLY the relevant reference before proceeding.
+Resolve **<specification-index>** and **<docs-root>** through the repository root `AGENTS.md` Config Reg. The active specification directory is the directory containing **<specification-index>**; its archive location and inventory rules are declared by that index. Never assume a fixed documentation root.
 
-| Phase | When to Use | Reference |
+Read the specification index before opening a feature artifact. Then identify the assigned phase and read only its reference:
+
+| Phase | Use | Reference |
 |---|---|---|
-| Requirements phase | EARS-format requirements from a rough idea or vision doc | [Requirements Phase](./references/requirements-phase.md) |
-| Design phase | Technical design from approved requirements | [Design Phase](./references/design-phase.md) |
-| Tasks phase | Test-driven, traceable checkbox task list | [Tasks Phase](./references/tasks-phase.md) |
-| Closeout phase | Tasks are delivered and their tests pass; retire the specification | [Closeout Phase](./references/closeout-phase.md) |
+| Requirements | Turn a feature idea into numbered EARS requirements | [Requirements phase](./references/requirements-phase.md) |
+| Design | Design against approved requirements and report gaps | [Design phase](./references/design-phase.md) |
+| Tasks | Produce traceable tasks and the selected development-mode contract | [Tasks phase](./references/tasks-phase.md) |
+| Closeout | Verify delivery, migrate durable facts, and archive the spec | [Closeout phase](./references/closeout-phase.md) |
 
-**Rule:** Read only the reference relevant to your current phase.
+## Headless phase contract
 
-## A specification has a shelf life
+This skill never prompts the user and never runs an approval gate. Persist the assigned artifact and return its digest to `conductor`, which relays `GAPS` and `OPEN_QUESTIONS` and returns user decisions in a later invocation.
 
-A specification records what was *intended*, so it goes stale the moment the implementation diverges from it — exactly like a plan. It is never canonical guidance, and an agent answering from one is quoting a proposal rather than the system.
+Normal phase work returns one of these exact status markers:
 
-That makes closeout part of the flow, not an afterthought. A specification whose tasks are done but which still sits in `6-Docs/specs/` is a live trap: it reads as current and it is not. Every specification this skill authors SHALL carry a final closeout task, and the task list is not complete without one.
+- `STATUS: READY_FOR_REVIEW`
+- `STATUS: REQUIREMENTS_GAP`
+- `STATUS: DESIGN_GAP`
+- `STATUS: PHASE_APPROVED`
+- `STATUS: SPEC_READY`
+- `STATUS: SPEC_FINALIZED`
+- `STATUS: SPEC_WRITE_ERROR`
 
-Both the active specification set and the archive register live in the path declared as **Specification Index** in the repository root `AGENTS.md` Config Registry. Read it before opening any specification.
+Every review or gap digest includes:
+
+```text
+STATUS: READY_FOR_REVIEW | REQUIREMENTS_GAP | DESIGN_GAP
+PHASE: requirements | design | tasks
+ARTIFACT: <path resolved from <specification-index>>
+SUMMARY: <concise persisted outcome>
+GAPS: <blocking gaps, or none>
+OPEN_QUESTIONS: <items for conductor to relay, or none>
+```
+
+The agent records phase approval only when the conductor supplies explicit user approval. A specification is Ready only after all phases are approved, the task artifact records `development-mode: test-first | standard`, the matching Test or verification contract is approved, and the conductor returns final **approve and execute** authorization.
+
+## Shelf life
+
+A specification records intent, not current behavior. Every tasks artifact ends with a `docs-dev` closeout task. Delivered specifications must migrate durable facts into canonical documentation before the specification is archived; the archive is never cited as current guidance.

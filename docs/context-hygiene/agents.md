@@ -45,7 +45,7 @@ narrow to one.
 
 While `agent validate` and `agent sync-check` audit and lint existing on-disk agent definitions
 across individual harnesses, **[Kyber-Squad](../kyber-squad/architecture.md)** provides the
-authoritative, end-to-end deployment control plane. Kyber-Squad maintains 24 canonical agent
+authoritative, end-to-end deployment control plane. Kyber-Squad maintains 21 canonical agent
 definitions in `products/kyber-squad/` and compiles them into target-native configurations
 for five currently implemented and registered renderers: `copilot`, `cursor`, `claude`, `codex`,
 and `antigravity`. The product declares four more targets—`opencode`, `kilo`, `warp`, and
@@ -54,8 +54,8 @@ deployment starts.
 
 The current agent namespace intersects the 24-skill namespace at seven names, all distinct-body
 collisions. There are no shared product identities. Fallback targets preserve each colliding skill
-and lower its agent to `role-<name>`; unoccupied agents, including `conductor` and
-`conductor-v3`, lower to same-name role skills.
+and lower its agent to `role-<name>`; unoccupied agents, including `conductor`, lower to
+same-name role skills.
 
 ## Commands
 

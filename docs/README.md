@@ -116,8 +116,9 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 ## Feature 3 — Kyber-Squad
 
-Unified multi-harness deployment and lifecycle control plane for 24 canonical agents and
-24 skills. The product declares nine harness targets; five are implemented and registered today
+Unified multi-harness deployment and lifecycle control plane for 21 canonical agents and
+24 skills, each owner projecting a validated resource closure beside its rendered principal.
+The product declares nine harness targets; five are implemented and registered today
 (`copilot`, `cursor`, `claude`, `codex`, and `antigravity`), while `opencode`, `kilo`, `warp`,
 and `factory` fail renderer-coverage preflight.
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.

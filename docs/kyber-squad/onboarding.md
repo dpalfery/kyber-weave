@@ -14,7 +14,7 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
+It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
 **24 canonical skills**, with transactional recovery and state governance. Nine harness targets
 are declared; five are currently implemented and registered.
 
@@ -193,10 +193,12 @@ Running `squad pack` outside the repository root fails immediately with a diagno
 
 Both archive formats recurse through each skill directory. They contain all 24 canonical
 `SKILL.md` files plus the 64 retained supplemental resources, and retained local skill references
-must resolve in the extracted package. The narrower Copilot deployment contains exactly 48 files:
-24 agents and 24 `SKILL.md` files, with no supplemental resources. That exact render matches the
-Hotshot golden surface but inherits its known omission of 61 referenced files; canonical source
-and packages keep the missing knowledge until the
+must resolve in the extracted package. The APM archive additionally contains the 21 canonical
+agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
+agent-owned resources. A fresh deployment renders every owner's resources beside its principal —
+113 files on Copilot today — with authored relative links resolving inside the target output. The
+tracked root `.github/` self-deployment predates resource delivery and is refreshed only by a
+release; surplus packaged content remains until the
 [resource-migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by

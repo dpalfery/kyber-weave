@@ -53,14 +53,19 @@ public sealed record SquadAgent(
     IReadOnlyList<string> Aliases,
     string InstructionBody,
     string BodyDigest,
-    string SourcePath);
+    string SourcePath,
+    IReadOnlyList<SquadResource> Resources);
 
 /// <summary>A canonical skill definition discovered from a <c>SKILL.md</c>.</summary>
 public sealed record SquadSkill(
     string Name,
     string Description,
     string InstructionBody,
-    string SourcePath);
+    string SourcePath,
+    IReadOnlyList<SquadResource> Resources);
+
+/// <summary>A validated resource reachable from a canonical agent or skill.</summary>
+public sealed record SquadResource(string RelativePath, string Content);
 
 /// <summary>How an agent is invoked by a harness that can represent it natively.</summary>
 public enum SquadInvocation

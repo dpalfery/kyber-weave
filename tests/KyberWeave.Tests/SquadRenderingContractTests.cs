@@ -68,7 +68,15 @@ public sealed class SquadRenderingContractTests
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
-        Assert.Equal(source.Agents.Count + source.Skills.Count - suppressedSkillCount, result.Files.Count);
+
+        // C3: every rendered owner also projects its validated resource closure beside its
+        // principal output, so the corpus count is principals plus emitted closures.
+        int expectedFileCount =
+            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+            + source.Skills.Count - suppressedSkillCount
+            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+                .Sum(skill => skill.Resources.Count);
+        Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("copilot", f.Target));
 
         Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
@@ -147,9 +155,9 @@ public sealed class SquadRenderingContractTests
             Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
         }
 
-        // Model resolution: conductor/conductor-v3 use profiles with no copilot-specific
-        // entry and default: inherit, so their agent files omit 'model' entirely.
-        foreach (string orchestrator in new[] { "conductor", "conductor-v3" })
+        // Model resolution: conductor uses a profile with no copilot-specific entry and
+        // default: inherit, so its agent file omits 'model' entirely.
+        foreach (string orchestrator in new[] { "conductor" })
         {
             SquadDeploymentFile file = Assert.Single(
                 result.Files,
@@ -160,7 +168,7 @@ public sealed class SquadRenderingContractTests
 
         // Every other agent's profile does carry a copilot-specific model — resolved from
         // the real profiles/models.yml, not a hardcoded expectation here.
-        foreach (SquadAgent agent in source.Agents.Where(a => a.Name is not ("conductor" or "conductor-v3")))
+        foreach (SquadAgent agent in source.Agents.Where(a => a.Name != "conductor"))
         {
             SquadModelProfile profile = source.ModelProfiles.Profiles[agent.ModelProfile];
             SquadDeploymentFile file = Assert.Single(
@@ -169,6 +177,34 @@ public sealed class SquadRenderingContractTests
             YamlMappingNode frontmatter = ReadFrontmatter(file);
             Assert.Equal(profile.HarnessModels["copilot"], RequireScalar(frontmatter, "model"));
         }
+    }
+
+    [Fact]
+    public async Task RenderAsync_Copilot_ProjectsLinkedAgentAndSkillResourcesWithoutRewritingLinks()
+    {
+        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
+            new CopilotRenderer(),
+            SquadTarget.Copilot,
+            ".github/agents/bug-crusher-investigator.agent.md",
+            ".github/agents",
+            ".github/skills");
+    }
+
+    [Fact]
+    public async Task RenderAsync_WhenResourceAliasesAnotherPrincipalOutput_RejectsTheCollision()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
+        fixture.AppendAgentLink("[Collision](architect.md)");
+        SquadRendererRegistry registry = new([new CopilotRenderer()]);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            registry.RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Copilot],
+                SquadDeploymentScope.Project)));
+
+        Assert.Contains("collision", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".github/agents/architect.agent.md", exception.Message, StringComparison.Ordinal);
     }
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text)
@@ -208,5 +244,184 @@ public sealed class SquadRenderingContractTests
         YamlNode value = node.Children[new YamlScalarNode(key)];
         return Assert.IsType<YamlScalarNode>(value).Value
             ?? throw new InvalidOperationException($"Key '{key}' has a null scalar value.");
+    }
+}
+
+/// <summary>
+/// Shared C3 fixture and assertions for recursive agent/skill resources. The fixture copies
+/// the canonical source into a disposable tree so the tests never mutate product content.
+/// </summary>
+internal sealed class ResourceBearingSquadFixture : IDisposable
+{
+    internal const string AgentName = "bug-crusher-investigator";
+    internal const string SkillName = "azure-cli";
+    internal const string AgentLink = "[Agent runbook](bug-crusher-investigator/references/runbook.md)";
+    internal const string SkillLink = "[Skill guide](references/guide.md)";
+    internal const string AgentRunbook = "[Payload](../assets/agent-payload.txt)\nAgent runbook.\n";
+    internal const string AgentPayload = "agent payload\n";
+    internal const string SkillGuide = "[Snippet](../assets/skill-snippet.txt)\nSkill guide.\n";
+    internal const string SkillSnippet = "skill snippet\n";
+
+    private readonly TempDirectory _temp = new();
+
+    private ResourceBearingSquadFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
+
+    internal string ProductRoot { get; }
+
+    internal static ResourceBearingSquadFixture Create()
+    {
+        ResourceBearingSquadFixture fixture = new();
+        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        CopyDirectory(canonicalRoot, fixture.ProductRoot);
+
+        fixture.AppendAgentLink(AgentLink);
+        fixture.Append(
+            $"skills/{SkillName}/SKILL.md",
+            "\n" + SkillLink + "\n");
+        fixture.Write($"agents/{AgentName}/references/runbook.md", AgentRunbook);
+        fixture.Write($"agents/{AgentName}/assets/agent-payload.txt", AgentPayload);
+        fixture.Write($"skills/{SkillName}/references/guide.md", SkillGuide);
+        fixture.Write($"skills/{SkillName}/assets/skill-snippet.txt", SkillSnippet);
+        return fixture;
+    }
+
+    internal void AppendAgentLink(string link) =>
+        Append($"agents/{AgentName}.md", "\n" + link + "\n");
+
+    public void Dispose() => _temp.Dispose();
+
+    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+    {
+        Directory.CreateDirectory(destinationDirectory);
+        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
+            string destinationPath = Path.Combine(destinationDirectory, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(sourcePath, destinationPath);
+        }
+    }
+
+    private void Append(string relativePath, string content) =>
+        File.AppendAllText(
+            Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)),
+            content,
+            new System.Text.UTF8Encoding(false));
+
+    private void Write(string relativePath, string content)
+    {
+        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content, new System.Text.UTF8Encoding(false));
+    }
+}
+
+/// <summary>Shared exact-path and byte assertions for C3 native and fallback renderers.</summary>
+internal static class SquadResourceRenderingContract
+{
+    internal static async Task AssertNativeProjectionAsync(
+        ISquadRenderer renderer,
+        SquadTarget target,
+        string agentPrincipalPath,
+        string agentsDirectory,
+        string skillsDirectory)
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
+        SquadRendererRegistry registry = new([renderer]);
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [target],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult first = await registry.RenderAsync(request);
+        SquadRenderResult second = await registry.RenderAsync(request);
+
+        Assert.True(first.Success, string.Join("; ", first.Errors));
+        Assert.True(second.Success, string.Join("; ", second.Errors));
+        AssertProjection(
+            first,
+            second,
+            agentPrincipalPath,
+            [
+                ($"{agentsDirectory}/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt", ResourceBearingSquadFixture.AgentPayload),
+                ($"{agentsDirectory}/{ResourceBearingSquadFixture.AgentName}/references/runbook.md", ResourceBearingSquadFixture.AgentRunbook),
+                ($"{skillsDirectory}/{ResourceBearingSquadFixture.SkillName}/assets/skill-snippet.txt", ResourceBearingSquadFixture.SkillSnippet),
+                ($"{skillsDirectory}/{ResourceBearingSquadFixture.SkillName}/references/guide.md", ResourceBearingSquadFixture.SkillGuide)
+            ]);
+    }
+
+    internal static async Task AssertFallbackProjectionAsync(ISquadRenderer renderer, SquadTarget target)
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
+        SquadRendererRegistry registry = new([renderer]);
+        SquadRenderRequest request = new(
+            fixture.ProductRoot,
+            [target],
+            SquadDeploymentScope.Project);
+
+        SquadRenderResult first = await registry.RenderAsync(request);
+        SquadRenderResult second = await registry.RenderAsync(request);
+
+        Assert.True(first.Success, string.Join("; ", first.Errors));
+        Assert.True(second.Success, string.Join("; ", second.Errors));
+        AssertProjection(
+            first,
+            second,
+            $".agents/skills/{ResourceBearingSquadFixture.AgentName}/SKILL.md",
+            [
+                ($".agents/skills/{ResourceBearingSquadFixture.AgentName}/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt", ResourceBearingSquadFixture.AgentPayload),
+                ($".agents/skills/{ResourceBearingSquadFixture.AgentName}/{ResourceBearingSquadFixture.AgentName}/references/runbook.md", ResourceBearingSquadFixture.AgentRunbook),
+                ($".agents/skills/{ResourceBearingSquadFixture.SkillName}/assets/skill-snippet.txt", ResourceBearingSquadFixture.SkillSnippet),
+                ($".agents/skills/{ResourceBearingSquadFixture.SkillName}/references/guide.md", ResourceBearingSquadFixture.SkillGuide)
+            ]);
+    }
+
+    private static void AssertProjection(
+        SquadRenderResult first,
+        SquadRenderResult second,
+        string agentPrincipalPath,
+        IReadOnlyList<(string Path, string Content)> expectedResources)
+    {
+        Assert.Equal(first.Files.Select(file => file.RelativePath), second.Files.Select(file => file.RelativePath));
+        Assert.Equal(first.Files.Count, second.Files.Count);
+        for (int i = 0; i < first.Files.Count; i++)
+        {
+            Assert.True(
+                first.Files[i].Content.Span.SequenceEqual(second.Files[i].Content.Span),
+                $"Repeated render changed bytes for '{first.Files[i].RelativePath}'.");
+        }
+
+        string[] duplicatePaths = first.Files
+            .GroupBy(file => file.RelativePath, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+        Assert.True(duplicatePaths.Length == 0, $"Duplicate output paths: {string.Join(", ", duplicatePaths)}");
+
+        SquadDeploymentFile agentPrincipal = Assert.Single(
+            first.Files,
+            file => string.Equals(file.RelativePath, agentPrincipalPath, StringComparison.Ordinal));
+        string agentBody = System.Text.Encoding.UTF8.GetString(agentPrincipal.Content.Span);
+        Assert.Contains(ResourceBearingSquadFixture.AgentLink, agentBody, StringComparison.Ordinal);
+
+        string[] actualResourceOrder = first.Files
+            .Where(file => expectedResources.Any(expected =>
+                string.Equals(expected.Path, file.RelativePath, StringComparison.Ordinal)))
+            .Select(file => file.RelativePath)
+            .ToArray();
+        Assert.Equal(expectedResources.Select(resource => resource.Path), actualResourceOrder);
+
+        foreach ((string expectedPath, string expectedContent) in expectedResources)
+        {
+            SquadDeploymentFile resource = Assert.Single(
+                first.Files,
+                file => string.Equals(file.RelativePath, expectedPath, StringComparison.Ordinal));
+            Assert.True(
+                System.Text.Encoding.UTF8.GetBytes(expectedContent).AsSpan().SequenceEqual(resource.Content.Span),
+                $"Resource '{expectedPath}' did not preserve its exact UTF-8 bytes.");
+        }
     }
 }

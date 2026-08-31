@@ -84,9 +84,11 @@ public sealed class CodexRenderer : ISquadRenderer
 
         foreach (SquadAgent agent in source.Agents)
         {
-            files.Add(RenderAgent(
+            SquadDeploymentFile principal = RenderAgent(
                 agent,
-                source.ModelProfiles.Profiles));
+                source.ModelProfiles.Profiles);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, agent.Resources);
 
             SquadDegradationRecord? degradation = BuildDegradationRecord(
                 agent,
@@ -108,7 +110,9 @@ public sealed class CodexRenderer : ISquadRenderer
                 continue;
             }
 
-            files.Add(RenderSkill(skill));
+            SquadDeploymentFile principal = RenderSkill(skill);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));

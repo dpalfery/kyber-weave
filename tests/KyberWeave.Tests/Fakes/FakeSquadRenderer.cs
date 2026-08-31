@@ -14,12 +14,10 @@ public sealed class FakeSquadRenderer : ISquadRenderer
     private static readonly IReadOnlyList<string> CanonicalAgents =
     [
         "architect",
-        "architect-v3",
         "azure-reader",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
-        "conductor-v3",
         "csharp-dev",
         "dal-dev",
         "docs-dev",
@@ -34,7 +32,6 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "review-triage",
         "sql-database-architect",
         "task-reviewer",
-        "task-reviewer-v3",
         "tauri-dev",
         "test-dev"
     ];

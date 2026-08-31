@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberSquad
 status: draft
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-08-31
 ---
 
 # Migrate retained skill-resource knowledge into durable canonical homes
@@ -22,10 +22,12 @@ by retained skills, two are create-PR scripts with reusable behavior, and one is
 `setup-dev-environment/agents/openai.yaml`. Removing them to make canonical storage resemble the
 rendered tree would discard working knowledge and leave dangling references.
 
-The current safe boundary is therefore deliberate: canonical source uses the exact golden raw bytes
-for all 24 `SKILL.md` files, restores the 64 supplemental resources from the synchronization
-baseline, and renders exactly the 24 golden skill files to Copilot. Recursive Squad packages
-continue to carry all retained resources until each item has a verified durable replacement.
+Rendered-reference delivery is fixed: every renderer now projects each owner's validated resource
+closure beside its principal output, so a fresh deployment has no dangling local references, and
+both recursive package formats carry all retained resources. Canonical source no longer mimics the
+golden tree's omissions. What remains deferred is the knowledge migration itself — giving each
+retained resource's content a verified durable canonical home so the resource files can eventually
+be retired rather than carried indefinitely.
 
 ## Deferred migration
 

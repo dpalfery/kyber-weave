@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 using Xunit.Abstractions;
@@ -535,6 +536,158 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadOwnedFile retained = Assert.Single(plan.Receipt.Files);
         Assert.Equal(Digest("installed body"), retained.Sha256);
         Assert.False(retained.Adopted);
+    }
+
+    /// <summary>
+    /// Progressively disclosed references are ordinary deployment files. Their rendered paths
+    /// must therefore receive the same exact-byte ownership and status guarantees as principals.
+    /// </summary>
+    [Fact]
+    public void RenderedResourcesAreReceiptOwnedWithExactHashesAndStatusDetectsTheirDrift()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        const string agentResource = ".codex/agents/conductor/references/plan-path.md";
+        const string skillResource = ".codex/skills/product-owner/references/requirements.md";
+        const string agentContent = "# Plan path\n";
+        const string skillContent = "# Requirements phase\n";
+        SquadStateStore store = Store(fixture.Path);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            Lock(),
+            [
+                Rendered(agentResource, agentContent),
+                Rendered(skillResource, skillContent)
+            ],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt));
+
+        new SquadTransaction(store).Execute(plan);
+
+        SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
+            fixture.Path,
+            SquadDeploymentScope.Project));
+        Assert.Equal(
+            [agentResource, skillResource],
+            receipt.Files.Select(file => file.RelativePath));
+        Assert.Equal(
+            [Digest(agentContent), Digest(skillContent)],
+            receipt.Files.Select(file => file.Sha256));
+        Assert.All(receipt.Files, file => Assert.Equal("codex", file.Target));
+
+        SquadStatusCommand command = new(stateStore: store);
+        CapturedConsoleExecution<int> clean = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = fixture.Path,
+                Global = false
+            }));
+        Assert.Equal(0, clean.Result);
+
+        Write(fixture.Path, agentResource, "operator edit\n");
+        CapturedConsoleExecution<int> drifted = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = fixture.Path,
+                Global = false
+            }));
+
+        Assert.Equal(1, drifted.Result);
+        Assert.Contains(agentResource, drifted.Output, StringComparison.Ordinal);
+        Assert.Contains("drift", drifted.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Resource removal cannot broaden update authority: unchanged obsolete resources may be
+    /// deleted, while locally edited current or obsolete resources remain owned at their prior hash.
+    /// </summary>
+    [Fact]
+    public void ResourceUpdateAndRemovalPreserveLocallyEditedReceiptOwnedFiles()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        const string currentResource = ".codex/agents/conductor/references/plan-path.md";
+        const string editedObsoleteResource = ".codex/agents/conductor/references/legacy.md";
+        const string unchangedObsoleteResource = ".codex/skills/product-owner/references/legacy.md";
+        SquadOwnedFile currentOwned = new(currentResource, Digest("installed plan\n"), "codex", false);
+        SquadOwnedFile editedObsoleteOwned = new(
+            editedObsoleteResource,
+            Digest("installed legacy agent\n"),
+            "codex",
+            false);
+        SquadOwnedFile unchangedObsoleteOwned = new(
+            unchangedObsoleteResource,
+            Digest("installed legacy skill\n"),
+            "codex",
+            false);
+        SquadReceipt receipt = Receipt(currentOwned, editedObsoleteOwned, unchangedObsoleteOwned);
+        Write(fixture.Path, currentResource, "operator plan edit\n");
+        Write(fixture.Path, editedObsoleteResource, "operator legacy edit\n");
+        Write(fixture.Path, unchangedObsoleteResource, "installed legacy skill\n");
+        WriteState(fixture.Path, Lock(), receipt);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [Rendered(currentResource, "updated plan\n")],
+            receipt,
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddDays(1)));
+
+        Transaction(fixture.Path).Execute(plan);
+
+        Assert.Equal("operator plan edit\n", Read(fixture.Path, currentResource));
+        Assert.Equal("operator legacy edit\n", Read(fixture.Path, editedObsoleteResource));
+        Assert.False(File.Exists(ToPlatformPath(fixture.Path, unchangedObsoleteResource)));
+        SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+            fixture.Path,
+            SquadDeploymentScope.Project));
+        Assert.Equal(
+            [currentOwned, editedObsoleteOwned],
+            persisted.Files);
+    }
+
+    /// <summary>
+    /// A failed resource update must restore the exact prior bytes and ownership receipt, even
+    /// when the failure happens after the new resource after-image has been published.
+    /// </summary>
+    [Fact]
+    public void ResourceUpdateFailureRollsBackPriorBytesAndReceipt()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        const string resourcePath = ".codex/agents/conductor/references/plan-path.md";
+        const string installedContent = "installed plan reference\n";
+        SquadReceipt receipt = Receipt(new SquadOwnedFile(
+            resourcePath,
+            Digest(installedContent),
+            "codex",
+            false));
+        Write(fixture.Path, resourcePath, installedContent);
+        WriteState(fixture.Path, Lock(), receipt);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [Rendered(resourcePath, "updated plan reference\n")],
+            receipt,
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddDays(1)));
+        LifecycleStepFailingObserver failure = new(
+            fixture.Path,
+            SquadTransactionStepKind.FileApplied);
+
+        Assert.Throws<InjectedSquadTransactionFailure>(() =>
+            Transaction(fixture.Path, failure).Execute(plan));
+
+        Assert.Equal(installedContent, Read(fixture.Path, resourcePath));
+        SquadReceipt restored = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+            fixture.Path,
+            SquadDeploymentScope.Project));
+        AssertReceiptEqual(receipt, restored);
     }
 
     [Fact]

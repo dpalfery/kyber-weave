@@ -1,3 +1,4 @@
+using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -154,6 +155,9 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             }
         }
 
+        ValidateResourcePrincipalCollisions(source, targets);
+        ValidatePortableOutputIdentities(files);
+
         foreach (SquadTarget target in targets)
         {
             string token = SquadTargetCatalog.GetToken(target);
@@ -258,6 +262,159 @@ public sealed class SquadRendererRegistry : ISquadRenderer
                 throw new SquadRenderValidationException(
                     $"Permission widening detected for agent '{degradation.CanonicalIdentity}'.");
             }
+        }
+    }
+
+    private static void ValidatePortableOutputIdentities(IReadOnlyList<SquadDeploymentFile> files)
+    {
+        Dictionary<string, string> outputs = new(StringComparer.OrdinalIgnoreCase);
+        foreach (SquadDeploymentFile file in files)
+        {
+            string portableIdentity = SquadPathPolicy.GetPortableIdentity(file.RelativePath);
+            string targetIdentity = $"{file.Target}/{portableIdentity}";
+            if (outputs.TryGetValue(targetIdentity, out string? existingPath))
+            {
+                throw new SquadRenderValidationException(
+                    $"Portable output collision detected between '{existingPath}' and '{file.RelativePath}' for target '{file.Target}'.");
+            }
+
+            outputs.Add(targetIdentity, file.RelativePath);
+        }
+    }
+
+    private static void ValidateResourcePrincipalCollisions(
+        SquadSource source,
+        IReadOnlyList<SquadTarget> targets)
+    {
+        HashSet<string> skillNames = source.Skills
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (SquadTarget target in targets)
+        {
+            Dictionary<string, string> principalOutputs = new(StringComparer.Ordinal);
+            foreach (SquadAgent agent in source.Agents)
+            {
+                string? outputPath = AgentOutputPath(target, agent.Name, skillNames, sharedIdentities);
+                if (outputPath is not null)
+                {
+                    principalOutputs.Add(agent.SourcePath, outputPath);
+                }
+            }
+
+            foreach (SquadSkill skill in source.Skills)
+            {
+                string? outputPath = SkillOutputPath(target, skill.Name, sharedIdentities);
+                if (outputPath is not null)
+                {
+                    principalOutputs.Add(skill.SourcePath, outputPath);
+                }
+            }
+
+            foreach (SquadAgent owner in source.Agents)
+            {
+                ValidateOwnerResources(owner.SourcePath, owner.Resources, principalOutputs);
+            }
+
+            foreach (SquadSkill owner in source.Skills)
+            {
+                ValidateOwnerResources(owner.SourcePath, owner.Resources, principalOutputs);
+            }
+        }
+    }
+
+    private static void ValidateOwnerResources(
+        string ownerSourcePath,
+        IReadOnlyList<SquadResource> resources,
+        IReadOnlyDictionary<string, string> principalOutputs)
+    {
+        int separator = ownerSourcePath.LastIndexOf('/');
+        string ownerDirectory = separator < 0 ? string.Empty : ownerSourcePath[..separator];
+        foreach (SquadResource resource in resources)
+        {
+            string sourcePath = ownerDirectory.Length == 0
+                ? resource.RelativePath
+                : $"{ownerDirectory}/{resource.RelativePath}";
+            if (principalOutputs.TryGetValue(sourcePath, out string? outputPath))
+            {
+                throw PrincipalCollision(ownerSourcePath, resource.RelativePath, outputPath);
+            }
+        }
+    }
+
+    private static SquadRenderValidationException PrincipalCollision(
+        string ownerSourcePath,
+        string resourcePath,
+        string outputPath) =>
+        new(
+            $"Resource '{resourcePath}' owned by '{ownerSourcePath}' aliases another principal and causes a portable output collision at '{outputPath}'.");
+
+    private static string? AgentOutputPath(
+        SquadTarget target,
+        string name,
+        IReadOnlySet<string> skillNames,
+        IReadOnlySet<string> sharedIdentities) => target switch
+        {
+            SquadTarget.Copilot => $".github/agents/{name}.agent.md",
+            SquadTarget.Cursor => $".cursor/agents/{name}.md",
+            SquadTarget.Claude => $".claude/agents/{name}.md",
+            SquadTarget.Codex => $".codex/agents/{name}.toml",
+            SquadTarget.Antigravity =>
+                $".agents/skills/{ResolveFallbackOutputIdentity(name, skillNames, sharedIdentities)}/SKILL.md",
+            _ => null
+        };
+
+    private static string? SkillOutputPath(
+        SquadTarget target,
+        string name,
+        IReadOnlySet<string> sharedIdentities) => target switch
+        {
+            SquadTarget.Copilot when !sharedIdentities.Contains(name) => $".github/skills/{name}/SKILL.md",
+            SquadTarget.Cursor when !sharedIdentities.Contains(name) => $".cursor/skills/{name}/SKILL.md",
+            SquadTarget.Claude when !sharedIdentities.Contains(name) => $".claude/skills/{name}/SKILL.md",
+            SquadTarget.Codex when !sharedIdentities.Contains(name) => $".codex/skills/{name}/SKILL.md",
+            SquadTarget.Antigravity => $".agents/skills/{name}/SKILL.md",
+            _ => null
+        };
+
+    private static string ResolveFallbackOutputIdentity(
+        string name,
+        IReadOnlySet<string> skillNames,
+        IReadOnlySet<string> sharedIdentities) =>
+        skillNames.Contains(name) && !sharedIdentities.Contains(name)
+            ? $"role-{name}"
+            : name;
+}
+
+/// <summary>Projects a validated resource closure beside its rendered principal.</summary>
+internal static class SquadResourceProjection
+{
+    internal static void Append(
+        List<SquadDeploymentFile> files,
+        SquadDeploymentFile principal,
+        IReadOnlyList<SquadResource> resources) =>
+        Append(files, principal.RelativePath, resources, principal.Target);
+
+    internal static void Append(
+        List<SquadDeploymentFile> files,
+        string principalRelativePath,
+        IReadOnlyList<SquadResource> resources,
+        string target)
+    {
+        int separator = principalRelativePath.LastIndexOf('/');
+        string principalDirectory = separator < 0 ? string.Empty : principalRelativePath[..separator];
+        foreach (SquadResource resource in resources)
+        {
+            string relativePath = principalDirectory.Length == 0
+                ? resource.RelativePath
+                : $"{principalDirectory}/{resource.RelativePath}";
+            files.Add(new SquadDeploymentFile(
+                relativePath,
+                Encoding.UTF8.GetBytes(resource.Content),
+                target));
         }
     }
 }

@@ -86,10 +86,12 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         foreach (SquadAgent agent in source.Agents)
         {
-            files.Add(RenderAgent(
+            SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
-                warnings));
+                warnings);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, agent.Resources);
 
             SquadDegradationRecord? degradation = BuildPermissionDegradation(agent, source.CapabilityProfiles.Profiles);
             if (degradation is not null)
@@ -108,7 +110,9 @@ public sealed class CopilotRenderer : ISquadRenderer
                 continue;
             }
 
-            files.Add(RenderSkill(skill));
+            SquadDeploymentFile principal = RenderSkill(skill);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, warnings, []));
@@ -146,7 +150,7 @@ public sealed class CopilotRenderer : ISquadRenderer
 
             // Subagents are dispatched by the conductor, not chosen directly by a human —
             // "user-invocable: false" is Copilot's closest equivalent. Primary agents
-            // (conductor, conductor-v3) leave this at its default (true, omitted).
+            // (conductor) leave this at its default (true, omitted).
             frontmatter["user-invocable"] = false;
         }
 
