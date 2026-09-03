@@ -8,7 +8,15 @@ import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
 import { sumCosts } from '../canon/cost.js'
-import type { CostBlock } from '../canon/types.js'
+import { CanonStore, decompressRaw } from '../canon/store.js'
+import {
+  CANONICAL_CONTENT_KEYS,
+  type CanonicalContent,
+  type CanonicalContentKey,
+  type CanonicalRecord,
+  type ContentPart,
+  type CostBlock,
+} from '../canon/types.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -130,7 +138,56 @@ export type KyberBridgeOptions = {
   ratesPath?: string
   canonDb?: DatabaseSync
   sessionsDb?: DatabaseSync
+  /**
+   * When present, content drill-down reads through `recordsForSession` / `get`
+   * instead of issuing its own SQL. Tests inject an in-memory store this way;
+   * production falls back to the already-open `canonDb` handle.
+   */
+  store?: CanonStore
 }
+
+/**
+ * Unclipped inspector payload. `_clip` stays on the session list and the
+ * session payload — those are summaries. This shape is what a band click
+ * reads so a 11,000-character system prompt is the real text, not a 2,000
+ * character stub.
+ *
+ * `{ sessionId, spanId?, parts: [{ spanId, part, text, tokens?, server?, truncated?, totalLength? }] }`
+ *
+ * `spanId` is present only when the caller asked for one span. `tokens` and
+ * `server` are omitted when the store did not have them — absent is not zero.
+ * `truncated` / `totalLength` appear only when this response hit the
+ * per-response budget; silent truncation is the defect this route exists to
+ * fix.
+ */
+export type SessionContentPart = {
+  spanId: string
+  part: CanonicalContentKey
+  text: string
+  tokens?: number
+  server?: string
+  truncated?: boolean
+  totalLength?: number
+}
+
+export type SessionContentResult = {
+  sessionId: string
+  spanId?: string
+  parts: SessionContentPart[]
+}
+
+export type SessionContentOptions = {
+  spanId?: string
+  part?: string
+}
+
+/**
+ * Generous ceiling for one unclipped content response (a few megabytes of
+ * characters). A single system prompt fits; a 7,000-turn dump does not get
+ * serialized whole. When a part does not fit, it is cut and flagged — never
+ * silently shortened.
+ */
+export const CONTENT_RESPONSE_BUDGET = 2_000_000
 
 interface SessionDbRow {
   session_id: string
@@ -236,9 +293,95 @@ function formatCurrency(val: number, cur = 'USD'): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(val)
 }
 
+type ContentSourceRecord = {
+  spanId: string
+  sessionKey: string | null
+  parts: ContentPart[]
+}
+
+function isCanonicalPart(value: string): value is CanonicalContentKey {
+  return (CANONICAL_CONTENT_KEYS as readonly string[]).includes(value)
+}
+
+function sessionKeyOf(record: Pick<CanonicalRecord, 'sessionId' | 'traceId'>): string | null {
+  return record.sessionId ?? record.traceId ?? null
+}
+
+function partsFromRecord(record: CanonicalRecord): ContentPart[] {
+  if (record.parts !== undefined && record.parts.length > 0) {
+    return [...record.parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  }
+  const synthesized: ContentPart[] = []
+  for (const key of CANONICAL_CONTENT_KEYS) {
+    const text = record.content[key]
+    if (typeof text === 'string' && text !== '') {
+      synthesized.push({ part: key, text })
+    }
+  }
+  return synthesized
+}
+
+function partsFromRow(row: Record<string, unknown>): ContentPart[] {
+  if (row.parts_json !== null && row.parts_json !== undefined) {
+    try {
+      const parts = decompressRaw(row.parts_json as Uint8Array) as ContentPart[]
+      if (Array.isArray(parts) && parts.length > 0) {
+        return [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      }
+    } catch {
+      // Fall through to content_json — a corrupt blob is not an empty session.
+    }
+  }
+  if (typeof row.content_json === 'string' && row.content_json !== '' && row.content_json !== '{}') {
+    try {
+      const content = JSON.parse(row.content_json) as CanonicalContent
+      const synthesized: ContentPart[] = []
+      for (const key of CANONICAL_CONTENT_KEYS) {
+        const text = content[key]
+        if (typeof text === 'string' && text !== '') {
+          synthesized.push({ part: key, text })
+        }
+      }
+      return synthesized
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+function toContentSource(record: CanonicalRecord): ContentSourceRecord {
+  return {
+    spanId: record.spanId,
+    sessionKey: sessionKeyOf(record),
+    parts: partsFromRecord(record),
+  }
+}
+
+function applyContentBudget(
+  parts: SessionContentPart[],
+  budget: number,
+): SessionContentPart[] {
+  let remaining = budget
+  return parts.map((part) => {
+    const totalLength = part.text.length
+    if (remaining <= 0) {
+      return { ...part, text: '', truncated: true, totalLength }
+    }
+    if (totalLength > remaining) {
+      const text = part.text.slice(0, remaining)
+      remaining = 0
+      return { ...part, text, truncated: true, totalLength }
+    }
+    remaining -= totalLength
+    return part
+  })
+}
+
 export class KyberBridge {
   private canonDb?: DatabaseSync
   private sessionsDb?: DatabaseSync
+  private readonly store?: CanonStore
   readonly canonPath: string
   readonly sessionsPath: string | undefined
   readonly ratesPath: string | undefined
@@ -260,6 +403,8 @@ export class KyberBridge {
       (this.sessionsPath
         ? join(dirname(this.sessionsPath), 'rates.json')
         : undefined)
+
+    this.store = options?.store
 
     if (options?.canonDb) {
       this.canonDb = options.canonDb
@@ -692,6 +837,150 @@ export class KyberBridge {
     }
 
     return null
+  }
+
+  /**
+   * Unclipped content for the inspector. `_clip` is deliberately not applied:
+   * this is the route that exists so a band click can show the real prompt.
+   * Prefer `CanonStore.recordsForSession` / `get` when a store is injected;
+   * otherwise the same lookup runs over the already-open `canonDb` handle
+   * (opening a second CanonStore on the live file would migrate it).
+   */
+  getSessionContent(
+    sessionId: string,
+    options: SessionContentOptions = {},
+  ): SessionContentResult | null {
+    if (!sessionId) return null
+
+    const records = this.loadContentRecords(sessionId, options.spanId)
+    if (records.length === 0 && !this.sessionKnown(sessionId)) {
+      return null
+    }
+
+    const partFilter =
+      options.part !== undefined && options.part !== '' && isCanonicalPart(options.part)
+        ? options.part
+        : options.part !== undefined && options.part !== ''
+          ? false
+          : undefined
+
+    const assembled: SessionContentPart[] = []
+    for (const record of records) {
+      for (const piece of record.parts) {
+        if (partFilter === false) continue
+        if (partFilter !== undefined && piece.part !== partFilter) continue
+        const entry: SessionContentPart = {
+          spanId: record.spanId,
+          part: piece.part,
+          text: piece.text,
+        }
+        if (piece.tokens !== undefined) entry.tokens = piece.tokens
+        if (piece.server !== undefined) entry.server = piece.server
+        assembled.push(entry)
+      }
+    }
+
+    const result: SessionContentResult = {
+      sessionId,
+      parts: applyContentBudget(assembled, CONTENT_RESPONSE_BUDGET),
+    }
+    if (options.spanId) result.spanId = options.spanId
+    return result
+  }
+
+  /**
+   * A session is known if a derived row exists or any record keys to it.
+   * The session table is cheap; records are the fallback for a corpus that
+   * has not been built into `session` yet. Checking the table first avoids
+   * clipping a large payload just to decide whether to 404.
+   */
+  private sessionKnown(sessionId: string): boolean {
+    if (this.store?.getSessionPayload(sessionId) !== undefined) return true
+    for (const db of [this.canonDb, this.sessionsDb]) {
+      if (!this.hasTable(db, 'session')) continue
+      try {
+        const row = db!.prepare('SELECT 1 FROM session WHERE session_id = ?').get(sessionId)
+        if (row) return true
+      } catch {
+        // Older or partial schemas still fall through to the records check.
+      }
+    }
+    // Records without a derived session row still make the session real —
+    // otherwise a span miss on an unbuilt session would 404 as "unknown".
+    if (this.store) return this.store.recordsForSession(sessionId).length > 0
+    return this.loadContentRecordsFromDb(sessionId).length > 0
+  }
+
+  /**
+   * `get` when a span is named so a 7,000-turn session is not decompressed
+   * just to return one band; `recordsForSession` otherwise.
+   */
+  private loadContentRecords(sessionId: string, spanId?: string): ContentSourceRecord[] {
+    if (this.store) {
+      if (spanId) {
+        const record = this.store.get(spanId)
+        if (record === undefined) return []
+        if (sessionKeyOf(record) !== sessionId) return []
+        return [toContentSource(record)]
+      }
+      return this.store.recordsForSession(sessionId).map(toContentSource)
+    }
+    return this.loadContentRecordsFromDb(sessionId, spanId)
+  }
+
+  private loadContentRecordsFromDb(sessionId: string, spanId?: string): ContentSourceRecord[] {
+    if (!this.hasTable(this.canonDb, 'records')) return []
+
+    if (spanId) {
+      try {
+        const row = this.canonDb!
+          .prepare('SELECT * FROM records WHERE span_id = ?')
+          .get(spanId) as Record<string, unknown> | undefined
+        if (row === undefined) return []
+        const key =
+          row.session_id !== null && row.session_id !== undefined
+            ? String(row.session_id)
+            : row.trace_id !== null && row.trace_id !== undefined
+              ? String(row.trace_id)
+              : null
+        if (key !== sessionId) return []
+        return [
+          {
+            spanId: String(row.span_id),
+            sessionKey: key,
+            parts: partsFromRow(row),
+          },
+        ]
+      } catch {
+        return []
+      }
+    }
+
+    try {
+      const rows = this.canonDb!
+        .prepare(
+          'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        )
+        .all(sessionId) as Record<string, unknown>[]
+      return rows.map((row) => ({
+        spanId: String(row.span_id),
+        sessionKey: sessionId,
+        parts: partsFromRow(row),
+      }))
+    } catch {
+      try {
+        const rows = this.canonDb!
+          .prepare('SELECT * FROM records WHERE trace_id = ? ORDER BY timestamp')
+          .all(sessionId) as Record<string, unknown>[]
+        return rows.map((row) => ({
+          spanId: String(row.span_id),
+          sessionKey: sessionId,
+          parts: partsFromRow(row),
+        }))
+      } catch {
+        return []
+      }
+    }
   }
 
   /**

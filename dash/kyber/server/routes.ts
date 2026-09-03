@@ -1,6 +1,21 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { KyberBridge } from './bridge.js'
 
+/**
+ * `/api/kyber/session/:id/content` — everything between the prefix and the
+ * `/content` suffix is the session id, so encoded ids stay intact. `null`
+ * means this is not the content route (so `/session/content` is not treated
+ * as an empty id).
+ */
+function parseSessionContentPath(pathname: string): string | null {
+  const prefix = '/api/kyber/session/'
+  const suffix = '/content'
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null
+  const middle = pathname.slice(prefix.length, pathname.length - suffix.length)
+  if (!middle || middle.endsWith('/')) return null
+  return decodeURIComponent(middle).trim()
+}
+
 function sendKyberJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -33,6 +48,29 @@ export function handleKyberRequest(
       sessions = sessions.filter((s) => s.harness?.toLowerCase() === harnessParam.toLowerCase())
     }
     sendKyberJson(res, 200, { sessions })
+    return true
+  }
+
+  // Full-fidelity content. Must run before /session/:id — that handler would
+  // otherwise treat ".../content" as part of the session id and 404.
+  const contentSessionId = parseSessionContentPath(url.pathname)
+  if (contentSessionId !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    if (!contentSessionId) {
+      sendKyberJson(res, 400, { error: 'Missing session id' })
+      return true
+    }
+    const span = (url.searchParams.get('span') ?? '').trim() || undefined
+    const part = (url.searchParams.get('part') ?? '').trim() || undefined
+    const body = bridge.getSessionContent(contentSessionId, { spanId: span, part })
+    if (!body) {
+      sendKyberJson(res, 404, { error: 'Session not found' })
+      return true
+    }
+    sendKyberJson(res, 200, body)
     return true
   }
 
