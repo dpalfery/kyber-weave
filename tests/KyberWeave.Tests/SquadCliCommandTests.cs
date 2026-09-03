@@ -1192,6 +1192,7 @@ public sealed class SquadCliCommandTests : IDisposable
                 invocation: subagent
                 model-profile: deep-planning
                 capability-profile: architect
+                copilot-tools: [vscode]
                 delegates-to: [csharp-dev]
                 fallback: role-skill
                 aliases: []
@@ -1207,6 +1208,7 @@ public sealed class SquadCliCommandTests : IDisposable
                 invocation: subagent
                 model-profile: general
                 capability-profile: worker
+                copilot-tools: [vscode]
                 delegates-to: []
                 fallback: role-skill
                 aliases: []

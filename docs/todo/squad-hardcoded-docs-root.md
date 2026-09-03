@@ -4,7 +4,7 @@ title: Replace the hardcoded 6-Docs path with a resolvable docs-root across Kybe
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-08-31
 status: draft
 ---
 
@@ -16,13 +16,16 @@ implementation.
 
 ## Why this exists
 
-`6-Docs` is the Kyber-Squad product's default documentation root, but it's written as a
-literal, hardcoded string throughout the canonical agent and skill instructions — 72
-occurrences across 19 files. Any project that overrides its docs root (Kyber-Weave's own
-repository does exactly this, via `ontology.docs-root: docs` in
-`.kyber-weave/kyber-weave.yml`) gets agents whose own instructions point at the wrong
-directory. `architect`, `conductor`, and `product-owner` all instruct reading and writing to
-`6-Docs/...` unconditionally — there is no per-deployment resolution.
+`6-Docs` is the Kyber-Squad product's default documentation root, but it remains as a
+literal string in canonical skill instructions and retained resources. The unified-conductor
+consolidation completed the product-owner slice: the 21 canonical agents, `product-owner/SKILL.md`
+with its four phase references, and `bug-crusher/SKILL.md` now resolve paths through Config Reg
+properties. The current sweep finds 34 occurrences on 25 lines across three files:
+`app-docs-standard/SKILL.md` uses it only as the approved illustrative example, while the two
+`second-brain` files still carry actionable directives. Any project that overrides its docs root
+(Kyber-Weave's own repository does exactly this, via `ontology.docs-root: docs` in
+`.kyber-weave/kyber-weave.yml`) can still receive a skill whose instructions point at the wrong
+directory. There is no per-deployment substitution for those retained literals.
 
 ## What is known
 
@@ -32,22 +35,13 @@ directory. `architect`, `conductor`, and `product-owner` all instruct reading an
   `ontology.docs-root` (e.g. `docs/` or `6-Docs/`)"* and then uses `<docs-root>` as a
   placeholder for the rest of its instructions (`<docs-root>/catalog.md`, etc.). This is the
   pattern to propagate, not a new one to invent.
-- The 19 affected files, all under `products/kyber-squad/`:
-  - Agents: `agents/architect.md`, `agents/architect-v3.md`, `agents/conductor.md`,
-    `agents/conductor-v3.md`, `agents/docs-dev.md`, `agents/product-owner.md`,
-    `agents/test-dev.md`.
-  - Skills: `skills/conductor/SKILL.md`, `skills/conductor-v3/SKILL.md`,
-    `skills/product-owner/SKILL.md`, `skills/product-owner/references/requirements-phase.md`,
-    `skills/product-owner/references/design-phase.md`,
-    `skills/product-owner/references/tasks-phase.md`, `skills/bug-crusher/SKILL.md`,
-    `skills/github-devops/SKILL.md`, `skills/create-pull-request/SKILL.md`,
-    `skills/second-brain/SKILL.md`, `skills/second-brain/references/templates.md`.
-- Representative occurrences (not exhaustive — 72 total):
-  `architect.md:19` ("check `6-Docs/`"), `architect.md:62-63` ("read `6-Docs/plans/README.md`
-  ... Place plans in `6-Docs/plans/`"), `conductor.md:25` ("Read only files under `6-Docs/`"),
-  `conductor.md:45` ("Pure `6-Docs/` lookup"), `product-owner.md:33` ("All artifacts live in
-  `6-Docs/specs/{feature_name}/`"), `product-owner.md:86,90` (registering and archiving
-  specs at `6-Docs/specs/README.md` / `6-Docs/archive/specs/`).
+- The two files with actionable directives are both under `products/kyber-squad/skills/`:
+  `skills/second-brain/SKILL.md` and `skills/second-brain/references/templates.md`. The
+  product-owner files and `skills/bug-crusher/SKILL.md` formerly on this list were rewritten to
+  Config Reg properties during the unified-conductor consolidation.
+- Representative occurrences include `skills/second-brain/SKILL.md` ("Create `6-Docs/README.md`
+  (index), `6-Docs/system/architecture.md` …") and its templates reference, whose index rows name
+  `6-Docs/catalog.md`, `6-Docs/plans/README.md`, and friends.
 - This matters beyond Kyber-Weave's own repository: any project that installs Kyber-Squad and
   configures a non-default docs root inherits the same mismatch.
 
@@ -68,14 +62,14 @@ directory. `architect`, `conductor`, and `product-owner` all instruct reading an
   contextually, or the render pipeline (`CopilotRenderer` and future renderers, see
   [architecture.md §8](../kyber-squad/architecture.md#8-rendering)) could substitute a
   resolved value into the rendered per-harness output. The former needs no code change, only
-  a documentation-content edit repeated 72 times; the latter is a real renderer feature that
+  a documentation-content edit across the remaining directive sites; the latter is a real renderer feature that
   doesn't exist today.
 
 ## How to verify
 
-- Every one of the 19 files uses the same `<docs-root>` convention `app-docs-standard.md`
-  already does, with no remaining literal `6-Docs` outside of illustrative examples (e.g.
-  "e.g. `docs/` or `6-Docs/`" is fine — an unconditional path like `6-Docs/plans/README.md`
-  is not).
+- Every remaining directive-bearing file uses the same `<docs-root>` convention
+  `app-docs-standard.md` already does, with no remaining literal `6-Docs` outside of illustrative
+  examples (e.g. "e.g. `docs/` or `6-Docs/`" is fine — an unconditional path like
+  `6-Docs/plans/README.md` is not).
 - `grep -rn "6-Docs" products/kyber-squad/agents/ products/kyber-squad/skills/` returns only
   the illustrative-example lines, not directive ones.

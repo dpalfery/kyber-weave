@@ -2,9 +2,6 @@
 name: azure-cli
 description: use the Azure CLI to interact with Azure resources.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Azure CLI

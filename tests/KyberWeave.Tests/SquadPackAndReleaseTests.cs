@@ -28,12 +28,10 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     private static readonly string[] CanonicalAgents =
     [
         "architect",
-        "architect-v3",
         "azure-reader",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
-        "conductor-v3",
         "csharp-dev",
         "dal-dev",
         "docs-dev",
@@ -60,8 +58,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "azure-naming",
         "bug-crusher",
         "code-review",
-        "conductor",
-        "conductor-v3",
         "create-pull-request",
         "create-pull-request-github",
         "csharp-dev",
@@ -148,15 +144,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 23 canonical agents
-        Assert.Equal(23, CanonicalAgents.Length);
+        // Presence of all 21 canonical agents
+        Assert.Equal(21, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 26 canonical skills
-        Assert.Equal(26, CanonicalSkills.Length);
+        // Presence of all 24 canonical skills
+        Assert.Equal(24, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -230,7 +226,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: Contains all 26 canonical skills
+        // Portable components only: contains all 24 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -264,6 +260,54 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
             Assert.False(root.TryGetProperty("agents", out _), "Agent Plugins v1 manifest must not declare portable agents.");
         }
+    }
+
+    /// <summary>
+    /// APM is the complete canonical source distribution, while Agent Plugins is intentionally
+    /// limited to skills and MCP. Recursive resources must preserve that boundary.
+    /// </summary>
+    [Fact]
+    public void ResourceClosuresStayInsideApmAndAgentPluginPackageBoundaries()
+    {
+        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateStub();
+        const string agentResource = "agents/conductor/references/plan-path.md";
+        const string skillResource = "skills/test-dev/references/unit-test-patterns.md";
+        const string agentContent = "# Plan path\n\nExecute a Ready plan.\n";
+        const string skillContent = "# Unit test patterns\n\nPin observable behaviour.\n";
+        repo.AddResourceClosure(agentResource, agentContent, skillResource, skillContent);
+        string outDirectory = Path.Combine(_temp.Path, "resource-pack");
+        SquadPackCommand command = new(new FakeProcessExecutor(), workingDirectory: repo.Path);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadPackSettings
+            {
+                Format = "all",
+                Out = outDirectory
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        string apmPath = Directory.GetFiles(outDirectory, "kyber-squad-*.zip")
+            .Single(path => !Path.GetFileName(path).StartsWith(
+                "kyber-squad-plugin-",
+                StringComparison.Ordinal));
+        string pluginPath = Assert.Single(Directory.GetFiles(
+            outDirectory,
+            "kyber-squad-plugin-*.zip"));
+        using ZipArchive apm = ZipFile.OpenRead(apmPath);
+        using ZipArchive plugin = ZipFile.OpenRead(pluginPath);
+
+        Assert.Equal(agentContent, ReadArchiveText(apm, agentResource));
+        Assert.Equal(skillContent, ReadArchiveText(apm, skillResource));
+        Assert.Equal(skillContent, ReadArchiveText(plugin, skillResource));
+        Assert.Null(plugin.GetEntry("agents/conductor.md"));
+        Assert.Null(plugin.GetEntry(agentResource));
+        Assert.Equal(
+            apm.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal),
+            apm.Entries.Select(entry => entry.FullName));
+        Assert.Equal(
+            plugin.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal),
+            plugin.Entries.Select(entry => entry.FullName));
     }
 
     [Theory]
@@ -479,6 +523,13 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         return ext is ".md" or ".yml" or ".yaml" or ".json" or ".toml" or ".txt";
     }
 
+    private static string ReadArchiveText(ZipArchive archive, string entryName)
+    {
+        ZipArchiveEntry entry = Assert.IsType<ZipArchiveEntry>(archive.GetEntry(entryName));
+        using StreamReader reader = new(entry.Open(), Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
     private static CommandExecution Capture(Func<int> execute)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
@@ -500,7 +551,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             // Solution marker
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
-            // Copy product source from real repo if available, or write all 23 agents and 26 skills
+            // Copy product source from real repo if available, or write all 21 agents and 24 skills
             string realSquadSource = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             if (Directory.Exists(realSquadSource))
             {
@@ -527,6 +578,16 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             return fixture;
         }
 
+        public static QualifiedSquadRepoFixture CreateStub()
+        {
+            QualifiedSquadRepoFixture fixture = new();
+            fixture.Write(
+                "KyberWeave.sln",
+                "Microsoft Visual Studio Solution File, Format Version 12.00");
+            fixture.WriteStubSquadSource();
+            return fixture;
+        }
+
         private static void CopyDirectory(string sourceDir, string destinationDir)
         {
             Directory.CreateDirectory(destinationDir);
@@ -544,6 +605,33 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             string fullPath = System.IO.Path.Combine(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);
             File.WriteAllText(fullPath, content, new UTF8Encoding(false));
+        }
+
+        public void AddResourceClosure(
+            string agentResource,
+            string agentContent,
+            string skillResource,
+            string skillContent)
+        {
+            string agentPath = System.IO.Path.Combine(Path, "products", "kyber-squad", "agents", "conductor.md");
+            File.AppendAllText(
+                agentPath,
+                "\n[Plan path](conductor/references/plan-path.md)\n",
+                new UTF8Encoding(false));
+            Write($"products/kyber-squad/{agentResource}", agentContent);
+
+            string skillPath = System.IO.Path.Combine(
+                Path,
+                "products",
+                "kyber-squad",
+                "skills",
+                "test-dev",
+                "SKILL.md");
+            File.AppendAllText(
+                skillPath,
+                "\n[Unit test patterns](references/unit-test-patterns.md)\n",
+                new UTF8Encoding(false));
+            Write($"products/kyber-squad/{skillResource}", skillContent);
         }
 
         /// <summary>
@@ -652,6 +740,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     "invocation: subagent\n" +
                     "model-profile: general\n" +
                     "capability-profile: worker\n" +
+                    "copilot-tools: [vscode]\n" +
                     "delegates-to: []\n" +
                     "fallback: role-skill\n" +
                     "aliases: []\n" +

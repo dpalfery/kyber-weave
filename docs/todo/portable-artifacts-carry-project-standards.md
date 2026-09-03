@@ -4,7 +4,7 @@ title: Remove project-specific coding standards embedded in canonical agents and
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-08-31
 status: draft
 ---
 
@@ -30,7 +30,7 @@ deferred so that the mechanism and a 27-file content migration did not land toge
 
 Two populations, one defect:
 
-- **The 23 canonical agents** under `products/kyber-squad/agents/`. Several already
+- **The 21 canonical agents** under `products/kyber-squad/agents/`. Several already
   resolve a registry property instead of embedding a standard (`csharp-dev`, `maui-dev`,
   `dal-dev`, `pulumi-dev`, `python-dev`, `test-dev`). Remaining cases include:
   - [`react-dev.md`](../../products/kyber-squad/agents/react-dev.md) defers to "established
@@ -68,3 +68,10 @@ Two populations, one defect:
 - Every agent that needs a standard resolves it by registry property name, in the form
   `app-docs-standard` already uses for `<docs-root>`.
 - `kyber-weave skill validate` and `skill scan` still pass for every affected skill.
+
+## Related
+
+The broader [skill-resource migration todo](migrate-skill-resources-into-standards.md)
+preserves all 64 supplemental resources while classifying normative policy, procedures, scripts,
+provider guidance, and metadata into appropriate durable homes. Neither todo authorizes resource
+deletion before its migration and routing acceptance criteria pass.

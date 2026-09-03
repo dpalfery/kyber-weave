@@ -1,0 +1,516 @@
+{
+  "schema": "kyber-squad.hotshot-golden/v1",
+  "source_commit": "677c3a876ba9c62f1083608596b238c9deaff167",
+  "approved_tool_order": [
+    "vscode",
+    "read",
+    "todo",
+    "codegraph/*",
+    "kyber-weave/*",
+    "context7/*",
+    "search",
+    "execute",
+    "web",
+    "edit",
+    "agent",
+    "edit/createDirectory",
+    "edit/createFile",
+    "edit/editFiles",
+    "edit/rename",
+    "vscodeGeneral/rename"
+  ],
+  "expected_collision_identities": [
+    "csharp-dev",
+    "dal-dev",
+    "github-devops",
+    "maui-dev",
+    "product-owner",
+    "python-dev",
+    "test-dev"
+  ],
+  "canonical_resources": [
+    "skills/code-review/references/azure.md",
+    "skills/code-review/references/csharp.md",
+    "skills/code-review/references/github-actions.md",
+    "skills/code-review/references/lenses/authz-tenancy.md",
+    "skills/code-review/references/lenses/blast-radius-revertibility.md",
+    "skills/code-review/references/lenses/correctness.md",
+    "skills/code-review/references/lenses/dependency-supply-chain.md",
+    "skills/code-review/references/lenses/di-composition.md",
+    "skills/code-review/references/lenses/duplicate-implementation.md",
+    "skills/code-review/references/lenses/infra-workflow.md",
+    "skills/code-review/references/lenses/intent-alignment.md",
+    "skills/code-review/references/lenses/model-placement.md",
+    "skills/code-review/references/lenses/performance.md",
+    "skills/code-review/references/lenses/prior-art.md",
+    "skills/code-review/references/lenses/security.md",
+    "skills/code-review/references/lenses/static-analysis-triage.md",
+    "skills/code-review/references/lenses/supportability.md",
+    "skills/code-review/references/lenses/test-adequacy.md",
+    "skills/code-review/references/pulumi.md",
+    "skills/code-review/references/python.md",
+    "skills/code-review/references/react.md",
+    "skills/code-review/references/sql.md",
+    "skills/create-pull-request-github/scripts/create-pr.ps1",
+    "skills/create-pull-request-github/scripts/create-pr.sh",
+    "skills/csharp-dev/references/aspnetcore-webapi.md",
+    "skills/csharp-dev/references/azure-ai-rag.md",
+    "skills/csharp-dev/references/bff-yarp.md",
+    "skills/csharp-dev/references/build-commands.md",
+    "skills/csharp-dev/references/file-upload.md",
+    "skills/csharp-dev/references/opentelemetry.md",
+    "skills/dal-dev/references/adonet-repository.md",
+    "skills/dal-dev/references/migration-scripts.md",
+    "skills/dal-dev/references/schema-design.md",
+    "skills/github-devops/references/build-performance.md",
+    "skills/github-devops/references/ci-build-diagnostics.md",
+    "skills/github-devops/references/directory-build-organization.md",
+    "skills/github-devops/references/incremental-build.md",
+    "skills/github-devops/references/msbuild-anti-patterns.md",
+    "skills/github-devops/references/msbuild-modernization.md",
+    "skills/maui-dev/references/app-lifecycle.md",
+    "skills/maui-dev/references/collectionview.md",
+    "skills/maui-dev/references/data-binding.md",
+    "skills/maui-dev/references/dependency-injection.md",
+    "skills/maui-dev/references/environment-doctor.md",
+    "skills/maui-dev/references/safe-area.md",
+    "skills/maui-dev/references/shell-navigation.md",
+    "skills/maui-dev/references/theming.md",
+    "skills/pr-review-fix-comments/providers/azure-devops.md",
+    "skills/pr-review-fix-comments/providers/github.md",
+    "skills/product-owner/references/closeout-phase.md",
+    "skills/product-owner/references/design-phase.md",
+    "skills/product-owner/references/requirements-phase.md",
+    "skills/product-owner/references/tasks-phase.md",
+    "skills/python-dev/references/fact-grounded-coding.md",
+    "skills/python-dev/references/pylance-docs.md",
+    "skills/python-dev/references/pylance-refactoring.md",
+    "skills/second-brain/references/templates.md",
+    "skills/setup-dev-environment/agents/openai.yaml",
+    "skills/setup-dev-environment/references/inventory.md",
+    "skills/test-dev/references/e2e-test-patterns.md",
+    "skills/test-dev/references/integration-test-patterns.md",
+    "skills/test-dev/references/mock-usage-analysis.md",
+    "skills/test-dev/references/test-maintainability.md",
+    "skills/test-dev/references/unit-test-patterns.md"
+  ],
+  "agents": [
+    {
+      "path": ".github/agents/architect-v3.agent.md",
+      "frontmatter": {
+        "name": "architect-v3",
+        "description": "Produces a test-first implementation plan in which every task names the failing test that defines its done-ness (Test contract) before any code. Use when planning inside a conductor-v3 Red-Green run, and only there. Plans only, writes no source code.",
+        "model": "GPT-5.6 Sol (copilot)",
+        "tools": ["vscode", "execute", "read", "agent", "edit/createDirectory", "edit/createFile", "edit/editFiles", "edit/rename", "search", "web", "codegraph/*", "kyber-weave/*", "context7/*", "todo"],
+        "agents": ["azure-reader", "research-agent"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "architect",
+          "fallback": "role-skill",
+          "delegates-to": "azure-reader, research-agent"
+        }
+      },
+      "body_sha256": "084e5e27e612f752b16e5ded160d45cfef91157eca3bd3b71994cbe4cb908d67",
+      "file_sha256": "5eb0ce098c11a54c9f78f75daaf517d332fedda97f5d9431e6c968b2a9558fcb"
+    },
+    {
+      "path": ".github/agents/architect.agent.md",
+      "frontmatter": {
+        "name": "architect",
+        "description": "Produces the implementation plan for a change: decomposes the work, resolves design decisions, sets scope. Use before any non-trivial bug fix, feature, or refactor starts, and whenever an unresolved design decision blocks work. Plans only, writes no source code. Do not use when the deliverable is a formal requirements/design/tasks spec rather than a plan.",
+        "model": "GPT-5.6 Sol (copilot)",
+        "tools": ["vscode", "execute", "read", "agent", "edit/createDirectory", "edit/createFile", "edit/editFiles", "edit/rename", "search", "web", "codegraph/*", "kyber-weave/*", "context7/*", "vscodeGeneral/rename", "todo"],
+        "agents": ["azure-reader", "research-agent"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "architect",
+          "fallback": "role-skill",
+          "delegates-to": "azure-reader, research-agent"
+        }
+      },
+      "body_sha256": "1e81c386a95a253ef984094d8a0a5a2df203a08500cb5665997b1aa3d2862dc0",
+      "file_sha256": "16afd840a7d528b941e86e4c9c3e050054a8655a423234c0ab484091373bc58c"
+    },
+    {
+      "path": ".github/agents/azure-reader.agent.md",
+      "frontmatter": {
+        "name": "azure-reader",
+        "description": "Reads live Azure resource state: configuration, runtime facts, diagnostics. Use when a plan, diagnosis, or review depends on how a deployed Azure resource is actually configured or behaving. Read-only, provisions and deploys nothing.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "read-only",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "0e53ac073b459ab1137546d6f9b791588bf16ff86109c94f8632c43036c372f3",
+      "file_sha256": "f4f8bf0fe71adc3933808dccf4112a5fa49154069a2ed0977cc92b0d005382ca"
+    },
+    {
+      "path": ".github/agents/bug-crusher-investigator.agent.md",
+      "frontmatter": {
+        "name": "bug-crusher-investigator",
+        "description": "Diagnoses a reported defect: reproduces the failure, finds root cause and blast radius, returns a TRIVIAL / NEEDS_ARCHITECT verdict. Use when the bug-crusher workflow needs a defect diagnosed before anything is fixed. Diagnoses only, edits no files.",
+        "model": "GPT-5.6 Sol (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "investigator",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "02c17ab003b7c3855652f6bb89020ed6d4db73c017be646851a3b271c5e56dfa",
+      "file_sha256": "e0f68b7e28c9153de337dbb5daba0c756a192714c8906bc5aeb379d54553dbb2"
+    },
+    {
+      "path": ".github/agents/code-reviewer.agent.md",
+      "frontmatter": {
+        "name": "code-reviewer",
+        "description": "Reviews a change by fanning out a council of review lenses, running the gate suite, and adjudicating findings into APPROVE, REQUEST_CHANGES, or NEEDS_HUMAN. Use once at the end of a run over the whole accumulated change, before a commit, push, or pull request, or whenever a human asks for a review. Do not use when the scope is one finished task rather than the whole run. Review-only, fixes nothing.",
+        "model": "Grok 4.5 (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "agent", "web", "todo"],
+        "agents": ["azure-reader", "review-lens", "review-triage"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "reviewer",
+          "fallback": "role-skill",
+          "delegates-to": "azure-reader, review-lens, review-triage"
+        }
+      },
+      "body_sha256": "f38e564a96dd415c3ef3b6b8314eca925062cfd282813382aa13425bbb5046d1",
+      "file_sha256": "98440b62230139ae74e4f1a54d15482db338ab34bf912d98afbc629b249ffd14"
+    },
+    {
+      "path": ".github/agents/conductor-v3.agent.md",
+      "frontmatter": {
+        "name": "conductor-v3",
+        "description": "Test-first orchestrator: routes like conductor, but enforces a hard Red-Green-Refactor pipeline so no implementation is sequenced before its failing test exists.",
+        "tools": ["vscode", "read", "agent", "todo"],
+        "metadata": {
+          "capability-profile": "orchestrator",
+          "fallback": "role-skill",
+          "delegates-to": "architect, architect-v3, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, sql-database-architect, task-reviewer-v3, tauri-dev, test-dev"
+        }
+      },
+      "body_sha256": "2491db44c9a3712757f3caa577dd1b0c7fda2b1e217aacc9cd9f3603c1a01418",
+      "file_sha256": "0392bd1e3dd09ab67f45801cb39aac7d016b5ed43733ee2ae65ac6c5668d7204"
+    },
+    {
+      "path": ".github/agents/conductor.agent.md",
+      "frontmatter": {
+        "name": "conductor",
+        "description": "Primary orchestrator and default entry point: routes the request to specialist agents, tracks dependencies, and consolidates results.",
+        "tools": ["vscode", "read", "agent", "todo"],
+        "metadata": {
+          "capability-profile": "orchestrator",
+          "fallback": "role-skill",
+          "delegates-to": "architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, sql-database-architect, task-reviewer, tauri-dev, test-dev",
+          "aliases": "conductor-v2"
+        }
+      },
+      "body_sha256": "72ef45f3453e641857dd1c4f9d4830fe35aef77d063cb60b0e472fe41a7a4ebd",
+      "file_sha256": "fe8fa326b83780cafb4a9b8aba06312ddb106eb732de1f7a64f3a88b8fe773c6"
+    },
+    {
+      "path": ".github/agents/csharp-dev.agent.md",
+      "frontmatter": {
+        "name": "csharp-dev",
+        "description": "Implements .NET/C# backend code: ASP.NET Core controllers, service classes, DI registration, middleware. Use when the change is in a non-test .cs file in the service or API layer. Do not use when the change is data-access, infrastructure-as-code, or client UI rather than service-layer logic.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "2fe9f41566f10639b97532b51b1bd8a01ae29b64a31b76d6ffb45c3654fff1a0",
+      "file_sha256": "09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146"
+    },
+    {
+      "path": ".github/agents/dal-dev.agent.md",
+      "frontmatter": {
+        "name": "dal-dev",
+        "description": "Implements the data-access layer: ADO.NET repositories, IRepository<T>, ISqlConnectionFactory, and FluentMigrator migrations. Use when the change touches repository code or adds a migration against an approved schema. Do not use when the deliverable is the schema design itself rather than the code that reads it.",
+        "model": "Grok 4.5 (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "03153aa8fc3ac5fa24d68ac81df675912d1b57fb1df24006277958ac3668bee7",
+      "file_sha256": "efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a"
+    },
+    {
+      "path": ".github/agents/docs-dev.agent.md",
+      "frontmatter": {
+        "name": "docs-dev",
+        "description": "Writes technical documentation: READMEs, API docs, ADRs, runbooks, and inline docs in Markdown/Mermaid. Use when the deliverable is a .md file. Do not use when the deliverable is a formal requirements/design/tasks spec rather than reference documentation.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "documentation",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "ab631d3b0ca35da8aa13877f2230d3c1468e27f49014a776af96a2cc23f3b471",
+      "file_sha256": "db63b4d3b09d0d352c5381feb6821e3fb982acdf49ad44f3b5d33861343410b0"
+    },
+    {
+      "path": ".github/agents/github-devops.agent.md",
+      "frontmatter": {
+        "name": "github-devops",
+        "description": "Owns CI/CD: GitHub Actions workflows, Docker build configuration, environment secrets, branch protection. Use when the change is under .github/workflows or in a Dockerfile, or when a build or deployment pipeline is failing. Do not use when the change provisions Azure resources rather than the pipeline that deploys to them.",
+        "model": "Grok 4.5 (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "publishing-worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "af12af51815171a44b021409f7f303dcda5f9de2cb64c48163132b69098cebad",
+      "file_sha256": "52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593"
+    },
+    {
+      "path": ".github/agents/maui-dev.agent.md",
+      "frontmatter": {
+        "name": "maui-dev",
+        "description": "Implements .NET MAUI mobile and desktop client UI: MVVM with CommunityToolkit.Maui, Shell navigation, cross-platform device features. Use when the change is in a MAUI app's XAML or view-model. Do not use when the UI is web/React rather than native MAUI.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "676ed30e147b4bde586be852a6768849b2a6f6128c3bcd57c831162af664721f",
+      "file_sha256": "d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f"
+    },
+    {
+      "path": ".github/agents/product-owner.agent.md",
+      "frontmatter": {
+        "name": "product-owner",
+        "description": "Runs the three-phase spec flow for one feature (requirements, design, tasks) behind an approval gate at each phase. Use when the deliverable is a formal spec under specs/, before any implementation plan exists. Produces planning artifacts only, implements nothing.",
+        "model": "Grok 4.5 (copilot)",
+        "tools": ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "agent", "web", "todo"],
+        "agents": ["research-agent"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "product-planning",
+          "fallback": "role-skill",
+          "delegates-to": "research-agent"
+        }
+      },
+      "body_sha256": "30adef003b402432203836c33f5368572390bd9250206b6df337715c0f4a3e0c",
+      "file_sha256": "5193d5e0bdabec19ceb33a646ab1120362e8705dec1bfe5da7af23a361c5d76e"
+    },
+    {
+      "path": ".github/agents/pulumi-dev.agent.md",
+      "frontmatter": {
+        "name": "pulumi-dev",
+        "description": "Writes Azure infrastructure-as-code in C# with Pulumi (Azure Native): stack design, reusable components, preview/apply workflows. Use when the change provisions or modifies Azure resources. Do not use when the change is the CI/CD pipeline or the SQL schema rather than the Azure resources themselves.",
+        "model": "Grok 4.5 (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "59a44060f3a0ccdd426b4f22de7c6eb33f0be4dfc6bc50a0cd487b4fa656cbdc",
+      "file_sha256": "968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040"
+    },
+    {
+      "path": ".github/agents/python-dev.agent.md",
+      "frontmatter": {
+        "name": "python-dev",
+        "description": "Implements Python: modules, typing, packaging, local environment configuration. Use when the change is in a non-test .py file, pyproject.toml, or a requirements file. Do not use when the deliverable is a test suite or a build pipeline rather than application code.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "a844c92006903f71a7a2b3103828e82ea813be23040f74b5c531cfef90946c9d",
+      "file_sha256": "f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944"
+    },
+    {
+      "path": ".github/agents/react-dev.agent.md",
+      "frontmatter": {
+        "name": "react-dev",
+        "description": "Implements React UI: components, hooks, client-side state, MUI (Pigment CSS) styling, feature-slice structure. Use when the change is in a .tsx or .jsx file, whether the app runs in a browser or in a desktop WebView such as Tauri. Do not use when the UI is native/mobile, or when the change is the desktop core rather than the web layer.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "16044bfd2892c80bc255455c0ad95ef69edfef534a39ca724d334e522904fa7d",
+      "file_sha256": "8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd"
+    },
+    {
+      "path": ".github/agents/research-agent.agent.md",
+      "frontmatter": {
+        "name": "research-agent",
+        "description": "Finds and verifies authoritative external technical facts: vendor docs, RFCs, SDK and library specs. Use when a claim about a third-party technology or version must be confirmed before it drives a decision. Read-only, edits no files and runs no commands.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "read-only",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "68ae251723de616a6afeb6e1ca4657d79365ae9e63e691cd47bab96e562c1101",
+      "file_sha256": "e0f94800f1c177fec00ff70f977263a61e14b3af1820225b7f7d99f60f66a548"
+    },
+    {
+      "path": ".github/agents/review-lens.agent.md",
+      "frontmatter": {
+        "name": "review-lens",
+        "description": "Applies one named review lens to a diff and returns structured findings or an explicit skip. Use when code-reviewer fans out its council and names the lens to apply. Do not use when the request is a general review rather than one named lens. Reports only, issues no verdict and fixes nothing.",
+        "model": "Grok 4.5 (copilot)",
+        "tools": ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "read-only",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "a6ca07be9f617fd2c9d54b96ea2c40def2b6e2f7e257b247eaf2ef664e91a38b",
+      "file_sha256": "0d686fd65d97da6fb24b8cf1aa7904391a2bc321e02f6420bb25f7a0bff403c4"
+    },
+    {
+      "path": ".github/agents/review-triage.agent.md",
+      "frontmatter": {
+        "name": "review-triage",
+        "description": "Attributes machine-produced output (analyzer diagnostics, manifest and lock diffs) to the change under review and reports it by rule or package identifier. Use when code-reviewer runs a lens whose input is a tool artifact rather than source code.",
+        "model": "GPT-5.6 Luna (copilot)",
+        "tools": ["vscode", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "read-only",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "4ab19c9f8ee9957634b358cea914ac326c740afce988aea194f5c761e4fb9a51",
+      "file_sha256": "891e681d971edf38be8a075f77700c3e4fc03f99cc7e685a3dc066382785eaa5"
+    },
+    {
+      "path": ".github/agents/sql-database-architect.agent.md",
+      "frontmatter": {
+        "name": "sql-database-architect",
+        "description": "Designs SQL Server / Azure SQL schema: tables, T-SQL, indexing, security hardening, and dacpac deployment. Use when the change is DDL, a .sql file, or a query that needs tuning. Do not use when the deliverable is application data-access code or a migration rather than the schema itself.",
+        "model": "GPT-5.6 Sol (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "7c219d53a0c3c8238c64335fc34a53829e379b8586b899a98ae86116923172fb",
+      "file_sha256": "7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6"
+    },
+    {
+      "path": ".github/agents/task-reviewer-v3.agent.md",
+      "frontmatter": {
+        "name": "task-reviewer-v3",
+        "description": "Audits one finished task in a Red-Green run: verifies its Test-contract row and RED/GREEN evidence, confirms its acceptance criteria, and checks completion claims against the tree. Returns PASS or FAIL with the fixes required. Use when a worker reports a task complete and that task carries a Test-contract row. Scope is that task only, code quality belongs to the end-of-run review.",
+        "model": "MAI-Code-1.1-Flash (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "investigator",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "91b03ba1201bdd54dff15b2cd1291d889532df961231a07fc719f19bcced8ac6",
+      "file_sha256": "27bc894fd3ed5b56172d4210d9f2ff3ac716fe7c8d79ee11a15d1d4c4800a1f8"
+    },
+    {
+      "path": ".github/agents/task-reviewer.agent.md",
+      "frontmatter": {
+        "name": "task-reviewer",
+        "description": "Audits one finished task: confirms it satisfies its acceptance criteria and nothing more, and checks the worker's completion claims against the tree. Returns PASS or FAIL with the fixes required. Use when any worker reports a task complete, every time. Scope is acceptance criteria only, code quality belongs to the end-of-run review.",
+        "model": "MAI-Code-1.1-Flash (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "search", "web", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "investigator",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "881accf653a1ba0fac3bab6e663f5519564971fc247fc435c8fb8bd8da70d208",
+      "file_sha256": "e096cb7d1507f7d6f1bc635dbc893d8f41a0289d105bfa5648bb2db5ba74b61c"
+    },
+    {
+      "path": ".github/agents/tauri-dev.agent.md",
+      "frontmatter": {
+        "name": "tauri-dev",
+        "description": "Implements the Rust/Tauri v2 desktop core: commands, the IPC contract, state, async, sidecar integration, and the capabilities/security model. Use when the change is under src-tauri or in a .rs file of a Tauri app. Do not use when the change is the WebView UI that consumes the IPC contract rather than the native core.",
+        "model": "Grok 4.5 (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "c2cde2ec264ded39c132c7ae8574fd52c9423ce164c1002f70c5d43554c3015c",
+      "file_sha256": "30f08182e6c42869088f2df5cc36aa6162182a97fa6576342b9ca2fff47051ad"
+    },
+    {
+      "path": ".github/agents/test-dev.agent.md",
+      "frontmatter": {
+        "name": "test-dev",
+        "description": "Authors and maintains automated tests (unit, integration, end-to-end) in xUnit, pytest, Vitest, and Playwright. Use when the change is in a test project or a .spec/.test file, whenever a test needs writing or updating, and for the failing test that opens a Red-Green task. Tests only, implements no application logic.",
+        "model": "MAI-Code-1.1-Flash (copilot)",
+        "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
+        "user-invocable": false,
+        "metadata": {
+          "capability-profile": "worker",
+          "fallback": "role-skill"
+        }
+      },
+      "body_sha256": "09111459da6bde07c75687c7449ca5ccfb67b627a41bc4ac94e04690ef8ec210",
+      "file_sha256": "b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548"
+    }
+  ],
+  "skills": [
+    { "path": ".github/skills/app-docs-standard/SKILL.md", "file_sha256": "46644b015da550584f8388c4c450d7a7d8df9ea64a3508abb1d389ab8d44316c" },
+    { "path": ".github/skills/architecture-decision-record/SKILL.md", "file_sha256": "6fb1abd28401615d44e760700ea0382b08cf6881bf9773aff650684ef9f07310" },
+    { "path": ".github/skills/azure-cli/SKILL.md", "file_sha256": "ce5c823e733d81da51dc48e665e447defc570908708fc48f997ae653aac0f115" },
+    { "path": ".github/skills/azure-naming/SKILL.md", "file_sha256": "df13f0ac027bab01024c709638168da26276d5e8737270592355a86d309efb51" },
+    { "path": ".github/skills/bug-crusher/SKILL.md", "file_sha256": "9e2a00d57f5915143561d239d38a8f1f6225f7210198fa8d9be44989e470b4b7" },
+    { "path": ".github/skills/code-review/SKILL.md", "file_sha256": "8d88b7b5597d0bf4dff65ac3b83f0ffd3f35000f84a442894003c905dfbca992" },
+    { "path": ".github/skills/create-pull-request-github/SKILL.md", "file_sha256": "82a23b03e606903df330bb379288bc91c34daa6902ef7051d5050db657dd2db7" },
+    { "path": ".github/skills/create-pull-request/SKILL.md", "file_sha256": "74b67dcb95548b62f214b3ba9597c142ea2dddb3728c3627a59ff152e47eeb71" },
+    { "path": ".github/skills/csharp-dev/SKILL.md", "file_sha256": "b0236ec8b31ea62cf703e317e0c86a71513062cd9f0e86a42d58529a560064e4" },
+    { "path": ".github/skills/csp-security/SKILL.md", "file_sha256": "00f6402451e0ed8c42d443af0f83cfca3cf128434db999cee4a609adc4c72e96" },
+    { "path": ".github/skills/dal-dev/SKILL.md", "file_sha256": "4409c828d6ae0a759cab4e53a45dd1b604f5ad2c0435ff4501e46fbb2ad817f5" },
+    { "path": ".github/skills/dp-code-reviewer/SKILL.md", "file_sha256": "cb69ddce6846ffab1754e2a3f47e17ff680ff78bea9b087867b06d242c57b9a4" },
+    { "path": ".github/skills/github-cli/SKILL.md", "file_sha256": "2de5215841103be8ebb7ce0d372da69e2fe644a6ef3479df98e0001fced9e2e1" },
+    { "path": ".github/skills/github-devops/SKILL.md", "file_sha256": "b3e6c365db3933491b9c4516356eff66def143720ce3124cc8eaf1650a8e3989" },
+    { "path": ".github/skills/lm-studio-cli/SKILL.md", "file_sha256": "469c0915b7c48cc5edd9b27bf4aa40d049b122e5a2c83f99a5eca0be85bde07e" },
+    { "path": ".github/skills/maui-dev/SKILL.md", "file_sha256": "84718884c2031ae27435b342cb59951960062d52fda90bf06ab857731695e428" },
+    { "path": ".github/skills/pr-review-fix-comments/SKILL.md", "file_sha256": "c9deed7dbc6e9e85d2c6097602e3956c0b107fcd8c3f5175e887141533a3c94a" },
+    { "path": ".github/skills/product-owner/SKILL.md", "file_sha256": "0226bbde6bb2461e85ee843e3ea3cbf26d5c34c199915a480baf6c838a7abcb7" },
+    { "path": ".github/skills/python-dev/SKILL.md", "file_sha256": "110c2cbfda093c6a71c419b2bb192b7a3293568426d869855a0f6a4513f56e96" },
+    { "path": ".github/skills/resharper-clt/SKILL.md", "file_sha256": "f6d5a1591f056a48ae52bdfb11de4312817e2a50c46c1c2b1eb650df4c9f1d83" },
+    { "path": ".github/skills/second-brain/SKILL.md", "file_sha256": "7ed8fa9aef8cc03e7ac5a857175c3e7be78585fb35945ff458a05bd71a2247fc" },
+    { "path": ".github/skills/security-review/SKILL.md", "file_sha256": "23e7e70a8163019bad2a933ae1d129a8a571d570b4dbe87ed2c0640ad6ab4c5d" },
+    { "path": ".github/skills/setup-dev-environment/SKILL.md", "file_sha256": "5409aa5f3231b84136a0f000a24c01136693cd52dc247926a03b99cb95011a42" },
+    { "path": ".github/skills/test-dev/SKILL.md", "file_sha256": "65b3b225dc7206eda470e13800e208a84b467460061208a31576c83bff3c8865" }
+  ]
+}

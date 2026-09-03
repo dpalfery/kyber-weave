@@ -2,12 +2,10 @@ schema: kyber-squad.bundle/v1
 name: full
 agents:
   - architect
-  - architect-v3
   - azure-reader
   - bug-crusher-investigator
   - code-reviewer
   - conductor
-  - conductor-v3
   - csharp-dev
   - dal-dev
   - docs-dev
@@ -31,8 +29,6 @@ skills:
   - azure-naming
   - bug-crusher
   - code-review
-  - conductor
-  - conductor-v3
   - create-pull-request
   - create-pull-request-github
   - csharp-dev

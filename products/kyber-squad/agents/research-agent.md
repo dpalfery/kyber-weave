@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: research-agent
-description: "Finds, verifies, and summarizes authoritative external technical information — vendor docs, RFCs, SDK/library specifications. Use to verify an external-technology claim before it drives a decision. Read-only: does not edit files, run commands, or investigate cloud resource state."
+description: "Finds and verifies authoritative external technical facts: vendor docs, RFCs, SDK and library specs. Use when a claim about a third-party technology or version must be confirmed before it drives a decision. Read-only, edits no files and runs no commands."
 invocation: subagent
 model-profile: fast
 capability-profile: read-only
+copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

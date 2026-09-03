@@ -1,8 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Validation;
+using Markdig;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -246,7 +250,18 @@ public static class SquadSourceLoader
         foreach ((string? name, YamlNode? node) in MappingEntries(profilesNode, file.RelativePath))
         {
             YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, nodeIsValue: true);
-            EnsureOnlyFields(profile, ["permissions"], file.RelativePath);
+            EnsureOnlyFields(profile, ["target", "permissions"], file.RelativePath);
+            string? target = TryGetScalar(profile, "target", file.RelativePath);
+            if (target is not null)
+            {
+                RequireLiteral(
+                    target,
+                    $"profiles.{name}.target",
+                    "copilot",
+                    file.RelativePath,
+                    "Use 'copilot' for a target-specific capability profile or omit target for a shared profile.");
+            }
+
             YamlMappingNode permissionsNode = RequireMapping(profile, "permissions", file.RelativePath);
             SortedDictionary<string, SquadPermissionDecision> permissions = new SortedDictionary<string, SquadPermissionDecision>(StringComparer.Ordinal);
 
@@ -288,7 +303,7 @@ public static class SquadSourceLoader
                     StartLine(permissionsNode));
             }
 
-            profiles.Add(name, new SquadCapabilityProfile(permissions));
+            profiles.Add(name, new SquadCapabilityProfile(target, permissions));
         }
 
         return new SquadCapabilityProfiles(schema, vocabulary, profiles, file.RelativePath);
@@ -444,25 +459,28 @@ public static class SquadSourceLoader
         return Directory.EnumerateFiles(logicalDirectory, "*.md", SearchOption.TopDirectoryOnly)
             .Select(path => ToRelativePath(logicalRoot, path))
             .Order(StringComparer.Ordinal)
-            .Select(relativePath => ParseAgent(ReadSourceFile(
+            .Select(relativePath => ParseAgent(
                 logicalRoot,
                 resolvedRoot,
-                relativePath,
-                relativePath,
-                relativePath)))
+                ReadSourceFile(
+                    logicalRoot,
+                    resolvedRoot,
+                    relativePath,
+                    relativePath,
+                    relativePath)))
             .OrderBy(agent => agent.Name, StringComparer.Ordinal)
             .ThenByDescending(agent => SourceIdentityMatches(agent.Name, agent.SourcePath, isSkill: false))
             .ThenBy(agent => agent.SourcePath, StringComparer.Ordinal)
             .ToArray();
     }
 
-    private static SquadAgent ParseAgent(SourceFile file)
+    private static SquadAgent ParseAgent(string logicalRoot, string resolvedRoot, SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
         EnsureOnlyFields(
             root,
-            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "delegates-to", "fallback", "aliases"],
+            ["schema", "name", "description", "invocation", "model-profile", "capability-profile", "copilot-capability-profile", "copilot-tools", "delegates-to", "fallback", "aliases"],
             file.RelativePath,
             frontmatter.LineOffset);
 
@@ -475,8 +493,31 @@ public static class SquadSourceLoader
         };
         IReadOnlyList<string> delegates = RequireStringSequence(root, "delegates-to", file.RelativePath, frontmatter.LineOffset);
         IReadOnlyList<string> aliases = RequireStringSequence(root, "aliases", file.RelativePath, frontmatter.LineOffset);
+        IReadOnlyList<string> copilotTools = RequireStringSequence(root, "copilot-tools", file.RelativePath, frontmatter.LineOffset);
         EnsureDistinct(delegates, "delegated agent", file.RelativePath);
         EnsureDistinct(aliases, "alias", file.RelativePath);
+        EnsureDistinct(copilotTools, "Copilot tool", file.RelativePath);
+
+        if (copilotTools.Count == 0)
+        {
+            SquadSourceValidator.Throw(
+                "Field 'copilot-tools' must declare at least one known tool.",
+                "copilot-tools",
+                file.RelativePath,
+                $"Add one or more tools from: {string.Join(", ", CopilotToolCatalog.OrderedTools)}.");
+        }
+
+        foreach (string tool in copilotTools)
+        {
+            if (!CopilotToolCatalog.RequiredCapabilities.ContainsKey(tool))
+            {
+                SquadSourceValidator.Throw(
+                    $"Copilot tool '{tool}' is not in the known tool catalog.",
+                    tool,
+                    file.RelativePath,
+                    $"Use one of: {string.Join(", ", CopilotToolCatalog.OrderedTools)}.");
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(frontmatter.Body))
         {
@@ -494,12 +535,15 @@ public static class SquadSourceLoader
             invocation,
             RequireScalar(root, "model-profile", file.RelativePath, frontmatter.LineOffset),
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
+            TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
+            copilotTools,
             delegates,
             RequireScalar(root, "fallback", file.RelativePath, frontmatter.LineOffset),
             aliases,
             frontmatter.Body,
             Sha256(frontmatter.Body),
-            file.RelativePath);
+            file.RelativePath,
+            LoadResources(logicalRoot, resolvedRoot, file.RelativePath, frontmatter.Body));
     }
 
     private static IReadOnlyList<SquadSkill> LoadSkills(string logicalRoot, string resolvedRoot)
@@ -524,12 +568,15 @@ public static class SquadSourceLoader
             }
 
             string relativePath = ToRelativePath(logicalRoot, skillPath);
-            skills.Add(ParseSkill(ReadSourceFile(
+            skills.Add(ParseSkill(
                 logicalRoot,
                 resolvedRoot,
-                relativePath,
-                relativePath,
-                relativePath)));
+                ReadSourceFile(
+                    logicalRoot,
+                    resolvedRoot,
+                    relativePath,
+                    relativePath,
+                    relativePath)));
         }
 
         return skills
@@ -539,7 +586,7 @@ public static class SquadSourceLoader
             .ToArray();
     }
 
-    private static SquadSkill ParseSkill(SourceFile file)
+    private static SquadSkill ParseSkill(string logicalRoot, string resolvedRoot, SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
@@ -552,7 +599,26 @@ public static class SquadSourceLoader
             RequireScalar(root, "name", file.RelativePath, frontmatter.LineOffset),
             RequireScalar(root, "description", file.RelativePath, frontmatter.LineOffset),
             frontmatter.Body,
-            file.RelativePath);
+            file.RelativePath,
+            LoadResources(logicalRoot, resolvedRoot, file.RelativePath, frontmatter.Body));
+    }
+
+    private static IReadOnlyList<SquadResource> LoadResources(
+        string logicalRoot,
+        string resolvedRoot,
+        string principalPath,
+        string instructionBody)
+    {
+        string platformPrincipalPath = principalPath.Replace('/', Path.DirectorySeparatorChar);
+        string ownerRelativePath = Path.GetDirectoryName(platformPrincipalPath) ?? string.Empty;
+        string logicalOwnerRoot = Path.GetFullPath(Path.Combine(logicalRoot, ownerRelativePath));
+        string resolvedOwnerRoot = ResolveExistingPath(logicalOwnerRoot).FullPath;
+        ResourceClosureBuilder builder = new ResourceClosureBuilder(
+            logicalRoot,
+            resolvedRoot,
+            logicalOwnerRoot,
+            resolvedOwnerRoot);
+        return builder.Build(principalPath, instructionBody);
     }
 
     private static void ValidateSchemaDocuments(string logicalRoot, string resolvedRoot)
@@ -1192,6 +1258,227 @@ public static class SquadSourceLoader
             ? Path.GetFileName(Path.GetDirectoryName(platformPath))
             : Path.GetFileNameWithoutExtension(platformPath);
         return string.Equals(identity, sourceIdentity, StringComparison.Ordinal);
+    }
+
+    private sealed class ResourceClosureBuilder
+    {
+        private readonly string _logicalRoot;
+        private readonly string _resolvedRoot;
+        private readonly string _logicalOwnerRoot;
+        private readonly string _resolvedOwnerRoot;
+        private readonly SortedDictionary<string, SquadResource> _resources =
+            new SortedDictionary<string, SquadResource>(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _portablePaths =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _active = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> _complete = new HashSet<string>(StringComparer.Ordinal);
+
+        public ResourceClosureBuilder(
+            string logicalRoot,
+            string resolvedRoot,
+            string logicalOwnerRoot,
+            string resolvedOwnerRoot)
+        {
+            _logicalRoot = logicalRoot;
+            _resolvedRoot = resolvedRoot;
+            _logicalOwnerRoot = logicalOwnerRoot;
+            _resolvedOwnerRoot = resolvedOwnerRoot;
+        }
+
+        public IReadOnlyList<SquadResource> Build(string principalPath, string instructionBody)
+        {
+            VisitLinks(instructionBody, principalPath, string.Empty);
+            return _resources.Values.ToArray();
+        }
+
+        private void VisitLinks(string markdown, string declaringPath, string declaringDirectory)
+        {
+            MarkdownDocument document = Markdown.Parse(markdown);
+            foreach (LinkInline link in document.Descendants<LinkInline>())
+            {
+                string? target = GetLocalTarget(link.Url);
+                if (target is not null)
+                {
+                    Visit(target, declaringPath, declaringDirectory);
+                }
+            }
+        }
+
+        private void Visit(string target, string declaringPath, string declaringDirectory)
+        {
+            if (IsRootedResourcePath(target))
+            {
+                ThrowOutsideOwner(target, declaringPath);
+            }
+
+            string platformTarget = target.Replace('/', Path.DirectorySeparatorChar);
+            string logicalPath = Path.GetFullPath(Path.Combine(
+                _logicalOwnerRoot,
+                declaringDirectory.Replace('/', Path.DirectorySeparatorChar),
+                platformTarget));
+            if (!IsWithin(_logicalOwnerRoot, logicalPath) ||
+                string.Equals(_logicalOwnerRoot, logicalPath, StringComparison.Ordinal))
+            {
+                ThrowOutsideOwner(target, declaringPath);
+            }
+
+            if (!File.Exists(logicalPath))
+            {
+                SquadSourceValidator.Throw(
+                    $"Referenced resource '{target}' does not exist inside its owning artifact directory.",
+                    target,
+                    declaringPath,
+                    "Add the file or update the link to an existing resource inside the owning agent or skill directory.");
+            }
+
+            ResolvedPath resolved = ResolveExistingPath(logicalPath);
+            if (!IsWithin(_resolvedOwnerRoot, resolved.FullPath))
+            {
+                string mechanism = resolved.EncounteredSymbolicLink ? "symbolic link" : "resolved path";
+                SquadSourceValidator.Throw(
+                    $"Resource '{target}' uses a {mechanism} whose target is outside its owning artifact directory.",
+                    target,
+                    declaringPath,
+                    "Keep every resource and symbolic-link target inside the owning agent or skill directory.");
+            }
+
+            string relativePath = ToPortablePath(Path.GetRelativePath(_logicalOwnerRoot, logicalPath));
+            EnsurePortableIdentity(relativePath, target, declaringPath);
+
+            if (_active.Contains(relativePath))
+            {
+                SquadSourceValidator.Throw(
+                    $"Resource link cycle detected at '{relativePath}'.",
+                    target,
+                    declaringPath,
+                    "Break the Markdown resource cycle so every reference chain terminates.");
+            }
+
+            if (_complete.Contains(relativePath))
+            {
+                return;
+            }
+
+            string productRelativePath = ToPortablePath(Path.GetRelativePath(_logicalRoot, logicalPath));
+            SourceFile resource = ReadSourceFile(
+                _logicalRoot,
+                _resolvedRoot,
+                productRelativePath,
+                declaringPath,
+                target);
+            _resources.Add(relativePath, new SquadResource(relativePath, resource.Content));
+
+            _active.Add(relativePath);
+            if (IsMarkdown(relativePath))
+            {
+                string resourceDirectory = ToPortablePath(Path.GetDirectoryName(
+                    relativePath.Replace('/', Path.DirectorySeparatorChar)) ?? string.Empty);
+                VisitLinks(resource.Content, resource.RelativePath, resourceDirectory);
+            }
+
+            _active.Remove(relativePath);
+            _complete.Add(relativePath);
+        }
+
+        private void EnsurePortableIdentity(string relativePath, string target, string declaringPath)
+        {
+            string portableIdentity = GetPortableAliasIdentity(relativePath);
+            if (_portablePaths.TryGetValue(portableIdentity, out string? existingPath) &&
+                !string.Equals(existingPath, relativePath, StringComparison.Ordinal))
+            {
+                SquadSourceValidator.Throw(
+                    $"Resource paths '{existingPath}' and '{relativePath}' have a portable alias collision.",
+                    target,
+                    declaringPath,
+                    "Rename one resource so its case-insensitive path remains distinct after trailing dots and spaces are removed.");
+            }
+
+            _portablePaths.TryAdd(portableIdentity, relativePath);
+            try
+            {
+                _ = SquadPathPolicy.NormalizeRelativePath(relativePath);
+            }
+            catch (SquadPathContainmentException)
+            {
+                ThrowNonPortable(relativePath, target, declaringPath);
+            }
+            catch (SquadDeploymentConflictException)
+            {
+                ThrowNonPortable(relativePath, target, declaringPath);
+            }
+        }
+
+        private static string? GetLocalTarget(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return null;
+            }
+
+            string target = url.Trim();
+            if (target.StartsWith('#') || target.StartsWith("//", StringComparison.Ordinal) ||
+                (HasUriScheme(target) && !IsWindowsDrivePath(target)))
+            {
+                return null;
+            }
+
+            int fragmentIndex = target.IndexOf('#', StringComparison.Ordinal);
+            int queryIndex = target.IndexOf('?', StringComparison.Ordinal);
+            int suffixIndex = fragmentIndex < 0
+                ? queryIndex
+                : queryIndex < 0 ? fragmentIndex : Math.Min(fragmentIndex, queryIndex);
+            if (suffixIndex >= 0)
+            {
+                target = target[..suffixIndex];
+            }
+
+            return target.Length == 0 ? null : Uri.UnescapeDataString(target);
+        }
+
+        private static bool HasUriScheme(string target)
+        {
+            int colonIndex = target.IndexOf(':', StringComparison.Ordinal);
+            if (colonIndex <= 0 || !char.IsAsciiLetter(target[0]))
+            {
+                return false;
+            }
+
+            return target[1..colonIndex].All(character =>
+                char.IsAsciiLetterOrDigit(character) || character is '+' or '-' or '.');
+        }
+
+        private static bool IsWindowsDrivePath(string target) =>
+            target.Length >= 2 && char.IsAsciiLetter(target[0]) && target[1] == ':';
+
+        private static bool IsRootedResourcePath(string target) =>
+            Path.IsPathRooted(target) || target[0] is '/' or '\\' || IsWindowsDrivePath(target);
+
+        private static bool IsMarkdown(string relativePath)
+        {
+            string extension = Path.GetExtension(relativePath);
+            return string.Equals(extension, ".md", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(extension, ".markdown", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetPortableAliasIdentity(string relativePath) =>
+            string.Join(
+                '/',
+                relativePath.Split('/').Select(segment => segment.TrimEnd(' ', '.')))
+                .Normalize(NormalizationForm.FormC);
+
+        private static void ThrowOutsideOwner(string target, string declaringPath) =>
+            SquadSourceValidator.Throw(
+                $"Referenced resource '{target}' escapes its owning artifact directory.",
+                target,
+                declaringPath,
+                "Use a relative link whose resolved file stays inside the owning agent or skill directory.");
+
+        private static void ThrowNonPortable(string relativePath, string target, string declaringPath) =>
+            SquadSourceValidator.Throw(
+                $"Resource path '{relativePath}' is not a normalized portable path.",
+                target,
+                declaringPath,
+                "Use NFC Unicode, forward slashes, and names valid on Windows filesystems.");
     }
 
     private sealed record SourceFile(string RelativePath, string Content);

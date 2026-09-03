@@ -36,8 +36,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Base ungoverned tools on every agent: <c>TodoWrite</c>, <c>Skill</c>. MCP server-level
 /// wildcards (<c>mcp__codegraph__*</c>, <c>mcp__kyber-weave__*</c>, <c>mcp__context7__*</c>)
 /// are granted when <c>filesystem.read</c> is allowed unless the agent is a pure
-/// orchestrator (profile id <c>orchestrator</c> or name in
-/// <c>{conductor, conductor-v3}</c>). When <c>delegate: allow</c> and
+/// orchestrator (profile id <c>orchestrator</c>). When <c>delegate: allow</c> and
 /// <see cref="SquadAgent.DelegatesTo"/> is non-empty, the allow-list emits
 /// <c>Agent(name1, name2, …)</c>; official docs state the parentheses roster is ignored
 /// when the definition runs as a nested subagent, so that limitation is recorded as
@@ -45,17 +44,15 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// Skills carry <c>name</c>, <c>description</c>, and <c>license: MIT</c>. Multi-line
-/// descriptions collapse to a single line. Primary agents (<c>conductor</c> and
-/// <c>conductor-v3</c>) suppress their skill projections per the native single-projection
-/// rule enforced by <see cref="SquadRendererRegistry"/>.
+/// descriptions collapse to a single line. Profile-declared shared identities suppress
+/// their skill projections per the native single-projection rule enforced by
+/// <see cref="SquadRendererRegistry"/>.
 /// </para>
 /// </remarks>
 public sealed class ClaudeRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".claude/agents";
     private const string SkillsDirectory = ".claude/skills";
-
-    private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
 
     private static readonly string[] BaseUngovernedTools = ["TodoWrite", "Skill"];
 
@@ -142,31 +139,38 @@ public sealed class ClaudeRenderer : ISquadRenderer
         }
 
         SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
         foreach (SquadAgent agent in source.Agents)
         {
-            files.Add(RenderAgent(
+            SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles));
+                source.CapabilityProfiles.Profiles);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, agent.Resources);
 
             degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
         }
 
         foreach (SquadSkill skill in source.Skills)
         {
-            // Primary agents (conductor and conductor-v3) are native agents on Claude Code;
-            // suppressing their skill projection adheres to the single-projection rule
-            // enforced by SquadRendererRegistry.
-            if (SharedConductorIdentities.Contains(skill.Name, StringComparer.Ordinal))
+            // A profile-declared shared identity has one canonical projection. Resolve the
+            // set from source so removing or adding a shared identity never requires a
+            // renderer-local roster change.
+            if (sharedIdentities.Contains(skill.Name))
             {
                 continue;
             }
 
-            files.Add(RenderSkill(skill));
+            SquadDeploymentFile principal = RenderSkill(skill);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));
@@ -289,9 +293,10 @@ public sealed class ClaudeRenderer : ISquadRenderer
                 granted.Add(agentToolEntry);
             }
 
-            bool isPureOrchestrator =
-                string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal) ||
-                SharedConductorIdentities.Contains(agent.Name, StringComparer.Ordinal);
+            bool isPureOrchestrator = string.Equals(
+                agent.CapabilityProfile,
+                "orchestrator",
+                StringComparison.Ordinal);
 
             if (!isPureOrchestrator &&
                 profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&

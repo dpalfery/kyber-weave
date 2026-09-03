@@ -41,7 +41,7 @@ between two runs over one diff. So the last step is arithmetic instead.
 flowchart TD
     Cfg["review: section of .kyber-weave/kyber-weave.yml<br/>gates · coverage · policy · suppressions"]
     Machine["worker completion gate<br/>dotnet format · analyzer fixes · cleanupcode --include<br/>mechanical defects fixed, never reported"]
-    Caller["conductor · conductor-v3"] --> Machine
+    Caller["conductor"] --> Machine
     Machine --> Ladder
     Worker["dev worker — rework"]
     Ladder["task-reviewer — passes 1-3<br/>one agent · PASS or FAIL + fix list<br/>the only reviewer a task gets"]

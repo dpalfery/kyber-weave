@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: python-dev
-description: "Python implementation: modules, typing, packaging, and local environment configuration. Use for Python code. Does not author test suites, own CI/CD, or write Dockerfiles."
+description: "Implements Python: modules, typing, packaging, local environment configuration. Use when the change is in a non-test .py file, pyproject.toml, or a requirements file. Do not use when the deliverable is a test suite or a build pipeline rather than application code."
 invocation: subagent
 model-profile: fast
 capability-profile: worker
+copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

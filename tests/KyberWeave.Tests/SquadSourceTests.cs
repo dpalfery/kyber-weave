@@ -27,6 +27,10 @@ public sealed class SquadSourceTests
         Assert.Equal(
             ["architect", "csharp-dev"],
             first.Agents.Select(agent => agent.Name));
+        Assert.All(
+            first.Agents,
+            agent => Assert.Equal(["vscode", "read"], agent.CopilotTools));
+        Assert.All(first.Agents, agent => Assert.Null(agent.CopilotCapabilityProfile));
         Assert.Equal(["test-dev"], first.Skills.Select(skill => skill.Name));
         Assert.Equal(
             first.Agents.Select(agent => (agent.Name, agent.SourcePath, agent.BodyDigest)),
@@ -82,6 +86,169 @@ public sealed class SquadSourceTests
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "harness-model");
 
         Assert.Contains("remove", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadAgentUsesUnknownCopilotToolReportsKnownCatalogAndSourceLocation()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, shell]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "shell");
+
+        Assert.Contains("known tool catalog", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("vscode", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("vscodeGeneral/rename", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadAgentRepeatsCopilotToolReportsDuplicateAndSourceLocation()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, read, read]");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "duplicate");
+
+        Assert.Contains("Copilot tool", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("Remove", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void LoadAgentDeclaresNoCopilotToolsReportsRequiredMembership()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: []");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "at least one");
+
+        Assert.Contains("copilot-tools", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("Add", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("ask")]
+    [InlineData("deny")]
+    public void LoadGovernedCopilotToolRequiresExplicitCapabilityAllow(string decision)
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "copilot-tools: [vscode, read]",
+            "copilot-tools: [vscode, edit]");
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "      filesystem.write: ask",
+            $"      filesystem.write: {decision}");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "filesystem.write");
+
+        Assert.Contains($"'{decision}'", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("Remove 'edit'", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("'allow'", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadCopilotSpecificProfileAllowsExactToolsWithoutWideningSharedProfile()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-copilot:\n" +
+            "    target: copilot\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n" +
+            "copilot-tools: [vscode, read]",
+            "capability-profile: architect\n" +
+            "copilot-capability-profile: architect-copilot\n" +
+            "copilot-tools: [vscode, read, edit]");
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
+
+        Assert.Equal("architect", architect.CapabilityProfile);
+        Assert.Equal("architect-copilot", architect.CopilotCapabilityProfile);
+        Assert.Equal("copilot", source.CapabilityProfiles.Profiles["architect-copilot"].Target);
+        Assert.Equal(SquadPermissionDecision.Deny, source.CapabilityProfiles.Profiles["architect"].Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, source.CapabilityProfiles.Profiles["architect-copilot"].Permissions["filesystem.write"]);
+    }
+
+    [Fact]
+    public void LoadCopilotSpecificProfileAsSharedProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "profiles/capabilities.yml",
+            "profiles:\n",
+            "profiles:\n" +
+            "  architect-copilot:\n" +
+            "    target: copilot\n" +
+            "    permissions:\n" +
+            "      filesystem.read: allow\n" +
+            "      filesystem.write: allow\n" +
+            "      delegate: ask\n");
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n" +
+            "copilot-tools: [vscode, read]",
+            "capability-profile: architect\n" +
+            "copilot-capability-profile: architect-copilot\n" +
+            "copilot-tools: [vscode, read, edit]");
+        fixture.Replace(
+            "agents/csharp-dev.md",
+            "capability-profile: worker",
+            "capability-profile: architect-copilot");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/csharp-dev.md", "Copilot-only");
+
+        Assert.Contains("shared capability profile", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("copilot-capability-profile", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadAgentReferencesUnknownCopilotCapabilityProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "copilot-capability-profile: missing-copilot\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "missing-copilot");
+
+        Assert.Contains("unknown Copilot capability profile", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("profiles/capabilities.yml", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadCopilotOverrideReferencesSharedProfileFailsClosed()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "capability-profile: architect\n",
+            "capability-profile: architect\n" +
+            "copilot-capability-profile: architect\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "not marked as Copilot-only");
+
+        Assert.Contains("target: copilot", diagnostic.Hint!, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -484,6 +651,7 @@ public sealed class SquadSourceTests
             "invocation: subagent\n" +
             "model-profile: deep-planning\n" +
             "capability-profile: architect\n" +
+            "copilot-tools: [vscode, read]\n" +
             "delegates-to: [csharp-dev]\n" +
             "fallback: role-skill\n" +
             "aliases: []\n" +
@@ -562,6 +730,7 @@ public sealed class SquadSourceTests
             "invocation: subagent\n" +
             "model-profile: deep-planning\n" +
             "capability-profile: architect\n" +
+            "copilot-tools: [vscode, read]\n" +
             "delegates-to: [csharp-dev]\n" +
             "fallback: role-skill\n" +
             "aliases: []\n" +
@@ -723,6 +892,7 @@ public sealed class SquadSourceTests
             "invocation: subagent\n" +
             "model-profile: general\n" +
             "capability-profile: worker\n" +
+            "copilot-tools: [vscode, read]\n" +
             "delegates-to: []\n" +
             "fallback: role-skill\n" +
             $"aliases: {aliases}\n" +

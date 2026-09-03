@@ -1,10 +1,7 @@
 ---
 name: create-pull-request-github
-description: "Use when asked to submit or create a Pull Request or PR on GitHub"
+description: Use when asked to submit or create a Pull Request or PR on GitHub
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 > **Note:** This skill is named `create-pull-request-github`. If you are looking for the original `create-pull-request` skill, this file is the GitHub-specific replacement.

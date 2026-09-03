@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: sql-database-architect
-description: "SQL Server / Azure SQL schema design: tables, T-SQL, indexing, security hardening, and source-controlled (dacpac) deployment. Use for schema/DDL design or query tuning. Does not write application data-access code or migrations."
+description: "Designs SQL Server / Azure SQL schema: tables, T-SQL, indexing, security hardening, and dacpac deployment. Use when the change is DDL, a .sql file, or a query that needs tuning. Do not use when the deliverable is application data-access code or a migration rather than the schema itself."
 invocation: subagent
 model-profile: deep-planning
 capability-profile: worker
+copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

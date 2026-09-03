@@ -2,9 +2,6 @@
 name: python-dev
 description: Use when writing Python code, debugging with Pylance, applying automated refactorings, or configuring Python environments. Do not use for test authorship or CI/CD.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.1.0
 ---
 
 # Python Developer

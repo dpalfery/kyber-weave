@@ -10,7 +10,7 @@ public static class SquadSourceValidator
     /// <summary>Stable rule id for an invalid canonical Squad source document.</summary>
     public const string InvalidSourceRule = "KW-SQUAD-SOURCE-001";
 
-    /// <summary>Validates identities, aliases, profile references, and bundle membership.</summary>
+    /// <summary>Validates identities, aliases, profiles, Copilot tools, and bundle membership.</summary>
     public static void Validate(
         SquadBundle bundle,
         IReadOnlyList<SquadAgent> agents,
@@ -47,7 +47,7 @@ public static class SquadSourceValidator
                     "Use a model-profile declared in profiles/models.yml.");
             }
 
-            if (!capabilities.Profiles.ContainsKey(agent.CapabilityProfile))
+            if (!capabilities.Profiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? sharedProfile))
             {
                 Throw(
                     $"Agent '{agent.Name}' references unknown capability profile '{agent.CapabilityProfile}'.",
@@ -55,6 +55,41 @@ public static class SquadSourceValidator
                     agent.SourcePath,
                     "Use a capability-profile declared in profiles/capabilities.yml.");
             }
+
+            if (sharedProfile.Target is not null)
+            {
+                Throw(
+                    $"Agent '{agent.Name}' uses {sharedProfile.Target}-only capability profile " +
+                    $"'{agent.CapabilityProfile}' as its shared capability profile.",
+                    agent.Name,
+                    agent.SourcePath,
+                    "Use a target-neutral capability-profile for shared permissions and reference " +
+                    "the target-specific profile only through copilot-capability-profile.");
+            }
+
+            string copilotCapabilityProfile = agent.CopilotCapabilityProfile ?? agent.CapabilityProfile;
+            if (!capabilities.Profiles.TryGetValue(copilotCapabilityProfile, out SquadCapabilityProfile? copilotProfile))
+            {
+                Throw(
+                    $"Agent '{agent.Name}' references unknown Copilot capability profile '{copilotCapabilityProfile}'.",
+                    agent.Name,
+                    agent.SourcePath,
+                    "Use a copilot-capability-profile declared in profiles/capabilities.yml.");
+            }
+
+            if (agent.CopilotCapabilityProfile is not null &&
+                !string.Equals(copilotProfile.Target, "copilot", StringComparison.Ordinal))
+            {
+                Throw(
+                    $"Agent '{agent.Name}' references capability profile '{copilotCapabilityProfile}', " +
+                    "but it is not marked as Copilot-only.",
+                    agent.Name,
+                    agent.SourcePath,
+                    $"Set target: copilot on capability profile '{copilotCapabilityProfile}' or remove " +
+                    "copilot-capability-profile to use the shared profile.");
+            }
+
+            ValidateCopilotToolCapabilities(agent, copilotCapabilityProfile, copilotProfile);
 
             if (!fallbacks.Profiles.ContainsKey(agent.Fallback))
             {
@@ -107,6 +142,63 @@ public static class SquadSourceValidator
                     bundle.Name,
                     bundle.SourcePath,
                     "Add the canonical skill under skills/ or remove it from this bundle.");
+            }
+        }
+    }
+
+    private static void ValidateCopilotToolCapabilities(
+        SquadAgent agent,
+        string capabilityProfileName,
+        SquadCapabilityProfile capabilityProfile)
+    {
+        if (agent.CopilotTools.Count == 0)
+        {
+            Throw(
+                $"Agent '{agent.Name}' declares no Copilot tools.",
+                agent.Name,
+                agent.SourcePath,
+                $"Add one or more tools from: {string.Join(", ", CopilotToolCatalog.OrderedTools)}.");
+        }
+
+        HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string tool in agent.CopilotTools)
+        {
+            if (!seen.Add(tool))
+            {
+                Throw(
+                    $"Agent '{agent.Name}' declares duplicate Copilot tool '{tool}'.",
+                    agent.Name,
+                    agent.SourcePath,
+                    $"Remove the duplicate '{tool}' entry from copilot-tools.");
+            }
+
+            if (!CopilotToolCatalog.RequiredCapabilities.TryGetValue(tool, out string? requiredCapability))
+            {
+                Throw(
+                    $"Agent '{agent.Name}' declares unknown Copilot tool '{tool}'.",
+                    agent.Name,
+                    agent.SourcePath,
+                    $"Use one of: {string.Join(", ", CopilotToolCatalog.OrderedTools)}.");
+            }
+
+            if (requiredCapability is null)
+            {
+                continue;
+            }
+
+            if (!capabilityProfile.Permissions.TryGetValue(requiredCapability, out SquadPermissionDecision decision) ||
+                decision != SquadPermissionDecision.Allow)
+            {
+                string actualDecision = capabilityProfile.Permissions.TryGetValue(requiredCapability, out decision)
+                    ? decision.ToString().ToLowerInvariant()
+                    : "undeclared";
+                Throw(
+                    $"Agent '{agent.Name}' declares Copilot tool '{tool}', but capability " +
+                    $"'{requiredCapability}' is '{actualDecision}'.",
+                    agent.Name,
+                    agent.SourcePath,
+                    $"Remove '{tool}' from copilot-tools or set '{requiredCapability}' to 'allow' " +
+                    $"in Copilot capability profile '{capabilityProfileName}'.");
             }
         }
     }

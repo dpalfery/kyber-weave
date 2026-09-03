@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: azure-reader
-description: Read-only investigation of live Azure resource state via Azure MCP tools; gathers configuration and runtime facts for debugging, planning, and architecture. Use to learn how Azure is configured or behaving. Does not create or modify infrastructure, or run deployments.
+description: "Reads live Azure resource state: configuration, runtime facts, diagnostics. Use when a plan, diagnosis, or review depends on how a deployed Azure resource is actually configured or behaving. Read-only, provisions and deploys nothing."
 invocation: subagent
-model-profile: general
+model-profile: fast
 capability-profile: read-only
+copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

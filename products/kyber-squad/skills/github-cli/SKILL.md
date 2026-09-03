@@ -2,9 +2,6 @@
 name: github-cli
 description: use the github CLI to interact with github resources.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # github CLI

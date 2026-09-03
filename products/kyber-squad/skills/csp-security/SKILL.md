@@ -2,9 +2,6 @@
 name: csp-security
 description: OWASP ASVS L2 security guidance (CSP, headers, HSTS, rate limiting, authz, input/output handling).
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # CSP / Security Headers / OWASP ASVS L2 Patterns

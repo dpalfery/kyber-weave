@@ -2,9 +2,6 @@
 name: test-dev
 description: Use when writing xUnit unit tests, integration tests with real databases, or E2E Playwright tests. Do not use for application or persistence implementation.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Test Developer
