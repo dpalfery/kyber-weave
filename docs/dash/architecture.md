@@ -7,6 +7,14 @@ source-root: dash
 status: draft
 owner: dpalfery
 last-reviewed: 2026-08-29
+keywords:
+  - dashboard
+  - codeburn
+  - tauri
+  - electron
+  - desktop
+  - menubar
+  - tui
 code-refs:
   - Synthesizer
   - OtlpReceiver
@@ -69,13 +77,17 @@ flowchart TB
     end
 
     subgraph surfaces["Surfaces"]
-        TUI["Terminal dashboard"]
-        WEB["Web dashboard views"]
+        TUI["Terminal TUI dashboard<br/>dash/src/dashboard.tsx"]
+        WEB["Web dashboard views<br/>dash/dash/"]
         SC["Status contract<br/>menubar-json kyber field"]
         MCP["MCP server"]
     end
 
-    NAT["macOS menu bar<br/>Electron macOS + Windows"]
+    subgraph native["Native Desktop & Tray"]
+        ELEC["Electron desktop app<br/>dash/app/"]
+        TAURI["Tauri Windows tray<br/>dash/windows/"]
+        MAC["macOS menu bar<br/>dash/mac/"]
+    end
 
     FS --> SY
     OT --> AD
@@ -84,7 +96,7 @@ flowchart TB
     AD --> ST
     ST --> AN1 & AN2 & AN3 & AN4
     AN1 & AN2 & AN3 & AN4 --> TUI & WEB & SC & MCP
-    SC --> NAT
+    SC --> ELEC & TAURI & MAC
 ```
 
 One canonical model serves both ingest paths: the session-file providers are **span
@@ -250,10 +262,44 @@ splitting a prefixed identifier (R8.3).
 ## Surface layer
 
 `dash/kyber/dashboard/data.ts` (`getDashboardData`) turns the canonical store into the single
-payload the surfaces consume: period reports, breakdown tables, daily activity, and the
-analysis payloads of Requirements 7 through 10. The terminal dashboard, the web dashboard
-views under `dash/kyber/web/components/`, the status contract, and the MCP server all derive
+payload the delivery surfaces consume: period reports, breakdown tables, daily activity, and the
+analysis payloads of Requirements 7 through 10. The terminal TUI dashboard, the browser-based web
+dashboard views under `dash/kyber/web/components/`, the status contract, and the MCP server all derive
 from it (R11.1).
+
+For operational instructions, dev runners, and test suites across all four surfaces, see the
+[KyberDash runbook](runbook.md).
+
+### Terminal TUI Dashboard (dash/src/dashboard.tsx)
+
+The interactive Terminal User Interface (TUI) dashboard is built with [Ink](https://github.com/vadimdemedes/ink)
+(React in the terminal) and runs directly in any modern terminal emulator supporting ANSI and 24-bit TrueColor.
+It provides responsive layout breakpoints adapting to terminal width (single column at 89 columns or below,
+two columns from 90 to 134 columns, and three columns at 135 columns and above, clamped at 256 columns),
+shortened project paths, interactive keyboard navigation, and live session refresh.
+
+### Web Dashboard (dash/dash/)
+
+The standalone browser web dashboard is a React application built with Vite and Tailwind CSS. It visualizes
+interactive token accumulation heatmaps, cost breakdowns, and agent turn timelines. In production, it is
+served directly by the CLI command `codeburn web` (or `node dash/dist/cli.js web`), which injects session
+bootstrapping with XSS protection and handles query filtering without crashing on invalid inputs.
+
+### Electron Desktop App (dash/app/)
+
+The Electron desktop application delivers a rich desktop window powered by a TypeScript main process
+and a Vite-bundled React renderer. The desktop client spawns the compiled CLI (`dist/cli.js`) to fetch
+dashboard state and stream telemetry updates. For development and visual testing without launching the full
+Electron runtime, a resident demo bridge (`dash/app/demo-bridge.mjs`) provides an HTTP mock bridge on port 4900.
+
+### Windows Menubar / Tray App (dash/windows/)
+
+The Windows menubar tray application is built with Tauri 2.x and Rust, residing in the taskbar notification
+tray to present instant spend statistics and popovers. It binds safely to the local CLI executable via the
+`CODEBURN_BIN` environment variable (validated by `CodeburnCli::resolve()` in `dash/windows/src-tauri/src/cli.rs`),
+enforcing bounded payloads, strict process timeouts, and version gating against CLIs older than `0.9.9`.
+
+### Status Contract and Native Delivery
 
 The status contract is the one seam the native clients depend on: they spawn the CLI on an
 interval and decode its output, holding no analysis logic. Extending the optional `kyber`
@@ -275,6 +321,7 @@ project; the measured rationale the retirement would otherwise take with it is p
 
 ## Related
 
+- [KyberDash runbook](runbook.md) — local development, execution runners, demo bridge, and test suites across all 4 surfaces.
 - [KyberDash measurable rationale](../reference/kyberdash-rationale.md) — the measured
   failures behind Requirements 4, 5, 6 and the other quantified constraints.
 - [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — the

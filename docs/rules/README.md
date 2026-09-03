@@ -4,7 +4,7 @@ title: Rules
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-09-03
 ---
 
 # Rules
@@ -17,7 +17,7 @@ here.
 
 ## Inventory
 
-_No rule document has been written yet._
+- [`rules/feature-runbooks`](feature-runbooks.md) — Mandates that every component declared with `Type: Feature` in the component catalog provides a companion local run/test runbook or declares an explicit non-executable rationale.
 
 The repository's non-negotiables currently live in the root [`AGENTS.md`](../../AGENTS.md),
 which is where a contributor and an agent both look first. A rule earns its own document when

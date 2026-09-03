@@ -113,6 +113,48 @@ public sealed class DocumentCorpusTests : IDisposable
         Assert.Equal(0, Score(corpus, zeta, "why do we keep getting session"));
     }
 
+    [Fact]
+    public void OutOfVocabularyTermReturnsCalibratedCorpusShareBaseline()
+    {
+        DocumentCorpus corpus = Build();
+
+        // Fixture corpus has N documents (6 api documents + 1 catalog = 7 documents).
+        // Calibrated baseline with n_effective = max(1, floor(0.2 * N)):
+        // IDF_oov = ln(1 + (N - n_eff + 0.5) / (n_eff + 0.5))
+        int n = corpus.Documents.Count;
+        double nEffective = Math.Max(1.0, Math.Floor(0.2 * n));
+        double expected = Math.Log(1.0 + ((n - nEffective + 0.5) / (nEffective + 0.5)));
+        double actual = corpus.InverseDocumentFrequency("novelunseenterm");
+
+        Assert.Equal(expected, actual, precision: 6);
+        Assert.True(actual < Math.Log((2 * n) + 2), "Calibrated IDF must be lower than uncalibrated ln(2N + 2).");
+    }
+
+    [Fact]
+    public void QueryWithThreeMatchingTermsAndOneOovTermRetainsCoverageAboveRelevanceFloor()
+    {
+        DocumentCorpus corpus = Build();
+        DocumentModel zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
+
+        // "kerberos", "ticket", "renewal" match zeta; "novelunseenterm" is OOV.
+        double score = Score(corpus, zeta, "kerberos ticket renewal novelunseenterm");
+
+        Assert.True(score >= 0.25, $"Expected score {score:0.000} to be >= 0.25 relevance floor.");
+    }
+
+    [Fact]
+    public void UnanswerableQueryWithThreeOovTermsCollapsesFarBelowFloor()
+    {
+        DocumentCorpus corpus = Build();
+        DocumentModel zeta = corpus.Documents.Single(d => d.Frontmatter.Id == "api/zeta");
+
+        // "kerberos" matches incidentally, but 3 terms ("snorkelling", "parade", "marmalade") are OOV.
+        double score = Score(corpus, zeta, "kerberos snorkelling parade marmalade");
+
+        Assert.True(score < 0.25, $"Expected score {score:0.000} to collapse far below 0.25 floor.");
+        Assert.True(score < 0.10, $"Expected score {score:0.000} to be strictly under 0.10.");
+    }
+
     private static double Score(DocumentCorpus corpus, DocumentModel doc, string query) =>
         corpus.ScoreBody(
             doc,

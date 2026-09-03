@@ -15,7 +15,8 @@ This inventory tracks architectural and implementation plans across their lifecy
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| _(none)_ | | | |
+| [2026-09-03-kyberdash-runbooks-and-local-execution-standards.md](2026-09-03-kyberdash-runbooks-and-local-execution-standards.md) | Complete | 2026-09-03 | Author KyberDash operational runbooks across four surfaces, improve search discoverability in architecture docs, establish a repository-wide local run/test standard for all catalog features, and ensure ontology compliance. |
+| [2026-09-03-ontology-and-retrieval-engine-enhancements.md](2026-09-03-ontology-and-retrieval-engine-enhancements.md) | Complete | 2026-09-03 | Enhance KyberWeave.Core document ontology with keywords metadata, compound prefix coverage matching, and calibrated OOV term scoring. |
 
 ## Archived Plans
 
