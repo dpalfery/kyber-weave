@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Threading;
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -31,7 +33,7 @@ public sealed class NewSettings : CommandSettings
 
 public sealed partial class NewCommand : Command<NewSettings>
 {
-    public override int Execute(CommandContext context, NewSettings settings)
+    protected override int Execute(CommandContext context, NewSettings settings, CancellationToken cancellationToken)
     {
         string name = settings.Name;
         if (!MyRegex().IsMatch(name))
@@ -58,10 +60,12 @@ public sealed partial class NewCommand : Command<NewSettings>
         return 0;
     }
 
+    public int Execute(CommandContext context, NewSettings settings) => Execute(context, settings, CancellationToken.None);
+
     private static string Template(string template, string name, bool includeLicense, bool includeMetadata)
     {
-        string title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0]) + w[1..]));
-        (string description, string instructions) = template.ToLowerInvariant() switch
+        string title = string.Join(' ', name.Split('-').Select(w => char.ToUpper(w[0], CultureInfo.InvariantCulture) + w[1..]));
+        (string description, string instructions) = template.ToUpperInvariant() switch
         {
             "sop" => (
                 $"Use to perform {title} the same compliant way every time. Use when a request matches this procedure. Do NOT use for unrelated tasks or when approval limits are exceeded.",

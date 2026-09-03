@@ -25,7 +25,7 @@ public sealed partial class TomlAgentParser : IAgentParser
         Dictionary<string, string> metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // Simple TOML line-and-block extractor
-        string[] lines = content.Replace("\r\n", "\n").Split('\n');
+        string[] lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         for (int i = 0; i < lines.Length; i++)
         {
             string line = lines[i].Trim();
@@ -36,7 +36,7 @@ public sealed partial class TomlAgentParser : IAgentParser
             if (multilineMatch.Success)
             {
                 string key = multilineMatch.Groups["key"].Value;
-                string quoteSymbol = line.Substring(line.IndexOf('=') + 1).Trim();
+                string quoteSymbol = line.Substring(line.IndexOf('=', StringComparison.Ordinal) + 1).Trim();
                 List<string> blockLines = new List<string>();
                 i++;
                 while (i < lines.Length)

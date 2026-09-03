@@ -85,9 +85,9 @@ public static partial class SkillParser
     {
         // The block span includes the --- fences; strip leading/trailing fence lines.
         string slice = content.Substring(block.Span.Start, block.Span.Length);
-        List<string> lines = slice.Replace("\r\n", "\n").Split('\n').ToList();
-        if (lines.Count > 0 && lines[0].TrimStart().StartsWith("---")) lines.RemoveAt(0);
-        if (lines.Count > 0 && lines[^1].TrimStart().StartsWith("---")) lines.RemoveAt(lines.Count - 1);
+        List<string> lines = slice.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').ToList();
+        if (lines.Count > 0 && lines[0].TrimStart().StartsWith("---", StringComparison.Ordinal)) lines.RemoveAt(0);
+        if (lines.Count > 0 && lines[^1].TrimStart().StartsWith("---", StringComparison.Ordinal)) lines.RemoveAt(lines.Count - 1);
         return string.Join("\n", lines);
     }
 
@@ -129,7 +129,7 @@ public static partial class SkillParser
         void Consider(string target)
         {
             if (string.IsNullOrWhiteSpace(target)) return;
-            if (target.StartsWith("http://") || target.StartsWith("https://") || target.StartsWith('#') || target.StartsWith("mailto:"))
+            if (target.StartsWith("http://", StringComparison.Ordinal) || target.StartsWith("https://", StringComparison.Ordinal) || target.StartsWith('#') || target.StartsWith("mailto:", StringComparison.Ordinal))
                 return;
             string normalized = target.Trim();
             if (normalized.StartsWith("./", StringComparison.Ordinal))
@@ -153,7 +153,7 @@ public static partial class SkillParser
     {
         try
         {
-            if (relative.Contains("..")) return false; // traversal: treat as unresolved/suspicious
+            if (relative.Contains("..", StringComparison.Ordinal)) return false; // traversal: treat as unresolved/suspicious
             string full = Path.GetFullPath(Path.Combine(directoryPath, relative));
             string baseFull = Path.GetFullPath(directoryPath);
             if (!full.StartsWith(baseFull, StringComparison.Ordinal)) return false;
@@ -182,7 +182,9 @@ public static partial class SkillParser
 
     private static SkillResourceKind ClassifyResource(string relativePath)
     {
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         string top = relativePath.Split('/')[0].ToLowerInvariant();
+#pragma warning restore CA1308
         return top switch
         {
             "scripts" => SkillResourceKind.Script,

@@ -1,0 +1,85 @@
+{
+  "name": "codeburn",
+  "version": "0.9.23",
+  "description": "See where your AI spend goes - by task, tool, model, and project",
+  "type": "module",
+  "main": "./dist/cli.js",
+  "bin": {
+    "codeburn": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "THIRD_PARTY_NOTICES.md",
+    "!dist/parse-worker.js.map"
+  ],
+  "scripts": {
+    "bundle-litellm": "node scripts/bundle-litellm.mjs",
+    "build": "node scripts/bundle-litellm.mjs && tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/cli.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\" && npm run build:dash",
+    "build:cli": "tsup && node -e \"const fs=require('fs'); fs.copyFileSync('src/cli.ts','dist/cli.js'); fs.chmodSync('dist/cli.js',0o755)\"",
+    "build:dash": "cd dash && npm install --no-audit --no-fund --silent && npm run build",
+    "dev": "NODE_OPTIONS=--no-deprecation tsx src/cli.ts",
+    "test": "vitest run tests --exclude \"tests/cache-refresh-lock*\"",
+    "test:locks": "vitest run tests/cache-refresh-lock.test.ts tests/cache-refresh-lock-corrupt-body.test.ts tests/cache-refresh-lock-process.test.ts tests/cache-refresh-lock-status-snapshot.test.ts --poolOptions.forks.singleFork=true",
+    "test:watch": "vitest tests --exclude \"tests/cache-refresh-lock*\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "verify:upgrade": "node scripts/upgrade-path/run.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude-code",
+    "cursor",
+    "codex",
+    "kimi",
+    "devin",
+    "ibm-bob",
+    "opencode",
+    "pi",
+    "codebuff",
+    "codewhale",
+    "dsh",
+    "ai-coding",
+    "token-usage",
+    "cost-tracking",
+    "observability",
+    "developer-tools"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "author": "AgentSeal <hello@agentseal.org>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getagentseal/codeburn.git"
+  },
+  "bugs": {
+    "url": "https://github.com/getagentseal/codeburn/issues"
+  },
+  "homepage": "https://github.com/getagentseal/codeburn#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "bonjour-service": "^1.4.1",
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "ink": "^7.0.0",
+    "react": "^19.2.5",
+    "selfsigned": "^5.5.0",
+    "strip-ansi": "^7.2.0",
+    "undici": "^7.27.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.19.17",
+    "@types/react": "^19.2.14",
+    "@types/selfsigned": "^2.0.4",
+    "eslint": "^9.18.0",
+    "playwright": "^1.61.1",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^3.1.0"
+  }
+}

@@ -203,6 +203,161 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  build-kyberdash:
+    # Single-executable Node SEA packaging per KyberDash spec task 12.1 /
+    # decision D7. RIDs follow the stable Node SEA set (not the .NET RID set),
+    # so macOS is published as darwin-* rather than osx-* — install.sh re-maps.
+    # macOS builds run on macos-latest so postject can be followed by an
+    # ad-hoc codesign (which is what replaces postject's deliberate
+    # invalidation of the embedded codesignature, per design.md D7 caveat b).
+    name: Build KyberDash ${{ matrix.rid }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: darwin-arm64, os: macos-14,    exe: "",    archive: tar.gz }
+          - { rid: darwin-x64,   os: macos-14,    exe: "",    archive: tar.gz }
+          - { rid: linux-arm64,  os: ubuntu-latest, exe: "",  archive: tar.gz }
+          - { rid: linux-x64,    os: ubuntu-latest, exe: "",  archive: tar.gz }
+          - { rid: win-x64,      os: ubuntu-latest, exe: ".exe", archive: zip }
+    env:
+      NODE_VERSION: "22.13.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node (for tsup and postject only; SEA binary comes from nodejs.org/dist)
+        uses: actions/setup-node@5e7f8364d2f2567dd9615d69ce0a8b9b178a1842 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Bundle dash CLI as ESM + CJS
+        # Task 1 spike: SEA needs a CommonJS entry alongside the upstream ESM
+        # one. tsup emits both in one pass when --format lists both formats.
+        working-directory: dash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          # --clean=false so the existing dist/ stays intact for fallout paths.
+          # --splitting=false matches upstream while still emitting a single
+          # CJS file tsup names cli.js when both formats target the same entry.
+          npx tsup src/main.ts \
+            --format esm,cjs \
+            --target node20 \
+            --out-dir dist-sea \
+            --clean false \
+            --dts false \
+            --sourcemap false \
+            --splitting false
+          test -f dist-sea/cli.js || { echo "tsup did not emit cli.js" >&2; exit 1; }
+
+      - name: Build Node SEA for ${{ matrix.rid }}
+        working-directory: dash
+        env:
+          RID: ${{ matrix.rid }}
+          EXE: ${{ matrix.exe }}
+        run: |
+          set -euo pipefail
+          RID="${RID}"
+          case "${RID}" in
+              darwin-arm64) NODE_PLATFORM=darwin; NODE_ARCH=arm64 ;;
+              darwin-x64)   NODE_PLATFORM=darwin; NODE_ARCH=x64   ;;
+              linux-arm64)  NODE_PLATFORM=linux;  NODE_ARCH=arm64 ;;
+              linux-x64)    NODE_PLATFORM=linux;  NODE_ARCH=x64   ;;
+              win-x64)      NODE_PLATFORM=win;    NODE_ARCH=x64   ;;
+              *) echo "::error::unsupported RID: ${RID}"; exit 1 ;;
+          esac
+
+          BUNDLE_DIR="$(pwd)/dist-sea"
+          BIN_DIR="$(pwd)/dist-bin"
+          WORK="$(mktemp -d)"
+          mkdir -p "${BIN_DIR}"
+          trap 'rm -rf "${WORK}"' EXIT
+
+          # Download the platform's prebuilt Node archive from nodejs.org/dist.
+          # Homebrew's node formula ships with SEA disabled (spec D7 caveat a),
+          # so we never use it as the SEA host binary.
+          TARBALL="node-${NODE_VERSION}-${NODE_PLATFORM}-${NODE_ARCH}"
+          BASE_URL="https://nodejs.org/dist/${NODE_VERSION}"
+          if [ "${NODE_PLATFORM}" = "win" ]; then
+              URL="${BASE_URL}/${TARBALL}.zip"
+              curl -fsSL -o "${WORK}/node.zip" "${URL}"
+              unzip -q "${WORK}/node.zip" -d "${WORK}/node"
+              NODE_BIN="${WORK}/node/node${EXE}"
+          else
+              URL="${BASE_URL}/${TARBALL}.tar.xz"
+              curl -fsSL -o "${WORK}/node.tar.xz" "${URL}"
+              tar -xJf "${WORK}/node.tar.xz" -C "${WORK}/node" --strip-components=1
+              NODE_BIN="${WORK}/node/bin/node"
+          fi
+          [ -f "${NODE_BIN}" ] || { echo "::error::node binary missing"; exit 1; }
+
+          # Configure SEA. The CJS bundle written by tsup is named cli.js when
+          # both formats are emitted; that file is what the SEA loader resolves.
+          SEA_CONFIG="${WORK}/sea-config.json"
+          # shellcheck disable=SC2154
+          cat > "${SEA_CONFIG}" <<EOF
+          {
+            "main": "${BUNDLE_DIR}/cli.js",
+            "output": "${WORK}/sea-prep.blob",
+            "useSnapshot": false,
+            "disableExperimentalSEAWarning": true
+          }
+          EOF
+          "${NODE_BIN}" --build-sea "${SEA_CONFIG}"
+
+          FINAL_BIN="${BIN_DIR}/kyberdash${EXE}"
+          cp "${NODE_BIN}" "${FINAL_BIN}"
+          chmod +x "${FINAL_BIN}"
+
+          # Inject the SEA blob into the executable. postject (npm) reframes
+          # the binary without disturbing the executable header.
+          npm install --no-save --no-audit --no-fund postject@0.0.1-20240712
+          npx postject "${FINAL_BIN}" NODE_SEA_BLOB "${WORK}/sea-prep.blob" \
+            --sentinel-fuse-bytes 0
+
+          # macOS: ad-hoc codesign is required after postject replaces the
+          # embedded signature (spec D7 caveat b). Linux and Windows runners
+          # skip this step; install.sh strips com.apple.quarantine on first run.
+          if [ "${NODE_PLATFORM}" = "darwin" ]; then
+              codesign --sign - --force "${FINAL_BIN}"
+              codesign --verify --verbose "${FINAL_BIN}" || true
+              # Ensure no quarantine xattr was applied by AppleDouble-aware tools.
+              xattr -c "${FINAL_BIN}" || true
+          fi
+
+          # Archive the artifact under the RID-keyed name the installer expects.
+          if [ "${RID}" = "win-x64" ]; then
+              zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}"
+          else
+              tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}"
+          fi
+
+          # Verify the SEA host can still report --version (catches a corrupt
+          # blob or wrong-endianness inject failure before archiving).
+          "${FINAL_BIN}" --version >/dev/null
+
+          # Per-RID checksum file alongside the artifact, merged into the
+          # SHA256SUMS.txt that ships with the Release (handled in the
+          # release job by downloading all artifacts and re-checksumming).
+          ( cd "${BIN_DIR}" && sha256sum "kyberdash-${RID}"*.* ) > "${BIN_DIR}/SHA256SUMS.txt"
+          cat "${BIN_DIR}/SHA256SUMS.txt"
+
+      - name: Upload KyberDash archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: binaries-kyberdash-${{ matrix.rid }}
+          path: |
+            dash/dist-bin/kyberdash-${{ matrix.rid }}.tar.gz
+            dash/dist-bin/kyberdash-${{ matrix.rid }}.zip
+            dash/dist-bin/SHA256SUMS.txt
+          retention-days: 14
+          if-no-files-found: error
+
   pack-squad:
     name: Package Kyber-Squad
     needs: version
@@ -245,7 +400,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [version, build, pack-squad]
+    needs: [version, build, build-kyberdash, pack-squad]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
     environment: release
@@ -299,10 +454,12 @@ jobs:
           | --- | --- |
           | CLI | \`kyber-weave-<rid>.tar.gz\` / \`.zip\` |
           | MCP | \`kyber-weave-mcp-<rid>.tar.gz\` / \`.zip\` |
+          | KyberDash | \`kyberdash-<rid>.tar.gz\` / \`.zip\` |
           | Squad APM | \`kyber-squad-<version>.zip\` |
           | Squad Plugins | \`kyber-squad-plugin-<version>.zip\` |
 
-          RIDs: \`linux-x64\`, \`linux-arm64\`, \`osx-x64\`, \`osx-arm64\`, \`win-x64\`.
+          Kyber-Weave RIDs (\`osx-*\`, .NET): \`linux-x64\`, \`linux-arm64\`, \`osx-x64\`, \`osx-arm64\`, \`win-x64\`.
+          KyberDash RIDs (\`darwin-*\`, Node SEA): \`linux-x64\`, \`linux-arm64\`, \`darwin-x64\`, \`darwin-arm64\`, \`win-x64\`.
 
           Install:
           \`\`\`bash

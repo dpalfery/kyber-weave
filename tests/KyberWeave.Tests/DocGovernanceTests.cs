@@ -492,6 +492,137 @@ public class DocSpecValidatorTests
         Assert.Equal(["SomeService"], doc.CodeRefs);
         Assert.Equal(["GET /api/thing"], doc.ApiEndpoints);
     }
+
+    [Fact]
+    public void KeywordsDeserializeIntoModel()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/thing.md", """
+                ---
+                id: reference/thing
+                title: A Thing
+                doc-type: reference
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-07-21
+                keywords:
+                  - dashboard
+                  - tauri
+                ---
+
+                # A Thing
+                """);
+
+        DocumentModel doc = Assert.Single(fixture.LoadSubjects());
+
+        Assert.Equal(["dashboard", "tauri"], doc.Keywords);
+        Assert.NotNull(doc.Frontmatter.Keywords);
+        Assert.Equal(["dashboard", "tauri"], doc.Frontmatter.Keywords);
+    }
+
+    [Fact]
+    public void AliasesDeserializeIntoKeywordsWhenKeywordsOmitted()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/thing.md", """
+                ---
+                id: reference/thing
+                title: A Thing
+                doc-type: reference
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-07-21
+                aliases:
+                  - dashboard
+                  - tauri
+                ---
+
+                # A Thing
+                """);
+
+        DocumentModel doc = Assert.Single(fixture.LoadSubjects());
+
+        Assert.Equal(["dashboard", "tauri"], doc.Keywords);
+        Assert.NotNull(doc.Frontmatter.Aliases);
+        Assert.Equal(["dashboard", "tauri"], doc.Frontmatter.Aliases);
+    }
+
+    [Fact]
+    public void ValidKeywordsProduceNoDiagnostics()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/thing.md", """
+                ---
+                id: reference/thing
+                title: A Thing
+                doc-type: reference
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-07-21
+                keywords:
+                  - dashboard
+                  - tauri
+                ---
+
+                # A Thing
+                """);
+
+        DiagnosticReport report = fixture.Validate();
+
+        Assert.False(report.HasErrors);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void EmptyOrWhitespaceKeywordIsSPEC002(string keyword)
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/thing.md", $"""
+                ---
+                id: reference/thing
+                title: A Thing
+                doc-type: reference
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-07-21
+                keywords:
+                  - "{keyword}"
+                ---
+
+                # A Thing
+                """);
+
+        DiagnosticReport report = fixture.Validate();
+
+        Diagnostic item = Assert.Single(report.Items.Where(i => i.Code == DocSpecValidator.InvalidVocabulary));
+        Assert.Equal("Each keyword must be a non-empty string.", item.Hint);
+    }
+
+    [Fact]
+    public void NullKeywordEntryIsSPEC002()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/thing.md", """
+                ---
+                id: reference/thing
+                title: A Thing
+                doc-type: reference
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-07-21
+                keywords:
+                  -
+                ---
+
+                # A Thing
+                """);
+
+        DiagnosticReport report = fixture.Validate();
+
+        Diagnostic item = Assert.Single(report.Items.Where(i => i.Code == DocSpecValidator.InvalidVocabulary));
+        Assert.Equal("Each keyword must be a non-empty string.", item.Hint);
+    }
 }
 
 public class DocLinkAndExportTests

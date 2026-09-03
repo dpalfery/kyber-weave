@@ -69,7 +69,10 @@ public static class AnalysisCacheSafety
         if (pattern.EndsWith('/'))
             return databaseRelativePath.StartsWith(pattern, StringComparison.Ordinal);
 
-        if (!pattern.Contains('/'))
+        // CA1847 suggests Contains(char) for single-char search, but CA1307 requires StringComparison.Ordinal which is only available on the string overload
+#pragma warning disable CA1847
+        if (!pattern.Contains("/", StringComparison.Ordinal))
+#pragma warning restore CA1847
         {
             return FileSystemName.MatchesSimpleExpression(
                 pattern,
@@ -81,12 +84,14 @@ public static class AnalysisCacheSafety
         // Character classes and `**` are treated conservatively because collapsing `**` to
         // `*` under-matches git's recursive semantics, and accepting an uncertain negation
         // would make a cache appear safer than it is.
-        return pattern.Contains('[') || pattern.Contains("**", StringComparison.Ordinal)
+#pragma warning disable CA1847 // Single-char Contains with StringComparison requires string overload to satisfy CA1307
+        return pattern.Contains("[", StringComparison.Ordinal) || pattern.Contains("**", StringComparison.Ordinal)
             ? pattern.Contains("cache", StringComparison.Ordinal)
             : FileSystemName.MatchesSimpleExpression(
                 pattern,
                 databaseRelativePath,
                 ignoreCase: OperatingSystem.IsWindows());
+#pragma warning restore CA1847
     }
 
     private static bool HasTrackedCacheEntry(string repositoryRoot)

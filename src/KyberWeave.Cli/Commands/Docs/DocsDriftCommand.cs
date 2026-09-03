@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using System.Threading;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
@@ -10,7 +11,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Entity-drift tier: resolves documented code references against CodeGraph.</summary>
 public sealed class DocsDriftCommand : Command<DocsSettings>
 {
-    public override int Execute(CommandContext context, DocsSettings settings)
+    protected override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateLoader(settings, report, out DocumentLoader? loader))
@@ -26,4 +27,6 @@ public sealed class DocsDriftCommand : Command<DocsSettings>
         CommandHelpers.Finish(report, settings, "docs drift", "Document");
         return report.HasErrors ? 1 : 0;
     }
+
+    public int Execute(CommandContext context, DocsSettings settings) => Execute(context, settings, CancellationToken.None);
 }

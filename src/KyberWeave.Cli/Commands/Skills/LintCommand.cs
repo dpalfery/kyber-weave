@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Threading;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
@@ -22,7 +23,7 @@ public sealed class LintSettings : AnalysisSettings
 
 public sealed class LintCommand : Command<LintSettings>
 {
-    public override int Execute(CommandContext context, LintSettings settings)
+    protected override int Execute(CommandContext context, LintSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         SkillSet set = CommandHelpers.LoadOrReport(settings.Path, report);
@@ -55,4 +56,6 @@ public sealed class LintCommand : Command<LintSettings>
         // Lint errors (name collisions) gate; warnings do not fail by default.
         return report.HasErrors ? 1 : 0;
     }
+
+    public int Execute(CommandContext context, LintSettings settings) => Execute(context, settings, CancellationToken.None);
 }

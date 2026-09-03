@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using Xunit;
@@ -34,30 +35,24 @@ public sealed class RetrievalRegressionTests
     /// <summary>Question a person would ask → the document id that answers it.</summary>
     public static TheoryData<string, string> Cases() => new()
     {
-        // The reported miss: plain wording, no jargon. The answer is a troubleshooting
-        // runbook that says "users are silently logged out" almost verbatim, but every
-        // requirements document is dense with "user", "session" and "authentication".
-        { "why does the user keep getting logged out", "operations/webui-bff-data-protection-troubleshooting" },
-        { "users are silently logged out after a deploy", "operations/webui-bff-data-protection-troubleshooting" },
+        // Novel / specialized terminology targeting dash/architecture.
+        { "dashboard dev environment tauri", "dash/architecture" },
 
-        // The same subject in the vocabulary you would need to already know. Retrieval is
-        // only worth having if both forms work, so both are pinned.
-        { "rotate data protection keys if blob storage is unavailable", "operations/webui-bff-data-protection-disaster-recovery" },
+        // Governance and ontology questions.
+        { "what frontmatter keys does a document need", "documentation-ontology" },
 
         // Component-shaped questions, asked the way people ask them.
-        { "how is the web ui put together", "webui/architecture" },
-        { "how do I run the web ui locally", "webui/onboarding" },
-        { "what does the BFF do", "webui-bff/architecture" },
-        { "how does the mobile app authenticate", "mobile/architecture" },
+        { "multi-harness agent and skill deployment", "squad/architecture" },
+        { "parallel code review council specialist lenses", "code-review/architecture" },
+        { "diagnostic engine rule ids and sarif", "ci-pipelines/architecture" },
+        { "how does retrieval scoring work", "docgraph/retrieval" },
 
         // Identity lookups: a doc-id is an exact handle and must win outright.
-        { "webui/architecture", "webui/architecture" },
-        { "api/architecture", "api/architecture" },
-
-        // Governance and operations.
-        { "what frontmatter keys does a document need", "system/documentation-ontology" },
-        { "how do I set up my dev machine", "devops/developer-setup-standard" },
-        { "what are the branch protection rules", "operations/github-branch-protection" },
+        { "docgraph/architecture", "docgraph/architecture" },
+        { "dash/architecture", "dash/architecture" },
+        { "squad/architecture", "squad/architecture" },
+        { "code-review/architecture", "code-review/architecture" },
+        { "documentation-ontology", "documentation-ontology" },
     };
 
     [Theory]
@@ -68,7 +63,7 @@ public sealed class RetrievalRegressionTests
         if (root is null) return;
 
         DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(root).Load(),
+            new DocumentLoader(root, KyberWeaveConfigLoader.Load(root).Ontology).Load(),
             CodeGraphResolverAdapter.ForRepository(root));
 
         List<string> ids = index.Explore(query, maxDocs: TopN)
@@ -98,7 +93,7 @@ public sealed class RetrievalRegressionTests
         if (root is null) return;
 
         DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(root).Load(),
+            new DocumentLoader(root, KyberWeaveConfigLoader.Load(root).Ontology).Load(),
             CodeGraphResolverAdapter.ForRepository(root));
 
         IReadOnlyList<DocumentHit> hits = index.Explore(query, maxDocs: TopN);
@@ -118,7 +113,7 @@ public sealed class RetrievalRegressionTests
 
         while (directory is not null)
         {
-            if (Directory.Exists(Path.Combine(directory.FullName, "6-Docs")) &&
+            if (File.Exists(Path.Combine(directory.FullName, "KyberWeave.sln")) &&
                 File.Exists(Path.Combine(directory.FullName, "AGENTS.md")))
             {
                 return directory.FullName;

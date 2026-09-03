@@ -853,6 +853,7 @@ public sealed class ManagedGlossaryService
         return lines;
     }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static string SenseId(GlossaryProposal proposal)
     {
         string slug = new string(proposal.Term.Trim().ToLowerInvariant()
@@ -866,6 +867,7 @@ public sealed class ManagedGlossaryService
         string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..8];
         return $"{slug}-{hash}";
     }
+#pragma warning restore CA1308
 
     private static string OwnershipFingerprint(string row, IReadOnlyList<string> evidenceLines)
     {

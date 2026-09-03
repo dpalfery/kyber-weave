@@ -1,0 +1,67 @@
+# gitleaks config for codeburn.
+#
+# Extends the default ruleset and allowlists the cases a full-history audit
+# (2026-08-04) confirmed are NOT secrets, so scans stay green and a real leak
+# is never buried under recurring false positives. See each entry for why the
+# match is safe; nothing here suppresses a live credential.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures: obviously-fake API keys used as parser/validator input."
+# sk-live-0123456789abcdef... and sk-live-AKIA1234567890SECRETKEY live in
+# packages/core and root test suites purely as decode/redaction fixtures.
+condition = "AND"
+regexes = [
+  '''sk-live-0123456789abcdef''',
+  '''sk-live-AKIA1234567890SECRETKEY''',
+]
+paths = ['''(^|/)tests?/''']
+
+[[allowlists]]
+description = "Public OAuth client IDs (PKCE public-client flow, public by design, no client_secret)."
+# Claude Code and Codex OAuth client identifiers. Client IDs travel in the
+# authorization request and are not credentials; the flows carry no secret.
+regexes = [
+  '''9d1c250a-e61b-44d9-88ed-5944d1962f5e''',
+  '''app_EMoamEEZ73f0CkXaXp7hrann''',
+]
+
+[[allowlists]]
+description = "Non-secret identifiers the generic-api-key rule mis-fires on."
+# e.g. dedup keys like 'synth-retain-89d' in parser fixtures.
+condition = "AND"
+regexes = ['''synth-[a-z0-9-]+''']
+paths = ['''(^|/)tests?/''']
+
+[[allowlists]]
+description = "Canonical example JWT header used as a redaction/parse fixture (decodes to {\"alg\":\"HS256\",\"typ\":\"JWT\"}, carries no claims or signature)."
+condition = "AND"
+regexes = ['''eyJhbGciOiJIUzI1NiIsIn''']
+paths = ['''(^|/)tests?/''']
+
+[[allowlists]]
+description = "Test fixtures: synthetic Google OAuth tokens — obviously fake, never a live credential. Downstream hotfix: re-apply after git subtree pull." # nosemgrep
+# ya29.* test fixtures: test-secret, workspace-secret, refreshed, google-token, leak # nosemgrep
+regexes = ['''ya29\.(test-secret|workspace-secret|refreshed|google-token|leak)'''] # nosemgrep
+
+paths = ['''(^|/)(app/electron/quota/|mac/Tests/)''']
+
+[[allowlists]]
+# nosemgrep-style JWT for workspace id_token header eyJhbGciOiJub25l (alg:none) with hd claim — test fixture only.
+# Also covers eyJhbGci generic and eyJabc placeholder used in redaction test.
+description = "Test fixtures: synthetic JWTs for Gemini workspace id_token (alg:none, hd claim) — not a real credential."
+condition = "AND"
+regexes = ['''eyJhbGciOiJub25l''', '''eyJabc''']
+paths = ['''(^|/)(app/electron/quota/|mac/Tests/)''']
+
+[[allowlists]]
+description = "Docs false positive: priced/unpriced/estimated — cost semantics, not a secret."
+regexes = ['''priced/unpriced/estimated''']
+paths = ['''docs/release-acceptance/''']
+
+[[allowlists]]
+description = "Test fixtures: synthetic GitHub/Anthropic tokens (gho_ghub, sk-ant-*) in sanitizer test."
+regexes = ['''gho_ghub''', '''sk-ant-''']
+paths = ['''(^|/)app/electron/quota/security\.test\.''']
+

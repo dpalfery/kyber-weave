@@ -7,6 +7,11 @@ source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
 last-reviewed: 2026-08-23
 status: current
+keywords:
+  - multi-harness
+  - deployment
+  - agent
+  - skill
 code-refs:
   - SquadTransaction
   - SquadStateStore

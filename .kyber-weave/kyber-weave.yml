@@ -83,6 +83,39 @@ review:
       run: [dotnet, run, --project, src/KyberWeave.Cli, --, review, duplicates, ., --out, artifacts/duplicates.json]
       blocking: true
 
+    # TypeScript gates for the dash/ vendored subtree. They are the upstream
+    # counterpart to the dotnet gates above — three checks that run the same
+    # command a local contributor runs, behind the same argv-only contract
+    # the rest of the suite uses.
+    #
+    # --prefix dash sets the npm package root without a shell `cd`. argv
+    # only: the gate bodies are dash/package.json scripts whose names are
+    # fixed (`typecheck`, `test`, `lint`), so a script rename in upstream
+    # is a gate-name collision that surfaces on the very next review.
+    - id: ts-typecheck
+      run: [npm, run, --prefix, dash, typecheck]
+      blocking: true
+    # `test` excludes the cache-refresh-lock* files because vitest's default
+    # pool forks them concurrently and writes to the same lock file. The
+    # dash CI invokes those under `test:locks` instead. Mirroring that
+    # partition keeps the gate's exit code meaningful in CI exactly as it
+    # is for a local `npm test`.
+    - id: ts-test
+      run: [npm, run, --prefix, dash, test]
+      blocking: true
+    # Two-tier severity, owned by dash/eslint.config.js:
+    #   * Vendored upstream (dash/src/**, dash/tests/**, …) — recommended
+    #     rules run as warnings. The lint gate has the same "must run, not
+    #     must be debt-free" semantics as the inspectcode and duplicates
+    #     gates above: the baseline inherited from upstream is out of scope
+    #     for T2.2; cleaning it up is its own task.
+    #   * Merge zone (dash/kyber/**, KyberDash-only) — same recommended
+    #     rules run at error severity. A new violation inside the zone
+    #     KyberDash ships is the one that fails the gate.
+    - id: ts-lint
+      run: [npm, run, --prefix, dash, lint]
+      blocking: true
+
   # Bodies shorter than this are guard clauses and one-line delegations, which are
   # identical everywhere and evidence of nothing. The count is of normalized lines —
   # braces, blank lines, whole-line comments, and the signature are already gone — so a

@@ -36,17 +36,21 @@ internal static class ChecksumVerifier
             if (slash >= 0)
                 name = name[(slash + 1)..];
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
             if (string.Equals(name, archiveName, StringComparison.Ordinal))
                 return hex.ToLowerInvariant();
+#pragma warning restore CA1308
         }
 
         throw new SelfUpdateException(
             $"SHA256SUMS.txt has no entry for {archiveName}; refusing to install an unverified asset");
     }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     internal static void Verify(string expectedHex, ReadOnlySpan<byte> actualHash, string archiveName)
     {
         string actual = Convert.ToHexString(actualHash).ToLowerInvariant();
+#pragma warning restore CA1308
         if (!string.Equals(actual, expectedHex, StringComparison.Ordinal))
         {
             throw new SelfUpdateException(

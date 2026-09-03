@@ -148,8 +148,16 @@ public sealed class DocumentCorpus
     /// </summary>
     public double InverseDocumentFrequency(string term)
     {
+        if (_documentCount <= 0) return 0.0;
+
         double n = _documentFrequency.GetValueOrDefault(term);
-        return Math.Log(1 + ((_documentCount - n + 0.5) / (n + 0.5)));
+        if (n <= 0)
+        {
+            double nEffective = Math.Max(1.0, Math.Floor(0.2 * _documentCount));
+            return Math.Log(1.0 + ((_documentCount - nEffective + 0.5) / (nEffective + 0.5)));
+        }
+
+        return Math.Log(1.0 + ((_documentCount - n + 0.5) / (n + 0.5)));
     }
 
     /// <summary>

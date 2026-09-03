@@ -20,6 +20,18 @@ trim_trailing_whitespace = false
 [*.{cs,csx}]
 indent_size = 4
 
+# javascript/typescript stack emitted by the dash/ subtree (vendored upstream
+# plus any first-party TS glue KyberDash adds inside its merge zone). Two-space
+# indent matches the upstream tsup/tsc default and the existing TypeScript
+# style used in the broader web ecosystem.
+[*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}]
+indent_size = 2
+
+# Swift (dash/mac/). Four-space indent matches upstream CodeBurnMenubar and
+# the wider Swift community convention.
+[*.swift]
+indent_size = 4
+
 # Keep Style/Naming/Formatting/Documentation off at *build* time so
 # TreatWarningsAsErrors stays focused on CA quality rules. Individual IDE
 # severities below still drive `dotnet format style --severity warn`.

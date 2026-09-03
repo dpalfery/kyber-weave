@@ -187,7 +187,7 @@ public sealed partial class DocumentLoader
     internal static IReadOnlyList<DocumentSection> SplitSections(string body)
     {
         List<DocumentSection> sections = new List<DocumentSection>();
-        string[] lines = body.Replace("\r\n", "\n").Split('\n');
+        string[] lines = body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
         string? heading = null;
         int headingLine = 1;
@@ -236,6 +236,7 @@ public sealed partial class DocumentLoader
     private static bool HasProse(IEnumerable<string> lines) =>
         lines.Any(l => !string.IsNullOrWhiteSpace(l) && !l.TrimStart().StartsWith('#'));
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static DocType ParseDocType(string? value) =>
         value?.Trim().ToLowerInvariant() switch
         {
@@ -257,6 +258,7 @@ public sealed partial class DocumentLoader
 
     private static DocStatus ParseStatus(string? value) =>
         value?.Trim().ToLowerInvariant() switch
+#pragma warning restore CA1308
         {
             "current" => DocStatus.Current,
             "draft" => DocStatus.Draft,

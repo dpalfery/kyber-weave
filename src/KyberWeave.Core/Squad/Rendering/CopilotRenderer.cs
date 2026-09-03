@@ -222,7 +222,7 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         builder.Append("---\n");
 
-        string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n");
+        string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
         builder.Append(normalizedBody);
         if (!normalizedBody.EndsWith('\n'))
         {
@@ -264,7 +264,7 @@ public sealed class CopilotRenderer : ISquadRenderer
 
         builder.Append("---\n");
 
-        string normalizedBody = skill.InstructionBody.Replace("\r\n", "\n");
+        string normalizedBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
         builder.Append(normalizedBody);
         if (!normalizedBody.EndsWith('\n'))
         {

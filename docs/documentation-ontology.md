@@ -51,6 +51,7 @@ code-refs:
 | `technology` | The stack a coding standard governs. Declared in configuration, and equal to the folder the standard sits in. Rejected on any other doc-type. |
 | `owner` | Who answers for it. Must exist in [catalog.md](catalog.md). |
 | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error, not a warning. |
+| `keywords` | Domain synonyms, acronyms, or search aliases that route natural-language and specialized queries to this document. |
 | `code-refs` | Symbols this document formally claims to describe. Resolved against the code graph. |
 | `api-endpoints` | Exact route strings, e.g. `GET /api/me/usage`. Resolved against the code graph. |
 | `decided-by` | Ids of the ADRs that decided this document's content. |

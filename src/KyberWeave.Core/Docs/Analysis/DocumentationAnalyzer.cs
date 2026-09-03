@@ -488,8 +488,10 @@ public sealed partial class DocumentationAnalyzer(
 
         if (NegationPattern().IsMatch(left.Text) != NegationPattern().IsMatch(right.Text)) return true;
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         HashSet<string> leftModal = ModalPattern().Matches(left.Text).Select(match => match.Value.ToLowerInvariant()).ToHashSet();
         HashSet<string> rightModal = ModalPattern().Matches(right.Text).Select(match => match.Value.ToLowerInvariant()).ToHashSet();
+#pragma warning restore CA1308
         if (leftModal.Count > 0 && rightModal.Count > 0 && !leftModal.SetEquals(rightModal)) return true;
 
         if (DifferentCapturedValues(NumberPattern(), left.Text, right.Text)) return true;
@@ -517,11 +519,13 @@ public sealed partial class DocumentationAnalyzer(
     private static bool IsShellFence(Claim claim) => FenceLanguage(claim) is
         "sh" or "shell" or "bash" or "zsh" or "fish" or "powershell" or "pwsh" or "cmd" or "bat" or "batch";
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static string FenceLanguage(Claim claim) =>
         (claim.FenceInfo ?? string.Empty)
             .Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
             .FirstOrDefault()?
             .ToLowerInvariant() ?? string.Empty;
+#pragma warning restore CA1308
 
     private static IReadOnlyList<string> MeaningfulShellLines(Claim claim) =>
         claim.Text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
@@ -547,6 +551,7 @@ public sealed partial class DocumentationAnalyzer(
         return leftValues.Count > 0 && rightValues.Count > 0 && !leftValues.SetEquals(rightValues);
     }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static IReadOnlyList<string> SharedInformativeTerms(string left, string right)
     {
         HashSet<string> leftTerms = TermPattern().Matches(left.ToLowerInvariant())
@@ -561,6 +566,7 @@ public sealed partial class DocumentationAnalyzer(
             .Order(StringComparer.Ordinal)
             .ToArray();
     }
+#pragma warning restore CA1308
 
     private static bool IsInformativeTerm(string term) =>
         term.Length >= 4 && !TerminologyStopWords.Contains(term);
