@@ -161,6 +161,22 @@ function findComponent(node: unknown, predicate: (props: any) => boolean): React
       const found = findComponent((node.props as any).children, predicate)
       if (found) return found
     }
+    // Descend THROUGH child function components by rendering them, not just
+    // through `children`. Without this the walk stops at the first extracted
+    // component, so moving markup out of this file into its own component
+    // silently breaks every integration test that looks for a test id inside
+    // it — the behaviour is intact, the walker just cannot see it. The hook
+    // dispatcher installed above is what makes rendering them here safe.
+    if (typeof node.type === 'function') {
+      try {
+        const rendered = (node.type as (props: unknown) => unknown)(node.props)
+        const found = findComponent(rendered, predicate)
+        if (found) return found
+      } catch {
+        // A component that cannot render in this harness is not a match;
+        // keep walking the rest of the tree rather than failing the search.
+      }
+    }
   }
   return null
 }

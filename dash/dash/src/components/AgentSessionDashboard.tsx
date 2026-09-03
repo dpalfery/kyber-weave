@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { useState, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { cn, usd, fmtTokens, fmtNum } from '../lib/utils'
@@ -6,6 +5,7 @@ import { Card } from './ui/card'
 import { Skeleton } from './ui/skeleton'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer'
 import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts'
+import { SchemaCostRanking, type SchemaCostAnalysis } from './SchemaCostRanking'
 import { TimelineView, type TimelineNode, type CostBlock } from './kyber/TimelineView'
 
 // ---------------------------------------------------------------------------
@@ -554,13 +554,6 @@ export function AgentSessionContent({
   const schemaOffered = toolRows.filter((t) => t.in_definitions)
   const isSchemaMeasurable = schemaOffered.length > 0
 
-  const toolsByServer: Record<string, ToolRow[]> = {}
-  toolRows.forEach((t) => {
-    const srv = t.server || (t.is_mcp ? 'mcp' : 'builtin')
-    if (!toolsByServer[srv]) toolsByServer[srv] = []
-    toolsByServer[srv].push(t)
-  })
-
   return (
     <div
       className={cn('flex flex-col gap-6 p-4 sm:p-6 text-foreground', className)}
@@ -1003,142 +996,12 @@ export function AgentSessionContent({
           </div>
         )}
 
-        {/* Tools Ranking Table */}
-        <Card className="overflow-hidden border border-border">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs" data-testid="tools-ranking-table">
-              <thead className="border-b border-border bg-interactive-secondary/40 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                <tr>
-                  <th className="py-2.5 px-4">Tool</th>
-                  <th className="py-2.5 px-3">Server</th>
-                  <th className="py-2.5 px-3 text-right">Schema Size</th>
-                  <th className="py-2.5 px-3 text-right">Turns Resident</th>
-                  <th className="py-2.5 px-3 text-right">Resident Cost</th>
-                  <th className="py-2.5 px-3 text-right">Invocations</th>
-                  <th className="py-2.5 px-3 text-right">Cost / Call</th>
-                  <th className="py-2.5 px-3 text-right">Result Tokens</th>
-                  <th className="py-2.5 px-4 text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60 font-mono">
-                {toolRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="py-6 text-center text-sm font-sans text-muted-foreground">
-                      No tools recorded for this session.
-                    </td>
-                  </tr>
-                ) : (
-                  Object.entries(toolsByServer).map(([serverName, tools]) => {
-                    const sortedTools = [...tools].sort(
-                      (a, b) => (b.total_schema_cost ?? 0) - (a.total_schema_cost ?? 0)
-                    )
-                    const isMcpServer = sortedTools.some((t) => t.is_mcp)
-                    const serverTokens = sortedTools.reduce((acc, t) => acc + (t.schema_tokens || 0), 0)
-                    const serverCalls = sortedTools.reduce((acc, t) => acc + (t.invocations || 0), 0)
-                    const serverCost = sortedTools.reduce((acc, t) => acc + (t.total_schema_cost || 0), 0)
-                    const unusedCount = sortedTools.filter((t) => t.invocations === 0).length
-
-                    return (
-                      <React.Fragment key={serverName}>
-                        {/* Server Group Header */}
-                        <tr className="bg-muted/40 font-sans font-semibold text-[11px] text-muted-foreground">
-                          <td colSpan={2} className="py-2 px-4 flex items-center gap-2">
-                            <span className="text-foreground">{serverName}</span>
-                            {isMcpServer && (
-                              <span className="rounded bg-violet-500/15 border border-violet-500/30 px-1.5 py-0.2 text-[9px] font-semibold text-violet-600 dark:text-violet-400">
-                                MCP
-                              </span>
-                            )}
-                            <span className="text-tertiary-foreground font-normal">
-                              ({sortedTools.length} tool{sortedTools.length > 1 ? 's' : ''})
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono text-tertiary-foreground">
-                            {fmtTokens(serverTokens)}
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono text-tertiary-foreground">—</td>
-                          <td className="py-2 px-3 text-right font-mono text-foreground">
-                            {fmtTokens(serverCost)}
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono text-foreground">
-                            {serverCalls}
-                          </td>
-                          <td className="py-2 px-3 text-right font-mono text-tertiary-foreground">—</td>
-                          <td className="py-2 px-3 text-right font-mono text-tertiary-foreground">—</td>
-                          <td className="py-2 px-4 text-center font-sans text-[10px]">
-                            {unusedCount > 0 ? (
-                              <span className="text-amber-600 dark:text-amber-400">
-                                {unusedCount} unused
-                              </span>
-                            ) : (
-                              <span className="text-emerald-600 dark:text-emerald-400">all called</span>
-                            )}
-                          </td>
-                        </tr>
-
-                        {/* Tool Rows */}
-                        {sortedTools.map((t) => {
-                          const dead = t.invocations === 0
-                          return (
-                            <tr
-                              key={t.name}
-                              onClick={() => openDrawerForTool(t)}
-                              className={cn(
-                                'cursor-pointer transition-colors hover:bg-interactive-secondary/60',
-                                dead ? 'bg-red-500/[0.03]' : ''
-                              )}
-                              data-testid={`tool-row-${t.name}`}
-                            >
-                              <td className="py-2 px-4 font-semibold text-foreground flex items-center gap-2 truncate max-w-xs">
-                                <span className="text-xs shrink-0" role="img" aria-label="wrench">
-                                  🔧
-                                </span>
-                                <span className="truncate">{t.name}</span>
-                                {dead && (
-                                  <span className="rounded bg-red-500/15 border border-red-500/30 px-1 py-0.2 text-[9px] font-sans font-semibold text-red-600 dark:text-red-400 shrink-0">
-                                    0 calls
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-2 px-3 text-tertiary-foreground font-sans">
-                                {t.server || (t.is_mcp ? 'mcp' : 'builtin')}
-                              </td>
-                              <td className="py-2 px-3 text-right tabular-nums text-foreground">
-                                {t.schema_tokens != null ? fmtTokens(t.schema_tokens) : '—'}
-                              </td>
-                              <td className="py-2 px-3 text-right tabular-nums text-tertiary-foreground">
-                                {t.turns_resident != null ? t.turns_resident : '—'}
-                              </td>
-                              <td className="py-2 px-3 text-right tabular-nums font-semibold text-foreground">
-                                {t.total_schema_cost != null ? fmtTokens(t.total_schema_cost) : '—'}
-                              </td>
-                              <td className="py-2 px-3 text-right tabular-nums text-foreground">
-                                {t.invocations}
-                              </td>
-                              <td className="py-2 px-3 text-right tabular-nums text-tertiary-foreground">
-                                {t.cost_per_invocation != null ? fmtTokens(t.cost_per_invocation) : '—'}
-                              </td>
-                              <td className="py-2 px-3 text-right tabular-nums text-tertiary-foreground">
-                                {t.result_tokens != null ? fmtTokens(t.result_tokens) : '—'}
-                              </td>
-                              <td className="py-2 px-4 text-center font-sans text-[10px]">
-                                {dead ? (
-                                  <span className="text-red-500 dark:text-red-400">never called</span>
-                                ) : (
-                                  <span className="text-emerald-500 dark:text-emerald-400">active</span>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </React.Fragment>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        {/* Tools Ranking */}
+        <SchemaCostRanking
+          schema={(session as { schema?: SchemaCostAnalysis }).schema}
+          tools={toolRows}
+          onSelectTool={openDrawerForTool}
+        />
       </div>
 
       {/* ---------------------------------------------------------------------
