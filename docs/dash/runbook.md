@@ -52,6 +52,20 @@ flowchart TD
 
 ---
 
+## OTLP ingest and canonical store operations
+
+The web dashboard does not start the collector. Ingest is a separate foreground command
+that listens for OTLP over HTTP on `127.0.0.1:4318` at `POST /v1/traces` and writes to
+`~/.kyberdash/canon.db`.
+
+- `KYBER_CANON_DB` overrides the store path.
+- `AGENTDASH_DB` is opt-in with no default; set it only when pointing at a pre-analyzed
+  benchmark store.
+
+A store built by an older version migrates in place when opened; it is not rebuilt.
+
+---
+
 ## Surface 1: Electron Desktop App (`dash/app/`)
 
 The Electron desktop application provides a dedicated desktop window with animated charts,
@@ -211,19 +225,70 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    ```
    *(Or run `codeburn web` if linked in your PATH).*
 
-   **Supported CLI Options**:
+   **Supported CLI Options & Environment Variables**:
    - `--port <number>`: Target HTTP port (default: `3000` or next open port).
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
+    - `AGENTDASH_DB` or `KYBER_DB`: Path to pre-analyzed benchmark `sessions.db` (opt-in; no default).
+   - `KYBER_CANON_DB`: Path to live OTel store (default: `~/.kyberdash/canon.db`).
 
-### Running Unit Tests
+#### Navigating the 5 Web Dashboard Views
 
-Execute the web dashboard Vitest suite:
+The web dashboard provides five top-level tabs:
+- **`[Usage]`**: Device spend overview, multi-provider cost rollups, top projects, and daily spend timelines.
+- **`[Context]`**: Unified agent session explorer. Selecting Copilot, Gemini, or Pi loads the **Agent Session Analysis Dashboard** (`AgentSessionDashboard`):
+  - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
+  - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
+  - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
+  - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
+  - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
+  - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
+- **`[Compare]`**: Cross-harness comparison matrix across all active agents.
+- **`[Quarantine]`**: Quarantined spans holding unrecognized namespaces or malformed attributes for triage.
+- **`[Problems]`**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
 
+#### Querying REST Endpoints Directly
+
+You can inspect the backend JSON endpoints directly via curl or any HTTP client:
 ```bash
-npm --prefix dash run test tests/web-dashboard.test.ts
+# List available sessions
+curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
+
+# Inspect a specific session
+curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001 | jq .
+
+# Cross-harness comparison matrix
+curl -s http://127.0.0.1:3000/api/kyber/compare | jq .
+
+# Quarantine entries and problems
+curl -s http://127.0.0.1:3000/api/kyber/quarantine | jq .
+curl -s http://127.0.0.1:3000/api/kyber/problems | jq .
+
+# Telemetry metadata and rate definitions
+curl -s http://127.0.0.1:3000/api/kyber/meta | jq .
 ```
 
-This suite validates:
+### Running Unit & Contract Tests
+
+Execute the backend contract and web dashboard test suites:
+
+```bash
+# Comprehensive /api/kyber/* backend contract tests
+npx --prefix dash vitest run tests/kyber-api.test.ts
+
+# Web server bootstrap injection and error handling tests
+npx --prefix dash vitest run tests/web-dashboard.test.ts
+
+# SQLite query bridge tests
+npx --prefix dash vitest run tests/kyber-bridge.test.ts
+
+# Frontend component & navigation tests
+npx --prefix dash vitest run dash/src/App.test.tsx dash/src/components/AgentSessionDashboard.test.tsx
+```
+
+These suites validate:
+- Hermetic SQLite in-memory bridge querying and cross-harness aggregation.
+- Standard HTTP 200 responses with `content-type: application/json; charset=utf-8` and `cache-control: no-store`.
+- Edge cases: 400 on missing session IDs, 404 on nonexistent sessions/routes, 405 on non-GET methods.
 - Safe bootstrap injection (`injectDashboardBootstrap`) preventing XSS attacks when embedding session data.
 - Payload script-tag escaping (`\u003c/script>`).
 - Resilient error handling (returns HTTP 400 on invalid query params without crashing the long-running server process).

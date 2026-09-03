@@ -3,10 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="/codeburn-logo.png" />
-    <title>CodeBurn - Local Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/kyberdash-logo.svg" />
+    <link rel="alternate icon" type="image/png" href="/kyberdash-logo.png" />
+    <title>kyberDash - Local Dashboard</title>
     <script>
       // Apply the saved theme before first paint so the dashboard never flashes light.
+      // Keep the localStorage key `codeburn-theme` — renaming it both loses
+      // existing prefs and conflicts with every upstream pull of this script.
       (function () {
         var saved = null
         try {

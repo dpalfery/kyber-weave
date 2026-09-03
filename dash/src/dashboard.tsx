@@ -24,6 +24,7 @@ import { getPlanUsages, type PlanUsage } from './plan-usage.js'
 import { planDisplayName } from './plans.js'
 import { formatDayRangeLabel, getDateRange, parseDayFlag, PERIODS, PERIOD_LABELS, shiftDay, type Period } from './cli-date.js'
 import { BSU, patchStdoutForWindows } from './ink-win.js'
+import { BRAND, resolveCliName } from './brand-overlay.js'
 
 type View = 'dashboard' | 'optimize' | 'compare'
 
@@ -599,7 +600,7 @@ function Overview({ projects, label, width, planUsages, durable }: { projects: P
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={PANEL_COLORS.overview} paddingX={1} width={width}>
       <Text wrap="truncate-end">
-        <Text bold color={ORANGE}>CodeBurn</Text>
+        <Text bold color={ORANGE}>{BRAND.productName}</Text>
         <Text dimColor>  {label}</Text>
       </Text>
       <Text wrap="truncate-end">
@@ -884,8 +885,8 @@ function ModelBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: 
       {unpriced.length > 0 && (
         <Text color="yellow" wrap={pw <= 44 ? 'wrap' : 'truncate-end'}>
           {pw <= 44
-            ? `! ${unpriced.length}: codeburn models --unpriced`
-            : `! ${unpriced.length} unpriced: codeburn models --unpriced`}
+            ? `! ${unpriced.length}: ${resolveCliName()} models --unpriced`
+            : `! ${unpriced.length} unpriced: ${resolveCliName()} models --unpriced`}
         </Text>
       )}
       {anyEstimated && (
@@ -1351,7 +1352,7 @@ function OptimizeView({ findings, costRate, projects, label, width, healthScore,
     <Box flexDirection="column" width={width}>
       <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1} width={width}>
         <Text wrap="truncate-end">
-          <Text bold color={ORANGE}>CodeBurn Optimize</Text>
+          <Text bold color={ORANGE}>{BRAND.productName} Optimize</Text>
           <Text dimColor>  {label}   Setup: </Text>
           <Text bold color={gradeColor}>{healthGrade}</Text>
           <Text dimColor> ({healthScore}/100)</Text>
@@ -1439,7 +1440,7 @@ function DashboardContent({ projects, period, columns, maxContentWidth, activePr
   const { dashWidth, columnCount, panelWidth, barWidth } = getLayout(columns, maxContentWidth)
   const isCursor = activeProvider === 'cursor'
   const activeLabel = label ?? PERIOD_LABELS[period]
-  if (showEmptyState(projects.length, scrollableDailyHistory, (dailyHistoryProjects ?? []).length, dailyHistoryLoading)) return <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {activeLabel}.</Text></Panel>
+  if (showEmptyState(projects.length, scrollableDailyHistory, (dailyHistoryProjects ?? []).length, dailyHistoryLoading)) return <Panel title={BRAND.productName} color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {activeLabel}.</Text></Panel>
   const projectRows = Math.min(projects.length, getProjectBreakdownRowLimit(period, dayMode))
   const days = dailyHistoryPageSize ?? getDailyActivityPageSize(columnCount, projectRows, getActivityBreakdownRowCount(projects), dayMode)
   // A provider-scoped plan (e.g. SuperGrok) only makes sense on its own
@@ -2079,8 +2080,8 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
               </Box>
             </Box>
           : view === 'optimize'
-            ? <Panel title="CodeBurn Optimize" color={ORANGE} width={dashWidth}><Text dimColor>Scanning {headerLabel}...</Text></Panel>
-            : <Panel title="CodeBurn" color={ORANGE} width={dashWidth}><Text dimColor>Loading {headerLabel}...</Text></Panel>}
+            ? <Panel title={`${BRAND.productName} Optimize`} color={ORANGE} width={dashWidth}><Text dimColor>Scanning {headerLabel}...</Text></Panel>
+            : <Panel title={BRAND.productName} color={ORANGE} width={dashWidth}><Text dimColor>Loading {headerLabel}...</Text></Panel>}
         {quitArmed && indexing && <QuitConfirmationBanner width={dashWidth} />}
         {view !== 'compare' && <StatusBar width={dashWidth} showProvider={multipleProviders} view={view} findingCount={0} optimizeAvailable={false} compareAvailable={false} customRange={isCustomRange} dayMode={isDayMode} />}
       </Box>

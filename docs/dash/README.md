@@ -43,8 +43,9 @@ Observability belongs where the developer already works:
 
 | Capability | How It Solves the Problem |
 |---|---|
-| **Multi-Surface UI Delivery** | Provides dedicated Terminal TUI, browser Web Dashboard, Electron Desktop, and Windows Menubar Tray surfaces for flexible developer workflows. |
-| **.NET Aspire & Ingest Pipeline** | Ingests OTLP traces streamed from .NET Aspire alongside local session files across 41 agent harnesses. |
+| **Multi-Surface UI Delivery** | Provides dedicated Terminal TUI, 5-tab browser Web Dashboard (`[Usage]`, `[Context]`, `[Compare]`, `[Quarantine]`, `[Problems]`), Electron Desktop, and Windows Menubar Tray surfaces. |
+| **Embedded Agent Session Dashboard** | Deep context analysis inside the `Context` view: overview metrics strip, per-turn spend charts, semantic context composition heatmap, tool schema ranking table, execution timeline, and slide-out XML tag-folding inspector drawer. |
+| **Dual-Database Query Bridge** | Seamlessly unions live OTel records from `~/.kyberdash/canon.db` and 187 pre-analyzed historical benchmark sessions from `sessions.db` (`AGENTDASH_DB`). |
 | **Interactive Context Heatmap** | Visualizes context window headroom, token accumulation rates, and context pressure across conversation turns. |
 | **Tool & Subagent Trace Visualizer** | Displays deep hierarchical call graphs of MCP tool executions, subagent invocations, and return payloads. |
 | **Context Tuning Feedback Loop** | Provides empirical metrics to benchmark prompt reductions and skill routing optimizations against historical sessions. |
@@ -53,9 +54,9 @@ Observability belongs where the developer already works:
 
 ## Documentation Roadmap
 
-KyberDash is under active development. The following technical documentation pages are published or planned in this directory:
+The following technical documentation pages are published in this directory:
 
-* **Operational Runbook ([`runbook.md`](runbook.md))** — Local development, execution runners, and testing procedures across all 4 surfaces (Electron, Tauri, Web, TUI).
-* **Architecture ([`architecture.md`](architecture.md))** — Deep dive into the telemetry ingest pipeline, local web architecture, and Aspire OTEL integration.
-* **Onboarding & Setup (`onboarding.md`)** — Quickstart guide to configuring .NET Aspire and launching the local KyberDash UI.
-* **Context Tuning Playbook (`tuning-playbook.md`)** — Practical guidelines for diagnosing context bloat and optimizing agent workflows using telemetry data.
+* **Operational Runbook ([`runbook.md`](runbook.md))** — Local development, execution runners, demo bridge, and test suites across all 4 surfaces.
+* **Architecture ([`architecture.md`](architecture.md))** — Deep dive into the telemetry ingest pipeline, dual-database SQLite bridge, 5-tab navigation, and REST API contract.
+* **ADR 0006: Soft Fork & Merge Zone ([`../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md`](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md))** — Core architectural decision for vendored subtree and embedded OTLP receiver.
+* **ADR 0007: Agent Session Analysis Integration ([`../adr/0007-kyberdash-agent-session-analysis-integration.md`](../adr/0007-kyberdash-agent-session-analysis-integration.md))** — Single coherent session view in Context, 5-tab topology, and dual-database bridge.

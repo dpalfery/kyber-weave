@@ -19,8 +19,10 @@
 import type { HarnessAdapter, RawSpan } from './base.js'
 import { resolveRootByParentage, traceGroup } from './base.js'
 import {
+  contentFromParts,
   validateTokens,
   type CanonicalRecord,
+  type ContentPart,
   type TokenUsage,
 } from '../types.js'
 
@@ -38,17 +40,27 @@ import {
  * semantic-conventions spelling of cache read and is accepted for the same
  * reason. Accepting a spelling is not attribution evidence — `detect` votes
  * on vendor namespaces, never on these shared keys.
+ *
+ * The bare, un-namespaced spellings are Claude Code's, whose spans carry
+ * `input_tokens` / `cache_read_tokens` directly. Reading only the namespaced
+ * forms dropped every counter it ever sent: 1,123 records in the measured
+ * corpus normalized to all-zero tokens, which then read as a session with no
+ * spend rather than as a session whose counters were not understood. The
+ * namespaced spellings are listed first so a harness sending both is read on
+ * its GenAI keys.
  */
-export const INPUT_TOKEN_KEYS = ['gen_ai.usage.input_tokens'] as const
-export const OUTPUT_TOKEN_KEYS = ['gen_ai.usage.output_tokens'] as const
+export const INPUT_TOKEN_KEYS = ['gen_ai.usage.input_tokens', 'input_tokens'] as const
+export const OUTPUT_TOKEN_KEYS = ['gen_ai.usage.output_tokens', 'output_tokens'] as const
 export const CACHE_READ_KEYS = [
   'gen_ai.usage.cache_read.input_tokens',
   'gen_ai.usage.cache_read_input_tokens',
   'gen_ai.usage.cached_tokens',
+  'cache_read_tokens',
 ] as const
 export const CACHE_CREATION_KEYS = [
   'gen_ai.usage.cache_creation.input_tokens',
   'gen_ai.usage.cache_creation_input_tokens',
+  'cache_creation_tokens',
 ] as const
 export const REASONING_KEYS = ['gen_ai.usage.reasoning_tokens'] as const
 
@@ -105,12 +117,288 @@ export function canonicalOp(attributes: Record<string, unknown>): string {
   return 'unspecified'
 }
 
-/** Map harness content attributes onto canonical keys; nothing else is guessed. */
+/**
+ * Attribute families naming the harness's own conversation. Copilot and
+ * Antigravity both emit `copilot_chat.chat_session_id`; Claude Code emits
+ * `session.id`, whose value is also the filename of its on-disk transcript,
+ * which is what lets file content and telemetry be joined for one session.
+ */
+export const SESSION_ID_KEYS = [
+  'gen_ai.session.id',
+  'session.id',
+  'copilot_chat.chat_session_id',
+  'gen_ai.conversation.id',
+] as const
+
+/** The harness's conversation id, or undefined. Never synthesized. */
+export function canonicalSessionId(attributes: Record<string, unknown>): string | undefined {
+  for (const key of SESSION_ID_KEYS) {
+    const value = attributes[key]
+    if (typeof value === 'string' && value !== '') return value
+  }
+  return undefined
+}
+
+// ---------------------------------------------------------------------------
+// Shared core — content attributes (R7.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Content attribute families. Harnesses disagree on spelling, so each bucket
+ * reads a family rather than one key. `gen_ai.prompt` is the flattened
+ * single-string form some harnesses emit; the structured
+ * `gen_ai.input.messages` supersedes it when both are present, because
+ * bucketing a flattened prompt understates every band and shows the shortfall
+ * as tokenizer drift, which it is not.
+ */
+export const SYSTEM_INSTRUCTION_KEYS = ['gen_ai.system_instructions'] as const
+export const INPUT_MESSAGE_KEYS = ['gen_ai.input.messages'] as const
+export const INSTRUCTION_RULE_KEYS = ['gen_ai.rules'] as const
+export const SKILL_KEYS = ['gen_ai.skills'] as const
+export const TOOL_DEFINITION_KEYS = ['gen_ai.tool.definitions', 'gen_ai.request.tools'] as const
+export const FLAT_PROMPT_KEYS = ['gen_ai.prompt'] as const
+
+/**
+ * Per-bucket token counters some harnesses report alongside the content
+ * (Antigravity emits all three). A reported count is `measured`; deriving one
+ * by tokenizing is not, and the two must not be confused (R4.6).
+ */
+export const SYSTEM_TOKEN_KEYS = ['gen_ai.usage.sys_tokens'] as const
+export const TOOL_DEFINITION_TOKEN_KEYS = ['gen_ai.usage.tool_tokens'] as const
+export const SKILL_TOKEN_KEYS = ['gen_ai.usage.skill_tokens'] as const
+export const RULE_TOKEN_KEYS = ['gen_ai.usage.rule_tokens'] as const
+export const MESSAGE_TOKEN_KEYS = ['gen_ai.usage.msg_tokens'] as const
+
+/** Fields a tool definition may name its MCP server under, as ground truth. */
+const TOOL_SERVER_FIELDS = ['server', 'mcp_server', 'mcpServer', 'server_name'] as const
+
+/**
+ * Read a counter that may legitimately be absent. `readCounter` folds absent
+ * into 0, which is the right answer for token classes but the wrong one here:
+ * a bucket the harness never counted must derive its count, not claim zero.
+ */
+export function readOptionalCounter(
+  attributes: Record<string, unknown>,
+  keys: readonly string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = attributes[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value)
+      if (Number.isFinite(parsed)) return parsed
+    }
+  }
+  return undefined
+}
+
+/** First present attribute across a key family, as a non-empty string. */
+function readText(
+  attributes: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = attributes[key]
+    if (typeof value === 'string' && value !== '') return value
+    if (value !== null && value !== undefined && typeof value === 'object') {
+      return JSON.stringify(value)
+    }
+  }
+  return undefined
+}
+
+/**
+ * Attribute values arrive either as JSON text (OTLP flattens structured
+ * attributes to strings) or already decoded. Undecodable text is not an
+ * error — it is content, and the caller stores it as such.
+ */
+function parseStructured(value: unknown): unknown {
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return undefined
+  }
+}
+
+/** The MCP server a tool definition names, or undefined. Never inferred. */
+function toolServer(tool: unknown): string | undefined {
+  if (tool === null || typeof tool !== 'object') return undefined
+  const record = tool as Record<string, unknown>
+  for (const field of TOOL_SERVER_FIELDS) {
+    const value = record[field]
+    if (typeof value === 'string' && value !== '') return value
+  }
+  return undefined
+}
+
+/**
+ * Tool-definition parts. When any definition names its server, one part per
+ * tool is emitted so `toolDefinitionsByServer` can attribute them; the
+ * harness-reported aggregate is deliberately dropped in that case, because
+ * spreading one total across N tools would fabricate per-server figures.
+ *
+ * When no definition names a server — Antigravity sends bare `[{name}]` —
+ * a single part carries the whole blob with the reported aggregate attached.
+ * That keeps the total exact and attributes nothing, which is the honest
+ * answer: those tokens land in `builtinToolDefinitionTokens`, not in a
+ * guessed server bucket.
+ */
+function toolDefinitionParts(
+  attributes: Record<string, unknown>,
+  nextOrder: () => number,
+): ContentPart[] {
+  const raw = readText(attributes, TOOL_DEFINITION_KEYS)
+  if (raw === undefined) return []
+
+  const reported = readOptionalCounter(attributes, TOOL_DEFINITION_TOKEN_KEYS)
+  const parsed = parseStructured(raw)
+
+  if (Array.isArray(parsed)) {
+    const servers = parsed.map(toolServer)
+    if (servers.some((server) => server !== undefined)) {
+      return parsed.map((tool, index) => ({
+        part: 'tool_definitions' as const,
+        text: typeof tool === 'string' ? tool : JSON.stringify(tool),
+        ...(servers[index] !== undefined ? { server: servers[index] } : {}),
+        order: nextOrder(),
+      }))
+    }
+  }
+
+  return [
+    {
+      part: 'tool_definitions' as const,
+      text: raw,
+      ...(reported !== undefined ? { tokens: reported } : {}),
+      order: nextOrder(),
+    },
+  ]
+}
+
+/**
+ * Conversation parts from the structured message list. Bucketing is on part
+ * TYPE, never role — harnesses disagree on which role owns a tool result, and
+ * the pipeline this ports from records that disagreement as the reason.
+ *
+ * System-role messages are skipped when `gen_ai.system_instructions` already
+ * supplied the system prompt: harnesses send the same text through both, and
+ * counting it twice inflates the bar past the model's reported input. (The
+ * Python pipeline does double-count here; this is a deliberate divergence.)
+ */
+function messageParts(
+  attributes: Record<string, unknown>,
+  hasSystemInstructions: boolean,
+  nextOrder: () => number,
+): ContentPart[] {
+  const raw = readText(attributes, INPUT_MESSAGE_KEYS)
+  if (raw === undefined) return []
+
+  const reported = readOptionalCounter(attributes, MESSAGE_TOKEN_KEYS)
+  const parsed = parseStructured(raw)
+  if (!Array.isArray(parsed)) {
+    return [
+      {
+        part: 'conversation_history',
+        text: raw,
+        ...(reported !== undefined ? { tokens: reported } : {}),
+        order: nextOrder(),
+      },
+    ]
+  }
+
+  const parts: ContentPart[] = []
+  for (const message of parsed) {
+    if (message === null || typeof message !== 'object') continue
+    const { role, parts: messageParts } = message as { role?: unknown; parts?: unknown }
+    if (hasSystemInstructions && role === 'system') continue
+    if (!Array.isArray(messageParts)) {
+      parts.push({ part: 'conversation_history', text: JSON.stringify(message), order: nextOrder() })
+      continue
+    }
+    for (const piece of messageParts) {
+      if (piece === null || typeof piece !== 'object') continue
+      const { type, text } = piece as { type?: unknown; text?: unknown }
+      const bucket = type === 'tool_result' ? 'tool_result_content' : 'conversation_history'
+      parts.push({
+        part: bucket,
+        text: typeof text === 'string' ? text : JSON.stringify(piece),
+        order: nextOrder(),
+      })
+    }
+  }
+
+  // The harness's message-token counter covers the whole list. It is applied
+  // only when every part landed in one bucket: split across conversation and
+  // tool-result buckets there is no non-arbitrary way to divide one total,
+  // and a fabricated split is worse than a derived count.
+  if (reported !== undefined && parts.length > 0 && parts.every((part) => part.part === 'conversation_history')) {
+    return parts.length === 1
+      ? [{ ...parts[0]!, tokens: reported }]
+      : parts
+  }
+  return parts
+}
+
+/**
+ * Map harness content attributes onto canonical parts; nothing is guessed.
+ * A bucket the attributes do not carry is absent, never zero (R10.1) — the
+ * analysis layer distinguishes the two and the charts say so.
+ */
+export function canonicalParts(attributes: Record<string, unknown>): ContentPart[] {
+  let order = 0
+  const nextOrder = () => order++
+  const parts: ContentPart[] = []
+
+  const system = readText(attributes, SYSTEM_INSTRUCTION_KEYS)
+  if (system !== undefined) {
+    const reported = readOptionalCounter(attributes, SYSTEM_TOKEN_KEYS)
+    parts.push({
+      part: 'system_prompt',
+      text: system,
+      ...(reported !== undefined ? { tokens: reported } : {}),
+      order: nextOrder(),
+    })
+  }
+
+  const rules = readText(attributes, INSTRUCTION_RULE_KEYS)
+  if (rules !== undefined) {
+    const reported = readOptionalCounter(attributes, RULE_TOKEN_KEYS)
+    parts.push({
+      part: 'instruction_context',
+      text: rules,
+      ...(reported !== undefined ? { tokens: reported } : {}),
+      order: nextOrder(),
+    })
+  }
+
+  const skills = readText(attributes, SKILL_KEYS)
+  if (skills !== undefined) {
+    const reported = readOptionalCounter(attributes, SKILL_TOKEN_KEYS)
+    parts.push({
+      part: 'instruction_context',
+      text: skills,
+      ...(reported !== undefined ? { tokens: reported } : {}),
+      order: nextOrder(),
+    })
+  }
+
+  parts.push(...toolDefinitionParts(attributes, nextOrder))
+  parts.push(...messageParts(attributes, system !== undefined, nextOrder))
+
+  if (!INPUT_MESSAGE_KEYS.some((key) => key in attributes)) {
+    const flat = readText(attributes, FLAT_PROMPT_KEYS)
+    if (flat !== undefined) {
+      parts.push({ part: 'conversation_history', text: flat, order: nextOrder() })
+    }
+  }
+
+  return parts
+}
+
+/** The flat per-bucket view of `canonicalParts`, for consumers that want it. */
 export function canonicalContent(attributes: Record<string, unknown>): CanonicalRecord['content'] {
-  const content: CanonicalRecord['content'] = {}
-  const prompt = attributes['gen_ai.prompt']
-  if (typeof prompt === 'string') content.conversation_history = prompt
-  return content
+  return contentFromParts(canonicalParts(attributes))
 }
 
 // ---------------------------------------------------------------------------
@@ -266,12 +554,15 @@ export function reconcileRequest(
  * blend bases silently (R5.1).
  */
 export function baseRecord(adapter: HarnessAdapter, raw: RawSpan): CanonicalRecord {
+  const parts = canonicalParts(raw.attributes)
+  const sessionId = canonicalSessionId(raw.attributes)
   return {
     spanId: raw.spanId,
     traceId: raw.traceId,
     parentSpanId: raw.parentSpanId,
     source: raw.source,
     harness: adapter.name,
+    ...(sessionId !== undefined ? { sessionId } : {}),
     name: raw.name,
     op: canonicalOp(raw.attributes),
     kind: raw.kind,
@@ -279,7 +570,8 @@ export function baseRecord(adapter: HarnessAdapter, raw: RawSpan): CanonicalReco
     durationMs: 0,
     status: 'unspecified',
     tokens: inclusiveConvention({ input: 0, cacheRead: 0, cacheCreation: 0, output: 0 }),
-    content: canonicalContent(raw.attributes),
+    content: contentFromParts(parts),
+    parts,
     cost: { basis: 'unknown', status: 'no_rate' },
     measurability: Object.fromEntries(
       adapter.unexportedMetrics().map((metric) => [metric, 'not_measurable' as const]),

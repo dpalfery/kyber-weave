@@ -1,0 +1,104 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "kyberdash:start-otel-collector",
+      "type": "shell",
+      "command": "node --no-deprecation --import tsx src/cli.ts otel --port 4318",
+      "options": {
+        "cwd": "${workspaceFolder}/dash"
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*KyberDash OTLP Trace Collector.*",
+          "endsPattern": ".*Ready to collect OTel telemetry.*"
+        }
+      }
+    },
+    {
+      "label": "kyberdash:build-supporting-system",
+      "type": "shell",
+      "command": "npm --prefix dash run build:cli && npm --prefix dash run build:dash",
+      "group": "build",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "kyberdash:run-supporting-system",
+      "type": "shell",
+      "command": "node --no-deprecation --import tsx src/cli.ts web --port 4747 --no-open",
+      "options": {
+        "cwd": "${workspaceFolder}/dash"
+      },
+      "dependsOn": "kyberdash:build-supporting-system",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": ".*dashboard at http://.*4747.*"
+        }
+      }
+    },
+    {
+      "label": "kyberdash:run-vite-dev-system",
+      "type": "shell",
+      "command": "npm --prefix dash/dash run dev",
+      "dependsOn": "kyberdash:run-supporting-system",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*VITE.*",
+          "endsPattern": ".*Local:.*http.*"
+        }
+      }
+    },
+    {
+      "label": "kyberdash:build-cli",
+      "type": "shell",
+      "command": "npm --prefix dash run build:cli",
+      "group": "build",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "kyberdash:build-electron",
+      "type": "shell",
+      "command": "npm --prefix dash run build:cli && npm --prefix dash/app run build:electron",
+      "group": "build",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "kyberdash:build-tauri-debug",
+      "type": "shell",
+      "command": "npm --prefix dash run build:cli && cargo build --manifest-path dash/windows/src-tauri/Cargo.toml",
+      "group": "build",
+      "presentation": {
+        "reveal": "silent"
+      },
+      "problemMatcher": ["$rustc"]
+    }
+  ]
+}

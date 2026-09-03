@@ -50,6 +50,7 @@ export type Current = {
   topActivities: Array<{ name: string; cost: number; turns: number; oneShotRate: number | null }>
   topModels: Array<{ name: string; cost: number; calls: number; savingsUSD: number }>
   providers: Record<string, number>
+  providerDetails?: Array<{ id: string; label: string; cost: number }>
   topProjects: Array<{ name: string; cost: number; sessions: number; avgCostPerSession: number }>
   tools: Array<{ name: string; calls: number }>
   subagents: Array<{ name: string; calls: number; cost: number }>
@@ -145,6 +146,7 @@ function normalizePayload(p?: Payload): Payload | undefined {
       topActivities: c.topActivities ?? [],
       topModels: c.topModels ?? [],
       providers: c.providers ?? {},
+      providerDetails: c.providerDetails ?? [],
       topProjects: c.topProjects ?? [],
       tools: c.tools ?? [],
       subagents: c.subagents ?? [],
@@ -234,7 +236,19 @@ export async function pairDevice(d: DiscoveredDevice): Promise<{ ok: boolean; na
   return res.json() as Promise<{ ok: boolean; name?: string; error?: string }>
 }
 
-export type ContextProvider = 'claude' | 'codex'
+export type ContextProvider =
+  | 'agent-all'
+  | 'claude'
+  | 'codex'
+  | 'antigravity'
+  | 'copilot-cli'
+  | 'copilot-vscode'
+  | 'copilot-agent'
+  | 'copilot'
+  | 'pi'
+  | 'opencode'
+  | 'kilo-code'
+  | 'cursor'
 
 export type ContextSessionInfo = {
   provider: ContextProvider

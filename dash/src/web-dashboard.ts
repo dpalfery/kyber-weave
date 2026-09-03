@@ -1,10 +1,12 @@
 import { createServer, type Server } from 'http'
 import { exec } from 'child_process'
-import { readFile } from 'fs/promises'
+import { readFile, stat } from 'fs/promises'
 import { existsSync } from 'fs'
-import { join, normalize, extname, dirname, sep } from 'path'
+import { join, normalize, extname, dirname, sep, basename } from 'path'
 import { fileURLToPath } from 'url'
 import { AddressInfo } from 'net'
+import { getProvider } from './providers/index.js'
+import { applyHtmlBrand, BRAND } from './brand-overlay.js'
 
 import { hostname } from 'os'
 
@@ -19,8 +21,21 @@ import { pairingCode } from './sharing/pairing.js'
 import { getSharingDir, loadRemotes, loadShareAlways, saveShareAlways } from './sharing/store.js'
 import { ShareController } from './sharing/share-controller.js'
 import { sanitizeForSharing } from './sharing/sanitize.js'
-import { buildContextTree, findClaudeSession, listRecentTitledSessions, snapshotRows, type ContextTreeResult, type SessionRef } from './context-tree.js'
+import {
+  buildContextTree,
+  findClaudeSession,
+  listRecentTitledSessions,
+  snapshotRows,
+  newAcc,
+  add,
+  snapshot,
+  type ContextTreeResult,
+  type SessionRef,
+  type ContextSnapshot,
+} from './context-tree.js'
 import { buildCodexContextTree, findCodexSession, listRecentCodexSessions } from './context-tree-codex.js'
+import { KyberBridge } from '../kyber/server/bridge.js'
+import { handleKyberRequest } from '../kyber/server/routes.js'
 
 function readBody(req: import('http').IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -100,7 +115,10 @@ export function injectDashboardBootstrap(html: string, payload: unknown): string
   // Keep the JSON safe at the boundary where it enters an HTML script. This is
   // deliberately inside the helper so callers cannot forget the escape.
   const safeJson = json.replace(/</g, String.fromCharCode(92) + 'u003c')
-  return html.replace('<script type="module"', () => `<script>window.__CODEBURN_BOOTSTRAP__=${safeJson}</script>\n    <script type="module"`)
+  // Title/favicon overlay: if a subtree pull restores CodeBurn chrome in
+  // index.html, serving still shows kyberDash without renaming upstream assets.
+  const branded = applyHtmlBrand(html)
+  return branded.replace('<script type="module"', () => `<script>window.__CODEBURN_BOOTSTRAP__=${safeJson}</script>\n    <script type="module"`)
 }
 
 export async function runWebDashboard(opts: {
@@ -112,9 +130,11 @@ export async function runWebDashboard(opts: {
   exclude: string[]
   port: number
   open: boolean
+  kyberBridge?: KyberBridge
 }): Promise<Server> {
   await loadPricing()
   const dashDir = resolveDashDir()
+  const bridge = opts.kyberBridge ?? new KyberBridge()
 
   // Sharing this device serves the SANITIZED aggregate (no project names/paths
   // or per-session detail), unlike the local /api/usage which shows everything.
@@ -184,6 +204,112 @@ export async function runWebDashboard(opts: {
       contextTreeCache.delete(oldest)
     }
     return tree
+  }
+
+  const listSessionsForProvider = async (
+    provider: string,
+    limit = 15,
+  ): Promise<
+    Array<{
+      provider: string
+      sessionId: string
+      project: string
+      title: string
+      mtimeMs: number
+      sizeBytes: number
+    }>
+  > => {
+    if (provider === 'claude') {
+      const refs = await listRecentTitledSessions(limit)
+      return refs.map((r) => ({
+        provider: 'claude',
+        sessionId: r.sessionId,
+        project: r.project,
+        title: r.title,
+        mtimeMs: r.mtimeMs,
+        sizeBytes: r.sizeBytes,
+      }))
+    }
+    if (provider === 'codex') {
+      const refs = await listRecentCodexSessions(limit)
+      return refs.map((r) => ({
+        provider: 'codex',
+        sessionId: r.sessionId,
+        project: r.project,
+        title: r.title,
+        mtimeMs: r.mtimeMs,
+        sizeBytes: r.sizeBytes,
+      }))
+    }
+
+    let baseProvider = provider
+    let subType: string | undefined
+    if (provider === 'copilot-cli') {
+      baseProvider = 'copilot'
+      subType = 'cli'
+    } else if (provider === 'copilot-vscode') {
+      baseProvider = 'copilot'
+      subType = 'vscode'
+    } else if (provider === 'copilot-agent') {
+      baseProvider = 'copilot'
+      subType = 'agent'
+    }
+
+    const prov = await getProvider(baseProvider)
+    if (!prov) return []
+    let sources = await prov.discoverSessions()
+    if (subType === 'cli') sources = sources.filter((s) => s.sourceType === 'jsonl' || s.sourceType === 'session-store')
+    else if (subType === 'vscode') sources = sources.filter((s) => s.sourceType === 'chatsession' || s.sourceType === 'transcript')
+    else if (subType === 'agent') sources = sources.filter((s) => s.sourceType === 'otel')
+
+    const withStats = await Promise.all(
+      sources.map(async (s) => {
+        let filePath = s.path
+        if (filePath.includes(':ses_')) filePath = filePath.split(':')[0]
+        if (filePath.includes('#')) filePath = filePath.split('#')[0]
+        let mtimeMs = Date.now()
+        let sizeBytes = 0
+        try {
+          const st = await stat(filePath)
+          mtimeMs = st.mtimeMs
+          sizeBytes = st.size
+        } catch {
+          // ignore missing
+        }
+        let sessionId = basename(s.path)
+        if (s.sourceType === 'jsonl' && s.path.endsWith('/events.jsonl')) sessionId = basename(dirname(s.path))
+        else if (s.path.includes(':')) sessionId = s.path.split(':').pop() ?? sessionId
+        else sessionId = sessionId.replace(/\.(jsonl?|pb|db)$/, '')
+        return {
+          provider,
+          sessionId,
+          project: s.project || baseProvider,
+          title: `${s.project || baseProvider} session (${sessionId.slice(0, 8)})`,
+          mtimeMs,
+          sizeBytes,
+        }
+      }),
+    )
+    withStats.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    return withStats.slice(0, limit)
+  }
+
+  const buildGenericSnapshot = (estTokens: number, messageCount = 10): ContextSnapshot => {
+    const acc = newAcc()
+    acc.messages = messageCount
+    acc.assistantCount = Math.max(1, Math.round(messageCount * 0.4))
+    acc.userCount = Math.max(1, Math.round(messageCount * 0.4))
+
+    const systemTokens = Math.max(10, Math.round(estTokens * 0.15))
+    const assistantTokens = Math.max(20, Math.round(estTokens * 0.5))
+    const userTokens = Math.max(20, Math.round(estTokens * 0.25))
+    const toolTokens = Math.max(0, estTokens - systemTokens - assistantTokens - userTokens)
+
+    add(acc.system, systemTokens)
+    add(acc.assistantText, assistantTokens)
+    add(acc.userText, userTokens)
+    if (toolTokens > 0) add(acc.toolResult, toolTokens)
+    return snapshot(acc)
   }
 
   // Embed this machine's prewarmed payload in index.html for an instant first
@@ -337,12 +463,7 @@ export async function runWebDashboard(opts: {
       // local file paths.
       if (url.pathname === '/api/context/sessions') {
         const provider = url.searchParams.get('provider') ?? 'claude'
-        if (provider !== 'claude' && provider !== 'codex') {
-          writeJsonError(res, 400, 'provider must be claude or codex')
-          return
-        }
-        const refs = provider === 'claude' ? await listRecentTitledSessions(15) : await listRecentCodexSessions(15)
-        const sessions = refs.map((r) => ({ provider, sessionId: r.sessionId, project: r.project, title: r.title, mtimeMs: r.mtimeMs, sizeBytes: r.sizeBytes }))
+        const sessions = await listSessionsForProvider(provider, 15)
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify({ sessions }))
         return
@@ -350,25 +471,48 @@ export async function runWebDashboard(opts: {
       if (url.pathname === '/api/context/tree') {
         const provider = url.searchParams.get('provider') ?? 'claude'
         const id = url.searchParams.get('id') ?? ''
-        if ((provider !== 'claude' && provider !== 'codex') || !id) {
-          writeJsonError(res, 400, 'provider (claude|codex) and id are required')
+        if (!id) {
+          writeJsonError(res, 400, 'id is required')
           return
         }
-        // findClaudeSession/findCodexSession resolve an id prefix the same way
-        // `codeburn context <session>` does (see context-tree.ts's resolveSession) -
-        // trust that match instead of re-requiring the full id here, so a prefix
-        // that works on the CLI works through the API too.
-        const ref = provider === 'claude' ? await findClaudeSession(id) : await findCodexSession(id)
-        if (!ref) {
-          writeJsonError(res, 404, `no ${provider} session ${id}`)
+        if (provider === 'claude' || provider === 'codex') {
+          const ref = provider === 'claude' ? await findClaudeSession(id) : await findCodexSession(id)
+          if (!ref) {
+            writeJsonError(res, 404, `no ${provider} session ${id}`)
+            return
+          }
+          const tree = await getContextTree(provider, ref)
+          const payload = {
+            ...tree,
+            session: { sessionId: tree.session.sessionId, project: tree.session.project, mtimeMs: tree.session.mtimeMs, sizeBytes: tree.session.sizeBytes },
+            effectiveRows: snapshotRows(tree.effective),
+            fullRows: snapshotRows(tree.full),
+          }
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify(payload))
           return
         }
-        const tree = await getContextTree(provider, ref)
+
+        const sessions = await listSessionsForProvider(provider, 50)
+        const match = sessions.find((s) => s.sessionId === id || s.sessionId.startsWith(id))
+        const sizeBytes = match?.sizeBytes ?? 4096
+        const estTokens = Math.max(1, Math.round(sizeBytes / 4))
+        const effective = buildGenericSnapshot(estTokens, 12)
+        const full = buildGenericSnapshot(estTokens, 12)
         const payload = {
-          ...tree,
-          session: { sessionId: tree.session.sessionId, project: tree.session.project, mtimeMs: tree.session.mtimeMs, sizeBytes: tree.session.sizeBytes },
-          effectiveRows: snapshotRows(tree.effective),
-          fullRows: snapshotRows(tree.full),
+          session: {
+            sessionId: id,
+            project: match?.project ?? provider,
+            mtimeMs: match?.mtimeMs ?? Date.now(),
+            sizeBytes,
+          },
+          model: provider,
+          compactions: 0,
+          reported: null,
+          effective,
+          full,
+          effectiveRows: snapshotRows(effective),
+          fullRows: snapshotRows(full),
         }
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(payload))
@@ -382,6 +526,8 @@ export async function runWebDashboard(opts: {
         res.end(JSON.stringify({ ok }))
         return
       }
+
+      if (handleKyberRequest(req, res, url, bridge)) return
 
       if (!dashDir) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -434,17 +580,20 @@ export async function runWebDashboard(opts: {
   if (!dashDir) {
     process.stdout.write(`\n  Dashboard UI is not built. Run: cd dash && npm install && npm run build\n`)
   }
-  process.stdout.write(`\n  CodeBurn dashboard at ${url}\n  Press Ctrl+C to stop.\n\n`)
+  process.stdout.write(`\n  ${BRAND.productName} dashboard at ${url}\n  Press Ctrl+C to stop.\n\n`)
   if (opts.open) openBrowser(url)
 
-  // Withdraw the mDNS advertisement and close the share server cleanly on exit.
-  process.on('SIGINT', () => {
+  const onSigint = () => {
+    bridge.close()
     void share.stop().finally(() => process.exit(0))
+  }
+  process.on('SIGINT', onSigint)
+
+  // Ensure bridge is cleanly closed and signal handler removed when server stops
+  server.on('close', () => {
+    process.off('SIGINT', onSigint)
+    bridge.close()
   })
 
   return server
-
-  await new Promise<never>(() => {
-    /* run until interrupted */
-  })
 }

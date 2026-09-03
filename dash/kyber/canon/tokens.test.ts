@@ -7,7 +7,16 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { CanonStore } from './store.js'
 import type { Measurability } from './types.js'
-import { DERIVED, approximateO200kBase, cacheKey, tokenize, type TokenCount } from './tokens.js'
+import {
+  DERIVED,
+  O200K_TOKENIZER,
+  activeTokenizer,
+  approximateO200kBase,
+  cacheKey,
+  countO200kBase,
+  tokenize,
+  type TokenCount,
+} from './tokens.js'
 
 function memoryStore(): InstanceType<typeof DatabaseSync> {
   return new DatabaseSync(':memory:')
@@ -194,5 +203,36 @@ describe('tokenize', () => {
       expect(approximateO200kBase('abcd')).toBe(1)
       expect(approximateO200kBase('abcde')).toBe(2)
     })
+  })
+})
+
+describe('the real o200k_base encoder (R4.6)', () => {
+  it('counts what the published tokenization counts, not what chars/4 guesses', async () => {
+    // Published o200k_base tokenizations. The approximation is not close on
+    // any of them, which is the point: a bucket chart built on chars/4 needs
+    // a "treat this as a lower bound" caveat that a real count does not.
+    expect(await countO200kBase('hello world')).toBe(2)
+    expect(await countO200kBase('The quick brown fox jumps over the lazy dog.')).toBe(10)
+    expect(await countO200kBase('a'.repeat(1000))).toBe(125)
+  })
+
+  it('is materially different from the approximation it replaces', async () => {
+    const text = 'a'.repeat(1000)
+
+    expect(approximateO200kBase(text)).toBe(250)
+    expect(await countO200kBase(text)).toBe(125)
+  })
+
+  it('names the tokenizer that actually ran', async () => {
+    expect(await activeTokenizer()).toBe(O200K_TOKENIZER)
+  })
+
+  it('is the default counter tokenize() uses', async () => {
+    const db = new DatabaseSync(':memory:')
+    const result = await tokenize('hello world', 'gpt-4o', db)
+
+    expect(result.count).toBe(2)
+    expect(result.derived).toBe(true)
+    db.close()
   })
 })

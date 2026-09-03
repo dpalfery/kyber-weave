@@ -23,12 +23,24 @@ import { DeviceSearchModal } from '@/components/DeviceSearchModal'
 import { ContextExplorer } from '@/components/ContextExplorer'
 import { WorkflowPanel, hasWorkflowContent } from '@/components/WorkflowPanel'
 import { Punchcard } from '@/components/Punchcard'
-import { ContextView } from '@/components/kyber/ContextView'
-import { SchemaView } from '@/components/kyber/SchemaView'
-import { TimelineView } from '@/components/kyber/TimelineView'
 import { CompareView } from '@/components/kyber/CompareView'
-import { QuarantineView } from '@/components/kyber/QuarantineView'
-import { ProblemsView } from '@/components/kyber/ProblemsView'
+import { QuarantineView, type QuarantineEntry } from '@/components/kyber/QuarantineView'
+import { ProblemsView, type ProblemEntry } from '@/components/kyber/ProblemsView'
+import { LightsaberLogo } from '@/components/LightsaberLogo'
+
+const HARNESS_TABS = [
+  { id: 'all', label: 'All Harnesses' },
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'antigravity', label: 'Antigravity (AGY)' },
+  { id: 'copilot-cli', label: 'GitHub Copilot CLI' },
+  { id: 'copilot-vscode', label: 'Copilot (VS Code)' },
+  { id: 'copilot-agent', label: 'Copilot Agent' },
+  { id: 'pi', label: 'Pi' },
+  { id: 'opencode', label: 'OpenCode' },
+  { id: 'kilo-code', label: 'KiloCode' },
+  { id: 'cursor', label: 'Cursor' },
+] as const
 
 const n = (v: number | undefined): number => v ?? 0
 
@@ -422,11 +434,15 @@ function CombinedView({ devices, unit }: { devices: DeviceUsage[]; unit: Unit })
 // Theme toggle: mirrors the .dark class set by the index.html pre-paint script
 // and persists the choice to the same localStorage key.
 function ThemeToggle() {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  const [dark, setDark] = useState(() =>
+    typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : false,
+  )
   const toggle = () => {
     const next = !dark
     setDark(next)
-    document.documentElement.classList.toggle('dark', next)
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.toggle('dark', next)
+    }
     try {
       localStorage.setItem('codeburn-theme', next ? 'dark' : 'light')
     } catch {
@@ -455,119 +471,146 @@ function ThemeToggle() {
   )
 }
 
-type KyberPage = 'usage' | 'context' | 'kyber-context' | 'schema' | 'timeline' | 'compare' | 'quarantine' | 'problems'
+export const NAV_TABS = [
+  { key: 'usage', label: 'Usage' },
+  { key: 'context', label: 'Context' },
+  { key: 'compare', label: 'Compare' },
+  { key: 'quarantine', label: 'Quarantine' },
+  { key: 'problems', label: 'Problems' },
+] as const
 
-function KyberContextPanel() {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['kyber-context'],
-    queryFn: async () => {
-      const r = await fetch('/api/kyber/context')
-      if (!r.ok) throw new Error(String(r.status))
-      return r.json()
-    },
-    retry: false,
-  })
-  if (isLoading) return <Skeleton className="h-40" />
-  if (isError || !data) {
-    return (
-      <ContextView
-        analysis={{
-          measurable: false,
-          reason: 'declared_not_measurable',
-          turns: 0,
-          contextLimit: 200_000,
-        }}
-      />
-    )
-  }
-  return <ContextView analysis={data} />
-}
-function KyberSchemaPanel() {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['kyber-schema'],
-    queryFn: async () => {
-      const r = await fetch('/api/kyber/schema')
-      if (!r.ok) throw new Error(String(r.status))
-      return r.json()
-    },
-    retry: false,
-  })
-  if (isLoading) return <Skeleton className="h-40" />
-  if (isError || !data) {
-    return <SchemaView analysis={{ measurable: false, invocationCount: 0, reason: 'declared_not_measurable' }} />
-  }
-  return <SchemaView analysis={data} />
-}
-function KyberTimelinePanel() {
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['kyber-timeline'],
-    queryFn: async () => {
-      const r = await fetch('/api/kyber/timeline')
-      if (!r.ok) throw new Error(String(r.status))
-      return r.json()
-    },
-    retry: false,
-  })
-  if (isLoading) return <Skeleton className="h-40" />
-  if (isError || !data) return <TimelineView root={null} />
-  return <TimelineView root={data} />
-}
-function KyberComparePanel() {
-  const { data, isLoading, isError } = useQuery({
+export type KyberPage = (typeof NAV_TABS)[number]['key']
+
+export function KyberComparePanel() {
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['kyber-compare'],
     queryFn: async () => {
       const r = await fetch('/api/kyber/compare')
-      if (!r.ok) throw new Error(String(r.status))
+      if (!r.ok) {
+        const err = await r.json().catch(() => null)
+        throw new Error(err?.error || `HTTP ${r.status}`)
+      }
       return r.json()
     },
     retry: false,
   })
+
   if (isLoading) return <Skeleton className="h-40" />
-  if (isError || !data)
+
+  if (isError || !data || !Array.isArray((data as any).rows)) {
     return (
       <CompareView
         table={{
-          harnesses: [],
+          harnesses: Array.isArray((data as any)?.harnesses) ? (data as any).harnesses : [],
           rows: [],
-          problems: [{ severity: 'warning', code: 'no_data', message: 'No comparison data available' }],
+          problems: [
+            {
+              severity: 'warning',
+              code: isError ? 'fetch_error' : 'no_data',
+              message: isError
+                ? `Failed to load comparison data: ${error instanceof Error ? error.message : String(error)}`
+                : 'No comparison data available',
+            },
+          ],
         }}
       />
     )
-  return <CompareView table={data} />
+  }
+
+  return (
+    <CompareView
+      table={{
+        harnesses: Array.isArray(data.harnesses) ? data.harnesses : [],
+        rows: Array.isArray(data.rows) ? data.rows : [],
+        problems: Array.isArray(data.problems) ? data.problems : [],
+      }}
+    />
+  )
 }
-function KyberQuarantinePanel() {
+
+export function KyberQuarantinePanel() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['kyber-quarantine'],
     queryFn: async () => {
       const r = await fetch('/api/kyber/quarantine')
-      if (!r.ok) throw new Error(String(r.status))
+      if (!r.ok) {
+        const err = await r.json().catch(() => null)
+        throw new Error(err?.error || `HTTP ${r.status}`)
+      }
       return r.json()
     },
     retry: false,
   })
+
   if (isLoading) return <Skeleton className="h-20" />
   if (isError || !data) return <QuarantineView entries={[]} />
-  const entries = Array.isArray(data) ? (data as unknown[]) : (data as { entries?: unknown }).entries ?? data
-  return <QuarantineView entries={(entries as { spanId: string; namespaces: string[]; reason: string }[]) ?? []} />
+
+  const rawEntries = Array.isArray(data) ? data : (data as { entries?: unknown[] }).entries ?? []
+  if (!Array.isArray(rawEntries)) {
+    return <QuarantineView entries={[]} />
+  }
+
+  const entries: QuarantineEntry[] = rawEntries.map((e: any, idx: number) => {
+    let ns: string[] = []
+    if (Array.isArray(e.namespaces)) {
+      ns = e.namespaces.map(String)
+    } else if (typeof e.namespaces === 'string' && e.namespaces.trim()) {
+      try {
+        const parsed = JSON.parse(e.namespaces)
+        ns = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)]
+      } catch {
+        ns = e.namespaces.includes(',') ? e.namespaces.split(',').map((s: string) => s.trim()) : [e.namespaces.trim()]
+      }
+    }
+    return {
+      spanId: String(e.spanId || e.span_id || `quarantine-${idx}`),
+      namespaces: ns,
+      reason: String(e.reason || ''),
+    }
+  })
+
+  return <QuarantineView entries={entries} />
 }
-function KyberProblemsPanel() {
+
+export function KyberProblemsPanel() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['kyber-problems'],
     queryFn: async () => {
       const r = await fetch('/api/kyber/problems')
-      if (!r.ok) throw new Error(String(r.status))
+      if (!r.ok) {
+        const err = await r.json().catch(() => null)
+        throw new Error(err?.error || `HTTP ${r.status}`)
+      }
       return r.json()
     },
     retry: false,
   })
+
   if (isLoading) return <Skeleton className="h-20" />
   if (isError || !data) return <ProblemsView problems={[]} />
-  const problems = Array.isArray(data) ? (data as unknown[]) : (data as { problems?: unknown }).problems ?? data
-  return <ProblemsView problems={(problems as { severity: string; code: string; message: string }[]) as never} />
+
+  const rawProblems = Array.isArray(data) ? data : (data as { problems?: unknown[] }).problems ?? []
+  if (!Array.isArray(rawProblems)) {
+    return <ProblemsView problems={[]} />
+  }
+
+  const problems: ProblemEntry[] = rawProblems.map((p: any) => ({
+    severity: (p.severity === 'error' ? 'error' : 'warning') as 'error' | 'warning',
+    code: String(p.code || 'unknown'),
+    message: String(p.message || ''),
+    location: p.location || p.at || p.harness || undefined,
+    spanId: p.spanId || p.span_id || undefined,
+  }))
+
+  return <ProblemsView problems={problems} />
 }
 
-export function App() {
-  const [page, setPage] = useState<KyberPage>('usage')
+export interface AppProps {
+  initialPage?: KyberPage
+}
+
+export function App({ initialPage = 'usage' }: AppProps = {}) {
+  const [page, setPage] = useState<KyberPage>(initialPage)
   const [period, setPeriod] = useState<Period>('today')
   const [provider, setProvider] = useState('all')
   const [view, setView] = useState<string>('all')
@@ -583,7 +626,10 @@ export function App() {
   const { data, isError, error, refetch } = useQuery({
     queryKey: ['devices', period, provider],
     queryFn: () => fetchDevices(period, provider),
-    initialData: () => (period === 'today' && provider === 'all' ? window.__CODEBURN_BOOTSTRAP__ : undefined),
+    initialData: () =>
+      period === 'today' && provider === 'all' && typeof window !== 'undefined'
+        ? window.__CODEBURN_BOOTSTRAP__
+        : undefined,
     // Bootstrap paints instantly but is stale by definition, so refetch at once
     // (the default 30s staleTime would otherwise hide a live peer until then).
     initialDataUpdatedAt: 0,
@@ -637,16 +683,15 @@ export function App() {
     if (period === 'today' && sessions === 0) setPeriod('week')
   }, [local, period])
 
-  const providerOptions = useMemo(
-    () =>
-      c0
-        ? Object.entries(c0.providers)
-            .filter(([, v]) => v > 0)
-            .sort((a, b) => b[1] - a[1])
-            .map(([k]) => k)
-        : [],
-    [c0],
-  )
+  const providerOptions = useMemo(() => {
+    if (!c0) return []
+    if (c0.providerDetails && c0.providerDetails.length > 0) {
+      return c0.providerDetails.map((p) => p.id)
+    }
+    return Object.entries(c0.providers)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([k]) => k)
+  }, [c0])
 
   // If the device you're viewing drops off (slept/unreachable), fall back to
   // All devices instead of showing an empty panel with nothing selected.
@@ -657,12 +702,16 @@ export function App() {
   // If the selected provider isn't present on the current view, reset to all
   // (otherwise a healthy device shows empty under a filter it has no data for).
   useEffect(() => {
-    if (provider !== 'all' && c0 && !providerOptions.includes(provider)) setProvider('all')
+    const knownHarnesses = HARNESS_TABS.map((t) => t.id)
+    if (provider !== 'all' && c0 && !knownHarnesses.includes(provider as never) && !providerOptions.includes(provider)) {
+      setProvider('all')
+    }
   }, [provider, providerOptions, c0])
 
   // Follow the OS theme live while the user has no explicit preference, so
   // flipping the system theme updates the dashboard without a reload.
   useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
     const mql = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
       let saved: string | null = null
@@ -700,27 +749,19 @@ export function App() {
             </svg>
           </button>
           <div className="flex items-center gap-2 max-md:shrink-0">
-            <img src="/codeburn-logo.png" alt="CodeBurn" className="h-6 w-6" />
+            <LightsaberLogo className="h-6 w-6" />
             <span className="text-lg font-semibold tracking-[-0.02em] text-foreground">
-              Code<span className="text-brand">Burn</span>
+              kyber<span className="text-primary">Dash</span>
             </span>
-            <span className="ml-1 text-[11px] font-light uppercase tracking-[0.14em] text-tertiary-foreground max-sm:hidden">usage</span>
+            <span className="ml-1 text-[11px] font-light uppercase tracking-[0.14em] text-tertiary-foreground max-sm:hidden">telemetry</span>
           </div>
 
-          <div className="ml-6 flex rounded-md border border-border bg-interactive-secondary p-0.5 max-md:ml-2 max-md:shrink-0">
-            {( [
-              { key: 'usage', label: 'Usage' },
-              { key: 'context', label: 'Context' },
-              { key: 'kyber-context', label: 'Buckets' },
-              { key: 'schema', label: 'Schema' },
-              { key: 'timeline', label: 'Timeline' },
-              { key: 'compare', label: 'Compare' },
-              { key: 'quarantine', label: 'Quarantine' },
-              { key: 'problems', label: 'Problems' },
-            ] as const).map((pg) => (
+          <div className="ml-6 flex rounded-md border border-border bg-interactive-secondary p-0.5 max-md:ml-2 max-md:shrink-0" data-testid="nav-tabs">
+            {NAV_TABS.map((pg) => (
               <button
                 key={pg.key}
                 type="button"
+                data-testid={`nav-tab-${pg.key}`}
                 onClick={() => setPage(pg.key)}
                 className={cn(
                   'rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
@@ -771,17 +812,45 @@ export function App() {
               className="rounded-md border border-border bg-card px-3 py-1.5 text-xs text-foreground outline-none max-md:min-h-9 max-md:shrink-0"
             >
               <option value="all">All tools</option>
-              {providerOptions.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
+              {providerOptions.map((p) => {
+                const optLabel = c0?.providerDetails?.find((pd) => pd.id === p)?.label ?? p
+                return (
+                  <option key={p} value={p}>
+                    {optLabel}
+                  </option>
+                )
+              })}
             </select>
             </>
             )}
             <ThemeToggle />
           </div>
         </header>
+
+        <nav
+          aria-label="Harness tabs"
+          className="flex shrink-0 items-center gap-1.5 overflow-x-auto rounded-md border border-border bg-card px-3 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.02)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-tertiary-foreground">Harness:</span>
+          {HARNESS_TABS.map((tab) => {
+            const active = provider === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setProvider(tab.id)}
+                className={cn(
+                  'flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-all',
+                  active
+                    ? 'border border-primary/50 bg-primary/15 text-primary font-semibold shadow-xs'
+                    : 'border border-transparent text-tertiary-foreground hover:bg-interactive-secondary hover:text-foreground'
+                )}
+              >
+                <span>{tab.label}</span>
+              </button>
+            )
+          })}
+        </nav>
 
         <div className="flex min-h-0 flex-1 gap-2.5">
           {sidebarOpen && (
@@ -875,69 +944,20 @@ export function App() {
                 </div>
               )}
             </div>
-
-            <div className="mt-auto border-t border-border pt-4">
-              <p className="text-[11px] leading-relaxed text-tertiary-foreground">
-                Local only. Nothing leaves your machine; only totals are shared between your devices.
-              </p>
-              <div className="mt-3 flex items-center gap-1">
-                <a
-                  href="https://codeburn.app/"
-                  target="_blank"
-                  rel="noreferrer"
-                  title="codeburn.app"
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground"
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6">
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M3 12h18" />
-                    <path d="M12 3c2.5 2.7 2.5 15.3 0 18M12 3c-2.5 2.7-2.5 15.3 0 18" />
-                  </svg>
-                </a>
-                <a
-                  href="https://discord.com/invite/w2sw8mCqep"
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Discord"
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground"
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                    <path d="M20.317 4.369A19.79 19.79 0 0 0 16.558 3c-.2.36-.43.85-.59 1.23a18.27 18.27 0 0 0-5.93 0A12.6 12.6 0 0 0 9.44 3 19.7 19.7 0 0 0 5.68 4.37C2.9 8.46 2.14 12.45 2.52 16.38a19.9 19.9 0 0 0 6.07 3.08c.49-.67.93-1.38 1.3-2.13-.71-.27-1.4-.6-2.04-.99.17-.13.34-.26.5-.4 3.93 1.84 8.18 1.84 12.06 0 .17.14.33.27.5.4-.65.39-1.33.72-2.05.99.38.75.81 1.46 1.3 2.13a19.9 19.9 0 0 0 6.07-3.08c.45-4.55-.77-8.5-3.2-12.01zM9.69 14.5c-1.18 0-2.15-1.08-2.15-2.42 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.09 2.15 2.42 0 1.34-.95 2.42-2.15 2.42zm4.62 0c-1.18 0-2.15-1.08-2.15-2.42 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.09 2.15 2.42 0 1.34-.94 2.42-2.15 2.42z" />
-                  </svg>
-                </a>
-                <a
-                  href="https://x.com/_codeburn"
-                  target="_blank"
-                  rel="noreferrer"
-                  title="X"
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground"
-                >
-                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.65l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                  </svg>
-                </a>
-              </div>
-            </div>
           </aside>
 
           <main className="min-w-0 flex-1 overflow-y-auto pr-0.5">
             <div className="mb-3 flex items-baseline justify-between">
-              <h1 className="font-display text-xl tracking-tight text-foreground">
+              <h1 className="font-display text-xl tracking-tight text-foreground" data-testid="page-title">
                 {page === 'context'
                   ? 'Context'
-                  : page === 'kyber-context'
-                    ? 'Context buckets'
-                    : page === 'schema'
-                      ? 'Schema cost'
-                      : page === 'timeline'
-                        ? 'Timeline'
-                        : page === 'compare'
-                          ? 'Compare'
-                          : page === 'quarantine'
-                            ? 'Quarantine'
-                            : page === 'problems'
-                              ? 'Problems'
-                              : viewTitle}
+                  : page === 'compare'
+                    ? 'Compare'
+                    : page === 'quarantine'
+                      ? 'Quarantine'
+                      : page === 'problems'
+                        ? 'Problems'
+                        : viewTitle}
               </h1>
               <span className="text-xs text-tertiary-foreground">{page === 'usage' ? label : ''}</span>
             </div>
@@ -945,13 +965,7 @@ export function App() {
             {page === 'usage' && <IndexingNotice payload={primary?.payload} />}
 
             {page === 'context' ? (
-              <ContextExplorer />
-            ) : page === 'kyber-context' ? (
-              <KyberContextPanel />
-            ) : page === 'schema' ? (
-              <KyberSchemaPanel />
-            ) : page === 'timeline' ? (
-              <KyberTimelinePanel />
+              <ContextExplorer activeHarness={provider} onHarnessChange={(p) => setProvider(p)} />
             ) : page === 'compare' ? (
               <KyberComparePanel />
             ) : page === 'quarantine' ? (

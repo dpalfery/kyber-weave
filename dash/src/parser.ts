@@ -5466,7 +5466,8 @@ async function runParseInner(
   for (const providerName of Object.keys(diskCache.providers)) {
     if (processedProviders.has(providerName)) continue
     // Skip if filtered to a different provider
-    if (providerFilter && providerFilter !== 'all' && providerFilter !== providerName) continue
+    const effectiveProvider = providerFilter?.startsWith('copilot-') ? 'copilot' : providerFilter
+    if (effectiveProvider && effectiveProvider !== 'all' && effectiveProvider !== providerName) continue
     const section = diskCache.providers[providerName]
     if (!section || Object.keys(section.files).length === 0) continue
     // Use the persisted durable flag (set by parseProviderSources when it first

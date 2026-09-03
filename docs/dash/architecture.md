@@ -225,12 +225,30 @@ cannot report renders as "not measurable", never as zero — rendering an unrepo
 
 `CanonStore` (`dash/kyber/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction; metadata carries the schema
-version so a store built by an older version is detectable. Idempotent upsert is keyed on the
-record identifier, which makes re-ingest idempotent (R2.5). Tables cover raw records, the
-tokenization cache, quarantine, the ingest log, derived sessions, problems, and the
-schema-version metadata. The raw column is compressed (R12.4); the measured cost of not doing
+schema is a version-controlled constant executed on construction, currently at version 3;
+metadata carries the schema version, and a store built by an older version is migrated in
+place on open rather than rebuilt. Idempotent upsert is keyed on the
+record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
+`session`, `token_cache`, `quarantine`, `problems`, `ingest_log`, and `metadata`. The raw column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
+
+Two `records` columns carry the grouping and content model. `session_id` holds the harness's
+own conversation id, promoted out of the raw payload so sessions group with a `GROUP BY`;
+where the source names no session it falls back to the trace id. `parts_json` holds
+deflate-compressed structured content parts, each with its canonical bucket, its text, an
+optional harness-reported token count, and an optional ground-truth MCP server name. Where
+parts are present they are the authority: the flat content map is derived from them on read,
+so the same text is never stored twice.
+
+The `session` table holds derived sessions, one row per conversation. Each payload is built by
+running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) over the
+records, and the table is a cache: dropping every row and rebuilding loses nothing.
+
+`KyberBridge` (`dash/kyber/server/bridge.ts`) reads `canon.db` and serves the derived sessions
+above. It retains a fallback reader for the retired Python pipeline's `sessions.db`, opt-in
+through `AGENTDASH_DB` with no default. That fallback is being removed:
+[ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) supersedes ADR 0007's
+dual-database decision, and `canon.db` is the only store.
 
 Derived token counts (R4.6) come from `dash/kyber/canon/tokens.ts`, a tokenizer wrapper with a
 store-backed memo cache, and are tagged as derived with the model name so consumers present
@@ -278,12 +296,43 @@ It provides responsive layout breakpoints adapting to terminal width (single col
 two columns from 90 to 134 columns, and three columns at 135 columns and above, clamped at 256 columns),
 shortened project paths, interactive keyboard navigation, and live session refresh.
 
-### Web Dashboard (dash/dash/)
+### Web Dashboard (dash/dash/) and 5-Tab Navigation Topology
 
-The standalone browser web dashboard is a React application built with Vite and Tailwind CSS. It visualizes
-interactive token accumulation heatmaps, cost breakdowns, and agent turn timelines. In production, it is
-served directly by the CLI command `codeburn web` (or `node dash/dist/cli.js web`), which injects session
-bootstrapping with XSS protection and handles query filtering without crashing on invalid inputs.
+The standalone browser web dashboard is a React application built with Vite and Tailwind CSS.
+Served directly by the CLI command `codeburn web` (or `node dash/dist/cli.js web`), it injects session
+bootstrapping with XSS protection and exposes five primary top-level views ([ADR 0007](../adr/0007-kyberdash-agent-session-analysis-integration.md)):
+
+1. **`[Usage]`**: CodeBurn device overview, multi-provider spend rollups, top projects, and daily spend timelines.
+2. **`[Context]`**: Unified agent session explorer. Selecting an agent harness (Copilot, Gemini, Pi) loads
+   the rich **`AgentSessionDashboard`**:
+   - *Overview Strip*: Metric summary chips (spans, turns, total tokens, cache hit ratio, cost basis), reconciliation badge (`exact_match`), subagent links, and harness caveats.
+   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token usage across turns (fresh input, cache read, cache creation, output).
+   - *Context Composition Heatmap & Chart*: Token distribution across turns by semantic bucket (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
+   - *Tool & Schema Cost Table*: Ranked tool schemas, resident size, invocation counts, and unused schema waste range.
+   - *Execution Timeline / Call Tree*: Hierarchical span execution tree with status badges, durations, and auxiliary/subagent flags.
+   - *Slide-out Inspector Drawer (`SessionInspectorDrawer`)*: XML tag-folded details (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool parameter/result trees.
+   - *Legacy CLI Fallback*: Selecting CLI text sessions renders the estimated token `TreeTable`.
+3. **`[Compare]`**: Cross-harness comparison matrix benchmarking sessions, tokens/turn, tools offered vs invoked, and cost across agents.
+4. **`[Quarantine]`**: Quarantined spans holding unrecognized namespaces or malformed attributes for triage.
+5. **`[Problems]`**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
+
+### Backend REST API Contract (dash/src/web-dashboard.ts)
+
+The web dashboard server (`dash/src/web-dashboard.ts`) wires HTTP requests directly to `KyberBridge`:
+
+| Endpoint | Method | Response Schema | Description |
+|---|---|---|---|
+| `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
+| `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. |
+| `/api/kyber/compare` | `GET` | `ComparisonTableResult` | Cross-harness comparison matrix (`harnesses`, `rows`, `problems`). |
+| `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
+| `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[] }` | Recorded problems; supports `?limit=`. |
+| `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
+| `/api/kyber/context` | `GET` | `ContextAnalysis` | Backward-compatible context composition (supports `?id=`). |
+| `/api/kyber/schema` | `GET` | `SchemaAnalysis` | Backward-compatible tool schema ranking (supports `?id=`). |
+| `/api/kyber/timeline` | `GET` | `TimelineNode` | Backward-compatible timeline tree root (supports `?id=`). |
+
+All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
 
 ### Electron Desktop App (dash/app/)
 
@@ -326,5 +375,8 @@ project; the measured rationale the retirement would otherwise take with it is p
   failures behind Requirements 4, 5, 6 and the other quantified constraints.
 - [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — the
   foundational decisions and their rejected alternatives.
+- [ADR 0007](../adr/0007-kyberdash-agent-session-analysis-integration.md) — Agent Session Analysis
+  integration and navigation topology; its dual-database decision is superseded by
+  [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md).
 - [KyberDash index](README.md) — the product story.
 - [Component catalog](../catalog.md)

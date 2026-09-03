@@ -87,6 +87,47 @@ export type CanonicalContentKey = (typeof CANONICAL_CONTENT_KEYS)[number]
 /** Content addressed only through canonical keys; any key may be absent. */
 export type CanonicalContent = Partial<Record<CanonicalContentKey, string>>
 
+/**
+ * One addressable piece of a turn's context, carrying what a flat
+ * `CanonicalContent` string cannot: the ground-truth MCP server a tool
+ * definition arrived under, and a harness-reported token count for the piece.
+ *
+ * `tokens` present means the harness counted this part itself, so it is
+ * `measured` rather than `derived` (R4.6) and no tokenizer runs over it.
+ * `server` is set only when the payload names one; it is never recovered by
+ * splitting a prefixed tool name, which analysis/context.ts (R8.3) refuses
+ * because delimiters occur inside real server names.
+ */
+export type ContentPart = {
+  part: CanonicalContentKey
+  text: string
+  /** Harness-reported token count for this part; absent means derive it. */
+  tokens?: number
+  /** Ground-truth MCP server; `tool_definitions` parts only. */
+  server?: string
+  /** Position within the turn, so ordering survives a store round trip. */
+  order?: number
+}
+
+/**
+ * Collapse parts into the flat per-bucket strings `CanonicalContent` carries,
+ * so every consumer predating structured parts keeps working unchanged. Parts
+ * sharing a bucket join with a newline, in `order` and then insertion order —
+ * `Array.prototype.sort` is stable, so equal orders keep the sequence given.
+ */
+export function contentFromParts(parts: readonly ContentPart[]): CanonicalContent {
+  const grouped = new Map<CanonicalContentKey, string[]>()
+  for (const part of [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+    if (part.text === '') continue
+    const bucket = grouped.get(part.part)
+    if (bucket === undefined) grouped.set(part.part, [part.text])
+    else bucket.push(part.text)
+  }
+  const content: CanonicalContent = {}
+  for (const [key, texts] of grouped) content[key] = texts.join('\n')
+  return content
+}
+
 /** The central entity: one normalized span or synthesized session turn. */
 export type CanonicalRecord = {
   /** Primary key; makes re-ingest idempotent (R2.5). */
@@ -98,6 +139,14 @@ export type CanonicalRecord = {
   source: string
   /** Voted harness attribution (R6.2). */
   harness: string
+  /**
+   * The harness's own conversation id, when the telemetry carries one.
+   * Distinct from `traceId`: one session spans many traces, and a trace can
+   * be shared by spans the harness considers separate conversations. Absent
+   * means the source named none, and the session builder falls back to the
+   * trace — a fallback, never a claim that the two are the same thing.
+   */
+  sessionId?: string | null
   name: string
   /** Canonical operation, not the harness's verb. */
   op: string
@@ -107,6 +156,12 @@ export type CanonicalRecord = {
   status: string
   tokens: TokenUsage
   content: CanonicalContent
+  /**
+   * Structured view of `content`, when the source supplied one. Holds the
+   * per-server attribution and harness-reported counts the flat map cannot
+   * express; `content` stays the collapsed form of exactly these parts.
+   */
+  parts?: readonly ContentPart[]
   cost: CostBlock
   /** What this source cannot supply, per metric (R7.6, R8.5, R10.1). */
   measurability?: Measurability

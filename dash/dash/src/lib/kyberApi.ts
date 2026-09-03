@@ -29,3 +29,41 @@ export function fetchKyberQuarantine(): Promise<{ entries: KyberQuarantineEntry[
 export function fetchKyberProblems(): Promise<{ problems: KyberProblemEntry[] }> {
   return fetchJson<{ problems: KyberProblemEntry[] }>('/api/kyber/problems')
 }
+
+export interface KyberSessionSummary {
+  session_id: string
+  sessionId?: string
+  harness: string
+  label?: string | null
+  is_subagent?: boolean
+  isSubagent?: boolean
+  parent_session?: string | null
+  parentSession?: string | null
+  agent_name?: string | null
+  agentName?: string | null
+  repo?: string | null
+  branch?: string | null
+  started?: string | number | null
+  ended?: string | number | null
+  turn_count?: number | null
+  turnCount?: number | null
+  request_count?: number | null
+  total_input?: number | null
+  total_output?: number | null
+  cost_usd?: number | null
+  costUsd?: number | null
+  models?: string[]
+  problems?: number
+}
+
+export async function fetchKyberSessions(harness?: string | null): Promise<KyberSessionSummary[]> {
+  const url = harness ? `/api/kyber/sessions?harness=${encodeURIComponent(harness)}` : '/api/kyber/sessions'
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Request failed (${res.status}) for ${url}`)
+  const json = (await res.json()) as { sessions: KyberSessionSummary[] }
+  let list = json.sessions ?? []
+  if (harness) {
+    list = list.filter((s) => s.harness?.toLowerCase() === harness.toLowerCase())
+  }
+  return list
+}

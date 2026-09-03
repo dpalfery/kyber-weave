@@ -21,6 +21,7 @@ import { loadStatusSnapshot, saveStatusSnapshot } from './session-cache.js'
 import { renderDashboard } from './dashboard.js'
 import { renderOverview } from './overview.js'
 import { runWebDashboard } from './web-dashboard.js'
+import { resolveCliName } from './brand-overlay.js'
 import { hostname } from 'os'
 import { runShareServer } from './sharing/share-run.js'
 import { addRemote, linkRemote, pullDevices, renderDevices, summarizeDeviceUsage } from './sharing/host.js'
@@ -37,6 +38,7 @@ import { registerActCommands } from './act/cli.js'
 import { registerGuardCommands } from './guard/cli.js'
 import { registerSyncCommands } from './sync/cli.js'
 import { registerPluginCommands, registerLoadedPluginCommands } from './plugins/cli.js'
+import { registerKyberCommands } from '../kyber/cli/register.js'
 import { runContextCommand } from './context-tree.js'
 import { renderCompare } from './compare.js'
 import { computeBudgetStatus, daysInMonth, diffCalendarDays, type BudgetStatus, type BudgetTier } from './budget.js'
@@ -423,7 +425,7 @@ function sortedPlans(plans: Partial<Record<PlanProvider, Plan>>): Plan[] {
 function assertFormat(value: string, allowed: readonly string[], command: string): void {
   if (!allowed.includes(value)) {
     process.stderr.write(
-      `codeburn ${command}: unknown format "${value}". Valid values: ${allowed.join(', ')}.\n`
+      `${resolveCliName()} ${command}: unknown format "${value}". Valid values: ${allowed.join(', ')}.\n`
     )
     process.exit(1)
   }
@@ -441,7 +443,7 @@ function assertProvider(value: string, command: string): void {
   const names = allProviderNames()
   if (value === 'all' || names.includes(value)) return
   process.stderr.write(
-    `codeburn ${command}: unknown provider "${value}". Valid values: all, ${names.join(', ')}.\n`
+    `${resolveCliName()} ${command}: unknown provider "${value}". Valid values: all, ${names.join(', ')}.\n`
   )
   process.exit(1)
 }
@@ -449,7 +451,7 @@ function assertProvider(value: string, command: string): void {
 function assertScope(value: string, allowed: readonly string[], command: string): void {
   if (!allowed.includes(value)) {
     process.stderr.write(
-      `codeburn ${command}: unknown scope "${value}". Valid values: ${allowed.join(', ')}.\n`
+      `${resolveCliName()} ${command}: unknown scope "${value}". Valid values: ${allowed.join(', ')}.\n`
     )
     process.exit(1)
   }
@@ -470,7 +472,9 @@ async function runJsonReport(period: Period, provider: string, project: string[]
 }
 
 const program = new Command()
-  .name('codeburn')
+  // Display name follows the installed binary (kyberdash). Keep package.json
+  // `"bin": { "codeburn": ... }` as the upstream identity for subtree merges.
+  .name(resolveCliName())
   .description('See where your AI coding tokens go - by task, tool, model, and project')
   .version(version)
   .option('--verbose', 'print warnings to stderr on read failures and skipped files')
@@ -2616,7 +2620,11 @@ program
     // `codeburn serve` appears in help and never falls through to `report`.
   })
 
-return program
+  // Delegate KyberDash commands and otel backwards-compatibility alias out of
+  // the vendored upstream surface into the kyber directory.
+  registerKyberCommands(program)
+
+  return program
 }
 
 if (process.argv[2] === 'serve') {

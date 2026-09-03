@@ -217,6 +217,9 @@ const lazyProviderDisplayNames: Record<string, string> = {
 }
 
 export function providerDisplayName(name: string): string {
+  if (name === 'copilot-cli') return 'GitHub Copilot CLI'
+  if (name === 'copilot-vscode') return 'Copilot (VS Code)'
+  if (name === 'copilot-agent') return 'Copilot Agent'
   const core = coreProviders.find(p => p.name === name)
   if (core) return core.displayName
   return lazyProviderDisplayNames[name] ?? name
@@ -230,6 +233,9 @@ export function allProviderNames(): readonly string[] {
   allProviderNamesCache ??= [
     ...coreProviders.map(p => p.name),
     ...lazyProviderNames,
+    'copilot-cli',
+    'copilot-vscode',
+    'copilot-agent',
   ].sort()
   return allProviderNamesCache
 }
@@ -283,14 +289,23 @@ export async function discoverAllSessions(
   providerList?: Provider[],
 ): Promise<SessionSource[]> {
   const allProviders = providerList ?? await getAllProviders()
-  const filtered = providerFilter && providerFilter !== 'all'
-    ? allProviders.filter(p => p.name === providerFilter)
+  const baseFilter = providerFilter?.startsWith('copilot-') ? 'copilot' : providerFilter
+  const filtered = baseFilter && baseFilter !== 'all'
+    ? allProviders.filter(p => p.name === baseFilter)
     : allProviders
   // Each provider's discovery is its own serial directory walk; run them
   // concurrently and concatenate in registry order so the result stays
   // byte-identical to the sequential version.
   const perProvider = await Promise.all(filtered.map(provider => safeDiscoverSessions(provider)))
-  return perProvider.flat()
+  let sources = perProvider.flat()
+  if (providerFilter === 'copilot-cli') {
+    sources = sources.filter(s => s.provider === 'copilot' && (s.sourceType === 'jsonl' || s.sourceType === 'session-store'))
+  } else if (providerFilter === 'copilot-vscode') {
+    sources = sources.filter(s => s.provider === 'copilot' && (s.sourceType === 'chatsession' || s.sourceType === 'transcript'))
+  } else if (providerFilter === 'copilot-agent') {
+    sources = sources.filter(s => s.provider === 'copilot' && s.sourceType === 'otel')
+  }
+  return sources
 }
 
 export async function getProvider(name: string): Promise<Provider | undefined> {

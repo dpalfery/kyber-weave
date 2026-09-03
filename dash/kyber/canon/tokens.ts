@@ -87,14 +87,93 @@ export function cacheKey(text: string, model: string): string {
 }
 
 /**
- * The default tokenizer: an `o200k_base` approximation of one token per four
- * characters. Deliberately a named seam rather than an inline expression —
- * when `js-tiktoken` lands it replaces this default without touching any
- * caller, and until then the approximation's name travels with the model the
- * way R4.6 requires.
+ * The character-count approximation: one token per four characters. Kept as
+ * the fallback for environments where the real encoder cannot load, and as
+ * the reference the real tokenizer is measured against. It is not accurate —
+ * over a run of repeated characters it reports 250 where `o200k_base` counts
+ * 125 — which is exactly why a count carries the name of what produced it.
  */
 export function approximateO200kBase(text: string): number {
   return Math.ceil(text.length / 4)
+}
+
+/** Name reported for counts produced by the character approximation. */
+export const APPROXIMATE_TOKENIZER = 'approximate/chars-per-4'
+
+/** Name reported for counts produced by the real `o200k_base` encoder. */
+export const O200K_TOKENIZER = 'js-tiktoken/o200k_base'
+
+/**
+ * The loaded encoder, or `null` once loading has been tried and failed.
+ * `js-tiktoken/lite` plus the single `o200k_base` rank table is 2.3 MB; the
+ * package's default entry point pulls every encoding it ships, which is not
+ * what this needs.
+ */
+let encoder: { encode(text: string): unknown[] } | null | undefined
+
+/**
+ * Load the real encoder once. A failure is remembered rather than retried per
+ * call: if the rank table is unavailable in this environment it will be
+ * unavailable for the next hundred thousand strings too, and the caller has
+ * a documented fallback.
+ */
+async function loadEncoder(): Promise<{ encode(text: string): unknown[] } | null> {
+  if (encoder !== undefined) return encoder
+  try {
+    const [{ Tiktoken }, ranks] = await Promise.all([
+      import('js-tiktoken/lite'),
+      import('js-tiktoken/ranks/o200k_base'),
+    ])
+    encoder = new Tiktoken((ranks as { default: ConstructorParameters<typeof Tiktoken>[0] }).default)
+  } catch {
+    encoder = null
+  }
+  return encoder
+}
+
+/**
+ * Load the encoder and return a SYNCHRONOUS counter over it.
+ *
+ * `analyzeContext` takes a sync `countTokens` on purpose — it walks thousands
+ * of parts and cannot await each one — while loading the rank table is
+ * necessarily async. This bridges the two: await once, then count freely.
+ * Falls back to the character approximation if the encoder is unavailable,
+ * so a caller always gets a counter and the tokenizer name says which ran.
+ */
+export async function loadO200kCounter(): Promise<(text: string) => number> {
+  const loaded = await loadEncoder()
+  if (loaded === null) return approximateO200kBase
+  return (text: string) => loaded.encode(text).length
+}
+
+/**
+ * The effective tokenizer name, without awaiting a load. Reports the
+ * configured encoder until a load has been attempted and failed, then reports
+ * the fallback. Exposed for metadata surfaces that are synchronous; anything
+ * that can await should prefer `activeTokenizer`.
+ */
+export function tokenizerName(): string {
+  return encoder === null ? APPROXIMATE_TOKENIZER : O200K_TOKENIZER
+}
+
+/**
+ * Which tokenizer the last count came from. Surfaces are required to name
+ * the tokenizer behind a derived figure (R4.6), and naming one that did not
+ * run is worse than naming none — the dashboard advertised
+ * `tiktoken/o200k_base` for counts this module produced with `length / 4`.
+ */
+export async function activeTokenizer(): Promise<string> {
+  return (await loadEncoder()) === null ? APPROXIMATE_TOKENIZER : O200K_TOKENIZER
+}
+
+/**
+ * The default tokenizer: the real `o200k_base` encoding, falling back to the
+ * character approximation when the encoder cannot be loaded. Still a named
+ * seam — a caller measuring one model against another passes its own counter.
+ */
+export async function countO200kBase(text: string): Promise<number> {
+  const loaded = await loadEncoder()
+  return loaded === null ? approximateO200kBase(text) : loaded.encode(text).length
 }
 
 /**
@@ -108,7 +187,7 @@ export async function tokenize(
   text: string,
   model: string,
   store: TokenCacheStore,
-  countTokens: TokenCounter = approximateO200kBase
+  countTokens: TokenCounter = countO200kBase
 ): Promise<TokenCount> {
   if (!ensuredStores.has(store)) {
     store.exec(TOKEN_CACHE_SCHEMA)

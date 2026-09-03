@@ -56,6 +56,32 @@ KyberWeave does not build upstream directly; it consumes upstream's
 published output. Day-to-day changes stay in `dash/kyber/**` and its peer
 subdirectories inside the merge zone.
 
+## User-facing names (brand overlay)
+
+Do **not** rename the subtree, `dash/package.json` `"name": "codeburn"`,
+`CODEBURN_*` env vars, or `dash/dash/public/codeburn-logo.png`. Those are
+upstream identity; renaming them is a conflict on every pull.
+
+Install and SEA already ship the binary as `kyberdash`. Display names live
+in `dash/src/brand-overlay.ts` (CLI `Usage:` line, served HTML title/favicon)
+and in the React chrome (`LightsaberLogo`, `kyberdash-logo.*`). Extra bin
+alias: `dash/package.json` `"bin"."kyberdash"`.
+
+See [branding/README.md](branding/README.md).
+
+## Pulling Codeburn upstream
+
+```bash
+git fetch codeburn
+git subtree pull --prefix=dash codeburn <tag-or-sha> --squash
+```
+
+Expect conflicts only on files we already shim (`dash/src/main.ts`,
+`dash/src/web-dashboard.ts`, `dash/src/dashboard.tsx`, `dash/dash/index.html`,
+and other intentional KyberDash boundary edits). Keep `dash/src/brand-overlay.ts`
+(ours). Leave `dash/windows/**` and `dash/gnome/**` untouched. Re-run
+`MergeBoundaryTests`.
+
 ## See also
 
 - `docs/specs/kyberdash/design.md` — Repository layout and merge-zone

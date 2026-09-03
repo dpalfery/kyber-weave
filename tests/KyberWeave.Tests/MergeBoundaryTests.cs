@@ -151,6 +151,32 @@ public class MergeBoundaryTests
             $"dash/{surface}/ was deleted. R14.4 forbids this — vendored upstream owns the directory.");
     }
 
+    [Fact]
+    public void UpstreamNpmIdentityRemainsCodeburn()
+    {
+        // User-facing install name is kyberdash (SEA + install.sh). The npm
+        // package name and original bin key stay `codeburn` so a subtree pull
+        // does not fight package.json identity on every upstream bump.
+        string packageJson = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", "package.json"));
+
+        Assert.Contains("\"name\": \"codeburn\"", packageJson, StringComparison.Ordinal);
+        Assert.Contains("\"codeburn\": \"dist/cli.js\"", packageJson, StringComparison.Ordinal);
+        Assert.Contains("\"kyberdash\": \"dist/cli.js\"", packageJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BrandOverlayLivesAsAnExtraUpstreamFile()
+    {
+        // Extra file with no upstream counterpart — subtree merge keeps it.
+        string overlay = Path.Combine(
+            KyberWeaveTestPaths.ToolRoot, "dash", "src", "brand-overlay.ts");
+        Assert.True(File.Exists(overlay), "dash/src/brand-overlay.ts is missing.");
+        string text = File.ReadAllText(overlay);
+        Assert.Contains("kyberdash", text, StringComparison.Ordinal);
+        Assert.Contains("codeburn-logo.png", text, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("dash")]
     [InlineData("app")]
