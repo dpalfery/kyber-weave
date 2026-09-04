@@ -74,6 +74,24 @@ export function registerKyberCommands(program: Command): void {
     })
 
   kyber
+    .command('renormalize')
+    .description('Re-derive harness attribution and token conversion from stored raw payloads')
+    .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .action(async (opts: { db?: string }) => {
+      const { renormalizeRecords } = await import('../tools/backfill.js')
+      const store = new CanonStore(resolveDbPath(opts.db))
+      try {
+        const report = renormalizeRecords(store)
+        console.log(`Traces:        ${report.traces}`)
+        console.log(`Reattributed:  ${report.reattributed}`)
+        console.log(`Unchanged:     ${report.unchanged}`)
+        console.log(`Unclaimed:     ${report.unclaimed}`)
+      } finally {
+        store.close()
+      }
+    })
+
+  kyber
     .command('build')
     .description('Build or rebuild derived sessions from canonical records')
     .option('--db <path>', 'Custom path for canon.db SQLite database')

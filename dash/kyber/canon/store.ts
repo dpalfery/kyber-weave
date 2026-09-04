@@ -457,6 +457,33 @@ export class CanonStore {
       )
   }
 
+  /** Distinct trace ids, the unit attribution votes over. */
+  traceIds(): string[] {
+    return (
+      this.db
+        .prepare('SELECT DISTINCT trace_id FROM records WHERE trace_id IS NOT NULL')
+        .all() as { trace_id: string }[]
+    ).map((row) => row.trace_id)
+  }
+
+  /** Every record in one trace, in timestamp order. */
+  recordsForTrace(traceId: string): CanonicalRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM records WHERE trace_id = ? ORDER BY timestamp')
+      .all(traceId) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
+  /** Rewrite the fields re-normalization decides, leaving content untouched. */
+  setAttribution(
+    spanId: string,
+    fields: { harness: string; source: string; op: string; tokens: TokenUsage },
+  ): void {
+    this.db
+      .prepare('UPDATE records SET harness = ?, source = ?, op = ?, tokens_json = ? WHERE span_id = ?')
+      .run(fields.harness, fields.source, fields.op, JSON.stringify(fields.tokens), spanId)
+  }
+
   /** Attach the harness's conversation id to a stored record. */
   setSessionId(spanId: string, sessionId: string | null): void {
     this.db.prepare('UPDATE records SET session_id = ? WHERE span_id = ?').run(sessionId, spanId)

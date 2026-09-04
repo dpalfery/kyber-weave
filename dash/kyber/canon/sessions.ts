@@ -186,7 +186,17 @@ function invocationsOf(records: readonly CanonicalRecord[]): string[] {
  * at ingest instead, which is a separate fix.
  */
 function hasEvidence(records: readonly CanonicalRecord[]): boolean {
-  return records.some(
+  // A session is a conversation with a model. A trace carrying no model call
+  // is not one, however many spans it holds: the receiver ingests everything
+  // sent to it, including the HTTP client and server spans emitted by
+  // instrumented libraries — 29,771 of them in the measured corpus, with no
+  // tokens and no content, which grouped by trace into 44 rows that looked
+  // like sessions and were not. Requiring a turn is what distinguishes an
+  // agent session from ambient telemetry that happened to share a trace.
+  const turns = records.filter(isTurn)
+  if (turns.length === 0) return false
+
+  return turns.some(
     (record) =>
       measuredInput(record.tokens) > 0 ||
       record.tokens.output > 0 ||

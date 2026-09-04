@@ -206,3 +206,43 @@ describe('buildSessions', () => {
     store.close()
   })
 })
+
+describe('what counts as a session', () => {
+  it('does not build a session from a trace with no model call', async () => {
+    // The receiver ingests every span sent to it, including HTTP client and
+    // server spans from instrumented libraries. Grouped by trace those looked
+    // like 44 sessions in the real corpus, with no tokens and no content.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('http-1', [], {
+        sessionId: 'trace-http',
+        harness: 'unattributed',
+        op: 'unspecified',
+        name: 'GET /v1/messages',
+        raw: { 'http.request.method': 'GET', 'url.full': 'https://example.invalid/x' },
+        tokens: tokens({ freshInput: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+      }),
+    ])
+
+    const report = await buildSessions(store)
+
+    expect(report.built).toBe(0)
+    expect(report.skipped).toBe(1)
+    store.close()
+  })
+
+  it('still builds when a model call is present alongside ambient spans', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('http-1', [], {
+        spanId: 'http-1',
+        op: 'unspecified',
+        tokens: tokens({ freshInput: 0, output: 0, reportedInput: 0, reportedOutput: 0 }),
+      }),
+      turn('llm-1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }], { spanId: 'llm-1' }),
+    ])
+
+    expect((await buildSessions(store)).built).toBe(1)
+    store.close()
+  })
+})

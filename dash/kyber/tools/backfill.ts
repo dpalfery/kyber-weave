@@ -13,6 +13,9 @@
 // The pass is idempotent: it recomputes content from raw and writes what it
 // finds, so running it twice lands on the same rows.
 
+import type { RawSpan } from '../canon/adapters/base.js'
+import { AdapterRegistry } from '../canon/adapters/registry.js'
+import { ADAPTERS } from '../canon/ingest.js'
 import { CanonStore } from '../canon/store.js'
 import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js'
 import { contentFromParts } from '../canon/types.js'
@@ -86,4 +89,93 @@ export function backfillContent(store: CanonStore, options: BackfillOptions = {}
 
   options.onProgress?.(report.scanned, spanIds.length)
   return report
+}
+
+/**
+ * Re-run harness attribution and the token conversion over stored records.
+ *
+ * `backfillContent` repairs what a span SAID; this repairs what the system
+ * concluded about it. The live collector used to decide both from
+ * `service.name` — the one signal R6.2 says is never attribution evidence —
+ * and applied a single token convention to every harness. Records ingested
+ * that way keep those conclusions until something re-derives them, which is
+ * why Claude Code's spans sat at zero tokens (its counters are un-namespaced
+ * and no adapter claimed it) and why Copilot's commit-message generator was
+ * filed under a harness that does not exist.
+ *
+ * The raw payload is the evidence and the store kept it, so this is a pure
+ * re-derivation: the vote runs per trace, exactly as it does on ingest.
+ */
+export function renormalizeRecords(store: CanonStore, options: BackfillOptions = {}): RenormalizeReport {
+  const registry = new AdapterRegistry(ADAPTERS)
+  const adapterByName = new Map(ADAPTERS.map((adapter) => [adapter.name, adapter]))
+  const traceIds = store.traceIds()
+  const progressEvery = options.progressEvery ?? 200
+  const report: RenormalizeReport = { traces: 0, reattributed: 0, unchanged: 0, unclaimed: 0 }
+
+  for (const traceId of traceIds) {
+    report.traces += 1
+    const records = store.recordsForTrace(traceId)
+
+    const rawSpans: RawSpan[] = []
+    for (const record of records) {
+      if (record.raw === null || typeof record.raw !== 'object') continue
+      rawSpans.push({
+        spanId: record.spanId,
+        traceId: record.traceId,
+        parentSpanId: record.parentSpanId,
+        source: record.source,
+        attributes: record.raw as Record<string, unknown>,
+        name: record.name,
+        kind: record.kind,
+      })
+    }
+    if (rawSpans.length === 0) continue
+
+    const attributed = registry.attribute(rawSpans)
+    for (const raw of rawSpans) {
+      const harness = attributed.get(raw.spanId)
+      if (harness === undefined) {
+        report.unclaimed += 1
+        continue
+      }
+      const adapter = adapterByName.get(harness)
+      if (adapter === undefined) continue
+
+      const before = records.find((record) => record.spanId === raw.spanId)!
+      const after = adapter.normalize(raw)
+      // A record whose conclusions already match is left alone, so a re-run
+      // is cheap and the report distinguishes repair from no-op.
+      if (
+        before.harness === after.harness &&
+        before.op === after.op &&
+        before.tokens.reportedInput === after.tokens.reportedInput &&
+        before.tokens.freshInput === after.tokens.freshInput
+      ) {
+        report.unchanged += 1
+        continue
+      }
+      store.setAttribution(raw.spanId, {
+        harness: after.harness,
+        source: raw.source,
+        op: after.op,
+        tokens: after.tokens,
+      })
+      report.reattributed += 1
+    }
+
+    if (report.traces % progressEvery === 0) options.onProgress?.(report.traces, traceIds.length)
+  }
+
+  options.onProgress?.(report.traces, traceIds.length)
+  return report
+}
+
+export type RenormalizeReport = {
+  traces: number
+  /** Records whose harness, operation or token decomposition changed. */
+  reattributed: number
+  unchanged: number
+  /** Records no adapter claimed; left as they are rather than guessed at. */
+  unclaimed: number
 }
