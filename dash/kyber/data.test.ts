@@ -32,9 +32,15 @@ import type { ParsedProviderCall } from '../src/providers/types.js'
 // carries them (R12.1, R12.2).
 // ---------------------------------------------------------------------------
 
-const LOCAL_ONLY_SESSION_MARKER = '__KYBER_LOCAL_ONLY_SESSION_CONTENT_9f3a7b2e__'
-const LOCAL_ONLY_SPAN_MARKER = '__KYBER_LOCAL_ONLY_SPAN_CONTENT_c4e2d1a8__'
-const CAPTURED_FIXTURE_MARKER = '__KYBER_CAPTURED_FIXTURE_MARKER_a1b2c3d4__'
+// Assembled at runtime rather than written literally, because the scan below
+// reads every tracked file under dash/kyber — including this one. Spelling the
+// markers out here made the test report itself as an offender, so it failed
+// permanently while proving nothing. Composed this way the assertion is
+// stronger, not weaker: it now genuinely covers every tracked file with no
+// exemption for the file that defines the markers.
+const LOCAL_ONLY_SESSION_MARKER = ['__KYBER', 'LOCAL', 'ONLY', 'SESSION', 'CONTENT', '9f3a7b2e__'].join('_')
+const LOCAL_ONLY_SPAN_MARKER = ['__KYBER', 'LOCAL', 'ONLY', 'SPAN', 'CONTENT', 'c4e2d1a8__'].join('_')
+const CAPTURED_FIXTURE_MARKER = ['__KYBER', 'CAPTURED', 'FIXTURE', 'MARKER', 'a1b2c3d4__'].join('_')
 
 // A synthetic repository-content fragment that must never leave the machine
 // and must never be written to a tracked file — the kind of telemetry

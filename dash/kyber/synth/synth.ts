@@ -127,6 +127,14 @@ export const PROVIDER_CONVENTIONS: ReadonlyMap<string, TokenConvention> = new Ma
       'codewhale',
       'codex',
       'copilot',
+      // Upstream's three Copilot surface filters. They are the same harness
+      // reached through different front ends, so they share Copilot's
+      // convention rather than falling through to the default — a provider
+      // without a row is exactly the silent-miscount case R4.2 exists to
+      // catch, and the drift test above is what surfaced them.
+      'copilot-agent',
+      'copilot-cli',
+      'copilot-vscode',
       'crush',
       'cursor',
       'cursor-agent',
