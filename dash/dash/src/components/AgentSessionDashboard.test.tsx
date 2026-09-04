@@ -865,3 +865,48 @@ describe('AgentSessionDashboard: Remote Fetch States', () => {
     expect(html).toContain('data-testid="timeline-bars-view"')
   })
 })
+
+describe('timeline shape from the canonical store', () => {
+  it('renders when timeline is a single root node, not an array', () => {
+    // buildTimeline() returns ONE root node, and the payload shape documents
+    // it that way — but three consumers here iterated it as an array. Every
+    // unit test passed because the fixtures used an array, while a real
+    // session threw "nodes is not iterable" and the error boundary replaced
+    // the entire expanded view. This pins the real shape.
+    const session = {
+      ...sampleSession,
+      timeline: {
+        spanId: 'root-1',
+        parentId: null,
+        name: 'session',
+        kind: 'session',
+        startMs: 0,
+        durationMs: 100,
+        attributes: {},
+        isSubagent: false,
+        isAuxiliary: false,
+        cost: { basis: 'unknown', status: 'no_rate' },
+        children: [
+          {
+            spanId: 'child-1',
+            parentId: 'root-1',
+            name: 'llm_request',
+            kind: 'client',
+            startMs: 1,
+            durationMs: 10,
+            attributes: {},
+            isSubagent: false,
+            isAuxiliary: false,
+            cost: { basis: 'unknown', status: 'no_rate' },
+            children: [],
+          },
+        ],
+      },
+    }
+
+    const html = renderHtml(React.createElement(AgentSessionContent as never, { session } as never))
+
+    expect(html).toContain('execution-timeline-section')
+    expect(html).toContain('spend-composition-section')
+  })
+})

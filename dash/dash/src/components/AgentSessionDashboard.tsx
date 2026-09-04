@@ -336,6 +336,18 @@ export function AgentSessionContent({
   const [timelineTab, setTimelineTab] = useState<'tree' | 'bars'>(initialTimelineTab ?? 'tree')
   const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(undefined)
 
+  // The payload's timeline is a SINGLE root node — that is what buildTimeline
+  // returns and what the payload shape documents — but both consumers below
+  // treated it as an array. On a real session that threw "nodes is not
+  // iterable" and the error boundary replaced the entire expanded view, while
+  // every unit test passed because the fixtures happened to use an array.
+  // Normalise once here so neither consumer has to care.
+  const timelineNodes = useMemo(() => {
+    const timeline = session?.timeline
+    if (!timeline) return []
+    return Array.isArray(timeline) ? timeline : [timeline]
+  }, [session?.timeline])
+
   // 4. Map of spanId -> full timeline node for quick lookup on click
   const spanMap = useMemo(() => {
     const map = new Map<string, any>()
@@ -349,19 +361,17 @@ export function AgentSessionContent({
         }
       }
     }
-    if (session?.timeline) {
-      walk(session.timeline)
-    }
+    walk(timelineNodes)
     return map
-  }, [session?.timeline])
+  }, [timelineNodes])
 
   // 5. Adapt session timeline into a single root TimelineNode for TimelineView
   const timelineRoot: TimelineNode | null = useMemo(() => {
-    if (!session?.timeline || session.timeline.length === 0) return null
+    if (!session || timelineNodes.length === 0) return null
     return {
       spanId: 'session-root',
       parentId: null,
-      children: session.timeline.map((n: any) => adaptTimelineNode(n, 'session-root')),
+      children: timelineNodes.map((n: any) => adaptTimelineNode(n, 'session-root')),
       startMs: 0,
       durationMs: session.summary?.duration_ms ?? 0,
       kind: 'session',
@@ -389,11 +399,9 @@ export function AgentSessionContent({
         }
       }
     }
-    if (session?.timeline) {
-      walk(session.timeline, 0)
-    }
+    walk(timelineNodes, 0)
     return list
-  }, [session?.timeline])
+  }, [timelineNodes])
 
   const maxTimelineSpan = useMemo(() => {
     if (flattenedTimeline.length === 0) return 1
