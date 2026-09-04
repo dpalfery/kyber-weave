@@ -7,6 +7,7 @@ import { SessionInspectorDrawer } from './SessionInspectorDrawer'
 import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts'
 import { SchemaCostRanking, type SchemaCostAnalysis } from './SchemaCostRanking'
 import { TimelineView, type TimelineNode, type CostBlock } from './kyber/TimelineView'
+import { SessionCostPanel } from './SessionCostPanel'
 
 // ---------------------------------------------------------------------------
 // Types & Contracts
@@ -922,6 +923,8 @@ export function AgentSessionContent({
             </div>
           </Card>
         </div>
+
+        <SessionCostPanel session={session} />
       </div>
 
       {/* ---------------------------------------------------------------------
