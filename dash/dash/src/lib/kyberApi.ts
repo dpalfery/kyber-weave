@@ -67,3 +67,31 @@ export async function fetchKyberSessions(harness?: string | null): Promise<Kyber
   }
   return list
 }
+
+export interface KyberSessionContentPart {
+  spanId: string
+  part: string
+  text: string
+  tokens?: number
+  server?: string
+  truncated?: boolean
+  totalLength?: number
+}
+
+export interface KyberSessionContentResult {
+  sessionId: string
+  spanId?: string
+  parts: KyberSessionContentPart[]
+}
+
+export function fetchKyberSessionContent(
+  sessionId: string,
+  opts?: { span?: string; part?: string },
+): Promise<KyberSessionContentResult> {
+  const params = new URLSearchParams()
+  if (opts?.span) params.set('span', opts.span)
+  if (opts?.part) params.set('part', opts.part)
+  const qs = params.toString()
+  const path = `/api/kyber/session/${encodeURIComponent(sessionId)}/content${qs ? `?${qs}` : ''}`
+  return fetchJson<KyberSessionContentResult>(path)
+}

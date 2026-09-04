@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import * as React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import {
   XML_FOLD_TAGS,
@@ -14,6 +15,7 @@ import {
 } from './SessionInspectorDrawer'
 
 import { renderToStaticMarkup } from 'react-dom/server'
+import type { KyberSessionContentResult } from '../lib/kyberApi'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
 const reactInternals = (
@@ -677,5 +679,172 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
     panel?.props.onClick({ stopPropagation } as any)
     expect(stopPropagation).toHaveBeenCalledTimes(1)
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0,
+      },
+    },
+  })
+}
+
+const CLIPPED_SYSTEM_PROMPT =
+  'You are a diagnostic coding agent.\nFollow the repository rules exactly.\n' + 'x'.repeat(80)
+const FULL_SYSTEM_PROMPT = CLIPPED_SYSTEM_PROMPT + 'x'.repeat(3000) + '\nUNIQUE_FULL_ENDING'
+
+const bucketRawContent = {
+  bucket: 'system_prompt',
+  key: 'system_prompt',
+  tokens: 5800,
+  value: 5800,
+  total: 12000,
+  label: 'System prompt',
+  content: CLIPPED_SYSTEM_PROMPT,
+  turn: { spanId: 'span-prompt', index: 1 },
+}
+
+const contentRequest = {
+  sessionId: 'sess-content-001',
+  span: 'span-prompt',
+  part: 'system_prompt',
+}
+
+const contentQueryKey = [
+  'kyber-session-content',
+  contentRequest.sessionId,
+  contentRequest.span,
+  contentRequest.part,
+]
+
+function renderDrawerWithQuery(
+  qc: QueryClient,
+  extra?: Partial<React.ComponentProps<typeof SessionInspectorDrawer>>,
+): string {
+  return renderHtml(
+    <QueryClientProvider client={qc}>
+      <SessionInspectorDrawer
+        open={true}
+        onClose={() => {}}
+        title="Turn 1 · system_prompt"
+        rawContent={bucketRawContent}
+        contentRequest={contentRequest}
+        {...extra}
+      />
+    </QueryClientProvider>
+  )
+}
+
+describe('SessionInspectorDrawer: Full-content endpoint', () => {
+  it('renders unclipped text from the content query instead of the payload stub', () => {
+    const qc = createTestQueryClient()
+    const body: KyberSessionContentResult = {
+      sessionId: contentRequest.sessionId,
+      spanId: contentRequest.span,
+      parts: [
+        {
+          spanId: contentRequest.span,
+          part: 'system_prompt',
+          text: FULL_SYSTEM_PROMPT,
+          tokens: 5800,
+        },
+      ],
+    }
+    qc.setQueryData(contentQueryKey, body)
+
+    const html = renderDrawerWithQuery(qc)
+
+    expect(html).toContain('UNIQUE_FULL_ENDING')
+    expect(html).toContain(FULL_SYSTEM_PROMPT.slice(-40))
+    expect(html).toContain('data-testid="drawer-content-scroll"')
+    expect(html).toContain('overflow-auto')
+    expect(html).toContain('data-testid="context-bucket-inspector"')
+    expect(html).not.toContain('data-testid="drawer-content-loading"')
+    expect(html).not.toContain('data-testid="drawer-content-fallback-note"')
+    expect(html).not.toContain('data-testid="drawer-content-truncated"')
+  })
+
+  it('states showing X of Y characters when a part is truncated', () => {
+    const qc = createTestQueryClient()
+    const shown = 'R'.repeat(120)
+    const totalLength = 2_050_000
+    const body: KyberSessionContentResult = {
+      sessionId: contentRequest.sessionId,
+      spanId: contentRequest.span,
+      parts: [
+        {
+          spanId: contentRequest.span,
+          part: 'system_prompt',
+          text: shown,
+          truncated: true,
+          totalLength,
+        },
+      ],
+    }
+    qc.setQueryData(contentQueryKey, body)
+
+    const html = renderDrawerWithQuery(qc)
+
+    expect(html).toContain('data-testid="drawer-content-truncated"')
+    expect(html).toContain(`showing ${shown.length} of ${totalLength} characters`)
+    expect(html).toContain(shown)
+    expect(html).toContain('data-testid="drawer-content-scroll"')
+    expect(html).toContain('overflow-auto')
+  })
+
+  it('shows a loading state while the content query has no result', () => {
+    const qc = createTestQueryClient()
+    const origFetch = globalThis.fetch
+    globalThis.fetch = () => new Promise(() => {})
+
+    try {
+      const html = renderDrawerWithQuery(qc)
+      expect(html).toContain('data-testid="drawer-content-loading"')
+      expect(html).toContain('Loading full content')
+      expect(html).not.toContain('UNIQUE_FULL_ENDING')
+      expect(html).not.toContain('data-testid="drawer-content-fallback-note"')
+    } finally {
+      globalThis.fetch = origFetch
+    }
+  })
+
+  it('falls back to clipped payload text with a visible note when the content query fails', () => {
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0,
+          retryOnMount: false,
+        },
+      },
+    })
+    const error = new Error('Request failed (500) for /api/kyber/session/sess-content-001/content')
+    const query = qc.getQueryCache().build(qc, {
+      queryKey: contentQueryKey,
+      queryFn: () => Promise.reject(error),
+    })
+    query.setState({
+      status: 'error',
+      error,
+      fetchStatus: 'idle',
+      data: undefined,
+      dataUpdatedAt: 0,
+      errorUpdatedAt: Date.now(),
+      isInvalidated: false,
+    })
+
+    const html = renderDrawerWithQuery(qc)
+
+    expect(html).toContain('data-testid="drawer-content-fallback-note"')
+    expect(html).toContain('truncated')
+    expect(html).toContain(CLIPPED_SYSTEM_PROMPT)
+    expect(html).toContain('data-testid="drawer-content-scroll"')
+    expect(html).not.toContain('UNIQUE_FULL_ENDING')
+    expect(html).not.toContain('data-testid="drawer-content-loading"')
+    expect(html).toContain('data-testid="context-bucket-inspector"')
   })
 })

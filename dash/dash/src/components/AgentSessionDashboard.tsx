@@ -1155,6 +1155,18 @@ export function AgentSessionContent({
         title={drawerTitle}
         subtitle={drawerSubtitle}
         rawContent={drawerContent}
+        contentRequest={
+          typeof drawerContent?.bucket === 'string' && (session.id ?? session.session_id)
+            ? {
+                sessionId: String(session.id ?? session.session_id),
+                span:
+                  typeof drawerContent.turn?.spanId === 'string' && drawerContent.turn.spanId
+                    ? drawerContent.turn.spanId
+                    : undefined,
+                part: drawerContent.bucket,
+              }
+            : undefined
+        }
       />
     </div>
   )

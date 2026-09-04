@@ -1,6 +1,9 @@
 import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { cn, usd, fmtTokens } from '../lib/utils'
+import { fetchKyberSessionContent } from '../lib/kyberApi'
+import { Skeleton } from './ui/skeleton'
 
 /**
  * Harness XML tags folded into collapsible <details> elements.
@@ -849,6 +852,91 @@ export function InspectorContent({ data }: { data: any }) {
   )
 }
 
+export interface SessionContentRequest {
+  sessionId: string
+  span?: string
+  part?: string
+}
+
+function FullContentPanel({
+  request,
+  fallback,
+}: {
+  request: SessionContentRequest
+  fallback: unknown
+}) {
+  const { data, isError } = useQuery({
+    queryKey: ['kyber-session-content', request.sessionId, request.span, request.part],
+    queryFn: () =>
+      fetchKyberSessionContent(request.sessionId, {
+        span: request.span,
+        part: request.part,
+      }),
+  })
+
+  // SSR and a still-in-flight observer both arrive here with no data and no
+  // error; isLoading is false on the server when fetchStatus is idle.
+  if (!isError && data === undefined) {
+    return (
+      <div className="space-y-2" data-testid="drawer-content-loading">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-32 w-full" />
+        <p className="text-xs text-tertiary-foreground">Loading full content…</p>
+      </div>
+    )
+  }
+
+  if (isError || data === undefined || data.parts.length === 0) {
+    return (
+      <div className="space-y-2">
+        <p
+          className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+          data-testid="drawer-content-fallback-note"
+        >
+          Showing truncated payload text — full content could not be loaded.
+        </p>
+        {fallback != null && fallback !== '' && (
+          <div
+            className="max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border"
+            data-testid="drawer-content-scroll"
+          >
+            <div className="p-3">
+              <InspectorContent data={fallback} />
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.parts.map((part, idx) => (
+        <div key={`${part.spanId}-${part.part}-${idx}`} className="space-y-2">
+          {part.truncated === true && (
+            <p
+              className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+              data-testid="drawer-content-truncated"
+            >
+              {part.totalLength != null
+                ? `showing ${part.text.length} of ${part.totalLength} characters`
+                : `showing ${part.text.length} characters (total length not measurable)`}
+            </p>
+          )}
+          <div
+            className="max-h-[min(60vh,32rem)] min-h-0 overflow-auto rounded border border-border"
+            data-testid="drawer-content-scroll"
+          >
+            <div className="p-3">
+              <InspectorContent data={part.text} />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export interface SessionInspectorDrawerProps {
   open: boolean
   onClose: () => void
@@ -856,6 +944,7 @@ export interface SessionInspectorDrawerProps {
   subtitle?: string
   children?: React.ReactNode
   rawContent?: any
+  contentRequest?: SessionContentRequest
 }
 
 /**
@@ -870,6 +959,7 @@ export function SessionInspectorDrawer({
   subtitle,
   children,
   rawContent,
+  contentRequest,
 }: SessionInspectorDrawerProps) {
   useEffect(() => {
     if (!open || typeof window === 'undefined') return
@@ -883,6 +973,17 @@ export function SessionInspectorDrawer({
   }, [open, onClose])
 
   if (!open) return null
+
+  // Drop the clipped leaf while the unclipped route is in play, otherwise the
+  // 2000-char stub renders next to (or instead of) the text this route exists for.
+  const inspectorData =
+    contentRequest && rawContent !== null && rawContent !== undefined && typeof rawContent === 'object'
+      ? { ...rawContent, content: undefined }
+      : rawContent
+  const fallbackContent =
+    rawContent !== null && rawContent !== undefined && typeof rawContent === 'object'
+      ? rawContent.content
+      : undefined
 
   return (
     <div className="relative z-50">
@@ -934,10 +1035,13 @@ export function SessionInspectorDrawer({
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs" data-testid="drawer-body">
           {children}
-          {rawContent !== undefined && rawContent !== null && (
-            <InspectorContent data={rawContent} />
+          {inspectorData !== undefined && inspectorData !== null && (
+            <InspectorContent data={inspectorData} />
           )}
-          {!children && (rawContent === undefined || rawContent === null) && (
+          {contentRequest && (
+            <FullContentPanel request={contentRequest} fallback={fallbackContent} />
+          )}
+          {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
             <p className="text-xs text-tertiary-foreground italic py-8 text-center">
               No content to inspect.
             </p>
