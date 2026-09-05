@@ -1,0 +1,26 @@
+D3 rework pass 2 diagnostics baseline
+Captured: 2026-09-04
+Targets: dash/kyber/canon/log-ingest.ts; dash/kyber/canon/log-ingest.test.ts
+Diagnostic provider: ESLint complete-file diagnostics using dash/eslint.config.js.
+
+=== Diagnostics: dash/kyber/canon/log-ingest.ts ===
+exit_code=0
+
+=== Diagnostics: dash/kyber/canon/log-ingest.test.ts ===
+exit_code=0
+
+=== Final sweep ===
+artifact_path=/Users/dave/git/personal/kyber-weave/artifacts/d3-rework-p2-diagnostics-baseline.txt
+artifact_nonempty_exit_code=0
+diagnostics_exit_codes=0,0
+diagnostics_status=clean on dash/kyber/canon/log-ingest.ts and dash/kyber/canon/log-ingest.test.ts
+remaining=none
+artifact_listing:
+-rw-r--r--  1 dave  staff  663 Sep  4 20:18 artifacts/d3-rework-p2-diagnostics-baseline.txt
+git_visibility_before_stage:
+
+=== Final sweep (visibility confirmation) ===
+git_status:
+AM artifacts/d3-rework-p2-diagnostics-baseline.txt
+git_visibility:
+100644 8975b79d14fd583b88dae96b4aa866ddf1214f0a 0	artifacts/d3-rework-p2-diagnostics-baseline.txt
