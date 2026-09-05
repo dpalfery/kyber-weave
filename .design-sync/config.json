@@ -1,0 +1,92 @@
+{
+  "pkg": "codeburn-desktop",
+  "globalName": "CodeburnDesktop",
+  "projectId": "6ac3a9c9-1627-4aaa-9336-7739411ba3f7",
+  "shape": "package",
+  "buildCmd": "cd dash/app && npx tsc -p tsconfig.design-sync.json && cat renderer/styles/indigo.css renderer/styles/plain.css > .ds-sync-styles.css",
+  "srcDir": "renderer/components",
+  "tsconfig": "tsconfig.json",
+  "cssEntry": ".ds-sync-styles.css",
+  "componentSrcMap": {
+    "AboutModal": "renderer/components/AboutModal.tsx",
+    "ActivityHeatmap": "renderer/components/ActivityHeatmap.tsx",
+    "CliErrorPanel": "renderer/components/CliErrorPanel.tsx",
+    "CliErrorText": "renderer/components/CliErrorPanel.tsx",
+    "ConnectAffordance": "renderer/components/ConnectAffordance.tsx",
+    "Dropdown": "renderer/components/Dropdown.tsx",
+    "EmptyNote": "renderer/components/EmptyState.tsx",
+    "ErrorBoundary": "renderer/components/ErrorBoundary.tsx",
+    "FlameMark": "renderer/components/FlameMark.tsx",
+    "Hint": "renderer/components/Hint.tsx",
+    "ListRow": "renderer/components/ListRow.tsx",
+    "Onboarding": "renderer/components/Onboarding.tsx",
+    "Panel": "renderer/components/Panel.tsx",
+    "ProviderLogo": "renderer/components/ProviderLogo.tsx",
+    "ProviderPop": "renderer/components/ProviderPop.tsx",
+    "Punchcard": "renderer/components/Punchcard.tsx",
+    "RangeCalendar": "renderer/components/RangeCalendar.tsx",
+    "Sankey": "renderer/components/Sankey.tsx",
+    "SectionSkeleton": "renderer/components/Skeleton.tsx",
+    "SegTabs": "renderer/components/SegTabs.tsx",
+    "Sidebar": "renderer/components/Sidebar.tsx",
+    "StackedBars": "renderer/components/StackedBars.tsx",
+    "StaleBanner": "renderer/components/StaleBanner.tsx",
+    "Stat": "renderer/components/Stat.tsx",
+    "SwitchingBanner": "renderer/components/SwitchingBanner.tsx",
+    "TeamTabContent": "renderer/components/TeamRegistry.tsx",
+    "ToastHost": "renderer/components/ToastHost.tsx",
+    "TopBar": "renderer/components/TopBar.tsx",
+    "UpdateBanner": "renderer/components/UpdateBanner.tsx",
+    "Window": "renderer/components/Window.tsx"
+  },
+  "dtsPropsFor": {
+    "ErrorBoundary": "children: React.ReactNode;",
+    "ToastHost": "/** No props \u2014 renders the global toast portal. */",
+    "SwitchingBanner": "/** No props \u2014 reads switching state internally. */",
+    "UpdateBanner": "/** No props \u2014 reads update status internally. */",
+    "Hint": "items: { k?: string; label: React.ReactNode }[];\nright?: React.ReactNode;",
+    "TopBar": "title: React.ReactNode;\nscope?: React.ReactNode;\nperiod: string;\nonPeriodChange: (value: string) => void;\n/** null whenever the period is a named preset rather than a custom range. */\ncustomRange: { from: string; to: string } | null;\nonRangeSelect: (range: { from: string; to: string }) => void;\nprovider: string;\nproviderLabel: string;\nproviderOptions: { value: string; label: string }[];\nonProviderSelect: (value: string) => void;\n/** Omit to hide the fourth control entirely. */\nclaudeConfigs?: { selectedId: string | null; options: { id: string; label: string; path: string }[] };\n/** null is the normal case \u2014 no explicit Claude config selected. */\nconfigSource: string | null;\nonConfigSelect: (id: string) => void;",
+    "Sidebar": "active: 'overview' | 'sessions' | 'pullRequests' | 'spend' | 'optimize' | 'models' | 'compare' | 'plans' | 'settings' | 'plugins';\nonNavigate: (section: 'overview' | 'sessions' | 'pullRequests' | 'spend' | 'optimize' | 'models' | 'compare' | 'plans' | 'settings' | 'plugins') => void;\n/** Declared but NOT rendered by the current implementation. */\nstatus?: React.ReactNode;",
+    "SegTabs": "options: { value: string; label: string }[];\nvalue: string;\nonChange: (value: string) => void;\nstyle?: React.CSSProperties;",
+    "ProviderPop": "value: string;\n/** Retained for API compatibility; the display label is derived from `options`. */\nlabel: string;\noptions: { value: string; label: string }[];\nonSelect: (value: string) => void;",
+    "Dropdown": "value: string;\noptions: { value: string; label: string }[];\nonChange: (value: string) => void;\nariaLabel: string;\nid: string;\nwidth?: React.CSSProperties['width'];\n/** Optional leading glyph (e.g. a provider logo) shown in the trigger and each option. */\nrenderIcon?: (value: string) => React.ReactNode;\n/** Optional non-interactive note pinned below the options in the open menu. */\nfooter?: React.ReactNode;",
+    "RangeCalendar": "/** null when no custom range is selected. */\nvalue: { from: string; to: string } | null;\nonSelect: (range: { from: string; to: string }) => void;",
+    "AboutModal": "socials: { label: string; url: string; icon: React.ReactNode }[];\nonClose: () => void;",
+    "CliErrorPanel": "error: { kind: 'not-found' | 'nonzero' | 'bad-json' | 'timeout' | 'too-large' | 'bad-args'; message: string; cold?: true };\n/** Named in the 'not-found' branch only, e.g. \"sessions\". */\nsubject?: string;",
+    "CliErrorText": "error: { kind: 'not-found' | 'nonzero' | 'bad-json' | 'timeout' | 'too-large' | 'bad-args'; message: string; cold?: true };",
+    "StaleBanner": "error: { kind: 'not-found' | 'nonzero' | 'bad-json' | 'timeout' | 'too-large' | 'bad-args'; message: string; cold?: true };",
+    "ActivityHeatmap": "daily: { date: string; cost: number; savingsUSD: number; calls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; topModels: { name: string; cost: number; savingsUSD: number; calls: number; inputTokens: number; outputTokens: number }[] }[];\n/** Drop the surrounding card chrome for embedding in a hero tile. */\nbare?: boolean;",
+    "StackedBars": "daily: { date: string; cost: number; savingsUSD: number; calls: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; topModels: { name: string; cost: number; savingsUSD: number; calls: number; inputTokens: number; outputTokens: number }[] }[];\n/** Label used when a provider filter leaves only cost data. */\nfallbackLabel?: string;\n/** Change to replay the entry animation. */\nanimateKey?: string;\n/** ISO date of first recorded history; earlier bars render as a dashed no-data lead-in. */\ndataStart?: string | null;",
+    "Sankey": "flow: { period: { label: string; start: string; end: string }; models: { id: string; label: string; cost: number }[]; projects: { id: string; label: string; cost: number }[]; links: { model: string; project: string; cost: number }[] };",
+    "TeamTabContent": "/** The CLI menubar payload (MenubarPayload in renderer/lib/types.ts) \u2014 a large\n *  aggregate; `current` plus the optional per-device and per-window sections. */\npayload: { generated: string; stale?: boolean; current: { label: string } & Record<string, unknown> } & Record<string, unknown>;\n/** Tab id from useTeamTabs(); an unknown id renders the fallback branch. */\ntab: string;"
+  },
+  "overrides": {
+    "Sankey": {
+      "cardMode": "column"
+    },
+    "Punchcard": {
+      "cardMode": "column"
+    },
+    "ToastHost": {
+      "cardMode": "single"
+    },
+    "Window": {
+      "cardMode": "column",
+      "viewport": "1180x760"
+    },
+    "TopBar": {
+      "cardMode": "column",
+      "viewport": "1180x760"
+    },
+    "Onboarding": {
+      "cardMode": "single"
+    },
+    "AboutModal": {
+      "cardMode": "single"
+    },
+    "SegTabs": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}
