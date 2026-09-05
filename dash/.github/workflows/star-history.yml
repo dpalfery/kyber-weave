@@ -1,0 +1,29 @@
+name: Star History
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: star-history
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Pin the action to an immutable revision because this workflow grants
+      # write access to the repository.
+      - uses: narayann7/star-history-action@a68d8f9d67ca20d55b682a264e69152dcf326e9c
+        with:
+          repos: getagentseal/codeburn
+          output-dir: assets/star-history
+          type: Date
+          themes: light,dark
+          width: "960"
