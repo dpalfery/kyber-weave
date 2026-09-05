@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
-import { TOKEN_SUM_MISMATCH, type CanonicalRecord, type TokenUsage } from './types.js'
+import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type TokenUsage } from './types.js'
 
 // The measured floor the store exists to break (R12.4): 2.9 GB across 37,623
 // spans is roughly 78 KB of raw payload per span, uncompressed. A record whose
@@ -61,7 +61,7 @@ function record(overrides: Partial<CanonicalRecord> = {}): CanonicalRecord {
       currency: 'USD',
       byModel: { 'claude-sonnet-4-5': 0.01234 },
     },
-    measurability: { input_tokens: 'measured', reasoning_tokens: 'not_measurable' },
+    measurability: { input_tokens: 'measured', reasoning_tokens: notMeasurable('reasoning is unexported in this fixture.') },
     ...overrides,
   }
 }
@@ -301,6 +301,24 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
       reason: 'unresolved parent span',
     })
     expect(store.getQuarantine('span-absent')).toBeUndefined()
+  })
+
+  it('keeps a non-model quarantine reason auditable rather than treating it as a generic drop', () => {
+    const store = new CanonStore(':memory:')
+    store.quarantine('health-1', ['copilot'], 'non-model span: health check')
+
+    expect(store.get('health-1')).toBeUndefined()
+    expect(store.getQuarantine('health-1')).toEqual({
+      spanId: 'health-1',
+      namespaces: ['copilot'],
+      reason: 'non-model span: health check',
+    })
+    expect(store.listQuarantine()).toContainEqual({
+      spanId: 'health-1',
+      namespaces: ['copilot'],
+      reason: 'non-model span: health check',
+    })
+    store.close()
   })
 
   it('re-quarantining a span replaces the entry', () => {

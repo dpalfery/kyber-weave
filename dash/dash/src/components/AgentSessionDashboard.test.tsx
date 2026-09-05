@@ -294,6 +294,90 @@ const sampleSession: AgentSessionPayload = {
   ],
 }
 
+/**
+ * Synthetic, content-free B1 ASAD wire payload. It intentionally contains
+ * analysis output only: no prompt text, tool schemas, or tool-result content.
+ * The dashboard must consume this server shape directly, without an adapter
+ * recreating the retired intermediate rows.
+ */
+const b1Session = {
+  id: 'b1-asad-session',
+  session_id: 'b1-asad-session',
+  harness: 'claude-code',
+  label: 'B1 fixture session',
+  agent_name: 'test-agent',
+  repo: 'acme/fixture',
+  branch: 'main',
+  span_count: 3,
+  summary: {
+    turn_count: 2,
+    request_count: 1,
+    total_input: 4200,
+    total_output: 600,
+    total_cache_read: 1200,
+    total_cache_creation: 300,
+    duration_ms: 1800,
+    models: ['claude-test'],
+    cost: { basis: 'published', status: 'priced', value: 0.42, currency: 'USD' },
+  },
+  context: {
+    measurable: true,
+    contextLimit: 200000,
+    turns: [
+      {
+        index: 0,
+        buckets: {
+          system_prompt: 400,
+          instruction_context: 200,
+          tool_definitions: 300,
+          conversation_history: 1800,
+          tool_result_content: 1200,
+          residual: 300,
+        },
+        reported_input: 4200,
+      },
+    ],
+    first: { buckets: { system_prompt: 400 }, reported_input: 4200 },
+    last: { buckets: { system_prompt: 400 }, reported_input: 4200 },
+  },
+  // B1 serializes tool metadata in `schema`; tools is deliberately free of
+  // content fields such as descriptions or definitions.
+  tools: [{ schema_tokens: 300, invocations: 0, turns_resident: 2 }],
+  schema: {
+    measurable: true,
+    byServer: { filesystem: 600 },
+    neverInvoked: [{ name: 'read_file', server: 'filesystem', cost: 600, invoked: false }],
+    unusedRange: { tokenResidencies: 600, floor: 0, ceiling: 600 },
+    turns: 2,
+  },
+  turns: [
+    { index: 0, spanId: 'b1-turn-1', model: 'claude-test', input: 4200, fresh: 2700, cache_read: 1200, cache_creation: 300, output: 600 },
+  ],
+  timeline: [
+    {
+      spanId: 'b1-turn-1',
+      parentId: null,
+      name: 'llm.invoke',
+      kind: 'client',
+      startMs: 0,
+      durationMs: 1800,
+      attributes: {},
+      isSubagent: false,
+      isAuxiliary: false,
+      cost: { basis: 'published', status: 'priced', value: 0.42, currency: 'USD' },
+      children: [],
+    },
+  ],
+  requests: [{ request: 'b1-request', turns: 1, model: 'claude-test' }],
+  servers: [{ server: 'filesystem', is_mcp: true, tools: 1, schema_tokens: 300, invocations: 0, unused_tools: 1, unused_cost: 600 }],
+  coverage: { schema: 1, context: 1 },
+  problems: [],
+  reconciliation: [],
+  subagents: [],
+  auxiliary: [],
+  measurability: {},
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -316,6 +400,41 @@ describe('AgentSessionDashboard: Formatters and Helpers', () => {
 })
 
 describe('AgentSessionDashboard: Assembly and Subpanels', () => {
+  it('renders all six ASAD views from the content-free B1 payload', () => {
+    const html = renderHtml(React.createElement(AgentSessionDashboard, { session: b1Session }))
+
+    // 1. Session overview
+    expect(html).toContain('Session Overview')
+    expect(html).toContain('4.2K')
+    // 2. Per-turn token spend
+    expect(html).toContain('Token Spend per Turn')
+    expect(html).toContain('2.7K')
+    // 3. Context composition
+    expect(html).toContain('Context Composition')
+    expect(html).toContain('Conversation history')
+    // 4. Tool/schema cost
+    expect(html).toContain('read_file')
+    expect(html).toContain('By MCP server')
+    // 5. Execution timeline
+    expect(html).toContain('Execution Timeline')
+    expect(html).toContain('llm.invoke')
+    // 6. Session cost/token accounting
+    expect(html).toContain('Session Cost &amp; Token Accounting')
+    expect(html).toContain('$0.42')
+
+    expect(html.indexOf('Session Overview')).toBeLessThan(html.indexOf('Token Spend per Turn'))
+    expect(html.indexOf('Token Spend per Turn')).toBeLessThan(html.indexOf('Context Composition'))
+    expect(html.indexOf('Context Composition')).toBeLessThan(
+      html.indexOf('3 · Tool &amp; Schema Cost Ranking')
+    )
+    expect(html.indexOf('3 · Tool &amp; Schema Cost Ranking')).toBeLessThan(
+      html.indexOf('Execution Timeline')
+    )
+    expect(html.indexOf('Execution Timeline')).toBeLessThan(
+      html.indexOf('Session Cost &amp; Token Accounting')
+    )
+  })
+
   it('renders overview strip with metrics (spans, turns, tokens, cost, cache hit ratio)', () => {
     const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
 
@@ -435,6 +554,21 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('data-testid="harness-notes"')
     expect(html).toContain('What copilot does not export:')
     expect(html).toContain('Harness does not export raw workspace info files.')
+  })
+
+  it('keeps a B3 unavailable-context reason verbatim in the dashboard banner', () => {
+    const reason = 'Claude Code session files record tool invocations, not tool definitions.'
+    const unavailableBucketSession = {
+      ...b1Session,
+      context: {
+        measurable: false,
+        reason,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={unavailableBucketSession} />)
+    expect(html).toContain('data-testid="context-composition-not-measurable"')
+    expect(html).toContain(reason)
   })
 
   it('renders multiple user requests list', () => {
@@ -664,6 +798,87 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
 })
 
 describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
+  it('routes turn bands, tool rows, and timeline spans through full-content requests', () => {
+    const internals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+    const originalUseState = internals?.H?.useState
+    const state: any[] = []
+    let stateCursor = 0
+
+    const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
+      stateCursor = 0
+      return AgentSessionContent({ session: sampleSession, initialTimelineTab })
+    }
+
+    const drawerFrom = (node: unknown): React.ReactElement<any> | null => {
+      if (node == null) return null
+      if (Array.isArray(node)) {
+        for (const child of node) {
+          const found = drawerFrom(child)
+          if (found) return found
+        }
+        return null
+      }
+      if (!React.isValidElement(node)) return null
+      if (node.type === SessionInspectorDrawer) return node
+      return drawerFrom((node.props as { children?: unknown }).children)
+    }
+
+    if (internals?.H) {
+      internals.H.useState = (initial: any) => {
+        const index = stateCursor++
+        if (!(index in state)) {
+          state[index] = typeof initial === 'function' ? initial() : initial
+        }
+        return [
+          state[index],
+          (next: any) => {
+            state[index] = typeof next === 'function' ? next(state[index]) : next
+          },
+        ]
+      }
+    }
+
+    try {
+      const turnTree = renderWithState()
+      let spendCharts: any = null
+      const findSpendCharts = (node: any): void => {
+        if (!node || spendCharts) return
+        if (node.props?.onSelectTurn && node.props?.session) {
+          spendCharts = node
+          return
+        }
+        React.Children.forEach(node.props?.children, findSpendCharts)
+      }
+      findSpendCharts(turnTree)
+      expect(spendCharts).not.toBeNull()
+      spendCharts.props.onSelectTurn(1, 'tool_definitions')
+      expect(drawerFrom(renderWithState())?.props.contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        span: 'turn-span-1',
+        part: 'tool_definitions',
+      })
+
+      const toolTree = renderWithState()
+      findElementByTestId(toolTree, 'tool-row-read_file')?.props.onClick()
+      expect(drawerFrom(renderWithState())?.props.contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        span: 'turn-span-1',
+        part: 'tool_definitions',
+      })
+
+      const spanTree = renderWithState('bars')
+      findElementByTestId(spanTree, 'timeline-bar-row')?.props.onClick()
+      expect(drawerFrom(renderWithState('bars'))?.props.contentRequest).toEqual({
+        sessionId: 'sess-abc-123',
+        span: 'root-span-1',
+      })
+    } finally {
+      if (internals?.H) {
+        internals.H.useState = originalUseState
+      }
+    }
+  })
+
   it('opens drawer when clicking a tool row', () => {
     let capturedOpen = false
     let capturedTitle = ''

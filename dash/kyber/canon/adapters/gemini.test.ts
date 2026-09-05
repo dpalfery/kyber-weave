@@ -26,7 +26,8 @@ const geminiCounts = (
 describe('geminiAdapter.detect', () => {
   it.each([
     ['full fingerprint', geminiCounts(), 1],
-    ['vendor namespace alone', { 'gemini.session.id': 'g-77' }, 0.6],
+    ['gemini namespace vendor evidence', { 'gemini.session.id': 'g-77' }, 0.6],
+    ['gen_ai.system vendor evidence', { 'gen_ai.system': 'gemini' }, 0.6],
     ['shared GenAI usage alone', { 'gen_ai.usage.input_tokens': 1_200 }, 0.4],
     ['no fingerprint', { 'pi.session.id': 's-9f2' }, 0],
   ])('scores %s as %s', (_label, attributes, score) => {
@@ -82,7 +83,9 @@ describe('geminiAdapter.normalize — the documented convention (R4.2)', () => {
     expect(geminiAdapter.unexportedMetrics()).toEqual(['cache_creation'])
     // No creation counter is invented from an absent attribute; the absence
     // is stated per metric (R7.6, R10.2).
-    expect(record.measurability).toEqual({ cache_creation: 'not_measurable' })
+    expect(record.measurability).toEqual({
+      cache_creation: expect.objectContaining({ availability: 'not_measurable' }),
+    })
     expect(record.tokens.cacheCreation).toBe(0)
   })
 })

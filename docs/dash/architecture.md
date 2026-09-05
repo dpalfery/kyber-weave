@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: draft
 owner: dpalfery
-last-reviewed: 2026-08-29
+last-reviewed: 2026-09-04
 keywords:
   - dashboard
   - codeburn
@@ -58,7 +58,7 @@ the embedded receiver — are recorded in [ADR 0006](../adr/0006-kyberdash-soft-
 flowchart TB
     subgraph sources["Ingest sources"]
         FS["Session files<br/>41 providers, upstream parser"]
-        OT["OTLP/HTTP :4318<br/>JSON + protobuf"]
+        OT["OTLP/HTTP :4318<br/>traces + logs, JSON + protobuf"]
         AS["Aspire export<br/>optional"]
     end
 
@@ -143,14 +143,15 @@ reason so a future merge conflict arrives with rationale attached (R14.3):
 |---|---|---|
 | Upstream provider parser | `dash/src/` | Existing. Produces parsed calls plus its deduplication set. Not modified. |
 | `Synthesizer` | `dash/kyber/synth/synth.ts` | Consumes parsed calls; emits canonical records with a declared measurability map. Extends upstream's cross-provider deduplication key rather than adding a parallel mechanism (R3). |
-| `OtlpReceiver` | `dash/kyber/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces`. Decodes JSON and protobuf to one span shape. Protobuf is decoded by hand — a wire-format reader against the stable OTLP trace schema — because the merge zone carries no protobuf library the subtree could merge cleanly. |
+| `OtlpReceiver` | `dash/kyber/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. |
 | `AspireSource` | `dash/kyber/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
 | `IngestWriter` | `dash/kyber/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
 
 The receiver is embedded rather than relying on an external Aspire dashboard because the
 dashboard is a ring buffer — eviction is a measured data-loss class (R2.7) — and because
 Requirement 2 must hold without Docker, a container runtime, or a collector. The existing
-collectors already post OTLP JSON to port 4318, so they work unchanged.
+collectors already post OTLP JSON to port 4318, so they work unchanged. Non-model and
+unmatched telemetry is quarantined with an auditable reason instead of becoming a session.
 
 ## Normalization layer
 
@@ -245,10 +246,16 @@ running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) ov
 records, and the table is a cache: dropping every row and rebuilding loses nothing.
 
 `KyberBridge` (`dash/kyber/server/bridge.ts`) reads `canon.db` and serves the derived sessions
-above. It retains a fallback reader for the retired Python pipeline's `sessions.db`, opt-in
-through `AGENTDASH_DB` with no default. That fallback is being removed:
-[ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) supersedes ADR 0007's
-dual-database decision, and `canon.db` is the only store.
+above. That is the single-store end state in [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md):
+production code under `dash/kyber` does not open a Python `sessions.db`, and
+`AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy session. Tests under `dash/kyber`
+prove those environment variables are ignored for session listing and payload.
+
+The session projection emits the ASAD payload directly. It preserves per-bucket
+measurability and reasons, so a source that cannot supply content, schemas, structure, or
+counters produces `not_measurable` rather than a misleading zero. The projection includes
+the ordered turns and requests, context at the first and last measured turns, tool and
+per-server schema data, timeline, reconciliation, coverage, problems, and summary.
 
 Derived token counts (R4.6) come from `dash/kyber/canon/tokens.ts`, a tokenizer wrapper with a
 store-backed memo cache, and are tagged as derived with the model name so consumers present
@@ -303,15 +310,14 @@ Served directly by the CLI command `codeburn web` (or `node dash/dist/cli.js web
 bootstrapping with XSS protection and exposes five primary top-level views ([ADR 0007](../adr/0007-kyberdash-agent-session-analysis-integration.md)):
 
 1. **`[Usage]`**: CodeBurn device overview, multi-provider spend rollups, top projects, and daily spend timelines.
-2. **`[Context]`**: Unified agent session explorer. Selecting an agent harness (Copilot, Gemini, Pi) loads
-   the rich **`AgentSessionDashboard`**:
+2. **`[Context]`**: One canonical session explorer for every harness. Expanding a session loads
+   the **`AgentSessionDashboard`** directly from its ASAD payload:
    - *Overview Strip*: Metric summary chips (spans, turns, total tokens, cache hit ratio, cost basis), reconciliation badge (`exact_match`), subagent links, and harness caveats.
    - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token usage across turns (fresh input, cache read, cache creation, output).
    - *Context Composition Heatmap & Chart*: Token distribution across turns by semantic bucket (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
    - *Tool & Schema Cost Table*: Ranked tool schemas, resident size, invocation counts, and unused schema waste range.
    - *Execution Timeline / Call Tree*: Hierarchical span execution tree with status badges, durations, and auxiliary/subagent flags.
-   - *Slide-out Inspector Drawer (`SessionInspectorDrawer`)*: XML tag-folded details (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool parameter/result trees.
-   - *Legacy CLI Fallback*: Selecting CLI text sessions renders the estimated token `TreeTable`.
+   - *Slide-out Inspector Drawer (`SessionInspectorDrawer`)*: Full canonical content on demand, with any server-side clipping labelled by shown and total length.
 3. **`[Compare]`**: Cross-harness comparison matrix benchmarking sessions, tokens/turn, tools offered vs invoked, and cost across agents.
 4. **`[Quarantine]`**: Quarantined spans holding unrecognized namespaces or malformed attributes for triage.
 5. **`[Problems]`**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
@@ -328,9 +334,7 @@ The web dashboard server (`dash/src/web-dashboard.ts`) wires HTTP requests direc
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[] }` | Recorded problems; supports `?limit=`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
-| `/api/kyber/context` | `GET` | `ContextAnalysis` | Backward-compatible context composition (supports `?id=`). |
-| `/api/kyber/schema` | `GET` | `SchemaAnalysis` | Backward-compatible tool schema ranking (supports `?id=`). |
-| `/api/kyber/timeline` | `GET` | `TimelineNode` | Backward-compatible timeline tree root (supports `?id=`). |
+| `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part, including explicit clipping metadata. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
 

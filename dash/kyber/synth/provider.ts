@@ -31,6 +31,13 @@
 
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 import type { CanonicalRecord, Problem } from '../canon/types.js'
+import { claudeReader } from './readers/claude.js'
+import { copilotCliReader, loadCopilotCliCalls } from './readers/copilot.js'
+import { codexReader } from './readers/codex.js'
+import { kiloReader } from './readers/kilo.js'
+import { opencodeReader } from './readers/opencode.js'
+import { piReader } from './readers/pi.js'
+import type { ContentReader, ReaderTurn } from './readers/types.js'
 import { Synthesizer } from './synth.js'
 
 /** Problem code for a session store that exists but cannot be parsed (R1.3). */
@@ -47,7 +54,14 @@ export const PROVIDER_PARSE_ERROR = 'PROVIDER_PARSE_ERROR'
  * The loader may equivalently throw; a throw is classified exactly like a
  * returned error.
  */
-export type ProviderLoaderResult = ParsedProviderCall[] | Error | null | undefined
+export type ProviderLoad = {
+  /** Calls parsed from one session file. */
+  calls: ParsedProviderCall[]
+  /** The same session file the registered reader must inspect. */
+  filePath: string
+}
+
+export type ProviderLoaderResult = ParsedProviderCall[] | ProviderLoad | Error | null | undefined
 
 /** Loads one provider's parsed calls, or reports why it could not. */
 export type ProviderLoader = (provider: string) => ProviderLoaderResult
@@ -58,6 +72,55 @@ export type ProviderIngestResult = {
   records: CanonicalRecord[]
   /** One problem per unparseable store; absent providers appear nowhere. */
   problems: Problem[]
+}
+
+/** Readers registered for the transcript formats D5 and D6 have verified. */
+export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
+  ['claude', claudeReader],
+  ['claude-code', claudeReader],
+  ['codex', codexReader],
+  ['opencode', opencodeReader],
+  ['kilo', kiloReader],
+  ['kilo-code', kiloReader],
+  ['copilot', copilotCliReader],
+  ['pi', piReader],
+])
+
+function callsAndTurns(
+  provider: string,
+  load: ProviderLoad,
+  reader: ContentReader | undefined,
+): Promise<readonly [ParsedProviderCall[], ReaderTurn[] | undefined]> {
+  // Copilot CLI records its ASAD context taxonomy in SQLite rather than in a
+  // transcript. Its upstream parser supplies no transcript calls for that
+  // source, so turn the reported rows into calls before normal synthesis.
+  const calls = provider === 'copilot' && load.calls.length === 0
+    ? loadCopilotCliCalls(load.filePath)
+    : load.calls
+  if (reader === undefined) return Promise.resolve([calls, undefined])
+  return (async () => {
+    const turns: ReaderTurn[] = []
+    for await (const turn of reader.read(load.filePath)) turns.push(turn)
+    return [calls, turns] as const
+  })()
+}
+
+/**
+ * Pair parser calls with turns from their shared session file. A reader turn
+ * names the same session when available; an unnamed turn remains positionally
+ * attributable to that file. Extra calls or turns are left unpaired rather
+ * than borrowing content from an adjacent invocation.
+ */
+function matchingTurns(
+  calls: readonly ParsedProviderCall[],
+  turns: readonly ReaderTurn[],
+): Array<ReaderTurn | undefined> {
+  return calls.map((call, index) => {
+    const turn = turns[index]
+    return turn === undefined || turn.sessionId === undefined || turn.sessionId === call.sessionId
+      ? turn
+      : undefined
+  })
 }
 
 /**
@@ -106,10 +169,10 @@ function parseProblem(provider: string, error: Error): Problem {
  * through 9.1's {@link Synthesizer} — records land exactly as if that
  * synthesizer had been called directly, preserving input order.
  */
-export function ingestProviders(
+export async function ingestProviders(
   providers: readonly string[],
   loader: ProviderLoader,
-): ProviderIngestResult {
+): Promise<ProviderIngestResult> {
   const synthesizer = new Synthesizer()
   const records: CanonicalRecord[] = []
   const problems: Problem[] = []
@@ -133,7 +196,13 @@ export function ingestProviders(
       continue
     }
 
-    records.push(...synthesizer.synthesize(loaded))
+    if (Array.isArray(loaded)) {
+      records.push(...synthesizer.synthesize(loaded))
+      continue
+    }
+
+    const [calls, turns] = await callsAndTurns(provider, loaded, PROVIDER_READERS.get(provider))
+    records.push(...synthesizer.synthesize(calls, turns === undefined ? undefined : matchingTurns(calls, turns)))
   }
 
   return { records, problems }

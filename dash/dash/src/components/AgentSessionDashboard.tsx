@@ -14,6 +14,8 @@ import { SessionCostPanel } from './SessionCostPanel'
 // ---------------------------------------------------------------------------
 
 export interface SessionSummaryCost {
+  value?: number | null
+  currency?: string | null
   usd?: number | null
   credits?: number | null
   basis?: 'published_rates' | 'harness_reported' | string
@@ -334,7 +336,11 @@ export function AgentSessionContent({
 
   // 3. State for timeline view mode ('tree' vs 'bars')
   const [timelineTab, setTimelineTab] = useState<'tree' | 'bars'>(initialTimelineTab ?? 'tree')
+  const [timelineTabSelected, setTimelineTabSelected] = useState(false)
   const [selectedSpanId, setSelectedSpanId] = useState<string | undefined>(undefined)
+  // A navigation can ask to open a particular timeline mode. Once a viewer
+  // chooses a tab, preserve that choice for the rest of this session.
+  const activeTimelineTab = timelineTabSelected ? timelineTab : (initialTimelineTab ?? timelineTab)
 
   // The payload's timeline is a SINGLE root node — that is what buildTimeline
   // returns and what the payload shape documents — but both consumers below
@@ -382,8 +388,8 @@ export function AgentSessionContent({
       cost: {
         basis: session.summary?.cost?.basis ?? 'none',
         status: session.summary?.cost?.status ?? 'ok',
-        value: session.summary?.cost?.usd ?? undefined,
-        currency: 'USD',
+        value: session.summary?.cost?.value ?? undefined,
+        currency: session.summary?.cost?.currency ?? 'USD',
       },
     }
   }, [session])
@@ -417,6 +423,7 @@ export function AgentSessionContent({
   // 7. Drawer trigger handlers
   const openDrawerForTurn = useCallback(
     (turnIndex: number, bucketName?: string) => {
+      setSelectedSpanId(undefined)
       const turns = session?.turns || []
       const turn = turns.find(
         (t: any, i: number) =>
@@ -510,6 +517,7 @@ export function AgentSessionContent({
 
   const openDrawerForTool = useCallback(
     (tool: ToolRow) => {
+      setSelectedSpanId(undefined)
       setDrawerTitle(`Tool: ${tool.name}`)
       setDrawerSubtitle(
         `Server: ${tool.server || 'built-in'}${tool.is_mcp ? ' (MCP)' : ''} · Invocations: ${tool.invocations}`
@@ -527,6 +535,10 @@ export function AgentSessionContent({
       setDrawerContent({
         tool,
         definition: def ?? null,
+        contentRequest: {
+          span: typeof turnWithDefs?.spanId === 'string' ? turnWithDefs.spanId : undefined,
+          part: 'tool_definitions',
+        },
       })
       setDrawerOpen(true)
     },
@@ -823,14 +835,14 @@ export function AgentSessionContent({
               )}
             </div>
             <div className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-foreground">
-              {cost.usd != null
-                ? usd(cost.usd)
+              {cost.value != null
+                ? usd(cost.value)
                 : cost.credits != null
                   ? `${formatCredits(cost.credits)} cr`
                   : '—'}
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
-              {cost.usd != null && cost.credits != null
+              {cost.value != null && cost.credits != null
                 ? `${formatCredits(cost.credits)} credits`
                 : isReported
                   ? 'reported by harness'
@@ -931,8 +943,6 @@ export function AgentSessionContent({
             </div>
           </Card>
         </div>
-
-        <SessionCostPanel session={session} />
       </div>
 
       {/* ---------------------------------------------------------------------
@@ -1033,10 +1043,13 @@ export function AgentSessionContent({
           <div className="flex rounded border border-border bg-interactive-secondary p-0.5 text-xs self-start sm:self-auto">
             <button
               type="button"
-              onClick={() => setTimelineTab('tree')}
+              onClick={() => {
+                setTimelineTab('tree')
+                setTimelineTabSelected(true)
+              }}
               className={cn(
                 'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-                timelineTab === 'tree'
+                activeTimelineTab === 'tree'
                   ? 'bg-card text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               )}
@@ -1046,10 +1059,13 @@ export function AgentSessionContent({
             </button>
             <button
               type="button"
-              onClick={() => setTimelineTab('bars')}
+              onClick={() => {
+                setTimelineTab('bars')
+                setTimelineTabSelected(true)
+              }}
               className={cn(
                 'px-2.5 py-1 rounded-[4px] font-medium transition-colors',
-                timelineTab === 'bars'
+                activeTimelineTab === 'bars'
                   ? 'bg-card text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               )}
@@ -1071,7 +1087,7 @@ export function AgentSessionContent({
         </div>
 
         {/* Call Tree View */}
-        {timelineTab === 'tree' ? (
+        {activeTimelineTab === 'tree' ? (
           <div data-testid="timeline-tree-view">
             <TimelineView
               root={timelineRoot}
@@ -1147,7 +1163,12 @@ export function AgentSessionContent({
       </div>
 
       {/* ---------------------------------------------------------------------
-          Section 5: Slide-out Inspector Drawer
+          Section 5: Session Cost & Token Accounting
+      --------------------------------------------------------------------- */}
+      <SessionCostPanel session={session} />
+
+      {/* ---------------------------------------------------------------------
+          Section 6: Slide-out Inspector Drawer
       --------------------------------------------------------------------- */}
       <SessionInspectorDrawer
         open={drawerOpen}
@@ -1156,16 +1177,31 @@ export function AgentSessionContent({
         subtitle={drawerSubtitle}
         rawContent={drawerContent}
         contentRequest={
-          typeof drawerContent?.bucket === 'string' && (session.id ?? session.session_id)
+          (session.id ?? session.session_id) && selectedSpanId
             ? {
                 sessionId: String(session.id ?? session.session_id),
-                span:
-                  typeof drawerContent.turn?.spanId === 'string' && drawerContent.turn.spanId
-                    ? drawerContent.turn.spanId
-                    : undefined,
-                part: drawerContent.bucket,
+                span: selectedSpanId,
               }
-            : undefined
+            : (session.id ?? session.session_id) && typeof drawerContent?.contentRequest === 'object'
+            ? {
+                sessionId: String(session.id ?? session.session_id),
+                ...drawerContent.contentRequest,
+              }
+            : typeof drawerContent?.bucket === 'string' && (session.id ?? session.session_id)
+              ? {
+                  sessionId: String(session.id ?? session.session_id),
+                  span:
+                    typeof drawerContent.turn?.spanId === 'string' && drawerContent.turn.spanId
+                      ? drawerContent.turn.spanId
+                      : undefined,
+                  part: drawerContent.bucket,
+                }
+              : (session.id ?? session.session_id) && typeof drawerContent?.spanId === 'string'
+                ? {
+                    sessionId: String(session.id ?? session.session_id),
+                    span: drawerContent.spanId,
+                  }
+                : undefined
         }
       />
     </div>

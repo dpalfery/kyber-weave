@@ -294,7 +294,8 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
   // The declaration is consulted before the data's shape: a source that
   // cannot supply structure is refused on its word, not on whether parts
   // happened to arrive this run (R7.6, R10.1).
-  const declared = contextCompositionAvailability(options.measurability) === 'not_measurable'
+  const availability = contextCompositionAvailability(options.measurability)
+  const declared = typeof availability === 'object' && availability.availability === 'not_measurable'
   const hasStructure = turns.some((turn) =>
     turn.parts.some((part) => part.text !== '' || part.tokens !== undefined)
   )

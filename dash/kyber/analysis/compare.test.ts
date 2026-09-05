@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import { COST_BASIS_MISMATCH, COST_CURRENCY_MISMATCH } from '../canon/cost.js'
 import type { CanonicalRecord, CostBasis, CostBlock, TokenUsage } from '../canon/types.js'
+import { notMeasurable } from '../canon/types.js'
 
 import { compareHarnesses, type ComparisonTable, type MetricRow } from './compare.js'
 
@@ -106,7 +107,7 @@ describe('availability independent of value (R10.1, R10.2)', () => {
     // 368 calls with none exported — so schema cost is a stated limitation,
     // not a perfect score of zero.
     const pi = times(3, () =>
-      turn('pi', { measurability: { tool_definitions: 'not_measurable' } })
+      turn('pi', { measurability: { tool_definitions: notMeasurable('pi does not export tool definitions.') } })
     )
     const copilot = times(3, () =>
       turn('copilot', { content: { tool_definitions: 'x'.repeat(400) } })
@@ -132,7 +133,7 @@ describe('availability independent of value (R10.1, R10.2)', () => {
   it('poisons an aggregate when any record declares the metric not measurable', () => {
     const corpus = [
       turn('pi'),
-      turn('pi', { measurability: { cache_read: 'not_measurable' } }),
+      turn('pi', { measurability: { cache_read: notMeasurable('pi fixture cache_read unavailable.') } }),
       turn('pi'),
     ]
 

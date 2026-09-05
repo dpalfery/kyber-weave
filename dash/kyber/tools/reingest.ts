@@ -41,65 +41,12 @@
 // it stamped at construction (`schema_version` metadata) is how a rebuilt
 // store is detected as current rather than silently misread.
 
-import type { HarnessAdapter, RawSpan } from '../canon/adapters/base.js'
-import { copilotAdapter } from '../canon/adapters/copilot.js'
-import { geminiAdapter } from '../canon/adapters/gemini.js'
-import { piAdapter } from '../canon/adapters/pi.js'
-import { AdapterRegistry } from '../canon/adapters/registry.js'
-import { quarantineUnclaimed, recordValidationProblems } from '../canon/adapters/quarantine.js'
+import { ingestBatch } from '../canon/ingest.js'
 import type { CanonStore } from '../canon/store.js'
-import type { CanonicalRecord } from '../canon/types.js'
 import type { OtlpSpan } from '../otel/receiver.js'
-
-/** The harness adapters attribution votes over, in registration (tie-break) order. */
-const ADAPTERS: readonly HarnessAdapter[] = [piAdapter, copilotAdapter, geminiAdapter]
-
-/** Resource attribute the OTLP convention names the emitting process with. */
-const SERVICE_NAME_ATTRIBUTE = 'service.name'
-
-/**
- * The source name a span carries when its export named no service. A
- * grouping key only — attribution votes on attribute fingerprints, never on
- * it (R6.2) — so the neutral constant attributes nothing and hides nothing.
- */
-const UNNAMED_SOURCE = 'otlp'
 
 /** The ingest-log source stamped on reconstruction runs. */
 const INGEST_SOURCE = 'span-exports'
-
-/**
- * Project a receiver-decoded span onto the adapter seam's input shape. The
- * telemetry source is the export's `service.name` resource attribute — the
- * emitting process's instance name, used for grouping and same-source
- * inheritance lookup only (R6.2). Attributes pass through untouched; they
- * are the only admissible fingerprint evidence.
- */
-function toRawSpan(span: OtlpSpan): RawSpan {
-  const service = span.resource[SERVICE_NAME_ATTRIBUTE]
-  return {
-    spanId: span.spanId,
-    traceId: span.traceId,
-    parentSpanId: span.parentSpanId,
-    source: typeof service === 'string' && service.length > 0 ? service : UNNAMED_SOURCE,
-    attributes: span.attributes,
-    name: span.name,
-    kind: span.kind,
-  }
-}
-
-/**
- * Give a normalized record the timing and outcome the adapter seam could not
- * carry. `RawSpan` is deliberately timing-free (the base contract fixes that
- * shape, and adapters stamp a neutral epoch), while the decoded span carries
- * the harness's own clock and status — the seam's documented growth path for
- * receiver-fed records. A corpus rebuilt from exports keeps the timestamps
- * its exports recorded; the timeline's session clock reads them.
- */
-function growWithReceiverTiming(record: CanonicalRecord, span: OtlpSpan): void {
-  record.timestamp = span.timestamp
-  record.durationMs = span.durationMs
-  record.status = span.status.code
-}
 
 /**
  * Rebuild the corpus from existing span exports into `store` (R15.3). Each
@@ -121,48 +68,9 @@ export async function reingestFromExports(
   exports: OtlpSpan[][],
   store: CanonStore,
 ): Promise<void> {
-  const registry = new AdapterRegistry(ADAPTERS)
-  const adapterByName = new Map(ADAPTERS.map((adapter) => [adapter.name, adapter]))
-
   let stored = 0
   for (const batch of exports) {
-    const rawSpans = batch.map(toRawSpan)
-    const attributed = registry.attribute(rawSpans)
-
-    // Normalize every claimed span with the adapter that won its group's
-    // vote, grouped per harness so each record is validated by the adapter
-    // that produced it (R4.3). Unclaimed spans are quarantined with the
-    // namespaces they carried (R6.1) — the work-order view's raw material.
-    quarantineUnclaimed(rawSpans, attributed, store)
-
-    const recordsByHarness = new Map<string, { adapter: HarnessAdapter; records: CanonicalRecord[] }>()
-    for (const [index, raw] of rawSpans.entries()) {
-      const harness = attributed.get(raw.spanId)
-      if (harness === undefined) continue // quarantined above
-      const adapter = adapterByName.get(harness)
-      if (adapter === undefined) {
-        // Unreachable: the registry only names adapters it was built with.
-        throw new Error(`attribution named unregistered harness "${harness}"`)
-      }
-      const record = adapter.normalize(raw)
-      growWithReceiverTiming(record, batch[index])
-      const group = recordsByHarness.get(harness)
-      if (group === undefined) {
-        recordsByHarness.set(harness, { adapter, records: [record] })
-      } else {
-        group.records.push(record)
-      }
-    }
-
-    // Validate per harness (R4.3, R4.4): rejected records are not stored —
-    // their problems are persisted instead — and the accepted subset lands
-    // in one transaction (R2.5).
-    const accepted: CanonicalRecord[] = []
-    for (const { adapter, records } of recordsByHarness.values()) {
-      accepted.push(...recordValidationProblems(records, store, (record) => adapter.validate(record)))
-    }
-    store.upsertMany(accepted)
-    stored += accepted.length
+    stored += ingestBatch(batch, store).accepted
 
     // Hand the event loop back between batches so a live receiver in this
     // process keeps ingesting while the rebuild runs (R15.3: both sources).

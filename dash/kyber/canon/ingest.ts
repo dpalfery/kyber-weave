@@ -27,10 +27,14 @@ import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { piAdapter } from './adapters/pi.js'
 import { AdapterRegistry } from './adapters/registry.js'
-import { quarantineUnclaimed, recordValidationProblems } from './adapters/quarantine.js'
+import {
+  observedNamespaces,
+  recordValidationProblems,
+} from './adapters/quarantine.js'
 import type { CanonStore } from './store.js'
 import type { CanonicalRecord } from './types.js'
 import type { OtlpSpan } from '../otel/receiver.js'
+import { ingestLogBatch } from './log-ingest.js'
 
 /** The harness adapters attribution votes over, in registration (tie-break) order. */
 export const ADAPTERS: readonly HarnessAdapter[] = [
@@ -80,11 +84,21 @@ export function growWithReceiverTiming(record: CanonicalRecord, span: OtlpSpan):
   record.status = span.status.code
 }
 
+/** Distinguish ambient telemetry from a span merely lacking an adapter. */
+function isStructuralSpan(span: RawSpan): boolean {
+  const name = span.name.toLowerCase()
+  return (
+    span.kind === 'server' ||
+    name.includes('health') ||
+    Object.keys(span.attributes).some((key) => key.startsWith('http.') || key.startsWith('db.'))
+  )
+}
+
 /** What one batch did, so a caller can log or assert on it. */
 export type IngestOutcome = {
   /** Records validated and stored. */
   accepted: number
-  /** Spans no adapter claimed; held back with the namespaces they carried. */
+  /** Spans held out of the corpus because no adapter claimed them or they were non-model. */
   quarantined: number
   /** Claimed records whose token decomposition failed validation. */
   rejected: number
@@ -107,8 +121,17 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
   const rawSpans = spans.map(toRawSpan)
   const attributed = registry.attribute(rawSpans)
 
-  quarantineUnclaimed(rawSpans, attributed, store)
-  const quarantined = rawSpans.filter((raw) => attributed.get(raw.spanId) === undefined).length
+  const unclaimed: string[] = []
+  for (const raw of rawSpans) {
+    if (attributed.has(raw.spanId)) continue
+    unclaimed.push(raw.spanId)
+    store.quarantineAndDelete(
+      raw.spanId,
+      observedNamespaces(raw.attributes),
+      isStructuralSpan(raw) ? 'non-model span' : 'unclaimed',
+    )
+  }
+  let quarantined = unclaimed.length
 
   const byHarness = new Map<string, { adapter: HarnessAdapter; records: CanonicalRecord[] }>()
   for (const [index, raw] of rawSpans.entries()) {
@@ -121,6 +144,14 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
     }
     const record = adapter.normalize(raw)
     growWithReceiverTiming(record, spans[index]!)
+    if (record.op === 'unspecified') {
+      // Attribution establishes the harness, not that every span in its trace
+      // is a model call. Keep structural and ambient spans out of both records
+      // and derived sessions while retaining an auditable quarantine row.
+      store.quarantineAndDelete(raw.spanId, observedNamespaces(raw.attributes), 'non-model span')
+      quarantined += 1
+      continue
+    }
     const group = byHarness.get(harness)
     if (group === undefined) byHarness.set(harness, { adapter, records: [record] })
     else group.records.push(record)
@@ -133,6 +164,10 @@ export function ingestBatch(spans: readonly OtlpSpan[], store: CanonStore): Inge
     accepted.push(...recordValidationProblems(records, store, (record) => adapter.validate(record)))
   }
   store.upsertMany(accepted)
+  const pendingLogs = store.getPendingLogs()
+  if (pendingLogs.length > 0) {
+    ingestLogBatch(pendingLogs as Parameters<typeof ingestLogBatch>[0], store)
+  }
 
   return { accepted: accepted.length, quarantined, rejected: claimed - accepted.length }
 }

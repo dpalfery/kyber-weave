@@ -188,7 +188,8 @@ export function rankSchemas(
   rates: SchemaCostRates = TOKEN_RESIDENCY_RATES,
   measurability?: Measurability
 ): SchemaCostAnalysis {
-  const declared = schemaRankingAvailability(measurability) === 'not_measurable'
+  const availability = schemaRankingAvailability(measurability)
+  const declared = typeof availability === 'object' && availability.availability === 'not_measurable'
   if (declared || (definitions.length === 0 && invocations.length > 0)) {
     return {
       measurable: false,

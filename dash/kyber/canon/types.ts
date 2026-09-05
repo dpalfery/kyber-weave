@@ -52,7 +52,23 @@ export type TokenUsage = {
  * R10.2): absent is not zero, and the reason matters. `derived` marks counts
  * produced by tokenizing content rather than read from a counter (R4.6).
  */
-export type MetricAvailability = 'measured' | 'derived' | 'not_measurable'
+export type NotMeasurable = {
+  availability: 'not_measurable'
+  /** Source-specific explanation; unavailable is never an implicit zero. */
+  reason: string
+}
+
+export type MetricAvailability = 'measured' | 'derived' | NotMeasurable
+
+/** Stamp a metric the source cannot report (R10.1, R10.2). */
+export function notMeasurable(reason: string): NotMeasurable {
+  return { availability: 'not_measurable', reason }
+}
+
+/** True when the declaration is the object form of `not_measurable`. */
+export function isNotMeasurable(value: MetricAvailability): value is NotMeasurable {
+  return typeof value === 'object'
+}
 
 /** Per-metric availability declared by a source or synthesizer. */
 export type Measurability = Record<string, MetricAvailability>

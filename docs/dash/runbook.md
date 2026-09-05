@@ -5,7 +5,7 @@ doc-type: runbook
 status: draft
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-03
+last-reviewed: 2026-09-04
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -55,12 +55,13 @@ flowchart TD
 ## OTLP ingest and canonical store operations
 
 The web dashboard does not start the collector. Ingest is a separate foreground command
-that listens for OTLP over HTTP on `127.0.0.1:4318` at `POST /v1/traces` and writes to
-`~/.kyberdash/canon.db`.
+that listens for OTLP over HTTP on `127.0.0.1:4318` at `POST /v1/traces` and
+`POST /v1/logs`, then writes to `~/.kyberdash/canon.db`. Logs enrich their correlated
+span-shaped record; they do not create a second canonical record.
 
 - `KYBER_CANON_DB` overrides the store path.
-- `AGENTDASH_DB` is opt-in with no default; set it only when pointing at a pre-analyzed
-  benchmark store.
+- `canon.db` is the only KyberDash session store. `AGENTDASH_DB` and `KYBER_DB` are not
+  production configuration; they cannot point the bridge at a Python `sessions.db`.
 
 A store built by an older version migrates in place when opened; it is not rebuilt.
 
@@ -228,14 +229,13 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    **Supported CLI Options & Environment Variables**:
    - `--port <number>`: Target HTTP port (default: `3000` or next open port).
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
-    - `AGENTDASH_DB` or `KYBER_DB`: Path to pre-analyzed benchmark `sessions.db` (opt-in; no default).
-   - `KYBER_CANON_DB`: Path to live OTel store (default: `~/.kyberdash/canon.db`).
+   - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 
 #### Navigating the 5 Web Dashboard Views
 
 The web dashboard provides five top-level tabs:
 - **`[Usage]`**: Device spend overview, multi-provider cost rollups, top projects, and daily spend timelines.
-- **`[Context]`**: Unified agent session explorer. Selecting Copilot, Gemini, or Pi loads the **Agent Session Analysis Dashboard** (`AgentSessionDashboard`):
+- **`[Context]`**: One canonical session explorer for every harness. Expanding a session loads the **Agent Session Analysis Dashboard** (`AgentSessionDashboard`) from `canon.db`:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
@@ -292,6 +292,17 @@ These suites validate:
 - Safe bootstrap injection (`injectDashboardBootstrap`) preventing XSS attacks when embedding session data.
 - Payload script-tag escaping (`\u003c/script>`).
 - Resilient error handling (returns HTTP 400 on invalid query params without crashing the long-running server process).
+
+### Optional Cursor hook collection
+
+`codeburn kyber cursor-hook` reads Cursor hook JSONL on standard input and posts one
+deterministic OTLP trace per completed turn to the local receiver. It preserves
+hook-supplied token counters and tool order; prompt and tool-schema data a hook does not
+supply remains explicitly not measurable.
+
+This command is implemented and synthetically verified, but it is not active until the
+owner registers it in their Cursor hook configuration and runs a turn. Do not replace or
+edit existing hooks as part of this setup.
 
 ---
 

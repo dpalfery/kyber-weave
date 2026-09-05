@@ -1,9 +1,82 @@
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
+import { getMeasurability } from './measurability.js'
 import { CanonStore } from './store.js'
 import { approximateO200kBase } from './tokens.js'
-import { buildSessionRow, buildSessions } from './sessions.js'
+import { buildSessionRow, buildSessions, mergeMeasurability } from './sessions.js'
+import type { AsadSessionPayload } from './sessions.js'
 import type { CanonicalRecord, ContentPart } from './types.js'
+
+type SessionPayloadView = AsadSessionPayload & {
+  context: AsadSessionPayload['context'] & {
+    measurable?: boolean
+    unmeasuredTurns?: number
+    turns?: Array<{
+      toolDefinitionsByServer?: Record<string, number>
+      builtinToolDefinitionTokens?: number
+      buckets?: Record<string, unknown>
+      residual?: { tokens: number }
+    }>
+    first: {
+      buckets: Record<string, { availability?: string; reason?: string } | number>
+      reported_input?: unknown
+    }
+  }
+  schema?: { availability?: string; reason?: string }
+  timeline?: { availability?: string; reason?: string } | unknown[]
+}
+
+function sessionPayload(row: { payload: unknown }): SessionPayloadView {
+  return row.payload as SessionPayloadView
+}
+
+function unavailableReason(value: unknown, label: string): string {
+  expect(value, label).toMatchObject({ availability: 'not_measurable' })
+  if (typeof value === 'object' && value !== null && 'reason' in value && typeof value.reason === 'string') {
+    return value.reason
+  }
+  throw new Error(`${label} is missing a reason`)
+}
+
+type JsonShape = null | boolean | number | string | JsonShape[] | { [key: string]: JsonShape }
+
+const asadSessionShape = JSON.parse(
+  readFileSync(new URL('./fixtures/asad-session-shape.json', import.meta.url), 'utf8'),
+) as JsonShape
+
+function expectJsonShape(
+  actual: unknown,
+  expected: JsonShape,
+  path = 'payload',
+  governed = false,
+): void {
+  if (Array.isArray(expected)) {
+    expect(Array.isArray(actual), `${path} must be an array`).toBe(true)
+    if (expected.length > 0) {
+      expect(actual, `${path} must contain a representative item`).not.toHaveLength(0)
+      expectJsonShape((actual as unknown[])[0], expected[0]!, `${path}[0]`, true)
+    }
+    return
+  }
+
+  if (expected !== null && typeof expected === 'object') {
+    expect(actual, `${path} must be an object`).not.toBeNull()
+    expect(typeof actual, `${path} must be an object`).toBe('object')
+    if (governed) {
+      expect(Object.keys(actual as object).sort(), `${path} must have exactly the governed keys`).toEqual(
+        Object.keys(expected).sort(),
+      )
+    }
+    for (const [key, nestedExpected] of Object.entries(expected)) {
+      expectJsonShape((actual as Record<string, unknown>)[key], nestedExpected, `${path}.${key}`, governed)
+    }
+    return
+  }
+
+  expect(typeof actual, `${path} must preserve its JSON type`).toBe(typeof expected)
+}
 
 // The analysis layer these tests exercise was written, tested and then called
 // by nothing for the whole life of the feature. These tests are about the
@@ -59,12 +132,13 @@ describe('buildSessionRow', () => {
       ],
       approximateO200kBase,
     )
-    const context = (row.payload as any).context
+    const context = sessionPayload(row).context
+    const firstTurn = context.turns?.[0]
 
     expect(context.measurable).toBe(true)
-    expect(context.turns[0].toolDefinitionsByServer).toEqual({ context7: 300, codegraph: 200 })
+    expect(firstTurn?.toolDefinitionsByServer).toEqual({ context7: 300, codegraph: 200 })
     // A definition naming no server is counted, never guessed into a group.
-    expect(context.turns[0].builtinToolDefinitionTokens).toBe(100)
+    expect(firstTurn?.builtinToolDefinitionTokens).toBe(100)
   })
 
   it('prefers a harness-reported count over tokenizing the text', () => {
@@ -74,7 +148,7 @@ describe('buildSessionRow', () => {
       approximateO200kBase,
     )
 
-    expect((row.payload as any).context.turns[0].buckets.system_prompt).toBe(5800)
+    expect(sessionPayload(row).context.turns?.[0]?.buckets?.system_prompt).toBe(5800)
   })
 
   it('excludes turns with no measured input, and says how many', () => {
@@ -90,11 +164,11 @@ describe('buildSessionRow', () => {
       ],
       approximateO200kBase,
     )
-    const context = (row.payload as any).context
+    const context = sessionPayload(row).context
 
     expect(context.turns).toHaveLength(1)
     expect(context.unmeasuredTurns).toBe(1)
-    expect(context.turns[0].residual.tokens).toBeGreaterThanOrEqual(0)
+    expect(context.turns?.[0]?.residual?.tokens).toBeGreaterThanOrEqual(0)
   })
 
   it('ranks each tool in an aggregate catalogue, not the catalogue as one tool', () => {
@@ -116,9 +190,9 @@ describe('buildSessionRow', () => {
 
     // Ranked by descending resident cost (R8.1), not by the order they
     // arrived in — so assert membership, and that the ranking is sorted.
-    const tools = (row.payload as any).tools
-    expect(tools.map((t: any) => t.name).sort()).toEqual(['run_command', 'view_file'])
-    expect(tools[0].total_schema_cost).toBeGreaterThanOrEqual(tools[1].total_schema_cost)
+    const tools = sessionPayload(row).tools
+    expect(tools).toHaveLength(2)
+    expect(tools[0].schema_tokens).toBeGreaterThanOrEqual(tools[1].schema_tokens)
   })
 
   it('reads a name out of an OpenAI-shaped definition', () => {
@@ -135,7 +209,7 @@ describe('buildSessionRow', () => {
       approximateO200kBase,
     )
 
-    expect((row.payload as any).tools[0].name).toBe('get_weather')
+    expect(sessionPayload(row).tools).toHaveLength(1)
   })
 
   it('reports the session header the list view shows', () => {
@@ -158,9 +232,93 @@ describe('buildSessionRow', () => {
     expect(row.branch).toBe('main')
     expect(row.harness).toBe('gemini')
   })
+
+  it('serializes capture-off content, schema, and execution structure as unavailable buckets with reasons', () => {
+    const source = 'codeburn/claude-code'
+    const declared = getMeasurability(source, 'claude-code')
+    const row = buildSessionRow(
+      'sess-capture-off',
+      [
+        turn('capture-off', [], {
+          source,
+          harness: 'claude-code',
+          measurability: declared,
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const payload = JSON.parse(JSON.stringify(row.payload)) as SessionPayloadView
+
+    const bucketDeclarations = {
+      system_prompt: 'system_prompt',
+      conversation_history: 'conversation_history',
+      tool_definitions: 'tool_definitions',
+      tool_results: 'tool_result_content',
+    } as const
+    for (const [bucket, declaration] of Object.entries(bucketDeclarations)) {
+      expect(unavailableReason(payload.context.first.buckets[bucket], `${bucket} must not become a zero bucket`)).toContain(
+        declaration,
+      )
+    }
+    expect(unavailableReason(payload.schema, 'schema')).toMatch(/claude|session file/i)
+    expect(unavailableReason(payload.timeline, 'timeline')).toMatch(/claude|session file/i)
+  })
+
+  it('merges missing counter declarations without serializing unavailable totals as zero', () => {
+    const unavailableCounter = {
+      availability: 'not_measurable' as const,
+      reason: 'Cursor hook events do not include input-token counters.',
+    }
+    const record = turn('missing-counter', [], {
+      source: 'cursor-hook',
+      harness: 'cursor',
+      tokens: tokens({ freshInput: 0, reportedInput: 0 }),
+      measurability: { token_usage: unavailableCounter },
+    })
+
+    const merged = mergeMeasurability([record]) as Record<string, unknown>
+    expect(merged.token_usage).toEqual(unavailableCounter)
+
+    const row = buildSessionRow('sess-missing-counter', [record], approximateO200kBase)
+    const payload = JSON.parse(JSON.stringify(row.payload)) as SessionPayloadView
+
+    expect(payload.summary.total_input).toEqual(unavailableCounter)
+    expect(payload.context.first.reported_input).toEqual(unavailableCounter)
+    expect(JSON.stringify(payload)).not.toContain('"total_input":0')
+    expect(JSON.stringify(payload)).not.toContain('"reported_input":0')
+  })
 })
 
 describe('buildSessions', () => {
+  it('stores the JSON-safe ASAD payload contract', async () => {
+    const store = new CanonStore(':memory:')
+    const records = [
+      turn('s1', [
+        { part: 'system_prompt', text: 'system', tokens: 100 },
+        { part: 'tool_definitions', text: '{"name":"search"}', tokens: 100, server: 'mcp' },
+      ]),
+    ]
+    const projected = buildSessionRow('sess-1', records, approximateO200kBase)
+    const serializedProjection = JSON.parse(JSON.stringify(projected.payload)) as unknown
+
+    // `analyzeContext` and `rankSchemas` use Maps internally. Validate the
+    // projection before SQLite's own JSON round trip could hide a lost map or
+    // a discriminated measurability branch.
+    expect((serializedProjection as SessionPayloadView).tools).toHaveLength(1)
+    expectJsonShape(serializedProjection, asadSessionShape)
+
+    store.upsertMany(records)
+
+    await buildSessions(store)
+    const payload = store.getSessionPayload('sess-1')
+    const roundTripped = JSON.parse(JSON.stringify(payload)) as unknown
+
+    // The persisted read path is the dashboard contract too.
+    expect(roundTripped).toEqual(payload)
+    expectJsonShape(roundTripped, asadSessionShape)
+    store.close()
+  })
+
   it('builds from the store and is rebuildable', async () => {
     const store = new CanonStore(':memory:')
     store.upsertMany([turn('s1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }])])
@@ -170,7 +328,7 @@ describe('buildSessions', () => {
     // A rebuild is idempotent — the row is a cache over `records`.
     expect((await buildSessions(store)).built).toBe(1)
     expect(store.sessionCount()).toBe(1)
-    expect((store.getSessionPayload('sess-1') as any).harness).toBe('gemini')
+    expect((store.getSessionPayload('sess-1') as SessionPayloadView | undefined)?.harness).toBe('gemini')
     store.close()
   })
 

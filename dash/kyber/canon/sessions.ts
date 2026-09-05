@@ -18,7 +18,7 @@ import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/tim
 import { measuredInput, sumCosts } from './cost.js'
 import { CanonStore, type SessionRow } from './store.js'
 import { loadO200kCounter } from './tokens.js'
-import type { CanonicalRecord, Measurability } from './types.js'
+import type { CanonicalRecord, Measurability, MetricAvailability, NotMeasurable } from './types.js'
 
 /**
  * Default context window, used when nothing on the record says otherwise.
@@ -83,23 +83,36 @@ function partsOf(record: CanonicalRecord): ContextPart[] {
  * so — one span exporting message structure means the session has structure,
  * even if others did not (R10.1).
  */
-function mergeMeasurability(records: readonly CanonicalRecord[]): Measurability | undefined {
-  const seen = new Map<string, Set<string>>()
+export function mergeMeasurability(records: readonly CanonicalRecord[]): Measurability | undefined {
+  const seen = new Map<string, MetricAvailability[]>()
   for (const record of records) {
     for (const [metric, availability] of Object.entries(record.measurability ?? {})) {
-      const values = seen.get(metric) ?? new Set<string>()
-      values.add(availability)
+      const values = seen.get(metric) ?? []
+      values.push(availability)
       seen.set(metric, values)
     }
   }
   if (seen.size === 0) return undefined
   const merged: Measurability = {}
   for (const [metric, values] of seen) {
-    if (values.has('measured')) merged[metric] = 'measured'
-    else if (values.has('derived')) merged[metric] = 'derived'
-    else merged[metric] = 'not_measurable'
+    if (values.some((value) => value === 'measured')) merged[metric] = 'measured'
+    else if (values.some((value) => value === 'derived')) merged[metric] = 'derived'
+    else {
+      merged[metric] = values.find(
+        (value): value is NotMeasurable =>
+          typeof value === 'object' && value.availability === 'not_measurable',
+      ) ?? {
+        availability: 'not_measurable',
+        reason: 'The source did not provide this metric.',
+      }
+    }
   }
   return merged
+}
+
+function unavailableFor(measurability: Measurability | undefined, metric: string): NotMeasurable | undefined {
+  const value = measurability?.[metric]
+  return typeof value === 'object' && value.availability === 'not_measurable' ? value : undefined
 }
 
 /**
@@ -169,7 +182,7 @@ function expandDefinitions(text: string): { name: string; text: string }[] {
   return Array.isArray(parsed) ? parsed.map(one) : [one(parsed)]
 }
 
-/** Tool names the session actually invoked, from its tool spans. */
+/** Tool names the session actually called, from its tool spans. */
 function invocationsOf(records: readonly CanonicalRecord[]): string[] {
   return records
     .filter((record) => record.op === 'tool.invoke')
@@ -210,6 +223,53 @@ export type BuildSessionsReport = {
   skipped: number
   /** Rows removed because their session no longer builds. */
   pruned: number
+}
+
+export type AsadContextBucket = {
+  buckets: Record<string, number | NotMeasurable>
+  reported_input: number | NotMeasurable
+}
+
+export type AsadTool = {
+  schema_tokens: number
+  invocations: number
+  turns_resident: number
+}
+
+export type AsadServer = {
+  server: string
+  is_mcp: true
+  tools: number
+  schema_tokens: number
+  invocations: number
+  unused_tools: number
+  unused_cost: number
+}
+
+export type AsadSessionPayload = {
+  id: string
+  session_id: string
+  harness: string
+  label: string
+  agent_name: string | null
+  repo: string | null
+  branch: string | null
+  span_count: number
+  context: {
+    first: AsadContextBucket
+    last: AsadContextBucket
+    [key: string]: unknown
+  }
+  tools: AsadTool[]
+  timeline: ReturnType<typeof buildTimeline>['children'] | NotMeasurable
+  turns: Array<Record<string, unknown>>
+  requests: Array<Record<string, unknown>>
+  servers: AsadServer[]
+  coverage: Record<string, number>
+  problems: Array<Record<string, unknown>>
+  reconciliation: Array<Record<string, unknown>>
+  summary: Record<string, unknown>
+  [key: string]: unknown
 }
 
 /**
@@ -283,6 +343,77 @@ export function buildSessionRow(
 
   const definitions = toolDefinitionsOf(records, countTokens)
   const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(records), undefined, measurability)
+  const invocations = invocationsOf(records)
+  const invocationCounts = new Map<string, number>()
+  for (const name of invocations) invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
+  const rankedTools = schema.measurable
+    ? schema.ranked
+    : definitions.map((definition) => ({
+        name: definition.name,
+        ...(definition.server !== undefined ? { server: definition.server } : {}),
+        cost: definition.tokens * (definition.turnsResident ?? turnRecords.length),
+      }))
+  const definitionsByName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const tools: AsadTool[] = rankedTools.map((tool) => {
+    const definition = definitionsByName.get(tool.name)
+    const schemaTokens = definition?.tokens ?? 0
+    const turnsResident = definition?.turnsResident ?? turnRecords.length
+    return {
+      schema_tokens: schemaTokens,
+      invocations: invocationCounts.get(tool.name) ?? 0,
+      turns_resident: turnsResident,
+    }
+  })
+  const servers: AsadServer[] = schema.measurable
+    ? [...schema.byServer.entries()].map(([server]) => {
+        const serverTools = rankedTools.filter((tool) => tool.server === server)
+        return {
+          server,
+          is_mcp: true,
+          tools: serverTools.length,
+          schema_tokens: serverTools.reduce(
+            (sum, tool) => sum + (definitionsByName.get(tool.name)?.tokens ?? 0),
+            0,
+          ),
+          invocations: serverTools.reduce(
+            (sum, tool) => sum + (invocationCounts.get(tool.name) ?? 0),
+            0,
+          ),
+          unused_tools: serverTools.filter((tool) => (invocationCounts.get(tool.name) ?? 0) === 0).length,
+          unused_cost: serverTools
+            .filter((tool) => (invocationCounts.get(tool.name) ?? 0) === 0)
+            .reduce((sum, tool) => sum + tool.cost, 0),
+        }
+      })
+    : []
+
+  const analyzedTurns = context.measurable ? context.turns : []
+  const contextBucketDeclarations = {
+    system_prompt: 'system_prompt',
+    conversation_history: 'conversation_history',
+    tool_definitions: 'tool_definitions',
+    tool_results: 'tool_result_content',
+    response: 'response',
+  } as const
+  const unavailableBuckets = Object.fromEntries(
+    Object.entries(contextBucketDeclarations).flatMap(([bucket, declaration]) => {
+      const unavailable = unavailableFor(measurability, declaration)
+      return unavailable === undefined ? [] : [[bucket, unavailable]]
+    }),
+  )
+  const contextBucket = (turn: (typeof analyzedTurns)[number] | undefined, reportedInput: number): AsadContextBucket => ({
+    buckets: turn?.buckets ?? (Object.keys(unavailableBuckets).length > 0 ? unavailableBuckets : {}),
+    reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
+  })
+  const contextShape = {
+    ...serializeContext(context),
+    first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
+    last: contextBucket(
+      analyzedTurns[analyzedTurns.length - 1],
+      measuredTurns[measuredTurns.length - 1]?.tokens.reportedInput ?? 0,
+    ),
+    unmeasuredTurns,
+  }
 
   const timeline = buildTimeline([...records])
   const cost = sumCosts(records.map((record) => record.cost))
@@ -301,7 +432,7 @@ export function buildSessionRow(
   const started = records[0]!.timestamp
   const ended = records[records.length - 1]!.timestamp
 
-  const payload = {
+  const payload: AsadSessionPayload = {
     id: sessionId,
     session_id: sessionId,
     harness,
@@ -313,7 +444,7 @@ export function buildSessionRow(
     summary: {
       turn_count: turnRecords.length,
       request_count: records.filter((r) => r.parentSpanId === null).length,
-      total_input: totals.input,
+      total_input: unavailableFor(measurability, 'token_usage') ?? totals.input,
       total_output: totals.output,
       total_cache_read: totals.cacheRead,
       total_cache_creation: totals.cacheCreation,
@@ -324,15 +455,8 @@ export function buildSessionRow(
     // The analysis output, verbatim. `toolDefinitionsByServer` is a Map, which
     // JSON.stringify would silently render as {} — convert it explicitly so a
     // per-server band that exists in the data survives to the chart.
-    context: { ...serializeContext(context), unmeasuredTurns },
-    tools: schema.measurable
-      ? schema.ranked.map((tool) => ({
-          name: tool.name,
-          server: tool.server ?? null,
-          total_schema_cost: tool.cost,
-          invoked: tool.invoked,
-        }))
-      : [],
+    context: contextShape,
+    tools,
     schema: schema.measurable
       ? {
           measurable: true as const,
@@ -341,7 +465,10 @@ export function buildSessionRow(
           unusedRange: schema.unusedRange,
           turns: schema.turns,
         }
-      : schema,
+      : unavailableFor(measurability, 'schema_cost') ?? {
+          availability: 'not_measurable',
+          reason: 'The source did not provide tool-definition schema data.',
+        },
     turns: turnRecords.map((record, index) => ({
       index,
       spanId: record.spanId,
@@ -354,7 +481,32 @@ export function buildSessionRow(
       cache_creation: record.tokens.cacheCreation,
       reasoning: record.tokens.reasoning ?? null,
     })),
-    timeline,
+    // ASAD renders the session root's children; the synthetic root is an
+    // analysis detail and is not part of the wire contract.
+    timeline: unavailableFor(measurability, 'execution_structure') ?? timeline.children,
+    requests: records
+      .filter((record) => record.parentSpanId === null)
+      .map((record) => ({
+        request: record.spanId,
+        timestamp: typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString(),
+        turns: record.op === 'llm.invoke' ? 1 : 0,
+        model: attributeOf(record, MODEL_KEYS) ?? null,
+      })),
+    servers,
+    coverage: {
+      schema: schema.measurable ? 1 : 0,
+      context: context.measurable ? 1 : 0,
+    },
+    problems: [],
+    reconciliation: turnRecords.map((record) => ({
+      request: record.spanId,
+      root_input: record.tokens.reportedInput,
+      sum_chat_input: measuredInput(record.tokens),
+      input_match: record.tokens.reportedInput === measuredInput(record.tokens),
+      root_output: record.tokens.reportedOutput,
+      sum_chat_output: record.tokens.output,
+      output_match: record.tokens.reportedOutput === record.tokens.output,
+    })),
     subagents: subagentSessions(timeline),
     auxiliary: auxiliarySpend(timeline),
     measurability: measurability ?? {},

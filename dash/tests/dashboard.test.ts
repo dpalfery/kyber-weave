@@ -9,6 +9,7 @@ import { describe, it, expect, onTestFinished, vi } from 'vitest'
 import { DAILY_ACTIVITY_PAGE_SIZE, INTERACTIVE_RENDER_OPTIONS, dailyActivityFooter, getDailyActivityPageSize, getDailyActivityRows, getDashboardMaxWidth, getDashboardScanRange, getLayout, getRefreshIntervalMs, InteractiveDashboard, pageHistoryCursor, scrollHistoryCursor, selectDashboardPeriodProjects, shortProject, showEmptyState } from '../src/dashboard.js'
 import { getDateRange } from '../src/cli-date.js'
 import { formatCost } from '../src/format.js'
+import { resolveCliName } from '../src/brand-overlay.js'
 import type { ProjectSummary, SessionSummary } from '../src/types.js'
 
 const EMPTY_CATEGORY_BREAKDOWN = {
@@ -421,10 +422,10 @@ describe('interactive terminal rendering', () => {
   })
 
   it.each([
-    { columns: 42, expected: '! 10: codeburn models --unpriced' },
-    { columns: 43, expected: '! 10: codeburn models --unpriced' },
-    { columns: 44, expected: '! 10: codeburn models --unpriced' },
-    { columns: 80, expected: '! 10 unpriced: codeburn models --unpriced' },
+    { columns: 42, expected: () => `! 10: ${resolveCliName()} models --unpriced` },
+    { columns: 43, expected: () => `! 10: ${resolveCliName()} models --unpriced` },
+    { columns: 44, expected: () => `! 10: ${resolveCliName()} models --unpriced` },
+    { columns: 80, expected: () => `! 10 unpriced: ${resolveCliName()} models --unpriced` },
   ])('shows an actionable unpriced-model command in a real $columns-column Ink frame', async ({ columns, expected }) => {
     const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
     const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
@@ -468,7 +469,7 @@ describe('interactive terminal rendering', () => {
     await app.waitUntilRenderFlush()
 
     const frame = frames.filter(value => value.trim()).at(-1) ?? ''
-    expect(frame).toContain(expected)
+    expect(frame).toContain(expected())
   })
 
   it('labels claude.ai connector remediation as a manual action', async () => {

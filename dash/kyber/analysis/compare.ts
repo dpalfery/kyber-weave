@@ -38,6 +38,7 @@ import type {
   MetricAvailability,
   Problem,
 } from '../canon/types.js'
+import { isNotMeasurable, notMeasurable } from '../canon/types.js'
 
 /** The exact phrase R10.2 pins for a metric a harness cannot report. */
 export const NOT_MEASURABLE = 'not measurable'
@@ -198,7 +199,7 @@ function aggregate(
   const unmeasurable = new Set<string>()
   for (const record of records) {
     for (const [metric, availability] of Object.entries(record.measurability ?? {})) {
-      if (availability === 'not_measurable') unmeasurable.add(metric)
+      if (isNotMeasurable(availability)) unmeasurable.add(metric)
     }
   }
 
@@ -242,7 +243,11 @@ function formatCurrencyValue(value: number, currency: string): string {
 
 /** R10.2's cell: no value, no zero, the pinned phrase. */
 function notMeasurableCell(): MetricCell {
-  return { measurable: false, availability: 'not_measurable', render: NOT_MEASURABLE }
+  return {
+    measurable: false,
+    availability: notMeasurable(NOT_MEASURABLE),
+    render: NOT_MEASURABLE,
+  }
 }
 
 /** A measurable metric that still carries no figure — the reason in words. */

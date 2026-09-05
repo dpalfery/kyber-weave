@@ -22,6 +22,10 @@ export type SessionSource = {
   //     #992 that exemption is redundant (only ORPHANS age out) — kept as the
   //     explicit statement of intent, not as the thing enforcing it.
   retainWhilePresent?: boolean
+  // Copilot discovers several on-disk shapes and later filters the list by
+  // this discriminant (`jsonl`, `session-store`, `chatsession`, `transcript`,
+  // `otel`, `jetbrains`). Optional because other providers never set it.
+  sourceType?: 'jsonl' | 'session-store' | 'chatsession' | 'transcript' | 'otel' | 'jetbrains'
 }
 
 export type SessionParser = {

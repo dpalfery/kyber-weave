@@ -44,9 +44,10 @@
 // rejects. Re-validating here would be a second mechanism for one job.
 
 import type { ParsedProviderCall } from '../../src/providers/types.js'
-import type { CanonicalRecord, CostBlock, TokenUsage } from '../canon/types.js'
+import { contentFromParts, type CanonicalRecord, type CostBlock, type TokenUsage } from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
+import type { ReaderTurn } from './readers/types.js'
 
 // ---------------------------------------------------------------------------
 // Identity scheme (R3.2: extend upstream's key, don't add a mechanism)
@@ -251,6 +252,7 @@ export function costBlockFor(call: ParsedProviderCall): CostBlock {
 export function synthesizeCall(
   call: ParsedProviderCall,
   conventions: ReadonlyMap<string, TokenConvention> = PROVIDER_CONVENTIONS,
+  readerTurn?: ReaderTurn,
 ): CanonicalRecord {
   const counts = {
     input: call.inputTokens,
@@ -283,7 +285,8 @@ export function synthesizeCall(
     durationMs: call.activeDurationMs ?? 0,
     status: 'unspecified',
     tokens,
-    content: {},
+    content: readerTurn === undefined ? {} : contentFromParts(readerTurn.parts),
+    ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
     measurability: measurabilityFor(call.provider),
     raw: call,
@@ -337,9 +340,16 @@ export class Synthesizer {
     this.conventions = options.conventions ?? PROVIDER_CONVENTIONS
   }
 
-  /** Serial synthesis: one record per call, in input order. */
-  synthesize(parsedCalls: readonly ParsedProviderCall[]): CanonicalRecord[] {
-    return parsedCalls.map((call) => synthesizeCall(call, this.conventions))
+  /**
+   * Serial synthesis: one record per call, in input order. When a D5 reader
+   * supplied a corresponding turn from the same session file, its content is
+   * carried into that record; counters continue to come only from the call.
+   */
+  synthesize(
+    parsedCalls: readonly ParsedProviderCall[],
+    readerTurns?: readonly (ReaderTurn | undefined)[],
+  ): CanonicalRecord[] {
+    return parsedCalls.map((call, index) => synthesizeCall(call, this.conventions, readerTurns?.[index]))
   }
 
   /** The serial path's explicit name; identical to {@link synthesize}. */

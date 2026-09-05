@@ -11,12 +11,17 @@ import { afterAll, describe, expect, it } from 'vitest'
 
 import {
   DEFAULT_OTLP_PORT,
+  OTLP_LOGS_PATH,
   OTLP_TRACES_PATH,
+  InMemoryLogStore,
   InMemorySpanStore,
   OtlpDecodeError,
   OtlpReceiver,
+  decodeOtlpLogJson,
+  decodeOtlpLogProtobuf,
   decodeOtlpJson,
   decodeOtlpProtobuf,
+  type OtlpLog,
   type OtlpSpan,
 } from './receiver.js'
 
@@ -479,6 +484,62 @@ function post(url: string, contentType: string, body: string | Uint8Array): Prom
   })
 }
 
+/** A synthetic OTLP log record that correlates to the fixture's root span. */
+function jsonLogFixture(): string {
+  return JSON.stringify({
+    resourceLogs: [
+      {
+        resource: { attributes: [{ key: 'service.name', value: { stringValue: 'synthetic-test' } }] },
+        scopeLogs: [
+          {
+            scope: { name: 'synthetic.logger', version: '1.0.0' },
+            logRecords: [
+              {
+                timeUnixNano: '1756478400123456789',
+                traceId: TRACE_ID,
+                spanId: ROOT_SPAN_ID,
+                body: { stringValue: 'synthetic log enrichment' },
+                attributes: [{ key: 'session_id', value: { stringValue: 'session-synthetic-1' } }],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  })
+}
+
+/** Genuine OTLP/protobuf bytes for the same synthetic log fixture. */
+function protobufLogFixture(): Uint8Array {
+  const resource = pbLengthDelimited(
+    1,
+    pbKeyValue({ key: 'service.name', value: { t: 'string', v: 'synthetic-test' } }),
+  )
+  const logRecord = [
+    ...pbFixed64Field(1, 1756478400123456789n),
+    ...pbSubmessage(5, pbValue({ t: 'string', v: 'synthetic log enrichment' })),
+    ...pbLengthDelimited(
+      6,
+      pbKeyValue({ key: 'session_id', value: { t: 'string', v: 'session-synthetic-1' } }),
+    ),
+    ...pbBytesField(9, TRACE_ID),
+    ...pbBytesField(10, ROOT_SPAN_ID),
+  ]
+  const scopeLogs = [
+    ...pbSubmessage(1, [...pbStringField(1, 'synthetic.logger'), ...pbStringField(2, '1.0.0')]),
+    ...pbSubmessage(2, logRecord),
+  ]
+  return Uint8Array.from(pbSubmessage(1, [...pbSubmessage(1, resource), ...pbSubmessage(2, scopeLogs)]))
+}
+
+function postLogs(url: string, contentType: string, body: string | Uint8Array): Promise<Response> {
+  return fetch(`${url}${OTLP_LOGS_PATH}`, {
+    method: 'POST',
+    headers: { 'content-type': contentType },
+    body: body as BodyInit,
+  })
+}
+
 describe('OtlpReceiver (R2.1)', () => {
   it('listens on the OTLP standard port 4318 by default', () => {
     expect(DEFAULT_OTLP_PORT).toBe(4318)
@@ -556,6 +617,41 @@ describe('OtlpReceiver protobuf encoding (R2.3)', () => {
     const response = await post(url, 'application/protobuf', protobufFixture())
     expect(response.status).toBe(200)
     expect(store.spans).toEqual(EXPECTED_SPANS)
+  })
+})
+
+describe('OtlpReceiver log signal (ADR 0009)', () => {
+  it('decodes equivalent JSON and protobuf log payloads into the same correlation-ready record', () => {
+    expect(decodeOtlpLogProtobuf(protobufLogFixture())).toEqual(decodeOtlpLogJson(jsonLogFixture()))
+  })
+
+  it.each([
+    ['application/json', jsonLogFixture()],
+    ['application/x-protobuf', protobufLogFixture()],
+  ] as const)('accepts %s at POST /v1/logs', async (contentType, body) => {
+    const spans = new InMemorySpanStore()
+    const logs = new InMemoryLogStore()
+    const receiver = new OtlpReceiver({ port: 0, store: { spans, logs } })
+    await receiver.start()
+    started.push(receiver)
+
+    const response = await postLogs(
+      `http://127.0.0.1:${receiver.port}`,
+      contentType,
+      body,
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ acceptedLogs: 1 })
+    expect(logs.logs).toEqual([
+      expect.objectContaining({
+        traceId: TRACE_ID,
+        spanId: ROOT_SPAN_ID,
+        sessionId: 'session-synthetic-1',
+        body: 'synthetic log enrichment',
+      } satisfies Partial<OtlpLog>),
+    ])
+    expect(spans.spans).toEqual([])
   })
 })
 

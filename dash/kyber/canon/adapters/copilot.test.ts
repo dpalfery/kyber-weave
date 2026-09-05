@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { AdapterRegistry } from './registry.js'
 import { rawSpan } from './testing.js'
 import { TOKEN_NEGATIVE_FRESH, TOKEN_SUM_MISMATCH } from '../types.js'
-import { copilotAdapter, reconcileRequest } from './copilot.js'
+import { canonicalSessionId, copilotAdapter, reconcileRequest } from './copilot.js'
 import { geminiAdapter } from './gemini.js'
 import { piAdapter } from './pi.js'
 
@@ -104,7 +104,50 @@ describe('copilotAdapter.normalize — the inclusive convention (R4.2)', () => {
   it('stamps unexported metrics as not measurable rather than zero (R10.2)', () => {
     const record = copilotAdapter.normalize(rawSpan({ spanId: 's1', attributes: copilotCounts() }))
     expect(copilotAdapter.unexportedMetrics()).toEqual(['reasoning'])
-    expect(record.measurability).toEqual({ reasoning: 'not_measurable' })
+    expect(record.measurability).toMatchObject({ reasoning: { availability: 'not_measurable' } })
+  })
+
+  it('preserves capture-enabled prompt, response, tool content, and the Copilot session identity', () => {
+    const attributes = {
+      ...copilotCounts(),
+      'copilot_chat.chat_session_id': 'synthetic-copilot-session',
+      'gen_ai.system_instructions': 'synthetic system prompt',
+      'gen_ai.tool.definitions': JSON.stringify([{ name: 'synthetic_tool' }]),
+      'gen_ai.input.messages': JSON.stringify([
+        { role: 'user', parts: [{ type: 'text', text: 'synthetic user prompt' }] },
+        { role: 'assistant', parts: [{ type: 'text', text: 'synthetic assistant response' }] },
+        { role: 'tool', parts: [{ type: 'tool_result', text: 'synthetic tool result' }] },
+      ]),
+    }
+    const record = copilotAdapter.normalize(rawSpan({ spanId: 's1', attributes }))
+
+    expect(canonicalSessionId(attributes)).toBe('synthetic-copilot-session')
+    expect(record.sessionId).toBe('synthetic-copilot-session')
+    expect(record.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ part: 'system_prompt', text: 'synthetic system prompt' }),
+        expect.objectContaining({
+          part: 'tool_definitions',
+          text: JSON.stringify([{ name: 'synthetic_tool' }]),
+        }),
+        expect.objectContaining({ part: 'conversation_history', text: 'synthetic user prompt' }),
+        expect.objectContaining({ part: 'conversation_history', text: 'synthetic assistant response' }),
+        expect.objectContaining({ part: 'tool_result_content', text: 'synthetic tool result' }),
+      ]),
+    )
+  })
+
+  it('marks unavailable content buckets not measurable when capture is disabled', () => {
+    const record = copilotAdapter.normalize(rawSpan({ spanId: 's1', attributes: copilotCounts() }))
+
+    expect(record.content).toEqual({})
+    expect(record.measurability).toMatchObject({
+      system_prompt: { availability: 'not_measurable' },
+      tool_definitions: { availability: 'not_measurable' },
+      instruction_context: { availability: 'not_measurable' },
+      conversation_history: { availability: 'not_measurable' },
+      tool_result_content: { availability: 'not_measurable' },
+    })
   })
 
   it('keeps structure, placeholder cost and the raw payload', () => {

@@ -24,9 +24,9 @@ import {
   contextCompositionAvailability,
   getMeasurability,
   isFileSource,
+  measurabilityFor,
   schemaRankingAvailability,
 } from './measurability.js'
-import { CANONICAL_CONTENT_KEYS } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Fixture kit
@@ -40,6 +40,22 @@ const OTLP_SOURCE = 'pi-abc123'
 
 /** The window the context assertions are against (R7.4). */
 const LIMIT = 200_000
+
+/** An unavailable metric must retain the source explanation, never just its flag. */
+function expectNotMeasurable(value: unknown) {
+  expect(value, 'unavailable metrics must preserve their source-specific reason').toMatchObject({
+    availability: 'not_measurable',
+    reason: expect.any(String),
+  })
+}
+
+function isNotMeasurable(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { availability?: unknown }).availability === 'not_measurable'
+  )
+}
 
 function call(spec: Partial<ParsedProviderCall> = {}): ParsedProviderCall {
   return {
@@ -107,13 +123,15 @@ describe('isFileSource — the ingest path a source name carries', () => {
 })
 
 describe('getMeasurability — the file-sourced path (R7.6, R8.5)', () => {
-  it('declares schema ranking and context composition not measurable', () => {
+  it('declares Claude schema ranking not measurable while preserving its measurable content buckets', () => {
     const measurability = getMeasurability(FILE_SOURCE, 'claude-code')
-    for (const metric of ['schema_cost', ...CANONICAL_CONTENT_KEYS]) {
-      expect(measurability[metric]).toBe('not_measurable')
+    for (const metric of ['schema_cost', 'system_prompt', 'tool_definitions']) {
+      expectNotMeasurable(measurability[metric])
     }
-    expect(schemaRankingAvailability(measurability)).toBe('not_measurable')
-    expect(contextCompositionAvailability(measurability)).toBe('not_measurable')
+    expectNotMeasurable(schemaRankingAvailability(measurability))
+    expect(contextCompositionAvailability(measurability)).toBe('measured')
+    expect(measurability['conversation_history']).toBeUndefined()
+    expect(measurability['tool_result_content']).toBeUndefined()
   })
 
   it('keeps the counters measurable, so only the impossible metrics are refused', () => {
@@ -124,12 +142,12 @@ describe('getMeasurability — the file-sourced path (R7.6, R8.5)', () => {
 
   it('declares the R9 hierarchy not measurable — "0 subagents" states a fact session files never carried', () => {
     const measurability = getMeasurability(FILE_SOURCE, 'claude-code')
-    expect(measurability['execution_structure']).toBe('not_measurable')
+    expectNotMeasurable(measurability['execution_structure'])
   })
 
   it('carries the provider-specific gaps (gemini has no cache-creation counter)', () => {
     const measurability = getMeasurability(`${FILE_SOURCE_PREFIX}gemini`, 'gemini')
-    expect(measurability['cache_creation']).toBe('not_measurable')
+    expectNotMeasurable(measurability['cache_creation'])
   })
 })
 
@@ -143,7 +161,7 @@ describe('getMeasurability — the OTLP path (R10.1)', () => {
     // tokens and a published table, never read from a counter.
     expect(measurability['cost']).toBe('derived')
     // The adapter's own gap statement rides along.
-    expect(measurability['reasoning']).toBe('not_measurable')
+    expectNotMeasurable(measurability['reasoning'])
   })
 
   it('agrees with the adapter about what the harness does not export', () => {
@@ -151,8 +169,8 @@ describe('getMeasurability — the OTLP path (R10.1)', () => {
     // measured case): the source-level answer refuses the ranking through
     // the adapter's declaration, exactly as its records are stamped.
     const measurability = getMeasurability(OTLP_SOURCE, 'pi')
-    expect(measurability['tool_definitions']).toBe('not_measurable')
-    expect(schemaRankingAvailability(measurability)).toBe('not_measurable')
+    expectNotMeasurable(measurability['tool_definitions'])
+    expectNotMeasurable(schemaRankingAvailability(measurability))
     // Structure is pi's telemetry's to supply; only definitions are missing.
     expect(contextCompositionAvailability(measurability)).toBe('measured')
   })
@@ -227,30 +245,24 @@ describe('rankSchemas under a declaration (R8.5, R10.2)', () => {
 // ---------------------------------------------------------------------------
 
 describe('analyzeContext under a declaration (R7.6, R10.2)', () => {
-  it('reports the file-sourced source not measurable even when turns carry parts', () => {
-    // The parts are the trap: fragments a file source happens to carry would
-    // otherwise bucket into a composition chart whose residual is read as
-    // tokenizer drift (R7.6). The declaration answers before the data.
+  it('composes the content buckets a Claude file actually measures', () => {
     const result = analyzeContext([turn(), turn({ inputTokens: 6_000, freshInput: 1_000 })], {
       contextLimit: LIMIT,
       measurability: getMeasurability(FILE_SOURCE, 'claude-code'),
     })
-    expect(result).toEqual({
-      measurable: false,
-      reason: 'declared_not_measurable',
-      turns: 2,
-      contextLimit: LIMIT,
-    })
+    expect(result.measurable).toBe(true)
   })
 
-  it('the refusal carries no buckets and no residual to chart', () => {
+  it('retains buckets and residual for its measurable context composition', () => {
     const result = analyzeContext([turn()], {
       contextLimit: LIMIT,
       measurability: getMeasurability(FILE_SOURCE, 'claude-code'),
     })
-    expect(result.measurable).toBe(false)
-    expect('buckets' in result).toBe(false)
-    expect('residual' in result).toBe(false)
+    expect(result.measurable).toBe(true)
+    if (result.measurable) {
+      expect(result.turns[0]?.buckets.system_prompt).toBeGreaterThan(0)
+      expect(result.residualTotal).toBeGreaterThan(0)
+    }
   })
 
   it('an OTLP source with structure composes', () => {
@@ -293,13 +305,13 @@ describe('agreement between record stamps and the source-level declaration', () 
       const record = synthesizeCall(parsed)
 
       const stamped = Object.entries(record.measurability ?? {})
-        .filter(([, availability]) => availability === 'not_measurable')
+        .filter(([, availability]) => isNotMeasurable(availability))
         .map(([metric]) => metric)
         .sort()
       expect(stamped.length).toBeGreaterThan(0)
 
       const declared = Object.entries(getMeasurability(sourceFor(parsed), provider))
-        .filter(([, availability]) => availability === 'not_measurable')
+        .filter(([, availability]) => isNotMeasurable(availability))
         .map(([metric]) => metric)
         .sort()
 
@@ -307,5 +319,37 @@ describe('agreement between record stamps and the source-level declaration', () 
         expect(declared).toContain(metric)
       }
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bucket-level wire contract (B3)
+// ---------------------------------------------------------------------------
+
+describe('source measurability reasons (B3)', () => {
+  it('makes every unavailable file-source metric name its source-specific limitation', () => {
+    const availability = measurabilityFor('claude-code') as Record<string, unknown>
+
+    for (const [metric, value] of Object.entries(availability)) {
+      expect(value, `${metric} must not be a bare availability flag`).toMatchObject({
+        availability: 'not_measurable',
+      })
+      expect(
+        (value as { reason?: unknown }).reason,
+        `${metric} must explain why Claude Code session files cannot measure it`,
+      ).toMatch(/claude|session file/i)
+    }
+  })
+
+  it('keeps a provider-specific absent counter unavailable with its own reason', () => {
+    const availability = getMeasurability(`${FILE_SOURCE_PREFIX}gemini`, 'gemini') as Record<string, unknown>
+
+    expect(availability.cache_creation).toMatchObject({
+      availability: 'not_measurable',
+    })
+    expect(
+      (availability.cache_creation as { reason?: unknown }).reason,
+      'Gemini must not represent its absent cache-creation counter as zero',
+    ).toMatch(/gemini|cache.creation/i)
   })
 })

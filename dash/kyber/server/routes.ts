@@ -24,6 +24,12 @@ function sendKyberJson(res: ServerResponse, status: number, body: unknown): void
   res.end(JSON.stringify(body))
 }
 
+type SessionViewPayload = {
+  context?: unknown
+  schema?: unknown
+  timeline?: unknown
+}
+
 export function handleKyberRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -90,7 +96,7 @@ export function handleKyberRequest(
       sendKyberJson(res, 400, { error: 'Missing session id' })
       return true
     }
-    const payload = bridge.getSessionPayload<Record<string, any>>(id)
+    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
     if (!payload) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
@@ -158,45 +164,12 @@ export function handleKyberRequest(
       }
       id = list[0].session_id
     }
-    const payload = bridge.getSessionPayload<Record<string, any>>(id)
+    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
     if (!payload) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
     }
-    const rawContext = payload.context ?? {}
-    const isMeasurable = Boolean(payload.turns && payload.turns.length > 0 && payload.harness === 'copilot')
-    const contextAnalysis = {
-      ...rawContext,
-      measurable: rawContext.measurable ?? isMeasurable,
-      contextLimit: rawContext.contextLimit ?? 200_000,
-      turns: rawContext.turns ?? (payload.turns ? payload.turns.map((t: any) => ({
-        index: t.index,
-        buckets: t.buckets ?? {
-          system_prompt: t.system_prompt ?? 0,
-          tool_definitions: t.tool_definitions ?? 0,
-          instruction_context: t.instruction_context ?? 0,
-          conversation_history: t.conversation_history ?? 0,
-          tool_result_content: t.tool_result_content ?? 0,
-        },
-        toolDefinitionsByServer: {},
-        builtinToolDefinitionTokens: 0,
-        strippedInstructionBlocks: { count: 0, tokens: 0 },
-        bucketedTokens: (t.input ?? 0) - (t.fresh ?? 0),
-        residual: { tokens: 0, attribution: 'tokenizer_drift' as const },
-        headroom: 200_000 - (t.input ?? 0),
-        pressure: (t.input ?? 0) / 200_000,
-        accumulationRate: t.fresh ?? 0,
-        freshInput: t.fresh ?? 0,
-      })) : []),
-      residualTotal: rawContext.residualTotal ?? 0,
-      derivedCounts: rawContext.derivedCounts ?? true,
-      freshJumpFactor: rawContext.freshJumpFactor ?? 1.5,
-      flaggedTurns: rawContext.flaggedTurns ?? [],
-      sessionAccumulationRate: rawContext.sessionAccumulationRate ?? 0,
-      derivedModel: rawContext.derivedModel ?? 'o200k_base',
-      reason: rawContext.reason ?? (!isMeasurable ? 'declared_not_measurable' : undefined),
-    }
-    sendKyberJson(res, 200, contextAnalysis)
+    sendKyberJson(res, 200, payload.context ?? {})
     return true
   }
 
@@ -214,54 +187,12 @@ export function handleKyberRequest(
       }
       id = list[0].session_id
     }
-    const payload = bridge.getSessionPayload<Record<string, any>>(id)
+    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
     if (!payload) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
     }
-    const tools = Array.isArray(payload.tools) ? payload.tools : []
-    const turnsCount = payload.summary?.turn_count ?? payload.turns?.length ?? 0
-    const measurable = tools.length > 0
-    const ranked = tools.map((t: any) => ({
-      name: t.name,
-      server: t.server ?? 'built-in',
-      cost: t.total_schema_cost ?? t.schema_tokens ?? 0,
-      invoked: (t.invocations ?? 0) > 0,
-    }))
-    const neverInvoked = ranked.filter((t: any) => !t.invoked)
-    const byServer: Record<string, number> = {}
-    for (const t of tools) {
-      const s = t.server ?? 'built-in'
-      byServer[s] = (byServer[s] ?? 0) + (t.total_schema_cost ?? t.schema_tokens ?? 0)
-    }
-    const unusedResidencies = tools
-      .filter((t: any) => (t.invocations ?? 0) === 0)
-      .reduce((sum: number, t: any) => sum + (t.total_schema_cost ?? 0), 0)
-
-    const schemaAnalysis = measurable
-      ? {
-          measurable: true,
-          ranked,
-          neverInvoked,
-          byServer,
-          unusedRange: {
-            tokenResidencies: unusedResidencies,
-            floor: 0,
-            ceiling: unusedResidencies,
-            currency: 'USD',
-          },
-          turns: turnsCount,
-          derived: true,
-          derivedModel: 'o200k_base',
-          tools,
-        }
-      : {
-          measurable: false,
-          invocationCount: payload.summary?.tool_count ?? 0,
-          reason: 'declared_not_measurable' as const,
-          tools: [],
-        }
-    sendKyberJson(res, 200, schemaAnalysis)
+    sendKyberJson(res, 200, payload.schema ?? null)
     return true
   }
 
@@ -279,54 +210,12 @@ export function handleKyberRequest(
       }
       id = list[0].session_id
     }
-    const payload = bridge.getSessionPayload<Record<string, any>>(id)
+    const payload = bridge.getSessionPayload<SessionViewPayload>(id)
     if (!payload) {
       sendKyberJson(res, 404, { error: 'Session not found' })
       return true
     }
-    const ensureNodeCost = (node: any): any => {
-      if (!node || typeof node !== 'object') return node
-      const cost = node.cost ?? {
-        basis: 'published_rates',
-        status: 'ok',
-        currency: 'USD',
-      }
-      const children = Array.isArray(node.children) ? node.children.map(ensureNodeCost) : []
-      return {
-        ...node,
-        cost,
-        children,
-        attributes: node.attributes ?? {},
-        durationMs: Number(node.durationMs) || 0,
-      }
-    }
-
-    const rawTimeline = payload.timeline
-    let rootNode: any
-    if (rawTimeline && !Array.isArray(rawTimeline) && typeof rawTimeline === 'object' && rawTimeline.spanId) {
-      rootNode = ensureNodeCost(rawTimeline)
-    } else {
-      const children = (Array.isArray(rawTimeline) ? rawTimeline : []).map(ensureNodeCost)
-      rootNode = {
-        spanId: payload.id ?? 'root',
-        parentId: null,
-        children,
-        startMs: 0,
-        durationMs: payload.summary?.duration_ms ?? 0,
-        kind: 'session',
-        name: payload.label ?? payload.harness ?? 'Session Timeline',
-        attributes: payload.summary ?? {},
-        isSubagent: Boolean(payload.is_subagent),
-        isAuxiliary: false,
-        cost: {
-          basis: payload.summary?.cost?.basis ?? 'published_rates',
-          status: payload.summary?.cost?.status ?? 'ok',
-          value: payload.summary?.cost?.usd,
-          currency: 'USD',
-        },
-      }
-    }
-    sendKyberJson(res, 200, rootNode)
+    sendKyberJson(res, 200, payload.timeline ?? [])
     return true
   }
 

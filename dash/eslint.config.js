@@ -38,6 +38,7 @@ const ignorePaths = [
   'gnome/**',        // upstream unshipped
   'assets/**',
   'scripts/**',      // upstream build/release helpers
+  'kyber/tools/**/*.mjs',
   'tests/fixtures/**',
   'eslint.config.js',
   '.release-0.9.21-runbook.md',

@@ -132,6 +132,69 @@ describe('ingestBatch — attribution and structure', () => {
     store.close()
   })
 
+  it('quarantines claimed health and HTTP-server noise while retaining the model call', () => {
+    // Trace inheritance establishes the harness, not that every span is a
+    // model call. These are the two high-volume ambient shapes that inflated
+    // the corpus into sessions which never happened.
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch(
+      [
+        span({ ...geminiAttributes, 'codeburn.provider': 'github-copilot' }, { spanId: 'model-1', traceId: 'claimed-trace' }),
+        span(
+          { 'codeburn.provider': 'github-copilot' },
+          { spanId: 'health-1', traceId: 'claimed-trace', name: 'GlobalHttpApi.health' },
+        ),
+        span(
+          { 'codeburn.provider': 'github-copilot', 'http.request.method': 'GET', 'url.path': '/v1/messages' },
+          { spanId: 'http-server-1', traceId: 'claimed-trace', name: 'GET /v1/messages', kind: 'server' },
+        ),
+      ],
+      store,
+    )
+
+    expect(outcome).toMatchObject({ accepted: 1, quarantined: 2, rejected: 0 })
+    expect(store.count()).toBe(1)
+    expect(store.get('model-1')?.op).toBe('llm.invoke')
+    expect(store.get('health-1')).toBeUndefined()
+    expect(store.get('http-server-1')).toBeUndefined()
+    expect(store.getQuarantine('health-1')?.reason).toMatch(/non[- ]model/i)
+    expect(store.getQuarantine('http-server-1')?.reason).toMatch(/non[- ]model/i)
+    store.close()
+  })
+
+  it.each([
+    ['health span', 'GlobalHttpApi.health', {}],
+    ['HTTP server span', 'GET /healthz', { 'http.request.method': 'GET', 'url.path': '/healthz' }],
+    ['other span without model-call evidence', 'connection pool checkout', { 'db.system.name': 'sqlite' }],
+  ])('quarantines wholly unattributed $0 with a non-model reason', (_shape, name, attributes) => {
+    const store = new CanonStore(':memory:')
+    const outcome = ingestBatch([span(attributes, { spanId: `noise-${name}`, name })], store)
+
+    expect(outcome).toMatchObject({ accepted: 0, quarantined: 1, rejected: 0 })
+    expect(store.count()).toBe(0)
+    expect(store.getQuarantine(`noise-${name}`)?.reason).toMatch(/non[- ]model/i)
+    store.close()
+  })
+
+  it('retains a supported tool child with the adapter-derived operation', () => {
+    const store = new CanonStore(':memory:')
+    ingestBatch(
+      [
+        span({ ...geminiAttributes, 'codeburn.provider': 'github-copilot' }, { spanId: 'model-1', traceId: 'tool-trace' }),
+        span(
+          { 'codeburn.provider': 'github-copilot', 'gen_ai.tool.name': 'read_file' },
+          { spanId: 'tool-1', traceId: 'tool-trace', parentSpanId: 'model-1', name: 'read_file' },
+        ),
+      ],
+      store,
+    )
+
+    expect(store.get('model-1')?.op).toBe('llm.invoke')
+    expect(store.get('tool-1')?.op).toBe('tool.invoke')
+    expect(store.getQuarantine('tool-1')).toBeUndefined()
+    store.close()
+  })
+
   it('quarantines a span no adapter claims instead of inventing a harness', () => {
     const store = new CanonStore(':memory:')
     const outcome = ingestBatch([span({ 'totally.unknown': 'x' }, { spanId: 'orphan-1' })], store)

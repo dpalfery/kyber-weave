@@ -39,15 +39,15 @@ export type { RequestReconciliation } from './copilot.js'
 
 /** Vendor namespaces Gemini telemetry is emitted under. */
 const GEMINI_VENDOR_NAMESPACES = ['gemini']
+const GEMINI_SYSTEM_KEY = 'gen_ai.system'
 
 /** Where Gemini's thought tokens come from, beyond the shared reasoning key. */
 const THOUGHT_KEYS = ['gemini.usage.thoughts_tokens'] as const
 
 /**
- * The Gemini adapter. Detection is vendor-namespace driven (`gemini.*`
- * attributes carry the vote; the shared `gen_ai.usage.*` keys alone score
- * 0.4, below the registry threshold), and the source name is never
- * consulted (R6.2).
+ * The Gemini adapter. Detection uses Gemini's vendor namespace or its exact
+ * `gen_ai.system` value; the shared `gen_ai.usage.*` keys alone score 0.4,
+ * below the registry threshold. The source name is never consulted (R6.2).
  */
 export const geminiAdapter: HarnessAdapter = {
   name: 'gemini',
@@ -55,7 +55,12 @@ export const geminiAdapter: HarnessAdapter = {
 
   detect(span) {
     let score = 0
-    if (hasNamespace(span.attributes, GEMINI_VENDOR_NAMESPACES)) score += VENDOR_EVIDENCE
+    if (
+      hasNamespace(span.attributes, GEMINI_VENDOR_NAMESPACES) ||
+      span.attributes[GEMINI_SYSTEM_KEY] === 'gemini'
+    ) {
+      score += VENDOR_EVIDENCE
+    }
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) score += USAGE_EVIDENCE
     return Math.min(1, score)
   },
@@ -67,7 +72,12 @@ export const geminiAdapter: HarnessAdapter = {
   relevance(span) {
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) return 1
     if (OUTPUT_TOKEN_KEYS.some((key) => key in span.attributes)) return 0.5
-    if (hasNamespace(span.attributes, GEMINI_VENDOR_NAMESPACES)) return 0.1
+    if (
+      hasNamespace(span.attributes, GEMINI_VENDOR_NAMESPACES) ||
+      span.attributes[GEMINI_SYSTEM_KEY] === 'gemini'
+    ) {
+      return 0.1
+    }
     return 0
   },
 

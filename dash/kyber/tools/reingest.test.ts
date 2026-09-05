@@ -41,6 +41,9 @@ const S_PI_TURN_2 = 'aaaa000000000003'
 const S_COPILOT_TURN = 'bbbb000000000001'
 const S_ORPHAN = 'cccc000000000001'
 const S_INVALID = 'dddd000000000001'
+const S_GEMINI_STATUSLINE = 'eeee000000000001'
+const S_HEALTH = 'eeee000000000002'
+const S_HTTP_SERVER = 'eeee000000000003'
 
 type FixtureSpan = {
   source: string
@@ -421,6 +424,64 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
 
     expect(store.get(S_PI_TOOL)?.harness).toBe('pi')
     expect(store.listQuarantine().map((entry) => entry.spanId)).toEqual([S_COPILOT_TURN])
+
+    store.close()
+  })
+
+  it('uses the shared ingest classification so claimed statusline noise is quarantined', async () => {
+    // A statusline model call and ambient spans can share attribution evidence.
+    // The old replay loop duplicated the adapter path, so it normalized every
+    // claimed span; the shared ingest seam must retain just the model call.
+    const statuslineAndNoise = exportRequest([
+      {
+        source: 'gemini-statusline',
+        traceId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        spanId: S_GEMINI_STATUSLINE,
+        name: 'gemini.statusline.request',
+        startMs: BASE_MS,
+        durationMs: 100,
+        attributes: {
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 20,
+          'gen_ai.usage.output_tokens': 5,
+          'gen_ai.prompt': 'synthetic retained context',
+        },
+      },
+      {
+        source: 'gemini-statusline',
+        traceId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        spanId: S_HEALTH,
+        name: 'GlobalHttpApi.health',
+        startMs: BASE_MS + 100,
+        durationMs: 5,
+        attributes: { 'gen_ai.system': 'gemini' },
+      },
+      {
+        source: 'gemini-statusline',
+        traceId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        spanId: S_HTTP_SERVER,
+        name: 'GET /v1/status',
+        startMs: BASE_MS + 105,
+        durationMs: 5,
+        attributes: { 'gen_ai.system': 'gemini', 'http.request.method': 'GET' },
+      },
+    ])
+    const store = new CanonStore(':memory:')
+
+    await reingestFromExports([decodeOtlpJson(statuslineAndNoise)], store)
+
+    const retained = store.get(S_GEMINI_STATUSLINE)
+    expect(retained?.harness).toBe('gemini')
+    expect(retained?.content).toEqual({ conversation_history: 'synthetic retained context' })
+    expect(retained?.parts).toEqual([
+      { part: 'conversation_history', text: 'synthetic retained context', order: 0 },
+    ])
+    expect(store.get(S_HEALTH)).toBeUndefined()
+    expect(store.get(S_HTTP_SERVER)).toBeUndefined()
+    expect(store.listQuarantine()).toEqual([
+      { spanId: S_HEALTH, namespaces: ['gen_ai'], reason: 'non-model span' },
+      { spanId: S_HTTP_SERVER, namespaces: ['gen_ai', 'http'], reason: 'non-model span' },
+    ])
 
     store.close()
   })

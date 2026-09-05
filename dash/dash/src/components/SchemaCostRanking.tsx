@@ -119,6 +119,20 @@ function displayToolsOf(schema: SchemaCostAnalysis | null | undefined, tools: Sc
     }))
   }
 
+  const hasNamedToolRows = tools?.some((tool) => typeof tool.name === 'string' && tool.name.length > 0) ?? false
+  if (schema?.measurable && !hasNamedToolRows && schema.neverInvoked.length > 0) {
+    // B1 emits only the ranked tools it can establish. When every offered
+    // tool was uninvoked, that means `neverInvoked` is the complete ranking.
+    // The content-free `tools` rows do not carry a name or server and must not
+    // be treated as ranking input.
+    return schema.neverInvoked.map((tool) => ({
+      name: tool.name,
+      ...(tool.server !== undefined ? { server: tool.server } : {}),
+      cost: tool.cost,
+      invoked: tool.invoked,
+    }))
+  }
+
   if (tools === undefined || tools.length === 0) return []
 
   return [...tools]

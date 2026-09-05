@@ -103,7 +103,9 @@ describe('piAdapter.normalize — the exclusive convention (R4.2)', () => {
     expect(piAdapter.unexportedMetrics()).toEqual(['tool_definitions'])
     // Absent is not zero (R7.6, R8.5, R10.2): the record says the harness
     // cannot measure it, and no tool definition is invented.
-    expect(record.measurability).toEqual({ tool_definitions: 'not_measurable' })
+    expect(record.measurability).toEqual({
+      tool_definitions: expect.objectContaining({ availability: 'not_measurable' }),
+    })
     expect(record.content).toEqual({})
   })
 })

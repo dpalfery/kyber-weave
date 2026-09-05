@@ -14,7 +14,11 @@
 // existence signal (`ENOENT`) reads as absence — every other error is a
 // present store with a problem.
 
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
@@ -71,41 +75,66 @@ function fsError(code: string, path: string): Error {
   return Object.assign(new Error(`${code}: something went wrong, open '${path}'`), { code, path })
 }
 
+const tempRoots: string[] = []
+
+afterAll(() => {
+  for (const root of tempRoots) rmSync(root, { recursive: true, force: true })
+})
+
+function claudeTranscript(): string {
+  const root = mkdtempSync(join(tmpdir(), 'kyber-provider-reader-'))
+  tempRoots.push(root)
+  const filePath = join(root, 'session.jsonl')
+  writeFileSync(filePath, [
+    JSON.stringify({
+      sessionId: 's-1',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'reader-provided conversation' },
+          { type: 'tool_result', content: 'reader-provided tool result' },
+        ],
+      },
+    }),
+  ].join('\n'))
+  return filePath
+}
+
 // ---------------------------------------------------------------------------
 // R1.2 — absent store: omitted silently, never an error
 // ---------------------------------------------------------------------------
 
 describe('R1.2 — an absent provider store is omitted silently', () => {
-  it('records no problem and no records when the loader reports null', () => {
-    const result = ingestProviders(['codex'], () => null)
+  it('records no problem and no records when the loader reports null', async () => {
+    const result = await ingestProviders(['codex'], () => null)
     expect(result.records).toEqual([])
     expect(result.problems).toEqual([])
   })
 
-  it('treats an undefined loader result the same as null', () => {
-    const result = ingestProviders(['kilo-code'], () => undefined)
+  it('treats an undefined loader result the same as null', async () => {
+    const result = await ingestProviders(['kilo-code'], () => undefined)
     expect(result.records).toEqual([])
     expect(result.problems).toEqual([])
   })
 
-  it('treats a thrown ENOENT as absence, not an error', () => {
+  it('treats a thrown ENOENT as absence, not an error', async () => {
     const loader = () => {
       throw fsError('ENOENT', '/home/dev/.codex/sessions')
     }
-    const result = ingestProviders(['codex'], loader)
+    const result = await ingestProviders(['codex'], loader)
     expect(result.records).toEqual([])
     expect(result.problems).toEqual([])
   })
 
-  it('treats a returned ENOENT error value as absence too', () => {
-    const result = ingestProviders(['codex'], () => fsError('ENOENT', '/home/dev/.codex/sessions'))
+  it('treats a returned ENOENT error value as absence too', async () => {
+    const result = await ingestProviders(['codex'], () => fsError('ENOENT', '/home/dev/.codex/sessions'))
     expect(result.records).toEqual([])
     expect(result.problems).toEqual([])
   })
 
-  it('omits the absent provider while still ingesting the present one', () => {
+  it('omits the absent provider while still ingesting the present one', async () => {
     const claude = callsFor('claude')
-    const result = ingestProviders(['codex', 'claude'], (provider) =>
+    const result = await ingestProviders(['codex', 'claude'], (provider) =>
       provider === 'claude' ? claude : null,
     )
     expect(result.problems).toEqual([])
@@ -120,8 +149,8 @@ describe('R1.2 — an absent provider store is omitted silently', () => {
 describe('R1.3 — an unparseable store is recorded and the run continues', () => {
   const corruptFile = '/home/dev/.codex/sessions/rollout-2026-08-29.jsonl'
 
-  it('records a problem naming the provider and the file for a corrupt store', () => {
-    const result = ingestProviders(['codex'], () => corruptStoreError(corruptFile))
+  it('records a problem naming the provider and the file for a corrupt store', async () => {
+    const result = await ingestProviders(['codex'], () => corruptStoreError(corruptFile))
 
     expect(result.records).toEqual([])
     expect(result.problems).toHaveLength(1)
@@ -133,12 +162,12 @@ describe('R1.3 — an unparseable store is recorded and the run continues', () =
     expect(problem.location).toBe(corruptFile)
   })
 
-  it('continues with every other provider — corruption does not abort the run', () => {
+  it('continues with every other provider — corruption does not abort the run', async () => {
     // The corrupt store sits in the middle: providers after it must still
     // synthesize, which is the "continue" half of R1.3.
     const claude = callsFor('claude')
     const gemini = callsFor('gemini', 1)
-    const result = ingestProviders(['claude', 'codex', 'gemini'], (provider) => {
+    const result = await ingestProviders(['claude', 'codex', 'gemini'], (provider) => {
       if (provider === 'claude') return claude
       if (provider === 'codex') return corruptStoreError(corruptFile)
       return gemini
@@ -149,22 +178,22 @@ describe('R1.3 — an unparseable store is recorded and the run continues', () =
     expect(result.records.map((record) => record.harness)).toEqual(['claude', 'claude', 'gemini'])
   })
 
-  it('records the same problem when the loader throws instead of returning', () => {
+  it('records the same problem when the loader throws instead of returning', async () => {
     const loader = () => {
       throw corruptStoreError(corruptFile)
     }
-    const result = ingestProviders(['codex'], loader)
+    const result = await ingestProviders(['codex'], loader)
     expect(result.problems).toHaveLength(1)
     expect(result.problems[0]!.code).toBe(PROVIDER_PARSE_ERROR)
     expect(result.problems[0]!.message).toContain('codex')
     expect(result.problems[0]!.message).toContain(corruptFile)
   })
 
-  it('takes the file from a Node fs error path for a present-but-unreadable store', () => {
+  it('takes the file from a Node fs error path for a present-but-unreadable store', async () => {
     // EACCES is a store that exists but cannot be read — a problem, never
     // absence; only ENOENT is a negative existence check.
     const locked = '/home/dev/.claude/projects/x/session.jsonl'
-    const result = ingestProviders(['claude'], () => fsError('EACCES', locked))
+    const result = await ingestProviders(['claude'], () => fsError('EACCES', locked))
     expect(result.problems).toHaveLength(1)
     expect(result.problems[0]!.code).toBe(PROVIDER_PARSE_ERROR)
     expect(result.problems[0]!.message).toContain('claude')
@@ -172,19 +201,19 @@ describe('R1.3 — an unparseable store is recorded and the run continues', () =
     expect(result.problems[0]!.location).toBe(locked)
   })
 
-  it('never omits the provider from the problem, even when no file is attached', () => {
+  it('never omits the provider from the problem, even when no file is attached', async () => {
     // A loader that lets a bare SyntaxError escape names no file; the
     // problem must still point at the provider rather than at nothing.
-    const result = ingestProviders(['pi'], () => new SyntaxError(`Unexpected end of JSON input`))
+    const result = await ingestProviders(['pi'], () => new SyntaxError(`Unexpected end of JSON input`))
     expect(result.problems).toHaveLength(1)
     expect(result.problems[0]!.code).toBe(PROVIDER_PARSE_ERROR)
     expect(result.problems[0]!.message).toContain('pi')
     expect(result.problems[0]!.location).toBeUndefined()
   })
 
-  it('records one problem per unparseable provider, not one for the whole pass', () => {
+  it('records one problem per unparseable provider, not one for the whole pass', async () => {
     const claude = callsFor('claude', 1)
-    const result = ingestProviders(['codex', 'claude', 'pi'], (provider) => {
+    const result = await ingestProviders(['codex', 'claude', 'pi'], (provider) => {
       if (provider === 'claude') return claude
       return corruptStoreError(`/home/dev/.${provider}/store.json`)
     })
@@ -201,10 +230,10 @@ describe('R1.3 — an unparseable store is recorded and the run continues', () =
 // ---------------------------------------------------------------------------
 
 describe('successful loads synthesize through the 9.1 Synthesizer', () => {
-  it('produces exactly what calling the Synthesizer directly produces', () => {
+  it('produces exactly what calling the Synthesizer directly produces', async () => {
     const claude = callsFor('claude')
     const gemini = callsFor('gemini', 3)
-    const result = ingestProviders(['claude', 'gemini'], (provider) =>
+    const result = await ingestProviders(['claude', 'gemini'], (provider) =>
       provider === 'claude' ? claude : gemini,
     )
 
@@ -216,16 +245,72 @@ describe('successful loads synthesize through the 9.1 Synthesizer', () => {
     }
   })
 
-  it('treats a present-but-empty store as neither absence nor error', () => {
-    const result = ingestProviders(['cursor'], () => [])
+  it('treats a present-but-empty store as neither absence nor error', async () => {
+    const result = await ingestProviders(['cursor'], () => [])
     expect(result.records).toEqual([])
     expect(result.problems).toEqual([])
   })
 
-  it('ingests nothing without drama when no providers are requested', () => {
-    const result = ingestProviders([], () => {
+  it('ingests nothing without drama when no providers are requested', async () => {
+    const result = await ingestProviders([], () => {
       throw new Error('the loader must never be consulted')
     })
     expect(result).toEqual({ records: [], problems: [] })
+  })
+})
+
+describe('D5 reader integration', () => {
+  it('invokes Claude’s registered reader and passes its matching turn to synthesis', async () => {
+    const result = await ingestProviders(['claude'], () => ({
+      calls: [call()],
+      filePath: claudeTranscript(),
+    }))
+
+    expect(result.problems).toEqual([])
+    expect(result.records).toHaveLength(1)
+    expect(result.records[0]?.content).toEqual({
+      conversation_history: 'reader-provided conversation',
+      tool_result_content: 'reader-provided tool result',
+    })
+    expect(result.records[0]?.parts).toHaveLength(2)
+  })
+})
+
+describe('D6 Copilot CLI SQLite integration', () => {
+  it('turns a collectable CLI row into a canonical record without zero-filling omitted buckets', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-copilot-cli-provider-'))
+    tempRoots.push(root)
+    const filePath = join(root, 'data.db')
+    const db = new DatabaseSync(filePath)
+    try {
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT,
+          session_id TEXT,
+          model TEXT,
+          created_at TEXT,
+          context_system_tokens INTEGER,
+          context_conversation_tokens INTEGER,
+          context_tier TEXT
+        );
+        INSERT INTO sessions VALUES (
+          'synthetic-row', 'synthetic-session', 'gpt-5',
+          '2026-09-04T12:00:00.000Z', 120, 340, 'standard'
+        );
+      `)
+    } finally {
+      db.close()
+    }
+
+    const result = await ingestProviders(['copilot'], () => ({ calls: [], filePath }))
+
+    expect(result.problems).toEqual([])
+    expect(result.records).toHaveLength(1)
+    expect(result.records[0]?.raw).toMatchObject({
+      context_system_tokens: 120,
+      context_conversation_tokens: 340,
+      context_tier: 'standard',
+    })
+    expect(result.records[0]?.raw).not.toHaveProperty('context_buffer_tokens')
   })
 })

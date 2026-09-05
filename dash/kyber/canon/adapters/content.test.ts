@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import antigravitySpan from './__fixtures__/antigravity-span.json' with { type: 'json' }
+import { parseClaudeApiRequestBody } from './claude-code.js'
 import { canonicalContent, canonicalParts } from './copilot.js'
 import { contentFromParts, type ContentPart } from '../types.js'
 
@@ -125,6 +126,61 @@ describe('canonicalParts — attribution and absence', () => {
     expect(canonicalContent({ 'gen_ai.prompt': 'flattened' })).toEqual({
       conversation_history: 'flattened',
     })
+  })
+
+  it('maps observed Copilot response and tool-result keys', () => {
+    expect(
+      canonicalParts({
+        'gen_ai.output.messages': JSON.stringify([
+          { role: 'assistant', parts: [{ type: 'text', text: 'synthetic response' }] },
+        ]),
+        'gen_ai.tool.call.result': 'synthetic tool result',
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ part: 'conversation_history', text: 'synthetic response' }),
+        expect.objectContaining({ part: 'tool_result_content', text: 'synthetic tool result' }),
+      ]),
+    )
+  })
+})
+
+describe('parseClaudeApiRequestBody', () => {
+  it('preserves Claude system blocks and complete tool schemas with only reported servers', () => {
+    const request = {
+      system: [
+        { type: 'text', text: 'Synthetic system policy.' },
+        { type: 'text', text: 'Synthetic tool policy.' },
+      ],
+      tools: [
+        {
+          name: 'search_repository',
+          server: 'synthetic-mcp-server',
+          description: 'Search a synthetic repository.',
+          input_schema: {
+            type: 'object',
+            properties: { query: { type: 'string' } },
+            required: ['query'],
+          },
+        },
+        {
+          name: 'mcp__synthetic-server__must-not-be-split',
+          description: 'A tool whose name is not server evidence.',
+          input_schema: { type: 'object', properties: {} },
+        },
+      ],
+    }
+
+    const parts = parseClaudeApiRequestBody(JSON.stringify(request))
+    const system = parts.filter((part) => part.part === 'system_prompt')
+    const tools = parts.filter((part) => part.part === 'tool_definitions')
+
+    expect(system.map((part) => part.text)).toEqual([
+      'Synthetic system policy.',
+      'Synthetic tool policy.',
+    ])
+    expect(tools.map((part) => JSON.parse(part.text))).toEqual(request.tools)
+    expect(tools.map((part) => part.server)).toEqual(['synthetic-mcp-server', undefined])
   })
 })
 

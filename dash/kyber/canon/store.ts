@@ -41,7 +41,7 @@ import type {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
@@ -113,6 +113,18 @@ CREATE TABLE IF NOT EXISTS quarantine (
   namespaces TEXT NOT NULL,
   reason TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS pending_logs (
+  log_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS quarantined_logs (
+  log_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  reason TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS enriched_logs (
+  log_id TEXT PRIMARY KEY
+);
 CREATE TABLE IF NOT EXISTS problems (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   span_id TEXT,
@@ -163,6 +175,20 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
     }
     db.exec('CREATE INDEX IF NOT EXISTS records_by_session ON records (session_id)')
   },
+  3: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS pending_logs (
+      log_id TEXT PRIMARY KEY,
+      payload TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS quarantined_logs (
+      log_id TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      reason TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS enriched_logs (
+      log_id TEXT PRIMARY KEY
+    );`)
+  },
 }
 
 /** One derived session, as the `session` table stores it. */
@@ -198,7 +224,13 @@ export type QuarantineEntry = {
   reason: string
 }
 
-type RecordRow = {
+export type QuarantinedLog = {
+  logId: string
+  reason: string
+  log: unknown
+}
+
+export type RecordRow = {
   span_id: unknown
   trace_id: unknown
   parent_span_id: unknown
@@ -241,7 +273,7 @@ function nullableText(value: unknown): string | null {
   return (value as string | null) ?? null
 }
 
-function toRecord(row: RecordRow): CanonicalRecord {
+export function toRecord(row: RecordRow): CanonicalRecord {
   const record: CanonicalRecord = {
     spanId: text(row.span_id),
     traceId: nullableText(row.trace_id),
@@ -275,7 +307,10 @@ function toRecord(row: RecordRow): CanonicalRecord {
     // same text compressed as parts — a 4x store for one copy of the data,
     // which is the shape of the 2.9 GB problem R12.4 exists to prevent.
     record.parts = decompressRaw(row.parts_json as Uint8Array) as ContentPart[]
-    record.content = contentFromParts(record.parts)
+    record.content = {
+      ...contentFromParts(record.parts),
+      ...(JSON.parse(text(row.content_json)) as CanonicalRecord['content']),
+    }
   }
   return record
 }
@@ -484,9 +519,109 @@ export class CanonStore {
       .run(fields.harness, fields.source, fields.op, JSON.stringify(fields.tokens), spanId)
   }
 
+  /**
+   * Move a record out of the canonical corpus and into quarantine atomically.
+   * Reclassification uses this for rows retained by an older ingest pass:
+   * the audit entry and the removal cannot disagree after a partial write.
+   */
+  quarantineAndDelete(spanId: string, namespaces: readonly string[], reason: string): void {
+    this.db.exec('BEGIN')
+    try {
+      this.db
+        .prepare('INSERT OR REPLACE INTO quarantine (span_id, namespaces, reason) VALUES (?, ?, ?)')
+        .run(spanId, JSON.stringify(namespaces), reason)
+      this.db.prepare('DELETE FROM records WHERE span_id = ?').run(spanId)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
   /** Attach the harness's conversation id to a stored record. */
   setSessionId(spanId: string, sessionId: string | null): void {
     this.db.prepare('UPDATE records SET session_id = ? WHERE span_id = ?').run(sessionId, spanId)
+  }
+
+  /** Find one span by the exact OTLP correlation identity. */
+  findByTraceSpan(traceId: string, spanId: string): CanonicalRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM records WHERE trace_id = ? AND span_id = ?')
+      .get(traceId, spanId) as RecordRow | undefined
+    return row === undefined ? undefined : toRecord(row)
+  }
+
+  /** Find the nearest record in a session, bounded to avoid accidental joins. */
+  findBySessionTime(sessionId: string, timestamp: string, windowMs = 5_000): CanonicalRecord | undefined {
+    const rows = this.db
+      .prepare('SELECT * FROM records WHERE session_id = ?')
+      .all(sessionId) as RecordRow[]
+    const target = Date.parse(timestamp)
+    return rows
+      .map(toRecord)
+      .filter((record) => Math.abs(Date.parse(String(record.timestamp)) - target) <= windowMs)
+      .sort((a, b) => Math.abs(Date.parse(String(a.timestamp)) - target) - Math.abs(Date.parse(String(b.timestamp)) - target))[0]
+  }
+
+  /** Merge log evidence into a record without touching model counters. */
+  enrich(spanId: string, log: { body?: unknown; attributes?: Record<string, unknown>; sessionId?: string | null }): boolean {
+    const existing = this.get(spanId)
+    if (existing === undefined) return false
+    const content = { ...existing.content } as Record<string, unknown>
+    if (log.body !== undefined && log.body !== null) content.log_body = log.body
+    if (log.attributes !== undefined) Object.assign(content, log.attributes)
+    this.db.prepare('UPDATE records SET content_json = ?, session_id = COALESCE(session_id, ?) WHERE span_id = ?')
+      .run(JSON.stringify(content), log.sessionId ?? null, spanId)
+    return true
+  }
+
+  addPendingLog(log: { logId: string; pendingSince?: number }): void {
+    this.db.prepare('INSERT OR REPLACE INTO pending_logs (log_id, payload) VALUES (?, ?)')
+      .run(log.logId, JSON.stringify(log))
+  }
+
+  deletePendingLog(logId: string): void {
+    this.db.prepare('DELETE FROM pending_logs WHERE log_id = ?').run(logId)
+  }
+
+  getPendingLogs(): unknown[] {
+    return (this.db.prepare('SELECT payload FROM pending_logs ORDER BY log_id').all() as { payload: string }[])
+      .map((row) => JSON.parse(row.payload))
+  }
+
+  consumePendingLogs(traceId: string, spanId: string, sessionId?: string | null): unknown[] {
+    const pending = this.getPendingLogs() as Array<{ traceId?: string | null; spanId?: string | null; sessionId?: string | null }>
+    const matched = pending.filter((log) =>
+      ((log.traceId === traceId && log.spanId === spanId) || log.spanId === spanId) ||
+      (sessionId !== null && sessionId !== undefined && log.sessionId === sessionId),
+    )
+    for (const log of matched) {
+      this.db.prepare('DELETE FROM pending_logs WHERE log_id = ?').run((log as { logId: string }).logId)
+    }
+    return matched
+  }
+
+  quarantineLog(log: { logId: string }, reason: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO quarantined_logs (log_id, payload, reason) VALUES (?, ?, ?)')
+      .run(log.logId, JSON.stringify(log), reason)
+  }
+
+  isLogEnriched(logId: string): boolean {
+    return this.db.prepare('SELECT 1 FROM enriched_logs WHERE log_id = ?').get(logId) !== undefined
+  }
+
+  markLogEnriched(logId: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO enriched_logs (log_id) VALUES (?)').run(logId)
+  }
+
+  getQuarantinedLog(logId: string): QuarantinedLog | undefined {
+    const row = this.db.prepare('SELECT payload, reason FROM quarantined_logs WHERE log_id = ?')
+      .get(logId) as { payload: string; reason: string } | undefined
+    return row === undefined ? undefined : { logId, reason: row.reason, log: JSON.parse(row.payload) }
+  }
+
+  quarantinedLogCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM quarantined_logs').get() as { n: number }).n
   }
 
   /**

@@ -25,7 +25,7 @@
 // wrapping it with that mapping where it is built; writer.test.ts shows
 // the seam against the real transactional store.
 
-import type { OtlpSpan, OtlpSpanStore } from './receiver.js'
+import type { OtlpLog, OtlpSignalStore, OtlpSpan, OtlpSpanStore } from './receiver.js'
 
 /**
  * What `IngestWriter` persists into: a batch sink that commits a batch as
@@ -38,8 +38,12 @@ export type SpanBatchSink = {
   upsertMany(spans: readonly OtlpSpan[]): unknown
 }
 
+export type SignalBatchSink = SpanBatchSink & {
+  upsertLogs(logs: readonly OtlpLog[]): unknown
+}
+
 /** Either sink shape the writer accepts. */
-export type IngestSink = SpanBatchSink | OtlpSpanStore
+export type IngestSink = SpanBatchSink | SignalBatchSink | OtlpSpanStore | OtlpSignalStore
 
 export type IngestWriterOptions = {
   /** Queue depth at which a size-triggered flush fires. */
@@ -76,15 +80,22 @@ function isBatchSink(sink: IngestSink): sink is SpanBatchSink {
   return typeof (sink as Partial<SpanBatchSink>).upsertMany === 'function'
 }
 
+function isSignalSink(sink: IngestSink): sink is SignalBatchSink | OtlpSignalStore {
+  return typeof (sink as Partial<SignalBatchSink>).upsertLogs === 'function' ||
+    typeof (sink as Partial<OtlpSignalStore>).writeLogs === 'function'
+}
+
 export class IngestWriter implements OtlpSpanStore {
   private readonly batchSink: SpanBatchSink | null
   private readonly spanStore: OtlpSpanStore | null
+  private readonly signalSink: SignalBatchSink | OtlpSignalStore | null
   private readonly batchSize: number
   private readonly flushIntervalMs: number
   private readonly highWaterMark: number
   private readonly report: (error: unknown) => void
 
   private queue: OtlpSpan[] = []
+  private logQueue: OtlpLog[] = []
   private flushInFlight: Promise<void> | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private stopped = false
@@ -92,6 +103,7 @@ export class IngestWriter implements OtlpSpanStore {
   constructor(sink: IngestSink, opts: IngestWriterOptions = {}) {
     this.batchSink = isBatchSink(sink) ? sink : null
     this.spanStore = isBatchSink(sink) ? null : sink
+    this.signalSink = isSignalSink(sink) ? sink : null
     this.batchSize = Math.max(1, Math.floor(opts.batchSize ?? DEFAULT_BATCH_SIZE))
     this.flushIntervalMs = Math.max(
       1,
@@ -132,6 +144,13 @@ export class IngestWriter implements OtlpSpanStore {
     }
     for (const span of spans) this.queue.push(span)
     if (this.queue.length >= this.batchSize) this.autoFlush()
+  }
+
+  writeLogs(logs: readonly OtlpLog[]): void {
+    if (logs.length === 0) return
+    if (this.stopped) throw new Error('IngestWriter is stopped; enqueueing more logs would silently drop them')
+    this.logQueue.push(...logs)
+    if (this.logQueue.length >= this.batchSize) this.autoFlush()
   }
 
   /**
@@ -195,7 +214,7 @@ export class IngestWriter implements OtlpSpanStore {
    */
   private pokeFlush(): Promise<void> {
     if (this.flushInFlight !== null) return this.flushInFlight
-    if (this.queue.length === 0) return Promise.resolve()
+    if (this.queue.length === 0 && this.logQueue.length === 0) return Promise.resolve()
     const flush = this.runFlush().finally(() => {
       // Single-flight: nothing can replace this flush while it runs, so
       // clearing unconditionally here is safe.
@@ -206,8 +225,9 @@ export class IngestWriter implements OtlpSpanStore {
   }
 
   private async runFlush(): Promise<void> {
-    while (this.queue.length > 0) {
+    while (this.queue.length > 0 || this.logQueue.length > 0) {
       const batch = this.queue.splice(0, this.batchSize)
+      const logs = this.logQueue.splice(0, this.batchSize)
       try {
         let result: unknown
         if (this.batchSink !== null) {
@@ -215,11 +235,19 @@ export class IngestWriter implements OtlpSpanStore {
         } else if (this.spanStore !== null) {
           this.spanStore.write(batch)
         }
+        if (logs.length > 0 && this.signalSink !== null) {
+          if (typeof (this.signalSink as Partial<SignalBatchSink>).upsertLogs === 'function') {
+            result = (this.signalSink as SignalBatchSink).upsertLogs(logs)
+          } else {
+            result = (this.signalSink as OtlpSignalStore).writeLogs(logs)
+          }
+        }
         if (isThenable(result)) await result
       } catch (err) {
         // The store refused the batch: put it back at the head, in order,
         // so no span is dropped (R2.5), and let the caller see the failure.
         this.queue.unshift(...batch)
+        this.logQueue.unshift(...logs)
         throw err
       }
     }

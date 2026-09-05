@@ -32,7 +32,7 @@ import {
 } from '../canon/adapters/copilot.js'
 import { DEFAULT_GROUP_ATTRIBUTE } from '../otel/aspire.js'
 import { decodeOtlpJson, type OtlpSpan } from '../otel/receiver.js'
-import { DEDUP_DISAGREEMENT, deduplicate, deduplicationKeyFor } from './dedup.js'
+import { DEDUP_DISAGREEMENT, deduplicate, deduplicationKeyFor, joinOtelAndFileTurn } from './dedup.js'
 import { Synthesizer, synthesizeCall, traceIdFor } from './synth.js'
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ function otlpExport(spanId: string, attributes: SpanAttributes): string {
 }
 
 /** The turn attributes the harness exports for its session `s-1`. */
-function turnAttributes(spec: SpanAttributes = {}): SpanAttributes {
+function turnAttributes(spec: Record<string, string | number | undefined> = {}): SpanAttributes {
   const attributes: SpanAttributes = {
     [DEFAULT_GROUP_ATTRIBUTE]: 's-1',
     'gen_ai.usage.input_tokens': 1_000,
@@ -241,7 +241,11 @@ describe('R3.1 — a session observed through both paths is counted once', () =>
     try {
       // The same session (claude, s-1), described twice: once as the file
       // the parser reads, once as the span the harness exported.
-      const fileRecords = fileSession([call()])
+      const fileRecords = fileSession([call()]).map((record) => ({
+        ...record,
+        parts: [{ part: 'conversation_history' as const, text: 'file-only turn content', order: 0 }],
+        content: { conversation_history: 'file-only turn content' },
+      }))
       const otlpRecords = otlpSession(
         SPAN_ID_1,
         turnAttributes({
@@ -280,6 +284,10 @@ describe('R3.1 — a session observed through both paths is counted once', () =>
         value: 0.0123,
         currency: 'USD',
       })
+      // D7: the OTLP row had no structured parts, so its counters stay
+      // authoritative while file-derived content fills the empty bucket.
+      expect(stored?.parts).toEqual(fileRecords[0]!.parts)
+      expect(stored?.content).toEqual(fileRecords[0]!.content)
 
       // And the collapse is idempotent end to end: re-ingesting the same
       // collapsed output rewrites the same row (R2.5).
@@ -288,6 +296,27 @@ describe('R3.1 — a session observed through both paths is counted once', () =>
     } finally {
       store.close()
     }
+  })
+
+  it('keeps OTel parts when both paths supplied structured content', () => {
+    const fileRecord: CanonicalRecord = {
+      ...synthesizeCall(call()),
+      parts: [{ part: 'conversation_history', text: 'file content', order: 0 }],
+      content: { conversation_history: 'file content' },
+    }
+    const otlpRecord: CanonicalRecord = {
+      ...fileRecord,
+      spanId: SPAN_ID_1,
+      source: 'claude-code',
+      parts: [{ part: 'conversation_history', text: 'OTel content', order: 0 }],
+      content: { conversation_history: 'OTel content' },
+    }
+
+    const joined = joinOtelAndFileTurn(otlpRecord, fileRecord)
+
+    expect(joined.tokens).toEqual(otlpRecord.tokens)
+    expect(joined.parts).toEqual(otlpRecord.parts)
+    expect(joined.content).toEqual(otlpRecord.content)
   })
 
   it('keeps every turn of a session only one path saw — turns are not duplicates', () => {
@@ -313,7 +342,7 @@ describe('R3.1 — a session observed through both paths is counted once', () =>
     }
   })
 
-  it('collapses a both-paths session to the richer side’s turns, counted once', () => {
+  it('keeps the OTel rows for a both-paths session, counted once', () => {
     const store = new CanonStore(':memory:')
     try {
       const turns = [0, 1, 2]
@@ -336,13 +365,12 @@ describe('R3.1 — a session observed through both paths is counted once', () =>
       const kept = deduplicate(fileRecords, otlpRecords, store)
       store.upsertMany(kept)
 
-      // The file side is the richer source (priced cost on every turn,
-      // larger raw): all three of its turns survive — not one lone record,
-      // not six doubled ones.
+      // D7 keeps the OTel accounting rows — not the file rows — while still
+      // collapsing the session to three distinct turns.
       expect(kept).toHaveLength(3)
       expect(store.count()).toBe(3)
       for (const record of kept) {
-        expect(record.spanId).toMatch(/^synth:/)
+        expect(record.spanId).toMatch(/^[0-9a-f]+$/)
       }
 
       // The paths reported identical values, so the collapse is silent.
@@ -400,7 +428,7 @@ describe('R3.1 — a session observed through both paths is counted once', () =>
 // R3.3 — prefer the richer source, record the disagreement
 // ---------------------------------------------------------------------------
 
-describe('R3.3 — richer source preferred, disagreement recorded', () => {
+describe('R3.3 — D7 precedence, disagreement recorded', () => {
   it('keeps the richer OTLP side and records the disagreement as a problem', () => {
     const store = new CanonStore(':memory:')
     try {
@@ -439,7 +467,7 @@ describe('R3.3 — richer source preferred, disagreement recorded', () => {
     }
   })
 
-  it('keeps the richer file side when the file path carries more, and still records the disagreement', () => {
+  it('keeps the OTel side even when the file path carries more, and records the disagreement', () => {
     const store = new CanonStore(':memory:')
     try {
       const fileRecords = fileSession([call()])
@@ -455,13 +483,13 @@ describe('R3.3 — richer source preferred, disagreement recorded', () => {
       store.upsertMany(kept)
 
       expect(kept).toHaveLength(1)
-      expect(kept[0]!.spanId).toBe('synth:claude:s-1:m-1')
+      expect(kept[0]!.spanId).toBe(SPAN_ID_1)
       expect(store.count()).toBe(1)
 
       const problems = store.getProblems()
       expect(problems).toHaveLength(1)
       expect(problems[0]!.code).toBe(DEDUP_DISAGREEMENT)
-      expect(problems[0]!.spanId).toBe('synth:claude:s-1:m-1')
+      expect(problems[0]!.spanId).toBe(SPAN_ID_1)
       expect(problems[0]!.message).toContain('990')
     } finally {
       store.close()

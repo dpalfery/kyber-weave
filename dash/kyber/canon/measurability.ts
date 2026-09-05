@@ -57,7 +57,7 @@ import type { HarnessAdapter } from './adapters/base.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { piAdapter } from './adapters/pi.js'
-import { CANONICAL_CONTENT_KEYS, type Measurability, type MetricAvailability } from './types.js'
+import { CANONICAL_CONTENT_KEYS, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 // ---------------------------------------------------------------------------
 // The file-sourced declarations (R7.6, R8.5)
@@ -72,18 +72,32 @@ export function isFileSource(source: string): boolean {
 }
 
 /**
- * Metrics no session file can measure, declared on every file-sourced
- * record. A parsed call carries counters and tool *invocation* names —
- * never tool *definitions*, never the session's message structure. The five
- * canonical content keys cover the structure half of that (R7.6, and
- * `tool_definitions` among them is R8.5's schema-ranking input);
- * `schema_cost` follows from having no definitions to tokenize. The analyses
- * read these declarations and answer not measurable rather than zero.
+ * Default limitations for readers that only expose upstream's parsed-call
+ * counters. Provider readers that preserve transcript content override this
+ * baseline below; a file source is not inherently unable to measure all
+ * message structure.
  */
 export const FILE_SOURCE_UNMEASURABLE: readonly string[] = [
   'schema_cost',
   ...CANONICAL_CONTENT_KEYS,
 ]
+
+/**
+ * Per-reader limits for the transcript formats D5 supports. Claude stores
+ * conversation and tool-result content but injects prompts and tool schemas
+ * at runtime. Codex stores prompts, instructions, conversation, and results,
+ * but records tool names rather than definition schemas.
+ */
+export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new Map([
+  ['claude', ['schema_cost', 'system_prompt', 'tool_definitions']],
+  ['claude-code', ['schema_cost', 'system_prompt', 'tool_definitions']],
+  ['codex', ['schema_cost', 'tool_definitions']],
+  ['opencode', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  ['kilo', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  ['kilo-code', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  ['copilot', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
+])
 
 /**
  * Per-provider additions: counters the provider's files genuinely do not
@@ -96,14 +110,38 @@ export const PROVIDER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new
   ['gemini', ['cache_creation']],
 ])
 
+function unavailable(reason: string): NotMeasurable {
+  return { availability: 'not_measurable', reason }
+}
+
+/** Read the discriminant while accepting legacy persisted string declarations. */
+function availabilityOf(value: MetricAvailability | undefined): string | undefined {
+  return typeof value === 'object' ? value.availability : value
+}
+
 /** The measurability map a file-sourced record declares for its provider. */
 export function measurabilityFor(
   provider: string,
   unmeasurable: ReadonlyMap<string, readonly string[]> = PROVIDER_UNMEASURABLE,
 ): Measurability {
-  const metrics = new Set(FILE_SOURCE_UNMEASURABLE)
+  const metrics = new Set(READER_UNMEASURABLE.get(provider) ?? FILE_SOURCE_UNMEASURABLE)
   for (const metric of unmeasurable.get(provider) ?? []) metrics.add(metric)
-  return Object.fromEntries([...metrics].sort().map((metric) => [metric, 'not_measurable']))
+  return Object.fromEntries(
+    [...metrics].sort().map((metric) => [
+      metric,
+      unavailable(
+        metric === 'cache_creation' && provider === 'gemini'
+          ? 'Gemini session files do not export a cache-creation counter.'
+          : metric === 'system_prompt' && (provider === 'claude' || provider === 'claude-code')
+            ? 'Claude Code session files do not store the runtime system prompt.'
+            : metric === 'tool_definitions' && (provider === 'claude' || provider === 'claude-code')
+              ? 'Claude Code session files record tool invocations, not tool definitions.'
+              : metric === 'tool_definitions' && provider === 'codex'
+                ? 'Codex session files record tool names, not tool definition schemas.'
+                : `Session files for ${provider} do not include ${metric} data.`,
+      ),
+    ]),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -139,10 +177,19 @@ export function schemaRankingAvailability(
   measurability: Measurability | undefined,
 ): MetricAvailability {
   if (measurability === undefined) return 'measured'
-  return measurability['schema_cost'] === 'not_measurable' ||
-    measurability['tool_definitions'] === 'not_measurable'
-    ? 'not_measurable'
-    : 'measured'
+  const schemaCost = measurability['schema_cost']
+  if (availabilityOf(schemaCost) === 'not_measurable') {
+    return typeof schemaCost === 'object'
+      ? schemaCost
+      : unavailable('This source does not provide schema-cost data.')
+  }
+  const toolDefinitions = measurability['tool_definitions']
+  if (availabilityOf(toolDefinitions) === 'not_measurable') {
+    return typeof toolDefinitions === 'object'
+      ? toolDefinitions
+      : unavailable('This source does not provide tool-definition data.')
+  }
+  return 'measured'
 }
 
 /**
@@ -158,8 +205,14 @@ export function contextCompositionAvailability(
   measurability: Measurability | undefined,
 ): MetricAvailability {
   if (measurability === undefined) return 'measured'
-  const blocked = CANONICAL_CONTENT_KEYS.every((key) => measurability[key] === 'not_measurable')
-  return blocked ? 'not_measurable' : 'measured'
+  const blockedKey = CANONICAL_CONTENT_KEYS.find(
+    (key) => availabilityOf(measurability[key]) !== 'not_measurable',
+  )
+  if (blockedKey !== undefined) return 'measured'
+  const unavailableValue = measurability[CANONICAL_CONTENT_KEYS[0]]
+  return typeof unavailableValue === 'object'
+    ? unavailableValue
+    : unavailable('This source does not provide message-structure data.')
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +244,7 @@ export function getMeasurability(source: string, harness: string): Measurability
       token_usage: 'measured',
       cost: 'measured',
       ...measurabilityFor(harness),
-      execution_structure: 'not_measurable',
+      execution_structure: unavailable('Claude Code session files do not carry execution structure.'),
     }
   }
 
@@ -203,6 +256,8 @@ export function getMeasurability(source: string, harness: string): Measurability
   }
   for (const key of CANONICAL_CONTENT_KEYS) declared[key] = 'measured'
   const adapter = ADAPTERS_BY_HARNESS.get(harness)
-  for (const metric of adapter?.unexportedMetrics() ?? []) declared[metric] = 'not_measurable'
+  for (const metric of adapter?.unexportedMetrics() ?? []) {
+    declared[metric] = unavailable(`${harness} telemetry does not export the ${metric} metric.`)
+  }
   return declared
 }

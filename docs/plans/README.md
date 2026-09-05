@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-23
+last-reviewed: 2026-09-04
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,6 +17,7 @@ This inventory tracks architectural and implementation plans across their lifecy
 |---|---|---|---|
 | [2026-09-03-kyberdash-runbooks-and-local-execution-standards.md](2026-09-03-kyberdash-runbooks-and-local-execution-standards.md) | Complete | 2026-09-03 | Author KyberDash operational runbooks across four surfaces, improve search discoverability in architecture docs, establish a repository-wide local run/test standard for all catalog features, and ensure ontology compliance. |
 | [2026-09-03-ontology-and-retrieval-engine-enhancements.md](2026-09-03-ontology-and-retrieval-engine-enhancements.md) | Complete | 2026-09-03 | Enhance KyberWeave.Core document ontology with keywords metadata, compound prefix coverage matching, and calibrated OOV term scoring. |
+| [2026-09-04-kyberdash-asad-context-dashboard.md](2026-09-04-kyberdash-asad-context-dashboard.md) | Review required | 2026-09-04 | Make the ASAD view the only view on the KyberDash Context page, for every harness, rendered from `canon.db` rather than the Python pipeline's `sessions.db` or hard-coded data. Implementation and end-of-run review are **APPROVE** (14/14 gates, unique `deriveLogId`); the plan is not archived. Remaining completion gates are owner-only: Claude `OTEL_LOG_RAW_API_BODIES=1`, register `codeburn kyber cursor-hook` in `~/.cursor/hooks.json` (not edited here), and a live full-content drawer click. |
 
 ## Archived Plans
 

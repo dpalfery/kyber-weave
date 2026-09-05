@@ -6,6 +6,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Command } from 'commander'
 import { CanonStore } from '../canon/store.js'
+import type { CursorHookStdinOptions } from '../otel/cursor-hook.js'
+
+export type KyberCommandDependencies = {
+  readStdin?: () => Promise<string>
+  write?: (line: string) => void
+  postCursorHookOtlp?: CursorHookStdinOptions['post']
+}
 
 /**
  * Resolve database file path, falling back to the default KyberDash store
@@ -18,6 +25,14 @@ function resolveDbPath(dbPath?: string): string {
 /** Parse integer argument for commander options. */
 function parseInteger(value: string): number {
   return parseInt(value, 10)
+}
+
+async function readStdinText(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+  }
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 /**
@@ -40,7 +55,7 @@ async function runOtel(opts: { port?: number; host?: string; db?: string }): Pro
 /**
  * Register the `kyber` command group and backwards-compatible aliases.
  */
-export function registerKyberCommands(program: Command): void {
+export function registerKyberCommands(program: Command, dependencies: KyberCommandDependencies = {}): void {
   const kyber = program
     .command('kyber')
     .description('KyberDash canonical telemetry and session commands')
@@ -107,6 +122,19 @@ export function registerKyberCommands(program: Command): void {
       } finally {
         store.close()
       }
+    })
+
+  kyber
+    .command('cursor-hook')
+    .description('POST Cursor hook JSONL from stdin to the local OTLP/HTTP receiver')
+    .action(async () => {
+      const { runCursorHookStdin } = await import('../otel/cursor-hook.js')
+      const stdin = await (dependencies.readStdin ?? readStdinText)()
+      await runCursorHookStdin({
+        stdin,
+        write: dependencies.write ?? ((line) => process.stdout.write(`${line}\n`)),
+        ...(dependencies.postCursorHookOtlp === undefined ? {} : { post: dependencies.postCursorHookOtlp }),
+      })
     })
 
   // Top-level alias for backwards compatibility: existing invocations targeting

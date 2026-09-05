@@ -13,12 +13,11 @@
 // The pass is idempotent: it recomputes content from raw and writes what it
 // finds, so running it twice lands on the same rows.
 
-import type { RawSpan } from '../canon/adapters/base.js'
-import { AdapterRegistry } from '../canon/adapters/registry.js'
-import { ADAPTERS } from '../canon/ingest.js'
+import { ingestBatch } from '../canon/ingest.js'
 import { CanonStore } from '../canon/store.js'
 import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js'
-import { contentFromParts } from '../canon/types.js'
+import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
+import type { OtlpSpan } from '../otel/receiver.js'
 
 export type BackfillReport = {
   /** Records examined. */
@@ -91,6 +90,30 @@ export function backfillContent(store: CanonStore, options: BackfillOptions = {}
   return report
 }
 
+/** Reconstruct the receiver shape around retained raw evidence. */
+function toOtlpSpan(record: CanonicalRecord): OtlpSpan {
+  const timestamp = typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString()
+  const startMs = Date.parse(timestamp)
+  const startNano = Number.isFinite(startMs) ? BigInt(startMs) * 1_000_000n : 0n
+  const durationNano = BigInt(Math.max(0, Math.round(record.durationMs * 1_000_000)))
+  const endNano = startNano + durationNano
+  return {
+    traceId: record.traceId!,
+    spanId: record.spanId,
+    parentSpanId: record.parentSpanId,
+    name: record.name,
+    kind: record.kind,
+    startTimeUnixNano: String(startNano),
+    endTimeUnixNano: String(endNano),
+    timestamp,
+    durationMs: record.durationMs,
+    status: { code: record.status === 'error' ? 'error' : record.status === 'unset' ? 'unset' : 'ok' },
+    attributes: record.raw as Record<string, unknown>,
+    resource: { 'service.name': record.source },
+    scope: {},
+  }
+}
+
 /**
  * Re-run harness attribution and the token conversion over stored records.
  *
@@ -107,8 +130,6 @@ export function backfillContent(store: CanonStore, options: BackfillOptions = {}
  * re-derivation: the vote runs per trace, exactly as it does on ingest.
  */
 export function renormalizeRecords(store: CanonStore, options: BackfillOptions = {}): RenormalizeReport {
-  const registry = new AdapterRegistry(ADAPTERS)
-  const adapterByName = new Map(ADAPTERS.map((adapter) => [adapter.name, adapter]))
   const traceIds = store.traceIds()
   const progressEvery = options.progressEvery ?? 200
   const report: RenormalizeReport = { traces: 0, reattributed: 0, unchanged: 0, unclaimed: 0 }
@@ -116,36 +137,39 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
   for (const traceId of traceIds) {
     report.traces += 1
     const records = store.recordsForTrace(traceId)
+    const withRaw = records.filter(
+      (record): record is CanonicalRecord & { raw: Record<string, unknown> } =>
+        record.raw !== undefined && record.raw !== null && typeof record.raw === 'object',
+    )
+    if (withRaw.length === 0) continue
 
-    const rawSpans: RawSpan[] = []
-    for (const record of records) {
-      if (record.raw === null || typeof record.raw !== 'object') continue
-      rawSpans.push({
-        spanId: record.spanId,
-        traceId: record.traceId,
-        parentSpanId: record.parentSpanId,
-        source: record.source,
-        attributes: record.raw as Record<string, unknown>,
-        name: record.name,
-        kind: record.kind,
-      })
+    const explicitGemini = withRaw.filter(
+      (record) => (record.raw as Record<string, unknown>)['gen_ai.system'] === 'gemini',
+    )
+    const grouped = withRaw.filter(
+      (record) => (record.raw as Record<string, unknown>)['gen_ai.system'] !== 'gemini',
+    )
+    for (const record of explicitGemini) ingestBatch([toOtlpSpan(record)], store)
+    if (grouped.length > 0) ingestBatch(grouped.map(toOtlpSpan), store)
+    for (const record of explicitGemini) {
+      const repaired = store.get(record.spanId)
+      if (repaired !== undefined && repaired.harness !== 'gemini') {
+        // A retained row with explicit vendor identity must not inherit a
+        // competing sibling's harness from the historical trace vote.
+        store.setAttribution(record.spanId, {
+          harness: 'gemini',
+          source: repaired.source,
+          op: repaired.op,
+          tokens: repaired.tokens,
+        })
+      }
     }
-    if (rawSpans.length === 0) continue
-
-    const attributed = registry.attribute(rawSpans)
-    for (const raw of rawSpans) {
-      const harness = attributed.get(raw.spanId)
-      if (harness === undefined) {
-        report.unclaimed += 1
+    for (const before of withRaw) {
+      const after = store.get(before.spanId)
+      if (after === undefined) {
+        if (store.getQuarantine(before.spanId)?.reason === 'unclaimed') report.unclaimed += 1
         continue
       }
-      const adapter = adapterByName.get(harness)
-      if (adapter === undefined) continue
-
-      const before = records.find((record) => record.spanId === raw.spanId)!
-      const after = adapter.normalize(raw)
-      // A record whose conclusions already match is left alone, so a re-run
-      // is cheap and the report distinguishes repair from no-op.
       if (
         before.harness === after.harness &&
         before.op === after.op &&
@@ -153,15 +177,15 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
         before.tokens.freshInput === after.tokens.freshInput
       ) {
         report.unchanged += 1
-        continue
+      } else {
+        report.reattributed += 1
       }
-      store.setAttribution(raw.spanId, {
-        harness: after.harness,
-        source: raw.source,
-        op: after.op,
-        tokens: after.tokens,
-      })
-      report.reattributed += 1
+      // Attribution is repaired from raw evidence, while content is retained
+      // exactly as collected. This protects richer signal-specific parts that
+      // the adapter may not know how to reconstruct.
+      if (before.parts !== undefined || Object.keys(before.content).length > 0) {
+        store.setContent(before.spanId, before.content, before.parts)
+      }
     }
 
     if (report.traces % progressEvery === 0) options.onProgress?.(report.traces, traceIds.length)

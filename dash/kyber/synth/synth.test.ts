@@ -29,7 +29,6 @@ import { tokenValidator } from '../canon/adapters/quarantine.js'
 import { validateTokens } from '../canon/types.js'
 import {
   DEFAULT_CONVENTION,
-  FILE_SOURCE_UNMEASURABLE,
   PROVIDER_CONVENTIONS,
   Synthesizer,
   conventionFor,
@@ -380,17 +379,18 @@ describe('cost blocks (R5.1, R5.2, R5.4)', () => {
 // ---------------------------------------------------------------------------
 
 describe('measurability declarations for the file-sourced path', () => {
-  it('declares schema ranking and every content metric not measurable — never zero', () => {
+  it('declares Claude’s unavailable buckets while retaining its stored conversation and results', () => {
     const record = synthesizeCall(call())
     expect(record.measurability).toEqual(measurabilityFor('claude'))
-    // The declared set: schema cost, plus all five canonical content keys
-    // (tool_definitions among them — the schema-ranking input of R8.5).
     expect(Object.keys(record.measurability ?? {}).sort()).toEqual(
-      [...FILE_SOURCE_UNMEASURABLE].sort(),
+      ['schema_cost', 'system_prompt', 'tool_definitions'],
     )
     for (const availability of Object.values(record.measurability ?? {})) {
-      expect(availability).toBe('not_measurable')
+      expect(availability).toMatchObject({ availability: 'not_measurable' })
     }
+    // Undeclared means available: Claude files genuinely retain these buckets.
+    expect(record.measurability?.['conversation_history']).toBeUndefined()
+    expect(record.measurability?.['tool_result_content']).toBeUndefined()
   })
 
   it('claims no content: a fragment is not a bucket (R7.6)', () => {
@@ -400,7 +400,7 @@ describe('measurability declarations for the file-sourced path', () => {
 
   it('adds per-provider counter gaps — gemini has no cache-creation counter', () => {
     const gemini = synthesizeCall(call({ provider: 'gemini' }))
-    expect(gemini.measurability?.['cache_creation']).toBe('not_measurable')
+    expect(gemini.measurability?.['cache_creation']).toMatchObject({ availability: 'not_measurable' })
     // The same metric stays undeclared for a provider that measures it —
     // absence from the map means measured, the vocabulary compare.ts reads.
     const claude = synthesizeCall(call())

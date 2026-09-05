@@ -1,18 +1,24 @@
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { runWebDashboard } from '../src/web-dashboard.js'
+import { CanonStore } from '../kyber/canon/store.js'
+import type { CanonicalRecord } from '../kyber/canon/types.js'
 import { KyberBridge } from '../kyber/server/bridge.js'
+
+const asadShape = JSON.parse(
+  readFileSync(new URL('../kyber/canon/fixtures/asad-session-shape.json', import.meta.url), 'utf8')
+) as Record<string, unknown>
 
 describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
   let server: Server
   let base: string
   let canonDb: DatabaseSync
-  let sessionsDb: DatabaseSync
   let testBridge: KyberBridge
 
   const copilotPayload = {
@@ -84,6 +90,27 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         invocations: 0,
       },
     ],
+    schema: {
+      measurable: true,
+      byServer: {
+        'built-in': 150,
+        'shell-tool': 250,
+      },
+      neverInvoked: [
+        {
+          name: 'run_command',
+          server: 'shell-tool',
+          cost: 250,
+          invoked: false,
+        },
+      ],
+      unusedRange: {
+        tokenResidencies: 250,
+        floor: 250,
+        ceiling: 250,
+      },
+      turns: 4,
+    },
     turns: [
       {
         index: 0,
@@ -146,7 +173,6 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
 
   beforeAll(async () => {
     canonDb = new DatabaseSync(':memory:')
-    sessionsDb = new DatabaseSync(':memory:')
 
     canonDb.exec(`
       CREATE TABLE session (
@@ -166,45 +192,13 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         span_id TEXT PRIMARY KEY,
         trace_id TEXT,
         parent_span_id TEXT,
+        session_id TEXT,
         harness TEXT,
         source TEXT,
         name TEXT,
         timestamp TEXT,
-        op TEXT
-      );
-      CREATE TABLE quarantine (
-        span_id TEXT PRIMARY KEY,
-        source TEXT,
-        name TEXT,
-        namespaces TEXT,
-        reason TEXT,
-        seen_at INTEGER
-      );
-      CREATE TABLE problem (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT,
-        span_id TEXT,
-        severity TEXT,
-        code TEXT,
-        message TEXT,
-        at INTEGER,
-        harness TEXT
-      );
-    `)
-
-    sessionsDb.exec(`
-      CREATE TABLE session (
-        session_id TEXT PRIMARY KEY,
-        harness TEXT NOT NULL,
-        label TEXT,
-        is_subagent INTEGER DEFAULT 0,
-        parent_session TEXT,
-        agent_name TEXT,
-        repo TEXT,
-        branch TEXT,
-        started TEXT,
-        ended TEXT,
-        payload TEXT
+        op TEXT,
+        content_json TEXT
       );
       CREATE TABLE quarantine (
         span_id TEXT PRIMARY KEY,
@@ -242,9 +236,43 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         '2026-09-03T10:15:00.000Z',
         JSON.stringify(copilotPayload)
       )
+    canonDb
+      .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        'sess-asad-contract',
+        'copilot',
+        'ASAD Contract Session',
+        0,
+        null,
+        'synthetic-agent',
+        'synthetic-repo',
+        'main',
+        '2026-09-02T10:00:00.000Z',
+        '2026-09-02T10:01:00.000Z',
+        JSON.stringify(asadShape)
+      )
 
-    // Seed session in sessionsDb
-    sessionsDb
+    const fullCanonicalPart = 'C'.repeat(2_400) + 'FULL_CANONICAL_PART_END'
+    const clippedPayloadPreview = fullCanonicalPart.slice(0, 2_000)
+    canonDb
+      .prepare(
+        'INSERT INTO records (span_id, trace_id, parent_span_id, session_id, harness, source, name, timestamp, op, content_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        'span-content-001',
+        'sess-copilot-001',
+        null,
+        'sess-copilot-001',
+        'copilot',
+        'synthetic',
+        'content fixture turn',
+        '2026-09-03T10:01:00.000Z',
+        'llm.invoke',
+        JSON.stringify({ system_prompt: fullCanonicalPart, instruction_context: clippedPayloadPreview }),
+      )
+
+    // Seed all API-visible data in the canonical store.
+    canonDb
       .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(
         'sess-gemini-002',
@@ -265,7 +293,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       .prepare('INSERT INTO quarantine VALUES (?, ?, ?, ?, ?, ?)')
       .run('quar-101', 'copilot', 'unmapped_span', '["custom.namespace"]', 'Namespace unmapped', 1725360000)
 
-    sessionsDb
+    canonDb
       .prepare('INSERT INTO quarantine VALUES (?, ?, ?, ?, ?, ?)')
       .run('quar-102', 'gemini', 'gemini_attr_span', '["unknown"]', 'Malformed attribute', 1725360100)
 
@@ -284,7 +312,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         'copilot'
       )
 
-    sessionsDb
+    canonDb
       .prepare(
         'INSERT INTO problem (session_id, span_id, severity, code, message, at, harness) VALUES (?, ?, ?, ?, ?, ?, ?)'
       )
@@ -300,7 +328,6 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
 
     testBridge = new KyberBridge({
       canonDb,
-      sessionsDb,
       ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
     })
 
@@ -329,6 +356,66 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
   }
 
   describe('GET /api/kyber/sessions', () => {
+    it('ignores legacy database environment variables', async () => {
+      const directory = mkdtempSync(join(tmpdir(), 'kyber-api-legacy-db-'))
+      const legacyPath = join(directory, 'sessions.db')
+      const previousAgentdashDb = process.env.AGENTDASH_DB
+      const previousKyberDb = process.env.KYBER_DB
+      const legacyDb = new DatabaseSync(legacyPath)
+      legacyDb.exec(`
+        CREATE TABLE session (
+          session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+          is_subagent INTEGER, parent_session TEXT, agent_name TEXT, repo TEXT,
+          branch TEXT, started TEXT, ended TEXT, payload TEXT
+        );
+      `)
+      legacyDb
+        .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(
+          'legacy-api-session',
+          'legacy',
+          'Legacy API session',
+          0,
+          null,
+          null,
+          null,
+          null,
+          '2026-09-04T00:00:00.000Z',
+          null,
+          JSON.stringify({ id: 'legacy-api-session' }),
+        )
+      legacyDb.close()
+      process.env.AGENTDASH_DB = legacyPath
+      process.env.KYBER_DB = legacyPath
+      const canonicalBridge = new KyberBridge({ canonPath: ':memory:' })
+      const canonicalServer = await runWebDashboard({
+        period: 'today',
+        provider: 'all',
+        project: [],
+        exclude: [],
+        port: 0,
+        open: false,
+        kyberBridge: canonicalBridge,
+      })
+
+      try {
+        const canonicalBase = `http://127.0.0.1:${(canonicalServer.address() as AddressInfo).port}`
+        const sessions = (await (await fetch(`${canonicalBase}/api/kyber/sessions`)).json()) as {
+          sessions: Array<{ session_id: string }>
+        }
+        expect(sessions.sessions.some((session) => session.session_id === 'legacy-api-session')).toBe(false)
+        expect((await fetch(`${canonicalBase}/api/kyber/session/legacy-api-session`)).status).toBe(404)
+      } finally {
+        await new Promise<void>((resolve) => canonicalServer.close(() => resolve()))
+        canonicalBridge.close()
+        if (previousAgentdashDb === undefined) delete process.env.AGENTDASH_DB
+        else process.env.AGENTDASH_DB = previousAgentdashDb
+        if (previousKyberDb === undefined) delete process.env.KYBER_DB
+        else process.env.KYBER_DB = previousKyberDb
+        rmSync(directory, { recursive: true, force: true })
+      }
+    })
+
     it('returns sessions list with proper headers and complete schema', async () => {
       const res = await fetch(`${base}/api/kyber/sessions`)
       expect(res.status).toBe(200)
@@ -336,7 +423,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
 
       const body = (await res.json()) as { sessions: Array<Record<string, unknown>> }
       expect(Array.isArray(body.sessions)).toBe(true)
-      expect(body.sessions.length).toBe(2)
+      expect(body.sessions.length).toBe(3)
 
       const copilotSession = body.sessions.find((s) => s.session_id === 'sess-copilot-001')
       expect(copilotSession).toBeDefined()
@@ -367,8 +454,8 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       const resCopilot = await fetch(`${base}/api/kyber/sessions?harness=copilot`)
       expect(resCopilot.status).toBe(200)
       const bodyCopilot = (await resCopilot.json()) as { sessions: Array<{ harness: string }> }
-      expect(bodyCopilot.sessions.length).toBe(1)
-      expect(bodyCopilot.sessions[0].harness).toBe('copilot')
+      expect(bodyCopilot.sessions.length).toBe(2)
+      expect(bodyCopilot.sessions.every((session) => session.harness === 'copilot')).toBe(true)
 
       const resGemini = await fetch(`${base}/api/kyber/sessions?harness=gemini`)
       expect(resGemini.status).toBe(200)
@@ -379,6 +466,17 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
   })
 
   describe('GET /api/kyber/session/:id', () => {
+    it('serves the canonical B1 ASAD payload without a route translation', async () => {
+      const res = await fetch(`${base}/api/kyber/session/sess-asad-contract`)
+      expect(res.status).toBe(200)
+      assertStandardKyberHeaders(res)
+
+      const body = (await res.json()) as Record<string, unknown>
+      expect(body).toEqual(asadShape)
+      expect(Object.keys(body).sort()).toEqual(Object.keys(asadShape).sort())
+      expect((body.context as { first?: unknown }).first).toBeDefined()
+    })
+
     it('returns full session payload object by path parameter', async () => {
       const res = await fetch(`${base}/api/kyber/session/sess-copilot-001`)
       expect(res.status).toBe(200)
@@ -416,23 +514,119 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
     })
   })
 
-  describe('GET /api/kyber/compare', () => {
-    it('returns comparison matrix with harnesses, rows, and problems', async () => {
-      const res = await fetch(`${base}/api/kyber/compare`)
+  describe('GET /api/kyber/session/:id/content', () => {
+    it('returns the full canonical part, not its 2,000-character payload preview', async () => {
+      const res = await fetch(
+        `${base}/api/kyber/session/sess-copilot-001/content?span=span-content-001&part=system_prompt`,
+      )
       expect(res.status).toBe(200)
       assertStandardKyberHeaders(res)
 
       const body = (await res.json()) as {
-        harnesses: string[]
-        rows: Array<{ label?: string; metric?: string }>
-        problems: unknown[]
+        sessionId: string
+        spanId?: string
+        parts: Array<{ spanId: string; part: string; text: string }>
       }
-      expect(Array.isArray(body.harnesses)).toBe(true)
-      expect(body.harnesses).toContain('copilot')
-      expect(body.harnesses).toContain('gemini')
-      expect(Array.isArray(body.rows)).toBe(true)
-      expect(body.rows.length).toBeGreaterThan(0)
-      expect(Array.isArray(body.problems)).toBe(true)
+      expect(body.sessionId).toBe('sess-copilot-001')
+      expect(body.spanId).toBe('span-content-001')
+      expect(body.parts).toHaveLength(1)
+      expect(body.parts[0]).toMatchObject({
+        spanId: 'span-content-001',
+        part: 'system_prompt',
+      })
+      expect(body.parts[0]!.text).toHaveLength(2_423)
+      expect(body.parts[0]!.text).toContain('FULL_CANONICAL_PART_END')
+    })
+
+    it.each([
+      ['unknown session', '/api/kyber/session/not-a-session/content'],
+      ['unknown span', '/api/kyber/session/sess-copilot-001/content?span=not-a-span'],
+      ['unknown content part', '/api/kyber/session/sess-copilot-001/content?span=span-content-001&part=not_a_part'],
+    ])('rejects an %s filter explicitly', async (_case, path) => {
+        const res = await fetch(`${base}${path}`)
+        expect(res.status).toBe(404)
+        assertStandardKyberHeaders(res)
+        await expect(res.json()).resolves.toMatchObject({ error: expect.any(String) })
+      })
+  })
+
+  describe('GET /api/kyber/compare', () => {
+    it('derives comparison rows from an injected canonical store with AGENTDASH_DB unset', async () => {
+      const previousAgentdashDb = process.env.AGENTDASH_DB
+      delete process.env.AGENTDASH_DB
+
+      const store = new CanonStore(':memory:')
+      const records: CanonicalRecord[] = [
+        {
+          spanId: 'comparison-copilot-turn',
+          traceId: 'comparison-copilot-trace',
+          parentSpanId: null,
+          sessionId: 'comparison-copilot-session',
+          source: 'synthetic',
+          harness: 'copilot',
+          name: 'canonical copilot turn',
+          op: 'llm.invoke',
+          kind: 'client',
+          timestamp: '2026-09-04T12:00:00.000Z',
+          durationMs: 100,
+          status: 'ok',
+          tokens: { freshInput: 80, cacheRead: 20, cacheCreation: 0, output: 40, reportedInput: 100, reportedOutput: 40 },
+          content: {},
+          cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+        },
+        {
+          spanId: 'comparison-gemini-turn',
+          traceId: 'comparison-gemini-trace',
+          parentSpanId: null,
+          sessionId: 'comparison-gemini-session',
+          source: 'synthetic',
+          harness: 'gemini',
+          name: 'canonical gemini turn',
+          op: 'llm.invoke',
+          kind: 'client',
+          timestamp: '2026-09-04T12:01:00.000Z',
+          durationMs: 100,
+          status: 'ok',
+          tokens: { freshInput: 50, cacheRead: 0, cacheCreation: 0, output: 25, reportedInput: 50, reportedOutput: 25 },
+          content: {},
+          cost: { basis: 'published', status: 'priced', value: 0.005, currency: 'USD' },
+        },
+      ]
+      store.upsertMany(records)
+      const comparisonBridge = new KyberBridge({ canonPath: ':memory:', store })
+      const comparisonServer = await runWebDashboard({
+        period: 'today',
+        provider: 'all',
+        project: [],
+        exclude: [],
+        port: 0,
+        open: false,
+        kyberBridge: comparisonBridge,
+      })
+
+      try {
+        const comparisonBase = `http://127.0.0.1:${(comparisonServer.address() as AddressInfo).port}`
+        const res = await fetch(`${comparisonBase}/api/kyber/compare`)
+        expect(res.status).toBe(200)
+        assertStandardKyberHeaders(res)
+
+        const body = (await res.json()) as {
+          harnesses: string[]
+          rows: Array<{ metric: string; cells: Record<string, { value?: number }> }>
+          problems: unknown[]
+        }
+        expect(process.env.AGENTDASH_DB).toBeUndefined()
+        expect(body.harnesses).toEqual(['copilot', 'gemini'])
+        expect(body.rows.find((row) => row.metric === 'turns')?.cells.copilot.value).toBe(1)
+        expect(body.rows.find((row) => row.metric === 'turns')?.cells.gemini.value).toBe(1)
+        expect(body.problems).toEqual([])
+      } finally {
+        await new Promise<void>((resolve) => comparisonServer.close(() => resolve()))
+        comparisonBridge.close()
+        store.close()
+        if (previousAgentdashDb === undefined) delete process.env.AGENTDASH_DB
+        else process.env.AGENTDASH_DB = previousAgentdashDb
+      }
     })
   })
 
@@ -560,23 +754,13 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       expect(body.turns.length).toBeGreaterThan(0)
     })
 
-    it('GET /api/kyber/schema returns tool schema analysis JSON', async () => {
+    it('GET /api/kyber/schema returns the canonical payload schema unchanged', async () => {
       const res = await fetch(`${base}/api/kyber/schema?id=sess-copilot-001`)
       expect(res.status).toBe(200)
       assertStandardKyberHeaders(res)
 
-      const body = (await res.json()) as {
-        measurable: boolean
-        ranked: Array<{ name: string; server: string; cost: number; invoked: boolean }>
-        byServer: Record<string, number>
-        tools: unknown[]
-      }
-      expect(body.measurable).toBe(true)
-      expect(Array.isArray(body.ranked)).toBe(true)
-      expect(body.ranked.length).toBe(2)
-      expect(body.byServer['built-in']).toBe(150)
-      expect(body.byServer['shell-tool']).toBe(250)
-      expect(Array.isArray(body.tools)).toBe(true)
+      const body = await res.json()
+      expect(body).toEqual(copilotPayload.schema)
     })
 
     it('GET /api/kyber/timeline returns execution timeline root tree node', async () => {

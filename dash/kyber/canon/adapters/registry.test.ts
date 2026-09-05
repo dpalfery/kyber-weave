@@ -10,6 +10,7 @@ import {
   piAdapter,
   rawSpan,
 } from './testing.js'
+import { geminiAdapter } from './gemini.js'
 
 describe('AdapterRegistry', () => {
   describe('register', () => {
@@ -20,6 +21,37 @@ describe('AdapterRegistry', () => {
   })
 
   describe('scoreGroup — the fingerprint vote', () => {
+    it.each([
+      ['gemini namespace', { 'gemini.session.id': 'g-77' }],
+      ['gen_ai.system value', { 'gen_ai.system': 'gemini' }],
+    ])('votes Gemini from %s vendor evidence', (_label, attributes) => {
+      const registry = new AdapterRegistry([geminiAdapter])
+      const spans = [rawSpan({ spanId: 'gemini', traceId: 't1', attributes })]
+
+      expect(registry.scoreGroup('pi-abc123', 't1', spans)).toEqual({
+        harness: 'gemini',
+        confidence: 0.6,
+      })
+      expect(registry.attribute(spans).get('gemini')).toBe('gemini')
+    })
+
+    it('leaves shared GenAI usage counters below the attribution threshold', () => {
+      const registry = new AdapterRegistry([geminiAdapter])
+      const spans = [
+        rawSpan({
+          spanId: 'usage-only',
+          traceId: 't1',
+          attributes: { 'gen_ai.usage.input_tokens': 1_200 },
+        }),
+      ]
+
+      expect(registry.scoreGroup('pi-abc123', 't1', spans)).toEqual({
+        harness: 'gemini',
+        confidence: 0.4,
+      })
+      expect(registry.attribute(spans).has('usage-only')).toBe(false)
+    })
+
     it('normalizes the winning detect total by the group size', () => {
       const spans = [
         rawSpan({ spanId: 'a', traceId: 't1', attributes: { ...PI_FINGERPRINT } }),

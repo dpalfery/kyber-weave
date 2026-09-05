@@ -18,21 +18,13 @@
 // string in one namespace; the store's idempotent upsert keyed on span id
 // (R2.5) then persists the survivor.
 //
-// What "collapse" means (R3.1, R3.3): a session whose key arrives from both
-// paths keeps ONE side's records — the richer source's — and the other
-// side's description of that session is not stored, so its turns, tokens and
-// cost are never counted twice. Richness is populated information: token
-// fields, canonical content keys, priced cost, raw payload size — compared
-// in that order so the judgement is a total order and deterministic. On any
-// disagreement of value between the two paths — turn counts, token class
-// sums, cost — a `DEDUP_DISAGREEMENT` problem recording both sides' figures
-// is persisted before the loser is discarded (R3.3): surfaced, not silently
-// dropped. A session seen by only one path passes through untouched, and
-// records within one path are never collapsed against each other — a
-// session's turns are distinct work, not duplicates.
+// What "collapse" means (D7): a duplicate turn keeps its counters, cost, and
+// identity from OTLP. File content fills the turn only when OTLP supplied no
+// structured parts. Values from the two paths are never summed. A disagreement
+// is still recorded for audit, but precedence is not a richness contest.
 
 import type { CanonStore, SpanProblem } from '../canon/store.js'
-import type { CanonicalRecord, TokenUsage } from '../canon/types.js'
+import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
 import { DEFAULT_GROUP_ATTRIBUTE } from '../otel/aspire.js'
 import { SYNTH_SPAN_PREFIX } from './synth.js'
 
@@ -84,73 +76,6 @@ function rawSessionId(record: CanonicalRecord): string | null {
   const value = (raw as Record<string, unknown>)[DEFAULT_GROUP_ATTRIBUTE]
   if (typeof value !== 'string' || value.length === 0) return null
   return value
-}
-
-// ---------------------------------------------------------------------------
-// Richness (R3.3: prefer the richer source)
-// ---------------------------------------------------------------------------
-
-/**
- * How much information one side's description of a session carries, summed
- * over its records and compared as a tuple on the axes R3.3 names: populated
- * token fields, then populated canonical content keys, then priced cost,
- * then raw payload bytes. The first axis that differs decides; a tie keeps
- * the file path's records — the upstream-native accounting — which also
- * makes the outcome deterministic.
- */
-type Richness = {
-  tokenFields: number
-  contentKeys: number
-  pricedCost: number
-  rawBytes: number
-}
-
-function richnessOf(records: readonly CanonicalRecord[]): Richness {
-  const total = { tokenFields: 0, contentKeys: 0, pricedCost: 0, rawBytes: 0 }
-  for (const record of records) {
-    total.tokenFields += populatedTokenFields(record.tokens)
-    total.contentKeys += populatedContentKeys(record.content)
-    total.pricedCost += record.cost.status === 'priced' ? 1 : 0
-    total.rawBytes += rawBytesOf(record.raw)
-  }
-  return total
-}
-
-/** Populated token counters: each non-zero class and reported total, plus reasoning. */
-function populatedTokenFields(tokens: TokenUsage): number {
-  let fields = 0
-  for (const value of [
-    tokens.freshInput,
-    tokens.cacheRead,
-    tokens.cacheCreation,
-    tokens.output,
-    tokens.reportedInput,
-    tokens.reportedOutput,
-  ]) {
-    if (value > 0) fields += 1
-  }
-  if (tokens.reasoning !== undefined && tokens.reasoning > 0) fields += 1
-  return fields
-}
-
-function populatedContentKeys(content: CanonicalRecord['content']): number {
-  return Object.values(content).filter(
-    (value) => typeof value === 'string' && value.length > 0,
-  ).length
-}
-
-function rawBytesOf(raw: unknown): number {
-  return raw === undefined ? 0 : JSON.stringify(raw).length
-}
-
-/** Positive when `a` is the richer side, negative when `b` is, zero when tied. */
-function compareRichness(a: Richness, b: Richness): number {
-  return (
-    a.tokenFields - b.tokenFields ||
-    a.contentKeys - b.contentKeys ||
-    a.pricedCost - b.pricedCost ||
-    a.rawBytes - b.rawBytes
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +183,7 @@ function recordDisagreement(
   key: string,
   fileRecords: readonly CanonicalRecord[],
   otlpRecords: readonly CanonicalRecord[],
-  winner: 'file' | 'otlp',
+  winner: 'otlp',
   store: CanonStore,
 ): void {
   const file = summarize(fileRecords)
@@ -266,7 +191,7 @@ function recordDisagreement(
   const what = firstDisagreement(file, otlp)
   if (what === null) return
 
-  const kept = winner === 'file' ? file : otlp
+  const kept = otlp
   const problem: SpanProblem = {
     spanId: kept.firstSpanId,
     severity: 'warning',
@@ -274,7 +199,7 @@ function recordDisagreement(
     message:
       `session ${key} arrived through both ingest paths and they disagree on ${what}. ` +
       `${describeSide('file', file)}. ${describeSide('OTLP', otlp)}. ` +
-      `kept the richer source (${winner === 'file' ? 'file' : 'OTLP'} path, ` +
+      `kept the D7-preferred ${winner.toUpperCase()} path's counters (and file content only when OTLP had no parts; ` +
       `${kept.turns} record(s), first span ${kept.firstSpanId}); ` +
       `the other path's figures are recorded here rather than stored`,
     location: key,
@@ -285,6 +210,25 @@ function recordDisagreement(
 // ---------------------------------------------------------------------------
 // The collapse
 // ---------------------------------------------------------------------------
+
+/**
+ * D7's per-turn source join. OTLP is the accounting authority; a file can
+ * supply structured content only for a turn whose OTLP row had no parts.
+ * Rebuilding the flat content from those parts prevents the legacy map from
+ * disagreeing with the structured view consumed by context analysis.
+ */
+export function joinOtelAndFileTurn(
+  otlpRecord: CanonicalRecord,
+  fileRecord: CanonicalRecord,
+): CanonicalRecord {
+  if (otlpRecord.parts !== undefined && otlpRecord.parts.length > 0) return otlpRecord
+  if (fileRecord.parts === undefined || fileRecord.parts.length === 0) return otlpRecord
+  return {
+    ...otlpRecord,
+    parts: fileRecord.parts,
+    content: contentFromParts(fileRecord.parts),
+  }
+}
 
 function groupByKey(records: readonly CanonicalRecord[]): Map<string, CanonicalRecord[]> {
   const groups = new Map<string, CanonicalRecord[]>()
@@ -305,16 +249,15 @@ function keylessRecords(records: readonly CanonicalRecord[]): CanonicalRecord[] 
 
 /**
  * Collapse a session observed through both ingest paths into one identity
- * (R3.1, R3.2): returns the records to store — every record of a
- * single-path session unchanged, and for a both-paths session exactly one
- * side's records, the richer source's (R3.3). Within one path nothing ever
- * collapses: a session's turns are distinct work and must each count once.
+ * (R3.1, R3.2): returns the records to store — every single-path session
+ * unchanged, and duplicate turns joined under D7. A pair is matched by its
+ * position in the shared session stream; unmatched turns remain distinct.
  *
  * Keyless records — a synthesized orphan, an OTLP span that carried no
  * `session.id` — claim no session identity and pass through untouched.
  *
  * Disagreements between the paths are persisted to `store` as
- * `DEDUP_DISAGREEMENT` problems before the poorer side is discarded (R3.3).
+ * `DEDUP_DISAGREEMENT` problems while OTLP remains the accounting authority.
  * The caller persists the returned records through the store's idempotent
  * `upsertMany` (R2.5), whose span-id primary key is the same identity
  * scheme this collapse runs on.
@@ -337,10 +280,12 @@ export function deduplicate(
       continue
     }
     collapsed.add(key)
-    const winner =
-      compareRichness(richnessOf(fileRecords), richnessOf(otlpRecords)) >= 0 ? 'file' : 'otlp'
-    kept.push(...(winner === 'file' ? fileRecords : otlpRecords))
-    recordDisagreement(key, fileRecords, otlpRecords, winner, store)
+    const sharedTurns = Math.min(fileRecords.length, otlpRecords.length)
+    for (let index = 0; index < sharedTurns; index += 1) {
+      kept.push(joinOtelAndFileTurn(otlpRecords[index]!, fileRecords[index]!))
+    }
+    kept.push(...fileRecords.slice(sharedTurns), ...otlpRecords.slice(sharedTurns))
+    recordDisagreement(key, fileRecords, otlpRecords, 'otlp', store)
   }
 
   // Sessions only the OTLP path saw: untouched, in arrival order. Keyless

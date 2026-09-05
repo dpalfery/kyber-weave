@@ -1063,9 +1063,7 @@ export function ContextCompositionChart({
           <h3 className="text-sm font-semibold text-foreground">Context Composition Unavailable</h3>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          {context.reason === 'no_message_structure'
-            ? 'Context composition cannot be broken down because this harness reports token counters without exporting full message payload structures.'
-            : 'Context composition is declared not measurable for this harness source.'}
+          {context.reason ?? 'Context composition is not measurable for this harness source.'}
         </p>
         <p className="mt-1 text-xs text-tertiary-foreground">
           Per-turn spend and cost metrics remain completely accurate as they are derived directly from API counters.

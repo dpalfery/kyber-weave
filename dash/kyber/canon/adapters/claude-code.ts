@@ -24,6 +24,7 @@
 
 import type { HarnessAdapter } from './base.js'
 import { resolveRootByParentage, traceGroup } from './base.js'
+import type { ContentPart } from '../types.js'
 import {
   INPUT_TOKEN_KEYS,
   OUTPUT_TOKEN_KEYS,
@@ -44,6 +45,52 @@ import {
  * cosmetic — the collector was reading `service.name` instead.
  */
 const CLAUDE_VENDOR_NAMESPACES = ['claude', 'claude_code']
+
+/**
+ * Extract the content Claude sends in its API request body.
+ *
+ * The raw body is deliberately treated as an opaque boundary: only the
+ * observed `system`, `tools`, and tool `server` fields are interpreted.
+ * Tool names are not split because their spelling is not server evidence.
+ */
+export function parseClaudeApiRequestBody(body: unknown): ContentPart[] {
+  let value: unknown = body
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return []
+    }
+  }
+  if (value === null || typeof value !== 'object') return []
+
+  const request = value as Record<string, unknown>
+  const parts: ContentPart[] = []
+  const system = request.system
+  if (typeof system === 'string') {
+    parts.push({ part: 'system_prompt', text: system })
+  } else if (Array.isArray(system)) {
+    for (const block of system) {
+      if (block === null || typeof block !== 'object') continue
+      const text = (block as Record<string, unknown>).text
+      if (typeof text === 'string') parts.push({ part: 'system_prompt', text })
+    }
+  }
+
+  if (Array.isArray(request.tools)) {
+    for (const tool of request.tools) {
+      if (tool === null || typeof tool !== 'object') continue
+      const toolRecord = tool as Record<string, unknown>
+      const part: ContentPart = {
+        part: 'tool_definitions',
+        text: JSON.stringify(tool),
+      }
+      if (typeof toolRecord.server === 'string') part.server = toolRecord.server
+      parts.push(part)
+    }
+  }
+  return parts
+}
 
 /**
  * The Claude Code adapter. Detection is vendor-namespace driven, scored the

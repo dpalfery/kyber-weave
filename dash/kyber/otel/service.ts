@@ -3,11 +3,16 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { mkdirSync } from 'fs'
 import chalk from 'chalk'
-import { OtlpReceiver, PortConflictError, type OtlpSpan } from './receiver.js'
-import { IngestWriter, type SpanBatchSink } from './writer.js'
+import { OtlpReceiver, PortConflictError, type OtlpLog, type OtlpSpan } from './receiver.js'
+import { IngestWriter, type SignalBatchSink } from './writer.js'
 import { CanonStore } from '../canon/store.js'
 import { readUsageCounters, exclusiveConvention, canonicalContent } from '../canon/adapters/copilot.js'
 import { ingestBatch } from '../canon/ingest.js'
+import {
+  DEFAULT_PENDING_TTL_MS,
+  ingestLogBatch,
+  reconcileExpiredPending,
+} from '../canon/log-ingest.js'
 import type { CanonicalRecord } from '../canon/types.js'
 
 /**
@@ -93,7 +98,7 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
 
   const canon = new CanonStore(dbPath)
 
-  const toCanon: SpanBatchSink = {
+  const toCanon: SignalBatchSink = {
     upsertMany: (spans) => {
       // One arriving request is one unit of attribution, which is exactly
       // what one stored export batch is — so live ingest and a rebuild from
@@ -113,16 +118,35 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
         ),
       )
     },
+    upsertLogs: (logs: readonly OtlpLog[]) => {
+      const outcome = ingestLogBatch(logs, canon)
+      console.log(chalk.dim(
+        `[${new Date().toLocaleTimeString()}] Ingested ${logs.length} logs ` +
+        `(${outcome.enriched} enriched, ${outcome.pending} pending, ${outcome.quarantined} quarantined)`,
+      ))
+    },
   }
 
   const writer = new IngestWriter(toCanon, { batchSize: 64, flushIntervalMs: 2000 })
   await writer.start()
 
   const receiver = new OtlpReceiver({ port, host, store: writer })
+  let pendingReconcileTimer: ReturnType<typeof setInterval> | null = null
 
   try {
     await receiver.start()
+    pendingReconcileTimer = setInterval(() => {
+      const quarantined = reconcileExpiredPending(canon, Date.now(), DEFAULT_PENDING_TTL_MS)
+      if (quarantined > 0) {
+        console.log(chalk.dim(
+          `[${new Date().toLocaleTimeString()}] Reconciled ${quarantined} expired pending logs`,
+        ))
+      }
+    }, DEFAULT_PENDING_TTL_MS)
+    // Reconciliation is lifecycle-owned, but must not keep the CLI alive.
+    pendingReconcileTimer.unref()
   } catch (err) {
+    if (pendingReconcileTimer !== null) clearInterval(pendingReconcileTimer)
     await writer.stop().catch(() => {})
     canon.close()
     if (err instanceof PortConflictError) {
@@ -142,6 +166,10 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
   }
 
   const close = async () => {
+    if (pendingReconcileTimer !== null) {
+      clearInterval(pendingReconcileTimer)
+      pendingReconcileTimer = null
+    }
     await receiver.stop().catch(() => {})
     await writer.stop().catch(() => {})
     canon.close()

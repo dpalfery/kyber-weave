@@ -20,6 +20,7 @@ import type { HarnessAdapter, RawSpan } from './base.js'
 import { resolveRootByParentage, traceGroup } from './base.js'
 import {
   contentFromParts,
+  notMeasurable,
   validateTokens,
   type CanonicalRecord,
   type ContentPart,
@@ -127,6 +128,7 @@ export const SESSION_ID_KEYS = [
   'gen_ai.session.id',
   'session.id',
   'copilot_chat.chat_session_id',
+  'copilot_chat.session_id',
   'gen_ai.conversation.id',
 ] as const
 
@@ -153,10 +155,20 @@ export function canonicalSessionId(attributes: Record<string, unknown>): string 
  */
 export const SYSTEM_INSTRUCTION_KEYS = ['gen_ai.system_instructions'] as const
 export const INPUT_MESSAGE_KEYS = ['gen_ai.input.messages'] as const
+export const OUTPUT_MESSAGE_KEYS = ['gen_ai.output.messages'] as const
 export const INSTRUCTION_RULE_KEYS = ['gen_ai.rules'] as const
 export const SKILL_KEYS = ['gen_ai.skills'] as const
 export const TOOL_DEFINITION_KEYS = ['gen_ai.tool.definitions', 'gen_ai.request.tools'] as const
+export const TOOL_RESULT_KEYS = ['gen_ai.tool.call.result'] as const
 export const FLAT_PROMPT_KEYS = ['gen_ai.prompt'] as const
+
+const CONTENT_BUCKETS = [
+  'system_prompt',
+  'tool_definitions',
+  'instruction_context',
+  'conversation_history',
+  'tool_result_content',
+] as const
 
 /**
  * Per-bucket token counters some harnesses report alongside the content
@@ -288,13 +300,15 @@ function toolDefinitionParts(
  */
 function messageParts(
   attributes: Record<string, unknown>,
+  messageKeys: readonly string[],
+  tokenKeys: readonly string[],
   hasSystemInstructions: boolean,
   nextOrder: () => number,
 ): ContentPart[] {
-  const raw = readText(attributes, INPUT_MESSAGE_KEYS)
+  const raw = readText(attributes, messageKeys)
   if (raw === undefined) return []
 
-  const reported = readOptionalCounter(attributes, MESSAGE_TOKEN_KEYS)
+  const reported = readOptionalCounter(attributes, tokenKeys)
   const parsed = parseStructured(raw)
   if (!Array.isArray(parsed)) {
     return [
@@ -384,7 +398,13 @@ export function canonicalParts(attributes: Record<string, unknown>): ContentPart
   }
 
   parts.push(...toolDefinitionParts(attributes, nextOrder))
-  parts.push(...messageParts(attributes, system !== undefined, nextOrder))
+  parts.push(...messageParts(attributes, INPUT_MESSAGE_KEYS, MESSAGE_TOKEN_KEYS, system !== undefined, nextOrder))
+  parts.push(...messageParts(attributes, OUTPUT_MESSAGE_KEYS, [], false, nextOrder))
+
+  const toolResult = readText(attributes, TOOL_RESULT_KEYS)
+  if (toolResult !== undefined) {
+    parts.push({ part: 'tool_result_content', text: toolResult, order: nextOrder() })
+  }
 
   if (!INPUT_MESSAGE_KEYS.some((key) => key in attributes)) {
     const flat = readText(attributes, FLAT_PROMPT_KEYS)
@@ -574,7 +594,10 @@ export function baseRecord(adapter: HarnessAdapter, raw: RawSpan): CanonicalReco
     parts,
     cost: { basis: 'unknown', status: 'no_rate' },
     measurability: Object.fromEntries(
-      adapter.unexportedMetrics().map((metric) => [metric, 'not_measurable' as const]),
+      adapter.unexportedMetrics().map((metric) => [
+        metric,
+        notMeasurable(`${adapter.name} does not export ${metric}.`),
+      ]),
     ),
     raw: raw.attributes,
   }
@@ -604,6 +627,9 @@ export const copilotAdapter: HarnessAdapter = {
   namespaces: ['gen_ai', ...COPILOT_VENDOR_NAMESPACES],
 
   detect(span) {
+    // An explicit Gemini system identity outranks a generic Copilot exporter
+    // label that may be attached by the collector or wrapper process.
+    if (span.attributes['gen_ai.system'] === 'gemini') return 0
     let score = 0
     if (hasNamespace(span.attributes, COPILOT_VENDOR_NAMESPACES)) score += VENDOR_EVIDENCE
     if (INPUT_TOKEN_KEYS.some((key) => key in span.attributes)) score += USAGE_EVIDENCE
@@ -629,6 +655,21 @@ export const copilotAdapter: HarnessAdapter = {
    */
   normalize(raw) {
     const record = baseRecord(this, raw)
+    // Usage-only spans are the exporter shape when content capture is disabled.
+    // Mark every content bucket explicitly in that case; captured spans retain
+    // the existing measurability map so a partial tool or message span does not
+    // claim that unrelated buckets were measured.
+    if (record.parts === undefined || record.parts.length === 0) {
+      record.measurability = {
+        ...record.measurability,
+        ...Object.fromEntries(
+          CONTENT_BUCKETS.map((bucket) => [
+            bucket,
+            notMeasurable('Copilot did not capture this content bucket.'),
+          ]),
+        ),
+      }
+    }
     const counters = readUsageCounters(raw.attributes)
     record.tokens = inclusiveConvention({
       input: counters.input,

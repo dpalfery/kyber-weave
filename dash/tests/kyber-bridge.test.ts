@@ -1,19 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync } from 'fs'
 import { createRequire } from 'node:module'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import {
   KyberBridge,
   _clip,
 } from '../kyber/server/bridge.js'
+import { CanonStore } from '../kyber/canon/store.js'
+import type { CanonicalRecord } from '../kyber/canon/types.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
   DatabaseSync: typeof import('node:sqlite').DatabaseSync
 }
-
-const SESSIONS_DB_PATH = '/Users/dave/git/personal/agent-session-analysis-dashboard/sessions.db'
-const HAS_REAL_SESSIONS_DB = existsSync(SESSIONS_DB_PATH)
 
 describe('KyberBridge: _clip helper', () => {
   it('leaves short strings unchanged', () => {
@@ -69,10 +70,65 @@ describe('KyberBridge: _clip helper', () => {
 })
 
 describe('KyberBridge: Missing / Empty Database Fallbacks', () => {
+  it('ignores legacy database environment variables', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-legacy-db-'))
+    const legacyPath = join(directory, 'sessions.db')
+    const previousAgentdashDb = process.env.AGENTDASH_DB
+    const previousKyberDb = process.env.KYBER_DB
+    const legacyDb = new DatabaseSync(legacyPath)
+    legacyDb.exec(`
+      CREATE TABLE session (
+        session_id TEXT PRIMARY KEY,
+        harness TEXT NOT NULL,
+        label TEXT,
+        is_subagent INTEGER,
+        parent_session TEXT,
+        agent_name TEXT,
+        repo TEXT,
+        branch TEXT,
+        started TEXT,
+        ended TEXT,
+        payload TEXT
+      );
+    `)
+    legacyDb
+      .prepare('INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(
+        'legacy-only-session',
+        'legacy',
+        'Legacy session',
+        0,
+        null,
+        null,
+        null,
+        null,
+        '2026-09-04T00:00:00.000Z',
+        null,
+        JSON.stringify({ id: 'legacy-only-session' }),
+      )
+    legacyDb.close()
+    process.env.AGENTDASH_DB = legacyPath
+    process.env.KYBER_DB = legacyPath
+
+    const bridge = new KyberBridge({ canonPath: ':memory:' })
+    try {
+      expect(bridge.listSessions()).not.toContainEqual(
+        expect.objectContaining({ session_id: 'legacy-only-session' }),
+      )
+      expect(bridge.getSessionPayload('legacy-only-session')).toBeNull()
+    } finally {
+      bridge.close()
+      if (previousAgentdashDb === undefined) delete process.env.AGENTDASH_DB
+      else process.env.AGENTDASH_DB = previousAgentdashDb
+      if (previousKyberDb === undefined) delete process.env.KYBER_DB
+      else process.env.KYBER_DB = previousKyberDb
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   it('instantiates cleanly and returns empty structures when files do not exist', () => {
     const bridge = new KyberBridge({
       canonPath: '/path/does/not/exist/canon.db',
-      sessionsPath: '/path/does/not/exist/sessions.db',
       ratesPath: '/path/does/not/exist/rates.json',
     })
 
@@ -102,7 +158,6 @@ describe('KyberBridge: Missing / Empty Database Fallbacks', () => {
   it('handles in-memory sqlite database gracefully', () => {
     const bridge = new KyberBridge({
       canonPath: ':memory:',
-      sessionsPath: ':memory:',
     })
     try {
       expect(bridge.listSessions()).toEqual([])
@@ -387,22 +442,22 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
       .prepare('INSERT INTO problem (session_id, span_id, severity, code, message, at, harness) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run('sess-shared', 'prob-shared', 'warning', 'basis_diff', 'Sessions problem shadowed', 1725350001, 'copilot')
 
-    bridge = new KyberBridge({ canonDb, sessionsDb })
+    bridge = new KyberBridge({ canonDb })
   })
 
   afterAll(() => {
     bridge.close()
   })
 
-  it('listSessions combines sessions from canonDb, sessionsDb, and records, deduplicated by session_id', () => {
+  it('listSessions combines canonical derived sessions and records', () => {
     const sessions = bridge.listSessions()
-    expect(sessions.length).toBe(4)
+    expect(sessions.length).toBe(3)
 
     const ids = sessions.map((s) => s.session_id)
     expect(ids).toContain('sess-canon-new')
     expect(ids).toContain('sess-shared')
     expect(ids).toContain('trace-records-1')
-    expect(ids).toContain('sess-sessions-older')
+    expect(ids).not.toContain('sess-sessions-older')
 
     // Verify deduplication: canonDb session took priority
     const shared = sessions.find((s) => s.session_id === 'sess-shared')!
@@ -415,7 +470,6 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
     expect(sessions[0].session_id).toBe('sess-canon-new') // 12:00:00Z
     expect(sessions[1].session_id).toBe('sess-shared') // 11:00:00Z
     expect(sessions[2].session_id).toBe('trace-records-1') // 10:30:00Z
-    expect(sessions[3].session_id).toBe('sess-sessions-older') // 09:00:00Z
 
     // Verify limit slices after global started DESC sort
     const top2 = bridge.listSessions(2)
@@ -428,48 +482,34 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
     expect(top1[0].session_id).toBe('sess-canon-new')
   })
 
-  it('getSessionPayload queries canonDb first and falls back to sessionsDb', () => {
-    // 1. In both canonDb and sessionsDb -> canonDb wins
+  it('getSessionPayload reads only canonDb', () => {
     const sharedPayload = bridge.getSessionPayload('sess-shared')
     expect(sharedPayload).not.toBeNull()
     expect(sharedPayload!.id).toBe('sess-shared')
 
-    // 2. Only in sessionsDb -> fallback resolves cleanly
     const olderPayload = bridge.getSessionPayload('sess-sessions-older')
-    expect(olderPayload).not.toBeNull()
-    expect(olderPayload!.id).toBe('sess-sessions-older')
-    expect(olderPayload!.harness).toBe('gemini')
+    expect(olderPayload).toBeNull()
 
-    // 3. Not in either -> returns null
     expect(bridge.getSessionPayload('non-existent')).toBeNull()
   })
 
-  it('getComparisonTable aggregates harnesses using json_extract optimization', () => {
+  it('getComparisonTable does not derive rows from legacy session tables', () => {
     const table = bridge.getComparisonTable()
-    expect(table).toBeDefined()
-    expect(table.harnesses).toContain('copilot')
-    expect(table.harnesses).toContain('gemini')
-
-    const tptRow = table.rows.find((r) => r.metric === 'tokens_per_turn')
-    expect(tptRow).toBeDefined()
-    // Copilot: 2 sessions (1000+500 / 5 turns = 300, and 400+200 / 2 turns = 300 -> total 2100 / 7 = 300)
-    expect(tptRow!.cells.copilot.measurable).toBe(true)
-    expect(tptRow!.cells.copilot.value).toBe(300)
-
-    const turnsRow = table.rows.find((r) => r.metric === 'turns')
-    expect(turnsRow).toBeDefined()
-    expect(turnsRow!.cells.copilot.value).toBe(7)
-    expect(turnsRow!.cells.gemini.value).toBe(3)
+    expect(table).toEqual({
+      harnesses: [],
+      rows: [],
+      problems: [],
+    })
   })
 
-  it('getQuarantine queries canonDb and sessionsDb without early return shadowing, deduplicating by span_id', () => {
+  it('getQuarantine reads canonical entries', () => {
     const quarantined = bridge.getQuarantine()
-    expect(quarantined.length).toBe(3)
+    expect(quarantined.length).toBe(2)
 
     const spanIds = quarantined.map((q) => q.span_id)
     expect(spanIds).toContain('quar-canon-1')
     expect(spanIds).toContain('quar-shared')
-    expect(spanIds).toContain('quar-sessions-1')
+    expect(spanIds).not.toContain('quar-sessions-1')
 
     // Canon priority on duplicate span_id
     const shared = quarantined.find((q) => q.span_id === 'quar-shared')!
@@ -480,14 +520,14 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
     expect(limited.length).toBe(2)
   })
 
-  it('getProblems queries canonDb and sessionsDb without early return shadowing, deduplicating correctly', () => {
+  it('getProblems reads canonical diagnostics', () => {
     const problems = bridge.getProblems()
-    expect(problems.length).toBe(3)
+    expect(problems.length).toBe(2)
 
     const spanIds = problems.map((p) => p.span_id)
     expect(spanIds).toContain('prob-canon-1')
     expect(spanIds).toContain('prob-shared')
-    expect(spanIds).toContain('prob-sessions-1')
+    expect(spanIds).not.toContain('prob-sessions-1')
 
     // Canon priority on duplicate problem
     const shared = problems.find((p) => p.span_id === 'prob-shared')!
@@ -498,146 +538,71 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
     expect(limited.length).toBe(2)
   })
 
-  it('getMeta counts spans and quarantine across in-memory databases', () => {
+  it('getMeta counts canonical spans and quarantine entries', () => {
     const meta = bridge.getMeta()
     expect(meta.span_count).toBe(1) // 1 record in records table
-    expect(meta.quarantined).toBe(4) // 2 in canonDb + 2 in sessionsDb
+    expect(meta.quarantined).toBe(2)
     expect(meta.tokenizer.kind).toBe('js-tiktoken/o200k_base')
     expect(meta.rates.credit_usd).toBe(0.01)
   })
 })
 
-describe.runIf(HAS_REAL_SESSIONS_DB)('KyberBridge: sessions.db live queries', () => {
-  let bridge: KyberBridge
+describe('KyberBridge: canonical-store comparison', () => {
+  it('derives comparison rows from injected canonical records with AGENTDASH_DB unset', () => {
+    const previousAgentdashDb = process.env.AGENTDASH_DB
+    delete process.env.AGENTDASH_DB
 
-  beforeAll(() => {
-    bridge = new KyberBridge({
-      sessionsPath: SESSIONS_DB_PATH,
-    })
-  })
+    const store = new CanonStore(':memory:')
+    const records: CanonicalRecord[] = [
+      {
+        spanId: 'copilot-turn',
+        traceId: 'trace-copilot',
+        parentSpanId: null,
+        sessionId: 'canon-copilot',
+        source: 'synthetic',
+        harness: 'copilot',
+        name: 'synthetic copilot turn',
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: '2026-09-04T12:00:00.000Z',
+        durationMs: 100,
+        status: 'ok',
+        tokens: { freshInput: 80, cacheRead: 20, cacheCreation: 0, output: 40, reportedInput: 100, reportedOutput: 40 },
+        content: {},
+        cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      },
+      {
+        spanId: 'gemini-turn',
+        traceId: 'trace-gemini',
+        parentSpanId: null,
+        sessionId: 'canon-gemini',
+        source: 'synthetic',
+        harness: 'gemini',
+        name: 'synthetic gemini turn',
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: '2026-09-04T12:01:00.000Z',
+        durationMs: 100,
+        status: 'ok',
+        tokens: { freshInput: 50, cacheRead: 0, cacheCreation: 0, output: 25, reportedInput: 50, reportedOutput: 25 },
+        content: {},
+        cost: { basis: 'published', status: 'priced', value: 0.005, currency: 'USD' },
+      },
+    ]
+    store.upsertMany(records)
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
 
-  afterAll(() => {
-    bridge.close()
-  })
-
-  it('listSessions returns sessions with exact required schema', () => {
-    const sessions = bridge.listSessions()
-    expect(sessions.length).toBeGreaterThan(0)
-    expect(sessions.length).toBeGreaterThanOrEqual(187)
-
-    const first = sessions[0]
-    expect(first).toHaveProperty('session_id')
-    expect(first).toHaveProperty('harness')
-    expect(first).toHaveProperty('label')
-    expect(first).toHaveProperty('is_subagent')
-    expect(first).toHaveProperty('parent_session')
-    expect(first).toHaveProperty('agent_name')
-    expect(first).toHaveProperty('repo')
-    expect(first).toHaveProperty('branch')
-    expect(first).toHaveProperty('started')
-    expect(first).toHaveProperty('ended')
-    expect(first).toHaveProperty('turn_count')
-    expect(first).toHaveProperty('request_count')
-    expect(first).toHaveProperty('total_input')
-    expect(first).toHaveProperty('total_output')
-    expect(first).toHaveProperty('cost_usd')
-    expect(first).toHaveProperty('models')
-    expect(first).toHaveProperty('problems')
-
-    expect(typeof first.is_subagent).toBe('boolean')
-    expect(Array.isArray(first.models)).toBe(true)
-    expect(typeof first.problems).toBe('number')
-  })
-
-  it('listSessions respects limit parameter', () => {
-    const limited = bridge.listSessions(10)
-    expect(limited.length).toBe(10)
-  })
-
-  it('getSessionPayload returns clipped payload for valid session id', () => {
-    const payload = bridge.getSessionPayload('functions.runSubagent:61')
-    expect(payload).not.toBeNull()
-    expect(payload!.id).toBe('functions.runSubagent:61')
-    expect(payload!.harness).toBe('copilot')
-    expect(payload!.summary).toBeDefined()
-    expect(payload!.summary!.turn_count).toBe(4)
-    expect(payload!.turns).toBeDefined()
-    expect(payload!.turns!.length).toBe(4)
-  })
-
-  it('getSessionPayload returns null for unknown session id', () => {
-    const payload = bridge.getSessionPayload('does-not-exist-12345')
-    expect(payload).toBeNull()
-  })
-
-  it('getComparisonTable returns complete matrix across copilot, gemini, and pi', () => {
-    const table = bridge.getComparisonTable()
-    expect(table).toBeDefined()
-    expect(table.harnesses).toContain('copilot')
-    expect(table.harnesses).toContain('gemini')
-    expect(table.harnesses).toContain('pi')
-
-    const metricKeys = table.rows.map((r) => r.metric)
-    expect(metricKeys).toContain('tokens_per_turn')
-    expect(metricKeys).toContain('input_tokens_per_turn')
-    expect(metricKeys).toContain('output_tokens_per_turn')
-    expect(metricKeys).toContain('fresh_input_per_turn')
-    expect(metricKeys).toContain('cache_read_share_per_turn')
-    expect(metricKeys).toContain('schema_cost_per_turn')
-    expect(metricKeys).toContain('cost_per_turn')
-    expect(metricKeys).toContain('turns')
-    expect(metricKeys).toContain('total_tokens')
-    expect(metricKeys).toContain('total_cost')
-
-    // Schema cost: pi and gemini not measurable, copilot derived
-    const schemaRow = table.rows.find((r) => r.metric === 'schema_cost_per_turn')!
-    expect(schemaRow.cells.pi.measurable).toBe(false)
-    expect(schemaRow.cells.pi.render).toBe('not measurable')
-    expect(schemaRow.cells.gemini.measurable).toBe(false)
-    expect(schemaRow.cells.gemini.render).toBe('not measurable')
-    expect(schemaRow.cells.copilot.measurable).toBe(true)
-    expect(schemaRow.cells.copilot.availability).toBe('derived')
-    expect(schemaRow.cells.copilot.render).toContain('derived, lower bound')
-
-    // Cost basis mismatch problem detected between published_rates and harness_reported
-    expect(table.problems.some((p) => p.code === 'cost_basis_mismatch')).toBe(true)
-  })
-
-  it('getQuarantine returns quarantine rows from quarantine table', () => {
-    const quarantined = bridge.getQuarantine(5)
-    expect(quarantined.length).toBe(5)
-    const q = quarantined[0]
-    expect(q).toHaveProperty('span_id')
-    expect(q).toHaveProperty('source')
-    expect(q).toHaveProperty('name')
-    expect(q).toHaveProperty('namespaces')
-    expect(q).toHaveProperty('reason')
-    expect(q).toHaveProperty('seen_at')
-  })
-
-  it('getProblems returns problems recorded in problem table', () => {
-    const problems = bridge.getProblems()
-    expect(problems.length).toBeGreaterThan(0)
-    const p = problems[0]
-    expect(p).toHaveProperty('id')
-    expect(p).toHaveProperty('session_id')
-    expect(p).toHaveProperty('span_id')
-    expect(p).toHaveProperty('severity')
-    expect(p).toHaveProperty('code')
-    expect(p).toHaveProperty('message')
-    expect(p).toHaveProperty('at')
-    expect(p).toHaveProperty('harness')
-  })
-
-  it('getMeta returns metadata, counts, rates and harness information', () => {
-    const meta = bridge.getMeta()
-    expect(meta.span_count).toBeGreaterThan(30000)
-    expect(meta.quarantined).toBeGreaterThan(400000)
-    expect(meta.tokenizer.kind).toBe('js-tiktoken/o200k_base')
-    expect(meta.rates.credit_usd).toBe(0.01)
-    expect(meta.harnesses.copilot).toBeDefined()
-    expect(meta.harnesses.gemini).toBeDefined()
-    expect(meta.harnesses.pi).toBeDefined()
-    expect(meta.sources.length).toBeGreaterThan(0)
+    try {
+      const table = bridge.getComparisonTable()
+      expect(process.env.AGENTDASH_DB).toBeUndefined()
+      expect(table.harnesses).toEqual(['copilot', 'gemini'])
+      expect(table.rows.find((row) => row.metric === 'turns')?.cells.copilot.value).toBe(1)
+      expect(table.rows.find((row) => row.metric === 'turns')?.cells.gemini.value).toBe(1)
+    } finally {
+      bridge.close()
+      store.close()
+      if (previousAgentdashDb === undefined) delete process.env.AGENTDASH_DB
+      else process.env.AGENTDASH_DB = previousAgentdashDb
+    }
   })
 })

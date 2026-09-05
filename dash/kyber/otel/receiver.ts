@@ -1,4 +1,4 @@
-// OTLP/HTTP trace receiver for KyberDash (spec: docs/specs/kyberdash,
+// OTLP/HTTP trace and log receiver for KyberDash (spec: docs/specs/kyberdash,
 // design.md "Ingest layer"). One `node:http` server on the OTLP-standard
 // port 4318 accepting `POST /v1/traces` in both OTLP encodings: JSON,
 // because the existing collectors hand-roll OTLP JSON to that exact port
@@ -28,6 +28,7 @@
 // posting to this port (hex ids, plain numbers, `INTERNAL`-style enums).
 
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { promisify } from 'node:util'
 
@@ -38,6 +39,7 @@ export const DEFAULT_OTLP_PORT = 4318
 
 /** The only endpoint this receiver serves (R2.1). */
 export const OTLP_TRACES_PATH = '/v1/traces'
+export const OTLP_LOGS_PATH = '/v1/logs'
 
 /**
  * Request bodies are whole `ExportTraceServiceRequest`s; collectors batch.
@@ -87,6 +89,50 @@ export type OtlpSpan = {
   scope: OtlpScope
 }
 
+export type OtlpLog = {
+  logId: string
+  traceId: string | null
+  spanId: string | null
+  sessionId: string | null
+  timestamp: string
+  body: string | null
+  attributes: Record<string, unknown>
+  resource: Record<string, unknown>
+  scope: OtlpScope
+}
+
+/**
+ * Globally unique log identity for enrichment idempotency.
+ *
+ * Event class names (`claude_code.api_request_body`) repeat every turn; using
+ * one as `logId` made later records of the same class look like duplicates.
+ * Correlation identity + timestamp + a payload digest distinguishes them.
+ */
+export function deriveLogId(input: {
+  traceId: string | null
+  spanId: string | null
+  sessionId: string | null
+  timeUnixNano: bigint | string
+  body: unknown
+  attributes: Record<string, unknown>
+  eventName?: string
+}): string {
+  const keys = Object.keys(input.attributes).sort()
+  const attributes: Record<string, unknown> = {}
+  for (const key of keys) attributes[key] = input.attributes[key]
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify({
+        event: input.eventName ?? '',
+        body: input.body ?? null,
+        attributes,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 16)
+  return `${input.traceId ?? input.sessionId ?? 'log'}:${input.spanId ?? 'none'}:${String(input.timeUnixNano)}:${digest}`
+}
+
 /**
  * Where decoded spans go. A port, not a store: persistence strategy —
  * batching, backpressure, canonical mapping — belongs to `IngestWriter`
@@ -96,12 +142,29 @@ export interface OtlpSpanStore {
   write(spans: readonly OtlpSpan[]): void
 }
 
+export interface OtlpSignalStore extends OtlpSpanStore {
+  writeLogs(logs: readonly OtlpLog[]): void
+}
+
+export type OtlpReceiverStore =
+  | OtlpSpanStore
+  | OtlpSignalStore
+  | { spans: OtlpSpanStore; logs: { writeLogs(logs: readonly OtlpLog[]): void } }
+
 /** Default sink: keeps every decoded span in memory. */
 export class InMemorySpanStore implements OtlpSpanStore {
   readonly spans: OtlpSpan[] = []
 
   write(spans: readonly OtlpSpan[]): void {
     this.spans.push(...spans)
+  }
+}
+
+export class InMemoryLogStore {
+  readonly logs: OtlpLog[] = []
+
+  writeLogs(logs: readonly OtlpLog[]): void {
+    this.logs.push(...logs)
   }
 }
 
@@ -441,6 +504,74 @@ export function decodeOtlpJson(body: string): OtlpSpan[] {
     }
   }
   return spans
+}
+
+export function decodeOtlpLogJson(body: string): OtlpLog[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch (err) {
+    throw new OtlpDecodeError(`OTLP JSON body does not parse: ${message(err)}`)
+  }
+  const request = expectObject(parsed, 'OTLP payload')
+  const resources = request.resourceLogs
+  if (resources === undefined || resources === null) return []
+  if (!Array.isArray(resources)) throw new OtlpDecodeError('resourceLogs must be an array')
+  const logs: OtlpLog[] = []
+  for (const [ri, raw] of resources.entries()) {
+    const where = `resourceLogs[${ri}]`
+    const resourceLog = expectObject(raw, where)
+    const resourceRaw = resourceLog.resource
+    const resource =
+      resourceRaw === undefined || resourceRaw === null
+        ? {}
+        : attributesFromJson(expectObject(resourceRaw, `${where}.resource`).attributes, `${where}.resource.attributes`)
+    const scopes = resourceLog.scopeLogs
+    if (scopes === undefined || scopes === null) continue
+    if (!Array.isArray(scopes)) throw new OtlpDecodeError(`${where}.scopeLogs must be an array`)
+    for (const [si, scopeRaw] of scopes.entries()) {
+      const scopeWhere = `${where}.scopeLogs[${si}]`
+      const scopeLog = expectObject(scopeRaw, scopeWhere)
+      const scope = scopeFromJson(scopeLog.scope, `${scopeWhere}.scope`)
+      const records = scopeLog.logRecords
+      if (records === undefined || records === null) continue
+      if (!Array.isArray(records)) throw new OtlpDecodeError(`${scopeWhere}.logRecords must be an array`)
+      for (const [li, recordRaw] of records.entries()) {
+        const recordWhere = `${scopeWhere}.logRecords[${li}]`
+        const record = expectObject(recordRaw, recordWhere)
+        const time = nanosToBigInt(record.timeUnixNano, `${recordWhere}.timeUnixNano`)
+        const attributes = attributesFromJson(record.attributes, `${recordWhere}.attributes`)
+        const session = attributes.session_id
+        const sessionId = typeof session === 'string' ? session : null
+        const traceId = record.traceId === undefined || record.traceId === null || record.traceId === ''
+          ? null : idToHex(record.traceId, 16, `${recordWhere}.traceId`)
+        const spanId = record.spanId === undefined || record.spanId === null || record.spanId === ''
+          ? null : idToHex(record.spanId, 8, `${recordWhere}.spanId`)
+        const body = record.body === undefined || record.body === null ? null : String(anyValueFromJson(record.body, `${recordWhere}.body`))
+        const eventName = typeof record.eventName === 'string' ? record.eventName : undefined
+        logs.push({
+          logId: deriveLogId({
+            traceId,
+            spanId,
+            sessionId,
+            timeUnixNano: time,
+            body,
+            attributes,
+            eventName,
+          }),
+          traceId,
+          spanId,
+          sessionId,
+          timestamp: nanosToIsoTimestamp(time),
+          body,
+          attributes,
+          resource,
+          scope,
+        })
+      }
+    }
+  }
+  return logs
 }
 
 function scopeFromJson(value: unknown, where: string): OtlpScope {
@@ -788,6 +919,58 @@ export function decodeOtlpProtobuf(body: Uint8Array): OtlpSpan[] {
   return spans
 }
 
+export function decodeOtlpLogProtobuf(body: Uint8Array): OtlpLog[] {
+  const request = readMessage(body)
+  const logs: OtlpLog[] = []
+  for (const [ri, resourceLogs] of pbMessages(request, 1, 'resource_logs').entries()) {
+    const where = `resource_logs[${ri}]`
+    const resourceMessage = pbMessage(resourceLogs, 1)
+    const resource = resourceMessage === undefined ? {} : pbKeyValues(resourceMessage, 1)
+    for (const [, scopeLogs] of pbMessages(resourceLogs, 2, `${where}.scope_logs`).entries()) {
+      const scopeMessage = pbMessage(scopeLogs, 1)
+      const scope: OtlpScope = {}
+      const name = pbString(scopeMessage, 1)
+      const version = pbString(scopeMessage, 2)
+      if (name) scope.name = name
+      if (version) scope.version = version
+      for (const [, logMessage] of pbMessages(scopeLogs, 2, `${where}.scope_logs.log_records`).entries()) {
+        const time = pbBigInt(logMessage, 1)
+        if (time === undefined) throw new OtlpDecodeError(`${where}.time_unix_nano is required`)
+        const trace = pbBytes(logMessage, 9)
+        const span = pbBytes(logMessage, 10)
+        const attributes = pbKeyValues(logMessage, 6)
+        const session = attributes.session_id
+        const sessionId = typeof session === 'string' ? session : null
+        const bodyMessage = pbMessage(logMessage, 5)
+        const body = bodyMessage === undefined ? null : String(pbAnyValue(bodyMessage))
+        const eventName = pbString(logMessage, 12)
+        const traceId = trace === undefined ? null : requiredId(trace, 16, `${where}.trace_id`)
+        const spanId = span === undefined ? null : requiredId(span, 8, `${where}.span_id`)
+        logs.push({
+          logId: deriveLogId({
+            traceId,
+            spanId,
+            sessionId,
+            timeUnixNano: time,
+            body,
+            attributes,
+            eventName,
+          }),
+          traceId,
+          spanId,
+          sessionId,
+          timestamp: nanosToIsoTimestamp(time),
+          body,
+          attributes,
+          resource,
+          scope,
+        })
+      }
+    }
+  }
+  return logs
+}
+
 function spanFromProtobuf(
   message: PbMessage,
   resource: Record<string, unknown>,
@@ -843,7 +1026,7 @@ export type OtlpReceiverOptions = {
    * collectors can reach it — telemetry must not leave the machine (R12.1).
    */
   host?: string
-  store?: OtlpSpanStore
+  store?: OtlpReceiverStore
   maxBodyBytes?: number
   /** Override port-occupant discovery; tests pin this to make the report deterministic. */
   discoverOccupants?: PortOccupantDiscovery
@@ -859,7 +1042,7 @@ class BodyTooLargeError extends Error {}
  * discoverable (R2.4) — never a silent failure, never a quiet rebind.
  */
 export class OtlpReceiver {
-  readonly store: OtlpSpanStore
+  readonly store: OtlpReceiverStore
 
   private readonly listenPort: number
   private readonly hostname: string
@@ -965,11 +1148,11 @@ export class OtlpReceiver {
 
   private async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = (req.url ?? '/').split('?')[0]
-    if (path !== OTLP_TRACES_PATH) {
+    if (path !== OTLP_TRACES_PATH && path !== OTLP_LOGS_PATH) {
       respondJson(res, 404, {
         error: {
           code: 'OTLP_NOT_FOUND',
-          message: `unknown endpoint ${req.method} ${path}: this receiver serves POST ${OTLP_TRACES_PATH}`,
+            message: `unknown endpoint ${req.method} ${path}: this receiver serves POST ${OTLP_TRACES_PATH} and ${OTLP_LOGS_PATH}`,
         },
       })
       return
@@ -993,10 +1176,23 @@ export class OtlpReceiver {
     }
 
     const body = await this.readBody(req)
+    if (path === OTLP_LOGS_PATH) {
+      const logs = encoding === 'json' ? decodeOtlpLogJson(body.toString('utf8')) : decodeOtlpLogProtobuf(body)
+      const nested = this.store as unknown as { logs?: { writeLogs(logs: readonly OtlpLog[]): void } }
+      const sink = nested.logs ?? (this.store as Partial<OtlpSignalStore>)
+      if (typeof sink.writeLogs !== 'function') {
+        throw new Error('OTLP logs require a signal-aware receiver store')
+      }
+      sink.writeLogs(logs)
+      respondJson(res, 200, { acceptedLogs: logs.length })
+      return
+    }
     const spans = encoding === 'json' ? decodeOtlpJson(body.toString('utf8')) : decodeOtlpProtobuf(body)
-    // Decode finished before the first write: a malformed payload never
-    // lands partially (design.md, "Error Handling").
-    this.store.write(spans)
+    const nested = this.store as unknown as { spans?: OtlpSpanStore }
+    const spanSink = nested.spans !== undefined && typeof nested.spans.write === 'function'
+      ? nested.spans
+      : this.store as OtlpSpanStore
+    spanSink.write(spans)
     respondJson(res, 200, { acceptedSpans: spans.length })
   }
 

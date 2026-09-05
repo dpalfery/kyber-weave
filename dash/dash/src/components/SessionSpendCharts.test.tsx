@@ -75,6 +75,10 @@ function renderText(element: React.ReactElement): string {
   return walk(element)
 }
 
+function normalizedRenderText(element: React.ReactElement): string {
+  return renderText(element).replace(/\s+/g, ' ').trim()
+}
+
 // Helper to find all elements matching a predicate in the rendered tree
 function findAllElements(
   node: unknown,
@@ -639,6 +643,89 @@ describe('ContextCompositionChart', () => {
 
     expect(hasTestId(element, 'context-caveat-measured')).toBe(true)
     expect(hasTestId(element, 'context-caveat-derived')).toBe(false)
+  })
+
+  it('uses the ASAD derived-count caveat and escalates only above a 15% residual', () => {
+    const atThreshold = React.createElement(ContextCompositionChart, {
+      context: {
+        measurable: true,
+        derivedCounts: true,
+        derivedModel: 'o200k_base',
+        turns: [
+          {
+            index: 1,
+            reported_input: 1_000,
+            buckets: { system_prompt: 850, residual: 150 },
+          },
+        ],
+      },
+    })
+    const aboveThreshold = React.createElement(ContextCompositionChart, {
+      context: {
+        measurable: true,
+        derivedCounts: true,
+        derivedModel: 'o200k_base',
+        turns: [
+          {
+            index: 1,
+            reported_input: 1_000,
+            buckets: { system_prompt: 840, residual: 160 },
+          },
+        ],
+      },
+    })
+
+    const atThresholdText = normalizedRenderText(atThreshold)
+    expect(atThresholdText).toMatch(
+      /Bucket sizes are derived by tokenizing content with o200k_base\s*, a proxy for models that do not publish their tokenizer, so each is a lower bound\./,
+    )
+    expect(atThresholdText).toMatch(
+      /The residual of 15\.0\s*% is the gap between the buckets and the model's own reported input\./,
+    )
+    expect(atThresholdText).not.toContain('Treat this session\'s bucket sizes as a lower bound.')
+
+    const aboveThresholdText = normalizedRenderText(aboveThreshold)
+    expect(aboveThresholdText).toMatch(
+      /The residual of 16\.0\s*% is the gap between the buckets and the model's own reported input\./,
+    )
+    expect(aboveThresholdText).toContain('Treat this session\'s bucket sizes as a lower bound.')
+  })
+
+  it('uses the ASAD harness-reported caveat without suppressing the residual', () => {
+    const element = React.createElement(ContextCompositionChart, {
+      context: {
+        measurable: true,
+        derivedCounts: false,
+        turns: [
+          {
+            index: 1,
+            reported_input: 1_000,
+            buckets: { system_prompt: 840, residual: 160 },
+          },
+        ],
+      },
+    })
+
+    const text = normalizedRenderText(element)
+    expect(text).toMatch(/Bucket sizes are reported by the harness\s*, not estimated\./)
+    expect(text).toMatch(
+      /The residual of 16\.0\s*% is input the harness did not attribute to any bucket — chat framing and role delimiters — rather than tokenizer drift\./,
+    )
+    expect(text).not.toContain('Treat this session\'s bucket sizes as a lower bound.')
+  })
+
+  it('renders the B3 unavailable-bucket reason verbatim', () => {
+    const reason = 'Claude Code session files do not store the runtime system prompt.'
+    const text = normalizedRenderText(
+      React.createElement(ContextCompositionChart, {
+        context: {
+          measurable: false,
+          reason,
+        },
+      }),
+    )
+
+    expect(text).toContain(reason)
   })
 
   it('states plainly when tool definitions carry no server attribution', () => {

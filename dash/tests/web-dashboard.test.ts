@@ -192,6 +192,7 @@ describe('web dashboard server: /api/kyber/* routes', () => {
       harness: 'copilot',
       label: 'Hermetic Test Session',
       context: { measurable: true },
+      schema: { measurable: true },
       tools: [
         { name: 'test_tool', server: 'built-in', total_schema_cost: 120, invocations: 1 },
       ],
