@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { cn, usd, fmtTokens } from '../lib/utils'
 import { fetchKyberSessionContent } from '../lib/kyberApi'
 import { Skeleton } from './ui/skeleton'
+import { ContextInspector } from './ContextInspector'
 
 /**
  * Harness XML tags folded into collapsible <details> elements.
@@ -402,7 +403,13 @@ function MessageView({ message }: { message: any }) {
 /**
  * Turn Inspector rendering token spend, minibar, model, and message content.
  */
-function TurnInspector({ turn }: { turn: any }) {
+function TurnInspector({
+  turn,
+  onOpenContextInspector,
+}: {
+  turn: any
+  onOpenContextInspector?: () => void
+}) {
   const cacheRead = turn.cache_read ?? turn.tokens?.cache_read ?? 0
   const cacheCreation = turn.cache_creation ?? turn.tokens?.cache_creation ?? 0
   const fresh = turn.fresh ?? turn.fresh_input ?? turn.tokens?.fresh ?? turn.tokens?.fresh_input ?? 0
@@ -494,6 +501,20 @@ function TurnInspector({ turn }: { turn: any }) {
             </div>
           )}
         </div>
+
+        {onOpenContextInspector && (
+          <div className="border-t border-border pt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={onOpenContextInspector}
+              data-testid="open-context-inspector-button"
+              className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5"
+            >
+              <span role="img" aria-label="inspect">🔍</span>
+              <span>Open in Context Inspector</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Fresh Jump Warning */}
@@ -700,7 +721,13 @@ function SpanInspector({ node }: { node: any }) {
 /**
  * Context Bucket Inspector.
  */
-function ContextBucketInspector({ item }: { item: any }) {
+function ContextBucketInspector({
+  item,
+  onOpenContextInspector,
+}: {
+  item: any
+  onOpenContextInspector?: () => void
+}) {
   const tokens = item.value ?? item.tokens ?? 0
   const total = item.total ?? 0
   const pct = total > 0 ? ((tokens / total) * 100).toFixed(1) + '%' : '—'
@@ -725,12 +752,25 @@ function ContextBucketInspector({ item }: { item: any }) {
             <span className="font-mono text-foreground">{fmtTokens(total)}</span>
           </div>
         )}
+        {onOpenContextInspector && (
+          <div className="border-t border-border pt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={onOpenContextInspector}
+              data-testid="open-context-inspector-button"
+              className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors flex items-center gap-1.5"
+            >
+              <span role="img" aria-label="inspect">🔍</span>
+              <span>Open in Context Inspector</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {item.content && (
         <div className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bucket Content</h4>
-          <InspectorContent data={item.content} />
+          <InspectorContent data={item.content} onOpenContextInspector={onOpenContextInspector} />
         </div>
       )}
     </div>
@@ -740,7 +780,13 @@ function ContextBucketInspector({ item }: { item: any }) {
 /**
  * Helper component InspectorContent to format turn messages, timeline span attributes, and raw JSON.
  */
-export function InspectorContent({ data }: { data: any }) {
+export function InspectorContent({
+  data,
+  onOpenContextInspector,
+}: {
+  data: any
+  onOpenContextInspector?: () => void
+}) {
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted')
   const [copied, setCopied] = useState(false)
 
@@ -755,7 +801,7 @@ export function InspectorContent({ data }: { data: any }) {
 
   // Handle Turn payload
   if (typeof data === 'object' && (data.fresh !== undefined || data.cache_read !== undefined || (data.index !== undefined && data.tokens !== undefined))) {
-    return <TurnInspector turn={data} />
+    return <TurnInspector turn={data} onOpenContextInspector={onOpenContextInspector} />
   }
 
   // Handle Timeline Span Node
@@ -765,7 +811,7 @@ export function InspectorContent({ data }: { data: any }) {
 
   // Handle Context bucket item
   if (typeof data === 'object' && ('bucket' in data || ('key' in data && 'total' in data))) {
-    return <ContextBucketInspector item={data} />
+    return <ContextBucketInspector item={data} onOpenContextInspector={onOpenContextInspector} />
   }
 
   // Handle Tool Call
@@ -945,6 +991,7 @@ export interface SessionInspectorDrawerProps {
   children?: React.ReactNode
   rawContent?: any
   contentRequest?: SessionContentRequest
+  inspectContext?: boolean
 }
 
 /**
@@ -960,7 +1007,16 @@ export function SessionInspectorDrawer({
   children,
   rawContent,
   contentRequest,
+  inspectContext,
 }: SessionInspectorDrawerProps) {
+  const [showContextInspector, setShowContextInspector] = useState<boolean>(() => Boolean(inspectContext))
+
+  useEffect(() => {
+    if (inspectContext !== undefined) {
+      setShowContextInspector(inspectContext)
+    }
+  }, [inspectContext])
+
   useEffect(() => {
     if (!open || typeof window === 'undefined') return
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -973,6 +1029,16 @@ export function SessionInspectorDrawer({
   }, [open, onClose])
 
   if (!open) return null
+
+  const targetSessionId = contentRequest?.sessionId ?? rawContent?.sessionId ?? rawContent?.session_id
+  const targetTurnIndex =
+    typeof rawContent?.turnIndex === 'number'
+      ? rawContent.turnIndex
+      : typeof rawContent?.index === 'number'
+        ? rawContent.index
+        : typeof rawContent?.turn === 'number'
+          ? rawContent.turn
+          : 0
 
   // Drop the clipped leaf while the unclipped route is in play, otherwise the
   // 2000-char stub renders next to (or instead of) the text this route exists for.
@@ -1021,30 +1087,65 @@ export function SessionInspectorDrawer({
               </p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground"
-            data-testid="drawer-close-button"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {targetSessionId && (
+              <button
+                type="button"
+                onClick={() => setShowContextInspector((prev) => !prev)}
+                data-testid="toggle-context-inspector-button"
+                className={cn(
+                  'rounded border border-border px-2.5 py-1 text-xs font-medium transition-colors flex items-center gap-1.5 select-none',
+                  showContextInspector
+                    ? 'bg-primary/15 border-primary/40 text-primary font-semibold'
+                    : 'bg-interactive-secondary text-muted-foreground hover:bg-interactive-secondary/80 hover:text-foreground'
+                )}
+              >
+                <span role="img" aria-label="inspector">🔍</span>
+                <span>{showContextInspector ? 'Show Overview' : 'Context Inspector'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-tertiary-foreground transition-colors hover:bg-interactive-secondary hover:text-foreground"
+              data-testid="drawer-close-button"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs" data-testid="drawer-body">
           {children}
-          {inspectorData !== undefined && inspectorData !== null && (
-            <InspectorContent data={inspectorData} />
-          )}
-          {contentRequest && (
-            <FullContentPanel request={contentRequest} fallback={fallbackContent} />
-          )}
-          {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
-            <p className="text-xs text-tertiary-foreground italic py-8 text-center">
-              No content to inspect.
-            </p>
+          {showContextInspector && targetSessionId ? (
+            <div data-testid="drawer-context-inspector-view">
+              <ContextInspector
+                sessionId={targetSessionId}
+                turnIndex={targetTurnIndex}
+                initialBlockKey={rawContent?.bucket}
+                initialPart={rawContent?.bucket}
+                onClose={() => setShowContextInspector(false)}
+              />
+            </div>
+          ) : (
+            <>
+              {inspectorData !== undefined && inspectorData !== null && (
+                <InspectorContent
+                  data={inspectorData}
+                  onOpenContextInspector={targetSessionId ? () => setShowContextInspector(true) : undefined}
+                />
+              )}
+              {contentRequest && (
+                <FullContentPanel request={contentRequest} fallback={fallbackContent} />
+              )}
+              {!children && (rawContent === undefined || rawContent === null) && !contentRequest && (
+                <p className="text-xs text-tertiary-foreground italic py-8 text-center">
+                  No content to inspect.
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>

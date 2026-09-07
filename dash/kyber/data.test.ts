@@ -21,8 +21,7 @@ import { join, resolve } from 'node:path'
 import { CanonStore, compressRaw, decompressRaw } from './canon/store.js'
 import { createCostBlock, type RateTable } from './canon/cost.js'
 import type { CanonicalRecord, TokenUsage } from './canon/types.js'
-import { Synthesizer } from './synth/synth.js'
-import type { ParsedProviderCall } from '../src/providers/types.js'
+import { Synthesizer, type ParsedProviderCall } from './synth/synth.js'
 
 // ---------------------------------------------------------------------------
 // Local-only markers — the "captured content" fixtures are seeded from.

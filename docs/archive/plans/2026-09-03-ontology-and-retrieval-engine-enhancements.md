@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-03-ontology-and-retrieval-engine-enhancements
+id: archive/plans/2026-09-03-ontology-and-retrieval-engine-enhancements
 title: Track 2 — Ontology & Retrieval Engine Enhancements (KyberWeave.Core)
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-09-03
 component: DocGraph
@@ -10,7 +10,8 @@ component: DocGraph
 
 # Track 2: Ontology & Retrieval Engine Enhancements (KyberWeave.Core)
 
-**Status:** Complete
+**Status:** Archived
+**Archive Date:** 2026-09-03
 **Date:** 2026-09-03
 **Goal:** Enhance KyberWeave.Core document ontology and retrieval engine with optional keywords metadata, compound prefix/sub-token identity coverage, and calibrated Out-of-Vocabulary (OOV) scoring so technical queries with novel terms reliably retrieve matching documents.
 

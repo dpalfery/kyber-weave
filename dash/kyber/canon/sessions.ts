@@ -16,9 +16,10 @@ import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
+import { buildRuns } from './runs.js'
 import { CanonStore, type SessionRow } from './store.js'
 import { loadO200kCounter } from './tokens.js'
-import type { CanonicalRecord, Measurability, MetricAvailability, NotMeasurable } from './types.js'
+import { notMeasurable, type CanonicalRecord, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 /**
  * Default context window, used when nothing on the record says otherwise.
@@ -303,6 +304,9 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
     report.pruned += 1
   }
 
+  // Rebuild run and execution tables over canonical records (D13, ADR 0008)
+  await buildRuns(store)
+
   return report
 }
 
@@ -397,7 +401,11 @@ export function buildSessionRow(
   } as const
   const unavailableBuckets = Object.fromEntries(
     Object.entries(contextBucketDeclarations).flatMap(([bucket, declaration]) => {
-      const unavailable = unavailableFor(measurability, declaration)
+      const unavailable =
+        unavailableFor(measurability, declaration) ??
+        (!context.measurable
+          ? notMeasurable(`Session records for ${harness} did not capture ${declaration}.`)
+          : undefined)
       return unavailable === undefined ? [] : [[bucket, unavailable]]
     }),
   )
@@ -512,12 +520,18 @@ export function buildSessionRow(
     measurability: measurability ?? {},
   }
 
+  const parentSessionAttr =
+    attributeOf(first, ['parent_session', 'parent_session_id', 'gen_ai.parent_session_id', 'parentSession']) ?? null
+  const isSubagent =
+    parentSessionAttr !== null ||
+    Boolean(attributeOf(first, ['gen_ai.is_subagent', 'is_subagent']))
+
   return {
     sessionId,
     harness,
     label: first.name,
-    isSubagent: false,
-    parentSession: null,
+    isSubagent,
+    parentSession: parentSessionAttr,
     agentName: attributeOf(first, AGENT_NAME_KEYS) ?? null,
     repo: attributeOf(first, REPO_KEYS) ?? null,
     branch: attributeOf(first, BRANCH_KEYS) ?? null,

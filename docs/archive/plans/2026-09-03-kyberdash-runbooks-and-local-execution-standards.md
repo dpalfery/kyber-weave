@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-03-kyberdash-runbooks-and-local-execution-standards
+id: archive/plans/2026-09-03-kyberdash-runbooks-and-local-execution-standards
 title: KyberDash Operational Runbooks & Feature Local Execution Standards
 doc-type: plan
-status: draft
+status: archived
 owner: dpalfery
 last-reviewed: 2026-09-03
 component: KyberDash
@@ -10,7 +10,8 @@ component: KyberDash
 
 # KyberDash Operational Runbooks & Feature Local Execution Standards
 
-**Status:** Complete  
+**Status:** Archived  
+**Archive Date:** 2026-09-03  
 **Date:** 2026-09-03  
 **Goal:** Author KyberDash operational runbooks across four surfaces, improve search discoverability in architecture docs, establish a repository-wide local run/test standard for all catalog features, and ensure ontology compliance.
 

@@ -46,6 +46,14 @@ import {
   validateTokens,
 } from '../canon/types.js'
 import {
+  SURVEYED_HARNESSES,
+  type SurveyedHarness,
+  cacheAvailability,
+  prefixAvailability,
+  type CacheAvailability,
+  type PrefixAvailability,
+} from '../canon/measurability.js'
+import {
   analyzeContext,
   type ContextAnalysis,
   type ContextTurn,
@@ -554,3 +562,131 @@ export function compareDigests(python: ParityDigest, ported: ParityDigest): Dige
   compareLeaves(python, ported, '', diff)
   return { equal: diff.length === 0, diff }
 }
+
+// ---------------------------------------------------------------------------
+// Cache counter and prefix byte coverage audit (Task E4)
+// ---------------------------------------------------------------------------
+
+/** Cache and prefix coverage result for one harness. */
+export type HarnessCachePrefixCoverage = {
+  harness: string
+  cache: CacheAvailability
+  prefix: PrefixAvailability
+}
+
+/** Aggregate cache counter and prefix byte coverage audit across harnesses. */
+export type CachePrefixCoverageReport = {
+  surveyedCount: number
+  harnesses: Record<string, HarnessCachePrefixCoverage>
+  supportedCacheCount: number
+  supportedPrefixCount: number
+  fallbackPrefixCount: number
+}
+
+/** Corpus-level cache counter and prefix byte accounting for one harness. */
+export type CorpusHarnessCachePrefix = {
+  recordCount: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  hasPrefixContent: boolean
+  declaredCache: CacheAvailability
+  declaredPrefix: PrefixAvailability
+}
+
+/** Corpus-level audit linking observed records to declared cache and prefix support. */
+export type CorpusCachePrefixAudit = {
+  recordCount: number
+  totalCacheReadTokens: number
+  totalCacheCreationTokens: number
+  byHarness: Record<string, CorpusHarnessCachePrefix>
+}
+
+/**
+ * Audit cache counter and prefix byte availability across surveyed harnesses (Task E4).
+ * Returns typed coverage details, confidence tags, and fallback capabilities.
+ */
+export function auditCachePrefixCoverage(
+  harnesses: readonly string[] = SURVEYED_HARNESSES,
+): CachePrefixCoverageReport {
+  const result: Record<string, HarnessCachePrefixCoverage> = {}
+  let supportedCacheCount = 0
+  let supportedPrefixCount = 0
+  let fallbackPrefixCount = 0
+
+  for (const harness of harnesses) {
+    const cache = cacheAvailability(harness)
+    const prefix = prefixAvailability(harness)
+
+    if (cache.status === 'supported' || cache.status === 'partial') {
+      supportedCacheCount += 1
+    }
+    if (prefix.status === 'supported') {
+      supportedPrefixCount += 1
+    }
+    if (prefix.fallback === 'detect-but-cannot-locate') {
+      fallbackPrefixCount += 1
+    }
+
+    result[harness] = { harness, cache, prefix }
+  }
+
+  return {
+    surveyedCount: harnesses.length,
+    harnesses: result,
+    supportedCacheCount,
+    supportedPrefixCount,
+    fallbackPrefixCount,
+  }
+}
+
+/**
+ * Audit a span corpus for cache counter utilization and prefix byte content,
+ * cross-referencing observed tokens against each harness's declared availability.
+ */
+export function auditCorpusCachePrefix(
+  corpus: readonly CanonicalRecord[],
+): CorpusCachePrefixAudit {
+  let totalCacheReadTokens = 0
+  let totalCacheCreationTokens = 0
+  const byHarness: Record<string, CorpusHarnessCachePrefix> = {}
+
+  for (const record of corpus) {
+    const harness = record.harness
+    const cacheRead = record.tokens.cacheRead
+    const cacheCreation = record.tokens.cacheCreation
+    totalCacheReadTokens += cacheRead
+    totalCacheCreationTokens += cacheCreation
+
+    const hasContent =
+      (typeof record.content.system_prompt === 'string' && record.content.system_prompt !== '') ||
+      (typeof record.content.conversation_history === 'string' && record.content.conversation_history !== '') ||
+      (typeof record.content.instruction_context === 'string' && record.content.instruction_context !== '')
+
+    if (!(harness in byHarness)) {
+      byHarness[harness] = {
+        recordCount: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        hasPrefixContent: false,
+        declaredCache: cacheAvailability(harness),
+        declaredPrefix: prefixAvailability(harness),
+      }
+    }
+
+    const entry = byHarness[harness]!
+    entry.recordCount += 1
+    entry.cacheReadTokens += cacheRead
+    entry.cacheCreationTokens += cacheCreation
+    if (hasContent) {
+      entry.hasPrefixContent = true
+    }
+  }
+
+  return {
+    recordCount: corpus.length,
+    totalCacheReadTokens,
+    totalCacheCreationTokens,
+    byHarness,
+  }
+}
+

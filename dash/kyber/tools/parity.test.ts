@@ -14,6 +14,8 @@ import { describe, expect, it } from 'vitest'
 import type { CanonicalRecord, TokenUsage } from '../canon/types.js'
 import {
   PARITY_CONTEXT_LIMIT,
+  auditCachePrefixCoverage,
+  auditCorpusCachePrefix,
   compareDigests,
   computeDigest,
   type ParityDigest,
@@ -418,3 +420,48 @@ describe('run context — counts the corpus cannot express', () => {
     expect(PARITY_CONTEXT_LIMIT).toBe(200_000)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Task E4 — Survey cache and prefix availability parity audit
+// ---------------------------------------------------------------------------
+
+describe('auditCachePrefixCoverage — Task E4 survey parity audit', () => {
+  it('audits all 10 surveyed harnesses with typed availability and confidence tags', () => {
+    const report = auditCachePrefixCoverage()
+    expect(report.surveyedCount).toBe(10)
+    expect(Object.keys(report.harnesses)).toHaveLength(10)
+    expect(report.supportedCacheCount).toBe(6) // copilot, claude-code, roo-code, cline, codex, gemini (partial)
+    expect(report.supportedPrefixCount).toBe(2) // copilot, codex
+    expect(report.fallbackPrefixCount).toBe(5) // copilot, claude-code, roo-code, cline, gemini
+
+    // Spot-check specific harnesses
+    expect(report.harnesses.copilot.cache.status).toBe('supported')
+    expect(report.harnesses.copilot.cache.confidence).toBe('verified')
+    expect(report.harnesses['claude-code'].cache.status).toBe('supported')
+    expect(report.harnesses['claude-code'].prefix.fallback).toBe('detect-but-cannot-locate')
+    expect(report.harnesses.cursor.cache.status).toBe('unsupported')
+    expect(report.harnesses.gemini.cache.status).toBe('partial')
+    expect(report.harnesses.opencode.cache.status).toBe('not_measurable')
+  })
+
+  it('audits a specific subset of harnesses', () => {
+    const report = auditCachePrefixCoverage(['copilot', 'codex', 'cursor'])
+    expect(report.surveyedCount).toBe(3)
+    expect(report.supportedCacheCount).toBe(2)
+    expect(report.supportedPrefixCount).toBe(2)
+    expect(report.fallbackPrefixCount).toBe(1)
+  })
+
+  it('audits corpus records cross-referencing actual token usage with declared support', () => {
+    const corpus = fixtureCorpus()
+    const audit = auditCorpusCachePrefix(corpus)
+    expect(audit.recordCount).toBe(6)
+    expect(audit.totalCacheReadTokens).toBe(5_020)
+    expect(audit.totalCacheCreationTokens).toBe(0)
+    expect(audit.byHarness['pi']).toBeDefined()
+    expect(audit.byHarness['copilot']).toBeDefined()
+    expect(audit.byHarness['copilot'].declaredCache.status).toBe('supported')
+    expect(audit.byHarness['copilot'].declaredPrefix.fallback).toBe('detect-but-cannot-locate')
+  })
+})
+

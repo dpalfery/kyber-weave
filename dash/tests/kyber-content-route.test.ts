@@ -11,6 +11,7 @@ import {
   KyberBridge,
   MAX_STRING_LENGTH,
   type SessionContentResult,
+  type TurnContentResult,
 } from '../kyber/server/bridge.js'
 import { CanonStore } from '../kyber/canon/store.js'
 import type { CanonicalRecord, ContentPart } from '../kyber/canon/types.js'
@@ -213,6 +214,72 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         const body = (await res.json()) as { error: string }
         expect(body).toEqual({ error: 'Method Not Allowed' })
       }
+    })
+  })
+
+  describe('GET /api/kyber/session/:id/turn/:index/content (Task G1 / Decision D14)', () => {
+    it('returns assembled turn content with blocks, parts, and full assembledText', async () => {
+      const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/0/content`)
+      expect(res.status).toBe(200)
+      assertStandardKyberHeaders(res)
+
+      const body = (await res.json()) as TurnContentResult
+      expect(body.sessionId).toBe('sess-content-001')
+      expect(body.turnIndex).toBe(0)
+      expect(body.spanId).toBe('span-prompt')
+      expect(body.blocks).toBeDefined()
+      expect(body.parts).toBeDefined()
+      expect(body.assembledText).toBeDefined()
+
+      const sysBlock = body.blocks.find((b) => b.key === 'system_prompt')
+      expect(sysBlock).toBeDefined()
+      expect(sysBlock?.text).toBe(SYSTEM_PROMPT)
+      expect(body.assembledText).toContain(SYSTEM_PROMPT)
+    })
+
+    it('returns parts with tools, user messages, and conversation history for turn 1', async () => {
+      const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/1/content`)
+      expect(res.status).toBe(200)
+      assertStandardKyberHeaders(res)
+
+      const body = (await res.json()) as TurnContentResult
+      expect(body.spanId).toBe('span-tools')
+      expect(body.parts.some((p) => p.part === 'tool_definitions')).toBe(true)
+      expect(body.parts.some((p) => p.part === 'user_messages' || p.part === 'conversation_history')).toBe(true)
+
+      const toolPart = body.parts.find((p) => p.part === 'tool_definitions')
+      expect(toolPart?.text).toBe(TOOL_DEFINITION)
+      expect(toolPart?.server).toBe('built-in')
+
+      const convPart = body.parts.find((p) => p.part === 'user_messages' || p.part === 'conversation_history')
+      expect(convPart?.text).toContain('why is the inspector showing a stub mid-sentence?')
+    })
+
+    it('supports ?turn=1 query param on /session/:id/content as alias', async () => {
+      const res = await fetch(`${base}/api/kyber/session/sess-content-001/content?turn=1`)
+      expect(res.status).toBe(200)
+      assertStandardKyberHeaders(res)
+
+      const body = (await res.json()) as TurnContentResult
+      expect(body.spanId).toBe('span-tools')
+      expect(body.turnIndex).toBe(1)
+    })
+
+    it('returns 404 for nonexistent turn index', async () => {
+      const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/999/content`)
+      expect(res.status).toBe(404)
+      assertStandardKyberHeaders(res)
+    })
+
+    it('flags budget truncation when turn content exceeds budget param', async () => {
+      const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content?budget=100`)
+      expect(res.status).toBe(200)
+      assertStandardKyberHeaders(res)
+
+      const body = (await res.json()) as TurnContentResult
+      expect(body.truncated).toBe(true)
+      expect(body.totalLength).toBeGreaterThan(100)
+      expect(body.assembledText.length).toBeLessThanOrEqual(100)
     })
   })
 })

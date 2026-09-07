@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-09-05
 ---
 
 # Architecture decision records
@@ -27,6 +27,12 @@ cite it still resolve.
 | [0007](0007-kyberdash-agent-session-analysis-integration.md) | [KyberDash Agent Session Analysis Integration, Dual-Database Architecture, and Navigation Topology](0007-kyberdash-agent-session-analysis-integration.md) | Accepted | 2026-09-03 | Embed deep agent session analysis into Context Explorer, streamline top navigation to 5 tabs, establish dual-database SQLite bridge (`~/.kyberdash/canon.db` and fallback `sessions.db`), and implement formal `/api/kyber/*` REST contract. |
 | [0008](0008-kyberdash-single-canonical-store.md) | [Single Canonical Store; Supersede ADR 0007 D4](0008-kyberdash-single-canonical-store.md) | Accepted | 2026-09-03 | Restore `canon.db` as the only store with derived cached sessions, retire the `sessions.db` fallback, and store content once as compressed parts with the flat map derived on read. |
 | [0009](0009-multi-signal-ingestion-span-shaped-record.md) | [Multi-Signal Ingestion into a Span-Shaped Canonical Record](0009-multi-signal-ingestion-span-shaped-record.md) | Accepted | 2026-09-04 | Serve `/v1/logs` as an enrichment path onto one span-shaped record, quarantine uncorrelated logs and non-model spans, and fix OTel/dot-folder source precedence at one turn. |
+| [0010](0010-keywords-prefix-coverage-and-oov-idf.md) | [Keywords Identity, Compound Prefix Coverage, and Calibrated OOV IDF](0010-keywords-prefix-coverage-and-oov-idf.md) | Accepted | 2026-09-03 | Optional `keywords`/`aliases` identity, exact and partial keyword weights, camelCase and ≥3-character prefix coverage, and OOV IDF calibrated to a 20% corpus-share baseline. |
+| [0011](0011-asad-only-context-view-and-payload-contract.md) | [ASAD as the Only Context View and as the Canonical Session Contract](0011-asad-only-context-view-and-payload-contract.md) | Accepted | 2026-09-04 | Context renders only the ASAD dashboard; `canon.db` emits the ASAD payload directly; every named harness is in scope with `not_measurable` reasons rather than zeros. |
+| [0012](0012-progressive-disclosure-6-level-diagnostic-spine.md) | [Progressive Disclosure Six-Level Diagnostic Spine and Independent Dimension Vectors](0012-progressive-disclosure-6-level-diagnostic-spine.md) | Accepted | 2026-09-05 | Six-level diagnostic hierarchy (Attention to ContextItem), first-class Run and AgentExecution entities with derived grouping, six independent dimension vectors, and phase-aligned comparison. |
+| [0013](0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) | [Telemetry-Grounded Finding Contracts, Waste Ranking, and Relocation Discipline](0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) | Accepted | 2026-09-05 | Full finding contracts with ≥2 evidence rows and outcome-risk caveats, waste ranking formula, relocation over deletion discipline, and evidence of use classification vocabulary. |
+| [0014](0014-unclipped-turn-inspection-and-copy-out-protocol.md) | [Unclipped Turn Inspection, Content Retention Window, and Copy-Out Protocol](0014-unclipped-turn-inspection-and-copy-out-protocol.md) | Accepted | 2026-09-05 | Progressive-disclosure Context Inspector with full plain-text inspection and multi-part copy out, bounded by a 14-day rolling retention window and CLI purge command. |
+| [0015](0015-opt-in-llm-context-review-seam.md) | [Opt-In LLM Context Review Seam and Finding Isolation](0015-opt-in-llm-context-review-seam.md) | Accepted | 2026-09-05 | On-demand opt-in LLM review seam requiring discrete per-invocation user action, prompt-enforced relocation and risk constraints, and strict isolation from canonical finding tables. |
 
 ## Writing one
 

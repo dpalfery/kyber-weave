@@ -39,6 +39,7 @@ import type {
   Problem,
 } from '../canon/types.js'
 import { isNotMeasurable, notMeasurable } from '../canon/types.js'
+import type { OutcomeBlock } from '../canon/outcome.js'
 
 /** The exact phrase R10.2 pins for a metric a harness cannot report. */
 export const NOT_MEASURABLE = 'not measurable'
@@ -621,4 +622,869 @@ export function compareHarnesses(
   }
 
   return { harnesses: [...harnesses], rows, problems }
+}
+
+// ---------------------------------------------------------------------------
+// Run and Turn Comparison Workflow (Task G4 / Decision D11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Task phases in the software engineering lifecycle (D11, Task G4).
+ * Runs and turns are aligned by semantic phase boundaries rather than naive turn index.
+ */
+export type TaskPhase = 'exploration' | 'implementation' | 'verification' | 'resolution'
+
+export const TASK_PHASES: readonly TaskPhase[] = [
+  'exploration',
+  'implementation',
+  'verification',
+  'resolution',
+] as const
+
+/**
+ * TaskFamily groups runs addressing the same task, benchmark instance, or problem.
+ */
+export type TaskFamily = {
+  id: string
+  name: string
+  description?: string
+  workingDirectory?: string
+  repo?: string
+}
+
+/**
+ * Representation of one turn within a run for comparison.
+ */
+export type RunTurn = {
+  turnIndex: number
+  spanId?: string
+  phase?: TaskPhase
+  tokens?: {
+    freshInput?: number
+    cacheRead?: number
+    cacheCreation?: number
+    output?: number
+    reportedInput?: number
+    reportedOutput?: number
+    all?: number
+  }
+  cost?: CostBlock
+  tools?: string[]
+  commands?: string[]
+  status?: string
+  summary?: string
+  measurability?: Record<string, MetricAvailability>
+  raw?: CanonicalRecord
+}
+
+/**
+ * Status of an individual signal comparison between two turns.
+ */
+export type SignalComparisonStatus =
+  | 'compared'
+  | 'not_comparable'
+  | 'missing_in_a'
+  | 'missing_in_b'
+
+export type SignalComparison = {
+  name: string
+  label: string
+  unit?: string
+  runAValue?: number | string
+  runBValue?: number | string
+  delta?: number
+  status: SignalComparisonStatus
+  reason?: string
+}
+
+/**
+ * One turn-level comparison pair aligned by semantic phase (Acceptance Criteria 1 & 2).
+ */
+export type PhaseAlignedTurnPair = {
+  phase: TaskPhase
+  phaseIndex: number
+  runATurn: RunTurn | null
+  runBTurn: RunTurn | null
+  signals: SignalComparison[]
+  reading: string
+}
+
+/**
+ * Comparison verdict status enforcing Decision D11 and Acceptance Criterion 3.
+ */
+export type ComparisonVerdictStatus =
+  | 'promoted'
+  | 'candidate_only'
+  | 'insufficient_history'
+  | 'outcome_regression'
+  | 'neutral'
+
+export type ComparisonVerdict = {
+  status: ComparisonVerdictStatus
+  pairCount: number
+  completedPairCount: number
+  meetsSufficiencyThreshold: boolean
+  outcomeRegression: boolean
+  canPromote: boolean
+  recommendation: string
+  refusalReason?: string
+  summary: string
+}
+
+export type PhaseSummary = {
+  phase: TaskPhase
+  turnsA: number
+  turnsB: number
+  tokensA: number
+  tokensB: number
+  tokenDelta: number
+  costA?: number
+  costB?: number
+  costDelta?: number
+  reading: string
+}
+
+export type RunComparisonInput = {
+  runId: string
+  harness: string
+  label?: string
+  taskFamily?: string | TaskFamily
+  workingDirectory?: string | null
+  outcome?: OutcomeBlock
+  turns: readonly (RunTurn | CanonicalRecord)[]
+}
+
+export type RunComparisonOptions = {
+  taskFamily?: string
+  costBasis?: CostBasis
+  completedPairCount?: number
+}
+
+export type ComparisonSummary = {
+  runA: {
+    runId: string
+    harness: string
+    label?: string
+    outcome?: OutcomeBlock
+    totalTokens: number
+    totalCost?: number
+    turnCount: number
+  }
+  runB: {
+    runId: string
+    harness: string
+    label?: string
+    outcome?: OutcomeBlock
+    totalTokens: number
+    totalCost?: number
+    turnCount: number
+  }
+  taskFamily?: string
+  pairs: PhaseAlignedTurnPair[]
+  phaseSummaries: Record<TaskPhase, PhaseSummary>
+  totals: {
+    tokensA: number
+    tokensB: number
+    tokenDelta: number
+    turnCountA: number
+    turnCountB: number
+    turnDelta: number
+    costA?: number
+    costB?: number
+    costDelta?: number
+    costComparable: boolean
+    costRefusalReason?: string
+  }
+  verdict: ComparisonVerdict
+}
+
+const EXPLORATION_TOOLS = new Set([
+  'read_file',
+  'view_file',
+  'list_dir',
+  'find_by_name',
+  'grep_search',
+  'glob',
+  'search',
+  'read',
+  'cat',
+  'ls',
+  'find',
+  'locate',
+  'inspect',
+  'fetch',
+  'get',
+])
+
+const IMPLEMENTATION_TOOLS = new Set([
+  'write_to_file',
+  'replace_file_content',
+  'edit_file',
+  'create_file',
+  'patch',
+  'edit',
+  'write',
+  'apply_patch',
+  'modify',
+  'update',
+])
+
+const VERIFICATION_TOOLS = new Set([
+  'run_tests',
+  'test',
+  'vitest',
+  'pytest',
+  'jest',
+  'cypress',
+  'playwright',
+  'typecheck',
+  'tsc',
+  'lint',
+  'eslint',
+  'check',
+  'validate',
+])
+
+const RESOLUTION_TOOLS = new Set([
+  'git_commit',
+  'git_push',
+  'task_complete',
+  'finish',
+  'resolve',
+  'complete',
+  'submit',
+])
+
+const VERIFICATION_COMMAND_REGEX = /\b(test|vitest|pytest|jest|cypress|playwright|tsc|typecheck|eslint|lint|check)\b/i
+const IMPLEMENTATION_COMMAND_REGEX = /\b(sed|awk|patch|apply|mkdir|npm\s+(?:i|install|add))\b/i
+const RESOLUTION_COMMAND_REGEX = /\b(git\s+(?:commit|push|tag)|complete|finish)\b/i
+const EXPLORATION_COMMAND_REGEX = /\b(find|grep|cat|ls|head|tail|view|diff|git\s+status|git\s+log|git\s+diff)\b/i
+
+/**
+ * Infer the task phase of a turn from its tool invocations, shell commands, or position.
+ */
+export function inferTurnPhase(
+  turn: Partial<RunTurn>,
+  context?: { turnIndex: number; totalTurns: number; previousPhase?: TaskPhase }
+): TaskPhase {
+  if (turn.phase && TASK_PHASES.includes(turn.phase)) {
+    return turn.phase
+  }
+
+  const tools = (turn.tools ?? []).map((t) => t.toLowerCase())
+  const commands = (turn.commands ?? []).join(' ')
+
+  // 1. Verification: tests, linters, typecheckers
+  if (
+    tools.some((t) => VERIFICATION_TOOLS.has(t)) ||
+    VERIFICATION_COMMAND_REGEX.test(commands)
+  ) {
+    return 'verification'
+  }
+
+  // 2. Resolution: git commit, git push, task_complete
+  if (
+    tools.some((t) => RESOLUTION_TOOLS.has(t)) ||
+    RESOLUTION_COMMAND_REGEX.test(commands)
+  ) {
+    return 'resolution'
+  }
+
+  // 3. Implementation: writing, replacing, editing files
+  if (
+    tools.some((t) => IMPLEMENTATION_TOOLS.has(t)) ||
+    IMPLEMENTATION_COMMAND_REGEX.test(commands)
+  ) {
+    return 'implementation'
+  }
+
+  // 4. Exploration: reading, searching, grepping, listing
+  if (
+    tools.some((t) => EXPLORATION_TOOLS.has(t)) ||
+    EXPLORATION_COMMAND_REGEX.test(commands)
+  ) {
+    return 'exploration'
+  }
+
+  // 5. Position-based fallback
+  const turnIndex = context?.turnIndex ?? turn.turnIndex ?? 0
+  const totalTurns = context?.totalTurns ?? 1
+
+  if (totalTurns > 1 && turnIndex === totalTurns - 1) {
+    return 'resolution'
+  }
+
+  if (totalTurns > 2 && turnIndex < Math.max(1, Math.ceil(totalTurns * 0.35))) {
+    return 'exploration'
+  }
+
+  if (context?.previousPhase) {
+    return context.previousPhase
+  }
+
+  return 'exploration'
+}
+
+function extractToolsFromRecord(record: CanonicalRecord): string[] {
+  const tools: string[] = []
+  if (record.op === 'tool.invoke' && record.name) {
+    tools.push(record.name)
+  }
+  if (record.raw && typeof record.raw === 'object' && !Array.isArray(record.raw)) {
+    const raw = record.raw as Record<string, unknown>
+    if (typeof raw.tool_name === 'string') tools.push(raw.tool_name)
+    if (typeof raw.tool === 'string') tools.push(raw.tool)
+    if (Array.isArray(raw.tools)) {
+      for (const t of raw.tools) {
+        if (typeof t === 'string') tools.push(t)
+      }
+    }
+  }
+  return [...new Set(tools)]
+}
+
+function extractCommandsFromRecord(record: CanonicalRecord): string[] {
+  const commands: string[] = []
+  if (record.raw && typeof record.raw === 'object' && !Array.isArray(record.raw)) {
+    const raw = record.raw as Record<string, unknown>
+    if (typeof raw.command === 'string') commands.push(raw.command)
+    if (typeof raw.cmd === 'string') commands.push(raw.cmd)
+  }
+  if (record.content.instruction_context) {
+    commands.push(record.content.instruction_context)
+  }
+  return commands
+}
+
+function toRunTurn(
+  item: RunTurn | CanonicalRecord,
+  index: number,
+  total: number,
+  previousPhase?: TaskPhase
+): RunTurn {
+  if ('spanId' in item && 'tokens' in item && 'op' in item) {
+    const rec = item as CanonicalRecord
+    const tools = extractToolsFromRecord(rec)
+    const commands = extractCommandsFromRecord(rec)
+    const input = rec.tokens.freshInput + rec.tokens.cacheRead + rec.tokens.cacheCreation
+    const all = input + rec.tokens.output
+    const turnTokens = {
+      freshInput: rec.tokens.freshInput,
+      cacheRead: rec.tokens.cacheRead,
+      cacheCreation: rec.tokens.cacheCreation,
+      output: rec.tokens.output,
+      reportedInput: rec.tokens.reportedInput,
+      reportedOutput: rec.tokens.reportedOutput,
+      all,
+    }
+    const candidate: Partial<RunTurn> = {
+      turnIndex: index,
+      spanId: rec.spanId,
+      tools,
+      commands,
+      tokens: turnTokens,
+      cost: rec.cost,
+      status: rec.status,
+      measurability: rec.measurability,
+      raw: rec,
+    }
+    const phase = inferTurnPhase(candidate, { turnIndex: index, totalTurns: total, previousPhase })
+    return {
+      turnIndex: index,
+      spanId: rec.spanId,
+      phase,
+      tools,
+      commands,
+      tokens: turnTokens,
+      cost: rec.cost,
+      status: rec.status,
+      measurability: rec.measurability,
+      raw: rec,
+    }
+  }
+
+  const t = item as RunTurn
+  const phase = inferTurnPhase(t, {
+    turnIndex: t.turnIndex ?? index,
+    totalTurns: total,
+    previousPhase,
+  })
+  return {
+    ...t,
+    turnIndex: t.turnIndex ?? index,
+    phase,
+  }
+}
+
+function getTurnTokens(turn: RunTurn | null): number {
+  if (!turn || !turn.tokens) return 0
+  if (typeof turn.tokens.all === 'number') return turn.tokens.all
+  const inp = turn.tokens.reportedInput ?? (turn.tokens.freshInput ?? 0) + (turn.tokens.cacheRead ?? 0)
+  return inp + (turn.tokens.output ?? 0)
+}
+
+function getTurnCost(turn: RunTurn | null): number | undefined {
+  if (!turn || !turn.cost || typeof turn.cost.value !== 'number') return undefined
+  return turn.cost.value
+}
+
+/**
+ * Compare signals between two phase-aligned turns.
+ * Unmeasurable signals render as 'not_comparable' rather than delta 0 (ADR 0009 / ADR 0011).
+ */
+function compareTurnSignals(
+  turnA: RunTurn | null,
+  turnB: RunTurn | null
+): SignalComparison[] {
+  const signals: SignalComparison[] = []
+
+  // 1. Total tokens
+  if (turnA !== null && turnB !== null) {
+    const valA = getTurnTokens(turnA)
+    const valB = getTurnTokens(turnB)
+    signals.push({
+      name: 'total_tokens',
+      label: 'Total tokens',
+      unit: 'tokens',
+      runAValue: valA,
+      runBValue: valB,
+      delta: valB - valA,
+      status: 'compared',
+    })
+  } else if (turnA !== null) {
+    signals.push({
+      name: 'total_tokens',
+      label: 'Total tokens',
+      unit: 'tokens',
+      runAValue: getTurnTokens(turnA),
+      status: 'missing_in_b',
+      reason: 'Turn missing in Run B for this phase slot',
+    })
+  } else if (turnB !== null) {
+    signals.push({
+      name: 'total_tokens',
+      label: 'Total tokens',
+      unit: 'tokens',
+      runBValue: getTurnTokens(turnB),
+      status: 'missing_in_a',
+      reason: 'Turn missing in Run A for this phase slot',
+    })
+  }
+
+  // 2. Fresh input tokens
+  if (turnA !== null && turnB !== null) {
+    const freshA = turnA.tokens?.freshInput
+    const freshB = turnB.tokens?.freshInput
+    if (freshA !== undefined && freshB !== undefined) {
+      signals.push({
+        name: 'fresh_input',
+        label: 'Fresh input',
+        unit: 'tokens',
+        runAValue: freshA,
+        runBValue: freshB,
+        delta: freshB - freshA,
+        status: 'compared',
+      })
+    } else {
+      signals.push({
+        name: 'fresh_input',
+        label: 'Fresh input',
+        unit: 'tokens',
+        status: 'not_comparable',
+        reason: 'Fresh input telemetry unavailable in one of the paired turns',
+      })
+    }
+  }
+
+  // 3. Cache read share
+  if (turnA !== null && turnB !== null) {
+    const isCacheReadUnmeasurableA =
+      turnA.measurability?.['cache_read'] !== undefined &&
+      isNotMeasurable(turnA.measurability['cache_read'])
+    const isCacheReadUnmeasurableB =
+      turnB.measurability?.['cache_read'] !== undefined &&
+      isNotMeasurable(turnB.measurability['cache_read'])
+
+    if (isCacheReadUnmeasurableA || isCacheReadUnmeasurableB) {
+      const reasonA = isCacheReadUnmeasurableA
+        ? 'cache_read is not measurable in Run A'
+        : ''
+      const reasonB = isCacheReadUnmeasurableB
+        ? 'cache_read is not measurable in Run B'
+        : ''
+      signals.push({
+        name: 'cache_read',
+        label: 'Cache-read tokens',
+        unit: 'tokens',
+        status: 'not_comparable',
+        reason: [reasonA, reasonB].filter(Boolean).join('; '),
+      })
+    } else {
+      const crA = turnA.tokens?.cacheRead
+      const crB = turnB.tokens?.cacheRead
+      if (typeof crA === 'number' && typeof crB === 'number') {
+        signals.push({
+          name: 'cache_read',
+          label: 'Cache-read tokens',
+          unit: 'tokens',
+          runAValue: crA,
+          runBValue: crB,
+          delta: crB - crA,
+          status: 'compared',
+        })
+      } else {
+        signals.push({
+          name: 'cache_read',
+          label: 'Cache-read tokens',
+          unit: 'tokens',
+          status: 'not_comparable',
+          reason: 'Cache-read tokens not reported in turn telemetry',
+        })
+      }
+    }
+  }
+
+  // 4. Cost
+  if (turnA !== null && turnB !== null) {
+    const costA = turnA.cost
+    const costB = turnB.cost
+    if (
+      costA?.status === 'priced' &&
+      costB?.status === 'priced' &&
+      typeof costA.value === 'number' &&
+      typeof costB.value === 'number'
+    ) {
+      if (costA.basis === costB.basis && costA.currency === costB.currency) {
+        signals.push({
+          name: 'cost',
+          label: 'Cost',
+          unit: costA.currency ?? 'USD',
+          runAValue: costA.value,
+          runBValue: costB.value,
+          delta: costB.value - costA.value,
+          status: 'compared',
+        })
+      } else {
+        signals.push({
+          name: 'cost',
+          label: 'Cost',
+          status: 'not_comparable',
+          reason: `Cost bases or currencies differ (${costA.basis ?? 'unknown'} vs ${costB.basis ?? 'unknown'})`,
+        })
+      }
+    }
+  }
+
+  return signals
+}
+
+function buildTurnReading(
+  phase: TaskPhase,
+  turnA: RunTurn | null,
+  turnB: RunTurn | null
+): string {
+  if (turnA !== null && turnB !== null) {
+    const tokensA = getTurnTokens(turnA)
+    const tokensB = getTurnTokens(turnB)
+    const delta = tokensB - tokensA
+    const deltaStr = delta >= 0 ? `+${delta.toLocaleString()}` : delta.toLocaleString()
+    const toolsA = (turnA.tools ?? []).length > 0 ? ` [tools: ${turnA.tools!.join(', ')}]` : ''
+    const toolsB = (turnB.tools ?? []).length > 0 ? ` [tools: ${turnB.tools!.join(', ')}]` : ''
+    return `Phase ${phase} (turn ${turnA.turnIndex + 1} vs ${turnB.turnIndex + 1}): Run A used ${tokensA.toLocaleString()} tokens${toolsA}; Run B used ${tokensB.toLocaleString()} tokens${toolsB}. Delta: ${deltaStr} tokens.`
+  }
+
+  if (turnA !== null) {
+    const tokensA = getTurnTokens(turnA)
+    const toolsA = (turnA.tools ?? []).length > 0 ? ` [tools: ${turnA.tools!.join(', ')}]` : ''
+    return `Phase ${phase} (turn ${turnA.turnIndex + 1}): Run A executed ${tokensA.toLocaleString()} tokens${toolsA}; Run B required no turns in this phase slot (completed phase faster).`
+  }
+
+  if (turnB !== null) {
+    const tokensB = getTurnTokens(turnB)
+    const toolsB = (turnB.tools ?? []).length > 0 ? ` [tools: ${turnB.tools!.join(', ')}]` : ''
+    return `Phase ${phase} (turn ${turnB.turnIndex + 1}): Run B executed ${tokensB.toLocaleString()} tokens${toolsB}; Run A had no corresponding turn in this phase slot (omitted or completed faster).`
+  }
+
+  return `Phase ${phase}: No turns recorded in either run.`
+}
+
+/**
+ * Aligns two runs by task phase (exploration, implementation, verification, resolution)
+ * rather than naive turn index (Acceptance Criterion 1 & 2).
+ * Robust to mismatched turn lengths and missing phases.
+ */
+export function alignByPhase(
+  turnsA: readonly (RunTurn | CanonicalRecord)[],
+  turnsB: readonly (RunTurn | CanonicalRecord)[]
+): PhaseAlignedTurnPair[] {
+  // Normalize inputs to RunTurn with resolved phases
+  const normalizedA: RunTurn[] = []
+  let prevPhaseA: TaskPhase | undefined
+  for (let i = 0; i < turnsA.length; i++) {
+    const t = toRunTurn(turnsA[i]!, i, turnsA.length, prevPhaseA)
+    normalizedA.push(t)
+    prevPhaseA = t.phase
+  }
+
+  const normalizedB: RunTurn[] = []
+  let prevPhaseB: TaskPhase | undefined
+  for (let i = 0; i < turnsB.length; i++) {
+    const t = toRunTurn(turnsB[i]!, i, turnsB.length, prevPhaseB)
+    normalizedB.push(t)
+    prevPhaseB = t.phase
+  }
+
+  const pairs: PhaseAlignedTurnPair[] = []
+
+  // Align turns phase by phase in semantic order
+  for (const phase of TASK_PHASES) {
+    const phaseTurnsA = normalizedA.filter((t) => t.phase === phase)
+    const phaseTurnsB = normalizedB.filter((t) => t.phase === phase)
+
+    const maxCount = Math.max(phaseTurnsA.length, phaseTurnsB.length)
+    if (maxCount === 0) {
+      continue
+    }
+
+    for (let i = 0; i < maxCount; i++) {
+      const turnA = phaseTurnsA[i] ?? null
+      const turnB = phaseTurnsB[i] ?? null
+      const signals = compareTurnSignals(turnA, turnB)
+      const reading = buildTurnReading(phase, turnA, turnB)
+
+      pairs.push({
+        phase,
+        phaseIndex: i,
+        runATurn: turnA,
+        runBTurn: turnB,
+        signals,
+        reading,
+      })
+    }
+  }
+
+  return pairs
+}
+
+function detectOutcomeRegression(
+  outcomeA?: OutcomeBlock,
+  outcomeB?: OutcomeBlock
+): boolean {
+  if (!outcomeA || !outcomeB) return false
+
+  // Direct status regression: success -> failure or abandoned
+  if (
+    outcomeA.status === 'success' &&
+    (outcomeB.status === 'failure' || outcomeB.status === 'abandoned')
+  ) {
+    return true
+  }
+
+  // Test suite regression: tests failed in B that didn't in A
+  const failedA = outcomeA.testDeltas?.after?.failed ?? 0
+  const failedB = outcomeB.testDeltas?.after?.failed ?? 0
+  if (failedB > failedA && failedB > 0) {
+    return true
+  }
+
+  // Exit code regression: 0 in A, non-zero in B
+  const exitA = outcomeA.termination?.exitCode
+  const exitB = outcomeB.termination?.exitCode
+  if (exitA === 0 && typeof exitB === 'number' && exitB !== 0) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Compare two runs aligned by phase with outcome guard and sufficiency threshold (Task G4).
+ * Enforces the candidate pairing rule: auto-pairing is proposed only, requiring n >= 5
+ * completed pairs before promoting recommendations (Acceptance Criterion 3).
+ */
+export function compareRuns(
+  runA: RunComparisonInput,
+  runB: RunComparisonInput,
+  options?: RunComparisonOptions
+): ComparisonSummary {
+  const pairs = alignByPhase(runA.turns, runB.turns)
+
+  // Compute summaries per phase
+  const phaseSummaries = {} as Record<TaskPhase, PhaseSummary>
+  for (const phase of TASK_PHASES) {
+    const phasePairs = pairs.filter((p) => p.phase === phase)
+    const turnsA = phasePairs.filter((p) => p.runATurn !== null).length
+    const turnsB = phasePairs.filter((p) => p.runBTurn !== null).length
+    let tokensA = 0
+    let tokensB = 0
+    let costA: number | undefined
+    let costB: number | undefined
+
+    for (const p of phasePairs) {
+      if (p.runATurn) {
+        tokensA += getTurnTokens(p.runATurn)
+        const c = getTurnCost(p.runATurn)
+        if (c !== undefined) costA = (costA ?? 0) + c
+      }
+      if (p.runBTurn) {
+        tokensB += getTurnTokens(p.runBTurn)
+        const c = getTurnCost(p.runBTurn)
+        if (c !== undefined) costB = (costB ?? 0) + c
+      }
+    }
+
+    const tokenDelta = tokensB - tokensA
+    const costDelta =
+      costA !== undefined && costB !== undefined ? costB - costA : undefined
+
+    let reading = `Phase ${phase}: ${turnsA} turns in Run A (${tokensA.toLocaleString()} tokens); ${turnsB} turns in Run B (${tokensB.toLocaleString()} tokens).`
+    if (turnsA === 0 && turnsB > 0) {
+      reading = `Phase ${phase}: Omitted in Run A; Run B executed ${turnsB} turns (${tokensB.toLocaleString()} tokens).`
+    } else if (turnsB === 0 && turnsA > 0) {
+      reading = `Phase ${phase}: Executed ${turnsA} turns in Run A (${tokensA.toLocaleString()} tokens); omitted in Run B.`
+    }
+
+    phaseSummaries[phase] = {
+      phase,
+      turnsA,
+      turnsB,
+      tokensA,
+      tokensB,
+      tokenDelta,
+      costA,
+      costB,
+      costDelta,
+      reading,
+    }
+  }
+
+  // Compute total aggregates
+  let totalTokensA = 0
+  let totalTokensB = 0
+  let totalCostA: number | undefined
+  let totalCostB: number | undefined
+
+  for (const p of pairs) {
+    if (p.runATurn) {
+      totalTokensA += getTurnTokens(p.runATurn)
+      const c = getTurnCost(p.runATurn)
+      if (c !== undefined) totalCostA = (totalCostA ?? 0) + c
+    }
+    if (p.runBTurn) {
+      totalTokensB += getTurnTokens(p.runBTurn)
+      const c = getTurnCost(p.runBTurn)
+      if (c !== undefined) totalCostB = (totalCostB ?? 0) + c
+    }
+  }
+
+  const turnCountA = runA.turns.length
+  const turnCountB = runB.turns.length
+  const tokenDelta = totalTokensB - totalTokensA
+  const turnDelta = turnCountB - turnCountA
+
+  // Check cost comparability
+  let costComparable = true
+  let costRefusalReason: string | undefined
+  if (totalCostA !== undefined && totalCostB !== undefined) {
+    const basisA = runA.turns[0]?.cost?.basis
+    const basisB = runB.turns[0]?.cost?.basis
+    if (basisA && basisB && basisA !== basisB) {
+      costComparable = false
+      costRefusalReason = `Cost bases differ (${basisA} vs ${basisB}); refusing to compare costs directly`
+    }
+  }
+
+  // Outcome comparison & verdict (Acceptance Criterion 3)
+  const outcomeRegression = detectOutcomeRegression(runA.outcome, runB.outcome)
+  const completedPairCount =
+    options?.completedPairCount ??
+    (runA.outcome?.status === 'success' && runB.outcome?.status === 'success' ? 1 : 0)
+  const meetsSufficiencyThreshold = completedPairCount >= 5
+
+  let status: ComparisonVerdictStatus = 'insufficient_history'
+  let canPromote = false
+  let recommendation = ''
+  let refusalReason: string | undefined
+
+  if (outcomeRegression) {
+    status = 'outcome_regression'
+    canPromote = false
+    refusalReason =
+      'Promotion refused: outcome regression detected between paired runs. Modifications cannot be recommended when correctness or test outcomes regress.'
+    recommendation =
+      'Do not adopt changes from Run B: task outcome regressed compared to baseline Run A.'
+  } else if (!meetsSufficiencyThreshold) {
+    status = 'insufficient_history'
+    canPromote = false
+    refusalReason = `Auto-promotion refused: observed ${completedPairCount} completed pair(s), but minimum threshold is n >= 5 completed pairs. Automatic pairing is proposed only and requires manual confirmation.`
+    recommendation =
+      'Pairing proposed for manual review. At least 5 completed pairs without outcome regression are required before promoting automated recommendations.'
+  } else {
+    status = 'promoted'
+    canPromote = true
+    recommendation =
+      'Sufficiency threshold satisfied (n >= 5 completed pairs) with no outcome regression. Run comparison recommendation promoted.'
+  }
+
+  const summary = `Compared Run ${runA.runId} against Run ${runB.runId}: ${pairs.length} phase-aligned pairs across ${TASK_PHASES.length} phases. Outcome: ${runA.outcome?.status ?? 'unobserved'} -> ${runB.outcome?.status ?? 'unobserved'}.`
+
+  const verdict: ComparisonVerdict = {
+    status,
+    pairCount: pairs.length,
+    completedPairCount,
+    meetsSufficiencyThreshold,
+    outcomeRegression,
+    canPromote,
+    recommendation,
+    refusalReason,
+    summary,
+  }
+
+  const taskFamily =
+    typeof runA.taskFamily === 'string'
+      ? runA.taskFamily
+      : typeof runB.taskFamily === 'string'
+        ? runB.taskFamily
+        : runA.taskFamily?.id ?? runB.taskFamily?.id ?? options?.taskFamily
+
+  return {
+    runA: {
+      runId: runA.runId,
+      harness: runA.harness,
+      label: runA.label,
+      outcome: runA.outcome,
+      totalTokens: totalTokensA,
+      totalCost: totalCostA,
+      turnCount: turnCountA,
+    },
+    runB: {
+      runId: runB.runId,
+      harness: runB.harness,
+      label: runB.label,
+      outcome: runB.outcome,
+      totalTokens: totalTokensB,
+      totalCost: totalCostB,
+      turnCount: turnCountB,
+    },
+    taskFamily,
+    pairs,
+    phaseSummaries,
+    totals: {
+      tokensA: totalTokensA,
+      tokensB: totalTokensB,
+      tokenDelta,
+      turnCountA,
+      turnCountB,
+      turnDelta,
+      costA: totalCostA,
+      costB: totalCostB,
+      costDelta:
+        totalCostA !== undefined && totalCostB !== undefined
+          ? totalCostB - totalCostA
+          : undefined,
+      costComparable,
+      costRefusalReason,
+    },
+    verdict,
+  }
 }

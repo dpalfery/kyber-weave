@@ -104,7 +104,9 @@ one analysis layer serves both ingest paths.
 ## Consequences
 
 - Upstream provider coverage keeps arriving through `git subtree` merges instead of hand
-  ports; the merge boundary is pinned by `tests/KyberWeave.Tests/MergeBoundaryTests.cs`.
+  ports; the merge boundary is pinned by `tests/KyberWeave.Tests/MergeBoundaryTests.cs`, and
+  static AST import-graph and cost isolation boundaries are enforced mechanically by
+  `dash/kyber/tools/boundary.test.ts`.
 - The `dash/kyber/**` merge zone stays small and free of upstream conflicts by construction;
   anything that needs upstream to behave differently is adapted at the boundary.
 - Users get the Python pipeline's analysis rigor with zero external infrastructure, and the

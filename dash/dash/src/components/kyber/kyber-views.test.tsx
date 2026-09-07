@@ -6,6 +6,8 @@ import { SchemaView } from './SchemaView'
 import { CompareView } from './CompareView'
 import { NotMeasurable } from './NotMeasurable'
 import { DerivedTokens } from './DerivedCaveat'
+import { TurnAlignedDiff } from './TurnAlignedDiff'
+import { CompareRuns } from '../../pages/CompareRuns'
 
 function renderText(element: React.ReactElement): string {
   const walk = (node: unknown): string => {
@@ -123,5 +125,82 @@ describe('dash: Derived-token caveat', () => {
     const text = renderText(React.createElement(SchemaView, { analysis: analysis as never }))
     expect(text).toContain('lower bound')
     expect(text).toContain('o200k_base')
+  })
+})
+
+describe('dash: TurnAlignedDiff and CompareRuns UI', () => {
+  it('TurnAlignedDiff renders semantic phase titles and turn diff reading', () => {
+    const pairs = [
+      {
+        phase: 'exploration' as const,
+        phaseIndex: 0,
+        runATurn: {
+          turnIndex: 0,
+          phase: 'exploration' as const,
+          tools: ['grep_search'],
+          tokens: { freshInput: 500, output: 100, all: 600 },
+        },
+        runBTurn: {
+          turnIndex: 0,
+          phase: 'exploration' as const,
+          tools: ['find_by_name'],
+          tokens: { freshInput: 800, output: 200, all: 1000 },
+        },
+        signals: [
+          {
+            name: 'total_tokens',
+            label: 'Tokens',
+            delta: 400,
+            status: 'compared' as const,
+          },
+        ],
+        reading: 'Phase exploration: Run A used 600 tokens; Run B used 1000 tokens.',
+      },
+    ]
+
+    const text = renderText(React.createElement(TurnAlignedDiff, { pairs }))
+    expect(text).toContain('Exploration')
+    expect(text).toMatch(/Turn\s+1/)
+    expect(text).toContain('Phase exploration')
+    expect(text).toContain('grep_search')
+    expect(text).toContain('find_by_name')
+  })
+
+  it('TurnAlignedDiff renders not comparable for unmeasured signals', () => {
+    const pairs = [
+      {
+        phase: 'exploration' as const,
+        phaseIndex: 0,
+        runATurn: {
+          turnIndex: 0,
+          tokens: { all: 600 },
+        },
+        runBTurn: {
+          turnIndex: 0,
+          tokens: { all: 600 },
+        },
+        signals: [
+          {
+            name: 'cache_read',
+            label: 'Cache-read tokens',
+            status: 'not_comparable' as const,
+            reason: 'cache_read not measurable in Run A',
+          },
+        ],
+        reading: 'cache read comparison unavailable',
+      },
+    ]
+
+    const text = renderText(React.createElement(TurnAlignedDiff, { pairs }))
+    expect(text).toContain('not comparable')
+    expect(text).not.toContain('+0')
+  })
+
+  it('CompareRuns renders sufficiency threshold notice and outcome guard', () => {
+    const text = renderText(React.createElement(CompareRuns, {}))
+    expect(text).toContain('Run Comparison Workspace')
+    expect(text).toContain('Phase-Aligned Turn Diff')
+    expect(text).toContain('Candidate Run Pairs (Proposed Only)')
+    expect(text).toContain('Sufficiency')
   })
 })

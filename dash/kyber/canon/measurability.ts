@@ -54,6 +54,7 @@
 // back to what the data's shape supports.
 
 import type { HarnessAdapter } from './adapters/base.js'
+import { claudeCodeAdapter } from './adapters/claude-code.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
 import { piAdapter } from './adapters/pi.js'
@@ -133,9 +134,9 @@ export function measurabilityFor(
         metric === 'cache_creation' && provider === 'gemini'
           ? 'Gemini session files do not export a cache-creation counter.'
           : metric === 'system_prompt' && (provider === 'claude' || provider === 'claude-code')
-            ? 'Claude Code session files do not store the runtime system prompt.'
+            ? 'Claude Code session files do not store the runtime system_prompt.'
             : metric === 'tool_definitions' && (provider === 'claude' || provider === 'claude-code')
-              ? 'Claude Code session files record tool invocations, not tool definitions.'
+            ? 'Claude Code session files record tool invocations, not tool_definitions.'
               : metric === 'tool_definitions' && provider === 'codex'
                 ? 'Codex session files record tool names, not tool definition schemas.'
                 : `Session files for ${provider} do not include ${metric} data.`,
@@ -157,7 +158,7 @@ export function measurabilityFor(
  * to update.
  */
 const ADAPTERS_BY_HARNESS: ReadonlyMap<string, HarnessAdapter> = new Map(
-  [copilotAdapter, geminiAdapter, piAdapter].map((adapter) => [adapter.name, adapter]),
+  [copilotAdapter, geminiAdapter, piAdapter, claudeCodeAdapter].map((adapter) => [adapter.name, adapter]),
 )
 
 // ---------------------------------------------------------------------------
@@ -261,3 +262,465 @@ export function getMeasurability(source: string, harness: string): Measurability
   }
   return declared
 }
+
+// ---------------------------------------------------------------------------
+// Cache counter and prefix byte survey declarations (Task E4)
+// ---------------------------------------------------------------------------
+
+/** Verification level of an observed harness capability. */
+export type ConfidenceTag = 'verified' | 'documented' | 'unverified' | 'assumed'
+
+/** Availability status for cache counters or prefix byte support. */
+export type CapabilityAvailabilityStatus =
+  | 'supported'
+  | 'unsupported'
+  | 'not_measurable'
+  | 'partial'
+
+/** Fallback behavior when prefix bytes cannot be located directly. */
+export type PrefixFallback = 'detect-but-cannot-locate' | 'none'
+
+/** Cache counter availability declaration for a harness. */
+export type CacheAvailability = {
+  harness: string
+  status: CapabilityAvailabilityStatus
+  confidence: ConfidenceTag
+  cacheRead: boolean
+  cacheCreation: boolean
+  reason: string
+}
+
+/** Prefix byte availability declaration for a harness. */
+export type PrefixAvailability = {
+  harness: string
+  status: CapabilityAvailabilityStatus
+  confidence: ConfidenceTag
+  prefixBytes: boolean
+  fallback: PrefixFallback
+  reason: string
+}
+
+/** The 10 agent harnesses surveyed under Task E4. */
+export const SURVEYED_HARNESSES = [
+  'copilot',
+  'claude-code',
+  'cursor',
+  'windsurf',
+  'roo-code',
+  'cline',
+  'aider',
+  'codex',
+  'gemini',
+  'opencode',
+] as const
+
+export type SurveyedHarness = (typeof SURVEYED_HARNESSES)[number]
+
+/** Normalize harness aliases to their canonical surveyed harness name. */
+export function normalizeHarnessName(harness: string): SurveyedHarness | string {
+  const lower = harness.trim().toLowerCase()
+  if (lower === 'claude' || lower === 'claude-code') return 'claude-code'
+  if (lower === 'copilot' || lower === 'copilot-chat' || lower === 'copilot-cli') return 'copilot'
+  if (lower === 'cursor' || lower === 'cursor-agent') return 'cursor'
+  if (lower === 'windsurf' || lower === 'cascade') return 'windsurf'
+  if (lower === 'roo' || lower === 'roo-code' || lower === 'roo-cline') return 'roo-code'
+  if (lower === 'cline' || lower === 'cline-cli') return 'cline'
+  if (lower === 'aider') return 'aider'
+  if (lower === 'codex' || lower === 'openai-codex') return 'codex'
+  if (lower === 'gemini' || lower === 'antigravity' || lower === 'agy') return 'gemini'
+  if (lower === 'opencode') return 'opencode'
+  return lower
+}
+
+const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability, 'harness'>> = new Map([
+  [
+    'copilot',
+    {
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: true,
+      reason:
+        'Copilot Chat OTLP exports cache read and creation counters; Copilot CLI preserves ASAD tiers in SQLite.',
+    },
+  ],
+  [
+    'claude-code',
+    {
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: true,
+      reason:
+        'Claude Code enhanced telemetry exports cache_read_tokens and cache_creation_tokens using Anthropic cache-exclusive convention.',
+    },
+  ],
+  [
+    'cursor',
+    {
+      status: 'unsupported',
+      confidence: 'verified',
+      cacheRead: false,
+      cacheCreation: false,
+      reason:
+        'Cursor hook JSONL and enterprise OTel export provide token totals without cache read/write counters.',
+    },
+  ],
+  [
+    'windsurf',
+    {
+      status: 'unsupported',
+      confidence: 'documented',
+      cacheRead: false,
+      cacheCreation: false,
+      reason:
+        'Windsurf Cascade telemetry exports non-model metadata and quarantined windsurf.* attributes without cache counters.',
+    },
+  ],
+  [
+    'roo-code',
+    {
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: true,
+      reason:
+        'Roo Code ui_messages.json api_req_started events record cacheReads and cacheWrites counters.',
+    },
+  ],
+  [
+    'cline',
+    {
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: true,
+      reason:
+        'Cline task transcripts (ui_messages.json) record cacheReads and cacheWrites counters.',
+    },
+  ],
+  [
+    'aider',
+    {
+      status: 'unsupported',
+      confidence: 'documented',
+      cacheRead: false,
+      cacheCreation: false,
+      reason:
+        'Aider displays cache metrics in terminal output via LiteLLM but exports no native OTLP telemetry and records no structured cache counters in chat history.',
+    },
+  ],
+  [
+    'codex',
+    {
+      status: 'supported',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: false,
+      reason:
+        'Codex rollout session files record input_tokens, output_tokens, and cached_tokens (cache_read); cache creation is implicit.',
+    },
+  ],
+  [
+    'gemini',
+    {
+      status: 'partial',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: false,
+      reason:
+        'Gemini telemetry exports cached_content_token_count (cache_read); Gemini explicit caching architecture has no cache-creation counter.',
+    },
+  ],
+  [
+    'opencode',
+    {
+      status: 'not_measurable',
+      confidence: 'documented',
+      cacheRead: false,
+      cacheCreation: false,
+      reason:
+        'OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.',
+    },
+  ],
+])
+
+const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailability, 'harness'>> = new Map([
+  [
+    'copilot',
+    {
+      status: 'supported',
+      confidence: 'verified',
+      prefixBytes: true,
+      fallback: 'detect-but-cannot-locate',
+      reason:
+        'Content-enabled OTLP capture reconstructs system instructions and message parts; falls back to cache_read / input when capture is off.',
+    },
+  ],
+  [
+    'claude-code',
+    {
+      status: 'not_measurable',
+      confidence: 'documented',
+      prefixBytes: false,
+      fallback: 'detect-but-cannot-locate',
+      reason:
+        'Session files omit runtime system prompt and tool definitions; raw API body export (OTEL_LOG_RAW_API_BODIES=1) is unconfigured by default.',
+    },
+  ],
+  [
+    'cursor',
+    {
+      status: 'not_measurable',
+      confidence: 'verified',
+      prefixBytes: false,
+      fallback: 'none',
+      reason:
+        'Cursor hook events emit isolated prompt text without multi-turn prefix reconstruction or cache counter fallback.',
+    },
+  ],
+  [
+    'windsurf',
+    {
+      status: 'not_measurable',
+      confidence: 'documented',
+      prefixBytes: false,
+      fallback: 'none',
+      reason:
+        'Cascade local storage and telemetry do not export raw request prefix bytes or system prompt boundaries.',
+    },
+  ],
+  [
+    'roo-code',
+    {
+      status: 'not_measurable',
+      confidence: 'verified',
+      prefixBytes: false,
+      fallback: 'detect-but-cannot-locate',
+      reason:
+        'Conversation history is stored on disk but dynamic template system prompts are not persisted; fallback cache_read / input is available.',
+    },
+  ],
+  [
+    'cline',
+    {
+      status: 'not_measurable',
+      confidence: 'verified',
+      prefixBytes: false,
+      fallback: 'detect-but-cannot-locate',
+      reason:
+        'Conversation history is stored but runtime prompt template is omitted; fallback cache_read / input is available.',
+    },
+  ],
+  [
+    'aider',
+    {
+      status: 'not_measurable',
+      confidence: 'documented',
+      prefixBytes: false,
+      fallback: 'none',
+      reason:
+        'Aider chat history (.aider.chat.history.md) lacks structured repo map and system prompt prefix demarcation.',
+    },
+  ],
+  [
+    'codex',
+    {
+      status: 'supported',
+      confidence: 'verified',
+      prefixBytes: true,
+      fallback: 'none',
+      reason:
+        'Codex rollout files preserve full base_instructions.text, agents_md.text, conversation history, and tool outputs for prefix reconstruction.',
+    },
+  ],
+  [
+    'gemini',
+    {
+      status: 'not_measurable',
+      confidence: 'verified',
+      prefixBytes: false,
+      fallback: 'detect-but-cannot-locate',
+      reason:
+        'Gemini telemetry exports model operations and tool names without raw prompt prefix bytes; fallback cache_read / input is available.',
+    },
+  ],
+  [
+    'opencode',
+    {
+      status: 'not_measurable',
+      confidence: 'documented',
+      prefixBytes: false,
+      fallback: 'none',
+      reason:
+        'OpenCode OpenTelemetry is disabled; no prefix bytes or transcript telemetry are available.',
+    },
+  ],
+])
+
+/**
+ * Return the typed cache counter availability and confidence tag for a harness.
+ */
+export function cacheAvailability(harness: string): CacheAvailability {
+  const normalized = normalizeHarnessName(harness) as SurveyedHarness
+  const survey = HARNESS_CACHE_SURVEY.get(normalized)
+  if (survey !== undefined) {
+    return { harness: normalized, ...survey }
+  }
+  return {
+    harness,
+    status: 'not_measurable',
+    confidence: 'assumed',
+    cacheRead: false,
+    cacheCreation: false,
+    reason: `Harness "${harness}" is not catalogued in the telemetry inventory.`,
+  }
+}
+
+/**
+ * Return the typed prefix byte availability, confidence tag, and fallback mode for a harness.
+ */
+export function prefixAvailability(harness: string): PrefixAvailability {
+  const normalized = normalizeHarnessName(harness) as SurveyedHarness
+  const survey = HARNESS_PREFIX_SURVEY.get(normalized)
+  if (survey !== undefined) {
+    return { harness: normalized, ...survey }
+  }
+  return {
+    harness,
+    status: 'not_measurable',
+    confidence: 'assumed',
+    prefixBytes: false,
+    fallback: 'none',
+    reason: `Harness "${harness}" is not catalogued in the telemetry inventory.`,
+  }
+}
+
+/**
+ * Return the availability declaration for a specific diagnostic dimension of a harness
+ * (Decision D3, ADR 0009, ADR 0011).
+ *
+ * In accordance with the core measurability discipline: where telemetry is absent
+ * (e.g. prefix bytes on Cursor, cache counters on Aider, or tool schemas on raw transcripts),
+ * this function emits an explicit `not_measurable` with its empirical reason, never
+ * fabricating data or defaulting to a misleading zero.
+ */
+export function harnessDimensionAvailability(harness: string, dimension: string): MetricAvailability {
+  const normalized = normalizeHarnessName(harness)
+  const dim = dimension.trim().toLowerCase()
+
+  // 1. Cache hit rate / cache efficiency: consult the Task E4 cache survey
+  if (dim === 'cache_hit_rate' || dim === 'cache_efficiency' || dim === 'cache') {
+    const cache = cacheAvailability(normalized)
+    if (cache.status === 'unsupported' || cache.status === 'not_measurable') {
+      return unavailable(cache.reason)
+    }
+    return 'measured'
+  }
+
+  // 2. Request prefix stability / prefix bytes: consult the Task E4 prefix survey
+  if (dim === 'prefix_stability' || dim === 'prefix_bytes' || dim === 'prefix') {
+    const prefix = prefixAvailability(normalized)
+    if (prefix.status === 'unsupported' || prefix.status === 'not_measurable') {
+      return unavailable(prefix.reason)
+    }
+    return 'measured'
+  }
+
+  // 3. Context pressure: requires per-turn input token counters and context limit
+  if (
+    dim === 'context_pressure' ||
+    dim === 'context_pressure_median' ||
+    dim === 'context_pressure_p95' ||
+    dim === 'context_hygiene' ||
+    dim === 'pressure'
+  ) {
+    if (normalized === 'opencode') {
+      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled and exports no supported session files.')
+    }
+    if (normalized === 'aider') {
+      return unavailable('Aider displays terminal metrics via LiteLLM but records no structured context window or per-turn token usage.')
+    }
+    return 'measured'
+  }
+
+  // 4. Tool yield: requires tool definition schemas and invocation tracking
+  if (dim === 'tool_yield' || dim === 'tool_definitions' || dim === 'schema_cost') {
+    if (normalized === 'cursor') {
+      return unavailable('Cursor hook telemetry does not export tool definition schemas.')
+    }
+    if (normalized === 'aider') {
+      return unavailable('Aider chat history does not export tool definitions or schemas.')
+    }
+    if (normalized === 'windsurf') {
+      return unavailable('Windsurf Cascade telemetry exports non-model metadata without tool definition schemas.')
+    }
+    if (normalized === 'opencode') {
+      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+    }
+    if (normalized === 'claude-code') {
+      return unavailable('Claude Code session files record tool invocations, not tool definition schemas; raw API body export is required.')
+    }
+    if (normalized === 'codex') {
+      return unavailable('Codex session files record tool names, not tool definition schemas.')
+    }
+    if (normalized === 'pi') {
+      return unavailable('pi telemetry does not export tool definitions.')
+    }
+    return 'measured'
+  }
+
+  // 5. Delegation overhead: requires execution hierarchy or subagent parent/child linkage
+  if (dim === 'delegation_overhead' || dim === 'execution_structure' || dim === 'delegation') {
+    if (normalized === 'cursor') {
+      return unavailable('Cursor does not export execution hierarchy or subagent delegation linkage.')
+    }
+    if (normalized === 'aider') {
+      return unavailable('Aider does not export execution hierarchy or subagent delegation linkage.')
+    }
+    if (normalized === 'windsurf') {
+      return unavailable('Windsurf does not export execution hierarchy or subagent delegation linkage.')
+    }
+    if (normalized === 'opencode') {
+      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+    }
+    if (normalized === 'codex') {
+      return unavailable('Codex session files record standalone sessions without execution hierarchy.')
+    }
+    return 'measured'
+  }
+
+  // 6. Field coverage: meta-metric calculated over the set of declarations
+  if (dim === 'field_coverage' || dim === 'coverage') {
+    return 'measured'
+  }
+
+  // 7. Cost: billing basis (derived from token usage or reported)
+  if (dim === 'cost') {
+    if (normalized === 'opencode') {
+      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+    }
+    return 'derived'
+  }
+
+  // 8. Token usage: basic token counters
+  if (dim === 'token_usage') {
+    if (normalized === 'opencode') {
+      return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
+    }
+    if (normalized === 'aider') {
+      return unavailable('Aider displays terminal output via LiteLLM without structured token counters.')
+    }
+    return 'measured'
+  }
+
+  // Uncatalogued harness fallback
+  const isCatalogued = (SURVEYED_HARNESSES as readonly string[]).includes(normalized)
+  if (!isCatalogued) {
+    return unavailable(`Harness "${harness}" is not catalogued in the telemetry inventory.`)
+  }
+
+  return 'measured'
+}
+
+

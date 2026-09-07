@@ -4,9 +4,18 @@ title: KyberDash architecture
 doc-type: architecture
 component: KyberDash
 source-root: dash
-status: draft
+status: current
 owner: dpalfery
-last-reviewed: 2026-09-04
+last-reviewed: 2026-09-05
+decided-by:
+  - adr/0008-kyberdash-single-canonical-store
+  - adr/0009-multi-signal-ingestion-span-shaped-record
+  - adr/0010-keywords-prefix-coverage-and-oov-idf
+  - adr/0011-asad-only-context-view-and-payload-contract
+  - adr/0012-progressive-disclosure-6-level-diagnostic-spine
+  - adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking
+  - adr/0014-unclipped-turn-inspection-and-copy-out-protocol
+  - adr/0015-opt-in-llm-context-review-seam
 keywords:
   - dashboard
   - codeburn
@@ -245,96 +254,197 @@ The `session` table holds derived sessions, one row per conversation. Each paylo
 running the analysis layer (`analyzeContext`, `rankSchemas`, `buildTimeline`) over the
 records, and the table is a cache: dropping every row and rebuilding loses nothing.
 
-`KyberBridge` (`dash/kyber/server/bridge.ts`) reads `canon.db` and serves the derived sessions
-above. That is the single-store end state in [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md):
-production code under `dash/kyber` does not open a Python `sessions.db`, and
-`AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy session. Tests under `dash/kyber`
-prove those environment variables are ignored for session listing and payload.
+### Canonical Run and AgentExecution Entities (ADR 0012)
 
-The session projection emits the ASAD payload directly. It preserves per-bucket
-measurability and reasons, so a source that cannot supply content, schemas, structure, or
-counters produces `not_measurable` rather than a misleading zero. The projection includes
-the ordered turns and requests, context at the first and last measured turns, tool and
-per-server schema data, timeline, reconciliation, coverage, problems, and summary.
+Single-session views obscure multi-agent collaboration overhead (tokens and latency spent
+handing off tasks to subagents). KyberDash introduces two first-class derived entities in
+`canon.db` (`dash/kyber/canon/runs.ts`):
+
+- **`Run` (`RunRow`)**: Represents a single user-initiated task or unit of work. It aggregates
+  all executions participating in that task, recording token totals, estimated waste,
+  duration, and outcome signals (`exit_code`, `test_status_delta`, `outcome_status`).
+- **`AgentExecution` (`ExecutionRow`)**: Represents an individual agent invocation within a
+  run, tracking `parent_execution_id` and execution role (`root`, `child`, `delegated`).
+
+#### Derived Run Identity (Decision D13)
+
+When a harness natively emits a run or task identifier, that identity is preserved directly.
+Where run identity is absent, KyberDash computes a **derived grouping** based on
+working-directory affinity and bounded inter-session time gaps. Derived groupings are
+explicitly recorded in `grouping_basis` as `derived` with the specific rule named. Heuristics
+are never silently presented as reported fact. Rebuilding via `kyber build` re-projects both
+tables deterministically from retained records.
+
+`KyberBridge` (`dash/kyber/server/bridge.ts`) reads `canon.db` and serves the derived sessions,
+runs, harness rollups, findings, and unclipped content. That is the single-store end state in
+[ADR 0008](../adr/0008-kyberdash-single-canonical-store.md): production code under `dash/kyber`
+does not open a Python `sessions.db`, and `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy session.
+Tests under `dash/kyber` prove those environment variables are ignored for session listing and payload.
+
+The session projection emits the ASAD payload directly ([ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md)).
+It preserves per-bucket measurability and reasons, so a source that cannot supply content, schemas,
+structure, or counters produces `not_measurable` rather than a misleading zero.
 
 Derived token counts (R4.6) come from `dash/kyber/canon/tokens.ts`, a tokenizer wrapper with a
 store-backed memo cache, and are tagged as derived with the model name so consumers present
 them as a lower bound.
 
-## Analysis layer
+## Diagnostic Spine and Progressive Disclosure (ADR 0012)
 
-Each analysis is a port of a Python module, one to one, so the parity gate has something to
-compare against:
+KyberDash structures agent context analysis into a six-level progressive-disclosure hierarchy:
+
+```
+Level 1: All Harnesses (Attention)
+   └── Level 2: Harness
+          └── Level 3: Run
+                 └── Level 4: AgentExecution (Session)
+                        └── Level 5: Turn
+                               └── Level 6: ContextItem (Block / Part)
+```
+
+1. **All Harnesses (`Attention.tsx`)**: Cross-harness landing view ranking attention by
+   aggregate context pressure, cache invalidation volume, and top telemetry-grounded findings.
+2. **Harness (`HarnessDetail.tsx`)**: Deep dive into a single agent harness (e.g. Claude Code,
+   Copilot, Cursor) showing harness rollups, coverage percentages, and run inventory.
+3. **Run (`RunDetail.tsx`)**: Task-level view showing the hierarchical execution tree,
+   delegation overhead, phase breakdown, run scorecard, and ranked run findings.
+4. **AgentExecution (`AgentSessionDashboard.tsx`)**: The full single-session ASAD view,
+   visualizing per-turn token spend, context composition, and tool schema cost.
+5. **Turn (`SessionSpendCharts`, `ContextPressureStrip`)**: Granular turn breakdown exposing
+   composition bands, fresh input spikes (cache invalidation), and schema residency.
+6. **ContextItem (`ContextInspector.tsx`)**: Full unclipped plain-text inspection per semantic
+   bucket, subdivided by part, with whole-turn and per-block copy out ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)).
+
+### Independent Dimension Vectors — No Composite Score (Decision D3)
+
+KyberDash explicitly rejects composite efficiency scores, letter grades, or single-number
+indexes. Agent performance is evaluated across six orthogonal dimensions:
+- **Context Hygiene**: Proportion of context occupied by active instructions vs redundant history.
+- **Cache Efficiency**: Cache read ratio, prefix stability, and cache breakpoint invalidation.
+- **Tool Yield**: Ratio of tool invocations producing utilized results vs resident schema weight.
+- **Skill Utilisation**: Empirical invocation frequency of declared capabilities.
+- **Delegation Overhead**: Tokens and latency dedicated strictly to orchestrating child handoffs.
+- **Continuity**: Turn-over-turn context stability and retention across compaction events.
+
+A dimension lacking telemetry renders as a dash (`—`) with an explicit reason, never as zero
+and never as a passing grade.
+
+## Analysis Layer
+
+The analysis layer contains pure, hermetic analysis modules that operate over canonical records:
 
 | Analysis | Module | Realizes |
 |---|---|---|
 | Context bucketing, residual, pressure, cache-invalidation flag | `dash/kyber/analysis/context.ts` (`analyzeContext`) | R7 |
-| Schema-cost ranking, never-invoked cost, bounded unused range | `dash/kyber/analysis/schema.ts` | R8 |
-| Hierarchical timeline, subagent and auxiliary separation | `dash/kyber/analysis/timeline.ts` | R9 |
-| Cross-harness metric table with availability | `dash/kyber/analysis/compare.ts` | R10 |
+| Schema-cost ranking, never-invoked cost, bounded unused range | `dash/kyber/analysis/schema.ts` (`rankSchemas`) | R8 |
+| Hierarchical timeline, subagent and auxiliary separation | `dash/kyber/analysis/timeline.ts` (`buildTimeline`) | R9 |
+| Cross-harness metric table with availability | `dash/kyber/analysis/compare.ts` (`compareHarnesses`) | R10 |
+| Pure signal engine (8 detectors) | `dash/kyber/analysis/signals.ts` (`computeSignals`) | ADR 0012, ADR 0013 |
+| Context-item classification (evidence of use) | `dash/kyber/analysis/classify.ts` (`classifyContextItem`) | ADR 0013 (D15) |
+| Telemetry-grounded finding engine & waste ranking | `dash/kyber/analysis/findings.ts` (`detectFindings`) | ADR 0013 (D5, D6, D8) |
+| Run & turn comparison by task phase | `dash/kyber/analysis/compare.ts`, `pairing.ts` | ADR 0012 (D11) |
+| Prediction logging & calibration curve | `dash/kyber/analysis/calibration.ts` | ADR 0012 (D11) |
+| Opt-in LLM context review seam | `dash/kyber/analysis/review.ts` | ADR 0015 (D10) |
 
-Context bucketing buckets by part type — system prompt, tool definitions, instruction and
-workspace context, conversation history, file contents through tool results — never by message
-role (R7.2). The unbucketed residual is exposed explicitly and attributed to tokenizer drift
-only where that is the actual cause (R7.3). A sharp fresh-input rise between consecutive turns
-flags the turn — the visible signature of cache invalidation (R7.5).
+### Pure Signals Engine (`dash/kyber/analysis/signals.ts`)
 
-Unused-schema cost is expressed as a range bounded by the cache-read floor and the fresh-input
-ceiling, because the true figure depends on cache behaviour the telemetry does not report
-(R8.4). Tool definitions are grouped by MCP server against ground-truth names rather than by
-splitting a prefixed identifier (R8.3).
+The signal engine computes deterministic diagnostic signals as pure, testable detectors. Each
+detector declares its numerator, denominator, measurement class, and explicit unobservability rule:
+- `contextReuseRatio`: Turn-over-turn token overlap via whitespace-normalized hashing.
+- `cachePrefixStability`: Byte-prefix preservation before cache breakpoints; falls back to counter ratio if prefix bytes are unavailable.
+- `toolYield`: Ratio of invoked tool calls to offered tool schemas. Credits on weak evidence, debits only on strong evidence.
+- `duplicateCallRate`: Frequency of byte-identical tool invocations within the same turn phase.
+- `oversizedResultShare`: Proportion of turn input consumed by large tool output blocks.
+- `compactionPressure`: Rate of context window growth relative to model context limits.
+- `delegationOverhead`: Percentage of run tokens spent on parent-child coordination.
+- `skillUtilisation`: Observed activation frequency of declared skills (ranked last per D16).
 
-## Surface layer
+### Context-Item Classification (Decision D15)
+
+Context items are classified strictly by empirical observability rather than value judgements:
+`evidence of use: strong / weak / none / unobserved`.
+- `unobserved` indicates the harness does not emit sufficient telemetry to determine whether the
+  block was read, and is never merged with `none`.
+- Unattributed residuals (difference between reported usage tokens and reconstructed parts) form
+  an isolated block, never distributed across other buckets.
+
+### Telemetry-Grounded Finding Contracts and Waste Ranking (ADR 0013)
+
+Every diagnostic finding satisfies the strict **Finding Contract (Decision D5)**:
+1. **Mechanism prose**: Explains the technical cause and impact of the observed pattern.
+2. **Evidence rows (≥2)**: Every finding links to at least two concrete telemetry records with IDs.
+3. **Measurement class**: Declared as `deterministic`, `inferred`, or `coverage-gap`.
+4. **Stated confidence basis**: Written justification for assigned confidence and what would raise it.
+5. **Recommendation**: Actionable guidance adhering to **Relocation Over Deletion (Decision D8)**.
+6. **Expected improvement & error bar**: Estimated token/latency savings with uncertainty bounds.
+7. **Outcome-risk caveat**: Mandatory disclosure of potential execution risks.
+
+Findings are ordered by the **Waste Ranking Formula (Decision D6)**:
+$$\text{Rank Score} = \text{Estimated Recoverable Waste} \times \text{Outcome Risk} \times \text{Confidence}$$
+An inferred finding can never outrank a deterministic finding of comparable size. Recoverable
+waste is an estimate tied to a specific recommended action.
+
+Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
+stamp (Decision D17), forcing automatic recomputation whenever detectors are updated.
+
+### Run Comparison and Phase Alignment (Decision D11)
+
+Comparing runs across prompt revisions or harness configurations requires phase alignment.
+`alignByPhase` aligns runs by logical task phase (discovery, editing, verification) rather than
+chronological turn index. Comparison verdicts enforce a statistical sufficiency threshold
+($n \ge 5$ completed pairs without outcome regression) before promoting observations to advice.
+Diagnostic predictions are logged and scored in `dash/kyber/analysis/calibration.ts`.
+
+### Opt-In LLM Context Review Seam (ADR 0015)
+
+When developers request subjective analysis of prompt quality, the LLM review seam provides
+an on-demand second opinion:
+- **Strictly Opt-In (Decision D10)**: No prompt text leaves the machine without a discrete user action.
+- **Configurable Providers**: Supports Anthropic, OpenAI-compatible (including local Ollama / vLLM), and `NullProvider`.
+- **System Prompt Guardrails**: Strictly enforces separation of measurement from inference, forbids calling unobserved context waste, enforces relocation over deletion (D8), and requires outcome risk statements.
+- **Finding Isolation**: LLM review output is ephemeral and is never written into the canonical `finding` table.
+
+## Surface Layer
 
 `dash/kyber/dashboard/data.ts` (`getDashboardData`) turns the canonical store into the single
-payload the delivery surfaces consume: period reports, breakdown tables, daily activity, and the
-analysis payloads of Requirements 7 through 10. The terminal TUI dashboard, the browser-based web
-dashboard views under `dash/kyber/web/components/`, the status contract, and the MCP server all derive
-from it (R11.1).
+payload delivery surfaces consume (R11.1).
 
-For operational instructions, dev runners, and test suites across all four surfaces, see the
-[KyberDash runbook](runbook.md).
+### Web Dashboard (dash/dash/)
 
-### Terminal TUI Dashboard (dash/src/dashboard.tsx)
+The React web dashboard provides progressive-disclosure views matching the 6-level spine:
+- **`Attention.tsx`**: Cross-harness dashboard and fleet-wide finding leaderboard.
+- **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, and run browser.
+- **`RunDetail.tsx`**: Multi-agent run topology, execution tree, and run scorecard.
+- **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, and risk caveats.
+- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards.
+- **`ContextInspector.tsx`**: Full unclipped context viewer with part tabs and copy-out protocol.
+- **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 
-The interactive Terminal User Interface (TUI) dashboard is built with [Ink](https://github.com/vadimdemedes/ink)
-(React in the terminal) and runs directly in any modern terminal emulator supporting ANSI and 24-bit TrueColor.
-It provides responsive layout breakpoints adapting to terminal width (single column at 89 columns or below,
-two columns from 90 to 134 columns, and three columns at 135 columns and above, clamped at 256 columns),
-shortened project paths, interactive keyboard navigation, and live session refresh.
+### Backend REST API Contract (dash/kyber/server/routes.ts)
 
-### Web Dashboard (dash/dash/) and 5-Tab Navigation Topology
-
-The standalone browser web dashboard is a React application built with Vite and Tailwind CSS.
-Served directly by the CLI command `codeburn web` (or `node dash/dist/cli.js web`), it injects session
-bootstrapping with XSS protection and exposes five primary top-level views ([ADR 0007](../adr/0007-kyberdash-agent-session-analysis-integration.md)):
-
-1. **`[Usage]`**: CodeBurn device overview, multi-provider spend rollups, top projects, and daily spend timelines.
-2. **`[Context]`**: One canonical session explorer for every harness. Expanding a session loads
-   the **`AgentSessionDashboard`** directly from its ASAD payload:
-   - *Overview Strip*: Metric summary chips (spans, turns, total tokens, cache hit ratio, cost basis), reconciliation badge (`exact_match`), subagent links, and harness caveats.
-   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token usage across turns (fresh input, cache read, cache creation, output).
-   - *Context Composition Heatmap & Chart*: Token distribution across turns by semantic bucket (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
-   - *Tool & Schema Cost Table*: Ranked tool schemas, resident size, invocation counts, and unused schema waste range.
-   - *Execution Timeline / Call Tree*: Hierarchical span execution tree with status badges, durations, and auxiliary/subagent flags.
-   - *Slide-out Inspector Drawer (`SessionInspectorDrawer`)*: Full canonical content on demand, with any server-side clipping labelled by shown and total length.
-3. **`[Compare]`**: Cross-harness comparison matrix benchmarking sessions, tokens/turn, tools offered vs invoked, and cost across agents.
-4. **`[Quarantine]`**: Quarantined spans holding unrecognized namespaces or malformed attributes for triage.
-5. **`[Problems]`**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
-
-### Backend REST API Contract (dash/src/web-dashboard.ts)
-
-The web dashboard server (`dash/src/web-dashboard.ts`) wires HTTP requests directly to `KyberBridge`:
+The web dashboard server wires HTTP requests directly to `KyberBridge`:
 
 | Endpoint | Method | Response Schema | Description |
 |---|---|---|---|
+| `/api/kyber/harnesses` | `GET` | `{ harnesses: HarnessRollupRow[] }` | List harness rollups with 6-dimension availability. |
+| `/api/kyber/harness/:id` | `GET` | `HarnessRollupRow` | Detail for a single harness including coverage metrics. |
+| `/api/kyber/runs` | `GET` | `{ runs: RunRow[] }` | List runs; supports `?harness=`. |
+| `/api/kyber/run/:id` | `GET` | `{ run, executionTree, executions, findings }` | Complete run detail with parent/child execution tree. |
 | `/api/kyber/sessions` | `GET` | `{ sessions: SessionSummary[] }` | List sessions; supports `?limit=` and `?harness=`. |
 | `/api/kyber/session/:id` | `GET` | `SessionPayload` | Full session payload with turns, context, tools, and timeline. |
-| `/api/kyber/compare` | `GET` | `ComparisonTableResult` | Cross-harness comparison matrix (`harnesses`, `rows`, `problems`). |
+| `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part. |
+| `/api/kyber/session/:id/turn/:index/content` | `GET` | `TurnContentResult` | Full unclipped assembled context for a specific turn (D4). |
+| `/api/kyber/findings` | `GET` | `{ findings: Finding[] }` | Ranked findings; supports `?runId=`, `?sessionId=`. |
+| `/api/kyber/finding/:id` | `GET` | `Finding` | Single finding detail with evidence rows and risk caveats. |
+| `/api/kyber/predictions` | `GET`, `POST` | `{ predictions: Prediction[] }` | Query or record prediction calibration entries. |
+| `/api/kyber/calibration` | `GET` | `CalibrationSummary` | Calibration curve and scoring summary. |
+| `/api/kyber/compare` | `GET` | `ComparisonTableResult` | Cross-harness comparison matrix. |
+| `/api/kyber/compare/runs` | `GET` | `RunComparisonResult` | Phase-aligned comparison between two runs. |
+| `/api/kyber/review` | `POST` | `ReviewResponse` | Opt-in LLM context review invocation (D10). |
+| `/api/kyber/review/status` | `GET` | `{ provider, isConfigured }` | Review provider configuration status. |
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[] }` | Recorded problems; supports `?limit=`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
-| `/api/kyber/session/:id/content` | `GET` | `SessionContent` | Full canonical content for an inspected session part, including explicit clipping metadata. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
 
@@ -381,6 +491,22 @@ project; the measured rationale the retirement would otherwise take with it is p
   foundational decisions and their rejected alternatives.
 - [ADR 0007](../adr/0007-kyberdash-agent-session-analysis-integration.md) — Agent Session Analysis
   integration and navigation topology; its dual-database decision is superseded by
-  [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md).
+  [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md), and its dual Context
+  rendering path is amended by
+  [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md).
+- [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) — single canonical store with derived sessions.
+- [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md) — logs enrich one
+  span-shaped record; non-model spans and unmatched logs are quarantined.
+- [ADR 0010](../adr/0010-keywords-prefix-coverage-and-oov-idf.md) — `keywords` on this
+  document are retrieval identity, not body mentions.
+- [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md) — ASAD-only Context view and payload contract.
+- [ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md) — progressive disclosure 6-level diagnostic spine, first-class runs, and independent dimension vectors.
+- [ADR 0013](../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) — telemetry-grounded finding contracts, waste ranking formula, and relocation discipline.
+- [ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md) — unclipped turn context inspection, rolling retention window, and copy-out protocol.
+- [ADR 0015](../adr/0015-opt-in-llm-context-review-seam.md) — opt-in LLM context review seam and finding isolation.
+- [Relocation over context deletion standard](../rules/relocation-over-deletion.md) — diagnostic recommendations prioritize moving and progressive disclosure over context removal (D8).
+- [Honest unobservability standard](../rules/honest-unobservability.md) — missing telemetry and coverage gaps are explicit and never coerced to zero.
+- [Secondary cost display standard](../rules/secondary-cost-display.md) — cost is strictly a derived secondary metric behind token and latency health (D9).
+- [Ban on composite efficiency scores](../rules/composite-efficiency-ban.md) — evaluation strictly preserves independent dimension vectors (D3).
 - [KyberDash index](README.md) — the product story.
 - [Component catalog](../catalog.md)

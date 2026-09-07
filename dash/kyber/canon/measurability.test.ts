@@ -10,7 +10,6 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { ParsedProviderCall } from '../../src/providers/types.js'
 import { analyzeContext, type ContextAnalysis, type ContextTurn } from '../analysis/context.js'
 import {
   TOKEN_RESIDENCY_RATES,
@@ -18,13 +17,17 @@ import {
   type SchemaCostAnalysis,
   type ToolDefinition,
 } from '../analysis/schema.js'
-import { sourceFor, synthesizeCall } from '../synth/synth.js'
+import { sourceFor, synthesizeCall, type ParsedProviderCall } from '../synth/synth.js'
 import {
   FILE_SOURCE_PREFIX,
+  SURVEYED_HARNESSES,
+  cacheAvailability,
   contextCompositionAvailability,
   getMeasurability,
   isFileSource,
   measurabilityFor,
+  normalizeHarnessName,
+  prefixAvailability,
   schemaRankingAvailability,
 } from './measurability.js'
 
@@ -353,3 +356,108 @@ describe('source measurability reasons (B3)', () => {
     ).toMatch(/gemini|cache.creation/i)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Task E4 — Survey cache and prefix availability per harness
+// ---------------------------------------------------------------------------
+
+describe('cacheAvailability and prefixAvailability (Task E4)', () => {
+  it('covers all 10 surveyed harnesses with valid availability and confidence tags', () => {
+    expect(SURVEYED_HARNESSES).toHaveLength(10)
+    const validConfidences = new Set(['verified', 'documented', 'unverified', 'assumed'])
+    const validStatuses = new Set(['supported', 'unsupported', 'not_measurable', 'partial'])
+    const validFallbacks = new Set(['detect-but-cannot-locate', 'none'])
+
+    for (const harness of SURVEYED_HARNESSES) {
+      const cache = cacheAvailability(harness)
+      expect(cache.harness).toBe(harness)
+      expect(validStatuses.has(cache.status), `${harness} cache status must be valid`).toBe(true)
+      expect(validConfidences.has(cache.confidence), `${harness} cache confidence must be valid`).toBe(true)
+      expect(typeof cache.reason).toBe('string')
+      expect(cache.reason.length).toBeGreaterThan(0)
+
+      const prefix = prefixAvailability(harness)
+      expect(prefix.harness).toBe(harness)
+      expect(validStatuses.has(prefix.status), `${harness} prefix status must be valid`).toBe(true)
+      expect(validConfidences.has(prefix.confidence), `${harness} prefix confidence must be valid`).toBe(true)
+      expect(validFallbacks.has(prefix.fallback), `${harness} prefix fallback must be valid`).toBe(true)
+      expect(typeof prefix.reason).toBe('string')
+      expect(prefix.reason.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('records detect-but-cannot-locate fallback where prefix bytes are unavailable but cache counters exist', () => {
+    // Claude Code, Roo Code, Cline, Gemini cannot reconstruct prefix bytes directly,
+    // but carry cache counters that permit the fallback ratio (cache_read ÷ input)
+    for (const harness of ['claude-code', 'roo-code', 'cline', 'gemini']) {
+      const prefix = prefixAvailability(harness)
+      expect(prefix.prefixBytes).toBe(false)
+      expect(prefix.fallback).toBe('detect-but-cannot-locate')
+    }
+  })
+
+  it('records none fallback where neither prefix bytes nor cache counters exist', () => {
+    // Cursor, Windsurf, Aider, OpenCode lack cache counters or prefix bytes
+    for (const harness of ['cursor', 'windsurf', 'aider', 'opencode']) {
+      const prefix = prefixAvailability(harness)
+      expect(prefix.fallback).toBe('none')
+    }
+  })
+
+  it('declares full prefix byte support for harnesses that persist prompt prefixes', () => {
+    // Codex stores base_instructions.text, agents_md.text, and conversation history
+    const codex = prefixAvailability('codex')
+    expect(codex.status).toBe('supported')
+    expect(codex.confidence).toBe('verified')
+    expect(codex.prefixBytes).toBe(true)
+
+    // Copilot with content capture enabled reconstructs prompt parts
+    const copilot = prefixAvailability('copilot')
+    expect(copilot.status).toBe('supported')
+    expect(copilot.confidence).toBe('verified')
+    expect(copilot.prefixBytes).toBe(true)
+  })
+
+  it('declares partial cache availability for Gemini reflecting absent cache creation', () => {
+    const gemini = cacheAvailability('gemini')
+    expect(gemini.status).toBe('partial')
+    expect(gemini.confidence).toBe('verified')
+    expect(gemini.cacheRead).toBe(true)
+    expect(gemini.cacheCreation).toBe(false)
+    expect(gemini.reason).toMatch(/cache-creation/i)
+  })
+
+  it('normalizes aliases to canonical surveyed harness names', () => {
+    expect(normalizeHarnessName('claude')).toBe('claude-code')
+    expect(normalizeHarnessName('Claude-Code')).toBe('claude-code')
+    expect(normalizeHarnessName('copilot-chat')).toBe('copilot')
+    expect(normalizeHarnessName('copilot-cli')).toBe('copilot')
+    expect(normalizeHarnessName('cursor-agent')).toBe('cursor')
+    expect(normalizeHarnessName('cascade')).toBe('windsurf')
+    expect(normalizeHarnessName('roo')).toBe('roo-code')
+    expect(normalizeHarnessName('cline-cli')).toBe('cline')
+    expect(normalizeHarnessName('antigravity')).toBe('gemini')
+    expect(normalizeHarnessName('agy')).toBe('gemini')
+
+    expect(cacheAvailability('antigravity').harness).toBe('gemini')
+    expect(cacheAvailability('claude').harness).toBe('claude-code')
+    expect(prefixAvailability('roo').harness).toBe('roo-code')
+  })
+
+  it('gracefully handles uncatalogued harnesses with assumed not_measurable', () => {
+    const cache = cacheAvailability('unknown-agent')
+    expect(cache.status).toBe('not_measurable')
+    expect(cache.confidence).toBe('assumed')
+    expect(cache.cacheRead).toBe(false)
+    expect(cache.cacheCreation).toBe(false)
+    expect(cache.reason).toContain('unknown-agent')
+
+    const prefix = prefixAvailability('unknown-agent')
+    expect(prefix.status).toBe('not_measurable')
+    expect(prefix.confidence).toBe('assumed')
+    expect(prefix.prefixBytes).toBe(false)
+    expect(prefix.fallback).toBe('none')
+    expect(prefix.reason).toContain('unknown-agent')
+  })
+})
+

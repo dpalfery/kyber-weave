@@ -46,6 +46,29 @@
 import { contextCompositionAvailability } from '../canon/measurability.js'
 import { CANONICAL_CONTENT_KEYS, type CanonicalContentKey, type Measurability } from '../canon/types.js'
 import { approximateO200kBase } from '../canon/tokens.js'
+import {
+  classifyTurnContext,
+  type ClassificationTelemetry,
+  type ClassifiedTurnContext,
+} from './classify.js'
+
+export {
+  classifyContextItem,
+  classifyTurnContext,
+  classifySessionContext,
+  EVIDENCE_OF_USE_LEVELS,
+  type EvidenceOfUse,
+  type ClassificationRule,
+  type ContextItem,
+  type ClassifiedContextItem,
+  type ClassificationTelemetry,
+  type EvidenceBucketSummary,
+  type IsolatedResidual,
+  type ClassifiedTurnContext,
+  type TurnContextInput,
+  type SessionContextTurn,
+  type SessionContextInput,
+} from './classify.js'
 
 /**
  * One piece of a turn's input, typed by part type — never by message role
@@ -144,6 +167,11 @@ export type ContextCountOptions = {
    * composition chart with a residual read as tokenizer drift.
    */
   measurability?: Measurability
+  /**
+   * Optional telemetry or flag to attach Decision D15 context classifications
+   * to turns in the analysis.
+   */
+  classify?: boolean | ClassificationTelemetry
 }
 
 /** Why a residual exists, when the buckets do not cover the whole input. */
@@ -180,13 +208,18 @@ export type TurnPressure = {
   pressure: number
   /**
    * Input growth since the previous turn in tokens/turn; the first turn
-   * reports its whole input, which is what it grew from — nothing.
+  * reports its whole input, which is what it grew from — nothing.
    */
   accumulationRate: number
   /** The turn's fresh input, carried for the R7.5 view. */
   freshInput: number
   /** Present only on turns whose fresh-input rise was flagged (R7.5). */
   freshInputJump?: { previous: number; factor: number }
+  /**
+   * Optional evidence-of-use classification per Decision D15 (strong / weak / none / unobserved),
+   * present when requested or when telemetry is provided.
+   */
+  classification?: ClassifiedTurnContext
 }
 
 /** The context analysis of one session (R7), or its not-measurable answer. */
@@ -393,6 +426,12 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
       }
     }
 
+    let classification: ClassifiedTurnContext | undefined
+    if (options.classify) {
+      const telemetry = typeof options.classify === 'object' ? options.classify : undefined
+      classification = classifyTurnContext(turn, telemetry, { countTokens })
+    }
+
     perTurn.push({
       index: position + 1,
       buckets,
@@ -406,6 +445,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
       accumulationRate,
       freshInput: turn.freshInput,
       ...(freshInputJump !== undefined ? { freshInputJump } : {}),
+      ...(classification !== undefined ? { classification } : {}),
     })
     if (freshInputJump !== undefined) flaggedTurns.push(position + 1)
   }

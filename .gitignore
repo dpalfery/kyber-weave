@@ -49,3 +49,12 @@ dash/**/*.tgz
 # no `bin/` directory currently, so the rule does not swallow an upstream
 # directory. If upstream ever ships a directory named `bin/` it would be
 # ignored — that is desirable, since it would be build artifact there too.
+
+# design-sync (claude.ai/design import) — staged scripts, build output, machine state
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+dash/app/types/
+dash/app/.ds-sync-styles.css

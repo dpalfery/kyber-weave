@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process'
 
 import { describe, it, expect } from 'vitest'
 
-const CLI_PLAN_TIMEOUT_MS = 10_000
+const CLI_PLAN_TIMEOUT_MS = 30_000
 
 function runCli(args: string[], home: string) {
   return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {

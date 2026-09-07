@@ -22,6 +22,7 @@
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 
+import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
 import type { ContentReader, ReaderTurn } from './types.js'
 
@@ -54,8 +55,9 @@ function payloadOf(entry: Record<string, unknown>): Record<string, unknown> | un
  * that is what the line carries, but an empty value is absence, not a prompt.
  */
 function systemPromptText(payload: Record<string, unknown>): string | undefined {
+  const prompt = payload['system_prompt']
+  if (typeof prompt === 'string' && prompt !== '') return prompt
   const base = payload['base_instructions']
-  if (typeof base === 'string' && base !== '') return base
   if (!isRecord(base)) return undefined
   const text = base['text']
   return typeof text === 'string' && text !== '' ? text : undefined
@@ -116,6 +118,10 @@ function snapshot(state: {
   items: ContentPart[]
   sessionId?: string
   contextWindow?: number
+  terminationReason?: string
+  exitCode?: number
+  isCorrection?: boolean
+  correctionRule?: string
 }): ReaderTurn {
   const parts: ContentPart[] = []
   let order = 0
@@ -132,11 +138,21 @@ function snapshot(state: {
     parts,
     ...(state.sessionId !== undefined ? { sessionId: state.sessionId } : {}),
     ...(state.contextWindow !== undefined ? { contextWindow: state.contextWindow } : {}),
+    ...(state.terminationReason !== undefined ? { terminationReason: state.terminationReason } : {}),
+    ...(state.exitCode !== undefined ? { exitCode: state.exitCode } : {}),
+    ...(state.isCorrection !== undefined ? { isCorrection: state.isCorrection, correctionRule: state.correctionRule } : {}),
   }
 }
 
 function hasAnything(turn: ReaderTurn): boolean {
-  return turn.parts.length > 0 || turn.sessionId !== undefined || turn.contextWindow !== undefined
+  return (
+    turn.parts.length > 0 ||
+    turn.sessionId !== undefined ||
+    turn.contextWindow !== undefined ||
+    turn.terminationReason !== undefined ||
+    turn.exitCode !== undefined ||
+    turn.isCorrection !== undefined
+  )
 }
 
 /**
@@ -156,6 +172,10 @@ export const codexReader: ContentReader = {
       items: ContentPart[]
       sessionId?: string
       contextWindow?: number
+      terminationReason?: string
+      exitCode?: number
+      isCorrection?: boolean
+      correctionRule?: string
     } = { items: [] }
     let dirty = false
     let yielded = false
@@ -165,6 +185,8 @@ export const codexReader: ContentReader = {
       if (!hasAnything(turn)) return undefined
       dirty = false
       yielded = true
+      state.isCorrection = undefined
+      state.correctionRule = undefined
       return turn
     }
 
@@ -203,6 +225,19 @@ export const codexReader: ContentReader = {
           const window = contextWindowOf(payload)
           if (window !== undefined) state.contextWindow = window
 
+          if (payload['type'] === 'task_complete') {
+            state.terminationReason = 'task_complete'
+            state.exitCode = 0
+            dirty = true
+          } else if (payload['type'] === 'task_failed' || payload['type'] === 'error') {
+            state.terminationReason = String(payload['type'])
+            state.exitCode = typeof payload['exit_code'] === 'number' ? payload['exit_code'] : 1
+            dirty = true
+          } else if (payload['type'] === 'turn_aborted' || payload['type'] === 'cancelled') {
+            state.terminationReason = 'aborted'
+            dirty = true
+          }
+
           // A token_count is one model invocation — the turn boundary.
           if (payload['type'] === 'token_count') {
             const turn = flush()
@@ -216,6 +251,11 @@ export const codexReader: ContentReader = {
           if (itemType === MESSAGE_ITEM) {
             const text = messageText(payload)
             if (text !== undefined) {
+              const check = detectUserCorrection(text)
+              if (check.matched) {
+                state.isCorrection = true
+                state.correctionRule = check.rule
+              }
               state.items.push({ part: 'conversation_history', text })
               dirty = true
             }

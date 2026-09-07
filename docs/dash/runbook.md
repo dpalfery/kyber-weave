@@ -2,10 +2,10 @@
 id: dash/runbook
 title: KyberDash runbook — Local development, execution, and testing
 doc-type: runbook
-status: draft
+status: current
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-04
+last-reviewed: 2026-09-05
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -20,7 +20,7 @@ under the `dash/` subtree, it delivers metrics, span analyses, and token breakdo
 3. [Web Dashboard (`dash/dash/`)](#surface-3-web-dashboard-dashdash) — Standalone React browser interface served over HTTP.
 4. [Terminal TUI Dashboard (`dash/src/dashboard.tsx`)](#surface-4-terminal-tui-dashboard-dashsrcdashboardtsx) — High-density interactive terminal interface built with Ink.
 
-This runbook covers the local prerequisites, build workflows, dev runners, and test suites
+This runbook covers the local prerequisites, build workflows, dev runners, CLI operations, and test suites
 for each surface.
 
 ---
@@ -52,18 +52,75 @@ flowchart TD
 
 ---
 
-## OTLP ingest and canonical store operations
+## Telemetry Ingest, Canonical Store, and CLI Operations
 
-The web dashboard does not start the collector. Ingest is a separate foreground command
-that listens for OTLP over HTTP on `127.0.0.1:4318` at `POST /v1/traces` and
-`POST /v1/logs`, then writes to `~/.kyberdash/canon.db`. Logs enrich their correlated
-span-shaped record; they do not create a second canonical record.
+KyberDash maintains all normalized data in SQLite at `~/.kyberdash/canon.db` ([ADR 0008](../adr/0008-kyberdash-single-canonical-store.md)).
+`KYBER_CANON_DB` overrides the store path. Older database schemas migrate in place on open.
 
-- `KYBER_CANON_DB` overrides the store path.
-- `canon.db` is the only KyberDash session store. `AGENTDASH_DB` and `KYBER_DB` are not
-  production configuration; they cannot point the bridge at a Python `sessions.db`.
+### 1. Starting the OTLP Ingest Receiver
 
-A store built by an older version migrates in place when opened; it is not rebuilt.
+The web dashboard does not start the collector automatically. Ingest is a separate command
+that listens for OTLP over HTTP on `127.0.0.1:4318` at `POST /v1/traces` and `POST /v1/logs`,
+then persists to `canon.db`. Logs enrich their correlated span-shaped record ([ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md)):
+
+```bash
+# Start receiver via the kyber command group
+node dash/dist/cli.js kyber otel --port 4318 --host 127.0.0.1
+
+# Backward-compatible alias
+node dash/dist/cli.js otel --port 4318
+```
+
+### 2. Derived Projection Rebuilding (`kyber build`)
+
+The `session`, `run`, `execution`, and `finding` tables are derived projections over raw canonical
+records. If detector algorithms change or migrations are applied, rebuild projections without re-ingesting:
+
+```bash
+node dash/dist/cli.js kyber build --db ~/.kyberdash/canon.db
+```
+
+This rebuilds:
+- Derived sessions from canonical records.
+- First-class `run` tasks and `execution` parent/child delegation trees ([ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md)).
+- Finding materializations stamped with `detector_version` ([ADR 0013](../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md)).
+
+### 3. Raw Content Backfill and Re-normalization
+
+```bash
+# Re-derive canonical content parts from raw stored payloads
+node dash/dist/cli.js kyber backfill
+
+# Re-evaluate harness attribution voting and token conventions
+node dash/dist/cli.js kyber renormalize
+```
+
+### 4. Content Retention Policy and Purging (`kyber purge-content`)
+
+Retaining unclipped plaintext of every prompt, tool parameter, and file snippet creates a
+standing privacy and storage liability ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)):
+
+- **Default 14-day rolling retention**: Full plaintext content blocks in `parts_json` are retained
+  for 14 days by default to support the Context Inspector.
+- **Explicit Content Purge**: To purge unclipped plaintext content immediately while preserving
+  token metrics, span timings, and diagnostic findings:
+  ```bash
+  node dash/dist/cli.js kyber purge-content --older-than 14d
+  node dash/dist/cli.js kyber purge-content --all
+  ```
+
+### 5. LLM Review Provider Configuration & Privacy Guardrails
+
+The Context Review Seam ([ADR 0015](../adr/0015-opt-in-llm-context-review-seam.md)) allows developers
+to request subjective analysis of prompt quality from an LLM.
+
+- **Strictly Opt-In**: Telemetry never leaves localhost without an intentional click in the UI.
+- **Provider Environment Variables**:
+  - *Anthropic*: Set `ANTHROPIC_API_KEY` (and optional `ANTHROPIC_MODEL`, default `claude-3-5-sonnet-20241022`).
+  - *OpenAI-compatible*: Set `OPENAI_API_KEY` (and optional `OPENAI_BASE_URL` or `OPENAI_MODEL`).
+  - *Local Ollama / vLLM*: Set `OPENAI_BASE_URL=http://localhost:11434/v1` and `OPENAI_API_KEY=ollama`.
+  - *Unconfigured*: If no provider is configured, KyberDash activates `NullProvider` and the UI explains how to configure one without erroring.
+- **Credential Handling**: API keys are read directly from process environment variables and are never stored in `canon.db` or written to log files.
 
 ---
 
@@ -250,11 +307,29 @@ The web dashboard provides five top-level tabs:
 
 You can inspect the backend JSON endpoints directly via curl or any HTTP client:
 ```bash
-# List available sessions
-curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
+# Harness rollups with 6-dimension availability
+curl -s http://127.0.0.1:3000/api/kyber/harnesses | jq .
 
-# Inspect a specific session
+# List runs and inspect specific run with execution tree
+curl -s http://127.0.0.1:3000/api/kyber/runs | jq .
+curl -s http://127.0.0.1:3000/api/kyber/run/run-copilot-001 | jq .
+
+# List available sessions and inspect a specific session
+curl -s http://127.0.0.1:3000/api/kyber/sessions | jq .
 curl -s http://127.0.0.1:3000/api/kyber/session/sess-copilot-001 | jq .
+
+# Inspect unclipped assembled turn context (Task G1 / Decision D14)
+curl -s "http://127.0.0.1:3000/api/kyber/session/sess-copilot-001/turn/0/content" | jq .
+
+# Query ranked telemetry findings (Task F3 / Decision D5 / D6)
+curl -s http://127.0.0.1:3000/api/kyber/findings | jq .
+curl -s http://127.0.0.1:3000/api/kyber/finding/find-001 | jq .
+
+# Query calibration curve and prediction scoring (Task F4 / Decision D11)
+curl -s http://127.0.0.1:3000/api/kyber/calibration | jq .
+
+# Check review provider configuration status (Task G5 / Decision D10)
+curl -s http://127.0.0.1:3000/api/kyber/review/status | jq .
 
 # Cross-harness comparison matrix
 curl -s http://127.0.0.1:3000/api/kyber/compare | jq .

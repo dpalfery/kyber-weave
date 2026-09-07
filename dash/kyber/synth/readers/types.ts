@@ -24,6 +24,14 @@ export type ReaderTurn = {
   sessionId?: string
   /** Model context window in tokens, when an `event_msg` reported one. */
   contextWindow?: number
+  /** Termination or exit indicator, when the transcript reported one. */
+  terminationReason?: string
+  /** Process or command exit code observed in transcript. */
+  exitCode?: number
+  /** Whether this turn represents an explicit user correction turn. */
+  isCorrection?: boolean
+  /** The rule that identified this turn as a user correction. */
+  correctionRule?: string
 }
 
 /**

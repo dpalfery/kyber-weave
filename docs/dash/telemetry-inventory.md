@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-04
+last-reviewed: 2026-09-05
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -20,6 +20,8 @@ serialized as `not_measurable` with a source-specific reason.
 sessions. A log correlates by `(trace_id, span_id)`, then by session and bounded timestamp
 window; it enriches one existing span-shaped record, is idempotent, and is quarantined if
 it remains unmatched. These are the durable decisions in [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md).
+The Context page contract — ASAD only, payload from `canon.db`, harnesses in scope with
+reasons rather than zeros — is [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md).
 
 **[VERIFIED]** The `canon.db` session projection emits the ASAD payload directly and is
 rebuilt from canonical records. For a turn present in both OTLP and a dot-folder source,
@@ -40,6 +42,29 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Cursor | `codeburn kyber cursor-hook` emits deterministic OTLP traces from hook JSONL with stable turn identity, supplied counters, and ordered tools. | Synthetic and CLI-post verification passed. Live collection requires the owner to register the command and execute a Cursor turn; existing hooks must not be changed by this work. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. | Owner enablement is required before collection can be verified. |
 | Kilo Code | The surveyed empty local store and undocumented OTel surface are represented as not collectable with a reason. | No zero-valued data is fabricated. |
+
+## Cache counter and prefix byte survey (Survey E4)
+
+Task E4 surveys whether cache counters (`cache_read`, `cache_creation`) and request-prefix
+bytes can be obtained across all 10 agent harnesses in KyberDash. These signals are the
+prerequisite for prefix-stability diagnosis and cache reuse analysis.
+
+Where request-prefix bytes are unavailable, prefix-stability diagnosis degrades to the
+counter-only fallback (`cache_read ÷ input`), recorded as `detect-but-cannot-locate`.
+Absent signals are never rendered as zero spend or zero cache hit rate.
+
+| Harness | Cache counters | Cache confidence | Prefix bytes | Prefix confidence | Fallback | Observed signal & rationale |
+|---|---|---|---|---|---|---|
+| Copilot | `supported` (`cache_read` + `cache_creation`) | `verified` | `supported` | `verified` | `detect-but-cannot-locate` | OTLP capture provides cache-inclusive usage (`gen_ai.usage.cache_read.input_tokens`, `cache_creation.input_tokens`) and maps message/instruction parts. When content capture is disabled, falls back to `cache_read ÷ input`. |
+| Claude Code | `supported` (`cache_read` + `cache_creation`) | `verified` | `not_measurable` | `documented` | `detect-but-cannot-locate` | Enhanced telemetry exports cache-exclusive counters (`cache_read_tokens`, `cache_creation_tokens`). Transcripts omit runtime system prompt and tool definitions; full prefix byte reconstruction requires `OTEL_LOG_RAW_API_BODIES=1`. |
+| Cursor | `unsupported` | `verified` | `not_measurable` | `verified` | `none` | `cursor-hook` and enterprise OTel export emit token totals (`promptTokens`, `outputTokens`, `schemaTokens`) without cache read/write counters. Prompt text is isolated; prefix stability cannot be computed. |
+| Windsurf | `unsupported` | `documented` | `not_measurable` | `documented` | `none` | Cascade transcripts and telemetry export non-model attributes under `windsurf.*` without cache read/creation counters or request-prefix boundaries. |
+| Roo Code | `supported` (`cache_read` + `cache_creation`) | `verified` | `not_measurable` | `verified` | `detect-but-cannot-locate` | Cline-family transcripts (`tasks/<id>/ui_messages.json` on `api_req_started`) record `cacheReads` and `cacheWrites`. Turn history is stored, but template system prompts are omitted on disk. |
+| Cline | `supported` (`cache_read` + `cache_creation`) | `verified` | `not_measurable` | `verified` | `detect-but-cannot-locate` | Task transcripts (`ui_messages.json` / CLI session data) record `cacheReads` and `cacheWrites`. Turn history is available, but dynamic system prompts are injected at runtime. |
+| Aider | `unsupported` | `documented` | `not_measurable` | `documented` | `none` | Displays cache metrics in terminal output via LiteLLM (`cache_read_input_tokens`, `cache_creation_input_tokens`), but does not export native OTLP telemetry or structured cache counters in `.aider.chat.history.md`. |
+| Codex | `supported` (`cache_read`) | `verified` | `supported` | `verified` | `none` | Rollout session files record `cached_tokens` (`cache_read`); cache creation is implicit in OpenAI caching. Full system instructions (`base_instructions.text`), workspace instructions (`agents_md.text`), and conversation turns are preserved for direct prefix reconstruction. |
+| Gemini / AGY | `partial` (`cache_read` only) | `verified` | `not_measurable` | `verified` | `detect-but-cannot-locate` | OTel statusline telemetry exports cached input tokens (`cached_content_token_count` / `cache_read`). Explicit caching architecture has no cache-creation counter (`PROVIDER_UNMEASURABLE: cache_creation`). Standard traces omit prompt prefix bytes. |
+| OpenCode | `not_measurable` | `documented` | `not_measurable` | `documented` | `none` | Experimental OpenTelemetry is disabled by default; no session transcripts or telemetry are collected without user enablement. |
 
 ## Dashboard verification boundary
 
@@ -70,3 +95,7 @@ per-server schema bands.
 - [Cursor — OpenTelemetry Export](https://cursor.com/docs/enterprise/opentelemetry-export)
 - [Kilo Code — settings](https://kilo.ai/docs/getting-started/settings)
 - [opentelemetry-hooks (agent hook → OTLP runner)](https://github.com/o11y-dev/opentelemetry-hooks)
+- [Aider — prompt caching documentation](https://aider.chat/docs/usage/caching.html)
+- [Cline — architecture and session data storage](https://github.com/cline/cline)
+- [Roo Code — task data storage](https://github.com/RooVetGit/Roo-Cline)
+- [Windsurf — IDE and Cascade documentation](https://codeium.com/windsurf)

@@ -4,6 +4,7 @@
   "version": "0.9.23",
   "description": "CodeBurn Desktop \u2014 Electron app fed by the codeburn CLI",
   "main": "dist/electron/main.js",
+  "types": "types/ds-sync-entry.d.ts",
   "scripts": {
     "build:electron": "tsc -p tsconfig.electron.json",
     "build:renderer": "vite build",

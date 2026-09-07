@@ -29,10 +29,28 @@ import type {
   CanonicalRecord,
   ContentPart,
   CostBlock,
+  ExecutionRow,
+  ExecutionTreeNode,
+  HarnessRollupRow,
   Measurability,
+  MetricAvailability,
   Problem,
+  RunGroupingBasis,
+  RunRow,
+  SessionRow,
   TokenUsage,
 } from './types.js'
+import type {
+  DetectorId,
+  Finding,
+  FindingConfidence,
+  FindingEvidenceLink,
+} from '../analysis/findings.js'
+import {
+  calculateCalibrationCurve,
+  type CalibrationCurveResult,
+  type PredictionRecord,
+} from '../analysis/calibration.js'
 
 /**
  * Bump when SCHEMA_SQL changes shape. A store built under a version this
@@ -41,7 +59,14 @@ import type {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 9
+
+/**
+ * Version of the diagnostic signal and finding detector suite (Decision D17).
+ * When detectors change, this version stamp is bumped to force automatic
+ * recomputation of derived findings and signals over stored canonical records.
+ */
+export const DETECTOR_VERSION = 1
 
 /**
  * The whole schema, as code. `CREATE ... IF NOT EXISTS` throughout so
@@ -103,6 +128,40 @@ CREATE TABLE IF NOT EXISTS session (
   payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_by_started ON session (started);
+-- Derived runs: group executions into user-initiated units of work.
+-- Grouping basis (explicit or derived) and rule are recorded per row (D13).
+CREATE TABLE IF NOT EXISTS run (
+  run_id TEXT PRIMARY KEY,
+  harness TEXT NOT NULL,
+  label TEXT,
+  grouping_basis TEXT NOT NULL,
+  grouping_rule TEXT,
+  working_directory TEXT,
+  started TEXT,
+  ended TEXT,
+  execution_count INTEGER NOT NULL DEFAULT 0,
+  payload TEXT
+);
+CREATE INDEX IF NOT EXISTS run_by_harness ON run (harness);
+CREATE INDEX IF NOT EXISTS run_by_started ON run (started);
+-- Derived agent executions: individual agent sessions or subagents within a run.
+-- Parent/child linkage is preserved where emitted and explicitly not_measurable otherwise.
+CREATE TABLE IF NOT EXISTS execution (
+  execution_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  session_id TEXT,
+  parent_execution_id TEXT,
+  harness TEXT NOT NULL,
+  agent_name TEXT,
+  is_root INTEGER NOT NULL DEFAULT 0,
+  started TEXT,
+  ended TEXT,
+  parent_linkage_json TEXT NOT NULL,
+  payload TEXT
+);
+CREATE INDEX IF NOT EXISTS execution_by_run ON execution (run_id);
+CREATE INDEX IF NOT EXISTS execution_by_parent ON execution (parent_execution_id);
+CREATE INDEX IF NOT EXISTS execution_by_session ON execution (session_id);
 CREATE TABLE IF NOT EXISTS token_cache (
   hash TEXT PRIMARY KEY,
   count INTEGER NOT NULL,
@@ -143,6 +202,55 @@ CREATE TABLE IF NOT EXISTS metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS harness_rollup (
+  harness TEXT PRIMARY KEY,
+  sample_count INTEGER NOT NULL DEFAULT 0,
+  context_pressure_median REAL,
+  context_pressure_p95 REAL,
+  cache_hit_rate REAL,
+  tool_yield REAL,
+  delegation_overhead REAL,
+  field_coverage REAL,
+  measurability_json TEXT NOT NULL,
+  payload TEXT
+);
+CREATE TABLE IF NOT EXISTS finding (
+  id TEXT PRIMARY KEY,
+  detector_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  mechanism TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  estimated_waste_tokens INTEGER NOT NULL DEFAULT 0,
+  recommendation TEXT NOT NULL,
+  error_bar_json TEXT NOT NULL,
+  evidence_links_json TEXT NOT NULL,
+  outcome_risk_caveat TEXT NOT NULL,
+  run_id TEXT,
+  session_id TEXT,
+  rank_score REAL NOT NULL DEFAULT 0.0,
+  payload TEXT
+);
+CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
+CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
+CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);
+-- Prediction table for logging and scoring finding waste predictions (Task F4 / Decision D11).
+CREATE TABLE IF NOT EXISTS prediction (
+  id TEXT PRIMARY KEY,
+  finding_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  predicted_waste_tokens INTEGER NOT NULL,
+  confidence REAL NOT NULL,
+  confidence_tier TEXT,
+  error_bar_json TEXT,
+  created_at TEXT NOT NULL,
+  comparison_run_id TEXT,
+  observed_delta_tokens INTEGER,
+  calibration_score REAL,
+  payload TEXT
+);
+CREATE INDEX IF NOT EXISTS prediction_by_finding ON prediction (finding_id);
+CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
+CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
 `
 
 /**
@@ -189,22 +297,115 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       log_id TEXT PRIMARY KEY
     );`)
   },
+  4: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS run (
+      run_id TEXT PRIMARY KEY,
+      harness TEXT NOT NULL,
+      label TEXT,
+      grouping_basis TEXT NOT NULL,
+      grouping_rule TEXT,
+      working_directory TEXT,
+      started TEXT,
+      ended TEXT,
+      execution_count INTEGER NOT NULL DEFAULT 0,
+      payload TEXT
+    );
+    CREATE INDEX IF NOT EXISTS run_by_harness ON run (harness);
+    CREATE INDEX IF NOT EXISTS run_by_started ON run (started);
+
+    CREATE TABLE IF NOT EXISTS execution (
+      execution_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      session_id TEXT,
+      parent_execution_id TEXT,
+      harness TEXT NOT NULL,
+      agent_name TEXT,
+      is_root INTEGER NOT NULL DEFAULT 0,
+      started TEXT,
+      ended TEXT,
+      parent_linkage_json TEXT NOT NULL,
+      payload TEXT
+    );
+    CREATE INDEX IF NOT EXISTS execution_by_run ON execution (run_id);
+    CREATE INDEX IF NOT EXISTS execution_by_parent ON execution (parent_execution_id);
+    CREATE INDEX IF NOT EXISTS execution_by_session ON execution (session_id);`)
+  },
+  5: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS harness_rollup (
+      harness TEXT PRIMARY KEY,
+      sample_count INTEGER NOT NULL DEFAULT 0,
+      context_pressure_median REAL,
+      context_pressure_p95 REAL,
+      cache_hit_rate REAL,
+      tool_yield REAL,
+      delegation_overhead REAL,
+      field_coverage REAL,
+      measurability_json TEXT NOT NULL,
+      payload TEXT
+    );`)
+  },
+  // v6 -> v7: Decision D17 - detector_version schema stamp
+  // Records the version of the pure signal and finding detectors.
+  // When detector_version is bumped, automatic recomputation is triggered.
+  6: (db) => {
+    db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run(
+      'detector_version',
+      String(DETECTOR_VERSION),
+    )
+  },
+  // v7 -> v8: Task F3 / Decision D5 finding table and indexes
+  7: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS finding (
+      id TEXT PRIMARY KEY,
+      detector_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      mechanism TEXT NOT NULL,
+      confidence TEXT NOT NULL,
+      estimated_waste_tokens INTEGER NOT NULL DEFAULT 0,
+      recommendation TEXT NOT NULL,
+      error_bar_json TEXT NOT NULL,
+      evidence_links_json TEXT NOT NULL,
+      outcome_risk_caveat TEXT NOT NULL,
+      run_id TEXT,
+      session_id TEXT,
+      rank_score REAL NOT NULL DEFAULT 0.0,
+      payload TEXT
+    );
+    CREATE INDEX IF NOT EXISTS finding_by_run ON finding (run_id);
+    CREATE INDEX IF NOT EXISTS finding_by_session ON finding (session_id);
+    CREATE INDEX IF NOT EXISTS finding_by_rank_score ON finding (rank_score DESC);`)
+  },
+  // v8 -> v9: Task F4 prediction logging and calibration table with indexes
+  8: (db) => {
+    db.exec(`CREATE TABLE IF NOT EXISTS prediction (
+      id TEXT PRIMARY KEY,
+      finding_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      predicted_waste_tokens INTEGER NOT NULL,
+      confidence REAL NOT NULL,
+      confidence_tier TEXT,
+      error_bar_json TEXT,
+      created_at TEXT NOT NULL,
+      comparison_run_id TEXT,
+      observed_delta_tokens INTEGER,
+      calibration_score REAL,
+      payload TEXT
+    );
+    CREATE INDEX IF NOT EXISTS prediction_by_finding ON prediction (finding_id);
+    CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
+    CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);`)
+  },
 }
 
-/** One derived session, as the `session` table stores it. */
-export type SessionRow = {
-  sessionId: string
-  harness: string
-  label?: string | null
-  isSubagent?: boolean
-  parentSession?: string | null
-  agentName?: string | null
-  repo?: string | null
-  branch?: string | null
-  started?: string | null
-  ended?: string | null
-  /** The analysis output the dashboard reads. */
-  payload: unknown
+export type {
+  DetectorId,
+  Finding,
+  FindingConfidence,
+  FindingEvidenceLink,
+  PredictionRecord,
+  CalibrationCurveResult,
+  SessionRow,
+  ExecutionTreeNode,
 }
 
 /** A problem pinned to the record it belongs to (the `problems` table row). */
@@ -315,6 +516,239 @@ export function toRecord(row: RecordRow): CanonicalRecord {
   return record
 }
 
+export type SessionDbRow = {
+  session_id: unknown
+  harness: unknown
+  label: unknown
+  is_subagent: unknown
+  parent_session: unknown
+  agent_name: unknown
+  repo: unknown
+  branch: unknown
+  started: unknown
+  ended: unknown
+  payload: unknown
+}
+
+export function toSessionRow(row: SessionDbRow): SessionRow {
+  let payload: unknown = undefined
+  if (row.payload !== null && row.payload !== undefined) {
+    try {
+      payload = JSON.parse(text(row.payload))
+    } catch {
+      payload = row.payload
+    }
+  }
+  return {
+    sessionId: text(row.session_id),
+    harness: text(row.harness),
+    label: nullableText(row.label),
+    isSubagent: Boolean(row.is_subagent),
+    parentSession: nullableText(row.parent_session),
+    agentName: nullableText(row.agent_name),
+    repo: nullableText(row.repo),
+    branch: nullableText(row.branch),
+    started: nullableText(row.started),
+    ended: nullableText(row.ended),
+    payload,
+  }
+}
+
+export type RunDbRow = {
+  run_id: unknown
+  harness: unknown
+  label: unknown
+  grouping_basis: unknown
+  grouping_rule: unknown
+  working_directory: unknown
+  started: unknown
+  ended: unknown
+  execution_count: unknown
+  payload: unknown
+}
+
+export function toRunRow(row: RunDbRow): RunRow {
+  const payload = row.payload === null || row.payload === undefined ? undefined : JSON.parse(text(row.payload))
+  const outcome =
+    payload !== null && typeof payload === 'object' && !Array.isArray(payload) && 'outcome' in payload
+      ? (payload as Record<string, unknown>)['outcome']
+      : undefined
+  return {
+    runId: text(row.run_id),
+    harness: text(row.harness),
+    label: nullableText(row.label),
+    groupingBasis: text(row.grouping_basis) as RunGroupingBasis,
+    groupingRule: nullableText(row.grouping_rule),
+    workingDirectory: nullableText(row.working_directory),
+    started: nullableText(row.started),
+    ended: nullableText(row.ended),
+    executionCount: Number(row.execution_count ?? 0),
+    ...(outcome !== undefined ? { outcome: outcome as RunRow['outcome'] } : {}),
+    payload,
+  }
+}
+
+export type ExecutionDbRow = {
+  execution_id: unknown
+  run_id: unknown
+  session_id: unknown
+  parent_execution_id: unknown
+  harness: unknown
+  agent_name: unknown
+  is_root: unknown
+  started: unknown
+  ended: unknown
+  parent_linkage_json: unknown
+  payload: unknown
+}
+
+export function toExecutionRow(row: ExecutionDbRow): ExecutionRow {
+  return {
+    executionId: text(row.execution_id),
+    runId: text(row.run_id),
+    sessionId: nullableText(row.session_id),
+    parentExecutionId: nullableText(row.parent_execution_id),
+    harness: text(row.harness),
+    agentName: nullableText(row.agent_name),
+    isRoot: Boolean(row.is_root),
+    started: nullableText(row.started),
+    ended: nullableText(row.ended),
+    parentLinkage: JSON.parse(text(row.parent_linkage_json)) as MetricAvailability,
+    payload: row.payload === null || row.payload === undefined ? undefined : JSON.parse(text(row.payload)),
+  }
+}
+
+export type HarnessRollupDbRow = {
+  harness: unknown
+  sample_count: unknown
+  context_pressure_median: unknown
+  context_pressure_p95: unknown
+  cache_hit_rate: unknown
+  tool_yield: unknown
+  delegation_overhead: unknown
+  field_coverage: unknown
+  measurability_json: unknown
+  payload: unknown
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
+
+export function toHarnessRollupRow(row: HarnessRollupDbRow): HarnessRollupRow {
+  return {
+    harness: text(row.harness),
+    sampleCount: Number(row.sample_count ?? 0),
+    contextPressureMedian: nullableNumber(row.context_pressure_median),
+    contextPressureP95: nullableNumber(row.context_pressure_p95),
+    cacheHitRate: nullableNumber(row.cache_hit_rate),
+    toolYield: nullableNumber(row.tool_yield),
+    delegationOverhead: nullableNumber(row.delegation_overhead),
+    fieldCoverage: nullableNumber(row.field_coverage),
+    measurability: JSON.parse(text(row.measurability_json)) as Record<string, MetricAvailability>,
+    payload: row.payload === null || row.payload === undefined ? undefined : JSON.parse(text(row.payload)),
+  }
+}
+
+export type FindingDbRow = {
+  id: unknown
+  detector_id: unknown
+  title: unknown
+  mechanism: unknown
+  confidence: unknown
+  estimated_waste_tokens: unknown
+  recommendation: unknown
+  error_bar_json: unknown
+  evidence_links_json: unknown
+  outcome_risk_caveat: unknown
+  run_id: unknown
+  session_id: unknown
+  rank_score: unknown
+  payload: unknown
+}
+
+export function toFinding(row: FindingDbRow): Finding {
+  const errorBar = JSON.parse(text(row.error_bar_json)) as { lower: number; upper: number }
+  const evidenceLinks = JSON.parse(text(row.evidence_links_json)) as FindingEvidenceLink[]
+  const finding: Finding = {
+    id: text(row.id),
+    detectorId: text(row.detector_id) as DetectorId,
+    title: text(row.title),
+    mechanism: text(row.mechanism),
+    evidenceLinks,
+    confidence: text(row.confidence) as FindingConfidence,
+    estimatedWasteTokens: Number(row.estimated_waste_tokens ?? 0),
+    recommendation: text(row.recommendation),
+    errorBar,
+    outcomeRiskCaveat: text(row.outcome_risk_caveat),
+    runId: nullableText(row.run_id) ?? undefined,
+    sessionId: nullableText(row.session_id) ?? undefined,
+    rankScore: Number(row.rank_score ?? 0),
+  }
+  if (row.payload !== null && row.payload !== undefined) {
+    try {
+      const extra = JSON.parse(text(row.payload)) as Record<string, unknown>
+      Object.assign(finding, extra)
+    } catch {}
+  }
+  return finding
+}
+
+export type PredictionDbRow = {
+  id: unknown
+  finding_id: unknown
+  run_id: unknown
+  predicted_waste_tokens: unknown
+  confidence: unknown
+  confidence_tier: unknown
+  error_bar_json: unknown
+  created_at: unknown
+  comparison_run_id: unknown
+  observed_delta_tokens: unknown
+  calibration_score: unknown
+  payload: unknown
+}
+
+export function toPrediction(row: PredictionDbRow): PredictionRecord {
+  const errorBar = row.error_bar_json
+    ? (JSON.parse(text(row.error_bar_json)) as { lower: number; upper: number })
+    : undefined
+  const createdAt = text(row.created_at)
+  const prediction: PredictionRecord = {
+    id: text(row.id),
+    findingId: text(row.finding_id),
+    runId: text(row.run_id),
+    predictedWasteTokens: Number(row.predicted_waste_tokens ?? 0),
+    confidence: Number(row.confidence ?? 0),
+    confidenceTier: row.confidence_tier ? (text(row.confidence_tier) as FindingConfidence) : undefined,
+    errorBar,
+    createdAt,
+    timestamp: createdAt,
+    comparisonRunId: nullableText(row.comparison_run_id) ?? undefined,
+    observedDeltaTokens:
+      row.observed_delta_tokens !== null && row.observed_delta_tokens !== undefined
+        ? Number(row.observed_delta_tokens)
+        : undefined,
+    calibrationScore:
+      row.calibration_score !== null && row.calibration_score !== undefined
+        ? Number(row.calibration_score)
+        : undefined,
+    status:
+      row.comparison_run_id !== null && row.comparison_run_id !== undefined
+        ? 'scored'
+        : 'pending',
+  }
+  if (row.payload !== null && row.payload !== undefined) {
+    try {
+      prediction.payload = JSON.parse(text(row.payload)) as Record<string, unknown>
+    } catch {}
+  }
+  return prediction
+}
+
+
 const UPSERT_RECORD_SQL = `
 INSERT OR REPLACE INTO records (
   span_id, trace_id, parent_span_id, source, harness, session_id, name, op, kind,
@@ -361,6 +795,9 @@ export class CanonStore {
       this.db
         .prepare('INSERT INTO metadata (key, value) VALUES (?, ?)')
         .run('schema_version', String(SCHEMA_VERSION))
+      this.db
+        .prepare('INSERT INTO metadata (key, value) VALUES (?, ?)')
+        .run('detector_version', String(DETECTOR_VERSION))
     }
 
     this.upsertStatement = this.db.prepare(UPSERT_RECORD_SQL)
@@ -705,6 +1142,487 @@ export class CanonStore {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM session').get() as { n: number }).n
   }
 
+  /** Fetch one session by id; absent id gives undefined. */
+  getSession(sessionId: string): SessionRow | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM session WHERE session_id = ?')
+      .get(sessionId) as SessionDbRow | undefined
+    return row === undefined ? undefined : toSessionRow(row)
+  }
+
+  /** List derived sessions, optionally narrowed to one harness; newest first. */
+  listSessions(harnessId?: string): SessionRow[] {
+    const rows = (
+      harnessId === undefined
+        ? this.db.prepare('SELECT * FROM session ORDER BY started DESC').all()
+        : this.db.prepare('SELECT * FROM session WHERE harness = ? ORDER BY started DESC').all(harnessId)
+    ) as SessionDbRow[]
+    return rows.map(toSessionRow)
+  }
+
+  /**
+   * Store a derived or explicit run. Dropping and rebuilding runs loses nothing;
+   * it is rebuildable over records.
+   */
+  upsertRun(run: RunRow): void {
+    const payloadObj =
+      run.outcome !== undefined
+        ? {
+            ...(run.payload !== null && typeof run.payload === 'object' && !Array.isArray(run.payload)
+              ? (run.payload as Record<string, unknown>)
+              : {}),
+            outcome: run.outcome,
+          }
+        : run.payload
+
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO run (
+           run_id, harness, label, grouping_basis, grouping_rule,
+           working_directory, started, ended, execution_count, payload
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        run.runId,
+        run.harness,
+        run.label ?? null,
+        run.groupingBasis,
+        run.groupingRule ?? null,
+        run.workingDirectory ?? null,
+        run.started ?? null,
+        run.ended ?? null,
+        run.executionCount ?? 0,
+        payloadObj === undefined || payloadObj === null ? null : JSON.stringify(payloadObj),
+      )
+  }
+
+  upsertRuns(runs: readonly RunRow[]): void {
+    if (runs.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      for (const run of runs) this.upsertRun(run)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /** Fetch one run by id; absent id gives undefined. */
+  getRun(id: string): RunRow | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM run WHERE run_id = ?')
+      .get(id) as RunDbRow | undefined
+    return row === undefined ? undefined : toRunRow(row)
+  }
+
+  /** List runs, optionally narrowed to one harness; newest first. */
+  listRuns(harnessId?: string): RunRow[] {
+    const rows = (
+      harnessId === undefined
+        ? this.db.prepare('SELECT * FROM run ORDER BY started DESC').all()
+        : this.db.prepare('SELECT * FROM run WHERE harness = ? ORDER BY started DESC').all(harnessId)
+    ) as RunDbRow[]
+    return rows.map(toRunRow)
+  }
+
+  deleteRun(id: string): void {
+    this.db.prepare('DELETE FROM run WHERE run_id = ?').run(id)
+  }
+
+  runCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM run').get() as { n: number }).n
+  }
+
+  builtRunIds(): string[] {
+    return (this.db.prepare('SELECT run_id FROM run').all() as { run_id: string }[]).map((r) => r.run_id)
+  }
+
+  /**
+   * Store one agent execution.
+   */
+  upsertExecution(execution: ExecutionRow): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO execution (
+           execution_id, run_id, session_id, parent_execution_id,
+           harness, agent_name, is_root, started, ended, parent_linkage_json, payload
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        execution.executionId,
+        execution.runId,
+        execution.sessionId ?? null,
+        execution.parentExecutionId ?? null,
+        execution.harness,
+        execution.agentName ?? null,
+        execution.isRoot ? 1 : 0,
+        execution.started ?? null,
+        execution.ended ?? null,
+        JSON.stringify(execution.parentLinkage),
+        execution.payload === undefined ? null : JSON.stringify(execution.payload),
+      )
+  }
+
+  upsertExecutions(executions: readonly ExecutionRow[]): void {
+    if (executions.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      for (const execution of executions) this.upsertExecution(execution)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /** Fetch one execution by id; absent id gives undefined. */
+  getExecution(id: string): ExecutionRow | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM execution WHERE execution_id = ?')
+      .get(id) as ExecutionDbRow | undefined
+    return row === undefined ? undefined : toExecutionRow(row)
+  }
+
+  /** List executions, optionally filtered by run id; ordered by started. */
+  listExecutions(runId?: string): ExecutionRow[] {
+    const rows = (
+      runId === undefined
+        ? this.db.prepare('SELECT * FROM execution ORDER BY started, execution_id').all()
+        : this.db.prepare('SELECT * FROM execution WHERE run_id = ? ORDER BY started, execution_id').all(runId)
+    ) as ExecutionDbRow[]
+    return rows.map(toExecutionRow)
+  }
+
+  deleteExecution(id: string): void {
+    this.db.prepare('DELETE FROM execution WHERE execution_id = ?').run(id)
+  }
+
+  executionCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM execution').get() as { n: number }).n
+  }
+
+  builtExecutionIds(): string[] {
+    return (this.db.prepare('SELECT execution_id FROM execution').all() as { execution_id: string }[]).map(
+      (r) => r.execution_id,
+    )
+  }
+
+  /**
+   * Return the hierarchical execution tree for a given run id.
+   * Root nodes are executions without a parent within the run; child executions nest
+   * recursively under their parent's `children` array.
+   */
+  getExecutionTree(runId: string): ExecutionTreeNode[] {
+    const executions = this.listExecutions(runId)
+    if (executions.length === 0) return []
+
+    const nodesById = new Map<string, ExecutionTreeNode>()
+    for (const exec of executions) {
+      nodesById.set(exec.executionId, { ...exec, children: [] })
+    }
+
+    const roots: ExecutionTreeNode[] = []
+    for (const node of nodesById.values()) {
+      if (node.parentExecutionId !== null && node.parentExecutionId !== undefined) {
+        const parent = nodesById.get(node.parentExecutionId)
+        if (parent !== undefined && parent !== node) {
+          parent.children.push(node)
+          continue
+        }
+      }
+      roots.push(node)
+    }
+
+    return roots
+  }
+
+  /**
+   * Distinct harnesses observed across records, sessions, runs, and executions.
+   */
+  listHarnesses(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT harness FROM (
+           SELECT harness FROM records
+           UNION
+           SELECT harness FROM session
+           UNION
+           SELECT harness FROM run
+           UNION
+           SELECT harness FROM execution
+         ) WHERE harness IS NOT NULL AND harness != ''
+         ORDER BY harness ASC`,
+      )
+      .all() as { harness: string }[]
+    return rows.map((r) => r.harness)
+  }
+
+  /**
+   * Store a derived harness rollup row.
+   */
+  upsertHarnessRollup(rollup: HarnessRollupRow): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO harness_rollup (
+           harness, sample_count, context_pressure_median, context_pressure_p95,
+           cache_hit_rate, tool_yield, delegation_overhead, field_coverage,
+           measurability_json, payload
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rollup.harness,
+        rollup.sampleCount,
+        rollup.contextPressureMedian ?? null,
+        rollup.contextPressureP95 ?? null,
+        rollup.cacheHitRate ?? null,
+        rollup.toolYield ?? null,
+        rollup.delegationOverhead ?? null,
+        rollup.fieldCoverage ?? null,
+        JSON.stringify(rollup.measurability),
+        rollup.payload === undefined ? null : JSON.stringify(rollup.payload),
+      )
+  }
+
+  upsertHarnessRollups(rollups: readonly HarnessRollupRow[]): void {
+    if (rollups.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      for (const rollup of rollups) this.upsertHarnessRollup(rollup)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /** Fetch one harness rollup; absent harness gives undefined. */
+  getHarnessRollup(harness: string): HarnessRollupRow | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM harness_rollup WHERE harness = ?')
+      .get(harness) as HarnessRollupDbRow | undefined
+    return row === undefined ? undefined : toHarnessRollupRow(row)
+  }
+
+  /** List all harness rollups in ascending harness name order. */
+  listHarnessRollups(): HarnessRollupRow[] {
+    const rows = this.db
+      .prepare('SELECT * FROM harness_rollup ORDER BY harness ASC')
+      .all() as HarnessRollupDbRow[]
+    return rows.map(toHarnessRollupRow)
+  }
+
+  deleteHarnessRollup(harness: string): void {
+    this.db.prepare('DELETE FROM harness_rollup WHERE harness = ?').run(harness)
+  }
+
+  harnessRollupCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM harness_rollup').get() as { n: number }).n
+  }
+
+  /** Store or replace a diagnostic finding row (Decision D5). */
+  upsertFinding(finding: Finding): void {
+    const payload = finding.payload ?? {
+      ...(finding.measurementClass ? { measurementClass: finding.measurementClass } : {}),
+      ...(finding.confidenceBasis ? { confidenceBasis: finding.confidenceBasis } : {}),
+      ...(finding.whatWouldRaiseIt ? { whatWouldRaiseIt: finding.whatWouldRaiseIt } : {}),
+    }
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO finding (
+           id, detector_id, title, mechanism, confidence,
+           estimated_waste_tokens, recommendation, error_bar_json,
+           evidence_links_json, outcome_risk_caveat, run_id, session_id,
+           rank_score, payload
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        finding.id,
+        finding.detectorId,
+        finding.title,
+        finding.mechanism,
+        finding.confidence,
+        finding.estimatedWasteTokens,
+        finding.recommendation,
+        JSON.stringify(finding.errorBar),
+        JSON.stringify(finding.evidenceLinks),
+        finding.outcomeRiskCaveat,
+        finding.runId ?? null,
+        finding.sessionId ?? null,
+        finding.rankScore ?? 0.0,
+        Object.keys(payload).length > 0 ? JSON.stringify(payload) : null,
+      )
+  }
+
+  /** Batch upsert findings inside a single transaction. */
+  upsertFindings(findings: readonly Finding[]): void {
+    if (findings.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      for (const finding of findings) this.upsertFinding(finding)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /** Fetch one finding by id; absent id gives undefined. */
+  getFinding(id: string): Finding | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM finding WHERE id = ?')
+      .get(id) as FindingDbRow | undefined
+    return row === undefined ? undefined : toFinding(row)
+  }
+
+  /** List findings, optionally filtered by runId or sessionId; ordered by rank_score DESC. */
+  listFindings(runId?: string, sessionId?: string): Finding[] {
+    let query = 'SELECT * FROM finding'
+    const params: string[] = []
+    const conditions: string[] = []
+
+    if (runId !== undefined && runId !== '') {
+      conditions.push('run_id = ?')
+      params.push(runId)
+    }
+    if (sessionId !== undefined && sessionId !== '') {
+      conditions.push('session_id = ?')
+      params.push(sessionId)
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`
+    }
+    query += ' ORDER BY rank_score DESC, id ASC'
+
+    const rows = this.db.prepare(query).all(...params) as FindingDbRow[]
+    return rows.map(toFinding)
+  }
+
+  /** Delete one finding by id. */
+  deleteFinding(id: string): void {
+    this.db.prepare('DELETE FROM finding WHERE id = ?').run(id)
+  }
+
+  /** Count total findings in the store. */
+  findingCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM finding').get() as { n: number }).n
+  }
+
+  /** Store or replace a prediction record (Task F4 / Decision D11). */
+  upsertPrediction(prediction: PredictionRecord): void {
+    const errorBar = prediction.errorBar ? JSON.stringify(prediction.errorBar) : null
+    const payload = prediction.payload ? JSON.stringify(prediction.payload) : null
+    const createdAt = prediction.createdAt || prediction.timestamp || new Date().toISOString()
+    const id = prediction.id || `pred-${prediction.findingId}-${prediction.runId}`
+
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO prediction (
+          id,
+          finding_id,
+          run_id,
+          predicted_waste_tokens,
+          confidence,
+          confidence_tier,
+          error_bar_json,
+          created_at,
+          comparison_run_id,
+          observed_delta_tokens,
+          calibration_score,
+          payload
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        prediction.findingId,
+        prediction.runId,
+        prediction.predictedWasteTokens,
+        prediction.confidence,
+        prediction.confidenceTier ?? null,
+        errorBar,
+        createdAt,
+        prediction.comparisonRunId ?? null,
+        prediction.observedDeltaTokens ?? null,
+        prediction.calibrationScore ?? null,
+        payload
+      )
+  }
+
+  /** Batch upsert predictions inside a single transaction. */
+  upsertPredictions(predictions: readonly PredictionRecord[]): void {
+    if (predictions.length === 0) return
+    this.db.exec('BEGIN')
+    try {
+      for (const prediction of predictions) this.upsertPrediction(prediction)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  /** Fetch one prediction by id; absent id gives undefined. */
+  getPrediction(id: string): PredictionRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM prediction WHERE id = ?')
+      .get(id) as unknown as PredictionDbRow | undefined
+    return row === undefined ? undefined : toPrediction(row)
+  }
+
+  /** List predictions, optionally filtered by runId, findingId, or scoredOnly; ordered by created_at DESC. */
+  listPredictions(options?: {
+    runId?: string
+    findingId?: string
+    scoredOnly?: boolean
+    limit?: number
+  }): PredictionRecord[] {
+    let query = 'SELECT * FROM prediction'
+    const conditions: string[] = []
+    const params: (string | number)[] = []
+
+    if (options?.runId) {
+      conditions.push('run_id = ?')
+      params.push(options.runId)
+    }
+    if (options?.findingId) {
+      conditions.push('finding_id = ?')
+      params.push(options.findingId)
+    }
+    if (options?.scoredOnly) {
+      conditions.push('comparison_run_id IS NOT NULL')
+    }
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`
+    }
+    query += ' ORDER BY created_at DESC, id ASC'
+    if (typeof options?.limit === 'number' && options.limit > 0) {
+      query += ' LIMIT ?'
+      params.push(Math.floor(options.limit))
+    }
+
+    const rows = this.db.prepare(query).all(...params) as unknown as PredictionDbRow[]
+    return rows.map(toPrediction)
+  }
+
+  /** Delete one prediction by id. */
+  deletePrediction(id: string): void {
+    this.db.prepare('DELETE FROM prediction WHERE id = ?').run(id)
+  }
+
+  /** Count total predictions in the store. */
+  predictionCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM prediction').get() as { n: number }).n
+  }
+
+  /**
+   * Calculates aggregate calibration curve and summary metrics across predictions.
+   */
+  getCalibrationSummary(options?: { runId?: string }): CalibrationCurveResult {
+    const predictions = this.listPredictions(options ? { runId: options.runId } : undefined)
+    return calculateCalibrationCurve(predictions)
+  }
+
   /** Number of stored records — the assertion behind store idempotency. */
   count(): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM records').get() as { n: number }).n
@@ -817,6 +1735,38 @@ export class CanonStore {
       .prepare('SELECT value FROM metadata WHERE key = ?')
       .get(key) as { value: unknown } | undefined
     return row === undefined ? undefined : text(row.value)
+  }
+
+  /** Write or replace a metadata value. */
+  setMetadata(key: string, value: string): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)')
+      .run(key, value)
+  }
+
+  /** Read the currently stamped detector version in metadata (Decision D17). */
+  getDetectorVersion(): number | undefined {
+    const val = this.getMetadata('detector_version')
+    return val === undefined ? undefined : Number(val)
+  }
+
+  /** Stamp a detector version into metadata (Decision D17). */
+  setDetectorVersion(version: number = DETECTOR_VERSION): void {
+    this.setMetadata('detector_version', String(version))
+  }
+
+  /**
+   * Check whether the store's stamped detector version is outdated (Decision D17).
+   * Returns true if missing or less than targetVersion, forcing automatic recomputation.
+   */
+  isDetectorOutdated(targetVersion: number = DETECTOR_VERSION): boolean {
+    const stored = this.getDetectorVersion()
+    return stored === undefined || stored < targetVersion
+  }
+
+  /** Returns true if the store's stamped detector version matches this build's DETECTOR_VERSION. */
+  hasCurrentDetectorVersion(): boolean {
+    return this.getDetectorVersion() === DETECTOR_VERSION
   }
 
   close(): void {

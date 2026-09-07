@@ -7,6 +7,7 @@
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 
+import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
 import type { ContentReader, ReaderTurn } from './types.js'
 
@@ -37,6 +38,10 @@ export const piReader: ContentReader = {
     const parts: ContentPart[] = []
     const order = { value: 0 }
     let sessionId: string | undefined
+    let observedExitCode: number | undefined
+    let observedTerminationReason: string | undefined
+    let hasCorrection = false
+    let detectedCorrectionRule: string | undefined
 
     try {
       for await (const line of lines) {
@@ -52,16 +57,52 @@ export const piReader: ContentReader = {
           sessionId = entry['id']
           continue
         }
+        if (entry['type'] === 'exit' || entry['type'] === 'session_end') {
+          observedTerminationReason = typeof entry['reason'] === 'string' ? entry['reason'] : 'completed'
+          if (typeof entry['exitCode'] === 'number') observedExitCode = entry['exitCode']
+          if (typeof entry['code'] === 'number') observedExitCode = entry['code']
+          continue
+        }
         if (entry['type'] !== 'message' || !isRecord(entry['message'])) continue
-        parts.push(...textParts(entry['message']['content'], order))
+
+        const msgRole = entry['message']['role']
+        const msgContent = entry['message']['content']
+        if (msgRole === 'user' || msgRole === undefined) {
+          const rawText = typeof msgContent === 'string'
+            ? msgContent
+            : Array.isArray(msgContent)
+              ? msgContent.map((c) => (typeof c === 'string' ? c : isRecord(c) && typeof c['text'] === 'string' ? c['text'] : '')).join('\n')
+              : undefined
+          if (rawText) {
+            const check = detectUserCorrection(rawText)
+            if (check.matched) {
+              hasCorrection = true
+              detectedCorrectionRule = check.rule
+            }
+          }
+        }
+
+        parts.push(...textParts(msgContent, order))
       }
     } finally {
       lines.close()
       stream.destroy()
     }
 
-    if (parts.length > 0 || sessionId !== undefined) {
-      yield { parts, ...(sessionId !== undefined ? { sessionId } : {}) }
+    if (
+      parts.length > 0 ||
+      sessionId !== undefined ||
+      observedTerminationReason !== undefined ||
+      observedExitCode !== undefined ||
+      hasCorrection
+    ) {
+      yield {
+        parts,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(observedTerminationReason !== undefined ? { terminationReason: observedTerminationReason } : {}),
+        ...(observedExitCode !== undefined ? { exitCode: observedExitCode } : {}),
+        ...(hasCorrection ? { isCorrection: true, correctionRule: detectedCorrectionRule } : {}),
+      }
     }
   },
 }

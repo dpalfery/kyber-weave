@@ -4,6 +4,8 @@
 // classes are stored disjointly so the reported-input identity is checkable
 // (R4.1), and `validateTokens` runs on every record, orphans included (R4.3).
 
+import type { OutcomeBlock } from './outcome.js'
+
 /** Where a cost figure came from (R5.1: bases are never blended silently). */
 export type CostBasis = 'published' | 'harness' | 'unknown'
 
@@ -99,6 +101,13 @@ export const CANONICAL_CONTENT_KEYS = [
 ] as const
 
 export type CanonicalContentKey = (typeof CANONICAL_CONTENT_KEYS)[number]
+
+/**
+ * Observable evidence-of-use levels for context items (Decision D15).
+ * Strictly empirical (strong / weak / none / unobserved); never value verdicts.
+ */
+export const EVIDENCE_OF_USE_LEVELS = ['strong', 'weak', 'none', 'unobserved'] as const
+export type EvidenceOfUse = (typeof EVIDENCE_OF_USE_LEVELS)[number]
 
 /** Content addressed only through canonical keys; any key may be absent. */
 export type CanonicalContent = Partial<Record<CanonicalContentKey, string>>
@@ -259,3 +268,91 @@ export function validateTokens(tokens: TokenUsage, location?: string): TokenVali
 
   return { valid: true }
 }
+
+/** One derived session row as stored in the `session` table. */
+export type SessionRow = {
+  sessionId: string
+  harness: string
+  label?: string | null
+  isSubagent?: boolean
+  parentSession?: string | null
+  agentName?: string | null
+  repo?: string | null
+  branch?: string | null
+  started?: string | null
+  ended?: string | null
+  /** The analysis output the dashboard reads. */
+  payload: unknown
+}
+
+/**
+ * How a run boundary was decided (D13, ADR 0008).
+ * 'explicit' means the harness explicitly emitted a run/workflow identity.
+ * 'derived' means the boundary was computed from working directory and time-gap clustering.
+ * Heuristics are never silently presented as raw facts.
+ */
+export type RunGroupingBasis = 'explicit' | 'derived'
+
+/** One derived or explicit run row as stored in the `run` table. */
+export type RunRow = {
+  runId: string
+  harness: string
+  label?: string | null
+  groupingBasis: RunGroupingBasis
+  groupingRule?: string | null
+  workingDirectory?: string | null
+  started?: string | null
+  ended?: string | null
+  executionCount?: number
+  outcome?: OutcomeBlock
+  payload?: unknown
+}
+
+/** One agent execution within a run as stored in the `execution` table. */
+export type ExecutionRow = {
+  executionId: string
+  runId: string
+  sessionId?: string | null
+  parentExecutionId?: string | null
+  harness: string
+  agentName?: string | null
+  isRoot: boolean
+  started?: string | null
+  ended?: string | null
+  parentLinkage: MetricAvailability
+  payload?: unknown
+}
+
+/** Hierarchical node in the execution tree. */
+export type ExecutionTreeNode = ExecutionRow & {
+  children: ExecutionTreeNode[]
+}
+
+/** Tree representation of executions for a run. */
+export type ExecutionTree = {
+  runId: string
+  roots: ExecutionTreeNode[]
+  linkage: MetricAvailability
+}
+
+/**
+ * One aggregated harness rollup row stored in the `harness_rollup` table (Task E2).
+ *
+ * Each metric is either a measured/derived number or null when unmeasurable;
+ * the exact reason and availability status for every dimension is preserved in
+ * the `measurability` map to adhere to ADR 0009 and ADR 0011 (never fabricate or disguise
+ * an unobserved metric as 0).
+ */
+export type HarnessRollupRow = {
+  harness: string
+  sampleCount: number
+  contextPressureMedian?: number | null
+  contextPressureP95?: number | null
+  cacheHitRate?: number | null
+  toolYield?: number | null
+  delegationOverhead?: number | null
+  fieldCoverage?: number | null
+  measurability: Record<string, MetricAvailability>
+  payload?: unknown
+}
+

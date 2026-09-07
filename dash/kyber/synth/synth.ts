@@ -43,7 +43,7 @@
 // and the adapters follow the same split — `normalize` emits, `validate`
 // rejects. Re-validating here would be a second mechanism for one job.
 
-import type { ParsedProviderCall } from '../../src/providers/types.js'
+export type { ParsedProviderCall } from '../../src/providers/types.js'
 import { contentFromParts, type CanonicalRecord, type CostBlock, type TokenUsage } from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
@@ -283,13 +283,22 @@ export function synthesizeCall(
     kind: 'internal',
     timestamp: call.timestamp,
     durationMs: call.activeDurationMs ?? 0,
-    status: 'unspecified',
+    status: readerTurn?.exitCode !== undefined && readerTurn.exitCode !== 0
+      ? 'error'
+      : (readerTurn?.terminationReason === 'task_complete' ? 'ok' : 'unspecified'),
     tokens,
     content: readerTurn === undefined ? {} : contentFromParts(readerTurn.parts),
     ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
     measurability: measurabilityFor(call.provider),
-    raw: call,
+    raw: readerTurn === undefined
+      ? call
+      : {
+          ...call,
+          ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
+          ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
+          ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
+        },
   }
 }
 

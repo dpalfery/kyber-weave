@@ -31,6 +31,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { basename, extname } from 'path'
 
+import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
 import type { ContentReader, ReaderTurn } from './types.js'
 
@@ -40,6 +41,14 @@ export type ClaudeSessionReadResult = {
   sessionId?: string
   /** Canonical content parts in transcript sequence order. */
   parts: ContentPart[]
+  /** Termination or exit indicator, when the transcript reported one. */
+  terminationReason?: string
+  /** Process or command exit code observed in transcript. */
+  exitCode?: number
+  /** Whether this session contains an explicit user correction turn. */
+  isCorrection?: boolean
+  /** The rule that identified the user correction. */
+  correctionRule?: string
 }
 
 /**
@@ -67,6 +76,10 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
   }
 
   let discoveredSessionId: string | undefined
+  let observedExitCode: number | undefined
+  let observedTerminationReason: string | undefined
+  let hasCorrection = false
+  let detectedCorrectionRule: string | undefined
   const parts: ContentPart[] = []
   let order = 0
   const nextOrder = () => order++
@@ -91,6 +104,16 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
       discoveredSessionId = record['sessionId']
     }
 
+    if (typeof record['exitCode'] === 'number') observedExitCode = record['exitCode']
+    if (typeof record['exit_code'] === 'number') observedExitCode = record['exit_code']
+    if (typeof record['terminationReason'] === 'string') observedTerminationReason = record['terminationReason']
+    if (typeof record['stop_reason'] === 'string') observedTerminationReason = record['stop_reason']
+    if (record['type'] === 'exit' || record['type'] === 'result') {
+      observedTerminationReason = String(record['type'])
+      if (typeof record['code'] === 'number') observedExitCode = record['code']
+      if (typeof record['exitCode'] === 'number') observedExitCode = record['exitCode']
+    }
+
     // Ground-truth MCP server field carried on assistant records.
     const rawServer = record['attributionMcpServer']
     const server = typeof rawServer === 'string' && rawServer.trim() !== ''
@@ -104,10 +127,18 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
     }
 
     const messageObj = msg as Record<string, unknown>
+    const role = messageObj['role']
     const content = messageObj['content']
 
     if (typeof content === 'string') {
       if (content !== '') {
+        if (role === 'user') {
+          const check = detectUserCorrection(content)
+          if (check.matched) {
+            hasCorrection = true
+            detectedCorrectionRule = check.rule
+          }
+        }
         parts.push({
           part: 'conversation_history',
           text: content,
@@ -133,6 +164,13 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
       if (type === 'text') {
         const text = typeof blockObj['text'] === 'string' ? blockObj['text'] : ''
         if (text === '') continue
+        if (role === 'user') {
+          const check = detectUserCorrection(text)
+          if (check.matched) {
+            hasCorrection = true
+            detectedCorrectionRule = check.rule
+          }
+        }
         parts.push({
           part: 'conversation_history',
           text,
@@ -194,6 +232,9 @@ export function readClaudeSession(source: string | readonly string[]): ClaudeSes
   return {
     sessionId: discoveredSessionId ?? fileStem,
     parts,
+    ...(observedTerminationReason !== undefined ? { terminationReason: observedTerminationReason } : {}),
+    ...(observedExitCode !== undefined ? { exitCode: observedExitCode } : {}),
+    ...(hasCorrection ? { isCorrection: true, correctionRule: detectedCorrectionRule } : {}),
   }
 }
 
@@ -231,6 +272,9 @@ export class ClaudeContentReader implements ContentReader {
     yield {
       parts: session.parts,
       ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
+      ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
+      ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
+      ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),
     }
   }
 

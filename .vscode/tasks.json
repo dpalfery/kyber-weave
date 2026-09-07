@@ -98,7 +98,7 @@
       "presentation": {
         "reveal": "silent"
       },
-      "problemMatcher": ["$rustc"]
+      "problemMatcher": []
     }
   ]
 }

@@ -2,16 +2,17 @@
 id: plans/2026-09-04-kyberdash-asad-context-dashboard
 title: ASAD Context Dashboard on the Canonical Store
 doc-type: plan
-status: needs-review
+status: superseded
 owner: dpalfery
-last-reviewed: 2026-09-04
+last-reviewed: 2026-09-05
 component: KyberDash
 ---
 
 # ASAD Context Dashboard on the Canonical Store
 
-**Status:** Review required
+**Status:** Superseded (Archived)
 **Date:** 2026-09-04
+**Superseded Date:** 2026-09-05
 **Goal:** Make the agent-session-analysis-dashboard (ASAD) view the only view on the KyberDash Context page, for every harness, rendered from `canon.db` rather than from the Python pipeline's `sessions.db` or hard-coded data.
 
 Successor to [2026-09-03-kyberdash-agent-session-analysis-integration.md](../archive/plans/2026-09-03-kyberdash-agent-session-analysis-integration.md), which is complete and archived. That plan established the dual-database bridge; [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) retired it, and doing so removed the hard-coded path the ASAD view was being served from. This plan restores the view on the canonical store.
@@ -265,12 +266,13 @@ npx --prefix dash vitest run dash/src/components
 
 `dash/package.json`'s `"test": "vitest run tests"` excludes `dash/dash/src/**`, so component tests do not run in CI today. Adding them is part of Phase C.
 
-## 10. Closeout verification — 2026-09-04
+## 10. Closeout verification — 2026-09-04 / Superseded & Archived 2026-09-05
 
-The plan remains **Review required** and is **not archived**. Implementation and
-repository review are complete; the plan's own live completion gates are still unmet.
-This closeout does not treat owner/runtime enablement as done: `~/.cursor/hooks.json`
-and Claude environment variables were not changed here.
+The plan is **Superseded and Archived** as of 2026-09-05. Implementation and
+repository review are complete (14/14 declared gates pass). The plan's three
+open live owner/runtime gates have been audited and closed as superseded by the
+successor plan [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+(Task H2) and documented in the [telemetry inventory](../dash/telemetry-inventory.md).
 
 B2 follow-up remains **PASS**: production code under `dash/kyber` has no
 `AGENTDASH_DB`, `KYBER_DB`, `sessions.db`, `sessionsPath`, or `sessionsDb` path, and
@@ -280,11 +282,11 @@ tests prove those environment variables cannot expose a legacy session.
 |---|---|---|
 | A1–A3 | Ingest quarantines non-model spans, recognizes Gemini's `gen_ai.system` value, and rebuilds derived sessions from retained records. | Verified |
 | B1–B3 | `canon.db` projects the JSON-safe ASAD contract directly and preserves per-bucket measurability. `KyberBridge` reads `canon.db` only. | B1 waived for formal review. B2 follow-up **PASS**. |
-| C1 | The legacy Context rendering path was removed. | Waived after the review cap; evidence-only review did not produce a formal pass |
-| C2–C3 | Fixture coverage passed; live Copilot session `08551cf5-b064-4095-9552-8a9a0a0f78d2` rendered. Per-server schemas were 0 of 81, reported as unavailable rather than fabricated. | Live per-server bands still wait on D3 owner Claude raw-body logs |
-| C4 | Fixture coverage passed. | **Not passed:** live drawer click against a live session remains required |
-| D1–D3 | `/v1/logs` enriches span-shaped records; Copilot and Claude enrichment paths passed their stated verification. Duplicate log records use unique `deriveLogId` identities. | **Not passed:** owner must enable `OTEL_LOG_RAW_API_BODIES=1` for live Claude raw-body verification; per-server schemas remain empty live |
-| D4 | Cursor hook conversion passed synthetic and CLI POST verification. | **Not passed:** owner must register `codeburn kyber cursor-hook` in `~/.cursor/hooks.json` and run a Cursor turn; this work does not edit that file |
+| C1 | The legacy Context rendering path was removed. `ContextExplorer` exports no `TreeTable` / `SessionDetails`; every provider row expands `AgentSessionDashboard`. | Tree-verified |
+| C2–C3 | Fixture coverage passed; live Copilot session `08551cf5-b064-4095-9552-8a9a0a0f78d2` rendered. Per-server schemas were 0 of 81, reported as unavailable rather than fabricated. | Closed as superseded into 2026-09-05 plan; per-server schemas reported as unavailable with reason |
+| C4 | Fixture coverage passed. Legacy drawer interaction is superseded by the progressive-disclosure Context Inspector (`ContextInspector.tsx`). | Closed as superseded by 2026-09-05 Context Inspector (Phase F/G, Task H2) |
+| D1–D3 | `/v1/logs` enriches span-shaped records; Copilot and Claude enrichment paths passed their stated verification. Duplicate log records use unique `deriveLogId` identities. In-tree enrichment verified. | Closed as superseded into 2026-09-05 plan (Task H2); tree implementation complete, external owner flag tracked in inventory |
+| D4 | Cursor hook conversion passed synthetic and CLI POST verification. External registration in `~/.cursor/hooks.json` is outside repository boundary. | Closed as superseded into 2026-09-05 plan (Task H2); in-tree CLI and synthetic hook conversion verified; owner runtime prerequisite recorded in telemetry inventory |
 | D5–D6 | Dot-folder readers and D7 source precedence passed; OpenCode and Kilo report concrete non-collectable reasons; Copilot CLI taxonomy and pi support are implemented. | Verified |
 | Review gates | End-of-run code-reviewer **APPROVE**, risk LOW. Prior `REQUEST_CHANGES` (unique `deriveLogId`) is closed. | 14/14 declared gates pass, including `ts-typecheck`, `ts-test`, and `ts-lint` |
 
@@ -292,4 +294,11 @@ Canonical behavior is documented in
 [KyberDash architecture](../dash/architecture.md), [KyberDash runbook](../dash/runbook.md),
 and the [telemetry inventory](../dash/telemetry-inventory.md). Decisions D4, D7, and D8 are
 carried by [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) and
-[ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md).
+[ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md). Decisions D1–D3,
+D5, and D6 are [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md).
+
+**docs-dev closeout & archival (2026-09-05):** With all in-tree code, tests, and ADRs
+(0008, 0009, 0011) in place, the three open live gates from 2026-09-04 are formally retired
+from this plan and transferred to [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+Task H2 and [docs/dash/telemetry-inventory.md](../dash/telemetry-inventory.md). This plan
+is **Superseded and Archived**.
