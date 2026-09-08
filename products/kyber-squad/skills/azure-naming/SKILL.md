@@ -2,9 +2,6 @@
 name: azure-naming
 description: Use the Azure naming convention to name resources.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 2.0.0
 ---
 
 # Azure Naming Standards

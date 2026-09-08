@@ -1,10 +1,7 @@
 ---
 name: dp-code-reviewer
-description: "Use when a change has already been reviewed and the author has pushed fixes — re-checks only the prior findings rather than re-running the whole council, then recomputes the verdict. Also use to select a review mode: shadow to calibrate without gating, or full to force a fresh council scan. Do NOT use for the first review of a change; invoke code-review for that."
+description: 'Use when a change has already been reviewed and the author has pushed fixes — re-checks only the prior findings rather than re-running the whole council, then recomputes the verdict. Also use to select a review mode: shadow to calibrate without gating, or full to force a fresh council scan. Do NOT use for the first review of a change; invoke code-review for that.'
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 2.0.0
 ---
 
 # Review modes and the re-review loop

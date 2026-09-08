@@ -2,9 +2,6 @@
 name: setup-dev-environment
 description: Set up the host repository development environment on a brand new Windows or macOS machine. Use when the user asks to setup/install/bootstrap/configure the repo or dev environment, including .NET, MAUI, Node/npm, Tauri/Rust, Python/Poetry, Docker/SQL Server database setup, VS Code extensions, MCP servers, Azure CLI read-only tooling, GitHub CLI, Ollama, and validation.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Setup Dev Environment

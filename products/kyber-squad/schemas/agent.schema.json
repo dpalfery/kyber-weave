@@ -10,6 +10,7 @@
     "invocation",
     "model-profile",
     "capability-profile",
+    "copilot-tools",
     "delegates-to",
     "fallback",
     "aliases"
@@ -21,6 +22,32 @@
     "invocation": { "enum": ["primary", "subagent"] },
     "model-profile": { "type": "string", "minLength": 1 },
     "capability-profile": { "type": "string", "minLength": 1 },
+    "copilot-capability-profile": { "type": "string", "minLength": 1 },
+    "copilot-tools": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "vscode",
+          "read",
+          "todo",
+          "codegraph/*",
+          "kyber-weave/*",
+          "context7/*",
+          "search",
+          "execute",
+          "web",
+          "edit",
+          "agent",
+          "edit/createDirectory",
+          "edit/createFile",
+          "edit/editFiles",
+          "edit/rename",
+          "vscodeGeneral/rename"
+        ]
+      }
+    },
     "delegates-to": {
       "type": "array",
       "uniqueItems": true,

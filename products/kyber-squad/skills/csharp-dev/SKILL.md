@@ -2,9 +2,6 @@
 name: csharp-dev
 description: Use when writing C#/.NET backend code, ASP.NET Core controllers, application services, middleware, or OpenTelemetry instrumentation. Do not use for repositories, migrations, or schema design.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 2.1.0
 ---
 
 # .NET Developer

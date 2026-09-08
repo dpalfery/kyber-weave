@@ -46,19 +46,26 @@ public sealed record SquadAgent(
     SquadInvocation Invocation,
     string ModelProfile,
     string CapabilityProfile,
+    string? CopilotCapabilityProfile,
+    IReadOnlyList<string> CopilotTools,
     IReadOnlyList<string> DelegatesTo,
     string Fallback,
     IReadOnlyList<string> Aliases,
     string InstructionBody,
     string BodyDigest,
-    string SourcePath);
+    string SourcePath,
+    IReadOnlyList<SquadResource> Resources);
 
 /// <summary>A canonical skill definition discovered from a <c>SKILL.md</c>.</summary>
 public sealed record SquadSkill(
     string Name,
     string Description,
     string InstructionBody,
-    string SourcePath);
+    string SourcePath,
+    IReadOnlyList<SquadResource> Resources);
+
+/// <summary>A validated resource reachable from a canonical agent or skill.</summary>
+public sealed record SquadResource(string RelativePath, string Content);
 
 /// <summary>How an agent is invoked by a harness that can represent it natively.</summary>
 public enum SquadInvocation
@@ -85,8 +92,9 @@ public sealed record SquadCapabilityProfiles(
     IReadOnlyDictionary<string, SquadCapabilityProfile> Profiles,
     string SourcePath);
 
-/// <summary>Resolved permission decisions for one named capability profile.</summary>
+/// <summary>Resolved permission decisions for one shared or explicitly target-specific profile.</summary>
 public sealed record SquadCapabilityProfile(
+    string? Target,
     IReadOnlyDictionary<string, SquadPermissionDecision> Permissions);
 
 /// <summary>A permission lattice ordered from most to least restrictive.</summary>

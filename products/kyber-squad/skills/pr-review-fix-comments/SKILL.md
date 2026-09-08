@@ -2,9 +2,6 @@
 name: pr-review-fix-comments
 description: Prompt workflow for addressing pull request review comments on Azure DevOps or GitHub. Start with a status-only inventory of review threads, then stop and wait for permission before analyzing any single comment.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Code Review Remediation

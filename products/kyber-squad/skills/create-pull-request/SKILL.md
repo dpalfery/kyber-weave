@@ -1,10 +1,7 @@
 ---
 name: create-pull-request
-description: "Guides developers and agents through creating a pull request: pre-PR validation, branching conventions, template usage, CI checks, review expectations, and post-merge documentation closeout. Use when opening or preparing a PR. Do not use for writing the implementation being merged."
+description: 'Guides developers and agents through creating a pull request: pre-PR validation, branching conventions, template usage, CI checks, review expectations, and post-merge documentation closeout. Use when opening or preparing a PR. Do not use for writing the implementation being merged.'
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Create Pull Request

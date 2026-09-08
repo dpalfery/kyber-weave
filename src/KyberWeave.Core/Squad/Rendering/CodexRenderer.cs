@@ -19,8 +19,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// Canonical skills render as harness skills at <c>.codex/skills/&lt;name&gt;/SKILL.md</c>
 /// with YAML frontmatter containing <c>name</c>, <c>description</c>, and <c>license: MIT</c>.
-/// Per the native single-projection rule, primary agents (<c>conductor</c> and <c>conductor-v3</c>)
-/// suppress their skill projections.
+/// Per the native single-projection rule, profile-declared shared identities suppress their
+/// skill projections.
 /// </para>
 /// <para>
 /// Model resolution resolves the agent model from <c>models.yml</c> for target <c>codex</c>,
@@ -36,8 +36,6 @@ public sealed class CodexRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".codex/agents";
     private const string SkillsDirectory = ".codex/skills";
-
-    private static readonly string[] SharedConductorIdentities = ["conductor", "conductor-v3"];
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -72,6 +70,9 @@ public sealed class CodexRenderer : ISquadRenderer
         }
 
         SquadSource source = SquadSourceLoader.Load(request.SourceDirectory);
+        HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -83,9 +84,11 @@ public sealed class CodexRenderer : ISquadRenderer
 
         foreach (SquadAgent agent in source.Agents)
         {
-            files.Add(RenderAgent(
+            SquadDeploymentFile principal = RenderAgent(
                 agent,
-                source.ModelProfiles.Profiles));
+                source.ModelProfiles.Profiles);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, agent.Resources);
 
             SquadDegradationRecord? degradation = BuildDegradationRecord(
                 agent,
@@ -99,15 +102,17 @@ public sealed class CodexRenderer : ISquadRenderer
 
         foreach (SquadSkill skill in source.Skills)
         {
-            // Primary agents (conductor and conductor-v3) are native primary agents on Codex;
-            // suppressing their skill projection adheres to the single-projection rule
-            // enforced by SquadRendererRegistry.
-            if (SharedConductorIdentities.Contains(skill.Name, StringComparer.Ordinal))
+            // A profile-declared shared identity has one canonical projection. Resolve the
+            // set from source so removing or adding a shared identity never requires a
+            // renderer-local roster change.
+            if (sharedIdentities.Contains(skill.Name))
             {
                 continue;
             }
 
-            files.Add(RenderSkill(skill));
+            SquadDeploymentFile principal = RenderSkill(skill);
+            files.Add(principal);
+            SquadResourceProjection.Append(files, principal, skill.Resources);
         }
 
         return Task.FromResult(new SquadRenderResult(true, files, degradations, [], []));

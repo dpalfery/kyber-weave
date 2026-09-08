@@ -2,9 +2,6 @@
 name: second-brain
 description: Bootstrap or audit a repository's documentation architecture — root AGENTS.md, a canonical 6-Docs/ tree (system/component docs, ADRs, plans, catalog, config registry), and the plan lifecycle that keeps agent and human context durable instead of drifting. Use whenever the user wants to set up a documentation structure for a new or existing repo, audit whether current docs match a standard, mentions "second brain", "config registry", "documentation architecture", "ADR", "plan lifecycle", "catalog", or has skills/agent instructions with project-specific facts hardcoded instead of living in canonical docs. Also trigger when onboarding a repo that has AGENTS.md/CLAUDE.md files but no structured doc tree behind them.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Second Brain: Documentation Architecture

@@ -1,10 +1,7 @@
 ---
 name: security-review
-description: "Security-focused code review of branch changes. Identifies HIGH-CONFIDENCE exploitable vulnerabilities (greater than 80% confidence) via a structured 3-phase analysis and parallel false-positive filtering. Outputs a ranked markdown report. USE FOR: security review, vuln scan, audit branch changes, pre-PR security check."
+description: 'Security-focused code review of branch changes. Identifies HIGH-CONFIDENCE exploitable vulnerabilities (greater than 80% confidence) via a structured 3-phase analysis and parallel false-positive filtering. Outputs a ranked markdown report. USE FOR: security review, vuln scan, audit branch changes, pre-PR security check.'
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Security Review Skill

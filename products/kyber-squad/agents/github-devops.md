@@ -1,10 +1,11 @@
 ---
 schema: kyber-squad.agent/v1
 name: github-devops
-description: "CI/CD ownership: GitHub Actions workflows, Docker build configuration, environment secrets, and branch protection. Use for build, pipeline, or deployment configuration. Does not provision cloud infrastructure or investigate live cloud resource state."
+description: "Owns CI/CD: GitHub Actions workflows, Docker build configuration, environment secrets, branch protection. Use when the change is under .github/workflows or in a Dockerfile, or when a build or deployment pipeline is failing. Do not use when the change provisions Azure resources rather than the pipeline that deploys to them."
 invocation: subagent
 model-profile: general
 capability-profile: publishing-worker
+copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, web, todo]
 delegates-to: []
 fallback: role-skill
 aliases: []

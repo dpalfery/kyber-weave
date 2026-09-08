@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-21
+last-reviewed: 2026-08-30
 ---
 
 # Distribution and release flow
@@ -65,8 +65,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 23 canonical agents, 26 skills, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | Portable skills (26) and MCP server configuration |
+| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 24 skills with 64 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 24 portable skills, their 64 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -84,6 +84,16 @@ kyber-weave squad pack --format all --out ./artifacts
 ```
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
+
+Both formats package `skills/` recursively: 24 `SKILL.md` files plus 64 retained resources, for
+88 skill-tree files. The resources stay in release packages until the
+[content-preserving migration todo](todo/migrate-skill-resources-into-standards.md) is accepted;
+their omission from the exact 24-file Copilot golden skill surface is not a package contract.
+
+`products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
+`.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` are an
+intentional stale self-deployment and its tracked state, not release-package inputs. This work
+leaves them untouched for a human refresh after a fresh Kyber-Weave release candidate.
 
 ### Version lockstep and toolchain validation
 
