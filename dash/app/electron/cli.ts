@@ -277,7 +277,13 @@ export function spawnSpecFor(target: CliTarget, args: string[]): SpawnSpec {
       env: { ...spawnEnvFor(target.entry), ELECTRON_RUN_AS_NODE: '1' },
     }
   }
-  return { bin: target.bin, args, env: spawnEnvFor(target.bin) }
+  // An external CLI never inherits the parent's ELECTRON_RUN_AS_NODE. Only the
+  // bundled spawn above sets it; a parent that already carries it (an Electron
+  // dev host, or a test runner launched from one) would otherwise flip an
+  // external Electron-based `codeburn` into plain Node.
+  const env = spawnEnvFor(target.bin)
+  delete env.ELECTRON_RUN_AS_NODE
+  return { bin: target.bin, args, env }
 }
 
 function isExecutableFile(p: string): boolean {

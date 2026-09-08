@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
+import type { ParsedProviderCall, Provider, SessionSource } from '../synth/provider.js'
 import { PROVIDER_PARSE_ERROR } from '../synth/provider.js'
 import { CanonStore } from '../canon/store.js'
 import { refreshLocalProviders } from './refresh.js'

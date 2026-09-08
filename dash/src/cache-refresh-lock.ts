@@ -368,37 +368,52 @@ export async function acquireCacheRefreshLock(options: RefreshLockOptions = {}):
     let heartbeatRunning = false
     ownedLockPaths.add(lockPath)
     armSignalCleanup()
+    // Coalesce ticks BEFORE they reach the serializer. Owner ops run one at a
+    // time and a tick's fs work (guard create, observe, write, utimes, unlink)
+    // outlasts a short heartbeatMs, so enqueueing every tick unconditionally
+    // grows ownerOpTail without bound: each verifyStillOwner then joins the
+    // tail behind a backlog that is still growing while it waits, and its
+    // latency runs away (measured 3ms -> 405ms -> 4.8s -> 42s at heartbeatMs:1).
+    // At most one tick is pending or running, so the fence waits on one
+    // heartbeat, never on a queue. `heartbeatRunning` therefore covers pending
+    // as well as running, which is also what release()'s drain loop wants.
     const heartbeat = setInterval(() => {
+      if (released || heartbeatRunning) return
+      heartbeatRunning = true
       void serializeOwnerOp(async () => {
-        if (released || heartbeatRunning) return
-        heartbeatRunning = true
-        const guard = await acquireTakeoverGuard()
-        if (guard !== 'created') { heartbeatRunning = false; return }
         try {
-          const current = await observe(lockPath)
-          if (current === 'missing' || current === 'changing' || current === 'unavailable') return
-          // A corrupt body is NOT ours to rewrite, even though no parseable
-          // token contradicts us. Holding the takeover guard excludes the other
-          // guard-takers, but NOT createExclusive, which publishes a directory
-          // entry before its body — so an unparseable body may be a successor's
-          // lock a millisecond from being written, or a foreign version's whose
-          // record shape we cannot read. Stamping our token over it made this
-          // process an owner again after it had been legitimately replaced:
-          // verifyStillOwner then answered true for a displaced writer, and
-          // release()'s removeIfOwned deleted the live successor's lock.
-          //
-          // So a body we cannot prove is ours ends our ownership. The mtime
-          // stops advancing, the fence refuses to publish (the parse is
-          // discarded, which is the fail-safe direction), and a successor
-          // recovers the lock one staleMs later through the age gate. Losing a
-          // parse is the correct price for never having two owners.
-          if (current.record === null || current.record.token !== token) return
-          await writeFile(lockPath, body(), { encoding: 'utf-8' })
-          const now = new Date(clock.wallNow())
-          await utimes(lockPath, now, now)
-        } catch { /* verify/release will turn displacement or I/O failure into a closed gate */ }
-        finally {
-          await retryWindowsMutation(() => unlink(takeoverPath), sleep)
+          if (released) return
+          const guard = await acquireTakeoverGuard()
+          if (guard !== 'created') return
+          try {
+            const current = await observe(lockPath)
+            if (current === 'missing' || current === 'changing' || current === 'unavailable') return
+            // A corrupt body is NOT ours to rewrite, even though no parseable
+            // token contradicts us. Holding the takeover guard excludes the other
+            // guard-takers, but NOT createExclusive, which publishes a directory
+            // entry before its body — so an unparseable body may be a successor's
+            // lock a millisecond from being written, or a foreign version's whose
+            // record shape we cannot read. Stamping our token over it made this
+            // process an owner again after it had been legitimately replaced:
+            // verifyStillOwner then answered true for a displaced writer, and
+            // release()'s removeIfOwned deleted the live successor's lock.
+            //
+            // So a body we cannot prove is ours ends our ownership. The mtime
+            // stops advancing, the fence refuses to publish (the parse is
+            // discarded, which is the fail-safe direction), and a successor
+            // recovers the lock one staleMs later through the age gate. Losing a
+            // parse is the correct price for never having two owners.
+            if (current.record === null || current.record.token !== token) return
+            await writeFile(lockPath, body(), { encoding: 'utf-8' })
+            const now = new Date(clock.wallNow())
+            await utimes(lockPath, now, now)
+          } catch { /* verify/release will turn displacement or I/O failure into a closed gate */ }
+          finally {
+            await retryWindowsMutation(() => unlink(takeoverPath), sleep)
+          }
+        } finally {
+          // Always clears, so a throw from the guard cannot wedge the flag on
+          // and kill every later tick — or hang release()'s drain loop.
           heartbeatRunning = false
         }
       })

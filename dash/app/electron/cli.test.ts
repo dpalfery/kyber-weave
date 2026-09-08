@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, isAbsolute, relative, win32, posix } from 'node:path'
+import { dirname, join, isAbsolute, relative, win32, posix, delimiter } from 'node:path'
 
 import { spawnCli, spawnCliAction, spawnEnvFor, spawnSpecFor, startServe, killAll, shutdownAll, CliError, nodeManagerDirs, notFoundStage, reapOrphanServe, resolveCodeburnPath, resolveTarget } from './cli'
 
@@ -316,7 +316,7 @@ describe('spawnSpecFor (bundled CLI runs via Electron-as-node)', () => {
     expect(spec.env.ELECTRON_RUN_AS_NODE).toBe('1')
     // PATH is still augmented (the bundle's own dir leads), harmless for a CLI
     // that itself shells out during pairing/sync.
-    expect((spec.env.PATH ?? '').split(':')[0]).toBe('/res/cli/dist')
+    expect((spec.env.PATH ?? '').split(delimiter)[0]).toBe('/res/cli/dist')
   })
 
   it('spawns an external CLI directly, with no run-as-node flag', () => {
@@ -324,7 +324,7 @@ describe('spawnSpecFor (bundled CLI runs via Electron-as-node)', () => {
     expect(spec.bin).toBe('/some/bin/codeburn')
     expect(spec.args).toEqual(['status'])
     expect(spec.env.ELECTRON_RUN_AS_NODE).toBeUndefined()
-    expect((spec.env.PATH ?? '').split(':')[0]).toBe('/some/bin')
+    expect((spec.env.PATH ?? '').split(delimiter)[0]).toBe('/some/bin')
   })
 
   it('spawnCli runs the bundled entry end-to-end as Node', async () => {

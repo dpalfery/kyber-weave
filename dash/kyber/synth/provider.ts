@@ -29,7 +29,8 @@
 // continue). Successful loads are byte-identical to calling the Synthesizer
 // directly; failure handling adds problems, never guesses at data.
 
-import type { ParsedProviderCall } from '../../src/providers/types.js'
+import type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
+export type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
 import type { CanonicalRecord, Problem } from '../canon/types.js'
 import { claudeReader } from './readers/claude.js'
 import { copilotCliReader, loadCopilotCliCalls } from './readers/copilot.js'
@@ -42,6 +43,16 @@ import { Synthesizer } from './synth.js'
 
 /** Problem code for a session store that exists but cannot be parsed (R1.3). */
 export const PROVIDER_PARSE_ERROR = 'PROVIDER_PARSE_ERROR'
+
+/**
+ * Production provider discovery behind the merge-zone seam (ADR 0006 / D12).
+ * `kyber/cli` must not import vendored `dash/src/**` directly; it reaches
+ * upstream discovery through this allowed `synth/**` contact surface instead,
+ * keeping every CodeBurn import inside `synth/**` and `canon/adapters/**`.
+ */
+export async function getAllProviders(): Promise<Provider[]> {
+  return (await import('../../src/providers/index.js')).getAllProviders()
+}
 
 /**
  * What loading one provider's session store can produce:

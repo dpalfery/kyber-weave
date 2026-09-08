@@ -70,8 +70,30 @@ export const CLEARED = [
   'KIMI_MODEL_NAME',
   'AI_GATEWAY_API_KEY',
   'VERCEL_OIDC_TOKEN',
+  // Review-provider credentials and endpoints (kyber/analysis/review-providers).
+  // getReviewProvider() picks its provider by which API key is present, and each
+  // provider builds its URL from the matching *_BASE_URL, so a dev shell decides
+  // both which provider a test gets and where it points. A gateway-shaped
+  // ANTHROPIC_BASE_URL ('https://api.anthropic.com', no /v1) turned
+  // review.test.ts red locally while CI stayed green.
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_BASE_URL',
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  'OLLAMA_HOST',
+  'OLLAMA_BASE_URL',
   // Read by detectBashBloat - a dev's real shell limit must not bleed in
   'BASH_MAX_OUTPUT_LENGTH',
+  // Color forcing. CLI tests spawn src/cli.ts with `...process.env` and assert
+  // on plain stdout; chalk writing to a pipe emits no escapes UNLESS one of
+  // these overrides supports-color's tty check. A dev shell (or a test-runner
+  // extension) that exports FORCE_COLOR turns every such assertion red - most
+  // sharply in cli-models-unpriced, whose control-character assertion is a
+  // terminal-injection guard and cannot distinguish chalk's own header styling
+  // from an escape smuggled in through a model ID. Cleared, not pinned to '0':
+  // piped stdio already means no color, and NO_COLOR stays the dev's to set.
+  'FORCE_COLOR',
+  'CLICOLOR_FORCE',
 ] as const
 
 // Snapshotted from the dev's shell and restored every test. These can't be

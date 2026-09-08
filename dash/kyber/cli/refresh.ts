@@ -7,7 +7,7 @@
 // derived dashboard tables. Keeping that boundary here avoids making either
 // the parser or the canonical store know about the other's runtime lifecycle.
 
-import type { Provider, SessionSource, ParsedProviderCall } from '../../src/providers/types.js'
+import type { Provider, SessionSource, ParsedProviderCall } from '../synth/provider.js'
 import { recordValidationProblems } from '../canon/adapters/quarantine.js'
 import { buildHarnessRollup } from '../canon/harnesses.js'
 import { buildSessions, type BuildSessionsReport } from '../canon/sessions.js'
@@ -40,7 +40,7 @@ export type RefreshDependencies = {
 }
 
 const productionDependencies: RefreshDependencies = {
-  getAllProviders: async () => (await import('../../src/providers/index.js')).getAllProviders(),
+  getAllProviders: async () => (await import('../synth/provider.js')).getAllProviders(),
 }
 
 function asError(error: unknown): Error {
