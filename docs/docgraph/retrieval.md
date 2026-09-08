@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-09-03
+last-reviewed: 2026-09-08
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
 code-refs:
@@ -39,7 +39,7 @@ score = score x authority
 | Partial `keywords` coverage | up to 4.5 | keyword coverage × 3.0, capped at a 1.5 multiplier |
 | Exact `component` match | 3.0 | the query is a component name |
 | Partial `component` coverage | up to 2.5 | the query names part of a component |
-| Title similarity | up to 2.0 | cosine overlap with the title |
+| Title similarity | up to 2.0 | cosine overlap with the title, ignoring question scaffolding |
 | Body relevance | up to 1.0 | BM25 over the prose, squashed to 0..1 |
 
 Frontmatter identity deliberately outranks prose. A document that *formally claims* the
@@ -111,6 +111,19 @@ point of having one.
 Terms appearing in more than half the corpus are dropped outright before scoring, so a
 question made entirely of them scores zero and is honestly reported as a miss instead of
 returning three confident results about nothing.
+
+Title cosine drops the scaffolding half of that filter but not the ubiquity half. Sharing
+only a scaffolding word with a title is no longer a hit — an off-topic question whose one
+scaffolding word appeared in a task plan's title used to clear the floor at 0.30 on that
+alone. Corpus-ubiquitous terms are kept, because the two filters are not the same
+judgement: a term in every *body* cannot say which body is the answer, but a title is a
+curated six-word label, and the document titled "Skills" is the one about skills however
+often this corpus says "skill". Filtering titles by ubiquity too cost that document a
+third of its score for the query "skill authoring".
+
+Note for anyone editing this page: the retrieval regression suite searches the real
+corpus, including this file. Spelling out an off-topic test query here makes that query
+answerable and fails the suite.
 
 Body BM25 still uses Robertson–Sparck Jones IDF, with one calibration: a query term that
 appears in **no** document body is not given the theoretical maximum IDF. It is treated as

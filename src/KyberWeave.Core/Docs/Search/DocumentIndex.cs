@@ -204,12 +204,15 @@ public sealed partial class DocumentIndex
         // part of a document is the answer.
         Dictionary<string, double> rarityWeighted = _corpus.WeightByRarity(queryVector);
 
+        // Titles are compared against the question's subject, not its phrasing.
+        Dictionary<string, double> titleQuery = TitleQuery(coverageTerms);
+
         List<(DocumentModel Doc, double Score)> scored = new List<(DocumentModel Doc, double Score)>();
         foreach (DocumentModel doc in _corpus.Documents)
         {
             double score = ScoreExact(doc, trimmed);
             score += ScorePartialIdentity(doc, queryVector);
-            score += TitleWeight * TextVectorizer.Similarity(doc.Frontmatter.Title ?? doc.RelativePath, trimmed);
+            score += TitleWeight * ScoreTitle(doc, titleQuery);
             score += BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms);
 
             score *= Authority(doc);
@@ -364,6 +367,43 @@ public sealed partial class DocumentIndex
         }
 
         return score;
+    }
+
+    /// <summary>
+    /// The query terms a title may be matched on: what was asked about, with the phrasing
+    /// of the asking removed.
+    /// </summary>
+    /// <remarks>
+    /// Raw title cosine counted question scaffolding. "how do I make a sandwich" shares
+    /// only "make" with a plan titled "Make 0 unrepresentable…", and after the plan
+    /// discount that was still 0.30 — over the floor, so an unanswerable question got a
+    /// confident answer. Body scoring already drops those words; title scoring has to as
+    /// well, or the floor does not mean a miss.
+    ///
+    /// Only the scaffolding half of <see cref="DocumentCorpus.IsInformative"/> is applied.
+    /// The corpus-ubiquity half belongs to bodies alone: dropping it here cost the
+    /// document titled "Skills" a third of its score for the query "skill authoring",
+    /// because a corpus about agents and skills says those words everywhere. Titles are
+    /// curated labels, and naming the corpus's own subject in one is the point of a title.
+    /// </remarks>
+    internal static Dictionary<string, double> TitleQuery(IReadOnlyCollection<string> coverageTerms)
+    {
+        Dictionary<string, double> query = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (string term in coverageTerms)
+        {
+            if (DocumentCorpus.IsQuestionScaffolding(term)) continue;
+            query[term] = 1;
+        }
+        return query;
+    }
+
+    /// <summary>Cosine overlap between a document's title and <see cref="TitleQuery"/>.</summary>
+    private static double ScoreTitle(DocumentModel doc, IReadOnlyDictionary<string, double> titleQuery)
+    {
+        if (titleQuery.Count == 0) return 0;
+
+        return TextVectorizer.CosineSimilarity(
+            titleQuery, TextVectorizer.Vectorize(doc.Frontmatter.Title ?? doc.RelativePath));
     }
 
     /// <summary>

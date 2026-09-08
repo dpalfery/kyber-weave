@@ -199,6 +199,77 @@ public class DocumentAuthorityTests
     }
 }
 
+/// <summary>
+/// Title cosine used to count question-scaffolding words. "how do I make a sandwich"
+/// shared only "make" with a plan titled "Make 0 unrepresentable…" and still cleared
+/// the 0.25 floor after plan demotion.
+/// </summary>
+public sealed class TitleScoringTests : IDisposable
+{
+    private readonly DocFixture _fixture = new();
+
+    private DocumentIndex BuildPlanTitledMakeUnrepresentable()
+    {
+        _fixture.WithCatalog().Write("6-Docs/plans/t2.md", """
+            ---
+            id: plans/tasks/t2-formatter-sentinel
+            title: T2 — Make 0 unrepresentable for an unreported counter
+            doc-type: plan
+            status: needs-review
+            component: MotorcycleRAG API
+            owner: API maintainers
+            last-reviewed: 2026-09-06
+            ---
+            # T2 — Make 0 unrepresentable for an unreported counter
+
+            ## Detail
+
+            The formatter must render an em-dash when a counter was not exported.
+            """);
+        return DocumentIndex.Build(_fixture.Load(), FakeCodeGraphResolver.WithSymbols());
+    }
+
+    [Fact]
+    public void QuestionScaffoldingInATitleDoesNotAnswerAnUnrelatedQuery()
+    {
+        DocumentIndex index = BuildPlanTitledMakeUnrepresentable();
+
+        IReadOnlyList<DocumentHit> hits = index.Explore("how do I make a sandwich", maxDocs: 3);
+
+        Assert.True(hits.Count == 0,
+            "expected no hits, got: " + string.Join(", ",
+                hits.Select(h => $"{h.Document.RelativePath} ({h.Score:0.00})")));
+    }
+
+    [Fact]
+    public void ATitleThatNamesTheSubjectStillClearsTheFloor()
+    {
+        DocumentIndex index = BuildPlanTitledMakeUnrepresentable();
+
+        List<string> ids = index.Explore("unrepresentable counter", maxDocs: 3)
+            .Select(h => h.Document.Frontmatter.Id ?? h.Document.RelativePath)
+            .ToList();
+
+        Assert.Contains("plans/tasks/t2-formatter-sentinel", ids, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The scaffolding and corpus-ubiquity halves of informativeness are separate
+    /// judgements, and only the first applies to titles. A corpus about agents says
+    /// "agent" everywhere, which is exactly why the document titled for it must keep that
+    /// word: filtering titles by ubiquity demoted the right document for "skill authoring".
+    /// </summary>
+    [Fact]
+    public void TitleQueryDropsScaffoldingAndKeepsCorpusVocabulary()
+    {
+        Dictionary<string, double> query = DocumentIndex.TitleQuery(["make", "tell", "agent", "sandwich"]);
+
+        Assert.Equal(["agent", "sandwich"], query.Keys.OrderBy(k => k, StringComparer.Ordinal));
+    }
+
+    public void Dispose() => _fixture.Dispose();
+}
+
 public class DocumentSectionTests
 {
     /// <summary>

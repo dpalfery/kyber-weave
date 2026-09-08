@@ -82,6 +82,7 @@ public sealed class DocumentCorpusTests : IDisposable
     [InlineData("getting")]
     [InlineData("keep")]
     [InlineData("tell")]
+    [InlineData("make")]
     public void QuestionScaffoldingIsNeverInformative(string word)
     {
         Assert.False(Build().IsInformative(word));

@@ -190,7 +190,14 @@ public static class SquadSourceValidator
                 decision != SquadPermissionDecision.Allow)
             {
                 string actualDecision = capabilityProfile.Permissions.TryGetValue(requiredCapability, out decision)
-                    ? decision.ToString().ToLowerInvariant()
+                    ? decision switch
+                    {
+                        SquadPermissionDecision.Deny => "deny",
+                        SquadPermissionDecision.Ask => "ask",
+                        SquadPermissionDecision.Allow => "allow",
+                        _ => throw new InvalidOperationException(
+                            $"Unexpected permission decision '{decision}'."),
+                    }
                     : "undeclared";
                 Throw(
                     $"Agent '{agent.Name}' declares Copilot tool '{tool}', but capability " +

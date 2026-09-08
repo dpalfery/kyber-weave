@@ -130,12 +130,26 @@ public sealed class DocumentCorpus
     };
 
     /// <summary>
+    /// True when a term is part of how a question is phrased rather than what it asks
+    /// about — "how do I <c>make</c> a sandwich".
+    /// </summary>
+    /// <remarks>
+    /// Exposed separately from <see cref="IsInformative"/> because the two halves of that
+    /// test do not belong to the same places. Scaffolding says nothing about relevance
+    /// anywhere, so every scorer should drop it. Corpus ubiquity is a body calibration:
+    /// a term in every body cannot say which body is the answer, but a title is a curated
+    /// six-word label, and the document titled "Agents" is the one about agents however
+    /// often the corpus says "agent".
+    /// </remarks>
+    public static bool IsQuestionScaffolding(string term) => QuestionWords.Contains(term);
+
+    /// <summary>
     /// False when a term says nothing about which document is relevant — either because
     /// it is question scaffolding, or because this corpus uses it nearly everywhere.
     /// </summary>
     public bool IsInformative(string term)
     {
-        if (QuestionWords.Contains(term)) return false;
+        if (IsQuestionScaffolding(term)) return false;
         if (_documentCount < 4) return true;
 
         double n = _documentFrequency.GetValueOrDefault(term);
