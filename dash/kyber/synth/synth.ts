@@ -43,6 +43,7 @@
 // and the adapters follow the same split — `normalize` emits, `validate`
 // rejects. Re-validating here would be a second mechanism for one job.
 
+import type { ParsedProviderCall } from '../../src/providers/types.js'
 export type { ParsedProviderCall } from '../../src/providers/types.js'
 import { contentFromParts, type CanonicalRecord, type CostBlock, type TokenUsage } from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'

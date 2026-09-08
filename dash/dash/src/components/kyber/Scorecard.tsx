@@ -177,18 +177,7 @@ export function Scorecard({
             <h3 className="text-xs font-semibold uppercase tracking-wider text-heading">
               {title}
             </h3>
-            <span
-              className="rounded bg-interactive-secondary px-1.5 py-0.5 text-[10px] font-medium text-tertiary-foreground"
-              title="Per Decision D3: each diagnostic dimension is evaluated independently. No combined efficiency metric."
-            >
-              Independent Vectors (D3)
-            </span>
           </div>
-          {!compact && (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              Six-dimension diagnostic posture. Dashes (<span className="font-mono">—</span>) indicate unmeasurable telemetry, never zero.
-            </p>
-          )}
         </div>
 
         {/* Decision D9: Secondary derived cost (muted/subordinate indicator) */}
@@ -196,7 +185,7 @@ export function Scorecard({
           <div
             className="flex items-center gap-1.5 rounded-md border border-border/60 bg-interactive-secondary/40 px-2 py-1 text-right text-xs text-muted-foreground"
             data-testid="secondary-cost"
-            title={`Cost: ${usd(secondaryCost.costUsd)} (${secondaryCost.basis || 'derived estimate'}) — Derived secondary metric per Decision D9`}
+            title={`Cost: ${usd(secondaryCost.costUsd)} (${secondaryCost.basis || 'derived estimate'})`}
           >
             <span className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
               Secondary Cost:
@@ -305,15 +294,6 @@ export function Scorecard({
         })}
       </div>
 
-      {/* Decision D9 & D3 Note Footer */}
-      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-2 text-[10px] text-tertiary-foreground">
-        <span>
-          Diagnostic integrity: D3 requires independent dimensions; D9 keeps cost derived & secondary.
-        </span>
-        <span>
-          Telemetry classes: deterministic · inferred · coverage-gap
-        </span>
-      </div>
     </Card>
   )
 }

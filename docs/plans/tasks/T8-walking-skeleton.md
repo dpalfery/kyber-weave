@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T8-walking-skeleton
+title: T8 — The walking skeleton
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T8 — The walking skeleton: make the hierarchy clickable
 
 **Model:** strong. **ONE agent, ONE window, NO parallelism.** **Run after:** T1–T4 merge.

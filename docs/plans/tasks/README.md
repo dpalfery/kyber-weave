@@ -1,3 +1,13 @@
+---
+id: plans/tasks/index
+title: KyberDash spine dispatch pack
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # Dispatch pack — prototype to running app
 
 Copy `spine.spec.ts` to `dash/e2e/spine.spec.ts`, then hand out the task files below.

@@ -564,6 +564,8 @@ export function AgentSessionContent({
   }
 
   const u = session.summary || {}
+  const toolCallsMeasured = typeof u.tool_calls === 'number' && Number.isFinite(u.tool_calls)
+  const toolCallsReason = `Tool invocation count was not reported by ${session.harness || 'this adapter'}.`
   const rows = session.reconciliation || []
   const badReconciliation = rows.filter((r) => !(r.input_match && r.output_match))
   const cost = u.cost || {}
@@ -916,15 +918,22 @@ export function AgentSessionContent({
           </Card>
 
           {/* 11. Tool Calls */}
-          <Card className="px-3.5 py-3">
+          <Card
+            className="px-3.5 py-3"
+            data-testid="metric-tool-calls"
+            data-measured={String(toolCallsMeasured)}
+            title={toolCallsMeasured ? undefined : toolCallsReason}
+          >
             <div className="text-[11px] uppercase tracking-wider text-tertiary-foreground">
               Tool Calls
             </div>
             <div className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-foreground">
-              {fmtNum(u.tool_calls ?? 0)}
+              {fmtNum(u.tool_calls)}
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground">
-              {u.tools_invoked != null ? `${u.tools_invoked} distinct invoked` : 'invocations'}
+              {toolCallsMeasured
+                ? u.tools_invoked != null ? `${u.tools_invoked} distinct invoked` : 'invocations'
+                : toolCallsReason}
             </div>
           </Card>
 

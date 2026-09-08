@@ -61,7 +61,7 @@ function deriveRelocationStrategy(recommendation: string, actionProp?: Relocatio
     strategyName: 'Context Relocation & Deferral',
     badgeLabel: 'relocate, do not delete',
     suggestedAction: 'Move volatile context items into dedicated subagent turns or lazy tool schemas rather than removing content.',
-    reversibilityNote: 'Decision D8 adherence: avoids destructive deletion by preserving latent instructions.',
+    reversibilityNote: 'Avoids destructive deletion by preserving latent instructions.',
   }
 }
 
@@ -95,13 +95,13 @@ export function RecommendationPanel({
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-heading">
-              Remediation Plan (Decision D8)
+              Remediation Plan
             </h3>
             <span
               className="rounded bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10.5px] font-semibold text-primary uppercase tracking-wider flex items-center gap-1"
               data-testid="d8-relocation-badge"
             >
-              <span>D8: Relocate, Do Not Delete</span>
+              <span>Relocate, Do Not Delete</span>
             </span>
           </div>
           <p className="mt-1 text-[11px] text-muted-foreground">
@@ -153,7 +153,7 @@ export function RecommendationPanel({
         >
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold uppercase tracking-wider text-muted-foreground text-[10.5px]">
-              Calibrated Error Bar Bounds (D5)
+              Calibrated Error Bar Bounds
             </span>
             <span className="font-mono text-[11px] text-tertiary-foreground tabular-nums">
               Lower: {fmtTokens(lowerBound)} · Upper: {fmtTokens(upperBound)}

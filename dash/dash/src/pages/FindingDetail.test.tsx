@@ -362,7 +362,7 @@ describe('FindingDetail Screen (Task G3 Compliance)', () => {
 
     expect(html).toContain('data-testid="recommendation-panel"')
     expect(html).toContain('data-testid="d8-relocation-badge"')
-    expect(html).toContain('D8: Relocate, Do Not Delete')
+    expect(html).toContain('Relocate, Do Not Delete')
 
     // Recommendation prose
     expect(html).toContain('data-testid="recommendation-text"')
@@ -387,7 +387,7 @@ describe('FindingDetail Screen (Task G3 Compliance)', () => {
     const html = renderHtml(<FindingDetail initialFinding={sampleDeterministicFinding} />)
 
     expect(html).toContain('data-testid="outcome-risk-caveat"')
-    expect(html).toContain('Outcome-Risk Caveat (Decision D5)')
+    expect(html).toContain('Outcome-Risk Caveat')
     expect(html).toContain('Non-Collapsible Guard')
     expect(html).toContain(sampleDeterministicFinding.outcomeRiskCaveat)
 
@@ -489,7 +489,7 @@ describe('RecommendationPanel Component Isolation', () => {
     )
 
     expect(html).toContain('Cache Breakpoint Repositioning')
-    expect(html).toContain('D8: Relocate, Do Not Delete')
+    expect(html).toContain('Relocate, Do Not Delete')
     expect(html).toContain('15.0K tokens')
     expect(html).toContain('[12.0K – 18.0K]')
   })

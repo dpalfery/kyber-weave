@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T7-q9-token-counts
+title: T7 — Are Antigravity's token counts absent, or dropped in ingest?
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T7 — Are Antigravity's token counts absent, or dropped in ingest?
 
 **Model:** strong (not Haiku — this is an empirical question with a judgement call). **Blocks:** T2, T4. **Time:** ~30 min. **Investigation only — no production edits.**

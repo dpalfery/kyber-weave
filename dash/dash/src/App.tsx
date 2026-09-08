@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -20,27 +20,55 @@ import { BarList, type BarItem } from '@/components/BarList'
 import { DataTable } from '@/components/DataTable'
 import { GranularUsageChart, DeviceUsageChart, type Unit } from '@/components/UsageChart'
 import { DeviceSearchModal } from '@/components/DeviceSearchModal'
-import { ContextExplorer } from '@/components/ContextExplorer'
 import { WorkflowPanel, hasWorkflowContent } from '@/components/WorkflowPanel'
 import { Punchcard } from '@/components/Punchcard'
 import { CompareView } from '@/components/kyber/CompareView'
 import { QuarantineView, type QuarantineEntry } from '@/components/kyber/QuarantineView'
 import { ProblemsView, type ProblemEntry } from '@/components/kyber/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
+import { Attention, HARNESS_CATALOG } from '@/pages/Attention'
+import { HarnessDetail } from '@/pages/HarnessDetail'
+import { RunDetail } from '@/pages/RunDetail'
+import { FindingDetail } from '@/pages/FindingDetail'
+import { TurnDetail } from '@/pages/TurnDetail'
 
-const HARNESS_TABS = [
-  { id: 'all', label: 'All Harnesses' },
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'antigravity', label: 'Antigravity (AGY)' },
-  { id: 'copilot-cli', label: 'GitHub Copilot CLI' },
-  { id: 'copilot-vscode', label: 'Copilot (VS Code)' },
-  { id: 'copilot-agent', label: 'Copilot Agent' },
-  { id: 'pi', label: 'Pi' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'kilo-code', label: 'KiloCode' },
-  { id: 'cursor', label: 'Cursor' },
-] as const
+export const HARNESS_TABS = HARNESS_CATALOG
+
+export type SpineLocation = {
+  level: 'attention' | 'harness' | 'run' | 'execution' | 'turn' | 'finding' | 'compare'
+  harnessId?: string
+  runId?: string
+  executionId?: string
+  turnIndex?: number
+  findingId?: string
+}
+
+type SpineAction =
+  | { type: 'push'; location: SpineLocation }
+  | { type: 'pop' }
+  | { type: 'replace'; location: SpineLocation }
+  | { type: 'goTo'; location: SpineLocation }
+
+function spineReducer(stack: SpineLocation[], action: SpineAction): SpineLocation[] {
+  switch (action.type) {
+    case 'push':
+      return [...stack, action.location]
+    case 'pop':
+      return stack.length > 1 ? stack.slice(0, -1) : stack
+    case 'replace':
+      return [...stack.slice(0, -1), action.location]
+    case 'goTo': {
+      const matchingIndex = stack.findLastIndex((location) =>
+        location.level === action.location.level &&
+        location.harnessId === action.location.harnessId &&
+        location.runId === action.location.runId &&
+        location.executionId === action.location.executionId &&
+        location.turnIndex === action.location.turnIndex,
+      )
+      return matchingIndex >= 0 ? stack.slice(0, matchingIndex + 1) : [stack[0]!, action.location]
+    }
+  }
+}
 
 const n = (v: number | undefined): number => v ?? 0
 
@@ -472,8 +500,8 @@ function ThemeToggle() {
 }
 
 export const NAV_TABS = [
+  { key: 'attention', label: 'Attention' },
   { key: 'usage', label: 'Usage' },
-  { key: 'context', label: 'Context' },
   { key: 'compare', label: 'Compare' },
   { key: 'quarantine', label: 'Quarantine' },
   { key: 'problems', label: 'Problems' },
@@ -609,8 +637,10 @@ export interface AppProps {
   initialPage?: KyberPage
 }
 
-export function App({ initialPage = 'usage' }: AppProps = {}) {
-  const [page, setPage] = useState<KyberPage>(initialPage)
+export function App({ initialPage = 'attention' }: AppProps = {}) {
+  const [section, setSection] = useState<KyberPage>(initialPage)
+  const [spine, dispatchSpine] = useReducer(spineReducer, [{ level: 'attention' }])
+  const location = spine.at(-1)!
   const [period, setPeriod] = useState<Period>('today')
   const [provider, setProvider] = useState('all')
   const [view, setView] = useState<string>('all')
@@ -702,8 +732,8 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
   // If the selected provider isn't present on the current view, reset to all
   // (otherwise a healthy device shows empty under a filter it has no data for).
   useEffect(() => {
-    const knownHarnesses = HARNESS_TABS.map((t) => t.id)
-    if (provider !== 'all' && c0 && !knownHarnesses.includes(provider as never) && !providerOptions.includes(provider)) {
+    const knownHarnesses = HARNESS_TABS.map((t) => t.harness)
+    if (provider !== 'all' && c0 && !knownHarnesses.includes(provider) && !providerOptions.includes(provider)) {
       setProvider('all')
     }
   }, [provider, providerOptions, c0])
@@ -731,6 +761,12 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
   const showCombined = multi && view === 'all'
   const viewTitle = showCombined ? 'All devices' : (primary ? primary.name + (primary.local ? ' · this Mac' : '') : 'Loading…')
   const label = local?.payload?.current?.label ?? ''
+
+  const showSpine = section === 'attention'
+  const openSpine = (next: SpineLocation, action: 'push' | 'replace' | 'goTo' = 'push') => {
+    setSection('attention')
+    dispatchSpine({ type: action, location: next })
+  }
 
   return (
     <div className="min-h-screen bg-outer-background p-2.5 max-md:min-h-[100dvh]">
@@ -762,10 +798,13 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
                 key={pg.key}
                 type="button"
                 data-testid={`nav-tab-${pg.key}`}
-                onClick={() => setPage(pg.key)}
+                onClick={() => {
+                  setSection(pg.key)
+                  if (pg.key === 'attention') dispatchSpine({ type: 'goTo', location: { level: 'attention' } })
+                }}
                 className={cn(
                   'rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
-                  page === pg.key ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
+                  section === pg.key ? 'bg-active-primary text-foreground shadow-sm' : 'text-tertiary-foreground hover:text-foreground',
                 )}
               >
                 {pg.label}
@@ -774,7 +813,7 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
           </div>
 
           <div className="ml-auto flex items-center gap-2 max-md:min-w-0 max-md:overflow-x-auto max-md:[-ms-overflow-style:none] max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden">
-            {page === 'usage' && (
+            {section === 'usage' && (
             <>
             <div className="flex rounded-md border border-border bg-interactive-secondary p-0.5 max-md:shrink-0">
               {PERIODS.map((p) => (
@@ -829,16 +868,24 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
 
         <nav
           aria-label="Harness tabs"
+          data-testid="harness-selector"
           className="flex shrink-0 items-center gap-1.5 overflow-x-auto rounded-md border border-border bg-card px-3 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.02)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-tertiary-foreground">Harness:</span>
           {HARNESS_TABS.map((tab) => {
-            const active = provider === tab.id
+            const active = location.level === 'harness' && location.harnessId === tab.harness
             return (
               <button
-                key={tab.id}
+                key={tab.harness}
                 type="button"
-                onClick={() => setProvider(tab.id)}
+                onClick={() => {
+                  setProvider(tab.harness)
+                  if (tab.harness === 'all') {
+                    openSpine({ level: 'attention' }, 'goTo')
+                  } else {
+                    openSpine({ level: 'harness', harnessId: tab.harness })
+                  }
+                }}
                 className={cn(
                   'flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-all',
                   active
@@ -846,7 +893,7 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
                     : 'border border-transparent text-tertiary-foreground hover:bg-interactive-secondary hover:text-foreground'
                 )}
               >
-                <span>{tab.label}</span>
+                <span>{tab.name}</span>
               </button>
             )
           })}
@@ -881,7 +928,7 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
                 <path d="M4 4l8 8M12 4l-8 8" />
               </svg>
             </button>
-            {page === 'usage' && (
+            {section === 'usage' && (
             <>
             <div className="flex flex-col gap-1">
               <p className="mb-1 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-heading">Devices</p>
@@ -949,28 +996,73 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
           <main className="min-w-0 flex-1 overflow-y-auto pr-0.5">
             <div className="mb-3 flex items-baseline justify-between">
               <h1 className="font-display text-xl tracking-tight text-foreground" data-testid="page-title">
-                {page === 'context'
-                  ? 'Context'
-                  : page === 'compare'
+                {showSpine
+                  ? 'Attention'
+                  : section === 'compare'
                     ? 'Compare'
-                    : page === 'quarantine'
+                    : section === 'quarantine'
                       ? 'Quarantine'
-                      : page === 'problems'
+                      : section === 'problems'
                         ? 'Problems'
                         : viewTitle}
               </h1>
-              <span className="text-xs text-tertiary-foreground">{page === 'usage' ? label : ''}</span>
+              <span className="text-xs text-tertiary-foreground">{section === 'usage' ? label : ''}</span>
             </div>
 
-            {page === 'usage' && <IndexingNotice payload={primary?.payload} />}
+            {section === 'usage' && <IndexingNotice payload={primary?.payload} />}
 
-            {page === 'context' ? (
-              <ContextExplorer activeHarness={provider} onHarnessChange={(p) => setProvider(p)} />
-            ) : page === 'compare' ? (
+            {showSpine ? (
+              location.level === 'attention' ? (
+                <Attention
+                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId })}
+                  onSelectRun={(runId, harnessId) => openSpine({ level: 'run', runId, harnessId })}
+                  onSelectFinding={(findingId) => openSpine({ level: 'finding', findingId })}
+                  onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', turnIndex, executionId, runId })}
+                />
+              ) : location.level === 'harness' ? (
+                <HarnessDetail
+                  harnessId={location.harnessId!}
+                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId })}
+                  onSelectFinding={(findingId) => openSpine({ level: 'finding', harnessId: location.harnessId, findingId })}
+                  onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId, executionId, turnIndex })}
+                />
+              ) : location.level === 'run' || location.level === 'execution' ? (
+                <RunDetail
+                  runId={location.runId!}
+                  executionId={location.level === 'execution' ? location.executionId : undefined}
+                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
+                  onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId })}
+                  onSelectTurn={(turnIndex, executionId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: location.runId, executionId, turnIndex })}
+                  onSelectFinding={(findingId) => openSpine({ level: 'finding', harnessId: location.harnessId, runId: location.runId, findingId })}
+                />
+              ) : location.level === 'turn' ? (
+                <TurnDetail
+                  runId={location.runId!}
+                  executionId={location.executionId}
+                  turnIndex={location.turnIndex!}
+                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
+                  onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId }, 'goTo')}
+                  onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId }, 'goTo')}
+                />
+              ) : (
+                <FindingDetail
+                  findingId={location.findingId}
+                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
+                  onSelectRun={(runId) => openSpine({ level: 'run', runId }, 'goTo')}
+                  onSelectExecution={(executionId) => openSpine({ level: 'execution', executionId })}
+                  onSelectTurn={(turnIndex) => openSpine({ level: 'turn', turnIndex })}
+                  onBack={() => dispatchSpine({ type: 'pop' })}
+                />
+              )
+            ) : section === 'compare' ? (
               <KyberComparePanel />
-            ) : page === 'quarantine' ? (
+            ) : section === 'quarantine' ? (
               <KyberQuarantinePanel />
-            ) : page === 'problems' ? (
+            ) : section === 'problems' ? (
               <KyberProblemsPanel />
             ) : showCombined ? (
               <CombinedView devices={devices} unit={unit} />
@@ -978,7 +1070,7 @@ export function App({ initialPage = 'usage' }: AppProps = {}) {
               <DeviceView payload={primary?.payload} isRemote={!!viewing && !viewing.local} unit={unit} />
             )}
 
-            {page === 'usage' && isError && (
+            {section === 'usage' && isError && (
               <div className="mt-4 text-sm text-tertiary-foreground">Failed to load: {String((error as Error)?.message)}</div>
             )}
           </main>

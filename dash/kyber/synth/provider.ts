@@ -196,13 +196,18 @@ export async function ingestProviders(
       continue
     }
 
-    if (Array.isArray(loaded)) {
-      records.push(...synthesizer.synthesize(loaded))
-      continue
-    }
+    try {
+      if (Array.isArray(loaded)) {
+        records.push(...synthesizer.synthesize(loaded))
+        continue
+      }
 
-    const [calls, turns] = await callsAndTurns(provider, loaded, PROVIDER_READERS.get(provider))
-    records.push(...synthesizer.synthesize(calls, turns === undefined ? undefined : matchingTurns(calls, turns)))
+      const [calls, turns] = await callsAndTurns(provider, loaded, PROVIDER_READERS.get(provider))
+      records.push(...synthesizer.synthesize(calls, turns === undefined ? undefined : matchingTurns(calls, turns)))
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err))
+      problems.push(parseProblem(provider, error))
+    }
   }
 
   return { records, problems }

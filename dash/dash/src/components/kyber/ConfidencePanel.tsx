@@ -128,13 +128,13 @@ export function ConfidencePanel({
             )}
           </div>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Decision D6 ranking factor: {config.rankPriority}. Deterministic observations outrank larger inferred claims.
+            {config.rankPriority}. Deterministic observations outrank larger inferred claims.
           </p>
         </div>
 
         <div className="text-right shrink-0">
           <div className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
-            D6 Multiplier
+            Ranking Multiplier
           </div>
           <div
             className="font-mono text-sm font-semibold tabular-nums text-foreground"

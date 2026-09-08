@@ -45,7 +45,7 @@ export function EvidenceTable({
             </span>
           </div>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Decision D5: Every finding requires ≥2 verifiable telemetry links resolving directly to the originating turn, span, or execution.
+            Links resolve to the originating turn, span, or execution.
           </p>
         </div>
       </div>

@@ -108,7 +108,7 @@ export function FindingCard({
             </span>
             <span
               className="rounded bg-interactive-secondary px-1.5 py-0.5 text-[9.5px] font-mono text-muted-foreground"
-              title={`Rank Score: ${rankScore.toFixed(0)} per Decision D6 formula`}
+              title={`Rank score: ${rankScore.toFixed(0)}`}
             >
               rank #{rankScore.toFixed(0)}
             </span>
@@ -143,7 +143,7 @@ export function FindingCard({
           {finding.errorBar && (
             <div
               className="text-[10px] font-mono text-tertiary-foreground tabular-nums"
-              title="Calibrated confidence error bar (Decision D5)"
+              title="Calibrated confidence error bar"
             >
               [{fmtTokens(finding.errorBar.lower)} – {fmtTokens(finding.errorBar.upper)}]
             </div>
@@ -167,7 +167,7 @@ export function FindingCard({
           >
             <path d="M8 2v8M4 6l4-4 4 4M2 14h12" />
           </svg>
-          Recommendation (D8: Relocate, Do Not Delete)
+          Recommendation
         </div>
         <p className="text-muted-foreground leading-relaxed">
           {finding.recommendation}
@@ -273,7 +273,7 @@ export function FindingCard({
 export function FindingList({
   findings = [],
   title = 'Highest-Leverage Diagnostic Findings',
-  description = 'Ranked by Decision D6 formula: estimated recoverable waste × outcome risk × confidence. Deterministic evidence outranks inferred claims.',
+  description = 'Ranked by estimated recoverable waste, outcome risk, and confidence. Deterministic evidence outranks inferred claims.',
   maxItems,
   onSelectFinding,
   onSelectTurn,

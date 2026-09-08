@@ -113,7 +113,7 @@ export function HarnessDetail({
           key: 'skillUtilisation',
           name: 'Skill Utilisation',
           status: 'not_measurable',
-          reason: 'Skill activation unobserved on this harness (Decision D16)',
+          reason: 'Skill activation is not observed on this harness',
           measurementClass: 'coverage-gap',
         },
         delegationOverhead: {
@@ -148,7 +148,7 @@ export function HarnessDetail({
       : '—'
 
   return (
-    <div className="flex flex-col gap-4" data-testid="page-harness-detail">
+    <div className="flex flex-col gap-4" data-testid="page-harness">
       {/* Top Header & Spine Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <HierarchyBreadcrumb
@@ -213,7 +213,7 @@ export function HarnessDetail({
         <FindingList
           findings={findings}
           title={`${harness?.name || harnessId} Diagnostic Findings`}
-          description="Ranked by Decision D6 formula. Deterministic waste outranks inferred claims."
+          description="Deterministic waste outranks inferred claims."
           onSelectFinding={onSelectFinding}
           onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
         />
@@ -249,7 +249,7 @@ export function HarnessDetail({
                 <tr className="border-b border-border text-[11px] font-semibold text-tertiary-foreground uppercase tracking-wider">
                   <th className="py-2.5 px-3">Run ID</th>
                   <th className="py-2.5 px-3">Label / Task</th>
-                  <th className="py-2.5 px-3">Grouping Basis (D13)</th>
+                  <th className="py-2.5 px-3">Grouping Basis</th>
                   <th className="py-2.5 px-3 text-right">Executions</th>
                   <th className="py-2.5 px-3 text-right">Turns</th>
                   <th className="py-2.5 px-3">Outcome</th>

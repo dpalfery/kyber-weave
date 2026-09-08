@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T2-formatter-sentinel
+title: T2 — Make 0 unrepresentable for an unreported counter
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T2 — Make `0` unrepresentable for an unreported counter
 
 **Model:** Haiku. **Parallel with:** T1, T3, T4. **Blocked by:** T7 (answer Q9 first).

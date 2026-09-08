@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T1-decision-id-sweep
+title: T1 — Delete decision-id narration from spine components
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T1 — Delete decision-id narration from spine components
 
 **Model:** Haiku. **Parallel with:** T2, T3, T4. **Blocks:** nothing.

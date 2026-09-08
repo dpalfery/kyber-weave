@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T4-empty-chart-guard
+title: T4 — A chart with no data is not a chart
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T4 — A chart with no data is not a chart
 
 **Model:** Haiku. **Parallel with:** T1, T2, T3.

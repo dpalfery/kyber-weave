@@ -2,7 +2,7 @@
 id: plans/2026-09-06-kyberdash-spine
 title: KyberDash Diagnostic Spine — State, Work, Dispatch
 doc-type: plan
-status: draft
+status: needs-review
 owner: dpalfery
 last-reviewed: 2026-09-06
 component: KyberDash
@@ -10,9 +10,23 @@ component: KyberDash
 
 # KyberDash Diagnostic Spine — State, Work, Dispatch
 
-**Status:** Draft
+**Status:** Needs review — the Phase A browser spine gates are green; Phase B–D remain active work.
 **Date:** 2026-09-06
 **Goal:** Get the six-level diagnostic hierarchy into the running dashboard without burning another ten agent-hours on unreachable components.
+
+**Execution checkpoint (2026-09-06):** A real local host passed G1–G7 (7/7): the
+dashboard lands on Attention, drills through the spine, retains one harness selector,
+and renders unavailable metrics and empty charts honestly. T7 resolved Q1 below. This
+is not plan completion: T5's dedicated numerals gate and T6's required artifact report
+are not evidenced here; Phase B–D are deliberately unassigned; and Q2–Q7 remain open.
+
+**Harness-filter regression checkpoint (2026-09-06):** The Attention selector had
+display labels that did not match the canonical storage identifiers, so a selected
+harness could yield no runs despite appearing in the All Harnesses view. Follow-up
+browser gate G4a now verifies the one selector exposes the canonical Claude Code,
+GitHub Copilot, and Gemini choices, and proves a Claude Code selection receives a
+successful `runs?harness=claude-code` response and drills into a run. This is a Phase A
+repair, not plan completion.
 
 Consolidates and replaces three earlier drafts (the 09-05 diagnostic-hierarchy plan, the 09-06 spine-structure plan, the 09-06 execution playbook). Interaction reference: `KyberDash.dc.html` in the design project — read its structure as a spec.
 
@@ -73,7 +87,7 @@ The 09-05 plan's own risk register named this failure mode — "phantom completi
 
 | Q# | Question | Recommended | Blocks | Status |
 |---|---|---|---|---|
-| Q1 | Are Antigravity's token counts absent, emitted-and-dropped, or emitted under unrecognised names? | Unknown — decides whether this is a formatter or a reader fix. The decisive check is `0` vs `NULL` in the store | T2, T4 | OPEN |
+| Q1 | Are Antigravity's token counts absent, emitted-and-dropped, or emitted under unrecognised names? | Resolved: affected short-session aggregate counters are producer-emitted zeroes that survive to `canon.db`; no reader mapping fix is indicated. See the [T7 inventory record](../dash/telemetry-inventory.md#antigravity-aggregate-token-investigation). | T2, T4 | RESOLVED |
 | Q2 | What happens to the Context tab? | (a) delete — composition and inspector become the Turn level. (c) keep, rename "Sessions", demote, is the hedge if most of the corpus has no derivable run identity | T8 | OPEN |
 | Q3 | Does the index store context **content**, or hashes plus offsets? | Content with a 14-day retention and an explicit purge. Content is the inspector; an unbounded plaintext corpus of every prompt is a standing liability. Needs an ADR | the inspector's future | OPEN |
 | Q4 | How is a `Run` boundary derived when the harness emits no run identity? | Require explicit run id, with working-dir + time-gap clustering offered as a *labelled derived* grouping the user accepts per harness — never silently | E1 | OPEN |
@@ -91,7 +105,7 @@ npm --prefix dash run dev &
 npx --prefix dash playwright test e2e/spine.spec.ts
 ```
 
-Seven gates, all failing today, run against the real dev server and the real `~/.kyberdash/canon.db`. **That failing output is the specification.**
+G1–G7 plus G4a run against the real dev server and the real `~/.kyberdash/canon.db`. Per the 2026-09-06 checkpoints above, a real local host passed G1–G7 (7/7) and the G4a harness-filter repair. **Current gate status is pass, not fail.** These gates specify Phase A live behaviour; they do not close the plan. T5's dedicated numerals gate and T6's required artifact report are not evidenced here; Phases B–D remain unassigned; Q2–Q7 remain open. That is why this plan stays Needs review and unarchived.
 
 | Gate | Asserts |
 |---|---|
@@ -99,6 +113,7 @@ Seven gates, all failing today, run against the real dev server and the real `~/
 | G2 | a developer can drill all six levels by clicking, and back out |
 | G3 | no unreported counter renders as zero |
 | G4 | exactly one harness selector on screen |
+| G4a | the selector uses canonical harness identifiers; selecting Claude Code loads its matching runs and drills into a run |
 | G5 | no decision ids in product copy |
 | G6 | empty datasets do not render as charts |
 | G7 | nothing lays out outside the shell |
@@ -209,6 +224,7 @@ Whether component tests gate in CI is unconfirmed — `dash/package.json`'s `tes
 ## 13. Related
 
 - [`tasks/`](tasks/) — dispatch prompts and the Playwright gate
+- [2026-09-05 Diagnostic Hierarchy and Context Inspector](2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md) — predecessor (Needs review); durable decisions harvested as ADRs 0012–0015. Remaining G2/G3 and Phase G live product wiring is this plan.
 - [KyberDash architecture](../dash/architecture.md), [runbook](../dash/runbook.md), [telemetry inventory](../dash/telemetry-inventory.md)
 - [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — soft fork and merge zone, enforced by D8
 - [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md) — ASAD-only Context view, revisited by Q2

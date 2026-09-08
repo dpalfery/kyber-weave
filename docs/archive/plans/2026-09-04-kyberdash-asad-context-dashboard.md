@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-04-kyberdash-asad-context-dashboard
+id: archive/plans/2026-09-04-kyberdash-asad-context-dashboard
 title: ASAD Context Dashboard on the Canonical Store
 doc-type: plan
-status: superseded
+status: archived
 owner: dpalfery
 last-reviewed: 2026-09-05
 component: KyberDash
@@ -15,7 +15,7 @@ component: KyberDash
 **Superseded Date:** 2026-09-05
 **Goal:** Make the agent-session-analysis-dashboard (ASAD) view the only view on the KyberDash Context page, for every harness, rendered from `canon.db` rather than from the Python pipeline's `sessions.db` or hard-coded data.
 
-Successor to [2026-09-03-kyberdash-agent-session-analysis-integration.md](../archive/plans/2026-09-03-kyberdash-agent-session-analysis-integration.md), which is complete and archived. That plan established the dual-database bridge; [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) retired it, and doing so removed the hard-coded path the ASAD view was being served from. This plan restores the view on the canonical store.
+Successor to [2026-09-03-kyberdash-agent-session-analysis-integration.md](2026-09-03-kyberdash-agent-session-analysis-integration.md), which is complete and archived. That plan established the dual-database bridge; [ADR 0008](../../adr/0008-kyberdash-single-canonical-store.md) retired it, and doing so removed the hard-coded path the ASAD view was being served from. This plan restores the view on the canonical store.
 
 ---
 
@@ -35,7 +35,7 @@ Successor to [2026-09-03-kyberdash-agent-session-analysis-integration.md](../arc
 - **D4 — One store.** `canon.db`, populated from both the OTLP receiver and the harness dot-folders. If the data cannot support the view, the data layer is fixed rather than the view degraded.
 - **D5 — The ASAD payload is the store's contract.** The session projection emits the ASAD shape directly. No adapter layer between store and view.
 - **D6 — Every harness is in scope.** Claude Code, Antigravity/agy, Copilot (extension, CLI, coding agent), Codex, pi, opencode, Cursor and Kilo. A harness we cannot yet collect from is recorded as *not measurable with a reason*, never as absent or zero.
-- **D7 — Source precedence.** Counters from the OTel row; content from the file row when the OTel row has no parts; never summed across sources for one turn. Recorded as [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md) decision 4.
+- **D7 — Source precedence.** Counters from the OTel row; content from the file row when the OTel row has no parts; never summed across sources for one turn. Recorded as [ADR 0009](../../adr/0009-multi-signal-ingestion-span-shaped-record.md) decision 4.
 - **D8 — Serve `/v1/logs`, merging into one record.** A log record enriches the record it belongs to; it never inserts a parallel one. Recorded as ADR 0009 decisions 1-3.
 
 ## 2a. Open questions (decision ledger)
@@ -46,7 +46,7 @@ Successor to [2026-09-03-kyberdash-agent-session-analysis-integration.md](../arc
 
 ## 3. Investigation findings
 
-The full per-harness survey, with every claim marked verified, documented, unverified or assumed, is [docs/dash/telemetry-inventory.md](../dash/telemetry-inventory.md). The findings that shape this plan:
+The full per-harness survey, with every claim marked verified, documented, unverified or assumed, is [docs/dash/telemetry-inventory.md](../../dash/telemetry-inventory.md). The findings that shape this plan:
 
 - **Copilot Chat is already exporting to our collector.** `github.copilot.chat.otel.enabled: true`, `otlpEndpoint: http://127.0.0.1:4318`, `protocol: http/protobuf` — in both VS Code stable and Insiders settings. `captureContent` is `false`. That single flag is the cheapest route to prompt, response and tool content we have.
 - **Claude Code's schemas are on the logs signal.** `OTEL_LOG_RAW_API_BODIES=1` emits `claude_code.api_request_body` carrying the full request JSON: system prompt and tool definitions with schemas. Unreachable while the receiver serves traces only.
@@ -271,8 +271,8 @@ npx --prefix dash vitest run dash/src/components
 The plan is **Superseded and Archived** as of 2026-09-05. Implementation and
 repository review are complete (14/14 declared gates pass). The plan's three
 open live owner/runtime gates have been audited and closed as superseded by the
-successor plan [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
-(Task H2) and documented in the [telemetry inventory](../dash/telemetry-inventory.md).
+successor plan [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](../../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+(Task H2) and documented in the [telemetry inventory](../../dash/telemetry-inventory.md).
 
 B2 follow-up remains **PASS**: production code under `dash/kyber` has no
 `AGENTDASH_DB`, `KYBER_DB`, `sessions.db`, `sessionsPath`, or `sessionsDb` path, and
@@ -291,14 +291,14 @@ tests prove those environment variables cannot expose a legacy session.
 | Review gates | End-of-run code-reviewer **APPROVE**, risk LOW. Prior `REQUEST_CHANGES` (unique `deriveLogId`) is closed. | 14/14 declared gates pass, including `ts-typecheck`, `ts-test`, and `ts-lint` |
 
 Canonical behavior is documented in
-[KyberDash architecture](../dash/architecture.md), [KyberDash runbook](../dash/runbook.md),
-and the [telemetry inventory](../dash/telemetry-inventory.md). Decisions D4, D7, and D8 are
-carried by [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) and
-[ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md). Decisions D1–D3,
-D5, and D6 are [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md).
+[KyberDash architecture](../../dash/architecture.md), [KyberDash runbook](../../dash/runbook.md),
+and the [telemetry inventory](../../dash/telemetry-inventory.md). Decisions D4, D7, and D8 are
+carried by [ADR 0008](../../adr/0008-kyberdash-single-canonical-store.md) and
+[ADR 0009](../../adr/0009-multi-signal-ingestion-span-shaped-record.md). Decisions D1–D3,
+D5, and D6 are [ADR 0011](../../adr/0011-asad-only-context-view-and-payload-contract.md).
 
 **docs-dev closeout & archival (2026-09-05):** With all in-tree code, tests, and ADRs
 (0008, 0009, 0011) in place, the three open live gates from 2026-09-04 are formally retired
-from this plan and transferred to [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
-Task H2 and [docs/dash/telemetry-inventory.md](../dash/telemetry-inventory.md). This plan
+from this plan and transferred to [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](../../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+Task H2 and [docs/dash/telemetry-inventory.md](../../dash/telemetry-inventory.md). This plan
 is **Superseded and Archived**.

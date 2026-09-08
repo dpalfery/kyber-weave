@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T6-left-edge-artifact
+title: T6 — Find what renders outside the shell
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T6 — Find what renders outside the shell
 
 **Model:** Haiku. **Run after:** T1–T4 merge. **Report before editing.**

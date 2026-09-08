@@ -116,8 +116,9 @@ describe('Scorecard Component (Decision D3 & D9 Compliance)', () => {
   it('Decision D3 compliance: NEVER calculates or displays a composite single efficiency score', () => {
     const html = renderToStaticMarkup(<Scorecard data={mockScorecardData} />)
 
-    // Verify D3 enforcement label
-    expect(html).toContain('Independent Vectors (D3)')
+    // All six independent dimensions remain visible without a composite score.
+    expect(html).toContain('data-testid="dimension-contextHygiene"')
+    expect(html).toContain('data-testid="dimension-continuity"')
 
     // Must NOT contain composite score terminology or overall grades
     expect(html).not.toMatch(/composite score/i)
@@ -256,7 +257,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
   it('renders Level 1: All Harnesses as active root', () => {
     const html = renderToStaticMarkup(<HierarchyBreadcrumb />)
     expect(html).toContain('hierarchy-breadcrumb')
-    expect(html).toContain('breadcrumb-all')
+    expect(html).toContain('breadcrumb-attention')
     expect(html).toContain('All Harnesses')
     expect(html).toContain('aria-current="page"')
   })
@@ -268,7 +269,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
         onSelectAll={() => {}}
       />,
     )
-    expect(html).toContain('breadcrumb-all')
+    expect(html).toContain('breadcrumb-attention')
     expect(html).toContain('breadcrumb-harness')
     expect(html).toContain('claude')
   })
@@ -282,7 +283,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
         onSelectHarness={() => {}}
       />,
     )
-    expect(html).toContain('breadcrumb-all')
+    expect(html).toContain('breadcrumb-attention')
     expect(html).toContain('breadcrumb-harness')
     expect(html).toContain('breadcrumb-run')
     expect(html).toContain('run-1234')
@@ -298,7 +299,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
         itemKey="System Prompt"
       />,
     )
-    expect(html).toContain('breadcrumb-all')
+    expect(html).toContain('breadcrumb-attention')
     expect(html).toContain('breadcrumb-harness')
     expect(html).toContain('breadcrumb-run')
     expect(html).toContain('breadcrumb-execution')
@@ -365,8 +366,8 @@ describe('FindingList (Decision D6 Ranking & D8 Recommendations)', () => {
   it('renders Decision D8 recommendation and outcome risk caveat', () => {
     const html = renderToStaticMarkup(<FindingList findings={sampleFindings} />)
 
-    // D8 recommendation check
-    expect(html).toContain('Recommendation (D8: Relocate, Do Not Delete)')
+    // Recommendation heading remains visible without implementation provenance.
+    expect(html).toContain('Recommendation')
     expect(html).toContain('Move dynamic user context after static system prompts')
 
     // Outcome risk caveat check
@@ -556,4 +557,3 @@ describe('ContextPressureStrip & BaselineSelect', () => {
     expect(html).toContain('Workspace Median (All Harnesses)')
   })
 })
-

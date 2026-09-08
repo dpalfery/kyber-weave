@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T5-mono-numerals
+title: T5 — Every number is mono and tabular
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T5 — Every number is mono and tabular
 
 **Model:** Haiku. **Run after:** T8 merges. Do not run in parallel with T8 — it owns the same files.

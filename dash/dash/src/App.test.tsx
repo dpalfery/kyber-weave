@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import {
   App,
+  HARNESS_TABS,
   NAV_TABS,
   KyberComparePanel,
   KyberQuarantinePanel,
@@ -104,9 +105,9 @@ describe('App: Top Navigation Refactoring', () => {
   it('exports exactly the 5 approved navigation tabs in NAV_TABS', () => {
     expect(NAV_TABS).toHaveLength(5)
     const keys = NAV_TABS.map((t) => t.key)
-    expect(keys).toEqual(['usage', 'context', 'compare', 'quarantine', 'problems'])
+    expect(keys).toEqual(['attention', 'usage', 'compare', 'quarantine', 'problems'])
     const labels = NAV_TABS.map((t) => t.label)
-    expect(labels).toEqual(['Usage', 'Context', 'Compare', 'Quarantine', 'Problems'])
+    expect(labels).toEqual(['Attention', 'Usage', 'Compare', 'Quarantine', 'Problems'])
   })
 
   it('renders exactly the 5 navigation tabs in the header and excludes disconnected buttons', () => {
@@ -118,8 +119,8 @@ describe('App: Top Navigation Refactoring', () => {
     )
 
     // All 5 tabs render
+    expect(html).toContain('data-testid="nav-tab-attention"')
     expect(html).toContain('data-testid="nav-tab-usage"')
-    expect(html).toContain('data-testid="nav-tab-context"')
     expect(html).toContain('data-testid="nav-tab-compare"')
     expect(html).toContain('data-testid="nav-tab-quarantine"')
     expect(html).toContain('data-testid="nav-tab-problems"')
@@ -167,9 +168,9 @@ describe('App: Top Navigation Refactoring', () => {
     expect(usageBtnFromCompare).not.toContain('bg-active-primary')
   })
 
-  it('updates active page styling for context, quarantine, and problems tabs', () => {
+  it('updates active page styling for attention, quarantine, and problems tabs', () => {
     const qc = createTestQueryClient()
-    const pages: KyberPage[] = ['context', 'quarantine', 'problems']
+    const pages: KyberPage[] = ['attention', 'quarantine', 'problems']
 
     for (const page of pages) {
       clearHooks()
@@ -185,21 +186,34 @@ describe('App: Top Navigation Refactoring', () => {
   })
 })
 
+describe('App: Harness selector storage filters', () => {
+  it('uses each live canonical harness ID exactly once', () => {
+    expect(HARNESS_TABS).toEqual([
+      { harness: 'all', name: 'All Harnesses' },
+      { harness: 'claude-code', name: 'Claude Code' },
+      { harness: 'copilot', name: 'GitHub Copilot' },
+      { harness: 'gemini', name: 'Gemini' },
+    ])
+
+    expect(new Set(HARNESS_TABS.map((tab) => tab.harness)).size).toBe(HARNESS_TABS.length)
+  })
+})
+
 describe('App: Page Switching & Title Rendering', () => {
   beforeEach(() => {
     clearHooks()
   })
 
-  it('renders page title "Context" when on context page', () => {
+  it('renders the attention landing page by default', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
-        <App initialPage="context" />
+        <App initialPage="attention" />
       </QueryClientProvider>
     )
     expect(html).toContain('data-testid="page-title"')
-    expect(html).toContain('Context')
-    expect(html).toContain('data-testid="provider-tab-agent-all"')
+    expect(html).toContain('Attention')
+    expect(html).toContain('data-testid="page-attention"')
   })
 
   it('renders page title "Compare" and CompareView when on compare page', () => {

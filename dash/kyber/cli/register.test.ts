@@ -4,6 +4,16 @@ import { describe, expect, it } from 'vitest'
 import { registerKyberCommands } from './register.js'
 
 describe('kyber CLI registration', () => {
+  it('registers local-provider refresh beneath the top-level dash command', () => {
+    const program = new Command()
+    registerKyberCommands(program)
+
+    const dash = program.commands.find((command) => command.name() === 'dash')
+    expect(dash?.commands.find((command) => command.name() === 'refresh')).toBeDefined()
+    const kyber = program.commands.find((command) => command.name() === 'kyber')
+    expect(kyber?.commands.find((command) => command.name() === 'dash')).toBeUndefined()
+  })
+
   it('registers cursor-hook and routes its stdin through the OTLP delivery and output seams', async () => {
     const stdin = [
       JSON.stringify({

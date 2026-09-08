@@ -5,6 +5,7 @@ import { Card } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
 import {
   fetchRun,
+  fetchKyberSessions,
   type KyberRunDetail,
   type KyberExecutionSummary,
   type ScorecardData,
@@ -20,9 +21,12 @@ import { SessionInspectorDrawer } from '../components/SessionInspectorDrawer'
 
 export interface RunDetailProps {
   runId: string
+  executionId?: string
   initialRun?: KyberRunDetail
   onSelectAll?: () => void
   onSelectHarness?: (harness: string) => void
+  onSelectExecution?: (executionId: string) => void
+  onSelectTurn?: (turnIndex: number, executionId?: string) => void
   onSelectFinding?: (findingId: string) => void
 }
 
@@ -48,7 +52,7 @@ function ExecutionTreeItem({
       <button
         type="button"
         onClick={() => onSelect(node.executionId)}
-        data-testid={`execution-node-${node.executionId}`}
+        data-testid={`drill-execution-${node.executionId}`}
         className={cn(
           'flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',
           isSelected
@@ -112,9 +116,12 @@ function ExecutionTreeItem({
 
 export function RunDetail({
   runId,
+  executionId,
   initialRun,
   onSelectAll,
   onSelectHarness,
+  onSelectExecution,
+  onSelectTurn,
   onSelectFinding,
 }: RunDetailProps) {
   const [baseline, setBaseline] = useState('none')
@@ -130,16 +137,38 @@ export function RunDetail({
   })
 
   // Select first execution by default when available
-  const activeExecutionId = selectedExecutionId ?? run?.executions?.[0]?.executionId
+  const activeExecutionId = executionId ?? selectedExecutionId ?? run?.executions?.[0]?.executionId
+  const activeExecution = run?.executions?.find((candidate) => candidate.executionId === activeExecutionId)
+
+  // A run may expose its execution tree before it has materialized a `turns`
+  // array. The session projection is already persisted and lets the spine
+  // navigate those measured turns without manufacturing a run rollup.
+  const { data: executionSession } = useQuery({
+    queryKey: ['kyber-execution-session', activeExecution?.sessionId],
+    queryFn: async () => {
+      const sessions = await fetchKyberSessions(run?.harness)
+      return sessions.find((session) => (session.sessionId ?? session.session_id) === activeExecution?.sessionId)
+    },
+    enabled: !!activeExecution?.sessionId,
+  })
 
   // Filter turns by selected execution if available
   const displayedTurns: KyberRunTurn[] = useMemo(() => {
-    if (!run?.turns) return []
-    if (!activeExecutionId) return run.turns
-    return run.turns.filter(
-      (t) => !t.executionId || t.executionId === activeExecutionId,
-    )
-  }, [run, activeExecutionId])
+    if (run?.turns) {
+      if (!activeExecutionId) return run.turns
+      return run.turns.filter(
+        (t) => !t.executionId || t.executionId === activeExecutionId,
+      )
+    }
+
+    const turnCount = executionSession?.turnCount ?? executionSession?.turn_count
+    if (!activeExecutionId || !Number.isInteger(turnCount) || turnCount < 1) return []
+    return Array.from({ length: turnCount }, (_, turnIndex) => ({
+      turnIndex,
+      executionId: activeExecutionId,
+      sessionId: activeExecution?.sessionId,
+    }))
+  }, [run, activeExecutionId, activeExecution?.sessionId, executionSession])
 
   // Build run scorecard data (NO composite score per D3, secondary cost per D9)
   const scorecardData: ScorecardData = useMemo(() => {
@@ -206,6 +235,10 @@ export function RunDetail({
   }, [run])
 
   const handleOpenTurn = (turnIdx: number) => {
+    if (onSelectTurn) {
+      onSelectTurn(turnIdx, activeExecutionId)
+      return
+    }
     setSelectedTurnIndex(turnIdx)
     setDrawerOpen(true)
   }
@@ -214,7 +247,7 @@ export function RunDetail({
   const isDerived = run?.groupingBasis === 'derived'
 
   return (
-    <div className="flex flex-col gap-4" data-testid="page-run-detail">
+    <div className="flex flex-col gap-4" data-testid={executionId ? 'page-execution' : 'page-run'}>
       {/* Top Header & 6-Level Spine Breadcrumb */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <HierarchyBreadcrumb
@@ -229,6 +262,10 @@ export function RunDetail({
             setSelectedTurnIndex(undefined)
           }}
           onSelectExecution={(execId) => {
+            if (onSelectExecution) {
+              onSelectExecution(execId)
+              return
+            }
             setSelectedExecutionId(execId)
             setSelectedTurnIndex(undefined)
           }}
@@ -315,14 +352,14 @@ export function RunDetail({
             title="Run Diagnostic Scorecard (6 Dimensions)"
           />
 
-          {/* Level 4: Execution Tree & Level 5: Turns Grid */}
+        {/* Execution tree and turns */}
           <div className="grid gap-4 lg:grid-cols-3">
             {/* Execution Tree Panel (Level 4) */}
             <Card className="p-4 flex flex-col" data-testid="execution-tree-panel">
               <div className="border-b border-border/60 pb-2 mb-3">
                 <div className="flex items-center gap-1.5">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-heading">
-                    Agent Executions (Level 4)
+                    Agent Executions
                   </h3>
                   <span className="rounded bg-interactive-secondary px-1.5 py-0.2 text-[10px] font-mono text-tertiary-foreground">
                     {run?.executions?.length ?? 1}
@@ -341,6 +378,10 @@ export function RunDetail({
                       node={exec}
                       selectedId={activeExecutionId}
                       onSelect={(id) => {
+                        if (onSelectExecution) {
+                          onSelectExecution(id)
+                          return
+                        }
                         setSelectedExecutionId(id)
                         setSelectedTurnIndex(undefined)
                       }}
@@ -353,6 +394,10 @@ export function RunDetail({
                       node={exec}
                       selectedId={activeExecutionId}
                       onSelect={(id) => {
+                        if (onSelectExecution) {
+                          onSelectExecution(id)
+                          return
+                        }
                         setSelectedExecutionId(id)
                         setSelectedTurnIndex(undefined)
                       }}
@@ -372,7 +417,7 @@ export function RunDetail({
                 <div>
                   <div className="flex items-center gap-1.5">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-heading">
-                      Turns (Level 5)
+                      Turns
                     </h3>
                     <span className="rounded bg-interactive-secondary px-1.5 py-0.2 text-[10px] font-mono text-tertiary-foreground">
                       {displayedTurns.length}
@@ -443,7 +488,7 @@ export function RunDetail({
                               <button
                                 type="button"
                                 onClick={() => handleOpenTurn(turn.turnIndex)}
-                                data-testid={`inspect-turn-${turn.turnIndex}`}
+                                data-testid={`drill-turn-${turn.turnIndex}`}
                                 className="rounded bg-interactive-secondary px-2 py-0.5 text-xs text-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
                               >
                                 Inspect →

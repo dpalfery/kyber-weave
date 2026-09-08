@@ -6,7 +6,8 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 export function usd(n: number | undefined | null): string {
-  const v = n == null || !isFinite(n) ? 0 : n
+  if (n == null || !isFinite(n)) return '—'
+  const v = n
   const sign = v < 0 ? '-' : ''
   const a = Math.abs(v)
   const s = a >= 1 || a === 0 ? a.toFixed(2) : a >= 0.01 ? a.toFixed(3) : a.toFixed(2)
@@ -15,7 +16,8 @@ export function usd(n: number | undefined | null): string {
 }
 
 export function fmtTokens(n: number | undefined | null): string {
-  const v = n == null || !isFinite(n) ? 0 : n
+  if (n == null || !isFinite(n)) return '—'
+  const v = n
   if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B'
   if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M'
   if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K'
@@ -23,8 +25,20 @@ export function fmtTokens(n: number | undefined | null): string {
 }
 
 export function fmtNum(n: number | undefined | null): string {
-  const v = n == null || !isFinite(n) ? 0 : n
+  if (n == null || !isFinite(n)) return '—'
+  const v = n
   return v.toLocaleString()
+}
+
+export function fmtMeasured(
+  value: number | undefined | null,
+  reason?: string,
+): { text: string; measured: boolean; reason?: string } {
+  if (value == null || !isFinite(value)) {
+    return { text: '—', measured: false, reason }
+  }
+
+  return { text: fmtNum(value), measured: true }
 }
 
 export function compactUsd(n: number): string {

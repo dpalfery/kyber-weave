@@ -121,7 +121,7 @@ export function FindingDetail({
   const targetSessionId = finding.sessionId || finding.runId || 'session'
 
   return (
-    <div className={cn('flex flex-col gap-5 p-2 sm:p-4 max-w-6xl mx-auto', className)} data-testid="page-finding-detail">
+    <div className={cn('flex flex-col gap-5 p-2 sm:p-4 max-w-6xl mx-auto', className)} data-testid="page-finding">
       {/* Top Header & Breadcrumb */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
         <HierarchyBreadcrumb
@@ -162,7 +162,7 @@ export function FindingDetail({
               </span>
               <span
                 className="rounded bg-interactive-secondary px-2 py-0.5 text-[10px] font-mono text-muted-foreground"
-                title="Rank score per Decision D6 formula: waste × confidence × (1 - outcomeRiskDiscount)"
+                title="Rank score: waste × confidence × outcome-risk adjustment"
               >
                 rank #{rankScore.toFixed(0)}
               </span>
@@ -227,7 +227,7 @@ export function FindingDetail({
           <div className="flex items-center gap-2">
             <span className="text-base" role="img" aria-label="warning">⚠️</span>
             <h3 className="text-xs font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
-              Outcome-Risk Caveat (Decision D5)
+              Outcome-Risk Caveat
             </h3>
           </div>
           <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-mono font-medium text-amber-800 dark:text-amber-300">

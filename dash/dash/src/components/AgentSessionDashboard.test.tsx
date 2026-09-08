@@ -488,6 +488,41 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     expect(html).toContain('1 never called')
   })
 
+  it('marks an unreported tool-call counter unavailable instead of rendering zero', () => {
+    const unavailableToolCalls: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: undefined,
+        tools_invoked: undefined,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: unavailableToolCalls })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="false"')
+    expect(html).toContain('>—<')
+    expect(html).not.toContain('>0<')
+    expect(html).toContain('Tool invocation count was not reported by copilot.')
+  })
+
+  it('preserves a recorded zero tool-call counter as measured', () => {
+    const zeroToolCalls: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 0,
+      },
+    }
+
+    const tree = AgentSessionDashboard({ session: zeroToolCalls })
+    const metric = findElementByTestId(tree, 'metric-tool-calls')
+    const html = renderHtml(metric)
+    expect(html).toContain('data-measured="true"')
+    expect(html).toContain('>0<')
+  })
+
   it('renders reconciliation OK badge when root inputs match sum of chat inputs', () => {
     const html = renderHtml(<AgentSessionDashboard session={sampleSession} />)
     expect(html).toContain('data-testid="reconciliation-ok"')

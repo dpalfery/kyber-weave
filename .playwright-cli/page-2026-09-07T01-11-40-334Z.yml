@@ -1,0 +1,100 @@
+- generic [ref=f3e4]:
+  - banner [ref=f3e5]:
+    - generic [ref=f3e6]:
+      - img "kyberDash lightsaber logo" [ref=f3e7]
+      - generic [ref=f3e22]: kyberDash
+      - generic [ref=f3e23]: telemetry
+    - generic [ref=f3e24]:
+      - button "Attention" [ref=f3e25]
+      - button "Usage" [ref=f3e26]
+      - button "Compare" [ref=f3e27]
+      - button "Quarantine" [ref=f3e28]
+      - button "Problems" [ref=f3e29]
+    - button "Switch to dark mode" [ref=f3e31]
+  - navigation "Harness tabs" [ref=f3e35]:
+    - generic [ref=f3e36]: "Harness:"
+    - button "All Harnesses" [ref=f3e37]
+    - button "Claude Code" [ref=f3e39]
+    - button "Codex" [ref=f3e41]
+    - button "Antigravity (AGY)" [ref=f3e43]
+    - button "GitHub Copilot CLI" [ref=f3e45]
+    - button "Copilot (VS Code)" [ref=f3e47]
+    - button "Copilot Agent" [ref=f3e49]
+    - button "Pi" [ref=f3e51]
+    - button "OpenCode" [ref=f3e53]
+    - button "KiloCode" [ref=f3e55]
+    - button "Cursor" [ref=f3e57]
+  - generic [ref=f3e59]:
+    - complementary [ref=f3e60]:
+      - generic [ref=f3e61]:
+        - paragraph [ref=f3e62]: Share
+        - button "Share this device" [ref=f3e63]
+    - main [ref=f3e67]:
+      - heading "Attention" [level=1] [ref=f3e69]
+      - generic [ref=f3e70]:
+        - generic [ref=f3e71]:
+          - navigation "Breadcrumb" [ref=f3e72]:
+            - list [ref=f3e73]:
+              - listitem [ref=f3e74]:
+                - generic [ref=f3e75]:
+                  - generic [ref=f3e76]: "Workspace:"
+                  - generic "All Harnesses" [ref=f3e77]
+          - generic [ref=f3e78]:
+            - generic [ref=f3e79]: "Baseline:"
+            - combobox "Baseline:" [ref=f3e80]:
+              - option "No Baseline (Absolute)" [selected]
+              - option "Previous Run"
+              - option "Harness Median"
+              - option "Workspace Median (All Harnesses)"
+              - option "First Run in Task Family"
+        - generic [ref=f3e82]:
+          - heading "Workspace Attention" [level=2] [ref=f3e83]
+          - paragraph [ref=f3e84]: Telemetry health, high-leverage findings, and harness postures.
+        - generic [ref=f3e85]:
+          - heading "Workspace Diagnostic Scorecard (All Harnesses)" [level=3] [ref=f3e89]
+          - generic [ref=f3e90]:
+            - 'generic "Context Hygiene: — (No context pressure telemetry aggregated)" [ref=f3e91]':
+              - generic [ref=f3e92]:
+                - generic [ref=f3e93]:
+                  - generic [ref=f3e94]: Context Hygiene
+                  - generic [ref=f3e95]: unmeasured
+                - generic [ref=f3e96]: —
+              - paragraph [ref=f3e99]: No context pressure telemetry aggregated
+            - 'generic "Cache Efficiency: — (No cache hit counters observed across harnesses)" [ref=f3e100]':
+              - generic [ref=f3e101]:
+                - generic [ref=f3e102]:
+                  - generic [ref=f3e103]: Cache Efficiency
+                  - generic [ref=f3e104]: unmeasured
+                - generic [ref=f3e105]: —
+              - paragraph [ref=f3e108]: No cache hit counters observed across harnesses
+            - 'generic "Tool Yield: — (No tool call telemetry recorded)" [ref=f3e109]':
+              - generic [ref=f3e110]:
+                - generic [ref=f3e111]:
+                  - generic [ref=f3e112]: Tool Yield
+                  - generic [ref=f3e113]: unmeasured
+                - generic [ref=f3e114]: —
+              - paragraph [ref=f3e117]: No tool call telemetry recorded
+            - 'generic "Skill Utilisation: — (Skill activation is not observed on current active harnesses)" [ref=f3e118]':
+              - generic [ref=f3e119]:
+                - generic [ref=f3e120]:
+                  - generic [ref=f3e121]: Skill Utilisation
+                  - generic [ref=f3e122]: unmeasured
+                - generic [ref=f3e123]: —
+              - paragraph [ref=f3e126]: Skill activation is not observed on current active harnesses
+            - 'generic "Delegation Overhead: — (Single-agent or uninstrumented subagent runs)" [ref=f3e127]':
+              - generic [ref=f3e128]:
+                - generic [ref=f3e129]:
+                  - generic [ref=f3e130]: Delegation Overhead
+                  - generic [ref=f3e131]: unmeasured
+                - generic [ref=f3e132]: —
+              - paragraph [ref=f3e135]: Single-agent or uninstrumented subagent runs
+            - 'generic "Continuity: — (Correction/abandonment tracking unobserved across harnesses)" [ref=f3e136]':
+              - generic [ref=f3e137]:
+                - generic [ref=f3e138]:
+                  - generic [ref=f3e139]: Continuity
+                  - generic [ref=f3e140]: unmeasured
+                - generic [ref=f3e141]: —
+              - paragraph [ref=f3e144]: Correction/abandonment tracking unobserved across harnesses
+        - generic [ref=f3e148]:
+          - heading "Agent Harnesses (11)" [level=3] [ref=f3e149]
+          - paragraph [ref=f3e150]: Select a harness to drill down into Level 2 (Harness Detail).

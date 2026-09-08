@@ -5,6 +5,7 @@ import { Card } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
 import {
   fetchHarnesses,
+  fetchRuns,
   fetchFindings,
   type KyberHarnessSummary,
   type KyberFinding,
@@ -15,6 +16,7 @@ import {
   Scorecard,
   FindingList,
   BaselineSelect,
+  NotMeasurable,
 } from '../components/kyber'
 
 export interface AttentionProps {
@@ -26,96 +28,24 @@ export interface AttentionProps {
   onSelectTurn?: (turnIndex: number, executionId?: string, runId?: string) => void
 }
 
-/**
- * Fallback surveyed harnesses catalogued in ADR 0009 and Task E4.
- * If live store has no rollups yet, these display with honest '—' unmeasured indicators.
- */
-const DEFAULT_SURVEYED_HARNESSES: KyberHarnessSummary[] = [
-  {
-    harness: 'claude',
-    name: 'Claude Code',
-    sampleCount: 0,
-    fieldCoverage: 0.83,
-    measurability: {
-      token_usage: 'measured',
-      cache_hit_rate: 'measured',
-      prefix_stability: 'derived',
-      tool_yield: 'measured',
-      delegation_overhead: 'not_measurable',
-      context_pressure: 'measured',
-    },
-  },
-  {
-    harness: 'codex',
-    name: 'Codex',
-    sampleCount: 0,
-    fieldCoverage: 0.83,
-    measurability: {
-      token_usage: 'measured',
-      cache_hit_rate: 'measured',
-      prefix_stability: 'derived',
-      tool_yield: 'measured',
-      delegation_overhead: 'not_measurable',
-      context_pressure: 'measured',
-    },
-  },
-  {
-    harness: 'cursor',
-    name: 'Cursor',
-    sampleCount: 0,
-    fieldCoverage: 0.33,
-    measurability: {
-      token_usage: 'measured',
-      cache_hit_rate: 'not_measurable',
-      prefix_stability: 'not_measurable',
-      tool_yield: 'not_measurable',
-      delegation_overhead: 'not_measurable',
-      context_pressure: 'measured',
-    },
-  },
-  {
-    harness: 'copilot',
-    name: 'GitHub Copilot',
-    sampleCount: 0,
-    fieldCoverage: 0.67,
-    measurability: {
-      token_usage: 'measured',
-      cache_hit_rate: 'not_measurable',
-      prefix_stability: 'not_measurable',
-      tool_yield: 'measured',
-      delegation_overhead: 'measured',
-      context_pressure: 'measured',
-    },
-  },
-  {
-    harness: 'gemini',
-    name: 'Gemini / Antigravity',
-    sampleCount: 0,
-    fieldCoverage: 0.67,
-    measurability: {
-      token_usage: 'measured',
-      cache_hit_rate: 'not_measurable',
-      prefix_stability: 'not_measurable',
-      tool_yield: 'measured',
-      delegation_overhead: 'measured',
-      context_pressure: 'measured',
-    },
-  },
-  {
-    harness: 'pi',
-    name: 'Pi',
-    sampleCount: 0,
-    fieldCoverage: 0.5,
-    measurability: {
-      token_usage: 'measured',
-      cache_hit_rate: 'not_measurable',
-      prefix_stability: 'not_measurable',
-      tool_yield: 'measured',
-      delegation_overhead: 'not_measurable',
-      context_pressure: 'measured',
-    },
-  },
+export type HarnessCatalogEntry = {
+  /** Canonical KyberDash storage identifier, used verbatim in API filters. */
+  harness: 'all' | 'claude-code' | 'copilot' | 'gemini'
+  name: string
+}
+
+export const HARNESS_CATALOG: readonly HarnessCatalogEntry[] = [
+  { harness: 'all', name: 'All Harnesses' },
+  { harness: 'claude-code', name: 'Claude Code' },
+  { harness: 'copilot', name: 'GitHub Copilot' },
+  { harness: 'gemini', name: 'Gemini' },
 ]
+
+function isLiveHarnessSummary(
+  harness: KyberHarnessSummary | HarnessCatalogEntry,
+): harness is KyberHarnessSummary {
+  return 'sampleCount' in harness
+}
 
 export function Attention({
   initialHarnesses,
@@ -134,6 +64,15 @@ export function Attention({
     initialData: initialHarnesses,
   })
 
+  // Harness rollups are deliberately optional. When their endpoint has not
+  // been populated yet, the existing run projection still supplies real
+  // harness identities for navigation. It supplies no metrics: those remain
+  // not measurable until the rollup contract is available.
+  const { data: runsData, isLoading: loadingRuns } = useQuery({
+    queryKey: ['kyber-runs-navigation'],
+    queryFn: () => fetchRuns(),
+  })
+
   // Query live findings across the entire workspace
   const { data: findingsData, isLoading: loadingFindings } = useQuery({
     queryKey: ['kyber-findings-workspace'],
@@ -141,33 +80,44 @@ export function Attention({
     initialData: initialFindings,
   })
 
-  const harnesses = useMemo(() => {
+  const harnesses = useMemo((): readonly (KyberHarnessSummary | HarnessCatalogEntry)[] => {
     if (harnessesData && harnessesData.length > 0) return harnessesData
-    return DEFAULT_SURVEYED_HARNESSES
-  }, [harnessesData])
+
+    const observedHarnesses = [...new Set((runsData ?? []).map((run) => run.harness).filter(Boolean))]
+    if (observedHarnesses.length > 0) {
+      return observedHarnesses.map((harness) => ({
+        harness,
+        name: HARNESS_CATALOG.find((entry) => entry.harness === harness)?.name ?? harness,
+      }))
+    }
+
+    return HARNESS_CATALOG
+  }, [harnessesData, runsData])
+
+  const liveHarnesses = harnessesData ?? []
 
   const findings = findingsData ?? []
 
   // Aggregate workspace diagnostic dimensions (never calculating a single composite score per D3!)
   const workspaceScorecardData: ScorecardData = useMemo(() => {
     // Collect non-zero values across harnesses
-    const measuredPressures = harnesses
+    const measuredPressures = liveHarnesses
       .map((h) => h.contextPressureMedian)
       .filter((v): v is number => typeof v === 'number')
 
-    const measuredCacheHits = harnesses
+    const measuredCacheHits = liveHarnesses
       .map((h) => h.cacheHitRate)
       .filter((v): v is number => typeof v === 'number')
 
-    const measuredToolYields = harnesses
+    const measuredToolYields = liveHarnesses
       .map((h) => h.toolYield)
       .filter((v): v is number => typeof v === 'number')
 
-    const measuredDelegation = harnesses
+    const measuredDelegation = liveHarnesses
       .map((h) => h.delegationOverhead)
       .filter((v): v is number => typeof v === 'number')
 
-    const totalCost = harnesses.reduce((acc, h) => acc + (h.costUsd ?? 0), 0)
+    const totalCost = liveHarnesses.reduce((acc, h) => acc + (h.costUsd ?? 0), 0)
 
     return {
       dimensions: {
@@ -201,7 +151,7 @@ export function Attention({
           key: 'skillUtilisation',
           name: 'Skill Utilisation',
           status: 'not_measurable',
-          reason: 'Skill activation unobserved on current active harnesses (Decision D16)',
+          reason: 'Skill activation is not observed on current active harnesses',
           measurementClass: 'coverage-gap',
         },
         delegationOverhead: {
@@ -226,7 +176,7 @@ export function Attention({
         status: totalCost > 0 ? 'derived' : 'not_measurable',
       },
     }
-  }, [harnesses])
+  }, [liveHarnesses])
 
   return (
     <div className="flex flex-col gap-4" data-testid="page-attention">
@@ -242,7 +192,7 @@ export function Attention({
             Workspace Attention
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Six-level spine landing page: All Harnesses. Overview of telemetry health, highest-leverage findings, and harness postures.
+            Telemetry health, high-leverage findings, and harness postures.
           </p>
         </div>
       </div>
@@ -261,7 +211,7 @@ export function Attention({
           findings={findings}
           maxItems={5}
           title="Highest-Leverage Workspace Findings"
-          description="Ranked by Decision D6 formula (estimated waste × outcome risk × confidence). Deterministic evidence beats inferred claims."
+          description="Ranked by estimated waste, outcome risk, and confidence. Deterministic evidence beats inferred claims."
           onSelectFinding={onSelectFinding}
           onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
           onSelectExecution={(execId) => onSelectRun?.(execId)}
@@ -281,7 +231,7 @@ export function Attention({
           </div>
         </div>
 
-        {loadingHarnesses ? (
+        {loadingHarnesses || (!harnessesData?.length && loadingRuns) ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-12 w-full" />
@@ -307,16 +257,17 @@ export function Attention({
               </thead>
               <tbody className="divide-y divide-border/40">
                 {harnesses.map((h) => {
+                  const live = isLiveHarnessSummary(h)
                   const hasCache =
-                    typeof h.cacheHitRate === 'number'
+                    live && typeof h.cacheHitRate === 'number'
                       ? `${Math.round(h.cacheHitRate * 100)}%`
                       : '—'
                   const hasPressure =
-                    typeof h.contextPressureMedian === 'number'
+                    live && typeof h.contextPressureMedian === 'number'
                       ? `${Math.round(h.contextPressureMedian * 100)}%`
                       : '—'
                   const coveragePct =
-                    typeof h.fieldCoverage === 'number'
+                    live && typeof h.fieldCoverage === 'number'
                       ? `${Math.round(h.fieldCoverage * 100)}%`
                       : '—'
 
@@ -335,16 +286,16 @@ export function Attention({
                         </div>
                       </td>
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground">
-                        {h.sampleCount ?? h.runCount ?? 0}
+                        {live ? h.sampleCount ?? h.runCount ?? 0 : <NotMeasurable reason="No live rollup" />}
                       </td>
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground">
-                        {coveragePct}
+                        {live ? coveragePct : <NotMeasurable reason="No live rollup" />}
                       </td>
                       <td
                         className="py-2.5 px-3 text-right font-mono tabular-nums"
                         title={hasPressure === '—' ? 'Context pressure unmeasured' : undefined}
                       >
-                        {hasPressure === '—' ? (
+                        {!live ? <NotMeasurable reason="No live rollup" /> : hasPressure === '—' ? (
                           <span className="text-tertiary-foreground font-mono">—</span>
                         ) : (
                           hasPressure
@@ -354,18 +305,18 @@ export function Attention({
                         className="py-2.5 px-3 text-right font-mono tabular-nums"
                         title={hasCache === '—' ? 'Cache hit counters unmeasured' : undefined}
                       >
-                        {hasCache === '—' ? (
+                        {!live ? <NotMeasurable reason="No live rollup" /> : hasCache === '—' ? (
                           <span className="text-tertiary-foreground font-mono">—</span>
                         ) : (
                           hasCache
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-amber-500 dark:text-amber-400">
-                        {h.findingCount ?? 0}
+                        {live ? h.findingCount ?? 0 : <NotMeasurable reason="No live rollup" />}
                       </td>
                       {/* Decision D9: Muted secondary derived cost */}
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80">
-                        {h.costUsd ? usd(h.costUsd) : '—'}
+                        {live && h.costUsd ? usd(h.costUsd) : <NotMeasurable reason="No live rollup" />}
                       </td>
                       <td className="py-2.5 px-3 text-right">
                         <button

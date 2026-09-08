@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-05
+last-reviewed: 2026-09-06
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -42,6 +42,34 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Cursor | `codeburn kyber cursor-hook` emits deterministic OTLP traces from hook JSONL with stable turn identity, supplied counters, and ordered tools. | Synthetic and CLI-post verification passed. Live collection requires the owner to register the command and execute a Cursor turn; existing hooks must not be changed by this work. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. | Owner enablement is required before collection can be verified. |
 | Kilo Code | The surveyed empty local store and undocumented OTel surface are represented as not collectable with a reason. | No zero-valued data is fabricated. |
+
+## Antigravity aggregate-token investigation (T7)
+
+**Verdict: (a), for aggregate counters.** Antigravity's September 4 statusline spans
+for the two short sessions inspected (`rd-pi` and `rd-cursor`) emit
+`gen_ai.usage.input_tokens: 0` and `gen_ai.usage.output_tokens: 0`. Those exact zeroes
+survive into the corresponding `canon.db` `records.tokens_json` values; this is not an
+ingest drop or a `NULL` value rendered as zero. **[VERIFIED]**
+
+**[VERIFIED]** The same raw spans do export measured context-band counts under
+`gen_ai.usage.sys_tokens`, `tool_tokens`, `skill_tokens`, `rule_tokens`, and
+`msg_tokens`. The canonical adapter preserves them as typed `parts_json` buckets
+(`system_prompt`, `tool_definitions`, `instruction_context`, and
+`conversation_history`), so these names are recognized rather than an unmapped
+semantic-convention rename. They are not a safe substitute for a reported aggregate
+input/output counter: the producer's aggregate fields remain zero, and the component
+counts describe input-context composition rather than generated output.
+
+**[VERIFIED]** The working Gemini/Antigravity path is distinguishable: a nonzero span
+from session `da5d8015-e8d1-4cbf-a6c8-612d2cff8682` carried nonzero
+`gen_ai.usage.input_tokens`, `output_tokens`, and `cache_read.input_tokens` in raw
+telemetry, with matching canonical token fields. The anomaly is therefore source data
+for the affected short sessions, not a general Gemini adapter failure.
+
+The required product response is the T2 formatter sentinel: show an unavailable reason
+for aggregate counters instead of a numeric zero. No reader mapping change is indicated
+by this investigation. Cache creation remains independently
+`not_measurable` for Gemini/Antigravity.
 
 ## Cache counter and prefix byte survey (Survey E4)
 

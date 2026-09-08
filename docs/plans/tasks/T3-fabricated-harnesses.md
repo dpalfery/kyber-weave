@@ -1,3 +1,13 @@
+---
+id: plans/tasks/T3-fabricated-harnesses
+title: T3 — Delete the fabricated harness catalogue and Attention's narration
+doc-type: plan
+status: needs-review
+owner: dpalfery
+last-reviewed: 2026-09-06
+component: KyberDash
+---
+
 # T3 — Delete the fabricated harness catalogue and Attention's narration
 
 **Model:** Haiku. **Parallel with:** T1, T2, T4.

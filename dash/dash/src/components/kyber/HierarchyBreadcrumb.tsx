@@ -48,7 +48,7 @@ export function HierarchyBreadcrumb({
     isCurrent: isAllCurrent,
     onClick: isAllCurrent ? undefined : onSelectAll,
     tag: 'Workspace',
-    testId: 'breadcrumb-all',
+    testId: 'breadcrumb-attention',
   })
 
   // Level 2: Harness

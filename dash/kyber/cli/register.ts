@@ -124,6 +124,36 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       }
     })
 
+  const dash = program
+    .command('dash')
+    .description('Manage KyberDash canonical telemetry and derived dashboard data')
+
+  dash
+    .command('refresh')
+    .description('Discover local provider sessions and rebuild KyberDash canonical data')
+    .option('--db <path>', 'Custom path for canon.db SQLite database')
+    .option('--provider <name>', 'Refresh one native provider identity (for example: pi)')
+    .action(async (opts: { db?: string; provider?: string }) => {
+      const store = new CanonStore(resolveDbPath(opts.db))
+      try {
+        const { refreshLocalProviders } = await import('./refresh.js')
+        const report = await refreshLocalProviders(
+          store,
+          undefined,
+          opts.provider === undefined ? undefined : { providers: [opts.provider] },
+        )
+        console.log(`Providers:   ${report.providers}`)
+        console.log(`Sources:     ${report.sources}`)
+        console.log(`Synthesized: ${report.synthesized}`)
+        console.log(`Accepted:    ${report.accepted}`)
+        console.log(`Problems:    ${report.problems}`)
+        console.log(`Sessions:    ${report.sessions.built} built, ${report.sessions.skipped} skipped, ${report.sessions.pruned} pruned`)
+        console.log(`Rollups:     ${report.rollups}`)
+      } finally {
+        store.close()
+      }
+    })
+
   kyber
     .command('cursor-hook')
     .description('POST Cursor hook JSONL from stdin to the local OTLP/HTTP receiver')
