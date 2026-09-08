@@ -104,7 +104,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
         HashSet<string> collisions = DeriveCollisions(source);
 
         int unoccupiedAgents = source.Agents.Count(a => !shared.Contains(a.Name) && !collisions.Contains(a.Name));
-        int expectedFiles = source.Skills.Count + unoccupiedAgents + collisions.Count;
+
+        // Every agent lowers to a role skill and every canonical skill is emitted; each
+        // projects its validated resource closure beneath the lowered identity directory.
+        int expectedFiles = source.Skills.Count + unoccupiedAgents + collisions.Count
+            + source.Agents.Sum(agent => agent.Resources.Count)
+            + source.Skills.Sum(skill => skill.Resources.Count);
 
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
         SquadRenderRequest request = new(
@@ -129,11 +134,25 @@ public sealed class AntigravityRendererContractTests : IDisposable
             duplicatePaths.Length == 0,
             $"Duplicate rendered paths: {string.Join(", ", duplicatePaths)}");
 
+        // Principals are SKILL.md files; closure resources render beside their lowered
+        // owner, so a resource path is .agents/skills/{ownerIdentity}/{resourcePath}.
+        HashSet<string> resourceOutputPaths = source.Agents
+            .SelectMany(
+                agent => agent.Resources,
+                (agent, resource) => $".agents/skills/{(collisions.Contains(agent.Name) ? $"role-{agent.Name}" : agent.Name)}/{resource.RelativePath}")
+            .Concat(source.Skills.SelectMany(
+                skill => skill.Resources,
+                (skill, resource) => $".agents/skills/{skill.Name}/{resource.RelativePath}"))
+            .ToHashSet(StringComparer.Ordinal);
+
         Assert.All(result.Files, f =>
         {
             Assert.Equal("antigravity", f.Target);
             Assert.StartsWith(".agents/skills/", f.RelativePath, StringComparison.Ordinal);
-            Assert.EndsWith("/SKILL.md", f.RelativePath, StringComparison.Ordinal);
+            Assert.True(
+                f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal) ||
+                resourceOutputPaths.Contains(f.RelativePath),
+                $"Rendered file '{f.RelativePath}' is neither a principal SKILL.md nor a projected closure resource.");
         });
 
         foreach (SquadSkill skill in source.Skills)
@@ -315,6 +334,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
         {
             Assert.Equal(first.Degradations[i], second.Degradations[i]);
         }
+    }
+
+    [Fact]
+    public async Task RenderAsync_Antigravity_ProjectsSkillAndLoweredAgentResourcesDeterministically()
+    {
+        await SquadResourceRenderingContract.AssertFallbackProjectionAsync(
+            new AntigravityRenderer(),
+            SquadTarget.Antigravity);
     }
 
     [Fact]

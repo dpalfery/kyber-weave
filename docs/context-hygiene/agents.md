@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Agents
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-08-30
 code-refs:
   - AgentLoader
   - AgentSpecValidator
@@ -45,10 +45,17 @@ narrow to one.
 
 While `agent validate` and `agent sync-check` audit and lint existing on-disk agent definitions
 across individual harnesses, **[Kyber-Squad](../kyber-squad/architecture.md)** provides the
-authoritative, end-to-end deployment control plane. Kyber-Squad maintains 23 canonical agent
+authoritative, end-to-end deployment control plane. Kyber-Squad maintains 21 canonical agent
 definitions in `products/kyber-squad/` and compiles them into target-native configurations
-across 9 supported harnesses (including Codex, Cursor, Claude, Copilot, OpenCode, Kilo,
-Antigravity, Warp, and Factory Droids) with transactional rollback and state tracking.
+for five currently implemented and registered renderers: `copilot`, `cursor`, `claude`, `codex`,
+and `antigravity`. The product declares four more targets—`opencode`, `kilo`, `warp`, and
+`factory`—but requesting any of them currently fails renderer-coverage preflight before a
+deployment starts.
+
+The current agent namespace intersects the 24-skill namespace at seven names, all distinct-body
+collisions. There are no shared product identities. Fallback targets preserve each colliding skill
+and lower its agent to `role-<name>`; unoccupied agents, including `conductor`, lower to
+same-name role skills.
 
 ## Commands
 

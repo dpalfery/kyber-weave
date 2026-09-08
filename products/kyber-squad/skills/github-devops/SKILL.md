@@ -2,9 +2,6 @@
 name: github-devops
 description: Use when working on GitHub Actions workflows, CI/CD pipelines, Docker builds, MSBuild configuration, build diagnostics, project modernization, or build performance in the CI context.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # GitHub DevOps

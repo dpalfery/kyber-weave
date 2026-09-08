@@ -11,8 +11,8 @@ namespace KyberWeave.Tests.Squad;
 /// <summary>
 /// Unit tests pinning GitHub Copilot agent rendering in <see cref="CopilotRenderer"/>,
 /// specifically verifying YAML flow sequence formatting for the <c>tools</c> frontmatter field,
-/// explicit single-quoting of MCP server wildcards, capability gating for MCP tools, inclusion
-/// of standard environment tools (<c>vscode</c>, <c>todo</c>), and deterministic tool ordering.
+/// explicit single-quoting of MCP server wildcards, exact canonical source membership, and
+/// deterministic tool ordering.
 /// </summary>
 public sealed class CopilotRendererTests
 {
@@ -24,6 +24,64 @@ public sealed class CopilotRendererTests
 
     private static readonly string[] McpWildcardTrio =
         ["'codegraph/*'", "'kyber-weave/*'", "'context7/*'"];
+
+    [Fact]
+    public void CopilotToolCatalogHasExactApprovedOrder()
+    {
+        Assert.Equal(
+            [
+                "vscode",
+                "read",
+                "todo",
+                "codegraph/*",
+                "kyber-weave/*",
+                "context7/*",
+                "search",
+                "execute",
+                "web",
+                "edit",
+                "agent",
+                "edit/createDirectory",
+                "edit/createFile",
+                "edit/editFiles",
+                "edit/rename",
+                "vscodeGeneral/rename"
+            ],
+            CopilotToolCatalog.OrderedTools);
+    }
+
+    [Theory]
+    [InlineData("architect")]
+    public void ArchitectCopilotProjectionDoesNotWidenSharedCrossHarnessProfile(string agentName)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == agentName);
+
+        Assert.Equal("architect", agent.CapabilityProfile);
+        Assert.Equal("architect-copilot", agent.CopilotCapabilityProfile);
+        Assert.Equal(
+            SquadPermissionDecision.Ask,
+            source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["filesystem.write"]);
+        Assert.Equal(
+            SquadPermissionDecision.Ask,
+            source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["process.execute"]);
+        Assert.Equal(
+            SquadPermissionDecision.Allow,
+            source.CapabilityProfiles.Profiles[agent.CopilotCapabilityProfile!].Permissions["filesystem.write"]);
+        Assert.Equal(
+            SquadPermissionDecision.Allow,
+            source.CapabilityProfiles.Profiles[agent.CopilotCapabilityProfile!].Permissions["process.execute"]);
+    }
+
+    [Theory]
+    [InlineData("architect")]
+    public async Task ArchitectRenderedMetadataKeepsSharedCapabilityProfile(string agentName)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        Assert.Contains("capability-profile: architect", frontmatter, StringComparison.Ordinal);
+        Assert.DoesNotContain("architect-copilot", frontmatter, StringComparison.Ordinal);
+    }
 
     [Fact]
     public async Task RenderAsync_EmitsToolsAsYamlFlowSequence_AcrossAllRenderedAgents()
@@ -120,106 +178,28 @@ public sealed class CopilotRendererTests
         }
     }
 
-    [Fact]
-    public async Task RenderAsync_PureOrchestratorAgents_WithholdMcpWildcardsDespiteFilesystemRead()
-    {
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        foreach (string orchestrator in new[] { "conductor", "conductor-v3" })
-        {
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".github/agents/{orchestrator}.agent.md");
-
-            string content = Encoding.UTF8.GetString(file.Content.Span);
-            string toolsLine = ExtractToolsLine(ExtractFrontmatterText(content));
-
-            // Conductor agents have filesystem.read: allow, but must strictly withhold MCP wildcards
-            Assert.DoesNotContain("codegraph", toolsLine, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("kyber-weave", toolsLine, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("context7", toolsLine, StringComparison.OrdinalIgnoreCase);
-
-            Assert.Equal("tools: [vscode, read, agent, todo]", toolsLine);
-        }
-    }
-
-    [Fact]
-    public async Task RenderAsync_AgentsWithFilesystemRead_IncludeMcpWildcards()
-    {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
-        SquadRendererRegistry registry = new([new CopilotRenderer()]);
-        SquadRenderRequest request = new(
-            SourceDirectory: ProductRoot,
-            Targets: [SquadTarget.Copilot],
-            Scope: SquadDeploymentScope.Project);
-
-        SquadRenderResult result = await registry.RenderAsync(request);
-
-        Assert.True(result.Success, string.Join("; ", result.Errors));
-
-        foreach (SquadAgent agent in source.Agents)
-        {
-            bool isOrchestrator = agent.Name is "conductor" or "conductor-v3";
-            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            bool hasRead = profile.Permissions["filesystem.read"] == SquadPermissionDecision.Allow;
-
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".github/agents/{agent.Name}.agent.md");
-
-            string content = Encoding.UTF8.GetString(file.Content.Span);
-            string toolsLine = ExtractToolsLine(ExtractFrontmatterText(content));
-
-            if (hasRead && !isOrchestrator)
-            {
-                foreach (string wildcard in McpWildcardTrio)
-                {
-                    Assert.Contains(wildcard, toolsLine, StringComparison.Ordinal);
-                }
-            }
-            else
-            {
-                Assert.DoesNotContain("codegraph", toolsLine, StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain("kyber-weave", toolsLine, StringComparison.OrdinalIgnoreCase);
-                Assert.DoesNotContain("context7", toolsLine, StringComparison.OrdinalIgnoreCase);
-            }
-        }
-    }
-
     [Theory]
-    [InlineData("csharp-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    [InlineData("python-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    [InlineData("react-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    [InlineData("test-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    [InlineData("maui-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    [InlineData("tauri-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    [InlineData("dal-dev", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    [InlineData("conductor", "tools: [vscode, read, agent, todo]")]
-    [InlineData("conductor-v3", "tools: [vscode, read, agent, todo]")]
-    [InlineData("architect", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
-    [InlineData("architect-v3", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
-    [InlineData("github-devops", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, web, todo]")]
-    // execute and agent are the widened reviewer profile reaching the tool allow-list; edit
-    // is absent because filesystem.write=ask has no per-tool confirmation gate here and
-    // safely narrows to deny — the reviewer returns findings rather than writing them.
-    [InlineData("code-reviewer", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, agent, web, todo]")]
-    [InlineData("azure-reader", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
-    [InlineData("research-agent", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
-    [InlineData("bug-crusher-investigator", "tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
-    [InlineData("docs-dev", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]")]
-    // Both lens seats are read-only: they read the diff and report. Neither executes, writes,
-    // nor delegates — the reviewer that spawned them holds those grants, and a council seat
-    // that could re-enter the council is a loop nobody bounded.
-    [InlineData("review-lens", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
-    [InlineData("review-triage", "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]")]
+    [InlineData("architect", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent, edit/createDirectory, edit/createFile, edit/editFiles, edit/rename, vscodeGeneral/rename]")]
+    [InlineData("azure-reader", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("bug-crusher-investigator", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
+    [InlineData("code-reviewer", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, agent]")]
+    [InlineData("conductor", "tools: [vscode, read, todo, agent]")]
+    [InlineData("csharp-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("dal-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("docs-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, edit]")]
+    [InlineData("github-devops", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, edit]")]
+    [InlineData("maui-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("product-owner", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, agent]")]
+    [InlineData("pulumi-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("python-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("react-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("research-agent", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("review-lens", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("review-triage", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]")]
+    [InlineData("sql-database-architect", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("task-reviewer", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web]")]
+    [InlineData("tauri-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
+    [InlineData("test-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
@@ -270,8 +250,21 @@ public sealed class CopilotRendererTests
             StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("task-reviewer")]
+    [InlineData("test-dev")]
+    public async Task MaiCodeProfileResolvesToExactCopilotModel(string agentName)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        Assert.Contains(
+            "model: MAI-Code-1.1-Flash (copilot)",
+            frontmatter,
+            StringComparison.Ordinal);
+    }
+
     [Fact]
-    public async Task RenderAsync_SyntheticProfiles_VerifyCapabilityGatingAndUngovernedTools()
+    public async Task RenderAsyncUsesExactSyntheticSourceMembershipWithoutInferringTools()
     {
         using TempDirectory temp = new();
         WriteSyntheticSquad(temp.Path, """
@@ -323,25 +316,21 @@ public sealed class CopilotRendererTests
         SquadRenderResult result = await renderer.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // 1. Agent with process.execute allow and filesystem.read deny -> [vscode, execute, todo] (no MCP wildcards)
         SquadDeploymentFile execAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/exec-bot.agent.md");
         Assert.Equal(
-            "tools: [vscode, execute, todo]",
+            "tools: [vscode, todo, execute]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(execAgent.Content.Span))));
 
-        // 2. Custom non-orchestrator agent with filesystem.read allow -> [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', todo]
         SquadDeploymentFile readAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/read-bot.agent.md");
         Assert.Equal(
-            "tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', todo]",
+            "tools: [vscode, read, todo, 'context7/*']",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(readAgent.Content.Span))));
 
-        // 3. Agent with all capabilities denied -> [vscode, todo]
         SquadDeploymentFile lockedAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/locked-bot.agent.md");
         Assert.Equal(
             "tools: [vscode, todo]",
             ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(lockedAgent.Content.Span))));
 
-        // 4. Pure orchestrator agent named conductor with filesystem.read allow -> excludes MCP wildcards
         SquadDeploymentFile conductorAgent = Assert.Single(result.Files, f => f.RelativePath == ".github/agents/conductor.agent.md");
         Assert.Equal(
             "tools: [vscode, read, todo]",
@@ -412,13 +401,17 @@ public sealed class CopilotRendererTests
                 no-agent-primitive: skill
             """);
 
-        WriteAgent(root, "exec-bot", "exec-only");
-        WriteAgent(root, "read-bot", "read-only-custom");
-        WriteAgent(root, "locked-bot", "all-denied");
-        WriteAgent(root, "conductor", "read-only-custom");
+        WriteAgent(root, "exec-bot", "exec-only", "[execute, todo, vscode]");
+        WriteAgent(root, "read-bot", "read-only-custom", "[context7/*, todo, read, vscode]");
+        WriteAgent(root, "locked-bot", "all-denied", "[todo, vscode]");
+        WriteAgent(root, "conductor", "read-only-custom", "[todo, read, vscode]");
     }
 
-    private static void WriteAgent(string root, string name, string capabilityProfile)
+    private static void WriteAgent(
+        string root,
+        string name,
+        string capabilityProfile,
+        string copilotTools)
     {
         File.WriteAllText(Path.Combine(root, "agents", $"{name}.md"), $"""
             ---
@@ -428,6 +421,7 @@ public sealed class CopilotRendererTests
             invocation: subagent
             model-profile: default
             capability-profile: {capabilityProfile}
+            copilot-tools: {copilotTools}
             delegates-to: []
             fallback: none
             aliases: []
@@ -454,7 +448,6 @@ public sealed class CopilotRendererTests
     /// </summary>
     [Theory]
     [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
-    [InlineData("architect-v3", "agents: ['azure-reader', 'research-agent']")]
     [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
@@ -480,7 +473,6 @@ public sealed class CopilotRendererTests
     [InlineData("review-lens")]
     [InlineData("azure-reader")]
     [InlineData("conductor")]
-    [InlineData("conductor-v3")]
     public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
     {
         string frontmatter = await RenderFrontmatterAsync(agentName);

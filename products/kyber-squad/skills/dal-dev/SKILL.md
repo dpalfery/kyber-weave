@@ -2,9 +2,6 @@
 name: dal-dev
 description: Use when implementing ADO.NET repositories, IRepository of T, ISqlConnectionFactory, FluentMigrator migrations, or persistence DI registration. Do not use for schema design or application/domain logic.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Data Access Layer Developer

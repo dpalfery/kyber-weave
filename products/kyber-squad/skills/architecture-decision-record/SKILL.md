@@ -2,9 +2,6 @@
 name: architecture-decision-record
 description: Capture an architectural decision as an ADR once it has been reached — a choice that constrains future work, had viable alternatives that were rejected, and would be expensive to revisit. Use when a design discussion has converged on such a decision, when the user asks for an ADR, or when a decision needs superseding. Do NOT use for reversible implementation choices, library picks with no lasting constraint, or to minute a discussion that has not concluded.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # Architecture Decision Record

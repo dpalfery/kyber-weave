@@ -15,8 +15,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// Validates that canonical agents lower to Claude subagents at <c>.claude/agents/&lt;name&gt;.md</c>
-/// and skills lower to <c>.claude/skills/&lt;name&gt;/SKILL.md</c>. Verifies single-projection suppression
-/// for primary conductors, explicit tool allow-listing, model resolution from <c>models.yml</c>,
+/// and skills lower to <c>.claude/skills/&lt;name&gt;/SKILL.md</c>. Verifies profile-declared
+/// shared-identity suppression, explicit tool allow-listing, model resolution from <c>models.yml</c>,
 /// and structured degradation accounting for <c>safety-narrowed</c> and
 /// <c>permission-not-expressible</c> codes.
 /// </remarks>
@@ -68,11 +68,13 @@ public sealed class ClaudeRendererContractTests : IDisposable
     ];
 
     /// <summary>
-    /// Primary agents are emitted as native subagents, so their same-named canonical skills
-    /// are suppressed by the single-projection rule. Keep the set in one place for both the
-    /// expected file count and per-skill assertions.
+    /// Shared identities are read from the loaded fallback profile so the test follows the
+    /// same generic single-projection contract as the renderer.
     /// </summary>
-    private static readonly HashSet<string> SuppressedSkillNames = ["conductor", "conductor-v3"];
+    private static HashSet<string> SharedIdentities(SquadSource source) =>
+        source.FallbackProfiles.Profiles.Values
+            .SelectMany(profile => profile.SharedIdentities)
+            .ToHashSet(StringComparer.Ordinal);
 
     public void Dispose()
     {
@@ -121,6 +123,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     public async Task RenderAsync_Claude_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        HashSet<string> sharedIdentities = SharedIdentities(source);
         SquadRendererRegistry registry = new([new ClaudeRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -131,9 +134,15 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // Native primary agents suppress their same-named skills; derive the expected count
-        // from the centralized suppression set rather than a literal subtraction.
-        int expectedFileCount = source.Agents.Count + source.Skills.Count - SuppressedSkillNames.Count;
+        int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
+
+        // C3: every rendered owner also projects its validated resource closure beside its
+        // principal output, so the corpus count is principals plus emitted closures.
+        int expectedFileCount =
+            source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+            + source.Skills.Count - suppressedSkillCount
+            + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
+                .Sum(skill => skill.Resources.Count);
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("claude", f.Target));
 
@@ -153,7 +162,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 $"Agent '{agent.Name}' description mismatch.");
 
             // Model resolution: verify against loaded ModelProfiles. Every assertion names
-            // the agent so a failure identifies the offender out of the 22-agent corpus.
+            // the agent so a failure identifies the offender out of the 21-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             if (modelProfile.HarnessModels.TryGetValue("claude", out string? claudeHarnessModel))
             {
@@ -230,9 +239,10 @@ public sealed class ClaudeRendererContractTests : IDisposable
             }
 
             // MCP wildcards are granted if filesystem.read is allowed AND the agent is not a pure orchestrator.
-            bool isPureOrchestrator =
-                string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal) ||
-                SuppressedSkillNames.Contains(agent.Name);
+            bool isPureOrchestrator = string.Equals(
+                agent.CapabilityProfile,
+                "orchestrator",
+                StringComparison.Ordinal);
             bool hasRead = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
                            readDecision == SquadPermissionDecision.Allow;
             bool expectedMcp = hasRead && !isPureOrchestrator;
@@ -270,20 +280,18 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
         AssertTools(result, "bug-crusher-investigator", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kyber-weave__*", "mcp__context7__*", "Grep", "Glob", "Bash", "PowerShell", "WebFetch", "WebSearch"]);
 
-        // Conductor and conductor-v3 are native primary agents on Claude: present as
-        // .claude/agents/<name>.md and never duplicated as skills.
-        foreach (string conductor in SuppressedSkillNames)
+        foreach (string sharedIdentity in sharedIdentities)
         {
-            Assert.Contains(result.Files, f => f.RelativePath == $".claude/agents/{conductor}.md");
-            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".claude/skills/{conductor}/SKILL.md");
+            Assert.Contains(result.Files, f => f.RelativePath == $".claude/agents/{sharedIdentity}.md");
+            Assert.DoesNotContain(result.Files, f => f.RelativePath == $".claude/skills/{sharedIdentity}/SKILL.md");
         }
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
         {
-            bool isConductor = SuppressedSkillNames.Contains(skill.Name);
+            bool isSharedIdentity = sharedIdentities.Contains(skill.Name);
             string path = $".claude/skills/{skill.Name}/SKILL.md";
-            if (isConductor)
+            if (isSharedIdentity)
             {
                 Assert.DoesNotContain(result.Files, f => f.RelativePath == path);
                 continue;
@@ -429,6 +437,17 @@ public sealed class ClaudeRendererContractTests : IDisposable
             Assert.Equal(file1.Target, file2.Target);
             Assert.True(file1.Content.Span.SequenceEqual(file2.Content.Span), $"Content differed for file '{file1.RelativePath}'.");
         }
+    }
+
+    [Fact]
+    public async Task RenderAsync_Claude_ProjectsLinkedAgentAndSkillResourcesDeterministically()
+    {
+        await SquadResourceRenderingContract.AssertNativeProjectionAsync(
+            new ClaudeRenderer(),
+            SquadTarget.Claude,
+            ".claude/agents/bug-crusher-investigator.md",
+            ".claude/agents",
+            ".claude/skills");
     }
 
     private static bool IsDocumentedClaudeTool(string tool) =>

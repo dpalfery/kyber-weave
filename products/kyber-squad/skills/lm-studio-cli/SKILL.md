@@ -2,9 +2,6 @@
 name: lm-studio-cli
 description: use the LM Studio CLI to inspect the local LM Studio instance, review server logs, and inspect downloaded or loaded models.
 license: MIT
-metadata:
-  author: David R Palfery
-  version: 1.0.0
 ---
 
 # LM Studio CLI
