@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { cn, usd, fmtTokens } from '../lib/utils'
-import { fetchKyberSessionContent } from '../lib/kyberApi'
+import { fetchKyberSessionContent, fetchSpanAttributes } from '../lib/kyberApi'
 import { Skeleton } from './ui/skeleton'
 import { ContextInspector } from './ContextInspector'
 
@@ -608,7 +608,34 @@ function TurnInspector({
  * Timeline Span / Node Inspector rendering attributes and metadata.
  */
 function SpanInspector({ node }: { node: any }) {
-  const attrs = node.attributes ?? {}
+  // Timeline nodes carry structure and metadata; their attribute map is the
+  // raw span payload and is no longer copied into every session row. A node
+  // that still has one inline renders it directly, otherwise the span on
+  // screen is fetched from compressed storage.
+  const inlineAttrs = (node.attributes ?? {}) as Record<string, unknown>
+  const hasInlineAttrs = Object.keys(inlineAttrs).length > 0
+  const spanId: string | undefined = typeof node.spanId === 'string' ? node.spanId : undefined
+  const [loadedAttrs, setLoadedAttrs] = useState<Record<string, unknown> | null>(null)
+
+  useEffect(() => {
+    setLoadedAttrs(null)
+    if (spanId === undefined || hasInlineAttrs) return
+    let cancelled = false
+    fetchSpanAttributes(spanId)
+      .then((result) => {
+        if (!cancelled) setLoadedAttrs(result.attributes)
+      })
+      .catch(() => {
+        // The inspector renders "no attributes" rather than an error here; the
+        // span's own metadata above is still the useful part of this pane.
+        if (!cancelled) setLoadedAttrs(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [spanId, hasInlineAttrs])
+
+  const attrs = hasInlineAttrs ? inlineAttrs : (loadedAttrs ?? {})
   const [filter, setFilter] = useState('')
 
   const filteredAttrs = useMemo(() => {

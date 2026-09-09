@@ -1,6 +1,7 @@
 // SQLite query bridge for the canonical KyberDash store.
 
 import { existsSync, readFileSync } from 'node:fs'
+import { inflateSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -846,6 +847,48 @@ export class KyberBridge {
           `[KyberBridge] Error reading session payload from canon.db for ${sessionId}:`,
           err
         )
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * One span's harness-emitted attributes, for the timeline inspector (R9.2).
+   *
+   * The timeline nodes in a session payload no longer carry their attribute
+   * map: it is the record's raw span payload, and copying it into every
+   * session made the derived cache a second, uncompressed copy of the whole
+   * corpus. The inspector asks for the node it is showing instead, and pays one
+   * primary-key seek and one inflate for it.
+   *
+   * `_clip` is deliberately not applied, for the same reason it is not applied
+   * to unclipped content: this route exists so a span click can show what the
+   * harness actually emitted.
+   */
+  getSpanAttributes(spanId: string): { spanId: string; attributes: Record<string, unknown> } | null {
+    if (!spanId) return null
+
+    if (this.store) {
+      const attributes = this.store.spanAttributes(spanId)
+      return attributes === undefined ? null : { spanId, attributes }
+    }
+
+    if (this.hasTable(this.canonDb, 'records')) {
+      try {
+        const row = this.canonDb!
+          .prepare('SELECT raw FROM records WHERE span_id = ?')
+          .get(spanId) as { raw: unknown } | undefined
+        if (row && row.raw !== null && row.raw !== undefined) {
+          const parsed = JSON.parse(
+            inflateSync(Buffer.from(row.raw as Uint8Array)).toString('utf8'),
+          ) as unknown
+          if (parsed !== null && typeof parsed === 'object') {
+            return { spanId, attributes: parsed as Record<string, unknown> }
+          }
+        }
+      } catch (err) {
+        console.warn(`[KyberBridge] Error reading span attributes for ${spanId}:`, err)
       }
     }
 

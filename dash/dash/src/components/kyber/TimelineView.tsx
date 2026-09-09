@@ -1,5 +1,7 @@
 import * as React from 'react'
 
+import { fetchSpanAttributes } from '../../lib/kyberApi'
+
 export type CostBlock = {
   basis: string
   status: string
@@ -94,6 +96,46 @@ export function TimelineView({
   }
   const shown = selectedId ? undefined : selected
 
+  // Session payloads no longer carry each node's attribute map — it is the raw
+  // span payload, and embedding it made every session row a second
+  // uncompressed copy of the corpus. A node that still has them inline (an
+  // older payload, or a caller passing them directly) renders them as before;
+  // otherwise the one span on screen is fetched from compressed storage.
+  const inlineAttributes = shown?.attributes ?? {}
+  const hasInlineAttributes = Object.keys(inlineAttributes).length > 0
+  const shownSpanId = shown?.spanId
+  const [loadedAttributes, setLoadedAttributes] = React.useState<Record<string, unknown> | null>(null)
+  const [attributesError, setAttributesError] = React.useState<string | null>(null)
+  const [attributesLoading, setAttributesLoading] = React.useState(false)
+
+  React.useEffect(() => {
+    setLoadedAttributes(null)
+    setAttributesError(null)
+    if (shownSpanId === undefined || hasInlineAttributes) {
+      setAttributesLoading(false)
+      return
+    }
+    let cancelled = false
+    setAttributesLoading(true)
+    fetchSpanAttributes(shownSpanId)
+      .then((result) => {
+        if (!cancelled) setLoadedAttributes(result.attributes)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setAttributesError(err instanceof Error ? err.message : 'Unable to load span attributes.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAttributesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [shownSpanId, hasInlineAttributes])
+
+  const attributes = hasInlineAttributes ? inlineAttributes : loadedAttributes
+
   if (!root) {
     return <div className="py-8 text-center text-sm text-tertiary-foreground">No timeline data.</div>
   }
@@ -121,10 +163,14 @@ export function TimelineView({
       {shown && (
         <div data-testid="timeline-attributes" className="rounded-md border border-border bg-card p-4">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-heading">Attributes: {shown.name}</h3>
-          {Object.keys(shown.attributes).length === 0 ? (
+          {attributesLoading ? (
+            <p className="text-sm text-tertiary-foreground">Loading attributes…</p>
+          ) : attributesError !== null ? (
+            <p className="text-sm text-destructive-foreground">{attributesError}</p>
+          ) : attributes === null || Object.keys(attributes).length === 0 ? (
             <p className="text-sm text-tertiary-foreground">No attributes.</p>
           ) : (
-            <pre className="overflow-auto rounded bg-interactive-secondary p-3 text-xs">{JSON.stringify(shown.attributes, null, 2)}</pre>
+            <pre className="overflow-auto rounded bg-interactive-secondary p-3 text-xs">{JSON.stringify(attributes, null, 2)}</pre>
           )}
           <div className="mt-2 text-xs text-tertiary-foreground">
             <div>spanId: {shown.spanId}</div>

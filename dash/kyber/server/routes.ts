@@ -20,6 +20,20 @@ function parseSessionContentPath(pathname: string): string | null {
 }
 
 /**
+ * `/api/kyber/span/:spanId/attributes` — the harness-emitted attribute map for
+ * one span (R9.2). Session payloads no longer carry these inline; see
+ * `CanonStore.spanAttributes`.
+ */
+function parseSpanAttributesPath(pathname: string): string | null {
+  const prefix = '/api/kyber/span/'
+  const suffix = '/attributes'
+  if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return null
+  const middle = pathname.slice(prefix.length, pathname.length - suffix.length)
+  if (!middle || middle.includes('/')) return null
+  return decodeURIComponent(middle).trim()
+}
+
+/**
  * `/api/kyber/session/:id/turn/:index/content` — returns unclipped assembled context
  * for a specific turn index (Task G1 / Decision D14).
  */
@@ -80,6 +94,26 @@ export function handleKyberRequest(
       sessions = sessions.filter((s) => s.harness?.toLowerCase() === harnessParam.toLowerCase())
     }
     sendKyberJson(res, 200, { sessions })
+    return true
+  }
+
+  // One span's attributes, fetched on demand by the timeline inspector.
+  const spanAttributesId = parseSpanAttributesPath(url.pathname)
+  if (spanAttributesId !== null) {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    if (!spanAttributesId) {
+      sendKyberJson(res, 400, { error: 'Missing span id' })
+      return true
+    }
+    const body = bridge.getSpanAttributes(spanAttributesId)
+    if (!body) {
+      sendKyberJson(res, 404, { error: 'Span attributes not found' })
+      return true
+    }
+    sendKyberJson(res, 200, body)
     return true
   }
 

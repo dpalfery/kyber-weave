@@ -520,7 +520,11 @@ export function RunDetail({
               onClose={() => setDrawerOpen(false)}
               title={`Turn #${selectedTurnIndex ?? 0} Content Inspector`}
               subtitle={`Run ${run.runId} · Harness: ${run.harness}`}
-              contentRequest={{ sessionId: run.runId }}
+              // A run id is not a session id — every derived run is
+              // `derived:<harness>:<session>`, so asking for content under the
+              // run id 404s for all of them. The active execution names the
+              // session whose records the inspector should read.
+              contentRequest={{ sessionId: activeExecution?.sessionId ?? activeExecutionId ?? run.runId }}
               inspectContext={true}
             />
           )}

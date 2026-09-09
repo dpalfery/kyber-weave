@@ -148,6 +148,22 @@ export function fetchTurnContent(
 
 export const assembleTurnContent = fetchTurnContent
 
+export interface KyberSpanAttributes {
+  spanId: string
+  attributes: Record<string, unknown>
+}
+
+/**
+ * One span's harness-emitted attributes (R9.2).
+ *
+ * Timeline nodes no longer carry their attribute map inline — it is the raw
+ * span payload, and embedding it made each session row a second uncompressed
+ * copy of the corpus. The inspector fetches the node it is showing instead.
+ */
+export function fetchSpanAttributes(spanId: string): Promise<KyberSpanAttributes> {
+  return fetchJson<KyberSpanAttributes>(`/api/kyber/span/${encodeURIComponent(spanId)}/attributes`)
+}
+
 // ===========================================================================
 // Spine Diagnostic Hierarchy & Finding Engine Contracts (Tasks G2, D1-D9)
 // ===========================================================================

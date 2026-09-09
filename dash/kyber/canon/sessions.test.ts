@@ -631,3 +631,92 @@ describe('canonical harness on derived sessions', () => {
     store.close()
   })
 })
+
+describe('timeline attributes are not re-stored in the payload', () => {
+  // Each timeline node carried the record's whole raw span payload. That made
+  // the derived cache a second, uncompressed copy of the corpus: 266 MB of one
+  // 264 MB session payload, and nearly all of the 995 MB the session table
+  // held on the measured corpus. The attributes stay reachable per span
+  // through `CanonStore.spanAttributes` (R9.2); they are simply no longer
+  // copied into every session row.
+
+  const RAW = { 'gen_ai.request.model': 'claude-opus-5', 'kyber.prompt': 'y'.repeat(5_000) }
+
+  function spanRecord(spanId: string, parentSpanId: string | null): CanonicalRecord {
+    return {
+      spanId,
+      traceId: 'trace-tl',
+      parentSpanId,
+      source: 'claude-code',
+      harness: 'claude-code',
+      sessionId: 'sess-tl',
+      name: 'llm_request',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-03T10:00:00.000Z',
+      durationMs: 10,
+      status: 'ok',
+      tokens: {
+        freshInput: 100,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 10,
+        reportedInput: 100,
+        reportedOutput: 10,
+      } as CanonicalRecord['tokens'],
+      content: { system_prompt: 'hello' },
+      cost: { basis: 'unknown', status: 'no_rate' },
+      raw: RAW,
+    }
+  }
+
+  type TimelineShape = { spanId: string; attributes: Record<string, unknown>; children: TimelineShape[] }
+
+  function flatten(nodes: TimelineShape[]): TimelineShape[] {
+    return nodes.flatMap((node) => [node, ...flatten(node.children)])
+  }
+
+  it('leaves every timeline node with an empty attribute map', () => {
+    const row = buildSessionRow(
+      'sess-tl',
+      [spanRecord('root', null), spanRecord('child', 'root')],
+      approximateO200kBase,
+    )
+
+    const timeline = (row.payload as { timeline: TimelineShape[] }).timeline
+    const nodes = flatten(timeline)
+    expect(nodes.length).toBeGreaterThan(0)
+    for (const node of nodes) {
+      expect(node.attributes).toEqual({})
+    }
+  })
+
+  it('keeps the prompt out of the serialized payload entirely', () => {
+    const row = buildSessionRow('sess-tl', [spanRecord('root', null)], approximateO200kBase)
+
+    expect(JSON.stringify(row.payload)).not.toContain('y'.repeat(5_000))
+  })
+
+  it('still preserves the node structure the renderer needs', () => {
+    const row = buildSessionRow(
+      'sess-tl',
+      [spanRecord('root', null), spanRecord('child', 'root')],
+      approximateO200kBase,
+    )
+
+    const nodes = flatten((row.payload as { timeline: TimelineShape[] }).timeline)
+    expect(nodes.map((node) => node.spanId)).toContain('root')
+    expect(nodes.map((node) => node.spanId)).toContain('child')
+  })
+
+  it('serves the same attributes back per span from the store', async () => {
+    // The capability R9.2 asks for, relocated rather than removed.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([spanRecord('root', null)])
+    await buildSessions(store)
+
+    expect(store.spanAttributes('root')).toEqual(RAW)
+    expect(store.spanAttributes('absent')).toBeUndefined()
+    store.close()
+  })
+})

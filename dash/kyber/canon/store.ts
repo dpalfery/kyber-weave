@@ -1230,6 +1230,25 @@ export class CanonStore {
     return this.db
   }
 
+  /**
+   * One span's harness-emitted attribute map, decompressed on demand.
+   *
+   * The timeline used to carry this map inline on every node, which meant the
+   * derived session payload re-stored the whole raw corpus uncompressed: 266 MB
+   * of one 264 MB payload, and very nearly all of the 995 MB the `session`
+   * table held. The attributes live here already, deflated, so the inspector
+   * fetches the one span it is showing instead of every session carrying all of
+   * them. Reading one costs a primary-key seek and a single inflate.
+   */
+  spanAttributes(spanId: string): Record<string, unknown> | undefined {
+    const row = this.db.prepare('SELECT raw FROM records WHERE span_id = ?').get(spanId) as
+      | { raw: unknown }
+      | undefined
+    if (row === undefined || row.raw === null || row.raw === undefined) return undefined
+    const raw = decompressRaw(row.raw as Uint8Array)
+    return raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined
+  }
+
   /** Every record belonging to one session key, in timestamp order. */
   recordsForSession(key: string): CanonicalRecord[] {
     const rows = this.db

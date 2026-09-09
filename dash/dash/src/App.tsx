@@ -1091,7 +1091,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
                   onSelectRun={(runId) => openSpine({ level: 'run', runId }, 'goTo')}
                   onSelectExecution={(executionId) => openSpine({ level: 'execution', executionId })}
-                  onSelectTurn={(turnIndex) => openSpine({ level: 'turn', turnIndex })}
+                  onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: runId ?? location.runId, executionId, turnIndex })}
                   onBack={() => dispatchSpine({ type: 'pop' })}
                 />
               )

@@ -17,6 +17,28 @@ export interface TurnDetailProps {
 }
 
 /**
+ * The session whose records a turn's content lives in.
+ *
+ * A run id is not a session id. Every derived run is keyed
+ * `derived:<harness>:<session>`, so asking the content route for a run id 404s
+ * — which is what left this page showing "Session or turn content not found"
+ * with no context bands. The turn belongs to an execution, and the execution
+ * names its session; a turn reached without an execution (from a finding, or
+ * any link that names only the run) indexes into the run's first execution
+ * rather than resolving to nothing.
+ */
+export function resolveTurnSessionId(
+  run: { executions?: readonly { executionId: string; sessionId?: string | null }[] } | undefined,
+  executionId: string | undefined,
+): string | undefined {
+  const executions = run?.executions
+  const execution = executionId
+    ? executions?.find((candidate) => candidate.executionId === executionId)
+    : executions?.[0]
+  return execution?.sessionId ?? execution?.executionId ?? executionId
+}
+
+/**
  * The turn surface deliberately reuses the established context inspector rather
  * than creating a second content representation. The small band list is the
  * spine's direct entry point into that existing inspection contract.
@@ -35,8 +57,7 @@ export function TurnDetail({
     queryKey: ['kyber-turn-run', runId],
     queryFn: () => fetchRun(runId),
   })
-  const sessionId = run?.executions.find((candidate) => candidate.executionId === executionId)?.sessionId
-    ?? executionId
+  const sessionId = resolveTurnSessionId(run, executionId)
   const { data, isLoading } = useQuery({
     queryKey: ['kyber-turn-content', sessionId, turnIndex],
     queryFn: () => fetchTurnContent(sessionId!, turnIndex),
@@ -100,7 +121,7 @@ export function TurnDetail({
             {selectedContent}
           </pre>
         ) : (
-          <ContextInspector sessionId={runId} turnIndex={turnIndex} data={data} />
+          <ContextInspector sessionId={sessionId} turnIndex={turnIndex} data={data} />
         )}
       </Card>
     </div>

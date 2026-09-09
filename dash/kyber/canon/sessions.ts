@@ -521,8 +521,9 @@ export function buildSessionRow(
       reasoning: record.tokens.reasoning ?? null,
     })),
     // ASAD renders the session root's children; the synthetic root is an
-    // analysis detail and is not part of the wire contract.
-    timeline: unavailableFor(measurability, 'execution_structure') ?? timeline.children,
+    // analysis detail and is not part of the wire contract. The attribute maps
+    // are dropped on the way out — see `withoutAttributes`.
+    timeline: unavailableFor(measurability, 'execution_structure') ?? withoutAttributes(timeline.children),
     requests: records
       .filter((record) => record.parentSpanId === null)
       .map((record) => ({
@@ -570,6 +571,29 @@ export function buildSessionRow(
     ended: typeof ended === 'string' ? ended : ended.toISOString(),
     payload,
   }
+}
+
+/**
+ * The timeline as it is persisted: structure and metadata, without the
+ * harness-emitted attribute map each node carried.
+ *
+ * Those maps are the record's raw span payload, verbatim. Keeping them here
+ * meant the derived cache re-stored the entire raw corpus uncompressed — 266 MB
+ * of a single 264 MB session payload, and nearly all of the 995 MB the session
+ * table held, which is what made rebuilding one harness rollup cost 4.4 GB.
+ * They are still available per span through `CanonStore.spanAttributes`, which
+ * the inspector calls for the one node it is showing (R9.2 is preserved: the
+ * attributes are inspectable, they are simply no longer copied into every
+ * session row).
+ */
+function withoutAttributes(
+  nodes: ReturnType<typeof buildTimeline>['children'],
+): ReturnType<typeof buildTimeline>['children'] {
+  return nodes.map((node) => ({
+    ...node,
+    attributes: {},
+    children: withoutAttributes(node.children),
+  }))
 }
 
 /** JSON-safe context analysis: the per-server Map becomes an object. */

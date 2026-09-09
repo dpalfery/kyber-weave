@@ -27,7 +27,7 @@ export interface FindingDetailProps {
   onSelectHarness?: (harness: string) => void
   onSelectRun?: (runId: string) => void
   onSelectExecution?: (executionId: string) => void
-  onSelectTurn?: (turnIndex: number) => void
+  onSelectTurn?: (turnIndex: number, executionId?: string, runId?: string) => void
   onBack?: () => void
   className?: string
 }
@@ -75,7 +75,11 @@ export function FindingDetail({
     setSelectedLink(link)
     setDrawerOpen(true)
     if (onSelectTurn && link.turnIndex !== undefined && link.turnIndex !== null) {
-      onSelectTurn(link.turnIndex)
+      // A turn is only resolvable through the execution that ran it and the run
+      // that owns it. Selecting one from a finding used to pass the index
+      // alone, so the turn view opened with no run: its content query had no
+      // session to ask about and every band came back empty.
+      onSelectTurn(link.turnIndex, link.executionId ?? finding?.executionId, finding?.runId)
     }
   }
 
@@ -260,8 +264,8 @@ export function FindingDetail({
       <EvidenceTable
         evidenceLinks={finding.evidenceLinks}
         onSelectEvidence={handleOpenEvidence}
-        onSelectTurn={(turnIdx) => {
-          if (onSelectTurn) onSelectTurn(turnIdx)
+        onSelectTurn={(turnIdx, executionId) => {
+          if (onSelectTurn) onSelectTurn(turnIdx, executionId ?? finding.executionId, finding.runId)
         }}
       />
 
