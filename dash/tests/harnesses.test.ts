@@ -756,3 +756,78 @@ describe('CanonStore — session retrieval encapsulation (ADR 0008, Task E2)', (
     store.close()
   })
 })
+
+describe('buildHarnessRollup — sessions are streamed, not materialized', () => {
+  // The dimensions each used to walk an array holding every session payload
+  // for the harness. Payloads are the largest objects in the store — 995 MB on
+  // the measured corpus, one session of it 264 MB, nearly all of it the
+  // timeline's preserved span attributes — and building that array took this
+  // phase's peak to 4.4 GB. The reductions below must be unchanged.
+
+  function pressureSession(id: string, harness: string, peak: number): SessionRow {
+    return {
+      sessionId: id,
+      harness,
+      payload: {
+        id,
+        session_id: id,
+        harness,
+        context: { measurable: true, turns: [{ pressure: peak * 0.5 }, { pressure: peak }] },
+        summary: { total_input: 1000, total_output: 100, total_cache_read: 250 },
+        tools: [{ invocations: 1 }, { invocations: 0 }],
+      },
+    }
+  }
+
+  it('reduces every session the harness owns, not just the first page of them', () => {
+    const store = new CanonStore(':memory:')
+    const peaks = [0.1, 0.2, 0.3, 0.4, 0.5]
+    peaks.forEach((peak, i) => store.upsertSession(pressureSession(`s-${i}`, 'copilot', peak)))
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+
+    expect(rollup.sampleCount).toBe(5)
+    expect(rollup.contextPressureMedian).toBe(0.3)
+    expect(rollup.contextPressureP95).toBe(0.5)
+    // 250 cache read against 1000 input, five times over.
+    expect(rollup.cacheHitRate).toBe(0.25)
+    // One of two tools invoked per session.
+    expect(rollup.toolYield).toBe(0.5)
+    expect((rollup.payload as { sessionCount: number }).sessionCount).toBe(5)
+
+    store.close()
+  })
+
+  it('counts only the harness it was asked for', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession(pressureSession('a', 'copilot', 0.4))
+    store.upsertSession(pressureSession('b', 'cursor', 0.9))
+
+    expect((buildHarnessRollup(store, 'copilot').payload as { sessionCount: number }).sessionCount).toBe(1)
+    expect(buildHarnessRollup(store, 'copilot').contextPressureP95).toBe(0.4)
+
+    store.close()
+  })
+
+  it('does not fold a not_measurable total into the cache denominator', () => {
+    // total_input is an object when the harness reported no counter; summing
+    // it as a number would silently produce a rate against garbage.
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 'unmeasured',
+      harness: 'copilot',
+      payload: {
+        summary: {
+          total_input: { availability: 'not_measurable', reason: 'no counter' },
+          total_cache_read: 400,
+        },
+      },
+    })
+
+    const rollup = buildHarnessRollup(store, 'copilot')
+
+    expect(rollup.cacheHitRate).toBeNull()
+    expect(isNotMeasurable(rollup.measurability['cache_hit_rate'])).toBe(true)
+    store.close()
+  })
+})

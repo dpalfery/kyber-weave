@@ -5,13 +5,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import {
   App,
-  HARNESS_TABS,
+  harnessTabsFrom,
   NAV_TABS,
   KyberComparePanel,
   KyberQuarantinePanel,
   KyberProblemsPanel,
   type KyberPage,
 } from './App'
+import type { KyberHarnessSummary } from '@/lib/kyberApi'
 
 // Ensure minimal browser environment shims in Node
 if (typeof (globalThis as any).window === 'undefined') {
@@ -187,15 +188,39 @@ describe('App: Top Navigation Refactoring', () => {
 })
 
 describe('App: Harness selector storage filters', () => {
-  it('uses each live canonical harness ID exactly once', () => {
-    expect(HARNESS_TABS).toEqual([
-      { harness: 'all', name: 'All Harnesses' },
-      { harness: 'claude-code', name: 'Claude Code' },
-      { harness: 'copilot', name: 'GitHub Copilot' },
-      { harness: 'gemini', name: 'Gemini' },
-    ])
+  // The strip used to be a hardcoded three, so a machine collecting Codex,
+  // Cursor, OpenCode or Antigravity ingested that data and then offered no tab
+  // to reach it. It is now derived from the harnesses the store actually holds.
+  const summary = (harness: string, sampleCount: number): KyberHarnessSummary => ({
+    harness,
+    sampleCount,
+    measurability: {},
+  })
 
-    expect(new Set(HARNESS_TABS.map((tab) => tab.harness)).size).toBe(HARNESS_TABS.length)
+  it('offers a tab for every harness that has samples, heaviest first', () => {
+    expect(
+      harnessTabsFrom([summary('codex', 101), summary('cursor', 405), summary('claude-code', 12)]),
+    ).toEqual([
+      { harness: 'all', name: 'All Harnesses' },
+      { harness: 'cursor', name: 'Cursor' },
+      { harness: 'codex', name: 'Codex' },
+      { harness: 'claude-code', name: 'Claude Code' },
+    ])
+  })
+
+  it('leaves out surveyed harnesses that recorded nothing', () => {
+    const tabs = harnessTabsFrom([summary('copilot', 56), summary('windsurf', 0)])
+    expect(tabs.map((t) => t.harness)).toEqual(['all', 'copilot'])
+  })
+
+  it('uses each live canonical harness ID exactly once', () => {
+    const tabs = harnessTabsFrom([summary('copilot', 56), summary('copilot', 56), summary('gemini', 2)])
+    expect(new Set(tabs.map((tab) => tab.harness)).size).toBe(tabs.length)
+  })
+
+  it('falls back to All Harnesses alone when nothing has been collected', () => {
+    expect(harnessTabsFrom([])).toEqual([{ harness: 'all', name: 'All Harnesses' }])
+    expect(harnessTabsFrom(undefined)).toEqual([{ harness: 'all', name: 'All Harnesses' }])
   })
 })
 

@@ -109,6 +109,7 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
  */
 export const PROVIDER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new Map([
   ['gemini', ['cache_creation']],
+  ['antigravity', ['cache_creation']],
 ])
 
 function unavailable(reason: string): NotMeasurable {
@@ -300,7 +301,14 @@ export type PrefixAvailability = {
   reason: string
 }
 
-/** The 10 agent harnesses surveyed under Task E4. */
+/**
+ * The agent harnesses surveyed under Task E4.
+ *
+ * Antigravity is listed separately from Gemini. It writes under `~/.gemini/`
+ * and speaks Gemini's telemetry vocabulary, but it is a distinct harness with
+ * its own conversation store and its own agentic surface; folding it into
+ * `gemini` reported one harness's rollup under another harness's name.
+ */
 export const SURVEYED_HARNESSES = [
   'copilot',
   'claude-code',
@@ -311,6 +319,7 @@ export const SURVEYED_HARNESSES = [
   'aider',
   'codex',
   'gemini',
+  'antigravity',
   'opencode',
 ] as const
 
@@ -327,7 +336,8 @@ export function normalizeHarnessName(harness: string): SurveyedHarness | string 
   if (lower === 'cline' || lower === 'cline-cli') return 'cline'
   if (lower === 'aider') return 'aider'
   if (lower === 'codex' || lower === 'openai-codex') return 'codex'
-  if (lower === 'gemini' || lower === 'antigravity' || lower === 'agy') return 'gemini'
+  if (lower === 'gemini') return 'gemini'
+  if (lower === 'antigravity' || lower === 'agy') return 'antigravity'
   if (lower === 'opencode') return 'opencode'
   return lower
 }
@@ -430,6 +440,17 @@ const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability,
       cacheCreation: false,
       reason:
         'Gemini telemetry exports cached_content_token_count (cache_read); Gemini explicit caching architecture has no cache-creation counter.',
+    },
+  ],
+  [
+    'antigravity',
+    {
+      status: 'partial',
+      confidence: 'verified',
+      cacheRead: true,
+      cacheCreation: false,
+      reason:
+        'Antigravity conversation stores carry cached_content_token_count (cache_read) in the Gemini counter vocabulary; that architecture has no cache-creation counter.',
     },
   ],
   [
@@ -543,6 +564,17 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
       fallback: 'detect-but-cannot-locate',
       reason:
         'Gemini telemetry exports model operations and tool names without raw prompt prefix bytes; fallback cache_read / input is available.',
+    },
+  ],
+  [
+    'antigravity',
+    {
+      status: 'not_measurable',
+      confidence: 'verified',
+      prefixBytes: false,
+      fallback: 'detect-but-cannot-locate',
+      reason:
+        'Antigravity conversation stores record model operations and tool names without raw prompt prefix bytes; fallback cache_read / input is available.',
     },
   ],
   [

@@ -48,7 +48,7 @@ function stubRecord(overrides: Partial<CanonicalRecord> = {}): CanonicalRecord {
 }
 
 describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () => {
-  it('covers exactly the 10 surveyed agent harnesses', () => {
+  it('covers exactly the surveyed agent harnesses', () => {
     const expected = [
       'copilot',
       'claude-code',
@@ -59,6 +59,9 @@ describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () =>
       'aider',
       'codex',
       'gemini',
+      // Antigravity stores under ~/.gemini/ and borrows Gemini's counter
+      // vocabulary, but it is its own harness and is surveyed as one.
+      'antigravity',
       'opencode',
     ]
     expect([...SURVEYED_HARNESSES].sort()).toEqual(expected.sort())
@@ -142,16 +145,17 @@ describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () =>
     expect(normalizeHarnessName('cascade')).toBe('windsurf')
     expect(normalizeHarnessName('roo')).toBe('roo-code')
     expect(normalizeHarnessName('cline-cli')).toBe('cline')
-    expect(normalizeHarnessName('antigravity')).toBe('gemini')
-    expect(normalizeHarnessName('agy')).toBe('gemini')
+    expect(normalizeHarnessName('antigravity')).toBe('antigravity')
+    expect(normalizeHarnessName('agy')).toBe('antigravity')
+    expect(normalizeHarnessName('gemini')).toBe('gemini')
   })
 
   it('runs auditCachePrefixCoverage across all harnesses producing typed parity audit report', () => {
     const report: CachePrefixCoverageReport = auditCachePrefixCoverage()
-    expect(report.surveyedCount).toBe(10)
-    expect(report.supportedCacheCount).toBe(6) // 5 supported + 1 partial (gemini)
+    expect(report.surveyedCount).toBe(SURVEYED_HARNESSES.length)
+    expect(report.supportedCacheCount).toBe(7) // 5 supported + 2 partial (gemini, antigravity)
     expect(report.supportedPrefixCount).toBe(2) // copilot, codex
-    expect(report.fallbackPrefixCount).toBe(5) // copilot, claude-code, roo-code, cline, gemini
+    expect(report.fallbackPrefixCount).toBe(6) // copilot, claude-code, roo-code, cline, gemini, antigravity
 
     for (const [harnessName, item] of Object.entries(report.harnesses)) {
       expect(item.harness).toBe(harnessName)

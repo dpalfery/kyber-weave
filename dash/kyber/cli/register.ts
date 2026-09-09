@@ -116,9 +116,11 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       try {
         const { buildSessions } = await import('../canon/sessions.js')
         const report = await buildSessions(store)
-        console.log(`Built:   ${report.built}`)
-        console.log(`Skipped: ${report.skipped}`)
-        console.log(`Pruned:  ${report.pruned}`)
+        console.log(`Built:    ${report.built}`)
+        console.log(`Skipped:  ${report.skipped}`)
+        console.log(`Pruned:   ${report.pruned}`)
+        console.log(`Rollups:  ${report.rollups}`)
+        console.log(`Findings: ${report.findings}`)
       } finally {
         store.close()
       }
@@ -149,6 +151,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
         console.log(`Problems:    ${report.problems}`)
         console.log(`Sessions:    ${report.sessions.built} built, ${report.sessions.skipped} skipped, ${report.sessions.pruned} pruned`)
         console.log(`Rollups:     ${report.rollups}`)
+        console.log(`Findings:    ${report.findings}`)
       } finally {
         store.close()
       }

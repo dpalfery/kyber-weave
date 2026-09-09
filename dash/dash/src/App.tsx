@@ -26,13 +26,49 @@ import { CompareView } from '@/components/kyber/CompareView'
 import { QuarantineView, type QuarantineEntry } from '@/components/kyber/QuarantineView'
 import { ProblemsView, type ProblemEntry } from '@/components/kyber/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
-import { Attention, HARNESS_CATALOG } from '@/pages/Attention'
+import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
+import { Attention, HARNESS_CATALOG, harnessDisplayName } from '@/pages/Attention'
 import { HarnessDetail } from '@/pages/HarnessDetail'
 import { RunDetail } from '@/pages/RunDetail'
 import { FindingDetail } from '@/pages/FindingDetail'
 import { TurnDetail } from '@/pages/TurnDetail'
 
 export const HARNESS_TABS = HARNESS_CATALOG
+
+/**
+ * The harness tabs to show: "All Harnesses" plus every harness the store has
+ * samples for, newest-heaviest first.
+ *
+ * The strip used to be a hardcoded three (claude-code, copilot, gemini), so a
+ * machine collecting Codex, Cursor, OpenCode or Antigravity had that data
+ * ingested and then no way to reach it. Harnesses with no samples are left out
+ * rather than shown as empty tabs.
+ */
+export function harnessTabsFrom(
+  summaries: readonly KyberHarnessSummary[] | undefined,
+): Array<{ harness: string; name: string }> {
+  const seen = new Set<string>(['all'])
+  const live: Array<{ harness: string; name: string }> = []
+  for (const summary of [...(summaries ?? [])].sort(
+    (a, b) => (b.sampleCount ?? 0) - (a.sampleCount ?? 0),
+  )) {
+    // A harness with no samples has nothing to show; a duplicate id would
+    // render two tabs that open the same page.
+    if ((summary.sampleCount ?? 0) <= 0 || seen.has(summary.harness)) continue
+    seen.add(summary.harness)
+    live.push({ harness: summary.harness, name: summary.name ?? harnessDisplayName(summary.harness) })
+  }
+  return [{ harness: 'all', name: 'All Harnesses' }, ...live]
+}
+
+function useHarnessTabs(): Array<{ harness: string; name: string }> {
+  const { data } = useQuery({
+    queryKey: ['kyber-harnesses'],
+    queryFn: fetchHarnesses,
+    staleTime: 30_000,
+  })
+  return useMemo(() => harnessTabsFrom(data), [data])
+}
 
 export type SpineLocation = {
   level: 'attention' | 'harness' | 'run' | 'execution' | 'turn' | 'finding' | 'compare'
@@ -644,6 +680,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
   const [period, setPeriod] = useState<Period>('today')
   const [provider, setProvider] = useState('all')
   const [view, setView] = useState<string>('all')
+  const harnessTabs = useHarnessTabs()
   const [unit, setUnit] = useState<Unit>('cost')
   const [searchOpen, setSearchOpen] = useState(false)
   // Mobile only: the sidebar collapses to an off-canvas drawer below md.
@@ -732,7 +769,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
   // If the selected provider isn't present on the current view, reset to all
   // (otherwise a healthy device shows empty under a filter it has no data for).
   useEffect(() => {
-    const knownHarnesses = HARNESS_TABS.map((t) => t.harness)
+    const knownHarnesses = harnessTabs.map((t) => t.harness)
     if (provider !== 'all' && c0 && !knownHarnesses.includes(provider) && !providerOptions.includes(provider)) {
       setProvider('all')
     }
@@ -872,7 +909,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
           className="flex shrink-0 items-center gap-1.5 overflow-x-auto rounded-md border border-border bg-card px-3 py-1.5 shadow-[0_1px_3px_rgba(0,0,0,0.02)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-tertiary-foreground">Harness:</span>
-          {HARNESS_TABS.map((tab) => {
+          {harnessTabs.map((tab) => {
             const active = location.level === 'harness' && location.harnessId === tab.harness
             return (
               <button

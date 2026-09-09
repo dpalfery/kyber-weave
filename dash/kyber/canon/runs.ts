@@ -170,6 +170,43 @@ export type ExecutionCandidate = {
   records: readonly CanonicalRecord[]
   parentSessionId?: string | null
   workingDirectory?: string | null
+  /**
+   * The harness-emitted run id, read off the full records while they were
+   * loaded. Held here so grouping never needs `raw` a second time — see
+   * {@link buildRuns} on why records are not retained.
+   */
+  explicitRunId?: string
+}
+
+/**
+ * The fields {@link linkExecutions} actually reads: span parentage, the source
+ * and the execution-structure declaration.
+ *
+ * `parts` is stored zlib-compressed and expands several-fold once decoded, so
+ * retaining every session's parts for the whole grouping pass is what made a
+ * full-corpus rebuild die with a heap OOM. Grouping keeps this projection and
+ * reloads the full records per run only where an outcome is derived.
+ */
+function toLinkageRecord(record: CanonicalRecord): CanonicalRecord {
+  const light: CanonicalRecord = {
+    spanId: record.spanId,
+    traceId: record.traceId,
+    parentSpanId: record.parentSpanId,
+    source: record.source,
+    harness: record.harness,
+    name: record.name,
+    op: record.op,
+    kind: record.kind,
+    timestamp: record.timestamp,
+    durationMs: record.durationMs,
+    status: record.status,
+    tokens: record.tokens,
+    content: {},
+    cost: record.cost,
+  }
+  if (record.sessionId !== undefined) light.sessionId = record.sessionId
+  if (record.measurability !== undefined) light.measurability = record.measurability
+  return light
 }
 
 export type LinkExecutionsOptions = {
@@ -189,7 +226,6 @@ export function linkExecutions(
   if (executions.length === 0) return []
 
   const runId = executions[0]!.runId ?? 'unknown'
-  const harness = executions[0]!.harness
 
   // Map each span_id to the execution_id it belongs to
   const spanToExecution = new Map<string, string>()
@@ -374,13 +410,17 @@ export async function buildRuns(
       continue
     }
 
-    const first = records[0]!
     const started = records[0]!.timestamp
     const ended = records[records.length - 1]!.timestamp
     const cwd = records.map((r) => rawAttribute(r, WORKING_DIRECTORY_ATTRIBUTE_KEYS)).find(Boolean) ?? null
     const parentSession = records.map((r) => rawAttribute(r, PARENT_SESSION_ATTRIBUTE_KEYS)).find(Boolean) ?? null
     const agentName = records.map((r) => rawAttribute(r, AGENT_NAME_KEYS)).find(Boolean) ?? null
 
+    const explicitRunId = records.map((r) => rawAttribute(r, RUN_ID_ATTRIBUTE_KEYS)).find(Boolean)
+
+    // Everything the later passes need is read here, while this session's full
+    // records are in hand, and only the linkage projection is retained. The
+    // records themselves go out of scope with this iteration.
     candidates.push({
       executionId: sessionKey.key,
       sessionId: sessionKey.key,
@@ -388,9 +428,10 @@ export async function buildRuns(
       agentName,
       started: typeof started === 'string' ? started : started.toISOString(),
       ended: typeof ended === 'string' ? ended : ended.toISOString(),
-      records,
+      records: records.map(toLinkageRecord),
       parentSessionId: parentSession,
       workingDirectory: cwd,
+      ...(explicitRunId === undefined ? {} : { explicitRunId }),
     })
   }
 
@@ -400,7 +441,7 @@ export async function buildRuns(
   const unassigned: ExecutionCandidate[] = []
 
   for (const cand of candidates) {
-    const explicitRunId = cand.records.map((r) => rawAttribute(r, RUN_ID_ATTRIBUTE_KEYS)).find(Boolean)
+    const explicitRunId = cand.explicitRunId
     if (explicitRunId !== undefined) {
       const group = explicitGroups.get(explicitRunId) ?? []
       group.push(cand)
@@ -423,8 +464,6 @@ export async function buildRuns(
     const first = sorted[0]!
     const last = sorted[sorted.length - 1]!
     const cwd = sorted.map((e) => e.workingDirectory).find(Boolean) ?? null
-    const allRecords = sorted.flatMap((e) => e.records)
-    const outcome = deriveOutcome(allRecords)
 
     plannedRuns.push({
       run: {
@@ -437,7 +476,6 @@ export async function buildRuns(
         started: first.started,
         ended: last.ended,
         executionCount: sorted.length,
-        outcome,
       },
       executions: sorted,
     })
@@ -466,7 +504,6 @@ export async function buildRuns(
             started: cand.started,
             ended: cand.ended,
             executionCount: 1,
-            outcome: deriveOutcome(cand.records),
           },
           executions: [cand],
         })
@@ -515,8 +552,6 @@ export async function buildRuns(
             const clusterEnd = currentCluster[currentCluster.length - 1]!.ended
             const cleanCwd = cwd.replace(/[^a-zA-Z0-9_-]/g, '_')
             const runId = `derived:${harness}:${cleanCwd}:${Date.parse(clusterStart ?? '') || 0}`
-            const allRecords = currentCluster.flatMap((e) => e.records)
-            const outcome = deriveOutcome(allRecords)
 
             plannedRuns.push({
               run: {
@@ -529,7 +564,6 @@ export async function buildRuns(
                 started: clusterStart,
                 ended: clusterEnd,
                 executionCount: currentCluster.length,
-                outcome,
               },
               executions: currentCluster,
             })
@@ -545,8 +579,6 @@ export async function buildRuns(
         const clusterEnd = currentCluster[currentCluster.length - 1]!.ended
         const cleanCwd = cwd.replace(/[^a-zA-Z0-9_-]/g, '_')
         const runId = `derived:${harness}:${cleanCwd}:${Date.parse(clusterStart ?? '') || 0}`
-        const allRecords = currentCluster.flatMap((e) => e.records)
-        const outcome = deriveOutcome(allRecords)
 
         plannedRuns.push({
           run: {
@@ -559,7 +591,6 @@ export async function buildRuns(
             started: clusterStart,
             ended: clusterEnd,
             executionCount: currentCluster.length,
-            outcome,
           },
           executions: currentCluster,
         })
@@ -579,7 +610,6 @@ export async function buildRuns(
           started: cand.started,
           ended: cand.ended,
           executionCount: 1,
-          outcome: deriveOutcome(cand.records),
         },
         executions: [cand],
       })
@@ -591,7 +621,12 @@ export async function buildRuns(
   const builtExecutionIds = new Set<string>()
 
   for (const { run, executions } of plannedRuns) {
-    store.upsertRun(run)
+    // Outcome derivation reads content, parts and raw, so the full records are
+    // loaded here — one run at a time — and released before the next run.
+    const outcomeRecords = executions.flatMap((e) =>
+      store.recordsForSession(e.sessionId ?? e.executionId),
+    )
+    store.upsertRun({ ...run, outcome: deriveOutcome(outcomeRecords) })
     builtRunIds.add(run.runId)
 
     // Tag each candidate with the resolved runId before linking

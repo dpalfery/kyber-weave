@@ -34,11 +34,40 @@ export type HarnessCatalogEntry = {
   name: string
 }
 
+/**
+ * Display names for harnesses the survey knows about. This is a labelling
+ * table, NOT the list of tabs: the tab strip is built from the harnesses the
+ * store actually holds (see `useHarnessTabs`), so a harness collected on this
+ * machine is never hidden because it was missing from a hardcoded list.
+ */
+export const HARNESS_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  all: 'All Harnesses',
+  claude: 'Claude Code',
+  'claude-code': 'Claude Code',
+  copilot: 'GitHub Copilot',
+  'copilot-cli': 'GitHub Copilot CLI',
+  gemini: 'Gemini',
+  antigravity: 'Antigravity',
+  codex: 'Codex',
+  cursor: 'Cursor',
+  'cursor-agent': 'Cursor Agent',
+  opencode: 'OpenCode',
+  'kilo-code': 'Kilo Code',
+  'roo-code': 'Roo Code',
+  cline: 'Cline',
+  windsurf: 'Windsurf',
+  aider: 'Aider',
+  droid: 'Droid',
+  pi: 'Pi',
+}
+
+/** The harness's display name, falling back to its own id. */
+export function harnessDisplayName(harness: string): string {
+  return HARNESS_DISPLAY_NAMES[harness] ?? harness
+}
+
 export const HARNESS_CATALOG: readonly HarnessCatalogEntry[] = [
   { harness: 'all', name: 'All Harnesses' },
-  { harness: 'claude-code', name: 'Claude Code' },
-  { harness: 'copilot', name: 'GitHub Copilot' },
-  { harness: 'gemini', name: 'Gemini' },
 ]
 
 function isLiveHarnessSummary(
@@ -87,7 +116,7 @@ export function Attention({
     if (observedHarnesses.length > 0) {
       return observedHarnesses.map((harness) => ({
         harness,
-        name: HARNESS_CATALOG.find((entry) => entry.harness === harness)?.name ?? harness,
+        name: harnessDisplayName(harness),
       }))
     }
 

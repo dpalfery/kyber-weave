@@ -494,12 +494,16 @@ describe('Task F4: Synthetic Paired Run Outcomes', () => {
 })
 
 describe('Task F4: CanonStore Persistence & Migration 8 -> v9 (Criterion 4)', () => {
-  it('stamps SCHEMA_VERSION = 9 on fresh stores and creates prediction table and indexes', () => {
+  it('stamps the current SCHEMA_VERSION on fresh stores and creates prediction table and indexes', () => {
     const path = tempStorePath()
     const store = new CanonStore(path)
 
-    expect(store.getMetadata('schema_version')).toBe('9')
-    expect(SCHEMA_VERSION).toBe(9)
+    // The stamp tracks SCHEMA_VERSION rather than a literal: what this test is
+    // about is the prediction table, and pinning the number here meant a later
+    // schema bump failed a calibration test that had nothing to do with it.
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    // v9 is the version that introduced `prediction`; every later one keeps it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(9)
     expect(store.predictionCount()).toBe(0)
 
     // Inspect SQLite master for table and indexes
@@ -519,7 +523,7 @@ describe('Task F4: CanonStore Persistence & Migration 8 -> v9 (Criterion 4)', ()
     store.close()
   })
 
-  it('migrates a v8 store forward to v9, preserving data and adding prediction table with indexes', () => {
+  it('migrates a v8 store forward, preserving data and adding prediction table with indexes', () => {
     const path = tempStorePath()
     const initStore = new CanonStore(path)
     initStore.close()
@@ -530,9 +534,9 @@ describe('Task F4: CanonStore Persistence & Migration 8 -> v9 (Criterion 4)', ()
     db.exec('DROP TABLE IF EXISTS prediction')
     db.close()
 
-    // Reopen store to trigger migration 8 -> 9
+    // Reopen store to trigger migration from 8 up to the current version
     const store = new CanonStore(path)
-    expect(store.getMetadata('schema_version')).toBe('9')
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
     expect(store.predictionCount()).toBe(0)
 
     // Verify prediction table was created by migration

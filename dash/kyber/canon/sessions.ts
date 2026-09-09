@@ -16,9 +16,12 @@ import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
+import { normalizeHarnessName } from './measurability.js'
+import { buildFindings } from './findings.js'
+import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, type SessionRow } from './store.js'
-import { loadO200kCounter } from './tokens.js'
+import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
 import { notMeasurable, type CanonicalRecord, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 /**
@@ -224,6 +227,10 @@ export type BuildSessionsReport = {
   skipped: number
   /** Rows removed because their session no longer builds. */
   pruned: number
+  /** Harness rollup rows rebuilt over the sessions, runs and executions. */
+  rollups: number
+  /** Findings the detector suite emitted over the rebuilt runs. */
+  findings: number
 }
 
 export type AsadContextBucket = {
@@ -280,8 +287,13 @@ export type AsadSessionPayload = {
  * and every row is replaced wholesale.
  */
 export async function buildSessions(store: CanonStore): Promise<BuildSessionsReport> {
-  const countTokens = await loadO200kCounter()
-  const report: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0 }
+  // Counted through the store's `token_cache` memo, not the bare encoder. The
+  // memo is what R4.6 provisioned the table for, and passing the raw counter
+  // here is why it had never held a row: a rebuild re-tokenized every part of
+  // every session, and a rebuild is the common case.
+  const counter = createCachedCounter(store.tokenCache(), await activeTokenizer(), await loadO200kCounter())
+  const countTokens = counter.count
+  const report: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0, rollups: 0, findings: 0 }
   const built = new Set<string>()
 
   for (const key of store.sessionKeys()) {
@@ -295,6 +307,10 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
     report.built += 1
   }
 
+  // Counting is done; the buffered misses are written once rather than one
+  // fsync at a time.
+  counter.flush()
+
   // A rebuild is authoritative. Rows from an earlier build whose session no
   // longer qualifies are removed rather than left to haunt the session list —
   // this is a cache over `records`, so a stale row is simply wrong.
@@ -307,6 +323,14 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   // Rebuild run and execution tables over canonical records (D13, ADR 0008)
   await buildRuns(store)
 
+  // Everything downstream of `run` is a cache over the same records, so it is
+  // rebuilt here too. Leaving rollups and findings to the refresh path alone
+  // let `kyber build` produce runs the dashboard could list but not score: the
+  // harness endpoint 404s on a missing rollup and the scorecard then reads as
+  // "telemetry missing" for telemetry that was collected and never aggregated.
+  report.rollups = buildHarnessRollup(store).length
+  report.findings = buildFindings(store).findingsBuilt
+
   return report
 }
 
@@ -318,7 +342,14 @@ export function buildSessionRow(
 ): SessionRow {
   const turnRecords = records.filter(isTurn)
   const first = records[0]!
-  const harness = first.harness
+  // The canonical harness, not the provider entry the record arrived under.
+  // `run`, `execution` and `listHarnesses` are all keyed canonically, and
+  // storing the raw name here meant the rollup's `listSessions(harness)` never
+  // matched them: the claude-code scorecard computed its context pressure,
+  // cache hit rate and tool yield from the 1 session stored as `claude-code`
+  // while 58 more sat under `claude`, and still reported a sample count of 59
+  // because that count comes from runs. Cursor lost 10 sessions the same way.
+  const harness = normalizeHarnessName(first.harness)
 
   // Only turns with a measured input can be charted against the context
   // window. A span that carried content but no counters still happened -- it

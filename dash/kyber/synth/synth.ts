@@ -283,6 +283,16 @@ export function synthesizeCall(
     op: 'llm.invoke',
     kind: 'internal',
     timestamp: call.timestamp,
+    // The session this turn belongs to, carried onto the record.
+    //
+    // Leaving it unset made `sessionKeys()` fall back to the trace id, which is
+    // namespaced (`synth:<provider>:<session>`) while the OTLP path stores the
+    // bare `session.id`. One session observed through both paths therefore
+    // produced two derived sessions and two runs even after the cross-path
+    // collapse had matched its records.
+    ...(call.sessionId === undefined || call.sessionId === null || call.sessionId === ''
+      ? {}
+      : { sessionId: String(call.sessionId) }),
     durationMs: call.activeDurationMs ?? 0,
     status: readerTurn?.exitCode !== undefined && readerTurn.exitCode !== 0
       ? 'error'

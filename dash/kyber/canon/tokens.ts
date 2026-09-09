@@ -217,3 +217,131 @@ export async function tokenize(
 
   return { count, model, derived: true }
 }
+
+/**
+ * Text shorter than this is counted without consulting the `token_cache`
+ * table. A SQLite round trip costs more than tokenizing a short string, and a
+ * table holding one row per tool name buys nothing on the next build: the memo
+ * that pays for itself is the one over system prompts and tool-definition
+ * blobs, which are large and reappear on every turn. Short text still goes
+ * through the in-process memo, which is free.
+ */
+export const MIN_CACHED_TEXT_LENGTH = 512
+
+/**
+ * Ceiling on in-process memo entries. Keys are digests rather than the text
+ * they stand for, so an entry is ~100 bytes and this bounds the memo at a few
+ * tens of MB — the rebuild it serves runs against a peak-RSS budget, and an
+ * unbounded map over a corpus of any size is how that budget goes.
+ */
+export const MAX_MEMO_ENTRIES = 500_000
+
+/** Buffered inserts flushed per transaction; see `flush`. */
+const FLUSH_THRESHOLD = 20_000
+
+/**
+ * A synchronous, memoized token counter over `token_cache`.
+ *
+ * `tokenize` is the async, one-text-at-a-time form of the same memo. It cannot
+ * serve `analyzeContext`, which takes a synchronous `countTokens` because it
+ * walks thousands of parts and cannot await each one — which is why the cache
+ * table sat empty while every rebuild re-tokenized the whole corpus (R4.6).
+ */
+export type CachedCounter = {
+  /** Count `text`, consulting and populating the memo. */
+  count(text: string): number
+  /** Write buffered misses. Must be called when counting is finished. */
+  flush(): void
+  /** Memo effectiveness, for reporting and tests. */
+  stats(): { hits: number; misses: number; uncached: number }
+}
+
+/**
+ * Build a synchronous counter that memoizes into the store's `token_cache`
+ * (R4.6). Counts are identical to `countTokens`'s own — tokenization is
+ * deterministic, so the memo changes only what it costs, never what it says.
+ *
+ * The `model` is part of every cache key, so a store that has counted the same
+ * text under two tokenizers keeps both figures and returns neither for the
+ * other: the residual between tokenizers is the measurement, not noise.
+ */
+export function createCachedCounter(
+  store: TokenCacheStore,
+  model: string,
+  countTokens: (text: string) => number,
+  options?: { minLength?: number; maxMemoEntries?: number },
+): CachedCounter {
+  if (!ensuredStores.has(store)) {
+    store.exec(TOKEN_CACHE_SCHEMA)
+    ensuredStores.add(store)
+  }
+
+  const minLength = options?.minLength ?? MIN_CACHED_TEXT_LENGTH
+  const maxMemoEntries = options?.maxMemoEntries ?? MAX_MEMO_ENTRIES
+  // Prepared once. `prepare` parses SQL, and these run once per distinct part
+  // text in the corpus — hundreds of thousands of times in a full rebuild.
+  const select = store.prepare('SELECT count FROM token_cache WHERE hash = ?')
+  const insert = store.prepare(
+    'INSERT OR IGNORE INTO token_cache (hash, count, model) VALUES (?, ?, ?)',
+  )
+
+  const memo = new Map<string, number>()
+  const pending = new Map<string, number>()
+  let hits = 0
+  let misses = 0
+  let uncached = 0
+
+  const flush = (): void => {
+    if (pending.size === 0) return
+    // One transaction, not one per row: the store opens WAL without setting
+    // `synchronous`, so it defaults to FULL and an autocommit insert fsyncs.
+    // Paying that per distinct text would cost more than the tokenization the
+    // cache exists to avoid.
+    store.exec('BEGIN')
+    try {
+      // IGNORE, not REPLACE: a concurrent writer on the same key ran the same
+      // deterministic counter over the same text, so either row is correct.
+      for (const [hash, count] of pending) insert.run(hash, count, model)
+      store.exec('COMMIT')
+    } catch (err) {
+      store.exec('ROLLBACK')
+      throw err
+    }
+    pending.clear()
+  }
+
+  const count = (text: string): number => {
+    if (text.length < minLength) {
+      uncached += 1
+      return countTokens(text)
+    }
+
+    const key = cacheKey(text, model)
+    const memoized = memo.get(key)
+    if (memoized !== undefined) {
+      hits += 1
+      return memoized
+    }
+
+    const row = select.get(key) as { count: number } | undefined
+    if (row !== undefined) {
+      hits += 1
+      if (memo.size < maxMemoEntries) memo.set(key, row.count)
+      return row.count
+    }
+
+    misses += 1
+    const computed = countTokens(text)
+    if (!Number.isFinite(computed) || computed < 0) {
+      // A non-finite or negative count would poison every future hit on this
+      // key; refuse it before it reaches the table.
+      throw new TypeError(`tokenizer returned an unusable count (${computed}) for model ${model}`)
+    }
+    if (memo.size < maxMemoEntries) memo.set(key, computed)
+    pending.set(key, computed)
+    if (pending.size >= FLUSH_THRESHOLD) flush()
+    return computed
+  }
+
+  return { count, flush, stats: () => ({ hits, misses, uncached }) }
+}

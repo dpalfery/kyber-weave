@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { cn, usd, fmtTokens } from '../lib/utils'
+import { cn, usd, fmtTokens, shortRunId, availabilityLabel, availabilityReason } from '../lib/utils'
 import { Card } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
 import {
@@ -82,16 +82,17 @@ function ExecutionTreeItem({
               {node.turnCount} turn{node.turnCount === 1 ? '' : 's'}
             </span>
           )}
-          {node.parentLinkage && (
+          {node.parentLinkage !== undefined && (
             <span
+              title={availabilityReason(node.parentLinkage)}
               className={cn(
                 'rounded px-1 text-[9.5px] uppercase',
-                node.parentLinkage === 'measured'
+                availabilityLabel(node.parentLinkage) === 'measured'
                   ? 'bg-emerald-500/10 text-emerald-600'
                   : 'bg-interactive-secondary text-tertiary-foreground',
               )}
             >
-              {node.parentLinkage}
+              {availabilityLabel(node.parentLinkage)}
             </span>
           )}
         </div>
@@ -282,7 +283,7 @@ export function RunDetail({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">
-                  Run {runId.slice(0, 10)}
+                  Run {shortRunId(runId, run?.harness)}
                 </h2>
                 {/* Decision D13: Grouping Basis badge */}
                 <span
@@ -507,7 +508,7 @@ export function RunDetail({
           {/* Run Diagnostic Findings per Decision D6 */}
           <FindingList
             findings={run?.findings ?? []}
-            title={`Run ${runId.slice(0, 10)} Diagnostic Findings`}
+            title={`Run ${shortRunId(runId, run?.harness)} Diagnostic Findings`}
             onSelectFinding={onSelectFinding}
             onSelectTurn={(turnIdx) => handleOpenTurn(turnIdx)}
           />

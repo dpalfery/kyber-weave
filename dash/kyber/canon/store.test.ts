@@ -375,3 +375,192 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
     }
   })
 })
+
+describe('session key index', () => {
+  // Every derived table — session, run, execution, finding — loads records by
+  // COALESCE(session_id, trace_id). Without an index on that expression SQLite
+  // scans the whole table per session key, which on the measured corpus was
+  // ~1,900 scans of 85,600 rows per rebuild. This is a performance contract,
+  // so it is asserted against the planner rather than a stopwatch.
+  function planFor(path: string): string {
+    const db = new DatabaseSync(path)
+    const rows = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp`,
+      )
+      .all('any-key') as { detail: string }[]
+    db.close()
+    return rows.map((row) => row.detail).join(' | ')
+  }
+
+  it('plans the per-session record load as a seek, not a table scan', () => {
+    const path = tempStorePath()
+    new CanonStore(path).close()
+
+    const plan = planFor(path)
+
+    expect(plan).toContain('records_by_session_key')
+    expect(plan).not.toMatch(/SCAN records/)
+  })
+
+  it('orders by timestamp from the index rather than sorting', () => {
+    // The second index column is what makes ORDER BY free; dropping it would
+    // reintroduce a sort per session with no test failing.
+    const path = tempStorePath()
+    new CanonStore(path).close()
+
+    expect(planFor(path)).not.toMatch(/TEMP B-TREE/i)
+  })
+
+  it('adds the index to a store that predates it', () => {
+    // An existing corpus is the expensive thing here; a schema bump migrates
+    // in place rather than telling the operator to rebuild.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.close()
+
+    const db = new DatabaseSync(path)
+    db.exec('DROP INDEX records_by_session_key')
+    db.prepare('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)').run(
+      'schema_version',
+      String(SCHEMA_VERSION - 1),
+    )
+    db.close()
+    expect(planFor(path)).toMatch(/SCAN records/)
+
+    new CanonStore(path).close()
+
+    expect(planFor(path)).toContain('records_by_session_key')
+  })
+})
+
+describe('sessionKeys canonicalization', () => {
+  // A conversation whose spans arrived under two front-end names is one
+  // conversation. Grouping by the raw harness and canonicalizing the label
+  // afterwards returned it twice: every caller reloaded its records and
+  // rebuilt the identical row, and `buildRuns` planned two runs sharing one
+  // execution id, so one of them ended up with no execution at all.
+  function aliasRecord(spanId: string, harness: string, timestamp: string): CanonicalRecord {
+    return {
+      spanId,
+      traceId: 'trace-alias',
+      parentSpanId: null,
+      source: harness,
+      harness,
+      sessionId: 'sess-alias',
+      name: 'llm_request',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp,
+      durationMs: 10,
+      status: 'ok',
+      tokens: usage({ reportedInput: 100, output: 10 }),
+      content: { system_prompt: 'hello' },
+      cost: { basis: 'unknown', status: 'no_rate' },
+    }
+  }
+
+  it('returns one row per session key when front-end names differ', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      aliasRecord('a1', 'cursor', '2026-09-03T10:00:00.000Z'),
+      aliasRecord('a2', 'cursor-agent', '2026-09-03T10:00:05.000Z'),
+    ])
+
+    const keys = store.sessionKeys()
+
+    expect(keys).toHaveLength(1)
+    expect(keys[0]?.key).toBe('sess-alias')
+    expect(keys[0]?.harness).toBe('cursor')
+    store.close()
+  })
+
+  it('spans the whole key when reporting started and ended', () => {
+    // Per-front-end MIN/MAX described only the half of the conversation that
+    // front end saw.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      aliasRecord('a1', 'cursor', '2026-09-03T10:00:00.000Z'),
+      aliasRecord('a2', 'cursor-agent', '2026-09-03T10:00:05.000Z'),
+    ])
+
+    const keys = store.sessionKeys()
+
+    expect(keys[0]?.started).toBe('2026-09-03T10:00:00.000Z')
+    expect(keys[0]?.ended).toBe('2026-09-03T10:00:05.000Z')
+    store.close()
+  })
+
+  it('reports the earliest record\'s harness, which is what the session is stamped with', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      aliasRecord('a2', 'gemini', '2026-09-03T10:00:05.000Z'),
+      aliasRecord('a1', 'antigravity', '2026-09-03T10:00:00.000Z'),
+    ])
+
+    expect(store.sessionKeys()[0]?.harness).toBe('antigravity')
+    store.close()
+  })
+
+  it('still separates genuinely distinct session keys', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      { ...aliasRecord('a1', 'cursor', '2026-09-03T10:00:00.000Z'), sessionId: 'one' },
+      { ...aliasRecord('a2', 'cursor', '2026-09-03T10:00:05.000Z'), sessionId: 'two' },
+    ])
+
+    expect(store.sessionKeys().map((k) => k.key).sort()).toEqual(['one', 'two'])
+    store.close()
+  })
+})
+
+describe('sessionTokenTotals', () => {
+  it('reads the summary totals without parsing the payload', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 's1',
+      harness: 'cursor',
+      label: null,
+      isSubagent: false,
+      parentSession: null,
+      agentName: null,
+      repo: null,
+      branch: null,
+      started: null,
+      ended: null,
+      payload: { summary: { total_input: 120, total_output: 34 } },
+    })
+
+    expect(store.sessionTokenTotals('s1')).toEqual({ input: 120, output: 34 })
+    store.close()
+  })
+
+  it('treats a not_measurable total as zero rather than coercing the object', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 's1',
+      harness: 'cursor',
+      label: null,
+      isSubagent: false,
+      parentSession: null,
+      agentName: null,
+      repo: null,
+      branch: null,
+      started: null,
+      ended: null,
+      payload: {
+        summary: { total_input: { availability: 'not_measurable', reason: 'no counter' }, total_output: 7 },
+      },
+    })
+
+    expect(store.sessionTokenTotals('s1')).toEqual({ input: 0, output: 7 })
+    store.close()
+  })
+
+  it('is undefined for a session that was never built', () => {
+    const store = new CanonStore(':memory:')
+    expect(store.sessionTokenTotals('missing')).toBeUndefined()
+    store.close()
+  })
+})

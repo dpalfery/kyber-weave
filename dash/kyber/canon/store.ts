@@ -13,6 +13,7 @@
 // deflate-compressed rather than stored verbatim (R12.4) — the measured cost
 // of not doing so is 2.9 GB for 37,623 records, roughly 78 KB per span.
 
+import { FILE_SOURCE_PREFIX, normalizeHarnessName } from './measurability.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createRequire } from 'node:module'
@@ -24,6 +25,7 @@ type StatementSync = import('node:sqlite').StatementSync
 type Database = import('node:sqlite').DatabaseSync
 import { deflateSync, inflateSync } from 'node:zlib'
 
+import type { TokenCacheStore } from './tokens.js'
 import { contentFromParts } from './types.js'
 import type {
   CanonicalRecord,
@@ -59,7 +61,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 10
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -111,6 +113,15 @@ CREATE TABLE IF NOT EXISTS records (
 CREATE INDEX IF NOT EXISTS records_by_trace ON records (trace_id);
 CREATE INDEX IF NOT EXISTS records_by_timestamp ON records (timestamp);
 CREATE INDEX IF NOT EXISTS records_by_session ON records (session_id);
+-- Sessions are keyed by COALESCE(session_id, trace_id), and neither
+-- single-column index above can serve that expression: SQLite scanned all of
+-- records once per session key, which on the measured corpus was ~1,900 scans
+-- of an 85,600-row, 3.3 GB table per rebuild -- very nearly the whole of the
+-- rebuild's ~30 minutes. Indexing the expression itself makes the load a
+-- seek, and carrying timestamp as the second column lets the same index
+-- satisfy ORDER BY timestamp without a sort.
+CREATE INDEX IF NOT EXISTS records_by_session_key
+  ON records (COALESCE(session_id, trace_id), timestamp);
 -- Derived sessions: one row per conversation, payload built by the analysis
 -- layer over the records table. This is what the dashboard reads. It is a
 -- cache, not a source -- dropping every row and rebuilding loses nothing.
@@ -395,6 +406,15 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
     CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
     CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);`)
   },
+  // v9 -> v10: index the session key expression. `records_by_session` and
+  // `records_by_trace` cover their columns individually, but every derived
+  // table loads records by COALESCE(session_id, trace_id), which neither can
+  // serve, so each load scanned the whole table. An existing store gets the
+  // index here rather than waiting for a rebuild from empty.
+  9: (db) => {
+    db.exec(`CREATE INDEX IF NOT EXISTS records_by_session_key
+      ON records (COALESCE(session_id, trace_id), timestamp);`)
+  },
 }
 
 export type {
@@ -474,6 +494,43 @@ function nullableText(value: unknown): string | null {
   return (value as string | null) ?? null
 }
 
+/**
+ * Install a memoized property computed on first read.
+ *
+ * Reading the corpus is what a rebuild spends its time on, and each pass over
+ * it wants a different handful of fields: grouping spans into runs needs
+ * `raw`'s attributes and never looks at the message parts, while the session
+ * builder needs the parts and tokenizes them. Inflating `parts_json` for a
+ * pass that discards it measured 13 of the 21 seconds each pass cost, and the
+ * record objects built around it are what took the rebuild's heap high-water
+ * mark to 3.5 GB.
+ *
+ * The property stays enumerable, configurable and writable, so a record is
+ * indistinguishable from the eager object this used to build: spread,
+ * `JSON.stringify`, `Object.keys` and deep equality all see the same shape,
+ * in the same order, with the same values. Redefining a key the literal
+ * already declared keeps its original position in that order.
+ */
+function defineLazy<T>(target: object, key: string, compute: () => T): void {
+  let value: T
+  let computed = false
+  Object.defineProperty(target, key, {
+    enumerable: true,
+    configurable: true,
+    get(): T {
+      if (!computed) {
+        value = compute()
+        computed = true
+      }
+      return value
+    },
+    set(next: T): void {
+      value = next
+      computed = true
+    },
+  })
+}
+
 export function toRecord(row: RecordRow): CanonicalRecord {
   const record: CanonicalRecord = {
     spanId: text(row.span_id),
@@ -491,10 +548,15 @@ export function toRecord(row: RecordRow): CanonicalRecord {
     status: text(row.status),
     tokens: JSON.parse(text(row.tokens_json)) as TokenUsage,
     content: JSON.parse(text(row.content_json)) as CanonicalRecord['content'],
-    // `content` is overwritten below when parts are present; see toRecord.
+    // `content` is redefined below when parts are present; see toRecord.
     cost: JSON.parse(text(row.cost_json)) as CostBlock,
-    raw: row.raw === null ? undefined : decompressRaw(row.raw as Uint8Array),
+    // Declared here for its place in the key order, then made lazy: only the
+    // attribute lookups read it, and they read it from a minority of records.
+    raw: undefined,
   }
+  defineLazy(record, 'raw', () =>
+    row.raw === null || row.raw === undefined ? undefined : decompressRaw(row.raw as Uint8Array),
+  )
   if (row.session_id !== null && row.session_id !== undefined) {
     record.sessionId = text(row.session_id)
   }
@@ -507,11 +569,11 @@ export function toRecord(row: RecordRow): CanonicalRecord {
     // measured 166 MB of uncompressed `content_json` against 40 MB for the
     // same text compressed as parts — a 4x store for one copy of the data,
     // which is the shape of the 2.9 GB problem R12.4 exists to prevent.
-    record.parts = decompressRaw(row.parts_json as Uint8Array) as ContentPart[]
-    record.content = {
-      ...contentFromParts(record.parts),
+    defineLazy(record, 'parts', () => decompressRaw(row.parts_json as Uint8Array) as ContentPart[])
+    defineLazy(record, 'content', () => ({
+      ...contentFromParts(record.parts ?? []),
       ...(JSON.parse(text(row.content_json)) as CanonicalRecord['content']),
-    }
+    }))
   }
   return record
 }
@@ -1067,16 +1129,105 @@ export class CanonStore {
    * otherwise — a fallback, not a claim that a trace is a session.
    */
   sessionKeys(): { key: string; harness: string; started: string; ended: string }[] {
-    return this.db
+    // One row per key, not per (key, harness) pair. A record keeps the provider
+    // entry that produced it, which is the right provenance to store, but
+    // everything derived from records is keyed by the canonical harness: one
+    // harness reached through two front ends (Claude Code's transcripts and its
+    // OTLP export, Cursor and Cursor Agent) is one harness.
+    //
+    // Grouping by the raw harness and canonicalizing afterwards deduplicated
+    // the label but not the rows, so a conversation whose spans arrived under
+    // both `cursor` and `cursor-agent` came back twice — 1,899 rows for 1,481
+    // keys on the measured corpus. Every caller then loaded that session's
+    // records again and rebuilt the identical row (31% of all record reads),
+    // and `buildRuns` produced two execution candidates sharing one execution
+    // id, so one of the two runs it planned lost its execution to the other.
+    //
+    // The harness reported here is the earliest record's, which is the one
+    // `buildSessionRow` stamps on the session, so the derived tables agree.
+    const rows = this.db
       .prepare(
-        `SELECT COALESCE(session_id, trace_id) AS key, harness,
-                MIN(timestamp) AS started, MAX(timestamp) AS ended
-         FROM records
-         WHERE COALESCE(session_id, trace_id) IS NOT NULL
-         GROUP BY key, harness
+        `SELECT key, harness, started, ended FROM (
+           SELECT COALESCE(session_id, trace_id) AS key,
+                  harness,
+                  MIN(timestamp) OVER (PARTITION BY COALESCE(session_id, trace_id)) AS started,
+                  MAX(timestamp) OVER (PARTITION BY COALESCE(session_id, trace_id)) AS ended,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY COALESCE(session_id, trace_id) ORDER BY timestamp
+                  ) AS rn
+           FROM records
+           WHERE COALESCE(session_id, trace_id) IS NOT NULL
+         )
+         WHERE rn = 1
          ORDER BY started DESC`,
       )
       .all() as { key: string; harness: string; started: string; ended: string }[]
+    return rows.map((row) => ({ ...row, harness: normalizeHarnessName(row.harness) }))
+  }
+
+  /**
+   * Derived sessions one at a time, newest first.
+   *
+   * `listSessions` materializes every payload at once. The rollup only reduces
+   * each one to a handful of scalars, and the payloads are the largest objects
+   * in the store — 995 MB of JSON on the measured corpus, one session of it
+   * 270 MB — so building that array took the rebuild's heap high-water mark to
+   * 4.4 GB. Streaming keeps one payload live at a time.
+   */
+  *iterateSessions(harnessId?: string): Generator<SessionRow> {
+    const rows =
+      harnessId === undefined
+        ? this.db.prepare('SELECT * FROM session ORDER BY started DESC').iterate()
+        : this.db
+            .prepare('SELECT * FROM session WHERE harness = ? ORDER BY started DESC')
+            .iterate(harnessId)
+    for (const row of rows) yield toSessionRow(row as SessionDbRow)
+  }
+
+  /**
+   * Executions belonging to one harness. The rollup previously read every
+   * execution in the store and filtered in memory, once per harness.
+   */
+  listExecutionsByHarness(harness: string): ExecutionRow[] {
+    const rows = this.db
+      .prepare('SELECT * FROM execution WHERE harness = ? ORDER BY started, execution_id')
+      .all(harness) as ExecutionDbRow[]
+    return rows.map(toExecutionRow)
+  }
+
+  /**
+   * A session's measured input and output totals, read out of the stored
+   * payload without parsing it.
+   *
+   * The delegation-overhead dimension needs two numbers per execution and was
+   * parsing the whole payload for each — the most expensive way to read
+   * `summary.total_input`. A total the session recorded as not measurable is
+   * not a number, and comes back here as `undefined` rather than a coerced 0.
+   */
+  sessionTokenTotals(sessionId: string): { input: number; output: number } | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT json_extract(payload, '$.summary.total_input') AS input,
+                json_extract(payload, '$.summary.total_output') AS output
+         FROM session WHERE session_id = ?`,
+      )
+      .get(sessionId) as { input: unknown; output: unknown } | undefined
+    if (row === undefined) return undefined
+    return {
+      input: typeof row.input === 'number' ? row.input : 0,
+      output: typeof row.output === 'number' ? row.output : 0,
+    }
+  }
+
+  /**
+   * The connection behind the `token_cache` table, for the memo in
+   * `tokens.ts`. The table is versioned by this store's schema while its
+   * accessors live with tokenization, so the database is handed over rather
+   * than wrapped in a pair of pass-through methods — the arrangement
+   * `tokenize` already documents.
+   */
+  tokenCache(): TokenCacheStore {
+    return this.db
   }
 
   /** Every record belonging to one session key, in timestamp order. */
@@ -1355,7 +1506,9 @@ export class CanonStore {
          ORDER BY harness ASC`,
       )
       .all() as { harness: string }[]
-    return rows.map((r) => r.harness)
+    // Canonical names, deduped: the raw record harness and its canonical name
+    // would otherwise each get their own rollup row.
+    return [...new Set(rows.map((r) => normalizeHarnessName(r.harness)))].sort()
   }
 
   /**
@@ -1637,6 +1790,53 @@ export class CanonStore {
   listAll(): import('./types.js').CanonicalRecord[] {
     const rows = this.db.prepare('SELECT * FROM records ORDER BY timestamp').all() as RecordRow[]
     return rows.map(toRecord)
+  }
+
+  /**
+   * Every record the OTLP path produced — those whose source is NOT in the
+   * `codeburn/` file-source namespace.
+   *
+   * Filtering in SQL rather than after `listAll()` keeps the file records, and
+   * their several-times-larger decompressed `parts`, off the heap entirely.
+   */
+  listOtlpSourced(): import('./types.js').CanonicalRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM records WHERE source IS NULL OR source NOT LIKE ? ESCAPE '\\' ORDER BY timestamp`,
+      )
+      .all(`${FILE_SOURCE_PREFIX}%`) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
+  /**
+   * Stream the OTLP-sourced records one at a time, so a caller that needs a
+   * fact from every record never holds them all.
+   *
+   * A refresh only needs each OTLP record's session key, but the key lives in
+   * the compressed `raw` payload, so it has to decode each row to read it.
+   * Materializing the whole side to do that cost ~3.3 GB resident on a corpus
+   * whose OTLP rows compress to ~285 MB; yielding row by row lets each one be
+   * collected as soon as its key has been read.
+   */
+  *streamOtlpSourced(): Generator<import('./types.js').CanonicalRecord> {
+    const statement = this.db.prepare(
+      `SELECT * FROM records WHERE source IS NULL OR source NOT LIKE ? ESCAPE '\\' ORDER BY span_id`,
+    )
+    for (const row of statement.iterate(`${FILE_SOURCE_PREFIX}%`)) {
+      yield toRecord(row as unknown as RecordRow)
+    }
+  }
+
+  /** Full records for the given span ids, in the order the ids are given. */
+  recordsBySpanIds(spanIds: readonly string[]): import('./types.js').CanonicalRecord[] {
+    if (spanIds.length === 0) return []
+    const statement = this.db.prepare('SELECT * FROM records WHERE span_id = ?')
+    const records: import('./types.js').CanonicalRecord[] = []
+    for (const spanId of spanIds) {
+      const row = statement.get(spanId) as RecordRow | undefined
+      if (row !== undefined) records.push(toRecord(row))
+    }
+    return records
   }
 
   /**

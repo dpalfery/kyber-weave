@@ -362,8 +362,8 @@ describe('source measurability reasons (B3)', () => {
 // ---------------------------------------------------------------------------
 
 describe('cacheAvailability and prefixAvailability (Task E4)', () => {
-  it('covers all 10 surveyed harnesses with valid availability and confidence tags', () => {
-    expect(SURVEYED_HARNESSES).toHaveLength(10)
+  it('covers every surveyed harness with valid availability and confidence tags', () => {
+    expect(SURVEYED_HARNESSES).toHaveLength(11)
     const validConfidences = new Set(['verified', 'documented', 'unverified', 'assumed'])
     const validStatuses = new Set(['supported', 'unsupported', 'not_measurable', 'partial'])
     const validFallbacks = new Set(['detect-but-cannot-locate', 'none'])
@@ -436,10 +436,14 @@ describe('cacheAvailability and prefixAvailability (Task E4)', () => {
     expect(normalizeHarnessName('cascade')).toBe('windsurf')
     expect(normalizeHarnessName('roo')).toBe('roo-code')
     expect(normalizeHarnessName('cline-cli')).toBe('cline')
-    expect(normalizeHarnessName('antigravity')).toBe('gemini')
-    expect(normalizeHarnessName('agy')).toBe('gemini')
+    // Antigravity writes under ~/.gemini/ and borrows Gemini's counter
+    // vocabulary, but it is its own harness: aliasing it onto Gemini filed one
+    // harness's rollup under another harness's name.
+    expect(normalizeHarnessName('antigravity')).toBe('antigravity')
+    expect(normalizeHarnessName('agy')).toBe('antigravity')
+    expect(normalizeHarnessName('gemini')).toBe('gemini')
 
-    expect(cacheAvailability('antigravity').harness).toBe('gemini')
+    expect(cacheAvailability('antigravity').harness).toBe('antigravity')
     expect(cacheAvailability('claude').harness).toBe('claude-code')
     expect(prefixAvailability('roo').harness).toBe('roo-code')
   })

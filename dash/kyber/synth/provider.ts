@@ -34,6 +34,7 @@ export type { ParsedProviderCall, Provider, SessionSource } from '../../src/prov
 import type { CanonicalRecord, Problem } from '../canon/types.js'
 import { claudeReader } from './readers/claude.js'
 import { copilotCliReader, loadCopilotCliCalls } from './readers/copilot.js'
+import { loadClaudeCalls } from './readers/claude.js'
 import { codexReader } from './readers/codex.js'
 import { kiloReader } from './readers/kilo.js'
 import { opencodeReader } from './readers/opencode.js'
@@ -102,11 +103,21 @@ function callsAndTurns(
   load: ProviderLoad,
   reader: ContentReader | undefined,
 ): Promise<readonly [ParsedProviderCall[], ReaderTurn[] | undefined]> {
-  // Copilot CLI records its ASAD context taxonomy in SQLite rather than in a
-  // transcript. Its upstream parser supplies no transcript calls for that
-  // source, so turn the reported rows into calls before normal synthesis.
-  const calls = provider === 'copilot' && load.calls.length === 0
-    ? loadCopilotCliCalls(load.filePath)
+  // Two providers supply no calls through the streaming parser seam, for
+  // different reasons, and both would otherwise synthesize zero records:
+  //   * Copilot CLI records its ASAD context taxonomy in SQLite rather than in
+  //     a transcript, so its upstream parser has no transcript calls to give.
+  //   * Claude Code's upstream provider implements discovery only — its
+  //     `createSessionParser` yields nothing — because the vendored aggregation
+  //     reads those transcripts by its own path.
+  // In both cases the on-disk source IS the record, so the counters are read
+  // straight off it here.
+  const calls = load.calls.length === 0
+    ? provider === 'copilot'
+      ? loadCopilotCliCalls(load.filePath)
+      : provider === 'claude' || provider === 'claude-code'
+        ? loadClaudeCalls(load.filePath)
+        : load.calls
     : load.calls
   if (reader === undefined) return Promise.resolve([calls, undefined])
   return (async () => {

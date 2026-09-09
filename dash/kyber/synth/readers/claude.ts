@@ -31,9 +31,136 @@
 import { existsSync, readFileSync } from 'fs'
 import { basename, extname } from 'path'
 
+import type { ParsedProviderCall } from '../../../src/providers/types.js'
+
 import { detectUserCorrection } from '../../canon/outcome.js'
 import type { ContentPart } from '../../canon/types.js'
 import type { ContentReader, ReaderTurn } from './types.js'
+
+/**
+ * The assistant records in a Claude Code transcript each carry the `usage`
+ * block for the request that produced them, so an assistant record with usage
+ * is exactly one model turn. This splits a transcript's lines into those turns:
+ * every line since the previous turn belongs to the turn it precedes, which is
+ * how a user prompt and its tool results stay attached to the request they fed.
+ *
+ * Lines after the last assistant record are emitted as a trailing group so a
+ * transcript that never reported usage still reads as a single turn.
+ */
+export function splitClaudeTurns(lines: readonly string[]): string[][] {
+  const groups: string[][] = []
+  let current: string[] = []
+
+  for (const rawLine of lines) {
+    if (rawLine.trim() === '') continue
+    current.push(rawLine)
+    if (claudeUsageOf(rawLine) === undefined) continue
+    groups.push(current)
+    current = []
+  }
+
+  if (current.length > 0) groups.push(current)
+  return groups
+}
+
+/** The `message.usage` block of one transcript line, when it is an assistant turn. */
+function claudeUsageOf(rawLine: string): Record<string, unknown> | undefined {
+  let record: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(rawLine)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    record = parsed as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  if (record['type'] !== 'assistant') return undefined
+  const message = record['message']
+  if (message === null || typeof message !== 'object' || Array.isArray(message)) return undefined
+  const usage = (message as Record<string, unknown>)['usage']
+  if (usage === null || usage === undefined || typeof usage !== 'object' || Array.isArray(usage)) {
+    return undefined
+  }
+  return usage as Record<string, unknown>
+}
+
+/** A finite non-negative counter, or 0 — never a fabricated estimate. */
+function claudeCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function claudeText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
+}
+
+/**
+ * Read one Claude Code transcript as provider calls — one per assistant turn.
+ *
+ * Claude Code's provider entry exposes discovery but no streaming session
+ * parser (`createSessionParser` yields nothing), so synthesis had no calls to
+ * build records from and every Claude transcript ingested as zero records.
+ * This is the same seam Copilot CLI uses for its SQLite store: the transcript
+ * is the collectable source, so the counters are read straight off it.
+ *
+ * Anthropic's `input_tokens` excludes both cache classes, which is the
+ * `exclusive` convention already registered for this provider. Counters are
+ * copied verbatim; nothing is inferred when a field is absent.
+ */
+export function loadClaudeCalls(filePath: string): ParsedProviderCall[] {
+  let lines: string[]
+  try {
+    lines = readFileSync(filePath, 'utf-8').split(/\r?\n/)
+  } catch {
+    return []
+  }
+
+  const calls: ParsedProviderCall[] = []
+  const fileStem = basename(filePath, extname(filePath))
+  let index = 0
+
+  for (const rawLine of lines) {
+    const usage = claudeUsageOf(rawLine)
+    if (usage === undefined) continue
+
+    const record = JSON.parse(rawLine) as Record<string, unknown>
+    const message = record['message'] as Record<string, unknown>
+    const sessionId = claudeText(record['sessionId']) ?? fileStem
+    // `uuid` is the transcript's own per-record identity; the index keeps the
+    // key unique for a transcript that omits it.
+    const messageId = claudeText(record['uuid']) ?? claudeText(message['id']) ?? `turn-${index}`
+    index += 1
+
+    const serverToolUse = usage['server_tool_use']
+    const webSearchRequests =
+      serverToolUse !== null && typeof serverToolUse === 'object' && !Array.isArray(serverToolUse)
+        ? claudeCount((serverToolUse as Record<string, unknown>)['web_search_requests'])
+        : 0
+
+    calls.push({
+      provider: 'claude',
+      model: claudeText(message['model']) ?? 'unknown',
+      inputTokens: claudeCount(usage['input_tokens']),
+      outputTokens: claudeCount(usage['output_tokens']),
+      cacheCreationInputTokens: claudeCount(usage['cache_creation_input_tokens']),
+      cacheReadInputTokens: claudeCount(usage['cache_read_input_tokens']),
+      cachedInputTokens: claudeCount(usage['cache_read_input_tokens']),
+      reasoningTokens: 0,
+      webSearchRequests,
+      // Cost is derived downstream from the counters and the rate table; the
+      // transcript states no price, and stating 0 here would be a fabrication.
+      costUSD: 0,
+      costIsEstimated: true,
+      tools: [],
+      bashCommands: [],
+      timestamp: claudeText(record['timestamp']) ?? new Date(0).toISOString(),
+      speed: claudeText(usage['speed']) === 'fast' ? 'fast' : 'standard',
+      deduplicationKey: `claude:${sessionId}:${messageId}`,
+      sessionId,
+      userMessage: '',
+    })
+  }
+
+  return calls
+}
 
 /** Result of reading a full session transcript, including its identifier. */
 export type ClaudeSessionReadResult = {
@@ -267,14 +394,27 @@ export class ClaudeContentReader implements ContentReader {
    * established the session identity, rather than inventing turns from roles.
    */
   async *read(filePath: string): AsyncGenerator<ReaderTurn> {
-    const session = readClaudeSession(filePath)
-    if (session.parts.length === 0 && session.sessionId === undefined) return
-    yield {
-      parts: session.parts,
-      ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
-      ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
-      ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
-      ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),
+    // One turn per assistant request, so a turn pairs with the call
+    // `loadClaudeCalls` emitted for the same request. Reading the whole
+    // transcript as a single turn would put every part on the first record and
+    // report a context-pressure curve that rises once and then flatlines.
+    let lines: string[]
+    try {
+      lines = readFileSync(filePath, 'utf-8').split(/\r?\n/)
+    } catch {
+      return
+    }
+
+    for (const group of splitClaudeTurns(lines)) {
+      const session = readClaudeSession(group)
+      if (session.parts.length === 0 && session.sessionId === undefined) continue
+      yield {
+        parts: session.parts,
+        ...(session.sessionId !== undefined ? { sessionId: session.sessionId } : {}),
+        ...(session.terminationReason !== undefined ? { terminationReason: session.terminationReason } : {}),
+        ...(session.exitCode !== undefined ? { exitCode: session.exitCode } : {}),
+        ...(session.isCorrection !== undefined ? { isCorrection: session.isCorrection, correctionRule: session.correctionRule } : {}),
+      }
     }
   }
 

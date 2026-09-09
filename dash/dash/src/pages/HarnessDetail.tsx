@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { cn, usd } from '../lib/utils'
+import { cn, fmtRunTimestamp, shortRunId, usd } from '../lib/utils'
 import { Card } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
 import {
@@ -44,7 +44,11 @@ export function HarnessDetail({
   const [baseline, setBaseline] = useState('none')
 
   // Query harness rollup
-  const { data: harnessData } = useQuery({
+  const {
+    data: harnessData,
+    isLoading: loadingHarness,
+    isError: harnessError,
+  } = useQuery({
     queryKey: ['kyber-harness', harnessId],
     queryFn: () => fetchHarness(harnessId),
     initialData: initialHarness,
@@ -68,6 +72,16 @@ export function HarnessDetail({
   const runs = runsData ?? []
   const findings = findingsData ?? []
 
+  // A missing rollup is not the same as missing telemetry, and conflating the two
+  // is the failure ADR 0011 forbids: the six dimensions would read "telemetry
+  // missing" for telemetry that was collected and simply never aggregated. The
+  // `harness_rollup` table is a cache over sessions, runs and executions, so an
+  // absent row means the build stage has not run — say that instead.
+  const rollupMissing = harness === undefined && !loadingHarness
+  const unbuiltReason =
+    'Harness rollup not built: recorded runs exist but have not been aggregated. ' +
+    'Run `kyber build` (or `kyber dash refresh`) to rebuild the derived tables.'
+
   // Construct honest 6-dimension scorecard for this harness (no composite score per D3!)
   const scorecardData: ScorecardData = useMemo(() => {
     const hasPressure = typeof harness?.contextPressureMedian === 'number'
@@ -85,7 +99,9 @@ export function HarnessDetail({
           status: hasPressure ? 'measured' : 'not_measurable',
           reason: hasPressure
             ? 'Measured across runs'
-            : 'Telemetry missing: context pressure unrecorded on this harness',
+            : rollupMissing
+              ? unbuiltReason
+              : 'Telemetry missing: context pressure unrecorded on this harness',
           measurementClass: 'deterministic',
         },
         cacheEfficiency: {
@@ -96,7 +112,9 @@ export function HarnessDetail({
           status: hasCache ? 'measured' : 'not_measurable',
           reason: hasCache
             ? 'Measured prompt cache read ratio'
-            : 'Telemetry missing: harness does not export cache read/creation counters',
+            : rollupMissing
+              ? unbuiltReason
+              : 'Telemetry missing: harness does not export cache read/creation counters',
           measurementClass: hasCache ? 'inferred' : 'coverage-gap',
         },
         toolYield: {
@@ -107,13 +125,15 @@ export function HarnessDetail({
           status: hasYield ? 'measured' : 'not_measurable',
           reason: hasYield
             ? 'Active calls per resident schema token'
-            : 'Telemetry missing: tool call definitions or invocations absent',
+            : rollupMissing
+              ? unbuiltReason
+              : 'Telemetry missing: tool call definitions or invocations absent',
         },
         skillUtilisation: {
           key: 'skillUtilisation',
           name: 'Skill Utilisation',
           status: 'not_measurable',
-          reason: 'Skill activation is not observed on this harness',
+          reason: rollupMissing ? unbuiltReason : 'Skill activation is not observed on this harness',
           measurementClass: 'coverage-gap',
         },
         delegationOverhead: {
@@ -124,13 +144,15 @@ export function HarnessDetail({
           status: hasDelegation ? 'measured' : 'not_measurable',
           reason: hasDelegation
             ? 'Observed delegation handoff ratio'
-            : 'Single-agent executions or uninstrumented subagent tree',
+            : rollupMissing
+              ? unbuiltReason
+              : 'Single-agent executions or uninstrumented subagent tree',
         },
         continuity: {
           key: 'continuity',
           name: 'Continuity',
           status: 'not_measurable',
-          reason: 'User corrections and turn recovery unrecorded',
+          reason: rollupMissing ? unbuiltReason : 'User corrections and turn recovery unrecorded',
           measurementClass: 'coverage-gap',
         },
       },
@@ -140,7 +162,7 @@ export function HarnessDetail({
         status: harness?.costUsd ? 'derived' : 'not_measurable',
       },
     }
-  }, [harness])
+  }, [harness, rollupMissing, unbuiltReason])
 
   const coveragePct =
     typeof harness?.fieldCoverage === 'number'
@@ -192,6 +214,23 @@ export function HarnessDetail({
         </div>
       </div>
 
+      {rollupMissing && (
+        <div
+          data-testid="harness-rollup-missing"
+          className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+        >
+          <span className="font-semibold">Scorecard unavailable: harness rollup not built.</span>{' '}
+          {runs.length > 0
+            ? `${runs.length} run${runs.length === 1 ? '' : 's'} are recorded for this harness, but the aggregate row is missing`
+            : 'No aggregate row exists for this harness'}
+          {harnessError ? ' (the harness endpoint returned no rollup)' : ''}. The six dimensions
+          below are blank because nothing has been aggregated — not because the harness withheld
+          telemetry. Rebuild the derived tables with{' '}
+          <code className="font-mono">kyber build</code> or{' '}
+          <code className="font-mono">kyber dash refresh</code>.
+        </div>
+      )}
+
       {/* Scorecard for this harness (NO composite score per D3, secondary cost per D9) */}
       <Scorecard
         data={scorecardData}
@@ -203,7 +242,9 @@ export function HarnessDetail({
         pressureMedian={harness?.contextPressureMedian}
         pressureP95={harness?.contextPressureP95}
         isUnmeasurable={typeof harness?.contextPressureMedian !== 'number'}
-        unmeasuredReason="Telemetry missing: context pressure unrecorded on this harness"
+        unmeasuredReason={
+          rollupMissing ? unbuiltReason : 'Telemetry missing: context pressure unrecorded on this harness'
+        }
       />
 
       {/* Harness-Specific Findings */}
@@ -227,7 +268,7 @@ export function HarnessDetail({
               Recent Runs ({runs.length})
             </h3>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              Select a run to drill down into Level 3 (Run Detail), execution trees, and turn inspections.
+              Select any row to drill down into Level 3 (Run Detail), execution trees, and turn inspections.
             </p>
           </div>
         </div>
@@ -248,6 +289,7 @@ export function HarnessDetail({
               <thead>
                 <tr className="border-b border-border text-[11px] font-semibold text-tertiary-foreground uppercase tracking-wider">
                   <th className="py-2.5 px-3">Run ID</th>
+                  <th className="py-2.5 px-3">Started</th>
                   <th className="py-2.5 px-3">Label / Task</th>
                   <th className="py-2.5 px-3">Grouping Basis</th>
                   <th className="py-2.5 px-3 text-right">Executions</th>
@@ -258,22 +300,43 @@ export function HarnessDetail({
                   <th className="py-2.5 px-3 text-right text-tertiary-foreground font-normal italic">
                     Cost (derived)
                   </th>
-                  <th className="py-2.5 px-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/40">
                 {runs.map((r) => {
                   const isDerived = r.groupingBasis === 'derived'
                   const outcomeStatus = r.outcome?.status || 'unobserved'
+                  const started = fmtRunTimestamp(r.started)
 
                   return (
                     <tr
                       key={r.runId}
-                      data-testid={`run-row-${r.runId}`}
-                      className="hover:bg-interactive-secondary/30 transition-colors"
+                      data-testid={`drill-run-${r.runId}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Inspect run ${r.runId}`}
+                      onClick={() => onSelectRun?.(r.runId)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onSelectRun?.(r.runId)
+                        }
+                      }}
+                      className="cursor-pointer transition-colors hover:bg-interactive-secondary/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
                     >
-                      <td className="py-2.5 px-3 font-mono text-xs text-primary font-medium">
-                        {r.runId.slice(0, 10)}
+                      <td
+                        className="py-2.5 px-3 font-mono text-xs text-primary font-medium whitespace-nowrap"
+                        title={r.runId}
+                      >
+                        {shortRunId(r.runId, r.harness)}
+                      </td>
+                      <td className="py-2.5 px-3 whitespace-nowrap" title={started.full}>
+                        <div className="text-foreground">{started.date}</div>
+                        {started.time && (
+                          <div className="text-[10px] font-mono tabular-nums text-tertiary-foreground">
+                            {started.time}
+                          </div>
+                        )}
                       </td>
                       <td className="py-2.5 px-3">
                         <div className="font-medium text-foreground truncate max-w-[200px]">
@@ -329,16 +392,6 @@ export function HarnessDetail({
                       {/* Decision D9: Secondary derived cost */}
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80">
                         {r.costUsd ? usd(r.costUsd) : '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => onSelectRun?.(r.runId)}
-                          data-testid={`drill-run-${r.runId}`}
-                          className="rounded bg-interactive-secondary px-2 py-1 text-xs font-medium text-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
-                        >
-                          Inspect Run →
-                        </button>
                       </td>
                     </tr>
                   )

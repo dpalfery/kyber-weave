@@ -23,6 +23,7 @@
 // structured parts. Values from the two paths are never summed. A disagreement
 // is still recorded for audit, but precedence is not a richness contest.
 
+import { normalizeHarnessName } from '../canon/measurability.js'
 import type { CanonStore, SpanProblem } from '../canon/store.js'
 import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
 import { DEFAULT_GROUP_ATTRIBUTE } from '../otel/aspire.js'
@@ -56,11 +57,37 @@ export const DEDUP_DISAGREEMENT = 'DEDUP_DISAGREEMENT'
 export function deduplicationKeyFor(record: CanonicalRecord): string | null {
   // Hex OTLP span ids cannot begin with `synth:` ('s' is not a hex digit),
   // so the prefix cleanly separates the two paths' records.
-  if (record.spanId.startsWith(SYNTH_SPAN_PREFIX)) return record.traceId
+  if (record.spanId.startsWith(SYNTH_SPAN_PREFIX)) {
+    // A synthesized record detached from its trace claims no session identity.
+    if (record.traceId === null || record.traceId === undefined) return null
+    const rest = record.traceId.slice(SYNTH_SPAN_PREFIX.length)
+    // `synth:<provider>:<session>`. Only the provider segment is split off:
+    // a session id may itself contain a colon (OpenCode's `<db>:<session>`).
+    const separator = rest.indexOf(':')
+    if (separator === -1) return record.traceId
+    return sessionKey(rest.slice(0, separator), rest.slice(separator + 1))
+  }
 
   const sessionId = rawSessionId(record)
   if (sessionId === null) return null
-  return `${SYNTH_SPAN_PREFIX}${record.harness}:${sessionId}`
+  return sessionKey(record.harness, sessionId)
+}
+
+/**
+ * The one key, with its harness segment canonicalized.
+ *
+ * The two paths name the same harness in different vocabularies: the file path
+ * carries the provider entry that parsed the transcript (`claude`,
+ * `cursor-agent`, `copilot-cli`), while the OTLP path carries the harness voted
+ * at normalization (`claude-code`, `cursor`, `copilot`). Building the key from
+ * those names as given puts the same session under two strings, so no session
+ * whose provider name differs from its harness name ever collapsed — Claude
+ * Code's transcripts and its OTLP export were stored as two runs of the same
+ * work. Canonicalizing here keeps R3.2's single mechanism: one key scheme, one
+ * namespace, now spelled one way on both sides.
+ */
+function sessionKey(harness: string, sessionId: string): string {
+  return `${SYNTH_SPAN_PREFIX}${normalizeHarnessName(harness)}:${sessionId}`
 }
 
 /**

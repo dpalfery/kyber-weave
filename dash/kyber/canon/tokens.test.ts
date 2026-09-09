@@ -9,11 +9,13 @@ import { CanonStore } from './store.js'
 import type { Measurability } from './types.js'
 import {
   DERIVED,
+  MIN_CACHED_TEXT_LENGTH,
   O200K_TOKENIZER,
   activeTokenizer,
   approximateO200kBase,
   cacheKey,
   countO200kBase,
+  createCachedCounter,
   tokenize,
   type TokenCount,
 } from './tokens.js'
@@ -234,5 +236,92 @@ describe('the real o200k_base encoder (R4.6)', () => {
     expect(result.count).toBe(2)
     expect(result.derived).toBe(true)
     db.close()
+  })
+})
+
+describe('createCachedCounter', () => {
+  /** Text long enough to be worth a cache row; see MIN_CACHED_TEXT_LENGTH. */
+  const long = (seed: string): string => seed.repeat(Math.ceil(MIN_CACHED_TEXT_LENGTH / seed.length) + 1)
+
+  it('computes a distinct text once and serves repeats from the memo', () => {
+    const store = memoryStore()
+    const countTokens = vi.fn((text: string) => text.length)
+    const counter = createCachedCounter(store, 'gpt-4o', countTokens)
+    const text = long('alpha ')
+
+    expect(counter.count(text)).toBe(text.length)
+    expect(counter.count(text)).toBe(text.length)
+    expect(counter.count(text)).toBe(text.length)
+
+    expect(countTokens).toHaveBeenCalledTimes(1)
+    expect(counter.stats()).toMatchObject({ hits: 2, misses: 1 })
+  })
+
+  it('populates token_cache on flush, and a second counter reads it back', () => {
+    // The rebuild case this exists for: the table outlives the process, so the
+    // next build must not re-tokenize what this one already counted (R4.6).
+    const store = memoryStore()
+    const first = vi.fn((text: string) => text.length)
+    const text = long('beta ')
+
+    const writer = createCachedCounter(store, 'gpt-4o', first)
+    writer.count(text)
+    expect(cachedRow(store, text, 'gpt-4o')).toBeUndefined()
+    writer.flush()
+    expect(cachedRow(store, text, 'gpt-4o')).toEqual({ count: text.length, model: 'gpt-4o' })
+
+    const second = vi.fn(() => 0)
+    const reader = createCachedCounter(store, 'gpt-4o', second)
+    expect(reader.count(text)).toBe(text.length)
+    expect(second).not.toHaveBeenCalled()
+    expect(reader.stats()).toMatchObject({ hits: 1, misses: 0 })
+  })
+
+  it('keys on the model, so two tokenizers never read each other\'s counts', () => {
+    // The residual between tokenizers is the measurement, not noise.
+    const store = memoryStore()
+    const counter = createCachedCounter(store, 'gpt-4o', () => 11)
+    const other = createCachedCounter(store, 'claude', () => 22)
+    const text = long('gamma ')
+
+    expect(counter.count(text)).toBe(11)
+    expect(other.count(text)).toBe(22)
+    counter.flush()
+    other.flush()
+
+    expect(cachedRow(store, text, 'gpt-4o')).toMatchObject({ count: 11 })
+    expect(cachedRow(store, text, 'claude')).toMatchObject({ count: 22 })
+  })
+
+  it('counts short text without spending a row on it', () => {
+    // A SQLite round trip costs more than tokenizing a short string, and a row
+    // per tool name buys nothing on the next build.
+    const store = memoryStore()
+    const countTokens = vi.fn((text: string) => text.length)
+    const counter = createCachedCounter(store, 'gpt-4o', countTokens)
+
+    expect(counter.count('short')).toBe(5)
+    counter.flush()
+
+    expect(cachedRow(store, 'short', 'gpt-4o')).toBeUndefined()
+    expect(counter.stats()).toMatchObject({ uncached: 1 })
+  })
+
+  it('refuses an unusable count rather than caching it', () => {
+    const store = memoryStore()
+    const counter = createCachedCounter(store, 'gpt-4o', () => Number.NaN)
+
+    expect(() => counter.count(long('delta '))).toThrow(/unusable count/)
+    counter.flush()
+    expect(cachedRow(store, long('delta '), 'gpt-4o')).toBeUndefined()
+  })
+
+  it('reports the same counts the bare counter would', () => {
+    // The memo may change what counting costs, never what it says.
+    const store = memoryStore()
+    const texts = [long('one '), long('two '), 'tiny', long('one ')]
+    const counter = createCachedCounter(store, O200K_TOKENIZER, approximateO200kBase)
+
+    expect(texts.map((text) => counter.count(text))).toEqual(texts.map(approximateO200kBase))
   })
 })

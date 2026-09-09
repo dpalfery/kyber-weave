@@ -365,7 +365,18 @@ export function handleKyberRequest(
       return true
     }
     const harnessParam = (url.searchParams.get('harness') ?? '').trim() || undefined
-    const runs = bridge.listRuns(harnessParam)
+    // `run` carries no finding count of its own. Without this join the table
+    // renders `findingCount ?? 0` for every row — a fabricated zero sitting
+    // directly beneath a findings panel listing the same runs' findings.
+    const findingCounts = new Map<string, number>()
+    for (const finding of bridge.listFindings()) {
+      if (finding.runId === undefined) continue
+      findingCounts.set(finding.runId, (findingCounts.get(finding.runId) ?? 0) + 1)
+    }
+    const runs = bridge.listRuns(harnessParam).map((run) => ({
+      ...run,
+      findingCount: findingCounts.get(run.runId) ?? 0,
+    }))
     sendKyberJson(res, 200, { runs })
     return true
   }

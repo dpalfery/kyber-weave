@@ -9,6 +9,7 @@
 // pipeline's digest differs, the test fails naming the section, and the
 // difference is resolved before migration proceeds.
 
+import { SURVEYED_HARNESSES } from '../canon/measurability.js'
 import { describe, expect, it } from 'vitest'
 
 import type { CanonicalRecord, TokenUsage } from '../canon/types.js'
@@ -426,13 +427,15 @@ describe('run context — counts the corpus cannot express', () => {
 // ---------------------------------------------------------------------------
 
 describe('auditCachePrefixCoverage — Task E4 survey parity audit', () => {
-  it('audits all 10 surveyed harnesses with typed availability and confidence tags', () => {
+  it('audits every surveyed harness with typed availability and confidence tags', () => {
     const report = auditCachePrefixCoverage()
-    expect(report.surveyedCount).toBe(10)
-    expect(Object.keys(report.harnesses)).toHaveLength(10)
-    expect(report.supportedCacheCount).toBe(6) // copilot, claude-code, roo-code, cline, codex, gemini (partial)
+    expect(report.surveyedCount).toBe(SURVEYED_HARNESSES.length)
+    expect(Object.keys(report.harnesses)).toHaveLength(SURVEYED_HARNESSES.length)
+    // Antigravity is surveyed separately from Gemini and shares its partial
+    // cache shape, so it adds one to both cache counts.
+    expect(report.supportedCacheCount).toBe(7) // copilot, claude-code, roo-code, cline, codex, gemini, antigravity (partial)
     expect(report.supportedPrefixCount).toBe(2) // copilot, codex
-    expect(report.fallbackPrefixCount).toBe(5) // copilot, claude-code, roo-code, cline, gemini
+    expect(report.fallbackPrefixCount).toBe(6) // copilot, claude-code, roo-code, cline, gemini, antigravity
 
     // Spot-check specific harnesses
     expect(report.harnesses.copilot.cache.status).toBe('supported')

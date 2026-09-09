@@ -269,6 +269,9 @@ export interface KyberRunSummary {
   payload?: Record<string, unknown>
 }
 
+/** A metric that is either reported, or explicitly stamped unreportable. */
+export type MetricAvailabilityLike = string | { availability: string; reason?: string }
+
 export interface KyberExecutionSummary {
   executionId: string
   runId: string
@@ -279,7 +282,12 @@ export interface KyberExecutionSummary {
   isRoot: boolean
   started?: string | null
   ended?: string | null
-  parentLinkage?: string
+  /**
+   * `'measured' | 'derived'`, or a `{ availability, reason }` object when the
+   * source could not report execution structure. Rendering this value directly
+   * crashes React on the object form — read it through `availabilityLabel`.
+   */
+  parentLinkage?: MetricAvailabilityLike
   turnCount?: number
   costUsd?: number | null
   payload?: Record<string, unknown>

@@ -1,4 +1,4 @@
-import { cn } from '../../lib/utils'
+import { cn, shortRunId } from '../../lib/utils'
 
 export interface HierarchyBreadcrumbProps {
   harness?: string | null
@@ -67,7 +67,9 @@ export function HierarchyBreadcrumb({
   // Level 3: Run
   if (runId) {
     const isRunCurrent = !executionId && turnIndex === undefined && !itemKey
-    const shortRun = runId.length > 10 ? `${runId.slice(0, 8)}…` : runId
+    // A head truncation renders every derived run as `derived:` — the harness
+    // and grouping prefix are shared by all of them.
+    const shortRun = shortRunId(runId, harness ?? undefined)
     levels.push({
       level: 3,
       label: `Run ${shortRun}`,

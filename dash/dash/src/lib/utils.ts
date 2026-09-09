@@ -81,3 +81,74 @@ export function label(key: string): string {
     .replace(/-/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
+
+/**
+ * Shorten a run id for a dense table without collapsing distinct runs into one
+ * label. Derived ids are `derived:<harness>:<discriminator>`, so a blind head
+ * truncation renders every run on a harness page as the same string; the
+ * discriminator is the only part that identifies the run. The redundant prefix
+ * is dropped (the grouping-basis column already states `derived`) and anything
+ * still over budget is elided in the middle, keeping both ends legible.
+ *
+ * Always pair with the full id in a `title` — this is a display form, not an id.
+ */
+export function shortRunId(runId: string, harness?: string): string {
+  const prefix = harness ? `derived:${harness}:` : 'derived:'
+  let rest = runId.startsWith(prefix) ? runId.slice(prefix.length) : runId
+  if (harness === undefined && rest !== runId) {
+    // Prefix known only as `derived:` — drop the harness segment too.
+    const sep = rest.indexOf(':')
+    if (sep !== -1) rest = rest.slice(sep + 1)
+  }
+  // File-sourced records carry a synthesized trace id, so a derived run over
+  // them reads `derived:<harness>:synth:<provider>:<id>`. That second prefix is
+  // shared by every run on the harness too, and hiding the discriminator behind
+  // it is the same defect as the first.
+  rest = rest.replace(/^synth:[^:]+:/, '')
+  if (rest.length === 0) return runId
+  if (rest.length <= 18) return rest
+  return `${rest.slice(0, 9)}…${rest.slice(-8)}`
+}
+
+/**
+ * Split an ISO timestamp into the date and time halves the run table stacks.
+ * Invalid or absent input yields em dashes rather than a fabricated date.
+ */
+export function fmtRunTimestamp(iso: string | null | undefined): {
+  date: string
+  time: string
+  full: string
+} {
+  if (!iso) return { date: '—', time: '', full: 'No start timestamp recorded' }
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return { date: '—', time: '', full: `Unparseable timestamp: ${iso}` }
+  return {
+    date: d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: '2-digit' }),
+    time: d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    full: d.toISOString(),
+  }
+}
+
+/**
+ * The short label for a metric availability, which arrives either as a bare
+ * string (`'measured'`, `'derived'`) or as a `{ availability, reason }` object
+ * when the source declared it unreportable. Rendering the object form straight
+ * into JSX throws React error #31, so every read of one goes through here.
+ */
+export function availabilityLabel(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value !== null && typeof value === 'object' && 'availability' in value) {
+    const availability = (value as { availability?: unknown }).availability
+    if (typeof availability === 'string') return availability
+  }
+  return 'unknown'
+}
+
+/** The stated reason a metric is unreportable, when the source gave one. */
+export function availabilityReason(value: unknown): string | undefined {
+  if (value !== null && typeof value === 'object' && 'reason' in value) {
+    const reason = (value as { reason?: unknown }).reason
+    if (typeof reason === 'string' && reason.trim() !== '') return reason
+  }
+  return undefined
+}

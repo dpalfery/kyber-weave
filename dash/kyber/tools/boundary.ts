@@ -427,6 +427,7 @@ export const PURE_DIAGNOSTIC_MODULES = [
   'kyber/canon/runs.ts',
   'kyber/canon/outcome.ts',
   'kyber/canon/harnesses.ts',
+  'kyber/canon/findings.ts',
 ]
 
 /**

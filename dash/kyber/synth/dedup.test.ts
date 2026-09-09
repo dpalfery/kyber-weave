@@ -34,6 +34,14 @@ import { DEFAULT_GROUP_ATTRIBUTE } from '../otel/aspire.js'
 import { decodeOtlpJson, type OtlpSpan } from '../otel/receiver.js'
 import { DEDUP_DISAGREEMENT, deduplicate, deduplicationKeyFor, joinOtelAndFileTurn } from './dedup.js'
 import { Synthesizer, synthesizeCall, traceIdFor } from './synth.js'
+import { normalizeHarnessName } from '../canon/measurability.js'
+
+/** `traceIdFor` with its harness segment canonicalized — the dedup key's shape. */
+function normalizedTraceId(spec: ParsedProviderCall): string {
+  const rest = traceIdFor(spec).slice('synth:'.length)
+  const separator = rest.indexOf(':')
+  return `synth:${normalizeHarnessName(rest.slice(0, separator))}:${rest.slice(separator + 1)}`
+}
 
 // ---------------------------------------------------------------------------
 // Fixture kit — the file path
@@ -184,20 +192,62 @@ function otlpSession(spanId: string, attributes: SpanAttributes): CanonicalRecor
 // ---------------------------------------------------------------------------
 
 describe('identity (R3.2 — upstream’s key, extended, not a second mechanism)', () => {
-  it('reads a synthesized record’s key verbatim from its trace id', () => {
+  it('reads a synthesized record’s key off its trace id, with the harness canonicalized', () => {
     const [record] = fileSession([call()])
-    expect(deduplicationKeyFor(record!)).toBe(record!.traceId)
     expect(record!.traceId).toBe('synth:claude:s-1')
+    // The trace id keeps the provider entry that parsed the transcript; the
+    // key canonicalizes it so the OTLP path's voted harness meets it.
+    expect(deduplicationKeyFor(record!)).toBe('synth:claude-code:s-1')
   })
 
   it('derives the same key for the OTLP record of the same session', () => {
     const [synthRecord] = fileSession([call()])
     const [otlpRecord] = otlpSession(SPAN_ID_1, turnAttributes())
-    // Both paths land on `synth:<provider>:<session>` — traceIdFor's own
-    // shape, applied to the same provider and session identity.
-    expect(deduplicationKeyFor(otlpRecord!)).toBe('synth:claude:s-1')
+    expect(deduplicationKeyFor(otlpRecord!)).toBe('synth:claude-code:s-1')
     expect(deduplicationKeyFor(otlpRecord!)).toBe(deduplicationKeyFor(synthRecord!))
-    expect(deduplicationKeyFor(otlpRecord!)).toBe(traceIdFor(call()))
+    expect(deduplicationKeyFor(otlpRecord!)).toBe(normalizedTraceId(call()))
+  })
+
+  // The regression this suite missed: its fixtures named the harness `claude`
+  // on BOTH sides, so the two vocabularies never differed. In the field the
+  // file path carries the provider entry (`claude`) and the OTLP path the
+  // voted harness (`claude-code`), the keys never met, and every Claude Code
+  // session was stored twice — once per path. One case per alias pair, so a
+  // harness whose front-end name differs from its harness name cannot regress.
+  it.each([
+    ['claude', 'claude-code'],
+    ['copilot-cli', 'copilot'],
+    ['copilot-chat', 'copilot'],
+    ['cursor-agent', 'cursor'],
+    ['roo', 'roo-code'],
+    ['cline-cli', 'cline'],
+    ['cascade', 'windsurf'],
+    ['openai-codex', 'codex'],
+    ['agy', 'antigravity'],
+  ])('collapses %s (file path) onto %s (OTLP path)', (providerName, votedHarness) => {
+    const [fileRecord] = fileSession([call({ provider: providerName })])
+    const [span] = decodeOtlpJson(otlpExport(SPAN_ID_1, turnAttributes()))
+    const otlpRecord = normalizeOtlpSpan(span!, votedHarness)
+
+    const key = deduplicationKeyFor(fileRecord!)
+    expect(key).not.toBeNull()
+    expect(deduplicationKeyFor(otlpRecord)).toBe(key)
+    expect(key).toBe(`synth:${votedHarness}:s-1`)
+  })
+
+  it('keeps distinct harnesses apart rather than collapsing everything together', () => {
+    const [claudeFile] = fileSession([call({ provider: 'claude' })])
+    const [codexFile] = fileSession([call({ provider: 'codex' })])
+    expect(deduplicationKeyFor(claudeFile!)).not.toBe(deduplicationKeyFor(codexFile!))
+  })
+
+  it('does not split a session id that contains a colon', () => {
+    // OpenCode identifies a session as `<db path>:<session>`; splitting on
+    // every colon would truncate the identity and merge unrelated sessions.
+    const [record] = fileSession([
+      call({ provider: 'opencode', deduplicationKey: 'opencode:opencode.db:ses_a:m-1', sessionId: 'opencode.db:ses_a' }),
+    ])
+    expect(deduplicationKeyFor(record!)).toBe('synth:opencode:opencode.db:ses_a')
   })
 
   it('claims no cross-path identity for an OTLP span without a session attribute', () => {
@@ -454,7 +504,7 @@ describe('R3.3 — D7 precedence, disagreement recorded', () => {
       const problem = problems[0]!
       expect(problem.code).toBe(DEDUP_DISAGREEMENT)
       expect(problem.severity).toBe('warning')
-      expect(problem.location).toBe('synth:claude:s-1')
+      expect(problem.location).toBe('synth:claude-code:s-1')
       expect(problem.spanId).toBe(kept[0]!.spanId)
       // Both sides' figures are in the message — the dropped side's values
       // are recorded, not discarded with its records.
