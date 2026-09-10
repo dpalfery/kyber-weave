@@ -277,8 +277,10 @@ jobs:
           if [ "${NODE_PLATFORM}" = "win" ]; then
               URL="${BASE_URL}/${TARBALL}.zip"
               curl -fsSL -o "${WORK}/node.zip" "${URL}"
+              # unzip has no --strip-components, so the archive keeps its own
+              # top-level directory; address the binary through it.
               unzip -q "${WORK}/node.zip" -d "${WORK}/node"
-              NODE_BIN="${WORK}/node/node${EXE}"
+              NODE_BIN="${WORK}/node/${TARBALL}/node${EXE}"
           else
               URL="${BASE_URL}/${TARBALL}.tar.xz"
               curl -fsSL -o "${WORK}/node.tar.xz" "${URL}"
@@ -307,7 +309,11 @@ jobs:
             }
           }
           EOF
-          "${NODE_BIN}" --experimental-sea-config "${SEA_CONFIG}"
+          # Built with the runner's own Node, not the downloaded one: for a
+          # cross-built RID the target binary cannot execute here at all
+          # (Exec format error). Both are ${NODE_VERSION}, and a non-snapshot
+          # blob carries no host architecture, so the output is identical.
+          node --experimental-sea-config "${SEA_CONFIG}"
 
           FINAL_BIN="${BIN_DIR}/kyberdash${EXE}"
           cp "${NODE_BIN}" "${FINAL_BIN}"
@@ -343,14 +349,28 @@ jobs:
               tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}"
           fi
 
-          # Verify the SEA host can still report --version (catches a corrupt
-          # blob or wrong-endianness inject failure before archiving).
-          "${FINAL_BIN}" --version >/dev/null
+          # Verify the binary still reports --version (catches a corrupt blob or
+          # a failed inject before archiving). Only meaningful where the RID is
+          # native to this runner; a cross-built one cannot be executed here.
+          HOST_OS="$(uname -s)"; HOST_ARCH="$(uname -m)"
+          case "${HOST_OS}" in Darwin) HOST_OS=darwin ;; Linux) HOST_OS=linux ;; esac
+          case "${HOST_ARCH}" in arm64|aarch64) HOST_ARCH=arm64 ;; x86_64) HOST_ARCH=x64 ;; esac
+          if [ "${NODE_PLATFORM}" = "${HOST_OS}" ] && [ "${NODE_ARCH}" = "${HOST_ARCH}" ]; then
+              "${FINAL_BIN}" --version >/dev/null
+              echo "smoke test passed for ${RID}"
+          else
+              echo "skipping smoke test: ${RID} is cross-built on ${HOST_OS}-${HOST_ARCH}"
+          fi
 
           # Per-RID checksum file alongside the artifact, merged into the
           # SHA256SUMS.txt that ships with the Release (handled in the
           # release job by downloading all artifacts and re-checksumming).
-          ( cd "${BIN_DIR}" && sha256sum "kyberdash-${RID}"*.* ) > "${BIN_DIR}/SHA256SUMS.txt"
+          # sha256sum is GNU coreutils; the macOS runners ship shasum instead.
+          if command -v sha256sum >/dev/null 2>&1; then
+              ( cd "${BIN_DIR}" && sha256sum "kyberdash-${RID}"*.* ) > "${BIN_DIR}/SHA256SUMS.txt"
+          else
+              ( cd "${BIN_DIR}" && shasum -a 256 "kyberdash-${RID}"*.* ) > "${BIN_DIR}/SHA256SUMS.txt"
+          fi
           cat "${BIN_DIR}/SHA256SUMS.txt"
 
       - name: Upload KyberDash archives
