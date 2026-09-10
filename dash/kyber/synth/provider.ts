@@ -29,7 +29,7 @@
 // continue). Successful loads are byte-identical to calling the Synthesizer
 // directly; failure handling adds problems, never guesses at data.
 
-import type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
+import type { ParsedProviderCall, Provider } from '../../src/providers/types.js'
 export type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
 import type { CanonicalRecord, Problem } from '../canon/types.js'
 import { claudeReader } from './readers/claude.js'

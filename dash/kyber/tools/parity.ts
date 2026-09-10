@@ -47,7 +47,6 @@ import {
 } from '../canon/types.js'
 import {
   SURVEYED_HARNESSES,
-  type SurveyedHarness,
   cacheAvailability,
   prefixAvailability,
   type CacheAvailability,

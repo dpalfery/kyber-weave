@@ -1141,7 +1141,13 @@ export class OtlpReceiver {
         // Malformed OTLP: reject with a diagnostic; nothing was written.
         respondJson(res, 400, { error: { code: 'OTLP_MALFORMED_PAYLOAD', message: err.message } })
       } else {
-        respondJson(res, 500, { error: { code: 'OTLP_INTERNAL', message: message(err) } })
+        // The bind interface is configurable (see `opts.host`), so an internal
+        // error's text — paths, driver detail — must not travel to the caller.
+        // It goes to the operator's console; the caller gets the code only.
+        console.error('[KyberOtel] Internal error handling OTLP request:', err)
+        respondJson(res, 500, {
+          error: { code: 'OTLP_INTERNAL', message: 'internal receiver error' },
+        })
       }
     }
   }

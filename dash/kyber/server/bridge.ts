@@ -341,6 +341,35 @@ type ContentSourceRecord = {
   parts: ContentPart[]
 }
 
+/**
+ * The fields `assembleTurnContent` reads off a turn, whether it arrives as a
+ * session-payload entry (`SessionPayload.turns` is `unknown[]`) or as a
+ * canonical record carrying an ingest-specific index or model. Each one is
+ * still checked at runtime before use; this only names the shape being probed.
+ */
+type TurnDescriptor = {
+  index?: number
+  spanId?: string
+  model?: string
+}
+
+/**
+ * Per-metric measurability as a payload carries it, under either the flat
+ * `measurability` map or `context.first.buckets`. `SessionPayload` types both
+ * as `unknown`, so the read that consults them names the shape here.
+ */
+type MeasurabilityEntry = { availability?: string; reason?: string }
+type MeasurabilityMap = Record<string, MeasurabilityEntry | undefined>
+
+/**
+ * Renders a request-supplied identifier for a log line. Control characters are
+ * stripped so a crafted id cannot forge log entries, and the result is
+ * truncated. Callers pass it as a printf argument, never as the format string.
+ */
+function logId(value: string): string {
+  return value.replace(/[^\x20-\x7e]/g, '?').slice(0, 120)
+}
+
 function isCanonicalPart(value: string): value is CanonicalContentKey {
   return (CANONICAL_CONTENT_KEYS as readonly string[]).includes(value)
 }
@@ -844,8 +873,9 @@ export class KyberBridge {
         }
       } catch (err) {
         console.warn(
-          `[KyberBridge] Error reading session payload from canon.db for ${sessionId}:`,
-          err
+          '[KyberBridge] Error reading session payload from canon.db for %s:',
+          logId(sessionId),
+          err,
         )
       }
     }
@@ -888,7 +918,7 @@ export class KyberBridge {
           }
         }
       } catch (err) {
-        console.warn(`[KyberBridge] Error reading span attributes for ${spanId}:`, err)
+        console.warn('[KyberBridge] Error reading span attributes for %s:', logId(spanId), err)
       }
     }
 
@@ -970,11 +1000,14 @@ export class KyberBridge {
     let model: string | undefined
 
     // 1. Try resolving via session payload if available
-    const payload = this.getSessionPayload<SessionPayload>(sessionId) as any
-    if (payload && Array.isArray(payload.turns) && payload.turns.length > 0) {
+    const payload = this.getSessionPayload<SessionPayload>(sessionId)
+    const turns: TurnDescriptor[] = Array.isArray(payload?.turns)
+      ? (payload.turns as TurnDescriptor[])
+      : []
+    if (turns.length > 0) {
       const turnItem =
-        payload.turns.find((t: any, i: number) => t.index === turnIndex || i === turnIndex) ??
-        (turnIndex >= 1 && turnIndex <= payload.turns.length ? payload.turns[turnIndex - 1] : undefined)
+        turns.find((t, i) => t.index === turnIndex || i === turnIndex) ??
+        (turnIndex >= 1 && turnIndex <= turns.length ? turns[turnIndex - 1] : undefined)
       if (turnItem) {
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
@@ -988,11 +1021,11 @@ export class KyberBridge {
         const turnRecords = records.filter((r) => r.op === 'llm.invoke')
         const pool = turnRecords.length > 0 ? turnRecords : records
         const target =
-          pool.find((r, i) => (r as any).index === turnIndex || i === turnIndex) ??
+          pool.find((r, i) => (r as CanonicalRecord & TurnDescriptor).index === turnIndex || i === turnIndex) ??
           (turnIndex >= 1 && turnIndex <= pool.length ? pool[turnIndex - 1] : undefined)
         if (target) {
           targetSpanId = target.spanId
-          model = (target as any).model ?? target.name
+          model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
         }
       } else if (this.hasTable(this.canonDb, 'records')) {
         try {
@@ -1161,7 +1194,10 @@ export class KyberBridge {
       }
 
       // Check measurability from payload
-      const measurability = payload?.measurability?.[def.key] ?? payload?.context?.first?.buckets?.[def.key]
+      const flat = payload?.measurability as MeasurabilityMap | undefined
+      const buckets = (payload?.context as { first?: { buckets?: MeasurabilityMap } } | undefined)
+        ?.first?.buckets
+      const measurability = flat?.[def.key] ?? buckets?.[def.key]
       if (measurability && typeof measurability === 'object' && measurability.availability === 'not_measurable') {
         block.notMeasurable = { reason: measurability.reason || 'Not measurable for this harness.' }
       }

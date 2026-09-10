@@ -197,6 +197,10 @@ export async function runCursorHookStdin({ stdin, write, post = postCursorHookOt
 
 /** Deliver one OTLP/JSON request to the in-repository local trace receiver. */
 export async function postCursorHookOtlpJson(payload: Record<string, unknown>): Promise<void> {
+  // Loopback OTLP/HTTP is the standard local receiver transport, and the
+  // endpoint is pinned to 127.0.0.1:4318 above — TLS has nothing to protect on
+  // this hop.
+  // nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request
   const response = await fetch(DEFAULT_CURSOR_HOOK_OTLP_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

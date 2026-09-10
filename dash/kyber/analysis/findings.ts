@@ -11,9 +11,8 @@
 //    on-demand loading, and tool deferral over deletion. Never suggest deleting outright.
 // 5. Decision D16: skill utilisation findings are stamped at low confidence ('heuristic') and ranked last.
 
-import { createHash } from 'node:crypto'
 import { normalizeWhitespace, hashNormalized } from './signals.js'
-import type { CanonicalRecord, ContentPart } from '../canon/types.js'
+import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
 
 // ---------------------------------------------------------------------------
