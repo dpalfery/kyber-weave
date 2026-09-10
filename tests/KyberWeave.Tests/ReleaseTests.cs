@@ -108,6 +108,90 @@ public sealed class ReleaseTests
         Assert.Equal(expectedKyberDashRid, result.StandardOutput.Trim());
     }
 
+    // ---- KyberDash version floor ----
+    //
+    // install.sh ships unversioned from the default branch, so it must stay
+    // installable against every tag it can resolve. Releases before
+    // KYBERDASH_MIN_VERSION publish no kyberdash asset at all; asking for one
+    // there 404s, and because every archive is verified before any is
+    // installed, that aborts the whole install — CLI and MCP included.
+
+    [Theory]
+    // The floor itself, and the release below it that the documented one-line
+    // install resolves by default.
+    [InlineData("0.1.6", "0.1.7-rc.9", "-1")]
+    [InlineData("0.1.7-rc.9", "0.1.7-rc.9", "0")]
+    [InlineData("0.2.0", "0.1.7-rc.9", "1")]
+    // String comparison sorts this pair the wrong way round.
+    [InlineData("0.1.7-rc.10", "0.1.7-rc.9", "1")]
+    [InlineData("0.1.9", "0.1.10", "-1")]
+    // A pre-release ranks below the release it precedes.
+    [InlineData("0.1.7-rc.9", "0.1.7", "-1")]
+    [InlineData("1.0.0", "1.0.0-rc.1", "1")]
+    // A leading v and build metadata carry no precedence.
+    [InlineData("v0.1.7-rc.9", "0.1.7-rc.9+abc123", "0")]
+    // SemVer 2.0.0's own precedence chain.
+    [InlineData("1.0.0-alpha", "1.0.0-alpha.1", "-1")]
+    [InlineData("1.0.0-alpha.1", "1.0.0-alpha.beta", "-1")]
+    [InlineData("1.0.0-beta.2", "1.0.0-beta.11", "-1")]
+    // A missing field reads as zero.
+    [InlineData("1.2", "1.2.0", "0")]
+    public void SemverCompareFollowsSemVerPrecedence(string left, string right, string expected)
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "kyber_weave_semver_compare '" + left + "' '" + right + "'");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expected, result.StandardOutput.Trim());
+    }
+
+    [Theory]
+    // Every published release below the floor, including the rc line the floor
+    // sits on, resolves to "skip".
+    [InlineData("0.1.1", false)]
+    [InlineData("0.1.6", false)]
+    [InlineData("0.1.7-rc.7", false)]
+    // The floor and everything above it resolves to "install".
+    [InlineData("0.1.7-rc.9", true)]
+    [InlineData("0.1.7-rc.10", true)]
+    [InlineData("0.1.7", true)]
+    [InlineData("0.2.0", true)]
+    [InlineData("1.0.0", true)]
+    public void ReleaseHasKyberDashGatesOnThePublishedFloor(string version, bool expected)
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "kyber_weave_release_has_kyberdash '" + version + "'");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(expected ? 0 : 1, result.ExitCode);
+    }
+
+    [Fact]
+    public void KyberDashMinVersionIsTheTagThatFirstPublishedTheAsset()
+    {
+        SkipOnWindows();
+
+        // Pinned so raising the floor is a deliberate edit: bumping it silently
+        // would stop installing KyberDash for everyone on the releases in between.
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "printf '%s' \"$KYBERDASH_MIN_VERSION\"");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("0.1.7-rc.9", result.StandardOutput.Trim());
+    }
+
     [Theory]
     [InlineData("openbsd")]
     [InlineData("Plan9")]

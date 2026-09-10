@@ -12,7 +12,9 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 ```
 
 Installs the latest release as self-contained binaries in `~/.local/bin` — no .NET runtime,
-no sudo, checksum-verified. Already installed? `kyber-weave update`. [Install details →](docs/install.md)
+no sudo, checksum-verified: the `kyber-weave` CLI, the `kyber-weave-mcp` server, and, from
+releases that publish it, the [`kyberdash`](docs/dash/README.md) observability binary. Already
+installed? `kyber-weave update`. [Install details →](docs/install.md)
 
 > **This repository governs its own documentation.** Everything under [`docs/`](docs/)
 > carries conformant frontmatter and passes `kyber-weave docs validate` and `docs drift`

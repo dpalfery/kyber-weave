@@ -43,6 +43,48 @@ public sealed class UpdateCommandTests : IDisposable
     }
 
     [Theory]
+    [InlineData("osx-x64", "darwin-x64")]
+    [InlineData("osx-arm64", "darwin-arm64")]
+    [InlineData("linux-x64", "linux-x64")]
+    [InlineData("linux-arm64", "linux-arm64")]
+    [InlineData("win-x64", "win-x64")]
+    // An RID with no KyberDash counterpart comes back verbatim rather than
+    // reshaped into a name no release publishes.
+    [InlineData("unknown-rid", "unknown-rid")]
+    public void PlatformRidKyberDashRidReMapsMacOsOnly(string rid, string expected)
+    {
+        Assert.Equal(expected, PlatformRid.KyberDashRid(rid));
+    }
+
+    [Theory]
+    // The gate this exists for: everything below the KyberDash floor, and the
+    // floor itself.
+    [InlineData("0.1.6", "0.1.7-rc.9", -1)]
+    [InlineData("0.1.7-rc.9", "0.1.7-rc.9", 0)]
+    [InlineData("0.2.0", "0.1.7-rc.9", 1)]
+    // Ordinal comparison gets this pair backwards.
+    [InlineData("0.1.7-rc.10", "0.1.7-rc.9", 1)]
+    [InlineData("0.1.9", "0.1.10", -1)]
+    // A pre-release ranks below the release it precedes.
+    [InlineData("0.1.7-rc.9", "0.1.7", -1)]
+    [InlineData("1.0.0", "1.0.0-rc.1", 1)]
+    // Build metadata and a leading v carry no precedence.
+    [InlineData("v0.1.7-rc.9", "0.1.7-rc.9+abc123", 0)]
+    // SemVer 2.0.0's own precedence chain.
+    [InlineData("1.0.0-alpha", "1.0.0-alpha.1", -1)]
+    [InlineData("1.0.0-alpha.1", "1.0.0-alpha.beta", -1)]
+    [InlineData("1.0.0-beta.2", "1.0.0-beta.11", -1)]
+    // A missing field reads as zero.
+    [InlineData("1.2", "1.2.0", 0)]
+    public void ReleaseVersionCompareFollowsSemVerPrecedence(string left, string right, int expected)
+    {
+        Assert.Equal(expected, Math.Sign(ReleaseVersion.Compare(left, right)));
+        // Precedence is antisymmetric; a gate that only holds in one direction
+        // would admit or refuse the wrong side of the floor.
+        Assert.Equal(-expected, Math.Sign(ReleaseVersion.Compare(right, left)));
+    }
+
+    [Theory]
     [InlineData("v0.2.0", "0.2.0")]
     [InlineData("0.2.0-rc.1", "0.2.0-rc.1")]
     [InlineData("0.1.0+714f187ab97d66e1199c33d5aaa0c9ab76ffae0f", "0.1.0")]
@@ -464,6 +506,79 @@ public sealed class UpdateCommandTests : IDisposable
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static extern uint GetEffectiveUserId();
 
+    // ---- KyberDash: installed beside the CLI, updated with it ----
+
+    [Fact]
+    public void RunReplacesInstalledKyberDashFromTheNodeSeaAsset()
+    {
+        string installed = InstallKyberDash();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withKyberDash: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("new-kyberdash", File.ReadAllText(installed));
+    }
+
+    [Fact]
+    public void RunLeavesKyberDashAloneWhenItIsNotInstalled()
+    {
+        // No kyberdash on disk, and the release map carries no kyberdash asset:
+        // an update that tried to fetch one would fail on the unmapped URI.
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.False(File.Exists(Path.Combine(_install.Path, "kyberdash")));
+    }
+
+    [Fact]
+    public void RunLeavesKyberDashUntouchedWhenTheReleasePredatesIt()
+    {
+        // 0.1.7-rc.8 sorts below the floor, so no release at that tag carries the
+        // asset. The unmapped URI is the assertion: asking for it would fail here.
+        string installed = InstallKyberDash();
+        using MapHandler handler = MapRelease("0.1.7-rc.8", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.1.7-rc.8", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("old-kyberdash", File.ReadAllText(installed));
+    }
+
+    [Fact]
+    public void RunLeavesKyberDashUntouchedUnderNoKyberDash()
+    {
+        string installed = InstallKyberDash();
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(
+            handler,
+            host,
+            new SelfUpdateOptions("0.2.0", false, false, NoKyberDash: true));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("old-kyberdash", File.ReadAllText(installed));
+    }
+
+    [Fact]
+    public void RunReplacesInstalledKyberDashOnWindows()
+    {
+        string installed = InstallKyberDash(windows: true);
+        using MapHandler handler = MapRelease("0.2.0", "win-x64", windows: true, withKyberDash: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "win-x64", windows: true);
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions("0.2.0", false, false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Equal("new-kyberdash", File.ReadAllText(installed));
+    }
+
     private SelfUpdateOutcome Run(
         HttpMessageHandler handler,
         SelfUpdateHost host,
@@ -482,7 +597,11 @@ public sealed class UpdateCommandTests : IDisposable
         return new SelfUpdateHost(path, currentVersion, rid, windows, IsMacOs: false);
     }
 
-    private MapHandler MapRelease(string version, string rid, bool windows)
+    private MapHandler MapRelease(
+        string version,
+        string rid,
+        bool windows,
+        bool withKyberDash = false)
     {
         MapHandler handler = new MapHandler();
         string tag = "v" + version;
@@ -497,12 +616,38 @@ public sealed class UpdateCommandTests : IDisposable
         byte[] cliBytes = File.ReadAllBytes(cliArchive);
         byte[] mcpBytes = File.ReadAllBytes(mcpArchive);
         string sums = $"{Sha(cliBytes)}  {cliName}\n{Sha(mcpBytes)}  {mcpName}\n";
+
+        if (withKyberDash)
+        {
+            // Published under the Node SEA RID, so an update that asked for the .NET
+            // RID would miss this mapping and fail rather than quietly pass.
+            string dashName = BinaryInstaller.ArchiveName(
+                "kyberdash",
+                PlatformRid.KyberDashRid(rid));
+            string dashArchive = Path.Combine(_assets.Path, dashName);
+            string dashFile = BinaryInstaller.InstalledFileName("kyberdash", windows);
+            WriteArchive(dashArchive, dashFile, "new-kyberdash"u8.ToArray(), windows);
+            byte[] dashBytes = File.ReadAllBytes(dashArchive);
+            sums += $"{Sha(dashBytes)}  {dashName}\n";
+            handler.MapFile(GitHubReleaseClient.AssetUri(tag, dashName).AbsoluteUri, dashBytes);
+        }
+
         handler.MapFile(
             GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
             Encoding.UTF8.GetBytes(sums));
         handler.MapFile(GitHubReleaseClient.AssetUri(tag, cliName).AbsoluteUri, cliBytes);
         handler.MapFile(GitHubReleaseClient.AssetUri(tag, mcpName).AbsoluteUri, mcpBytes);
         return handler;
+    }
+
+    /// <summary>Places an already-installed kyberdash beside the CLI.</summary>
+    private string InstallKyberDash(bool windows = false)
+    {
+        string path = Path.Combine(
+            _install.Path,
+            BinaryInstaller.InstalledFileName("kyberdash", windows));
+        File.WriteAllText(path, "old-kyberdash");
+        return path;
     }
 
     private static void WriteArchive(string archivePath, string entryName, byte[] content, bool windows)

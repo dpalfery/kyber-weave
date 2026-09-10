@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-17
+last-reviewed: 2026-09-10
 ---
 
 # Installing Kyber-Weave
@@ -17,13 +17,17 @@ install and no SDK requirement.
 curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh
 ```
 
-This installs the **latest stable release tag** to `~/.local/bin` without sudo, placing two
-binaries on your PATH:
+This installs the **latest stable release tag** to `~/.local/bin` without sudo, placing up to
+three binaries on your PATH:
 
 | Binary | Purpose |
 |---|---|
 | `kyber-weave` | The CLI — [docs](docgraph/governance.md), [skill](context-hygiene/skills.md), [agent](context-hygiene/agents.md), and [squad](kyber-squad/onboarding.md) commands |
 | `kyber-weave-mcp` | The [MCP server](docgraph/mcp-runbook.md) that serves documentation to an agent |
+| `kyberdash` | [KyberDash](dash/README.md) — token, cost, and context observability across agentic coding harnesses ([runbook](dash/runbook.md)) |
+
+`kyberdash` installs only from releases that publish it — see
+[KyberDash and the version floor](#kyberdash-and-the-version-floor).
 
 Make sure `~/.local/bin` is on your PATH:
 
@@ -39,6 +43,8 @@ export PATH="$HOME/.local/bin:$PATH"
 | `--prerelease` | `KYBER_WEAVE_PRERELEASE=1` | Resolve and install candidate/pre-release builds (e.g. `v*-rc.*`, `v*-dev.*`) |
 | `--install-dir <d>` | `KYBER_WEAVE_INSTALL_DIR` | Target directory (default `~/.local/bin`) |
 | `--no-mcp` | `KYBER_WEAVE_NO_MCP=1` | CLI only; skip the MCP server |
+| `--no-kyberdash` | `KYBER_WEAVE_NO_KYBERDASH=1` | CLI + MCP; skip the KyberDash binary |
+| `--with-menubar` | `KYBER_WEAVE_WITH_MENUBAR=1` | macOS only; also install the signed menubar app to `~/Applications` after verifying its SHA-256 and code signature |
 
 Pinning a specific version or install directory:
 
@@ -70,9 +76,40 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 A checksum mismatch aborts the install. The script never needs sudo when installing to the
 default location.
 
+## KyberDash and the version floor
+
+KyberDash ships as a Node single-executable, so its archives are keyed by Node's RID names —
+`darwin-x64` and `darwin-arm64` where the .NET binaries use `osx-x64` and `osx-arm64`. The
+script maps your platform to both names and verifies every archive against the same
+`SHA256SUMS.txt`.
+
+`kyberdash-<rid>` assets first appear in **0.1.7-rc.9**. Releases before that publish none, so
+the script checks the resolved version against that floor and installs the CLI and MCP alone
+when it is not met:
+
+```
+kyber-weave: release 0.1.6 predates KyberDash (first published in 0.1.7-rc.9); skipping kyberdash
+```
+
+This is why the floor exists rather than an unconditional download: `install.sh` is served
+unversioned from the default branch and has to stay installable against every tag it can
+resolve. All archives are verified before any binary is placed, so one missing asset would
+otherwise abort the whole install and leave you with no CLI either.
+
+Until 0.1.7 is promoted to stable, reach KyberDash with `--prerelease`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+  | sh -s -- --prerelease
+```
+
+`kyberdash --version` reports the KyberDash product version (for example `0.9.23`), not the
+Kyber-Weave release tag it shipped in. The two version lines are independent.
+
 ## Supported platforms
 
-`linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`
+`linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64` — and for KyberDash, the same platforms
+under Node's names: `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`.
 
 Windows binaries (`win-x64`) are published on the release, but the install script does not
 handle `.zip` extraction — download the asset from
@@ -99,6 +136,12 @@ kyber-weave-mcp --version
 kyber-weave-mcp -v
 ```
 
+Verify KyberDash, when it was installed:
+
+```bash
+kyberdash --version
+```
+
 View CLI general help:
 
 ```bash
@@ -107,17 +150,24 @@ kyber-weave --help
 
 ## Updating
 
-`kyber-weave update` replaces the running CLI and the sibling `kyber-weave-mcp` in the
-same directory from GitHub Release assets, after verifying SHA-256 against
-`SHA256SUMS.txt`. It is the self-update path for binaries installed by this script (or
-placed from a Release by hand). It refuses `dotnet run` and `dotnet tool` installs.
+`kyber-weave update` replaces the running CLI, the sibling `kyber-weave-mcp`, and an
+installed `kyberdash` in the same directory from GitHub Release assets, after verifying
+SHA-256 against `SHA256SUMS.txt`. It is the self-update path for binaries installed by this
+script (or placed from a Release by hand). It refuses `dotnet run` and `dotnet tool` installs.
 
 ```bash
 kyber-weave update                    # latest stable Release
 kyber-weave update --release-candidate  # newest listed Release, including -rc and -dev
 kyber-weave update 0.2.0              # pin a tag (leading v is optional)
 kyber-weave update --no-mcp           # CLI only
+kyber-weave update --no-kyberdash     # leave an installed kyberdash unchanged
 ```
+
+KyberDash is **replaced, never introduced**: update touches `kyberdash` only when it already
+sits beside the CLI. `--no-kyberdash` at install time is an opt-out that update respects, and
+a machine that installed before KyberDash existed never chose to run it. Both skips are
+logged. To add it later, re-run `install.sh`. Updating to a release below the version floor
+leaves `kyberdash` alone for the same reason the install skips it.
 
 `--release-candidate` matches `install.sh --prerelease`: it reads the GitHub Releases
 list (not `/releases/latest`) and takes the newest non-draft tag. Do not combine it with
