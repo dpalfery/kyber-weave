@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using System.Threading;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
@@ -21,7 +22,7 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
     private const string ReportWriteFailed = "KW-REVIEW-025";
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, ReviewDuplicatesSettings settings)
+    protected override int Execute(CommandContext context, ReviewDuplicatesSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -87,6 +88,8 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
         // as a passed gate.
         return report.HasErrors ? 1 : 0;
     }
+
+    public int Execute(CommandContext context, ReviewDuplicatesSettings settings) => Execute(context, settings, CancellationToken.None);
 
     /// <summary>
     /// Takes the two CodeGraph ports separately rather than the concrete adapter, so the

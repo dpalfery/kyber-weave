@@ -109,7 +109,7 @@ public static class ReportRenderer
             JsonObject finding = new JsonObject
             {
                 ["code"] = d.Code,
-                ["severity"] = d.Severity.ToString().ToLowerInvariant(),
+                ["severity"] = d.Severity.ToString().ToUpperInvariant(),
                 ["subject"] = d.Subject,
                 ["message"] = d.Message,
                 ["file"] = d.FilePath,
@@ -154,9 +154,9 @@ public static class ReportRenderer
     private static string ToMarkdown(DiagnosticReport report, string command, string subjectLabel)
     {
         StringBuilder sb = new StringBuilder();
-        sb.AppendLine($"### Kyber-Weave `{command}` results");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"### Kyber-Weave `{command}` results");
         sb.AppendLine();
-        sb.AppendLine($"**{report.Count(Severity.Critical)} critical · {report.Count(Severity.Error)} error · {report.Warnings} warning · {report.Infos} info**");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**{report.Count(Severity.Critical)} critical · {report.Count(Severity.Error)} error · {report.Warnings} warning · {report.Infos} info**");
         sb.AppendLine();
         if (report.Items.Count == 0)
         {
@@ -164,11 +164,11 @@ public static class ReportRenderer
         }
         else
         {
-            sb.AppendLine($"| Severity | Code | {subjectLabel} | Location | Message |");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"| Severity | Code | {subjectLabel} | Location | Message |");
             sb.AppendLine("|---|---|---|---|---|");
             foreach (Diagnostic d in report.Items.OrderByDescending(i => i.Severity))
             {
-                sb.AppendLine($"| {d.Severity} | {EscapeMarkdown(d.Code)} | {EscapeMarkdown(d.Subject)} | {EscapeMarkdown(FormatLocation(d, includeRelatedCount: false))} | {EscapeMarkdown(d.Message)} |");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"| {d.Severity} | {EscapeMarkdown(d.Code)} | {EscapeMarkdown(d.Subject)} | {EscapeMarkdown(FormatLocation(d, includeRelatedCount: false))} | {EscapeMarkdown(d.Message)} |");
                 if (d.RelatedLocations is not { Count: > 0 })
                 {
                     continue;
@@ -177,7 +177,7 @@ public static class ReportRenderer
                 foreach (DiagnosticLocation related in d.RelatedLocations)
                 {
                     string message = related.Message ?? "Related location";
-                    sb.AppendLine($"|  |  |  | {EscapeMarkdown(FormatLocation(related))} | {EscapeMarkdown(message)} |");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"|  |  |  | {EscapeMarkdown(FormatLocation(related))} | {EscapeMarkdown(message)} |");
                 }
             }
         }
@@ -313,7 +313,7 @@ public static class ReportRenderer
         sb.AppendLine("|---|---|");
         foreach (KeyValuePair<string, object?> metric in report.Metrics)
         {
-            sb.AppendLine($"| {EscapeMarkdown(metric.Key)} | {EscapeMarkdown(FormatMetric(metric.Value))} |");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"| {EscapeMarkdown(metric.Key)} | {EscapeMarkdown(FormatMetric(metric.Value))} |");
         }
     }
 

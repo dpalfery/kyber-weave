@@ -60,6 +60,12 @@ public sealed class DocumentFrontmatter
     public Collection<string>? ApiEndpoints { get; init; }
     public Collection<string>? DecidedBy { get; init; }
     public Collection<string>? Supersedes { get; init; }
+
+    /// <summary>Domain synonyms, acronyms, or search aliases for discovery.</summary>
+    public Collection<string>? Keywords { get; init; }
+
+    /// <summary>Synonym for keywords, accepted for backwards compatibility.</summary>
+    public Collection<string>? Aliases { get; init; }
 }
 
 /// <summary>One <c>##</c> section of a document body.</summary>
@@ -128,4 +134,6 @@ public sealed class DocumentModel
     public IReadOnlyList<string> ApiEndpoints => Frontmatter.ApiEndpoints ?? [];
     public IReadOnlyList<string> DecidedBy => Frontmatter.DecidedBy ?? [];
     public IReadOnlyList<string> Supersedes => Frontmatter.Supersedes ?? [];
+    /// <summary>Domain synonyms, acronyms, or query aliases declared for this document.</summary>
+    public IReadOnlyList<string> Keywords => (Frontmatter.Keywords ?? Frontmatter.Aliases) ?? [];
 }

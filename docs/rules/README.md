@@ -4,7 +4,7 @@ title: Rules
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-09-06
 ---
 
 # Rules
@@ -15,9 +15,11 @@ a rule about how tests are written belongs in the [test coding standard](../stan
 a rule that would still hold if this repository were rewritten in another language belongs
 here.
 
-## Inventory
-
-_No rule document has been written yet._
+- [`rules/feature-runbooks`](feature-runbooks.md) — Mandates that every component declared with `Type: Feature` in the component catalog provides a companion local run/test runbook or declares an explicit non-executable rationale.
+- [`rules/relocation-over-deletion`](relocation-over-deletion.md) — Mandates that diagnostic recommendations prioritize relocating and progressively disclosing context over deleting or pruning it.
+- [`rules/honest-unobservability`](honest-unobservability.md) — Mandates that missing telemetry and unmeasured dimensions are represented transparently as unobserved/not-measurable and never coerced to zero.
+- [`rules/secondary-cost-display`](secondary-cost-display.md) — Mandates that financial spend is strictly a derived secondary figure, never a primary sort, top-level navigation item, or landing metric.
+- [`rules/composite-efficiency-ban`](composite-efficiency-ban.md) — Prohibits computing or rendering single-scalar composite efficiency scores or letter grades across multidimensional agent telemetry.
 
 The repository's non-negotiables currently live in the root [`AGENTS.md`](../../AGENTS.md),
 which is where a contributor and an agent both look first. A rule earns its own document when

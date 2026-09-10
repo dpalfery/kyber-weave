@@ -1,4 +1,5 @@
 using KyberWeave.Core.CodeGraph;
+using System.Threading;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -13,7 +14,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Emits the documentation graph as newline-delimited JSON.</summary>
 public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
 {
-    public override int Execute(CommandContext context, DocsExportGraphSettings settings)
+    protected override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryCreateLoader(
@@ -66,4 +67,6 @@ public sealed class DocsExportGraphCommand : Command<DocsExportGraphSettings>
             $"[green]{result.EdgeCount} edges[/] → {Markup.Escape(result.EdgesPath)}");
         return 0;
     }
+
+    public int Execute(CommandContext context, DocsExportGraphSettings settings) => Execute(context, settings, CancellationToken.None);
 }

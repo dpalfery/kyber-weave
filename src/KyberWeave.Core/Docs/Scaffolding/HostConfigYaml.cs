@@ -623,7 +623,7 @@ internal static partial class HostConfigYaml
             if (trimmed[0] == '-')
             {
                 lastItemIndex = j;
-                int dashIndex = lines[j].IndexOf('-');
+                int dashIndex = lines[j].IndexOf('-', StringComparison.Ordinal);
                 itemIndent = lines[j][..dashIndex];
 
                 string afterDash = trimmed[1..].TrimStart();

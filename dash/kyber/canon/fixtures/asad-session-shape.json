@@ -1,0 +1,27 @@
+{
+  "context": {
+    "first": {
+      "buckets": {},
+      "reported_input": 0
+    },
+    "last": {
+      "buckets": {},
+      "reported_input": 0
+    }
+  },
+  "tools": [
+    {
+      "schema_tokens": 0,
+      "invocations": 0,
+      "turns_resident": 0
+    }
+  ],
+  "timeline": [],
+  "turns": [],
+  "requests": [],
+  "servers": [],
+  "coverage": {},
+  "problems": [],
+  "reconciliation": [],
+  "summary": {}
+}

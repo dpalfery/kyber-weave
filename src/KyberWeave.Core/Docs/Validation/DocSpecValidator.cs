@@ -156,6 +156,36 @@ public sealed class DocSpecValidator
                 doc.Subject, doc.RelativePath));
         }
 
+        if (fm.Keywords is not null)
+        {
+            foreach (string? keyword in fm.Keywords)
+            {
+                if (string.IsNullOrWhiteSpace(keyword))
+                {
+                    report.Add(new Diagnostic(
+                        InvalidVocabulary, Severity.Error,
+                        $"keyword '{keyword}' is empty or whitespace.",
+                        doc.Subject, doc.RelativePath,
+                        "Each keyword must be a non-empty string."));
+                }
+            }
+        }
+
+        if (fm.Aliases is not null)
+        {
+            foreach (string? alias in fm.Aliases)
+            {
+                if (string.IsNullOrWhiteSpace(alias))
+                {
+                    report.Add(new Diagnostic(
+                        InvalidVocabulary, Severity.Error,
+                        $"alias '{alias}' is empty or whitespace.",
+                        doc.Subject, doc.RelativePath,
+                        "Each keyword must be a non-empty string."));
+                }
+            }
+        }
+
         // --- KW-DOC-SPEC-003: per-doc-type requirements ---------------------------------
         ValidateRequiredForType(doc, report);
 

@@ -1,0 +1,99 @@
+name: Release Windows Menubar
+
+# Triggers on a `windows-v*` tag push (e.g. `git tag windows-v0.9.20 && git push origin
+# windows-v0.9.20`), or manually via the Actions tab. Mirrors release-menubar.yml, which
+# does the same job for the macOS menubar under the `mac-v*` tags. The produced `.msi` is
+# unsigned; users see a SmartScreen prompt on first run until we add signing.
+on:
+  push:
+    tags:
+      - 'windows-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label for the bundle (e.g. v0.9.20 or dev-preview)'
+        required: true
+        default: 'dev-preview'
+
+permissions:
+  contents: write  # Needed to create the release + upload assets.
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve version label
+        id: version
+        shell: bash
+        run: | # nosemgrep: yaml.github-actions.security.run-shell-injection, run-shell-injection
+          if [[ "${GITHUB_REF}" == refs/tags/windows-v* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/windows-}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT" # nosemgrep: yaml.github-actions.security.run-shell-injection, run-shell-injection
+          fi
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows/src-tauri
+
+      - name: Install dependencies
+        working-directory: windows
+        run: npm ci
+
+      - name: Build MSI bundle
+        working-directory: windows
+        run: npm run tauri build
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          find windows/src-tauri/target/release/bundle -type f -name '*.msi' \
+            -exec cp -v {} release-artifacts/ \;
+          (cd release-artifacts && for f in *.msi; do sha256sum "$f" > "$f.sha256"; done)
+          ls -la release-artifacts
+
+      - name: Upload artifact (for manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: CodeBurnMenubar-Windows-${{ steps.version.outputs.value }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+      - name: Create / update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/windows-v')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Windows Menubar ${{ steps.version.outputs.value }}
+          body: |
+            Download the `.msi` below and run it. The tray app reads everything through the
+            CodeBurn CLI, so install that first:
+
+            ```
+            npm install -g codeburn
+            ```
+
+            Requires codeburn 0.9.9 or newer and the WebView2 Runtime (preinstalled on
+            Windows 11 and recent Windows 10 updates; installed on demand otherwise).
+
+            The bundle is unsigned, so Windows SmartScreen warns on first run: click
+            "More info", then "Run anyway". Signing is planned.
+          files: release-artifacts/*
+          fail_on_unmatched_files: true

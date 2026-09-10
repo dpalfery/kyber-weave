@@ -79,7 +79,7 @@ public static partial class SpecValidator
         }
 
         // ---- angle brackets in front matter (system-prompt injection safety note) ----
-        if (skill.RawFrontmatter.Contains('<') || skill.RawFrontmatter.Contains('>'))
+        if (skill.RawFrontmatter.Contains('<', StringComparison.Ordinal) || skill.RawFrontmatter.Contains('>', StringComparison.Ordinal))
         {
             yield return new Diagnostic("KW-SKILL-SPEC-008", Severity.Error,
                 "Front matter contains '<' or '>'. The spec advises avoiding angle brackets in front matter because they can inject content into the system prompt.",
@@ -105,7 +105,7 @@ public static partial class SpecValidator
         // ---- file reference integrity ----
         foreach (SkillReferenceLink link in skill.ReferenceLinks)
         {
-            if (link.Target.Contains(".."))
+            if (link.Target.Contains("..", StringComparison.Ordinal))
             {
                 yield return new Diagnostic("KW-SKILL-SPEC-011", Severity.Error,
                     $"Body references '{link.Target}', which escapes the skill directory ('..'). Path traversal is not allowed.",

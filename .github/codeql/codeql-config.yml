@@ -1,0 +1,31 @@
+# CodeQL scope for KyberWeave.
+#
+# `dash/**` is a `git subtree` vendoring of getagentseal/codeburn (ADR 0006).
+# KyberWeave code lives only in `dash/kyber/**` — the merge zone. Every other
+# directory under `dash/` is upstream, and ADR 0006 forbids editing it: a local
+# change manufactures a conflict on every future subtree pull. Alerts raised
+# against upstream are therefore unactionable here, and they bury the ones that
+# are not — 114 of 119 alerts came from upstream before this config existed.
+# Upstream's own CI is the security boundary for upstream code.
+#
+# `dash/kyber/**` is deliberately absent from this list: the merge zone stays
+# fully analysed, and so does every path outside `dash/`.
+name: KyberWeave CodeQL
+
+paths-ignore:
+  - dash/.github
+  - dash/app
+  - dash/assets
+  - dash/dash
+  - dash/docs
+  - dash/e2e
+  - dash/gnome
+  - dash/mac
+  - dash/scripts
+  - dash/src
+  - dash/test-results
+  - dash/tests
+  - dash/windows
+  - dash/*.js
+  - dash/*.ts
+  - dash/*.html

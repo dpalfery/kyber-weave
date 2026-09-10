@@ -346,9 +346,11 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
                 $"The release checksum manifest has an invalid checksum row for '{assetName}'.");
         }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         return new SquadReleaseChecksum(
             assetName,
             exactRow[..64].ToLowerInvariant());
+#pragma warning restore CA1308
     }
 
     private static bool HasExactAssetName(string line, string assetName)

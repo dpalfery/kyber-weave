@@ -28,7 +28,7 @@ public interface ICodeGraphResolver
     bool HasFilesUnder(string relativePathPrefix);
 
     /// <summary>Candidate symbol names for a "did you mean" hint after a failed resolve.</summary>
-    IReadOnlyList<string> CandidateNames(string like);
+    IReadOnlyList<string> CandidateNames(string likePattern);
 
     /// <summary>All indexed route strings, for a "did you mean" hint.</summary>
     IReadOnlyList<string> AllRoutes();

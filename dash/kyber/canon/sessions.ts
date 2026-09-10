@@ -1,0 +1,609 @@
+// Derived sessions (spec: docs/specs/kyberdash; ADR 0006 D3). One row per
+// conversation, built by running the analysis layer over the canonical
+// records and caching the result the dashboard reads.
+//
+// This is the wire that was missing. `analyzeContext`, `rankSchemas` and
+// `buildTimeline` were written, tested and then called by nothing: the web
+// dashboard read a precomputed payload out of the retired Python pipeline's
+// SQLite instead, and `/api/kyber/context` fabricated the same shape from
+// per-turn counters with `toolDefinitionsByServer: {}` hard-coded. Everything
+// below is assembly of parts that already existed.
+//
+// The output shape is the payload the dashboard already consumes, so the
+// frontend does not move when the source of truth does.
+
+import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/context.js'
+import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
+import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
+import { measuredInput, sumCosts } from './cost.js'
+import { normalizeHarnessName } from './measurability.js'
+import { buildFindings } from './findings.js'
+import { buildHarnessRollup } from './harnesses.js'
+import { buildRuns } from './runs.js'
+import { CanonStore, type SessionRow } from './store.js'
+import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
+import { notMeasurable, type CanonicalRecord, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
+
+/**
+ * Default context window, used when nothing on the record says otherwise.
+ * Named rather than inlined so a wrong headroom figure is traceable to one
+ * assumption instead of looking like a measurement.
+ */
+export const DEFAULT_CONTEXT_LIMIT = 200_000
+
+/** Attributes a harness may report its context window under. */
+const CONTEXT_LIMIT_KEYS = [
+  'gen_ai.request.max_context_tokens',
+  'gen_ai.request.context_window',
+  'model_context_window',
+] as const
+
+/** Attributes naming the agent, repository and branch, for the session header. */
+const AGENT_NAME_KEYS = ['gen_ai.agent.name', 'agent.name'] as const
+const REPO_KEYS = ['vcs.repository.name', 'repo'] as const
+const BRANCH_KEYS = ['vcs.ref.head.name', 'branch'] as const
+const MODEL_KEYS = ['gen_ai.response.model', 'gen_ai.request.model', 'model'] as const
+
+function attributeOf(record: CanonicalRecord, keys: readonly string[]): string | undefined {
+  const raw = record.raw
+  if (raw === null || typeof raw !== 'object') return undefined
+  const attributes = raw as Record<string, unknown>
+  for (const key of keys) {
+    const value = attributes[key]
+    if (typeof value === 'string' && value !== '') return value
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  }
+  return undefined
+}
+
+/** A turn is a model call. Tool and structural spans are not turns. */
+function isTurn(record: CanonicalRecord): boolean {
+  return record.op === 'llm.invoke'
+}
+
+/**
+ * The turn's parts, as the analysis consumes them. Records carrying
+ * structured parts pass them through with their server attribution and
+ * harness-reported counts intact; records carrying only the flat content map
+ * are converted key by key, which loses nothing they had.
+ */
+function partsOf(record: CanonicalRecord): ContextPart[] {
+  if (record.parts !== undefined && record.parts.length > 0) {
+    return record.parts.map((part) => ({
+      part: part.part,
+      text: part.text,
+      ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
+      ...(part.server !== undefined ? { server: part.server } : {}),
+    }))
+  }
+  return Object.entries(record.content)
+    .filter((entry): entry is [ContextPart['part'], string] => typeof entry[1] === 'string')
+    .map(([part, text]) => ({ part, text }))
+}
+
+/**
+ * Merge the records' own measurability declarations. A metric is only
+ * `not_measurable` for the session when every record that spoke about it said
+ * so — one span exporting message structure means the session has structure,
+ * even if others did not (R10.1).
+ */
+export function mergeMeasurability(records: readonly CanonicalRecord[]): Measurability | undefined {
+  const seen = new Map<string, MetricAvailability[]>()
+  for (const record of records) {
+    for (const [metric, availability] of Object.entries(record.measurability ?? {})) {
+      const values = seen.get(metric) ?? []
+      values.push(availability)
+      seen.set(metric, values)
+    }
+  }
+  if (seen.size === 0) return undefined
+  const merged: Measurability = {}
+  for (const [metric, values] of seen) {
+    if (values.some((value) => value === 'measured')) merged[metric] = 'measured'
+    else if (values.some((value) => value === 'derived')) merged[metric] = 'derived'
+    else {
+      merged[metric] = values.find(
+        (value): value is NotMeasurable =>
+          typeof value === 'object' && value.availability === 'not_measurable',
+      ) ?? {
+        availability: 'not_measurable',
+        reason: 'The source did not provide this metric.',
+      }
+    }
+  }
+  return merged
+}
+
+function unavailableFor(measurability: Measurability | undefined, metric: string): NotMeasurable | undefined {
+  const value = measurability?.[metric]
+  return typeof value === 'object' && value.availability === 'not_measurable' ? value : undefined
+}
+
+/**
+ * Tool definitions for the schema ranking. Only parts carrying a ground-truth
+ * `server` are attributed to one; the rest are built-in as far as this system
+ * is concerned. Splitting a prefixed name to recover a server is the thing
+ * R8.3 forbids, because delimiters occur inside real server names.
+ */
+function toolDefinitionsOf(
+  records: readonly CanonicalRecord[],
+  countTokens: (text: string) => number,
+): ToolDefinition[] {
+  const byName = new Map<string, ToolDefinition>()
+  for (const record of records) {
+    for (const part of record.parts ?? []) {
+      if (part.part !== 'tool_definitions') continue
+      for (const tool of expandDefinitions(part.text)) {
+        const existing = byName.get(tool.name)
+        if (existing === undefined) {
+          byName.set(tool.name, {
+            name: tool.name,
+            // A part's server applies to what it carried; an aggregate blob
+            // that named no server yields tools with no server, which the
+            // ranking reports as built-in rather than grouping by a guess.
+            ...(part.server !== undefined ? { server: part.server } : {}),
+            // Per-tool cost is always derived. The harness's aggregate
+            // `tool_tokens` covers the whole blob and cannot be divided
+            // across N tools without inventing the split -- it is used for
+            // the context bucket total, not for this ranking.
+            tokens: countTokens(tool.text),
+            turnsResident: 1,
+          })
+        } else {
+          existing.turnsResident = (existing.turnsResident ?? 0) + 1
+        }
+      }
+    }
+  }
+  return [...byName.values()]
+}
+
+/**
+ * Split a tool-definition part into individual tools. Harnesses send either
+ * one definition per part or the whole catalogue as a single JSON array; an
+ * array left unsplit ranks as one tool whose name is the entire blob, which
+ * is how "[{\"name\": \"define_subagent\"}, ...]" ends up in a cost table.
+ */
+function expandDefinitions(text: string): { name: string; text: string }[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return [{ name: text, text }]
+  }
+
+  const one = (value: unknown): { name: string; text: string } => {
+    const asText = typeof value === 'string' ? value : JSON.stringify(value)
+    if (value !== null && typeof value === 'object') {
+      const named = (value as { name?: unknown; function?: { name?: unknown } })
+      if (typeof named.name === 'string') return { name: named.name, text: asText }
+      // OpenAI-shaped definitions nest the name under `function`.
+      if (typeof named.function?.name === 'string') return { name: named.function.name, text: asText }
+    }
+    return { name: asText, text: asText }
+  }
+
+  return Array.isArray(parsed) ? parsed.map(one) : [one(parsed)]
+}
+
+/** Tool names the session actually called, from its tool spans. */
+function invocationsOf(records: readonly CanonicalRecord[]): string[] {
+  return records
+    .filter((record) => record.op === 'tool.invoke')
+    .map((record) => attributeOf(record, ['gen_ai.tool.name']) ?? record.name)
+}
+
+/**
+ * Whether a group of records says anything at all. The live collector stores
+ * every span it receives, including ones that arrive with no attributes and
+ * no counters -- 15,535 of them in the measured corpus, every one stamped
+ * `op: llm.invoke` and `harness: unattributed` by a receiver that hard-codes
+ * both. Building sessions out of those manufactures a session list of
+ * near-empty rows. They are skipped here; the receiver should quarantine them
+ * at ingest instead, which is a separate fix.
+ */
+function hasEvidence(records: readonly CanonicalRecord[]): boolean {
+  // A session is a conversation with a model. A trace carrying no model call
+  // is not one, however many spans it holds: the receiver ingests everything
+  // sent to it, including the HTTP client and server spans emitted by
+  // instrumented libraries — 29,771 of them in the measured corpus, with no
+  // tokens and no content, which grouped by trace into 44 rows that looked
+  // like sessions and were not. Requiring a turn is what distinguishes an
+  // agent session from ambient telemetry that happened to share a trace.
+  const turns = records.filter(isTurn)
+  if (turns.length === 0) return false
+
+  return turns.some(
+    (record) =>
+      measuredInput(record.tokens) > 0 ||
+      record.tokens.output > 0 ||
+      (record.parts?.length ?? 0) > 0 ||
+      Object.keys(record.content).length > 0,
+  )
+}
+
+export type BuildSessionsReport = {
+  built: number
+  skipped: number
+  /** Rows removed because their session no longer builds. */
+  pruned: number
+  /** Harness rollup rows rebuilt over the sessions, runs and executions. */
+  rollups: number
+  /** Findings the detector suite emitted over the rebuilt runs. */
+  findings: number
+}
+
+export type AsadContextBucket = {
+  buckets: Record<string, number | NotMeasurable>
+  reported_input: number | NotMeasurable
+}
+
+export type AsadTool = {
+  schema_tokens: number
+  invocations: number
+  turns_resident: number
+}
+
+export type AsadServer = {
+  server: string
+  is_mcp: true
+  tools: number
+  schema_tokens: number
+  invocations: number
+  unused_tools: number
+  unused_cost: number
+}
+
+export type AsadSessionPayload = {
+  id: string
+  session_id: string
+  harness: string
+  label: string
+  agent_name: string | null
+  repo: string | null
+  branch: string | null
+  span_count: number
+  context: {
+    first: AsadContextBucket
+    last: AsadContextBucket
+    [key: string]: unknown
+  }
+  tools: AsadTool[]
+  timeline: ReturnType<typeof buildTimeline>['children'] | NotMeasurable
+  turns: Array<Record<string, unknown>>
+  requests: Array<Record<string, unknown>>
+  servers: AsadServer[]
+  coverage: Record<string, number>
+  problems: Array<Record<string, unknown>>
+  reconciliation: Array<Record<string, unknown>>
+  summary: Record<string, unknown>
+  [key: string]: unknown
+}
+
+/**
+ * Build (or rebuild) every derived session in the store.
+ *
+ * Rebuilding is always safe: the `session` table is a cache over `records`,
+ * and every row is replaced wholesale.
+ */
+export async function buildSessions(store: CanonStore): Promise<BuildSessionsReport> {
+  // Counted through the store's `token_cache` memo, not the bare encoder. The
+  // memo is what R4.6 provisioned the table for, and passing the raw counter
+  // here is why it had never held a row: a rebuild re-tokenized every part of
+  // every session, and a rebuild is the common case.
+  const counter = createCachedCounter(store.tokenCache(), await activeTokenizer(), await loadO200kCounter())
+  const countTokens = counter.count
+  const report: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0, rollups: 0, findings: 0 }
+  const built = new Set<string>()
+
+  for (const key of store.sessionKeys()) {
+    const records = store.recordsForSession(key.key)
+    if (records.length === 0 || !hasEvidence(records)) {
+      report.skipped += 1
+      continue
+    }
+    store.upsertSession(buildSessionRow(key.key, records, countTokens))
+    built.add(key.key)
+    report.built += 1
+  }
+
+  // Counting is done; the buffered misses are written once rather than one
+  // fsync at a time.
+  counter.flush()
+
+  // A rebuild is authoritative. Rows from an earlier build whose session no
+  // longer qualifies are removed rather than left to haunt the session list —
+  // this is a cache over `records`, so a stale row is simply wrong.
+  for (const sessionId of store.builtSessionIds()) {
+    if (built.has(sessionId)) continue
+    store.deleteSession(sessionId)
+    report.pruned += 1
+  }
+
+  // Rebuild run and execution tables over canonical records (D13, ADR 0008)
+  await buildRuns(store)
+
+  // Everything downstream of `run` is a cache over the same records, so it is
+  // rebuilt here too. Leaving rollups and findings to the refresh path alone
+  // let `kyber build` produce runs the dashboard could list but not score: the
+  // harness endpoint 404s on a missing rollup and the scorecard then reads as
+  // "telemetry missing" for telemetry that was collected and never aggregated.
+  report.rollups = buildHarnessRollup(store).length
+  report.findings = buildFindings(store).findingsBuilt
+
+  return report
+}
+
+/** Build one session row from its records. Pure — exported for testing. */
+export function buildSessionRow(
+  sessionId: string,
+  records: readonly CanonicalRecord[],
+  countTokens: (text: string) => number,
+): SessionRow {
+  const turnRecords = records.filter(isTurn)
+  const first = records[0]!
+  // The canonical harness, not the provider entry the record arrived under.
+  // `run`, `execution` and `listHarnesses` are all keyed canonically, and
+  // storing the raw name here meant the rollup's `listSessions(harness)` never
+  // matched them: the claude-code scorecard computed its context pressure,
+  // cache hit rate and tool yield from the 1 session stored as `claude-code`
+  // while 58 more sat under `claude`, and still reported a sample count of 59
+  // because that count comes from runs. Cursor lost 10 sessions the same way.
+  const harness = normalizeHarnessName(first.harness)
+
+  // Only turns with a measured input can be charted against the context
+  // window. A span that carried content but no counters still happened -- it
+  // stays in `turns` for spend -- but reconciling buckets against an input of
+  // zero yields a negative residual, which is not a finding about the model's
+  // context, only about the absent counter. The count is reported so the
+  // omission is stated rather than hidden.
+  const measuredTurns = turnRecords.filter((record) => measuredInput(record.tokens) > 0)
+  const unmeasuredTurns = turnRecords.length - measuredTurns.length
+  const contextTurns: ContextTurn[] = measuredTurns.map((record) => ({
+    parts: partsOf(record),
+    inputTokens: measuredInput(record.tokens),
+    freshInput: record.tokens.freshInput,
+  }))
+
+  const contextLimit = Number(
+    turnRecords.map((r) => attributeOf(r, CONTEXT_LIMIT_KEYS)).find((v) => v !== undefined) ??
+      DEFAULT_CONTEXT_LIMIT,
+  )
+  const measurability = mergeMeasurability(records)
+  const context = analyzeContext(contextTurns, {
+    contextLimit: Number.isFinite(contextLimit) && contextLimit > 0 ? contextLimit : DEFAULT_CONTEXT_LIMIT,
+    countTokens,
+    ...(measurability !== undefined ? { measurability } : {}),
+  })
+
+  const definitions = toolDefinitionsOf(records, countTokens)
+  const schema = rankSchemas(definitions, turnRecords.length, invocationsOf(records), undefined, measurability)
+  const invocations = invocationsOf(records)
+  const invocationCounts = new Map<string, number>()
+  for (const name of invocations) invocationCounts.set(name, (invocationCounts.get(name) ?? 0) + 1)
+  const rankedTools = schema.measurable
+    ? schema.ranked
+    : definitions.map((definition) => ({
+        name: definition.name,
+        ...(definition.server !== undefined ? { server: definition.server } : {}),
+        cost: definition.tokens * (definition.turnsResident ?? turnRecords.length),
+      }))
+  const definitionsByName = new Map(definitions.map((definition) => [definition.name, definition]))
+  const tools: AsadTool[] = rankedTools.map((tool) => {
+    const definition = definitionsByName.get(tool.name)
+    const schemaTokens = definition?.tokens ?? 0
+    const turnsResident = definition?.turnsResident ?? turnRecords.length
+    return {
+      schema_tokens: schemaTokens,
+      invocations: invocationCounts.get(tool.name) ?? 0,
+      turns_resident: turnsResident,
+    }
+  })
+  const servers: AsadServer[] = schema.measurable
+    ? [...schema.byServer.entries()].map(([server]) => {
+        const serverTools = rankedTools.filter((tool) => tool.server === server)
+        return {
+          server,
+          is_mcp: true,
+          tools: serverTools.length,
+          schema_tokens: serverTools.reduce(
+            (sum, tool) => sum + (definitionsByName.get(tool.name)?.tokens ?? 0),
+            0,
+          ),
+          invocations: serverTools.reduce(
+            (sum, tool) => sum + (invocationCounts.get(tool.name) ?? 0),
+            0,
+          ),
+          unused_tools: serverTools.filter((tool) => (invocationCounts.get(tool.name) ?? 0) === 0).length,
+          unused_cost: serverTools
+            .filter((tool) => (invocationCounts.get(tool.name) ?? 0) === 0)
+            .reduce((sum, tool) => sum + tool.cost, 0),
+        }
+      })
+    : []
+
+  const analyzedTurns = context.measurable ? context.turns : []
+  const contextBucketDeclarations = {
+    system_prompt: 'system_prompt',
+    conversation_history: 'conversation_history',
+    tool_definitions: 'tool_definitions',
+    tool_results: 'tool_result_content',
+    response: 'response',
+  } as const
+  const unavailableBuckets = Object.fromEntries(
+    Object.entries(contextBucketDeclarations).flatMap(([bucket, declaration]) => {
+      const unavailable =
+        unavailableFor(measurability, declaration) ??
+        (!context.measurable
+          ? notMeasurable(`Session records for ${harness} did not capture ${declaration}.`)
+          : undefined)
+      return unavailable === undefined ? [] : [[bucket, unavailable]]
+    }),
+  )
+  const contextBucket = (turn: (typeof analyzedTurns)[number] | undefined, reportedInput: number): AsadContextBucket => ({
+    buckets: turn?.buckets ?? (Object.keys(unavailableBuckets).length > 0 ? unavailableBuckets : {}),
+    reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
+  })
+  const contextShape = {
+    ...serializeContext(context),
+    first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
+    last: contextBucket(
+      analyzedTurns[analyzedTurns.length - 1],
+      measuredTurns[measuredTurns.length - 1]?.tokens.reportedInput ?? 0,
+    ),
+    unmeasuredTurns,
+  }
+
+  const timeline = buildTimeline([...records])
+  const cost = sumCosts(records.map((record) => record.cost))
+
+  const totals = turnRecords.reduce(
+    (acc, record) => ({
+      input: acc.input + measuredInput(record.tokens),
+      output: acc.output + record.tokens.output,
+      cacheRead: acc.cacheRead + record.tokens.cacheRead,
+      cacheCreation: acc.cacheCreation + record.tokens.cacheCreation,
+    }),
+    { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+  )
+
+  const models = [...new Set(turnRecords.map((r) => attributeOf(r, MODEL_KEYS)).filter(Boolean))]
+  const started = records[0]!.timestamp
+  const ended = records[records.length - 1]!.timestamp
+
+  const payload: AsadSessionPayload = {
+    id: sessionId,
+    session_id: sessionId,
+    harness,
+    label: first.name,
+    agent_name: attributeOf(first, AGENT_NAME_KEYS) ?? null,
+    repo: attributeOf(first, REPO_KEYS) ?? null,
+    branch: attributeOf(first, BRANCH_KEYS) ?? null,
+    span_count: records.length,
+    summary: {
+      turn_count: turnRecords.length,
+      request_count: records.filter((r) => r.parentSpanId === null).length,
+      total_input: unavailableFor(measurability, 'token_usage') ?? totals.input,
+      total_output: totals.output,
+      total_cache_read: totals.cacheRead,
+      total_cache_creation: totals.cacheCreation,
+      duration_ms: records.reduce((sum, record) => sum + record.durationMs, 0),
+      models,
+      cost: cost.ok ? cost.total : { basis: 'unknown' as const, status: 'no_rate' as const },
+    },
+    // The analysis output, verbatim. `toolDefinitionsByServer` is a Map, which
+    // JSON.stringify would silently render as {} — convert it explicitly so a
+    // per-server band that exists in the data survives to the chart.
+    context: contextShape,
+    tools,
+    schema: schema.measurable
+      ? {
+          measurable: true as const,
+          byServer: Object.fromEntries(schema.byServer),
+          neverInvoked: schema.neverInvoked,
+          unusedRange: schema.unusedRange,
+          turns: schema.turns,
+        }
+      : unavailableFor(measurability, 'schema_cost') ?? {
+          availability: 'not_measurable',
+          reason: 'The source did not provide tool-definition schema data.',
+        },
+    turns: turnRecords.map((record, index) => ({
+      index,
+      spanId: record.spanId,
+      timestamp: record.timestamp,
+      model: attributeOf(record, MODEL_KEYS) ?? null,
+      input: measuredInput(record.tokens),
+      output: record.tokens.output,
+      fresh: record.tokens.freshInput,
+      cache_read: record.tokens.cacheRead,
+      cache_creation: record.tokens.cacheCreation,
+      reasoning: record.tokens.reasoning ?? null,
+    })),
+    // ASAD renders the session root's children; the synthetic root is an
+    // analysis detail and is not part of the wire contract. The attribute maps
+    // are dropped on the way out — see `withoutAttributes`.
+    timeline: unavailableFor(measurability, 'execution_structure') ?? withoutAttributes(timeline.children),
+    requests: records
+      .filter((record) => record.parentSpanId === null)
+      .map((record) => ({
+        request: record.spanId,
+        timestamp: typeof record.timestamp === 'string' ? record.timestamp : record.timestamp.toISOString(),
+        turns: record.op === 'llm.invoke' ? 1 : 0,
+        model: attributeOf(record, MODEL_KEYS) ?? null,
+      })),
+    servers,
+    coverage: {
+      schema: schema.measurable ? 1 : 0,
+      context: context.measurable ? 1 : 0,
+    },
+    problems: [],
+    reconciliation: turnRecords.map((record) => ({
+      request: record.spanId,
+      root_input: record.tokens.reportedInput,
+      sum_chat_input: measuredInput(record.tokens),
+      input_match: record.tokens.reportedInput === measuredInput(record.tokens),
+      root_output: record.tokens.reportedOutput,
+      sum_chat_output: record.tokens.output,
+      output_match: record.tokens.reportedOutput === record.tokens.output,
+    })),
+    subagents: subagentSessions(timeline),
+    auxiliary: auxiliarySpend(timeline),
+    measurability: measurability ?? {},
+  }
+
+  const parentSessionAttr =
+    attributeOf(first, ['parent_session', 'parent_session_id', 'gen_ai.parent_session_id', 'parentSession']) ?? null
+  const isSubagent =
+    parentSessionAttr !== null ||
+    Boolean(attributeOf(first, ['gen_ai.is_subagent', 'is_subagent']))
+
+  return {
+    sessionId,
+    harness,
+    label: first.name,
+    isSubagent,
+    parentSession: parentSessionAttr,
+    agentName: attributeOf(first, AGENT_NAME_KEYS) ?? null,
+    repo: attributeOf(first, REPO_KEYS) ?? null,
+    branch: attributeOf(first, BRANCH_KEYS) ?? null,
+    started: typeof started === 'string' ? started : started.toISOString(),
+    ended: typeof ended === 'string' ? ended : ended.toISOString(),
+    payload,
+  }
+}
+
+/**
+ * The timeline as it is persisted: structure and metadata, without the
+ * harness-emitted attribute map each node carried.
+ *
+ * Those maps are the record's raw span payload, verbatim. Keeping them here
+ * meant the derived cache re-stored the entire raw corpus uncompressed — 266 MB
+ * of a single 264 MB session payload, and nearly all of the 995 MB the session
+ * table held, which is what made rebuilding one harness rollup cost 4.4 GB.
+ * They are still available per span through `CanonStore.spanAttributes`, which
+ * the inspector calls for the one node it is showing (R9.2 is preserved: the
+ * attributes are inspectable, they are simply no longer copied into every
+ * session row).
+ */
+function withoutAttributes(
+  nodes: ReturnType<typeof buildTimeline>['children'],
+): ReturnType<typeof buildTimeline>['children'] {
+  return nodes.map((node) => ({
+    ...node,
+    attributes: {},
+    children: withoutAttributes(node.children),
+  }))
+}
+
+/** JSON-safe context analysis: the per-server Map becomes an object. */
+function serializeContext(context: ReturnType<typeof analyzeContext>) {
+  if (!context.measurable) return context
+  return {
+    ...context,
+    turns: context.turns.map((turn) => ({
+      ...turn,
+      toolDefinitionsByServer: Object.fromEntries(turn.toolDefinitionsByServer),
+    })),
+  }
+}

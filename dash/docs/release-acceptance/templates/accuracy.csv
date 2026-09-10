@@ -1,0 +1,1 @@
+run_id,case_id,persona,surface,filter,provider,session_id,expected_calls,actual_calls,expected_input_tokens,actual_input_tokens,expected_output_tokens,actual_output_tokens,expected_cache_read,actual_cache_read,expected_cache_write,actual_cache_write,expected_reasoning,actual_reasoning,expected_cost_usd,actual_cost_usd,priced_state,estimated_state,status,evidence,notes

@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using System.Threading;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
@@ -29,7 +30,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
     internal DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    public override int Execute(CommandContext context, DocsIntegrityCheckSettings settings)
+    protected override int Execute(CommandContext context, DocsIntegrityCheckSettings settings, CancellationToken cancellationToken)
     {
         try
         {
@@ -46,6 +47,9 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
         }
     }
 
+    public int Execute(CommandContext context, DocsIntegrityCheckSettings settings) => Execute(context, settings, CancellationToken.None);
+
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static int FindingExitCode(DiagnosticReport report, string failOn) =>
         failOn.Trim().ToLowerInvariant() switch
         {
@@ -54,6 +58,7 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
             "error" => report.HasErrors ? 1 : 0,
             _ => throw new ArgumentException("--fail-on must be none, warning, or error.", nameof(failOn))
         };
+#pragma warning restore CA1308
 
     private static bool HasOperationalErrors(DiagnosticReport report) =>
         report.Items.Any(item =>
@@ -73,7 +78,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
     internal DocsReviewExportCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    public override int Execute(CommandContext context, DocsReviewExportSettings settings)
+    protected override int Execute(CommandContext context, DocsReviewExportSettings settings, CancellationToken cancellationToken)
     {
         try
         {
@@ -99,6 +104,8 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, DocsReviewExportSettings settings) => Execute(context, settings, CancellationToken.None);
 }
 
 public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
@@ -111,7 +118,7 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
     internal DocsReviewImportCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    public override int Execute(CommandContext context, DocsReviewImportSettings settings)
+    protected override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
     {
         try
         {
@@ -129,6 +136,8 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, DocsReviewImportSettings settings) => Execute(context, settings, CancellationToken.None);
 }
 
 public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
@@ -141,7 +150,7 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
     internal DocsGlossaryCommand(IDocsAnalysisCommandService service) =>
         _service = service ?? throw new ArgumentNullException(nameof(service));
 
-    public override int Execute(CommandContext context, DocsGlossarySettings settings)
+    protected override int Execute(CommandContext context, DocsGlossarySettings settings, CancellationToken cancellationToken)
     {
         try
         {
@@ -163,6 +172,8 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, DocsGlossarySettings settings) => Execute(context, settings, CancellationToken.None);
 }
 
 internal static class DocsAnalysisCommandErrors

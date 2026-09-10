@@ -6,7 +6,9 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core/Docs
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-09-03
+decided-by:
+  - adr/0010-keywords-prefix-coverage-and-oov-idf
 code-refs:
   - DocumentLoader
   - DocumentCorpus
@@ -28,7 +30,8 @@ DocumentLoader.Load()        walk every <docs-root>/**/*.md, parse frontmatter +
 DocumentCorpus.Build()       BM25 term statistics, fused term vectors   → DocumentCorpus
         │
 DocumentIndex.Build()        resolve code-refs / api-endpoints against
-                             the code graph, index docs by symbol       → DocumentIndex
+                             the code graph, index docs by symbol and
+                             by frontmatter keywords                    → DocumentIndex
         │
 DocumentIndexHost.Current()  cache, and rebuild whichever half is stale
 ```

@@ -37,7 +37,7 @@ public static class SquadMarkdownDocument
 
         builder.Append("---\n");
 
-        string normalizedBody = body.Replace("\r\n", "\n");
+        string normalizedBody = body.Replace("\r\n", "\n", StringComparison.Ordinal);
         builder.Append(normalizedBody);
         if (!normalizedBody.EndsWith('\n'))
         {

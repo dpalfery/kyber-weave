@@ -1,0 +1,7 @@
+{
+  // Vitest must only discover vitest.config.*. The default include also matches
+  // vite.config.ts (e.g. dash/dash/vite.config.ts), which imports
+  // @vitejs/plugin-react from dash/dash/node_modules. Vitest transpiles it
+  // under dash/node_modules/.vite-temp, where that package is unresolvable.
+  "vitest.configSearchPatternInclude": "**/vitest.config.{ts,js,mjs,cjs,cts,mts}"
+}

@@ -24,6 +24,7 @@ public class AnalysisSettings : CommandSettings
     [Description("Path to kyber-weave.yml. Defaults to <path>/.kyber-weave/kyber-weave.yml (or legacy <path>/kyber-weave.yml) when present.")]
     public string? Config { get; set; }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     public OutputFormat ParsedFormat => Format.ToLowerInvariant() switch
     {
         "json" => OutputFormat.Json,
@@ -31,4 +32,5 @@ public class AnalysisSettings : CommandSettings
         "markdown" or "md" => OutputFormat.Markdown,
         _ => OutputFormat.Table
     };
+#pragma warning restore CA1308
 }

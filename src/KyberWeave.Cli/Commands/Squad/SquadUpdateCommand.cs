@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using System.Threading;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -36,7 +37,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadUpdateSettings settings)
+    protected override int Execute(CommandContext context, SquadUpdateSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -127,7 +128,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.UpdateAsync(updateRequest).GetAwaiter().GetResult();
+            SquadLifecycleResult result = lifecycleService.UpdateAsync(updateRequest, cancellationToken).GetAwaiter().GetResult();
             if (result.Success)
             {
                 if (settings.DryRun)
@@ -164,4 +165,6 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, SquadUpdateSettings settings) => Execute(context, settings, CancellationToken.None);
 }

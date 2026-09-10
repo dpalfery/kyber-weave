@@ -1,0 +1,61 @@
+id,phase,persona,surface,test,method,automation,evidence,threshold,blocking,owner
+RA-PROV-001,provenance,both,all,Authoritative remote SHA and ancestry pinned,script,full,provenance.json,exact match,yes,release
+RA-PROV-002,provenance,both,all,CLI Desktop Menu Bar manifest versions agree,script,full,provenance.json,no unexplained drift,yes,release
+RA-PROV-003,provenance,both,all,Artifact hashes and build inputs recorded,script,full,provenance.json,all distributables hashed,yes,release
+RA-PROV-004,provenance,both,all,Build leaves tracked worktree clean,script,full,run.json,no tracked mutation,yes,build
+RA-INV-001,inventory,both,all,PATH npm bun brew and app-bundle inventory,shell,partial,residue.csv,no unintended duplicate,yes,release
+RA-INV-002,inventory,both,all,Processes helpers mounted images and launch items,shell,partial,residue.csv,no stale active copy,yes,release
+RA-INV-003,inventory,both,all,Config cache state and reversible backup sizes,shell,partial,residue.csv,backup verified,yes,release
+RA-BUILD-001,build,A,CLI,Root tests and lock tests,script,full,automated-results.json,all non-quarantined pass,yes,engineering
+RA-BUILD-002,build,A,Desktop,Desktop tests typecheck and package,script,partial,automated-results.json,pass,yes,desktop
+RA-BUILD-003,build,A,Menu Bar,Swift tests universal package and deployment target,script,full,automated-results.json,pass,yes,menubar
+RA-BUILD-004,build,A,Web,Production dashboard build,script,full,automated-results.json,pass,yes,web
+RA-INSTALL-001,install,A,CLI,Packed artifact install version and process path,shell,partial,install.json,exact candidate,yes,release
+RA-INSTALL-002,install,A,Desktop,Two uninstall reinstall cycles,computer-use,manual,click-through.csv,exact candidate twice,yes,desktop
+RA-INSTALL-003,install,A,Menu Bar,Two uninstall reinstall cycles,computer-use,manual,click-through.csv,exact candidate twice,yes,menubar
+RA-INSTALL-004,install,A,macOS,Signing entitlements and Gatekeeper,shell,partial,install.json,release policy satisfied,yes,release
+RA-INSTALL-005,install,A,all,Quit relaunch logout login persistence,computer-use,manual,click-through.csv,one healthy copy,yes,release
+RA-A-001,onboarding,A,Desktop,Zero-state onboarding every page and choice,computer-use,manual,click-through.csv,all destinations inspected,yes,product
+RA-A-002,onboarding,A,Desktop,Telemetry opt-out is clear and honored,computer-use,manual,screenshot,zero remote transmission,yes,privacy
+RA-A-003,onboarding,A,Desktop,Empty overview is honest and non-evaluative,computer-use,manual,screenshot,no false grade or totals,yes,product
+RA-A-004,onboarding,A,CLI,Help invalid options no-data and first output,shell,full,automated-results.json,actionable bounded output,yes,cli
+RA-UI-001,clickthrough,A,Desktop,Every primary destination,computer-use,manual,click-through.csv,clicked and inspected,yes,desktop
+RA-UI-002,clickthrough,A,Desktop,Every settings page control and disclosure,computer-use,manual,click-through.csv,clicked and inspected,yes,desktop
+RA-UI-003,clickthrough,A,Desktop,Periods custom dates providers filters sorts search,computer-use,manual,click-through.csv,correct state,yes,desktop
+RA-UI-004,clickthrough,A,Desktop,Detail drawer back forward refresh and shortcuts,computer-use,manual,click-through.csv,correct state,yes,desktop
+RA-UI-005,clickthrough,A,Desktop,Resize zoom light dark system keyboard-only,computer-use,manual,click-through.csv,no inaccessible content,yes,accessibility
+RA-UI-006,clickthrough,A,Desktop,Accessibility roles labels focus order,computer-use,manual,click-through.csv,no critical gap,yes,accessibility
+RA-UI-007,clickthrough,A,Menu Bar,Status item visible and left-click popover,computer-use,manual,click-through.csv,genuine click and state inspection,yes,menubar
+RA-UI-008,clickthrough,A,Menu Bar,Right-click menu settings refresh quit,computer-use,manual,click-through.csv,genuine click and state inspection,yes,menubar
+RA-UI-009,clickthrough,A,Menu Bar,All periods modes providers disclosures,computer-use,manual,click-through.csv,correct state,yes,menubar
+RA-UI-010,clickthrough,A,Web,First paint routes periods modes providers, browser,manual,click-through.csv,clicked and inspected,yes,web
+RA-UI-011,clickthrough,A,Web,Back forward reload resize themes device search,browser,manual,click-through.csv,correct state,yes,web
+RA-PERF-001,performance,A,CLI,Golden packed cold three trials,shell,partial,timings.csv,identical totals and baseline comparison,yes,performance
+RA-PERF-002,performance,A,CLI,Golden packed warm five trials,shell,partial,timings.csv,identical totals and baseline comparison,yes,performance
+RA-PERF-003,performance,A,Desktop,Visible and settled launch,shell+computer-use,manual,timings.csv,progress and product SLA,yes,performance
+RA-PERF-004,performance,A,Web,First useful paint and warm actions,browser,manual,timings.csv,flag feedback over 250ms or navigation over 1s,no,performance
+RA-PERF-005,performance,B,Desktop,Heavy cold first useful complete peak CPU RSS,shell+computer-use,manual,timings.csv,progress plus product SLA,yes,performance
+RA-PERF-006,performance,B,all,Warm navigation and detail actions,computer-use,manual,timings.csv,flag warm action over 1s,no,performance
+RA-ACC-001,accuracy,A,all,Golden calls sessions and token families,independent-calculation,partial,accuracy.csv,exact equality,yes,correctness
+RA-ACC-002,accuracy,A,all,Golden cost priced unpriced estimated,independent-calculation,partial,accuracy.csv,exact sub-cent semantics,yes,correctness
+RA-ACC-003,accuracy,A,all,UTC local boundaries custom dates,independent-calculation,partial,accuracy.csv,exact documented boundary,yes,correctness
+RA-ACC-004,accuracy,A,all,Duplicate resume subagent attribution,independent-calculation,partial,accuracy.csv,exact invariant,yes,correctness
+RA-ACC-005,accuracy,A,all,Identical filters across CLI TUI Desktop Menu Bar Web,mixed,manual,accuracy.csv,exact equality,yes,correctness
+RA-ACC-006,accuracy,B,all,Thirty raw sessions over five providers or all available,independent-sample,manual,accuracy.csv,every mismatch investigated,yes,correctness
+RA-ACC-007,accuracy,B,all,Plans quotas cache reasoning delegated cases,independent-sample,manual,accuracy.csv,semantics reconciled,yes,correctness
+RA-REC-001,recovery,A,CLI,Offline startup and cached data,shell,partial,recovery.json,bounded honest state,yes,reliability
+RA-REC-002,recovery,A,CLI,Unreadable provider file copy,shell,partial,recovery.json,actionable degraded warning,yes,reliability
+RA-REC-003,recovery,A,CLI,Exclusive locked SQLite copy,shell,partial,recovery.json,never silently empty,yes,correctness
+RA-REC-004,recovery,A,all,Corrupt and interrupted cache copy,shell,partial,recovery.json,self-heal or actionable error,yes,reliability
+RA-REC-005,recovery,A,CLI,Concurrent runs and identical totals,shell,partial,recovery.json,no corruption or mismatch,yes,reliability
+RA-REC-006,recovery,A,CLI,SIGINT then restart,shell,partial,recovery.json,clean bounded recovery,yes,reliability
+RA-REC-007,recovery,A,Desktop,Quit removes all owned processes,computer-use+shell,manual,recovery.json,within product SLA,yes,desktop
+RA-REC-008,recovery,A,Menu Bar,Sleep wake display sleep and relaunch,computer-use+shell,manual,recovery.json,item and refresh recover,yes,menubar
+RA-REC-009,recovery,A,all,Stale cache and live corpus change,mixed,manual,recovery.json,no stale success claim,yes,correctness
+RA-REC-010,recovery,A,all,No-data and unavailable-provider distinction,mixed,manual,recovery.json,no false empty result,yes,correctness
+RA-RES-001,residue,both,all,Exactly one intended active install per surface,shell,partial,residue.csv,no duplicate path or process,yes,release
+RA-RES-002,residue,both,all,Compatible history config restored and caches rebuilt,shell,partial,residue.csv,verified,yes,release
+RA-RES-003,residue,both,all,Backups inert checksummed and documented,shell,partial,residue.csv,not on PATH or active,yes,release
+RA-RES-004,residue,both,all,No mounted image installer helper or stale login item,shell,partial,residue.csv,none,yes,release
+RA-REV-001,review,both,all,Independent finding reproduction and code review,review,manual,run.json,sign-off recorded,yes,quality
+RA-REV-002,review,both,all,Affected-machine proof for environment-specific defect,external-test,manual,run.json,reporter evidence,conditional,quality

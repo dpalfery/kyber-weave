@@ -1,0 +1,12 @@
+{
+  "//": "Declaration-only build for /design-sync. The renderer has no library build, so the converter has no .d.ts tree to read prop contracts from and every emitted <Name>Props collapses to `[key: string]: unknown`. This emits real declarations into types/ (a path findTypesRoot probes) so the design agent gets the true component API. Generated output; types/ is gitignored.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "types",
+    "rootDir": "."
+  },
+  "include": ["ds-sync-entry.tsx", "renderer/vite-env.d.ts"]
+}

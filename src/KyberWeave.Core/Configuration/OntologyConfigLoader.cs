@@ -191,7 +191,9 @@ public static class OntologyConfigLoader
             return false;
         }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         docType = name.Trim().ToLowerInvariant() switch
+#pragma warning restore CA1308
         {
             "architecture" => DocType.Architecture,
             "onboarding" => DocType.Onboarding,

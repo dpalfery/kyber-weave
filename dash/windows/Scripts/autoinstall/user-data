@@ -1,0 +1,57 @@
+#cloud-config
+# Ubuntu 24.04 LTS Server autoinstall configuration for a CodeBurn desktop dev VM. Mount this
+# file as a second virtual disk (CIDATA volume) alongside the Ubuntu Server ISO in UTM and
+# the installer runs unattended end to end. Default login: codeburn / codeburn. Change the
+# identity block before running in any environment that matters.
+autoinstall:
+  version: 1
+
+  # Accept the EULA-style prompts without user input.
+  refresh-installer:
+    update: yes
+
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+
+  # Wire up a default user. Password is `codeburn`; hash generated with `openssl passwd -6`.
+  # Regenerate the hash if you care about the credentials outside of a throwaway VM.
+  identity:
+    hostname: codeburn-linux
+    username: codeburn
+    password: "$6$rounds=4096$JrKVZcJ2$F93p8IWyTlZR5p1Trmno/qCnhYI1BnbUUYdf6HsiD.XW4T0I3JtvzH40nWNy9Z1CcJ2X5C6RuzK0bj9WM3x/n."
+
+  ssh:
+    install-server: yes
+    allow-pw: yes
+
+  # Install GNOME + the build dependencies Tauri needs so the first login is already ready
+  # to run `npm run tauri dev` without another apt round trip.
+  packages:
+    - ubuntu-desktop-minimal
+    - build-essential
+    - curl
+    - wget
+    - file
+    - git
+    - libwebkit2gtk-4.1-dev
+    - libayatana-appindicator3-dev
+    - librsvg2-dev
+    - libssl-dev
+    - libxdo-dev
+    - libgtk-3-dev
+    - pkg-config
+
+  # Run the provisioner as the new user on first boot. It installs Node + Rust, pulls the
+  # repo, and runs `npm install` for the desktop app. After the script finishes, logging in
+  # to GNOME and running `cd ~/codeburn/windows && npm run tauri dev` brings the tray up.
+  late-commands:
+    - curtin in-target --target=/target -- bash -lc '
+        sudo -iu codeburn bash -lc "
+          curl -fsSL https://raw.githubusercontent.com/getagentseal/codeburn/main/windows/Scripts/provision-linux.sh \
+            -o /home/codeburn/provision.sh
+          chmod +x /home/codeburn/provision.sh
+        "
+      '
+
+  shutdown: reboot

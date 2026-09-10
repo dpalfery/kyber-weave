@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Threading;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -36,7 +37,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadDoctorSettings settings)
+    protected override int Execute(CommandContext context, SquadDoctorSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -112,6 +113,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         AnsiConsole.MarkupLine("[green]All checked prerequisites and components are healthy.[/]");
         return 0;
     }
+
+    public int Execute(CommandContext context, SquadDoctorSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static string GetCliVersion()
     {

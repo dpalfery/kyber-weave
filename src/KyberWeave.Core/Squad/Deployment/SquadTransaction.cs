@@ -27,7 +27,7 @@ public sealed record SquadTransactionStep(
 /// <summary>Receives transaction checkpoints after their corresponding filesystem mutation.</summary>
 public interface ISquadTransactionObserver
 {
-    void AfterStep(SquadTransactionStep step);
+    void AfterStep(SquadTransactionStep transactionStep);
 }
 
 internal enum SquadTransactionCheckpointKind

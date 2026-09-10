@@ -1,0 +1,20 @@
+{
+  // Typecheck gate for the merge zone. The repo-root tsconfig fixes
+  // `rootDir: "src"` and includes only `src/**/*`, so every file under
+  // `kyber/` is either unchecked or reported as outside the root — 35 such
+  // errors stand on main. This config checks the merge zone on its own terms
+  // without touching upstream's, per the ADR 0006 boundary rule.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "web"]
+}

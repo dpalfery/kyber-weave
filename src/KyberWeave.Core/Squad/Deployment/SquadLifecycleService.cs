@@ -448,7 +448,7 @@ public sealed class SquadLifecycleService
         string? infoVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         if (!string.IsNullOrWhiteSpace(infoVersion))
         {
-            int plusIdx = infoVersion.IndexOf('+');
+            int plusIdx = infoVersion.IndexOf('+', StringComparison.Ordinal);
             return plusIdx > 0 ? infoVersion[..plusIdx] : infoVersion;
         }
 
@@ -530,7 +530,9 @@ public sealed class SquadLifecycleService
                                 $"'{toolchainPath}' declares an invalid APM validated-release. A 64-character hex asset-sha256, version, and tag-commit are required.");
                         }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
                         return new SquadApmIdentity(apmVersion, apmTagCommit, apmDigest.ToLowerInvariant());
+#pragma warning restore CA1308
                     }
                     else if (valRelNode is not YamlScalarNode scalar || (scalar.Value is not null && scalar.Value != "null" && scalar.Value != "~" && scalar.Value.Length > 0))
                     {

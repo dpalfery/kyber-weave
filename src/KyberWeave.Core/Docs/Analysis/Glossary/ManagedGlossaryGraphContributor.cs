@@ -120,7 +120,9 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
         string term)
     {
         string id = TermId(term);
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         string semanticIdentity = term.Trim().ToLowerInvariant();
+#pragma warning restore CA1308
         if (identities.TryGetValue(id, out string? existing)
             && !StringComparer.Ordinal.Equals(existing, semanticIdentity))
         {
@@ -194,6 +196,7 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
 
     private static string TermId(string term)
     {
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         string slug = new string(term.Trim().ToLowerInvariant()
             .Select(character => char.IsLetterOrDigit(character) ? character : '-')
             .ToArray());
@@ -201,6 +204,7 @@ public sealed class ManagedGlossaryGraphContributor : IDocGraphContributor
             slug = slug.Replace("--", "-", StringComparison.Ordinal);
         slug = slug.Trim('-');
         return $"term:{slug}";
+#pragma warning restore CA1308
     }
 
     private sealed record TermSnapshot(string Term, IReadOnlyList<SenseSnapshot> Senses);

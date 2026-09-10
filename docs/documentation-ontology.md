@@ -5,7 +5,9 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-09-03
+decided-by:
+  - adr/0010-keywords-prefix-coverage-and-oov-idf
 ---
 
 # The documentation ontology
@@ -51,6 +53,7 @@ code-refs:
 | `technology` | The stack a coding standard governs. Declared in configuration, and equal to the folder the standard sits in. Rejected on any other doc-type. |
 | `owner` | Who answers for it. Must exist in [catalog.md](catalog.md). |
 | `last-reviewed` | ISO `yyyy-MM-dd`. Any other format is an error, not a warning. |
+| `keywords` | Domain synonyms, acronyms, or search aliases that route natural-language and specialized queries to this document. Optional. `aliases` is accepted as an internal synonym for the same list; retrieval reads the unified `Keywords` view. Empty items fail `KW-DOC-SPEC-002`. |
 | `code-refs` | Symbols this document formally claims to describe. Resolved against the code graph. |
 | `api-endpoints` | Exact route strings, e.g. `GET /api/me/usage`. Resolved against the code graph. |
 | `decided-by` | Ids of the ADRs that decided this document's content. |
@@ -148,6 +151,8 @@ diagnostic names. See [adoption](docgraph/onboarding.md).
 
 ## Related
 
+- [Retrieval and ranking](docgraph/retrieval.md) — how identity, keywords, and BM25 combine
+- [ADR 0010](adr/0010-keywords-prefix-coverage-and-oov-idf.md) — keywords, prefix coverage, OOV IDF
 - [DocGraph architecture](docgraph/architecture.md) — how the corpus becomes a graph
 - [Documentation analysis and review](docgraph/analysis.md) — how claims and terminology are compared
 - [Documentation governance](docgraph/governance.md) — the gates that enforce this file

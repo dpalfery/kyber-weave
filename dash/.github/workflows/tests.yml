@@ -1,0 +1,68 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Package floor, and the newest 22.x so paths gated on later node:zlib
+        # features (zstd, 22.15+) get exercised.
+        node-version: [22.13.0, 22]
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      # The cache-refresh-lock files exercise a cross-process file lock and are
+      # parallelism-sensitive (they fail under full worker pressure and pass serially -
+      # reproduced repeatedly on unmodified main), so they run in their own serial step
+      # below instead of making every PR roll dice.
+      # Scoping (tests/ only, app/ excluded) lives in the package.json test
+      # script since #948, so CI and a contributor's `npm test` can never drift.
+      - name: Test suite (parallel)
+        run: npm test
+      # Single forked worker, so lock contention comes only from the child
+      # processes the tests spawn deliberately. Serial because the suite is
+      # parallelism-sensitive (fails under full worker pressure, passes
+      # serially). After #904 the loser of a stale-lock contest may be
+      # timed-out or completed-by-other; this step gates CI.
+      # Step-level timeout so a stalled lock suite fails this job instead of
+      # eating the 15-minute budget and cancelling a green parallel suite.
+      - name: Cache-lock suite (serial)
+        timeout-minutes: 5
+        run: npm run test:locks
+
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test suite
+        run: npm test
+      - name: Build
+        run: npm run build

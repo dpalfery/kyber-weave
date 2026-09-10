@@ -5,7 +5,9 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-09-08
+decided-by:
+  - adr/0010-keywords-prefix-coverage-and-oov-idf
 code-refs:
   - DocumentIndex
   - DocumentCorpus
@@ -20,7 +22,7 @@ passage that answers, plus enough signal to know whether to trust it.
 
 ## Scoring
 
-Every document is scored on four independent contributions, then scaled by authority:
+Every document is scored on independent identity, title, and body contributions, then scaled by authority:
 
 ```
 score = exact-identity + partial-identity + (2.0 x title similarity) + body relevance
@@ -32,10 +34,12 @@ score = score x authority
 | Exact `id` or path match | 6.0 | the query names the document outright |
 | Exact `code-refs` match | 5.0 | the query is a symbol the document claims |
 | Exact `api-endpoints` match | 5.0 | the query is a route the document claims |
+| Exact `keywords` match | 4.0 | the query equals a declared keyword or alias |
 | Partial `id` coverage | up to 4.5 | the query names part of the id slug |
+| Partial `keywords` coverage | up to 4.5 | keyword coverage × 3.0, capped at a 1.5 multiplier |
 | Exact `component` match | 3.0 | the query is a component name |
 | Partial `component` coverage | up to 2.5 | the query names part of a component |
-| Title similarity | up to 2.0 | cosine overlap with the title |
+| Title similarity | up to 2.0 | cosine overlap with the title, ignoring question scaffolding |
 | Body relevance | up to 1.0 | BM25 over the prose, squashed to 0..1 |
 
 Frontmatter identity deliberately outranks prose. A document that *formally claims* the
@@ -47,6 +51,10 @@ Partial identity exists because ids are structured slugs (`docgraph/architecture
 controlled vocabulary. Without it, "DocGraph architecture" returned every architecture
 document in the repository: several files sharing one generic word, ranked above the one
 actually asked for.
+
+Optional `keywords` (and the internal `aliases` synonym) sit in that same identity layer:
+they are claims, not body mentions, which is why an exact keyword match outranks title and
+prose.
 
 ## Authority
 
@@ -69,7 +77,7 @@ The two multiply. A superseded plan lands at 0.22 of its raw relevance — prese
 never the first thing an agent reads. A demoted document still wins when it is named
 outright, because an exact id match scores far above the discount.
 
-## Compound names
+## Compound names and prefix coverage
 
 Both queries and bodies are vectorised with **adjacent token pairs fused**, at half
 weight. Text writing "Web UI" therefore remains reachable from a query writing "WebUI",
@@ -80,6 +88,15 @@ yields the term `loggedout`, which a troubleshooting runbook has and a spec that
 Half weight is deliberate — a fused pair is a bridge for compound names, not evidence in
 its own right, and counting it fully would let an incidental adjacency outweigh a real
 term match.
+
+Identity coverage goes further than fusion. CamelCase identities are split on letter-case
+boundaries before they are vectorised, so `KyberDash` is tokens `kyber` and `dash`, not one
+opaque `kyberdash`. Coverage then counts a hit when a query token and an identity token
+share a prefix of at least three characters either way — `dashboard` covers `dash`. Shorter
+stems are ignored so `it` cannot match `iteration`.
+
+These ranking weights and the prefix floor are the contract in
+[ADR 0010](../adr/0010-keywords-prefix-coverage-and-oov-idf.md).
 
 ## The relevance floor
 
@@ -94,6 +111,26 @@ point of having one.
 Terms appearing in more than half the corpus are dropped outright before scoring, so a
 question made entirely of them scores zero and is honestly reported as a miss instead of
 returning three confident results about nothing.
+
+Title cosine drops the scaffolding half of that filter but not the ubiquity half. Sharing
+only a scaffolding word with a title is no longer a hit — an off-topic question whose one
+scaffolding word appeared in a task plan's title used to clear the floor at 0.30 on that
+alone. Corpus-ubiquitous terms are kept, because the two filters are not the same
+judgement: a term in every *body* cannot say which body is the answer, but a title is a
+curated six-word label, and the document titled "Skills" is the one about skills however
+often this corpus says "skill". Filtering titles by ubiquity too cost that document a
+third of its score for the query "skill authoring".
+
+Note for anyone editing this page: the retrieval regression suite searches the real
+corpus, including this file. Spelling out an off-topic test query here makes that query
+answerable and fails the suite.
+
+Body BM25 still uses Robertson–Sparck Jones IDF, with one calibration: a query term that
+appears in **no** document body is not given the theoretical maximum IDF. It is treated as
+if it occurred in 20 percent of the corpus. One novel technical term therefore penalises
+coverage without dragging an otherwise matching document under the 0.25 floor. Several
+such terms still accumulate in `askedFor`, so an off-topic question remains an explicit
+miss.
 
 ## Budget, not truncation
 
@@ -130,3 +167,4 @@ all-pairs scan and never calls an embedding endpoint. See
 - [MCP server runbook](mcp-runbook.md) — the tools that expose this
 - [Documentation analysis and review](analysis.md) — claim comparison and review workflow
 - [The documentation ontology](../documentation-ontology.md) — the identity ranking reads
+- [ADR 0010](../adr/0010-keywords-prefix-coverage-and-oov-idf.md) — keywords, prefix coverage, OOV IDF

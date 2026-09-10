@@ -1,0 +1,252 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "KyberDash: OTel Trace Collector (Port 4318)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--no-deprecation",
+        "--import",
+        "tsx"
+      ],
+      "program": "${workspaceFolder}/dash/src/cli.ts",
+      "args": [
+        "otel",
+        "--port",
+        "4318"
+      ],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "KyberDash: Terminal TUI Dashboard",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--no-deprecation",
+        "--import",
+        "tsx"
+      ],
+      "program": "${workspaceFolder}/dash/src/cli.ts",
+      "args": [],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "KyberDash: Terminal TUI Dashboard (Custom Args)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--no-deprecation",
+        "--import",
+        "tsx"
+      ],
+      "program": "${workspaceFolder}/dash/src/cli.ts",
+      "args": [
+        "${input:tuiArgs}"
+      ],
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "KyberDash: Web Dashboard (Browser Frontend)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:4747",
+      "webRoot": "${workspaceFolder}/dash/dash",
+      "sourceMaps": true,
+      "preLaunchTask": "kyberdash:run-supporting-system"
+    },
+    {
+      "name": "KyberDash: Web Dashboard (CLI Server - Auto-Open Browser)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--no-deprecation",
+        "--import",
+        "tsx"
+      ],
+      "program": "${workspaceFolder}/dash/src/cli.ts",
+      "args": [
+        "web",
+        "--port",
+        "4747"
+      ],
+      "preLaunchTask": "kyberdash:build-supporting-system",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "KyberDash: Web Dashboard (CLI Server)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "--no-deprecation",
+        "--import",
+        "tsx"
+      ],
+      "program": "${workspaceFolder}/dash/src/cli.ts",
+      "args": [
+        "web",
+        "--port",
+        "4747",
+        "--no-open"
+      ],
+      "preLaunchTask": "kyberdash:build-supporting-system",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "name": "KyberDash: Web Dashboard (Browser on Port 4747)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://127.0.0.1:4747",
+      "webRoot": "${workspaceFolder}/dash/dash",
+      "sourceMaps": true
+    },
+    {
+      "name": "KyberDash: Web Dashboard (Vite HMR Dev - Port 5173)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/dash/dash/src",
+      "sourceMaps": true,
+      "preLaunchTask": "kyberdash:run-vite-dev-system"
+    },
+    {
+      "name": "KyberDash: Electron Desktop (Main Process)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dash/app",
+      "runtimeExecutable": "${workspaceFolder}/dash/app/node_modules/.bin/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/dash/app/node_modules/.bin/electron.cmd"
+      },
+      "args": [
+        ".",
+        "--remote-debugging-port=9222"
+      ],
+      "env": {
+        "VITE_DEV_SERVER_URL": "http://127.0.0.1:5173"
+      },
+      "sourceMaps": true,
+      "outFiles": [
+        "${workspaceFolder}/dash/app/dist/electron/**/*.js"
+      ],
+      "preLaunchTask": "kyberdash:build-electron",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "name": "KyberDash: Electron Desktop (Attach Renderer)",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/dash/app/renderer",
+      "timeout": 30000
+    },
+    {
+      "name": "KyberDash: Electron Desktop (Demo Bridge)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/dash",
+      "program": "${workspaceFolder}/dash/app/demo-bridge.mjs",
+      "preLaunchTask": "kyberdash:build-cli",
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "name": "KyberDash: Menubar Tray (Rust Backend - LLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/dash/windows/src-tauri/target/debug/codeburn-menubar",
+      "windows": {
+        "program": "${workspaceFolder}/dash/windows/src-tauri/target/debug/codeburn-menubar.exe"
+      },
+      "cwd": "${workspaceFolder}/dash/windows/src-tauri",
+      "env": {
+        "CODEBURN_BIN": "node ${workspaceFolder}/dash/dist/cli.js"
+      },
+      "preLaunchTask": "kyberdash:build-tauri-debug"
+    },
+    {
+      "name": "KyberDash: Menubar Tray (Rust Backend - Windows MSVC)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/dash/windows/src-tauri/target/debug/codeburn-menubar.exe",
+      "cwd": "${workspaceFolder}/dash/windows/src-tauri",
+      "env": {
+        "CODEBURN_BIN": "node ${workspaceFolder}/dash/dist/cli.js"
+      },
+      "preLaunchTask": "kyberdash:build-tauri-debug"
+    },
+    {
+      "name": "KyberDash: Menubar Tray (Popover Frontend)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:1420",
+      "webRoot": "${workspaceFolder}/dash/windows/src",
+      "sourceMaps": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "KyberDash: Web Dashboard (Full Stack: CLI Server + Browser)",
+      "configurations": [
+        "KyberDash: Web Dashboard (CLI Server)",
+        "KyberDash: Web Dashboard (Browser on Port 4747)"
+      ],
+      "stopAll": true
+    },
+    {
+      "name": "KyberDash: Web Dashboard (Full Stack: CLI Server + Vite HMR Dev)",
+      "configurations": [
+        "KyberDash: Web Dashboard (CLI Server)",
+        "KyberDash: Web Dashboard (Vite HMR Dev - Port 5173)"
+      ],
+      "stopAll": true
+    },
+    {
+      "name": "KyberDash: Electron Desktop (Main + Renderer)",
+      "configurations": [
+        "KyberDash: Electron Desktop (Main Process)",
+        "KyberDash: Electron Desktop (Attach Renderer)"
+      ],
+      "stopAll": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "tuiArgs",
+      "type": "promptString",
+      "description": "Enter CLI flags for KyberDash TUI (e.g. '--period week' or '--provider claude')",
+      "default": ""
+    }
+  ]
+}

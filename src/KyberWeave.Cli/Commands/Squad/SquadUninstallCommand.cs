@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Deployment;
+using System.Threading;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -30,7 +31,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadUninstallSettings settings)
+    protected override int Execute(CommandContext context, SquadUninstallSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -49,7 +50,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.UninstallAsync(uninstallRequest).GetAwaiter().GetResult();
+            SquadLifecycleResult result = lifecycleService.UninstallAsync(uninstallRequest, cancellationToken).GetAwaiter().GetResult();
             if (result.Success)
             {
                 if (result.Plan is null)
@@ -90,4 +91,6 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, SquadUninstallSettings settings) => Execute(context, settings, CancellationToken.None);
 }

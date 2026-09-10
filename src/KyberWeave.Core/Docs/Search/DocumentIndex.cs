@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Text;
@@ -20,13 +21,14 @@ namespace KyberWeave.Core.Docs.Search;
 /// flight always sees one coherent view of the corpus.
 /// </para>
 /// </remarks>
-public sealed class DocumentIndex
+public sealed partial class DocumentIndex
 {
     /// <summary>Frontmatter identity outranks prose: a document that formally claims the
     /// query term is a better answer than one that merely discusses it.</summary>
     private const double IdWeight = 6.0;
     private const double CodeRefWeight = 5.0;
     private const double EndpointWeight = 5.0;
+    private const double KeywordWeight = 4.0;
     private const double ComponentWeight = 3.0;
     private const double TitleWeight = 2.0;
     private const double BodyWeight = 1.0;
@@ -39,6 +41,7 @@ public sealed class DocumentIndex
     /// Partial matches sit below their exact counterparts but above prose.
     /// </summary>
     private const double IdPartialWeight = 4.5;
+    private const double KeywordPartialWeight = 3.0;
     private const double ComponentPartialWeight = 2.5;
 
     /// <summary>
@@ -83,15 +86,20 @@ public sealed class DocumentIndex
 
     private readonly DocumentCorpus _corpus;
     private readonly Dictionary<string, List<DocumentModel>> _bySymbol;
+    private readonly Dictionary<string, List<DocumentModel>> _byKeyword;
     private readonly Dictionary<string, IReadOnlyList<CodeJoin>> _joinsByPath;
+
+    internal IReadOnlyDictionary<string, List<DocumentModel>> ByKeyword => _byKeyword;
 
     private DocumentIndex(
         DocumentCorpus corpus,
         Dictionary<string, List<DocumentModel>> bySymbol,
+        Dictionary<string, List<DocumentModel>> byKeyword,
         Dictionary<string, IReadOnlyList<CodeJoin>> joinsByPath)
     {
         _corpus = corpus;
         _bySymbol = bySymbol;
+        _byKeyword = byKeyword;
         _joinsByPath = joinsByPath;
     }
 
@@ -112,11 +120,24 @@ public sealed class DocumentIndex
         ArgumentNullException.ThrowIfNull(resolver);
 
         Dictionary<string, List<DocumentModel>> bySymbol = new Dictionary<string, List<DocumentModel>>(StringComparer.Ordinal);
+        Dictionary<string, List<DocumentModel>> byKeyword = new Dictionary<string, List<DocumentModel>>(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, IReadOnlyList<CodeJoin>> joinsByPath = new Dictionary<string, IReadOnlyList<CodeJoin>>(StringComparer.Ordinal);
 
         foreach (DocumentModel doc in corpus.Documents)
         {
             List<CodeJoin> joins = new List<CodeJoin>();
+
+            foreach (string keyword in doc.Keywords)
+            {
+                string trimmed = keyword.Trim();
+                if (trimmed.Length == 0) continue;
+                if (!byKeyword.TryGetValue(trimmed, out List<DocumentModel>? list))
+                {
+                    list = [];
+                    byKeyword[trimmed] = list;
+                }
+                if (!list.Contains(doc)) list.Add(doc);
+            }
 
             foreach (string symbol in doc.CodeRefs)
             {
@@ -141,7 +162,7 @@ public sealed class DocumentIndex
             joinsByPath[doc.RelativePath] = joins;
         }
 
-        return new DocumentIndex(corpus, bySymbol, joinsByPath)
+        return new DocumentIndex(corpus, bySymbol, byKeyword, joinsByPath)
         {
             CodeGraphAvailable = resolver.IsAvailable
         };
@@ -183,12 +204,15 @@ public sealed class DocumentIndex
         // part of a document is the answer.
         Dictionary<string, double> rarityWeighted = _corpus.WeightByRarity(queryVector);
 
+        // Titles are compared against the question's subject, not its phrasing.
+        Dictionary<string, double> titleQuery = TitleQuery(coverageTerms);
+
         List<(DocumentModel Doc, double Score)> scored = new List<(DocumentModel Doc, double Score)>();
         foreach (DocumentModel doc in _corpus.Documents)
         {
             double score = ScoreExact(doc, trimmed);
             score += ScorePartialIdentity(doc, queryVector);
-            score += TitleWeight * TextVectorizer.Similarity(doc.Frontmatter.Title ?? doc.RelativePath, trimmed);
+            score += TitleWeight * ScoreTitle(doc, titleQuery);
             score += BodyWeight * _corpus.ScoreBody(doc, queryVector, coverageTerms);
 
             score *= Authority(doc);
@@ -300,7 +324,7 @@ public sealed class DocumentIndex
         _ => 1
     };
 
-    private double ScoreExact(DocumentModel doc, string query)
+    internal static double ScoreExact(DocumentModel doc, string query)
     {
         double score = 0;
 
@@ -313,6 +337,15 @@ public sealed class DocumentIndex
         if (string.Equals(doc.Frontmatter.Component, query, StringComparison.OrdinalIgnoreCase))
         {
             score += ComponentWeight;
+        }
+
+        foreach (string keyword in doc.Keywords)
+        {
+            if (string.Equals(keyword, query, StringComparison.OrdinalIgnoreCase))
+            {
+                score += KeywordWeight;
+                break;
+            }
         }
 
         foreach (string reference in doc.CodeRefs)
@@ -334,6 +367,43 @@ public sealed class DocumentIndex
         }
 
         return score;
+    }
+
+    /// <summary>
+    /// The query terms a title may be matched on: what was asked about, with the phrasing
+    /// of the asking removed.
+    /// </summary>
+    /// <remarks>
+    /// Raw title cosine counted question scaffolding. "how do I make a sandwich" shares
+    /// only "make" with a plan titled "Make 0 unrepresentable…", and after the plan
+    /// discount that was still 0.30 — over the floor, so an unanswerable question got a
+    /// confident answer. Body scoring already drops those words; title scoring has to as
+    /// well, or the floor does not mean a miss.
+    ///
+    /// Only the scaffolding half of <see cref="DocumentCorpus.IsInformative"/> is applied.
+    /// The corpus-ubiquity half belongs to bodies alone: dropping it here cost the
+    /// document titled "Skills" a third of its score for the query "skill authoring",
+    /// because a corpus about agents and skills says those words everywhere. Titles are
+    /// curated labels, and naming the corpus's own subject in one is the point of a title.
+    /// </remarks>
+    internal static Dictionary<string, double> TitleQuery(IReadOnlyCollection<string> coverageTerms)
+    {
+        Dictionary<string, double> query = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (string term in coverageTerms)
+        {
+            if (DocumentCorpus.IsQuestionScaffolding(term)) continue;
+            query[term] = 1;
+        }
+        return query;
+    }
+
+    /// <summary>Cosine overlap between a document's title and <see cref="TitleQuery"/>.</summary>
+    private static double ScoreTitle(DocumentModel doc, IReadOnlyDictionary<string, double> titleQuery)
+    {
+        if (titleQuery.Count == 0) return 0;
+
+        return TextVectorizer.CosineSimilarity(
+            titleQuery, TextVectorizer.Vectorize(doc.Frontmatter.Title ?? doc.RelativePath));
     }
 
     /// <summary>
@@ -384,13 +454,33 @@ public sealed class DocumentIndex
     /// system and Azure architecture documents was: three documents sharing one generic
     /// word, ranked above the one the user actually asked for.
     /// </remarks>
-    private static double ScorePartialIdentity(DocumentModel doc, IReadOnlyDictionary<string, double> queryVector)
+    internal static double ScorePartialIdentity(DocumentModel doc, IReadOnlyDictionary<string, double> queryVector)
     {
         if (queryVector.Count == 0) return 0;
 
+        double keywordCoverage = 0;
+        if (doc.Keywords.Count > 0)
+        {
+            double matched = 0;
+            foreach (string keyword in doc.Keywords)
+            {
+                double cov = Coverage(keyword, queryVector);
+                if (cov > 0)
+                {
+                    matched += cov;
+                }
+            }
+
+            keywordCoverage = KeywordPartialWeight * Math.Min(1.5, matched);
+        }
+
         return (IdPartialWeight * Coverage(doc.Frontmatter.Id, queryVector))
-             + (ComponentPartialWeight * Coverage(doc.Frontmatter.Component, queryVector));
+             + (ComponentPartialWeight * Coverage(doc.Frontmatter.Component, queryVector))
+             + keywordCoverage;
     }
+
+    [GeneratedRegex(@"([a-z0-9])([A-Z])")]
+    private static partial Regex CamelCaseBoundaryRegex();
 
     /// <summary>
     /// The fraction of an identity's own tokens that the query mentions.
@@ -404,8 +494,9 @@ public sealed class DocumentIndex
     {
         if (string.IsNullOrWhiteSpace(identity)) return 0;
 
+        string expanded = CamelCaseBoundaryRegex().Replace(identity, "$1 $2");
         List<string> parts = TextVectorizer
-            .Vectorize(identity.Replace('/', ' ').Replace('-', ' '))
+            .Vectorize(expanded.Replace('/', ' ').Replace('-', ' '))
             .Keys
             .ToList();
 
@@ -414,9 +505,23 @@ public sealed class DocumentIndex
         int covered = 0;
         for (int i = 0; i < parts.Count; i++)
         {
-            bool hit = queryVector.ContainsKey(parts[i])
-                || (i + 1 < parts.Count && queryVector.ContainsKey(parts[i] + parts[i + 1]))
-                || (i > 0 && queryVector.ContainsKey(parts[i - 1] + parts[i]));
+            string p = parts[i];
+            bool hit = queryVector.ContainsKey(p)
+                || (i + 1 < parts.Count && queryVector.ContainsKey(p + parts[i + 1]))
+                || (i > 0 && queryVector.ContainsKey(parts[i - 1] + p));
+
+            if (!hit)
+            {
+                foreach (string q in queryVector.Keys)
+                {
+                    if (Math.Min(p.Length, q.Length) >= 3 &&
+                        (p.StartsWith(q, StringComparison.Ordinal) || q.StartsWith(p, StringComparison.Ordinal)))
+                    {
+                        hit = true;
+                        break;
+                    }
+                }
+            }
 
             if (hit) covered++;
         }

@@ -173,12 +173,14 @@ public static class SquadPacker
 
     private static string NormalizeLineEndings(string text)
     {
-        return text.Replace("\r\n", "\n").Replace('\r', '\n');
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
     }
 
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static bool IsTextFile(string filePath)
     {
         string ext = Path.GetExtension(filePath).ToLowerInvariant();
+#pragma warning restore CA1308
         return ext is ".md" or ".yml" or ".yaml" or ".json" or ".toml" or ".txt" or ".ps1" or ".sh";
     }
 

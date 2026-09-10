@@ -171,10 +171,12 @@ public sealed class DocumentationReviewExchange
             .Select(item => candidatesById[item.CandidateId])
             .ToArray();
         IReadOnlyList<PersistedClaim> claims = PersistedClaims(reviewedCandidates);
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
         PersistedCandidateFingerprint[] fingerprints = reviewedCandidates.Select(candidate => new PersistedCandidateFingerprint(
             candidate.Id,
             candidate.Kind,
             candidate.Term?.Trim().ToLowerInvariant(),
+#pragma warning restore CA1308
             bundle.CandidateSetHash,
             bundle.AnalyzerVersion,
             bundle.RubricVersion,

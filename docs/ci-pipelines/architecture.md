@@ -7,6 +7,10 @@ component: CI Pipelines
 source-root: src/KyberWeave.Core/Diagnostics
 owner: dpalfery
 last-reviewed: 2026-08-15
+keywords:
+  - diagnostic
+  - engine
+  - sarif
 code-refs:
   - Diagnostic
   - DiagnosticReport

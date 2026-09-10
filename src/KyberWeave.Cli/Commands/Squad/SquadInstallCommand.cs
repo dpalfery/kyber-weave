@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using System.Threading;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
@@ -36,7 +37,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     }
 
     /// <inheritdoc />
-    public override int Execute(CommandContext context, SquadInstallSettings settings)
+    protected override int Execute(CommandContext context, SquadInstallSettings settings, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -109,7 +110,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
         try
         {
-            SquadLifecycleResult result = lifecycleService.InstallAsync(installRequest).GetAwaiter().GetResult();
+            SquadLifecycleResult result = lifecycleService.InstallAsync(installRequest, cancellationToken).GetAwaiter().GetResult();
             if (result.Success)
             {
                 if (settings.DryRun)
@@ -146,4 +147,6 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return 1;
         }
     }
+
+    public int Execute(CommandContext context, SquadInstallSettings settings) => Execute(context, settings, CancellationToken.None);
 }

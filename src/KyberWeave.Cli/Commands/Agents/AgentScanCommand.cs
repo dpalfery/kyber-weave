@@ -1,4 +1,5 @@
 using KyberWeave.Core.Agents.Model;
+using System.Threading;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Security;
 using KyberWeave.Core.Diagnostics;
@@ -11,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Agents;
 /// </summary>
 public sealed class AgentScanCommand : Command<AgentScanSettings>
 {
-    public override int Execute(CommandContext context, AgentScanSettings settings)
+    protected override int Execute(CommandContext context, AgentScanSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
 
@@ -29,11 +30,13 @@ public sealed class AgentScanCommand : Command<AgentScanSettings>
 
         CommandHelpers.Finish(report, settings, "agent scan", "Agent");
 
-        return settings.FailOn.ToLowerInvariant() switch
+        return settings.FailOn.ToUpperInvariant() switch
         {
             "warning" => report.Warnings > 0 || report.HasErrors ? 1 : 0,
             "error" => report.HasErrors ? 1 : 0,
             _ => report.HasCritical ? 1 : 0
         };
     }
+
+    public int Execute(CommandContext context, AgentScanSettings settings) => Execute(context, settings, CancellationToken.None);
 }

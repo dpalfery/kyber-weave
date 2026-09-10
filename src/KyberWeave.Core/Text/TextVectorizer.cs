@@ -36,12 +36,14 @@ public static partial class TextVectorizer
     /// see the two tokens were neighbours can recover that. <see cref="VectorizeFused"/>
     /// is the public consumer.
     /// </summary>
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
     private static IReadOnlyList<string> Tokenize(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
 
         List<string> tokens = new List<string>();
         foreach (Match m in Tokenizer.Matches(text.ToLowerInvariant()))
+#pragma warning restore CA1308
         {
             string token = Normalize(m.Value);
             if (token.Length < 2 || StopWords.Contains(token)) continue;
@@ -81,7 +83,7 @@ public static partial class TextVectorizer
     /// 'errors' and 'error' match. Deliberately conservative — not a full stemmer.</summary>
     private static string Normalize(string token)
     {
-        if (token.Length > 3 && token.EndsWith('s') && !token.EndsWith("ss") && !token.EndsWith("us"))
+        if (token.Length > 3 && token.EndsWith('s') && !token.EndsWith("ss", StringComparison.Ordinal) && !token.EndsWith("us", StringComparison.Ordinal))
             return token[..^1];
         return token;
     }

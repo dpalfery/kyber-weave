@@ -471,7 +471,9 @@ public static class DocsScaffolder
         if (pattern.EndsWith('/'))
             return databaseRelativePath.StartsWith(pattern, StringComparison.Ordinal);
 
-        if (!pattern.Contains('/'))
+#pragma warning disable CA1847 // Single-char Contains with StringComparison requires string overload to satisfy CA1307
+        if (!pattern.Contains("/", StringComparison.Ordinal))
+#pragma warning restore CA1847
         {
             return FileSystemName.MatchesSimpleExpression(
                 pattern,
@@ -479,12 +481,14 @@ public static class DocsScaffolder
                 ignoreCase: OperatingSystem.IsWindows());
         }
 
-        return pattern.Contains('[')
+#pragma warning disable CA1847 // Single-char Contains with StringComparison requires string overload to satisfy CA1307
+        return pattern.Contains("[", StringComparison.Ordinal)
             ? pattern.StartsWith("cache/", StringComparison.Ordinal)
             : FileSystemName.MatchesSimpleExpression(
                 pattern.Replace("**", "*", StringComparison.Ordinal),
                 databaseRelativePath,
                 ignoreCase: OperatingSystem.IsWindows());
+#pragma warning restore CA1847
     }
 
     private static string ExistingNewline(string content)
@@ -633,7 +637,9 @@ public static class DocsScaffolder
         string yamlOwner = HostConfigYaml.QuoteScalar(owner);
         string body = folder == DocsLayout.Standards
             ? StandardsRegistry()
+#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
             : $"Add one document per {title.TrimEnd('s').ToLowerInvariant()} and list it here.\n";
+#pragma warning restore CA1308
 
         return $"""
         ---

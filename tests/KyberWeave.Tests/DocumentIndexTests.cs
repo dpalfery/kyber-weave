@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
@@ -54,6 +55,124 @@ public class DocumentIndexRankingTests
 
         Assert.Equal(0.0, DocumentIndex.Coverage("webui/architecture", query));
     }
+
+    [Fact]
+    public void CoverageSplitsCamelCaseIdentities()
+    {
+        Dictionary<string, double> query = TextVectorizer.Vectorize("dash");
+
+        // "KyberDash" splits into "kyber" and "dash" (2 tokens); query has "dash" (1 token matched).
+        double coverage = DocumentIndex.Coverage("KyberDash", query);
+
+        Assert.Equal(0.5, coverage);
+    }
+
+    [Fact]
+    public void CoverageSymmetricPrefixMatchesWhenQueryTokenStartsWithIdentityToken()
+    {
+        // Identity token "dash" (|p|=4 >= 3); query token "dashboard" (|q|=9 >= 3) starts with "dash"
+        Dictionary<string, double> query = TextVectorizer.Vectorize("dashboard");
+
+        double coverage = DocumentIndex.Coverage("dash", query);
+
+        Assert.Equal(1.0, coverage);
+    }
+
+    [Fact]
+    public void CoverageSymmetricPrefixMatchesWhenIdentityTokenStartsWithQueryToken()
+    {
+        // Identity token "dashboard" (|p|=9 >= 3); starts with query token "dash" (|q|=4 >= 3)
+        Dictionary<string, double> query = TextVectorizer.Vectorize("dash");
+
+        double coverage = DocumentIndex.Coverage("dashboard", query);
+
+        Assert.Equal(1.0, coverage);
+    }
+
+    [Fact]
+    public void CoverageDoesNotMatchPrefixWhenShorterTokenLengthIsLessThanThree()
+    {
+        // Shorter token with length 2 (< 3) must NOT match as prefix.
+        // Identity "iteration" vs query token "it" (length 2)
+        Dictionary<string, double> queryWithShortToken = new(StringComparer.Ordinal) { ["it"] = 1.0 };
+        double identityCoverage = DocumentIndex.Coverage("iteration", queryWithShortToken);
+
+        Assert.Equal(0.0, identityCoverage);
+
+        // Identity "db" (length 2) vs query token "database" (length 8)
+        Dictionary<string, double> queryDatabase = TextVectorizer.Vectorize("database");
+        double shortIdentityCoverage = DocumentIndex.Coverage("db", queryDatabase);
+
+        Assert.Equal(0.0, shortIdentityCoverage);
+    }
+}
+
+public class DocumentKeywordScoringTests
+{
+    private static DocumentModel DocWithKeywords(params string[] keywords) => new()
+    {
+        RelativePath = "docs/sample.md",
+        FilePath = "/tmp/docs/sample.md",
+        HasFrontmatter = true,
+        DocType = DocType.Architecture,
+        Status = DocStatus.Current,
+        Frontmatter = new DocumentFrontmatter
+        {
+            Id = "sample/doc",
+            Keywords = new Collection<string>(keywords)
+        }
+    };
+
+    [Fact]
+    public void ExactKeywordMatchAddsKeywordWeightInScoring()
+    {
+        DocumentModel doc = DocWithKeywords("dashboard", "tauri");
+
+        // Exact match adds KeywordWeight = 4.0
+        Assert.Equal(4.0, DocumentIndex.ScoreExact(doc, "dashboard"));
+        Assert.Equal(4.0, DocumentIndex.ScoreExact(doc, "DASHBOARD")); // case-insensitive
+        Assert.Equal(0.0, DocumentIndex.ScoreExact(doc, "unrelated"));
+    }
+
+    [Fact]
+    public void PartialKeywordMatchScoresViaKeywordPartialWeightCappedAtOnePointFiveMultiplier()
+    {
+        DocumentModel singleKeywordDoc = DocWithKeywords("dashboard");
+        DocumentModel twoKeywordsDoc = DocWithKeywords("dashboard", "tauri");
+        DocumentModel threeKeywordsDoc = DocWithKeywords("dashboard", "tauri", "terminal");
+
+        // 1 matching keyword: 1.0 * KeywordPartialWeight (3.0) = 3.0
+        Dictionary<string, double> querySingle = TextVectorizer.Vectorize("dashboard");
+        Assert.Equal(3.0, DocumentIndex.ScorePartialIdentity(singleKeywordDoc, querySingle));
+
+        // 2 matching keywords: 2.0 capped at 1.5 * KeywordPartialWeight (3.0) = 4.5
+        Dictionary<string, double> queryTwo = TextVectorizer.Vectorize("dashboard tauri");
+        Assert.Equal(4.5, DocumentIndex.ScorePartialIdentity(twoKeywordsDoc, queryTwo));
+
+        // 3 matching keywords: 3.0 capped at 1.5 * KeywordPartialWeight (3.0) = 4.5
+        Dictionary<string, double> queryThree = TextVectorizer.Vectorize("dashboard tauri terminal");
+        Assert.Equal(4.5, DocumentIndex.ScorePartialIdentity(threeKeywordsDoc, queryThree));
+
+        // Unrelated query scores 0.0
+        Dictionary<string, double> queryUnrelated = TextVectorizer.Vectorize("unrelated query");
+        Assert.Equal(0.0, DocumentIndex.ScorePartialIdentity(twoKeywordsDoc, queryUnrelated));
+    }
+
+    [Fact]
+    public void ByKeywordInvertedMapIndexesDeclaredKeywordsCaseInsensitively()
+    {
+        DocumentModel doc = DocWithKeywords("dashboard", "Tauri");
+        DocumentCorpus corpus = DocumentCorpus.Build(new DocumentSet { Documents = [doc] });
+        DocumentIndex index = DocumentIndex.Build(corpus, FakeCodeGraphResolver.WithSymbols());
+
+        Assert.True(index.ByKeyword.TryGetValue("dashboard", out List<DocumentModel>? dashboardDocs));
+        Assert.Contains(doc, dashboardDocs!);
+
+        Assert.True(index.ByKeyword.TryGetValue("tauri", out List<DocumentModel>? tauriDocs));
+        Assert.Contains(doc, tauriDocs!);
+
+        Assert.False(index.ByKeyword.ContainsKey("unindexed"));
+    }
 }
 
 /// <summary>
@@ -78,6 +197,77 @@ public class DocumentAuthorityTests
         Assert.Equal(DocumentIndex.Authority(Doc(DocType.Reference)), DocumentIndex.Authority(Doc(DocType.CodingStandard)));
         Assert.True(DocumentIndex.Authority(Doc(DocType.Plan)) < DocumentIndex.Authority(Doc(DocType.CodingStandard)));
     }
+}
+
+/// <summary>
+/// Title cosine used to count question-scaffolding words. "how do I make a sandwich"
+/// shared only "make" with a plan titled "Make 0 unrepresentable…" and still cleared
+/// the 0.25 floor after plan demotion.
+/// </summary>
+public sealed class TitleScoringTests : IDisposable
+{
+    private readonly DocFixture _fixture = new();
+
+    private DocumentIndex BuildPlanTitledMakeUnrepresentable()
+    {
+        _fixture.WithCatalog().Write("6-Docs/plans/t2.md", """
+            ---
+            id: plans/tasks/t2-formatter-sentinel
+            title: T2 — Make 0 unrepresentable for an unreported counter
+            doc-type: plan
+            status: needs-review
+            component: MotorcycleRAG API
+            owner: API maintainers
+            last-reviewed: 2026-09-06
+            ---
+            # T2 — Make 0 unrepresentable for an unreported counter
+
+            ## Detail
+
+            The formatter must render an em-dash when a counter was not exported.
+            """);
+        return DocumentIndex.Build(_fixture.Load(), FakeCodeGraphResolver.WithSymbols());
+    }
+
+    [Fact]
+    public void QuestionScaffoldingInATitleDoesNotAnswerAnUnrelatedQuery()
+    {
+        DocumentIndex index = BuildPlanTitledMakeUnrepresentable();
+
+        IReadOnlyList<DocumentHit> hits = index.Explore("how do I make a sandwich", maxDocs: 3);
+
+        Assert.True(hits.Count == 0,
+            "expected no hits, got: " + string.Join(", ",
+                hits.Select(h => $"{h.Document.RelativePath} ({h.Score:0.00})")));
+    }
+
+    [Fact]
+    public void ATitleThatNamesTheSubjectStillClearsTheFloor()
+    {
+        DocumentIndex index = BuildPlanTitledMakeUnrepresentable();
+
+        List<string> ids = index.Explore("unrepresentable counter", maxDocs: 3)
+            .Select(h => h.Document.Frontmatter.Id ?? h.Document.RelativePath)
+            .ToList();
+
+        Assert.Contains("plans/tasks/t2-formatter-sentinel", ids, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// The scaffolding and corpus-ubiquity halves of informativeness are separate
+    /// judgements, and only the first applies to titles. A corpus about agents says
+    /// "agent" everywhere, which is exactly why the document titled for it must keep that
+    /// word: filtering titles by ubiquity demoted the right document for "skill authoring".
+    /// </summary>
+    [Fact]
+    public void TitleQueryDropsScaffoldingAndKeepsCorpusVocabulary()
+    {
+        Dictionary<string, double> query = DocumentIndex.TitleQuery(["make", "tell", "agent", "sandwich"]);
+
+        Assert.Equal(["agent", "sandwich"], query.Keys.OrderBy(k => k, StringComparer.Ordinal));
+    }
+
+    public void Dispose() => _fixture.Dispose();
 }
 
 public class DocumentSectionTests

@@ -234,13 +234,13 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> CandidateNames(string like)
+    public IReadOnlyList<string> CandidateNames(string likePattern)
     {
-        if (!IsAvailable || string.IsNullOrWhiteSpace(like)) return [];
+        if (!IsAvailable || string.IsNullOrWhiteSpace(likePattern)) return [];
 
         // Anchor on a short prefix so the candidate pool stays small; a rename usually
         // preserves a prefix or a suffix, not neither.
-        string prefix = like.Length <= 4 ? like : like[..4];
+        string prefix = likePattern.Length <= 4 ? likePattern : likePattern[..4];
 
         return _byName
             .Where(kv => kv.Value.Exists(n => SymbolKinds.Contains(n.Kind, StringComparer.Ordinal)))

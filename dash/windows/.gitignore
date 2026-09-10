@@ -1,0 +1,10 @@
+node_modules/
+# dist/ is a Vite build output; we gitignore its contents but keep a tracked placeholder
+# index.html so Tauri's compile-time `frontendDist` validation passes on fresh clones before
+# anyone has run `npm run build`. Real build output replaces the placeholder locally.
+dist/*
+!dist/index.html
+src-tauri/target/
+src-tauri/gen/
+.DS_Store
+*.log

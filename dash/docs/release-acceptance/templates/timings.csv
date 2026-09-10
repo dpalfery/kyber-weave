@@ -1,0 +1,1 @@
+run_id,case_id,surface,persona,operation,trial,cache_state,start_monotonic_ms,first_feedback_ms,first_useful_ms,complete_ms,cpu_peak_pct,rss_peak_bytes,calls,tokens,cost_usd,identical_totals,notes
