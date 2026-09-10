@@ -223,7 +223,7 @@ jobs:
           - { rid: linux-x64,    os: ubuntu-latest, exe: "",  archive: tar.gz }
           - { rid: win-x64,      os: ubuntu-latest, exe: ".exe", archive: zip }
     env:
-      NODE_VERSION: "22.13.0"
+      NODE_VERSION: "24.21.0"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -231,7 +231,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node (for tsup and postject only; SEA binary comes from nodejs.org/dist)
-        uses: actions/setup-node@5e7f8364d2f2567dd9615d69ce0a8b9b178a1842 # v5.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -247,7 +247,7 @@ jobs:
           # CJS file tsup names cli.js when both formats target the same entry.
           npx tsup src/main.ts \
             --format esm,cjs \
-            --target node20 \
+            --target node22 \
             --out-dir dist-sea \
             --clean false \
             --dts false \
@@ -275,14 +275,14 @@ jobs:
           BUNDLE_DIR="$(pwd)/dist-sea"
           BIN_DIR="$(pwd)/dist-bin"
           WORK="$(mktemp -d)"
-          mkdir -p "${BIN_DIR}"
+          mkdir -p "${BIN_DIR}" "${WORK}/node"
           trap 'rm -rf "${WORK}"' EXIT
 
           # Download the platform's prebuilt Node archive from nodejs.org/dist.
           # Homebrew's node formula ships with SEA disabled (spec D7 caveat a),
           # so we never use it as the SEA host binary.
-          TARBALL="node-${NODE_VERSION}-${NODE_PLATFORM}-${NODE_ARCH}"
-          BASE_URL="https://nodejs.org/dist/${NODE_VERSION}"
+          TARBALL="node-v${NODE_VERSION}-${NODE_PLATFORM}-${NODE_ARCH}"
+          BASE_URL="https://nodejs.org/dist/v${NODE_VERSION}"
           if [ "${NODE_PLATFORM}" = "win" ]; then
               URL="${BASE_URL}/${TARBALL}.zip"
               curl -fsSL -o "${WORK}/node.zip" "${URL}"
@@ -308,7 +308,7 @@ jobs:
             "disableExperimentalSEAWarning": true
           }
           EOF
-          "${NODE_BIN}" --build-sea "${SEA_CONFIG}"
+          "${NODE_BIN}" --experimental-sea-config "${SEA_CONFIG}"
 
           FINAL_BIN="${BIN_DIR}/kyberdash${EXE}"
           cp "${NODE_BIN}" "${FINAL_BIN}"
@@ -316,9 +316,16 @@ jobs:
 
           # Inject the SEA blob into the executable. postject (npm) reframes
           # the binary without disturbing the executable header.
-          npm install --no-save --no-audit --no-fund postject@0.0.1-20240712
+          npm install --no-save --no-audit --no-fund postject@1.0.0-alpha.6
+          # The fuse string must match the one Node compiles in, or the
+          # runtime will not detect the injected blob. macOS additionally
+          # needs the blob in the NODE_SEA segment.
+          POSTJECT_ARGS=(--sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2)
+          if [ "${NODE_PLATFORM}" = "darwin" ]; then
+              POSTJECT_ARGS+=(--macho-segment-name NODE_SEA)
+          fi
           npx postject "${FINAL_BIN}" NODE_SEA_BLOB "${WORK}/sea-prep.blob" \
-            --sentinel-fuse-bytes 0
+            "${POSTJECT_ARGS[@]}"
 
           # macOS: ad-hoc codesign is required after postject replaces the
           # embedded signature (spec D7 caveat b). Linux and Windows runners
