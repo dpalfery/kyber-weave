@@ -223,7 +223,7 @@ jobs:
           - { rid: linux-x64,    os: ubuntu-latest, exe: "",  archive: tar.gz }
           - { rid: win-x64,      os: ubuntu-latest, exe: ".exe", archive: zip }
     env:
-      NODE_VERSION: "22.13.0"
+      NODE_VERSION: "24.21.0"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -231,29 +231,20 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node (for tsup and postject only; SEA binary comes from nodejs.org/dist)
-        uses: actions/setup-node@5e7f8364d2f2567dd9615d69ce0a8b9b178a1842 # v5.0.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Bundle dash CLI as ESM + CJS
-        # Task 1 spike: SEA needs a CommonJS entry alongside the upstream ESM
-        # one. tsup emits both in one pass when --format lists both formats.
+        # ink and yoga-layout are ESM-only and use top-level await, so the SEA
+        # bundle cannot be CommonJS. It is emitted as ESM and loaded by
+        # src/sea-shim.cjs; tsup.sea.config.ts carries the reasoning.
         working-directory: dash
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
-          # --clean=false so the existing dist/ stays intact for fallout paths.
-          # --splitting=false matches upstream while still emitting a single
-          # CJS file tsup names cli.js when both formats target the same entry.
-          npx tsup src/main.ts \
-            --format esm,cjs \
-            --target node20 \
-            --out-dir dist-sea \
-            --clean false \
-            --dts false \
-            --sourcemap false \
-            --splitting false
-          test -f dist-sea/cli.js || { echo "tsup did not emit cli.js" >&2; exit 1; }
+          npx tsup --config tsup.sea.config.ts
+          test -f dist-sea/main.js || { echo "tsup did not emit dist-sea/main.js" >&2; exit 1; }
 
       - name: Build Node SEA for ${{ matrix.rid }}
         working-directory: dash
@@ -275,19 +266,21 @@ jobs:
           BUNDLE_DIR="$(pwd)/dist-sea"
           BIN_DIR="$(pwd)/dist-bin"
           WORK="$(mktemp -d)"
-          mkdir -p "${BIN_DIR}"
+          mkdir -p "${BIN_DIR}" "${WORK}/node"
           trap 'rm -rf "${WORK}"' EXIT
 
           # Download the platform's prebuilt Node archive from nodejs.org/dist.
           # Homebrew's node formula ships with SEA disabled (spec D7 caveat a),
           # so we never use it as the SEA host binary.
-          TARBALL="node-${NODE_VERSION}-${NODE_PLATFORM}-${NODE_ARCH}"
-          BASE_URL="https://nodejs.org/dist/${NODE_VERSION}"
+          TARBALL="node-v${NODE_VERSION}-${NODE_PLATFORM}-${NODE_ARCH}"
+          BASE_URL="https://nodejs.org/dist/v${NODE_VERSION}"
           if [ "${NODE_PLATFORM}" = "win" ]; then
               URL="${BASE_URL}/${TARBALL}.zip"
               curl -fsSL -o "${WORK}/node.zip" "${URL}"
+              # unzip has no --strip-components, so the archive keeps its own
+              # top-level directory; address the binary through it.
               unzip -q "${WORK}/node.zip" -d "${WORK}/node"
-              NODE_BIN="${WORK}/node/node${EXE}"
+              NODE_BIN="${WORK}/node/${TARBALL}/node${EXE}"
           else
               URL="${BASE_URL}/${TARBALL}.tar.xz"
               curl -fsSL -o "${WORK}/node.tar.xz" "${URL}"
@@ -299,16 +292,28 @@ jobs:
           # Configure SEA. The CJS bundle written by tsup is named cli.js when
           # both formats are emitted; that file is what the SEA loader resolves.
           SEA_CONFIG="${WORK}/sea-config.json"
+          # The main script is the CommonJS shim, not the bundle: Node runs a
+          # SEA main as CJS whatever its extension. The ESM bundle rides along
+          # as an asset, and package.json answers the version lookups that
+          # would otherwise resolve off a filesystem the binary does not have.
           # shellcheck disable=SC2154
           cat > "${SEA_CONFIG}" <<EOF
           {
-            "main": "${BUNDLE_DIR}/cli.js",
+            "main": "$(pwd)/src/sea-shim.cjs",
             "output": "${WORK}/sea-prep.blob",
             "useSnapshot": false,
-            "disableExperimentalSEAWarning": true
+            "disableExperimentalSEAWarning": true,
+            "assets": {
+              "main.js": "${BUNDLE_DIR}/main.js",
+              "package.json": "$(pwd)/package.json"
+            }
           }
           EOF
-          "${NODE_BIN}" --build-sea "${SEA_CONFIG}"
+          # Built with the runner's own Node, not the downloaded one: for a
+          # cross-built RID the target binary cannot execute here at all
+          # (Exec format error). Both are ${NODE_VERSION}, and a non-snapshot
+          # blob carries no host architecture, so the output is identical.
+          node --experimental-sea-config "${SEA_CONFIG}"
 
           FINAL_BIN="${BIN_DIR}/kyberdash${EXE}"
           cp "${NODE_BIN}" "${FINAL_BIN}"
@@ -316,9 +321,16 @@ jobs:
 
           # Inject the SEA blob into the executable. postject (npm) reframes
           # the binary without disturbing the executable header.
-          npm install --no-save --no-audit --no-fund postject@0.0.1-20240712
+          npm install --no-save --no-audit --no-fund postject@1.0.0-alpha.6
+          # The fuse string must match the one Node compiles in, or the
+          # runtime will not detect the injected blob. macOS additionally
+          # needs the blob in the NODE_SEA segment.
+          POSTJECT_ARGS=(--sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2)
+          if [ "${NODE_PLATFORM}" = "darwin" ]; then
+              POSTJECT_ARGS+=(--macho-segment-name NODE_SEA)
+          fi
           npx postject "${FINAL_BIN}" NODE_SEA_BLOB "${WORK}/sea-prep.blob" \
-            --sentinel-fuse-bytes 0
+            "${POSTJECT_ARGS[@]}"
 
           # macOS: ad-hoc codesign is required after postject replaces the
           # embedded signature (spec D7 caveat b). Linux and Windows runners
@@ -337,14 +349,28 @@ jobs:
               tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}"
           fi
 
-          # Verify the SEA host can still report --version (catches a corrupt
-          # blob or wrong-endianness inject failure before archiving).
-          "${FINAL_BIN}" --version >/dev/null
+          # Verify the binary still reports --version (catches a corrupt blob or
+          # a failed inject before archiving). Only meaningful where the RID is
+          # native to this runner; a cross-built one cannot be executed here.
+          HOST_OS="$(uname -s)"; HOST_ARCH="$(uname -m)"
+          case "${HOST_OS}" in Darwin) HOST_OS=darwin ;; Linux) HOST_OS=linux ;; esac
+          case "${HOST_ARCH}" in arm64|aarch64) HOST_ARCH=arm64 ;; x86_64) HOST_ARCH=x64 ;; esac
+          if [ "${NODE_PLATFORM}" = "${HOST_OS}" ] && [ "${NODE_ARCH}" = "${HOST_ARCH}" ]; then
+              "${FINAL_BIN}" --version >/dev/null
+              echo "smoke test passed for ${RID}"
+          else
+              echo "skipping smoke test: ${RID} is cross-built on ${HOST_OS}-${HOST_ARCH}"
+          fi
 
           # Per-RID checksum file alongside the artifact, merged into the
           # SHA256SUMS.txt that ships with the Release (handled in the
           # release job by downloading all artifacts and re-checksumming).
-          ( cd "${BIN_DIR}" && sha256sum "kyberdash-${RID}"*.* ) > "${BIN_DIR}/SHA256SUMS.txt"
+          # sha256sum is GNU coreutils; the macOS runners ship shasum instead.
+          if command -v sha256sum >/dev/null 2>&1; then
+              ( cd "${BIN_DIR}" && sha256sum "kyberdash-${RID}"*.* ) > "${BIN_DIR}/SHA256SUMS.txt"
+          else
+              ( cd "${BIN_DIR}" && shasum -a 256 "kyberdash-${RID}"*.* ) > "${BIN_DIR}/SHA256SUMS.txt"
+          fi
           cat "${BIN_DIR}/SHA256SUMS.txt"
 
       - name: Upload KyberDash archives
