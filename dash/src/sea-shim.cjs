@@ -8,7 +8,11 @@
 //
 // This file is the SEA main verbatim; it is never bundled, so it must stay
 // plain CommonJS using only node: builtins.
+// Buffer and process are imported rather than taken from the globals so this
+// file needs no eslint env of its own.
+const { Buffer } = require('node:buffer')
 const Module = require('node:module')
+const process = require('node:process')
 const { getAsset } = require('node:sea')
 
 // src/main.ts and src/plugins/loader.ts both read the CLI version with
