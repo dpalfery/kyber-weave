@@ -305,7 +305,7 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    *(Or run `codeburn web` if linked in your PATH).*
 
    **Supported CLI Options & Environment Variables**:
-   - `--port <number>`: Target HTTP port (default: `3000` or next open port).
+   - `--port <number>`: Target HTTP port (default: `4747`, falling back to a free port if taken).
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 

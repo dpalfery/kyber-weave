@@ -142,14 +142,21 @@ Start at the [Review council overview](code-review/README.md) for the idea and t
 | [Overview & Why the council](code-review/README.md) | Lens fan-out, gates as evidence, what makes the verdict trustworthy |
 | [Architecture](code-review/architecture.md) | Three layers, two lens seats, the evidence schema, verdict rules, permissions, configuration |
 
-## Feature 5 — KyberDash (Upcoming)
+## Feature 5 — KyberDash
 
-Local interactive web dashboard consuming OpenTelemetry data from the .NET Aspire dashboard to observe, analyze, and tune agentic context windows.
-Start at the [KyberDash Overview](dash/README.md) for value proposition and development roadmap.
+Local telemetry observability and context tuning for agentic workflows: an OTLP receiver and a
+single canonical store feeding four execution surfaces, none of which sends anything off the
+machine. Start at the [KyberDash Overview](dash/README.md) for the value proposition.
 
-| Page | Covers | Status |
-|---|---|---|
-| [Overview & Why KyberDash](dash/README.md) | Value proposition, OTEL telemetry ingestion, context window heatmap, tuning loop | Draft |
+| Page | Covers |
+|---|---|
+| [Overview & Why KyberDash](dash/README.md) | Value proposition, the four surfaces, capabilities |
+| [Architecture](dash/architecture.md) | Ingest pipeline, canonical store, the soft fork and its merge zone |
+| [Runbook](dash/runbook.md) | Installing the released binary; building, running, and testing each surface locally |
+| [Telemetry inventory](dash/telemetry-inventory.md) | Which signals and content each harness actually makes available |
+
+The `kyberdash` binary installs alongside the CLI — see
+[the version floor](install.md#kyberdash-and-the-version-floor) for which releases publish it.
 
 ---
 
