@@ -12,12 +12,6 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class MergeBoundaryTests
 {
-    private static readonly string[] UnshippedUpstreamSurfaces =
-    [
-        "windows",
-        "gnome",
-    ];
-
     [Fact]
     public void DashSubtreeIsVendoredUpstream()
     {
@@ -108,6 +102,11 @@ public class MergeBoundaryTests
     [Theory]
     [InlineData("src")]
     [InlineData("tests")]
+    // windows/ and gnome/ are the surfaces the architecture table marks
+    // "Unmodified and unbuilt" (R14.4). They are upstream read-only roots like
+    // any other, so the same no-leak rule applies to them.
+    [InlineData("windows")]
+    [InlineData("gnome")]
     public void NoKyberSourcesUnderUpstreamReadOnlyRoots(string upstreamRoot)
     {
         // Core enforcement of R14.2: KyberDash code lives outside upstream's

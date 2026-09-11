@@ -31,7 +31,7 @@ See scripts/run.py for details.
     {
         Skill skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
         Assert.Equal("my-skill", skill.Frontmatter.Name);
-        Assert.StartsWith("Use to do a thing", skill.Frontmatter.Description);
+        Assert.StartsWith("Use to do a thing", skill.Frontmatter.Description, StringComparison.Ordinal);
         Assert.Equal("MIT", skill.Frontmatter.License);
         Assert.Equal("me", skill.Frontmatter.Metadata!["author"]);
         Assert.Equal(ExpectedAllowedTools, skill.Frontmatter.AllowedTools);
@@ -41,15 +41,15 @@ See scripts/run.py for details.
     public void SeparatesBodyFromFrontmatter()
     {
         Skill skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
-        Assert.Contains("ALWAYS verify first.", skill.InstructionsBody);
-        Assert.DoesNotContain("name: my-skill", skill.InstructionsBody);
+        Assert.Contains("ALWAYS verify first.", skill.InstructionsBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("name: my-skill", skill.InstructionsBody, StringComparison.Ordinal);
     }
 
     [Fact]
     public void ExtractsReferenceLinks()
     {
         Skill skill = SkillParser.Parse(Valid, "/tmp/my-skill/SKILL.md", "/tmp/nonexistent-dir");
-        Assert.Contains(skill.ReferenceLinks, l => l.Target.Contains("scripts/run.py"));
+        Assert.Contains(skill.ReferenceLinks, l => l.Target.Contains("scripts/run.py", StringComparison.Ordinal));
         // directory does not exist, so it should not resolve
         Assert.All(skill.ReferenceLinks, l => Assert.False(l.Resolves));
     }

@@ -173,7 +173,7 @@ public sealed class CursorRendererContractTests
 
             // Exact comparison: the renderer appends the normalized body verbatim, so a
             // duplicated or padded body must fail, and the message names the offender.
-            string expectedAgentBody = agent.InstructionBody.Replace("\r\n", "\n");
+            string expectedAgentBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedAgentBody.EndsWith('\n'))
             {
                 expectedAgentBody += "\n";
@@ -232,7 +232,7 @@ public sealed class CursorRendererContractTests
 
             // Exact comparison with the normalized canonical body: the renderer appends it
             // verbatim, so duplication or padding must fail, naming the offender.
-            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n");
+            string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedSkillBody.EndsWith('\n'))
             {
                 expectedSkillBody += "\n";

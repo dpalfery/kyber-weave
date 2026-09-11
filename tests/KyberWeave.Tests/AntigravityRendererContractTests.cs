@@ -165,7 +165,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.Equal(skill.Name, RequireScalar(frontmatter, "name"));
             string emittedDescription = RequireScalar(frontmatter, "description");
             Assert.True(
-                !emittedDescription.Contains('\n') &&
+                !emittedDescription.Contains('\n', StringComparison.Ordinal) &&
                 string.Equals(emittedDescription, emittedDescription.Trim(), StringComparison.Ordinal),
                 $"Skill '{skill.Name}' description must be a trimmed single-line scalar.");
             foreach (string line in skill.Description.Split(
@@ -375,7 +375,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
     private static string NormalizeBody(string body)
     {
-        string normalized = body.Replace("\r\n", "\n");
+        string normalized = body.Replace("\r\n", "\n", StringComparison.Ordinal);
         return normalized.EndsWith('\n') ? normalized : normalized + "\n";
     }
 

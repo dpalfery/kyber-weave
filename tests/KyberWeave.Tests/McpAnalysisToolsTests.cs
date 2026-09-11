@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;
@@ -383,6 +384,11 @@ public sealed class McpAnalysisToolsTests : IDisposable
     {
         public DocumentationAnalysisResult Analyze(CancellationToken cancellationToken = default) => result;
 
+        [SuppressMessage(
+            "Globalization",
+            "CA1308:Normalize strings to uppercase",
+            Justification = "Glossary terms are matched and returned case-insensitively in "
+                + "lowercase; this fake mirrors the production normalization it stands in for.")]
         public GlossaryLookupResult LookupGlossary(string term) =>
             glossary?.GetValueOrDefault(term)
             ?? new GlossaryLookupResult(term.Trim().ToLowerInvariant(), []);

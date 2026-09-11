@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using KyberWeave.Core.Configuration;
@@ -303,6 +304,11 @@ public sealed class DocumentationAnalysisScaleTests(ITestOutputHelper output)
 }
 
 [CollectionDefinition(Name, DisableParallelization = true)]
+[SuppressMessage(
+    "Naming",
+    "CA1711:Identifiers should not have incorrect suffix",
+    Justification = "xUnit collection definitions are named <Name>Collection by convention; "
+        + "the suffix is the framework idiom, not a claim to be a collection type.")]
 public sealed class ScaleAcceptanceCollection
 {
     public const string Name = "Documentation analysis scale acceptance";
