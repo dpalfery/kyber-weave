@@ -60,4 +60,4 @@ ADR 0007 and ADR 0011 established the Agent Session Analysis Dashboard (ASAD) as
 - [ADR 0011: ASAD as the Only Context View and as the Canonical Session Contract](0011-asad-only-context-view-and-payload-contract.md)
 - [ADR 0013: Telemetry-Grounded Finding Contracts and Waste Ranking](0013-telemetry-grounded-finding-contracts-and-waste-ranking.md)
 - [KyberDash architecture](../dash/architecture.md)
-- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../archive/plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)

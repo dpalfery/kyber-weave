@@ -5,8 +5,10 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-09-12
 status: current
+decided-by:
+  - adr/0017-copilot-deterministic-tool-order
 keywords:
   - multi-harness
   - deployment
@@ -41,7 +43,7 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
-        Agents["24 Canonical Agents\n(agents/*.md)"]
+        Agents["21 Canonical Agents\n(agents/*.md)"]
         Skills["24 SKILL.md Files\n+ 64 Resources"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]
@@ -266,6 +268,13 @@ and validates.
   Copilot allow-list and safety degradation only. They do not replace or widen the shared
   `capability-profile`, fallback metadata, description, or instruction body consumed by other
   renderers.
+- **Copilot tool order ([ADR 0017](../adr/0017-copilot-deterministic-tool-order.md))**:
+  `CopilotRenderer` emits `CopilotToolCatalog.Normalize(agent.CopilotTools)` — membership from
+  the agent, order from one global catalog sequence (`vscode`, `read`, `todo`, MCP wildcards,
+  then search/execute/web/edit/agent and the granular edit tools). Normalization never adds a
+  tool the agent omitted and never reorders per agent. Capability bindings are an upper bound
+  at load/validation time, not a second membership source. Wildcards remain single-quoted in
+  the YAML flow sequence.
 - **Resource projection**: after each principal file, the renderer appends the owner's validated
   resource closure beside it — each resource at its artifact-relative path under the principal's
   directory — so authored relative links resolve verbatim in the deployed tree. A resource that
@@ -281,17 +290,19 @@ and validates.
   allow-list with no published mapping to the semantic capability vocabulary) records a
   structured degradation instead of a claimed mapping that might silently broaden or narrow
   what the deployed agent can actually do.
-- **Tools flow sequence & MCP allow-listing**: Copilot agent manifests serialize `tools` as an
-  inline YAML flow sequence (e.g. `tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]`).
-  Base tools (`vscode`, `todo`) are granted unconditionally, while capability-governed built-ins
-  and single-quoted MCP server wildcards (`'codegraph/*'`, `'kyber-weave/*'`, `'context7/*'`) are
-  capability-gated (`filesystem.read` for non-orchestrator roles).
-- **Copilot golden boundary**: Copilot emits exactly 48 files: 24
-  `.github/agents/<name>.agent.md` files and 24 `.github/skills/<name>/SKILL.md` files. All 24
-  raw canonical `SKILL.md` files are Hotshot golden bytes. Supplemental resources are not
-  rendered, even though the Hotshot tree consequently has 61 dangling local references.
-  Canonical source and both recursive package formats retain all 64 resources and resolve the
-  retained references. They remain until the
+- **Copilot emit today**: `CopilotRenderer` writes each agent's
+  `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
+  `SquadResourceProjection.Append` places that owner's validated resource closure beside the
+  principal. A fresh Copilot render is 113 files — 21 agents, 24 skills, plus projected
+  closures — with authored relative links resolving in the output. That count is the current
+  contract in [requirements](requirements.md) (KS-001 and the golden-render requirement). The
+  Hotshot-era 48-file Copilot tree that omitted resources is historical, not current
+  behaviour.
+- **Skill golden bytes and retained resources**: every canonical raw `SKILL.md` except the
+  two explicitly evolved skills (`product-owner`, `bug-crusher`) still matches Hotshot golden
+  bytes. Canonical source and both recursive package formats retain all 64 skill resources
+  (88 files under `products/kyber-squad/skills/`) and resolve the retained references. They
+  remain until the
   [content-preserving migration todo](../todo/migrate-skill-resources-into-standards.md) passes.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
@@ -310,6 +321,7 @@ and validates.
 
 ## Related
 
+- [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications
 - [Configuration](../configuration.md) — repository configuration options

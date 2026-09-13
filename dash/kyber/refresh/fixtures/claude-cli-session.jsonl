@@ -1,0 +1,1 @@
+{"type":"assistant","sessionId":"fixture-claude-cli","uuid":"turn-1","timestamp":"2026-09-06T10:00:00.000Z","entrypoint":"cli","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":11,"output_tokens":7}}}

@@ -6,8 +6,9 @@
 // Rules enforced:
 // 1. Merge-zone boundary (ADR 0006, D12):
 //    - KyberDash ships code under `dash/kyber/**`. Vendored CodeBurn internals live under `dash/src/**`.
-//    - Non-adapter modules (modules outside `canon/adapters/**`, `adapter/**`, or `synth/**`)
-//      must NEVER import vendored CodeBurn internals (`dash/src/**` or root `src/**`).
+//    - Non-adapter modules (modules outside `canon/adapters/**`, `adapter/**`,
+//      `synth/**`, or `refresh/**`) must NEVER import vendored CodeBurn internals
+//      (`dash/src/**` or root `src/**`).
 //    - Only `dash/src/brand-overlay.ts` is exempted as it is KyberDash's own brand overlay.
 // 2. Cost isolation & diagnostic contract integrity (D9, D5, D6, D16):
 //    - Diagnostic and context contracts (Run, AgentExecution, Finding, Scorecard / HarnessRollup,
@@ -175,13 +176,15 @@ export function extractImportsFromAst(sourceFile: ts.SourceFile): ImportLocation
  * Permitted contact zones per ADR 0006 & Plan Task H1:
  * - Adapters (`dash/kyber/canon/adapters/**` or `dash/kyber/adapter/**`)
  * - Synthesizers (`dash/kyber/synth/**`)
+ * - Refresh adapters (`dash/kyber/refresh/**`)
  */
 export function isAllowedUpstreamImporter(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/')
   return (
     normalized.includes('/kyber/synth/') ||
     normalized.includes('/kyber/canon/adapters/') ||
-    normalized.includes('/kyber/adapter/')
+    normalized.includes('/kyber/adapter/') ||
+    normalized.includes('/kyber/refresh/')
   )
 }
 
@@ -249,7 +252,7 @@ export function checkImportBoundary(
         reason:
           `ADR 0006 / D12 boundary violation: non-adapter module '${path.relative(dashRoot, importerFilePath)}' ` +
           `imports vendored CodeBurn internal '${path.relative(dashRoot, resolvedTarget)}'. ` +
-          `Only modules in 'canon/adapters/**' or 'synth/**' may contact vendored upstream internals.`,
+          `Only modules in 'canon/adapters/**', 'synth/**', or 'refresh/**' may contact vendored upstream internals.`,
       }
     }
   }

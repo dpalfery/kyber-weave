@@ -16,7 +16,7 @@ import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
-import { normalizeHarnessName } from './measurability.js'
+import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
@@ -297,14 +297,21 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   const built = new Set<string>()
 
   for (const key of store.sessionKeys()) {
-    const records = store.recordsForSession(key.key)
-    if (records.length === 0 || !hasEvidence(records)) {
+    const grouped = groupByCanonicalHarness(store.recordsForSession(key.key))
+    if (grouped.size === 0) {
       report.skipped += 1
       continue
     }
-    store.upsertSession(buildSessionRow(key.key, records, countTokens))
-    built.add(key.key)
-    report.built += 1
+    for (const [harness, records] of grouped) {
+      if (records.length === 0 || !hasEvidence(records)) {
+        report.skipped += 1
+        continue
+      }
+      const sessionId = grouped.size > 1 ? `${harness}:${key.key}` : key.key
+      store.upsertSession(buildSessionRow(sessionId, records, countTokens))
+      built.add(sessionId)
+      report.built += 1
+    }
   }
 
   // Counting is done; the buffered misses are written once rather than one

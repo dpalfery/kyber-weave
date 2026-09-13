@@ -1,20 +1,47 @@
 ---
-id: plans/2026-09-06-kyberdash-refresh-pipeline
+id: archive/plans/2026-09-06-kyberdash-refresh-pipeline
 title: KyberDash Harness-Source Refresh Pipeline
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 
 # KyberDash Harness-Source Refresh Pipeline
 
+**Status:** Complete (Archived 2026-09-13)
+**Archive Date:** 2026-09-13
+
 ## Outcome
 
 Implement `kyber-weave dash refresh [--history-weeks N]` as the production lifecycle that fills KyberDash from local coding-harness history. The default history window is two weeks. One logical job is created for every distinct harness source type, each job processes that source's files or native records through the requested window, successful jobs are committed and derived even when another job fails, and the command exits nonzero when any harness job fails.
 
-This plan is the canonical execution source for local-history refresh. The [KyberDash spine plan](2026-09-06-kyberdash-spine.md) remains authoritative for the dashboard hierarchy and presentation work; it does not define this ingestion lifecycle. Durable store and signal-merging rules remain in [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md), [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md), and the [telemetry inventory](../dash/telemetry-inventory.md).
+This plan is the historical execution record for local-history refresh. Canonical guidance is
+[KyberDash architecture](../../dash/architecture.md), [runbook](../../dash/runbook.md),
+[ADR 0016](../../adr/0016-kyberdash-harness-source-refresh.md), and
+[ADR 0018](../../adr/0018-kyberdash-content-retention-purge.md). The [spine plan](2026-09-06-kyberdash-spine.md)
+owns dashboard hierarchy.
+
+## Implementation evidence (2026-09-13)
+
+In-tree, matching this plan’s contract:
+
+| Claim | Evidence |
+|---|---|
+| `SCHEMA_VERSION` 11 | `dash/kyber/canon/store.ts`; `SOURCE_STATE_SQL` in `source-state.ts` |
+| `commitSourceUnit` | `CanonStore.commitSourceUnit` — records + provenance + checkpoint |
+| `dash/kyber/refresh/**` | registry, orchestrator, scheduler, writer, source-reader; ADR 0006 allowlist in `boundary.ts` |
+| `--history-weeks` default 2 | `DEFAULT_HISTORY_WEEKS`; `registerKyberCommands`; no public `--provider` (`register.test.ts`) |
+| Exit 0 / 1 / 2 | Report `exitCode` 0\|1; Commander invalid `--history-weeks` → 2 |
+| Gemini never a harness id | `canonicalHarnessId` / registry exclusion; selector **label** may remain |
+| Split identities | `normalizeHarnessName` keeps copilot-cli, cursor-agent, antigravity-cli/ide, unclassified buckets |
+| 14-day content purge | `purgeExpiredContent` after refresh; `records.raw` kept |
+| No refresh UI | No `/api/kyber/refresh`; Playwright asserts zero Refresh buttons |
+
+T0–T7 and T9 are satisfied by that tree. T8 shipped **fixture/temp-DB** API + Playwright (`dash/e2e/refresh-filters.spec.ts`), not live-source smoke against installed roots. See residual risks.
+
+**Finalize (2026-09-12):** User ordered execute-now. No third plan. Spine Q3 (content + 14-day purge) is **not** T2: T2 owns `store.ts` + `source-state.ts` first; spine Q3 later in `retention.ts`. Spine Q5Q6 owns `dash/dash/src/App.tsx`; T8 sequences after that shell work and must not take `App.tsx`.
 
 ## Decisions already made
 
@@ -111,7 +138,7 @@ The exact missing runtime links are:
 - Claude's generic `createSessionParser()` path is intentionally empty because the upstream parser owns its project-directory scan; the partial command therefore produces no Claude calls.
 - `normalizeHarnessName` and `SURVEYED_HARNESSES` still merge or omit several client surfaces, so persisted rows and rollups cannot back correct filters.
 - Deduplication can pair by session position, which is not a safe identity for a partial window or changed file.
-- `CanonStore` schema version 9 has canonical and derived rows, but no native-source checkpoint or record-provenance relation.
+- `CanonStore` `SCHEMA_VERSION` is already **10** with canonical and derived rows, but no native-source checkpoint or record-provenance relation (`source-state.ts` does not exist). T2 adds the next additive bump from live 10, not from 9.
 - The partial command calls `store.listAll()` for OTLP data on every source, making work proportional to the entire corpus rather than the changed unit.
 - Discovery/parser failure is stored as a generic provider problem, but there is no per-harness status, retry/checkpoint rule, summary row, or command exit contract.
 - The current dashboard cannot distinguish data that was never refreshed, a source not installed, a source that failed, and a measured zero.
@@ -271,7 +298,7 @@ Every descriptor has one row, including `unavailable` when its roots are not ins
 
 ## Source checkpoints, provenance, and schema migration
 
-Bump the canonical schema from version 9 through the existing migration mechanism. The migration is additive and transactionally creates two relations; it does not rewrite or delete `records.raw` or derived history.
+Bump the canonical schema from the **live** version (**10**) through the existing migration mechanism. The migration is additive and transactionally creates two relations; it does not rewrite or delete `records.raw` or derived history. Do not re-apply v9→v10 steps.
 
 ### `source_checkpoint`
 
@@ -342,23 +369,23 @@ The API/browser acceptance in this plan verifies the stored lifecycle and filter
 
 ## Execution task graph
 
-Each task starts with a failing focused test. `conductor` owns sequencing and review. Core TypeScript tasks require no invented specialist skill; use the repository instructions and a TypeScript implementation/review worker. Documentation closeout uses `app-docs-standard` and `kyber-weave-docs`; browser acceptance uses `playwright`.
+Each task starts with a failing focused test. Core TypeScript tasks use the repository instructions (no invented specialist skill name). Documentation closeout uses `app-docs-standard` and `kyber-weave-docs`; browser acceptance uses `playwright`. **T0 is inspect/salvage lock — a worker may do T0; conductor will not.**
 
-| Task | Exact scope and symbols | Depends on | Parallel ownership | Test-first acceptance |
+| Task | Exclusive files / symbols | Depends on | Skill | Test-first acceptance |
 |---|---|---|---|---|
-| T0 — Baseline and salvage lock | Inspect/stage-map only: `dash/kyber/cli/register.ts`, untracked `refresh.ts` and tests, `dash/kyber/synth/provider.ts`, `synth.ts`; record unrelated dirty paths. No production edit. | None | Conductor | A path ownership map identifies salvage/rework and prevents other tasks from touching user-owned frontend/docs work. |
-| T1 — Harness-source registry and identity contracts | Add `dash/kyber/refresh/types.ts`, `registry.ts`, `registry.test.ts`; adapt `dash/src/providers/index.js` and `SessionSource` only through imports. Define `HarnessSourceDescriptor`, exclusions, classifiers, safe labels, parser contract versions, and source keys. | T0 | Identity worker | Registry exhaustively accounts for every actual provider; Antigravity, Copilot, Codex, Claude, Cursor, Cline, Kiro, Kilo, Pi, and OpenCode cases match the inventory; Gemini/Vercel exclusions have reasons; unknown provider fails the audit. |
-| T2 — Checkpoint/provenance migration | Extend `dash/kyber/canon/store.ts` migration chain and typed accessors; add `dash/kyber/canon/source-state.ts`; extend `migration.test.ts`, `store.test.ts`, and new `source-state.test.ts`. | T1 | Store worker | v9 fixture migrates forward without changing/deleting raw records; checkpoint+rows commit atomically; failure leaves prior checkpoint; coverage expansion and targeted provenance lookup work; reopen is stable. |
-| T3 — Native-unit boundary adapter | Add `dash/kyber/refresh/source-reader.ts` and tests/fixtures. Reuse exported upstream Provider/`DateRange`/`SessionCache`/parser seams and existing Kyber readers. Do not edit `dash/src/**`. | T1 | Parser worker | Fixtures prove record slicing for cross-cutoff chats, Claude special-path recovery, Codex originator split, Antigravity root split, Copilot source-type split, Kiro path split, Kilo shared fallback, changed-unit detection, and bounded iteration. |
-| T4 — Identity-aware synthesis and dedup | Update `dash/kyber/synth/synth.ts`, `provider.ts`, `dedup.ts`, reader types, and focused tests. Add `SourceRecordEnvelope` provenance fields without weakening validation. | T1 | Synthesis worker | Stable split-surface ids rerun unchanged; changed record updates in place; position-only matches do not join; OTLP counters win and file content only fills gaps; generic telemetry never creates Gemini or guessed client attribution. |
-| T5 — Bounded scheduler, writer queue, and CLI | Replace the partial `dash/kyber/cli/refresh.ts` with `dash/kyber/refresh/orchestrator.ts`, `scheduler.ts`, `writer.ts`, and report formatter; update `dash/kyber/cli/register.ts`, `register.test.ts`, and refresh tests. | T2, T3, T4 | Orchestration worker | Help/validation contract is exact; all descriptors get jobs; active jobs never exceed injected limit; source units stream with bounded queue depth; one failure does not cancel others; output contains every row; exit 0/1/2 is correct; store always closes. |
-| T6 — Split-aware derivation and availability | Update `dash/kyber/canon/measurability.ts`, `harnesses.ts`, `sessions.ts`, `runs.ts`, affected analysis/data/store accessors, and their tests. | T1, T4 | Derivation worker | No normalization collapses required surfaces; registered/observed rollups are separate; Gemini is absent as a harness; selected harness filters return their rows; unavailable KPI values remain unavailable rather than zero. |
-| T7 — End-to-end refresh fixtures | Add `dash/kyber/refresh/refresh.integration.test.ts` plus minimal sanitized fixtures for file and virtual-DB sources. Extend canonical integration tests where necessary. | T2–T6 | Integration worker | Default two weeks, explicit wider window, cross-cutoff record slicing, unchanged rerun, one changed unit, range expansion, restart after partial failure, one unreadable harness, and raw-history preservation all pass against a temporary `canon.db`. |
-| T8 — API and live browser acceptance, no refresh UI | Exercise existing `dash/kyber/server/routes.ts`, `bridge.ts`, dashboard data tests, and Playwright flows. Production UI edits are allowed only if a hard-coded alias blocks correct stored filters; no button/endpoint is added. | T6, T7 | Browser worker using `playwright` | Each installed split harness appears and filters independently; Pi/OpenCode/Cursor/Kilo rows and KPIs render from the temp refreshed DB; empty means unavailable with a reason; Attention filtering never returns a record from another harness. |
-| T9 — Documentation and closeout | Update [architecture](../dash/architecture.md), [runbook](../dash/runbook.md), [telemetry inventory](../dash/telemetry-inventory.md), this plan's status/evidence, and add/harvest an ADR for source identity/checkpoint rules if the final implementation makes those durable. Update the plan index/archive only at completion. | T7, T8 | Docs worker using `app-docs-standard` and `kyber-weave-docs` | CodeGraph index, docs validate, docs drift, links, commands, identity vocabulary, and operational recovery instructions pass. |
-| T10 — Independent review and delivery | Review only the implementation-owned diff, run complete gates, resolve high-confidence defects, then produce a scoped commit/PR if separately requested. | T9 | Conductor + independent reviewer | No vendored-source edit, no unrelated dirty file, no identity collapse, no unbounded corpus read, and no green-test claim without the required command/browser evidence. |
+| T0 — Baseline and salvage lock | Inspect only: `dash/kyber/cli/register.ts`, `dash/kyber/cli/refresh.ts`, `dash/kyber/cli/refresh.test.ts`, `dash/kyber/cli/register.test.ts`, `dash/kyber/synth/provider.ts`, `dash/kyber/synth/synth.ts`. Record unrelated dirty paths. **No production edit.** | None | `typescript` (inspect) | Ownership map: salvage vs rework vs user-owned dirty files. Other tasks must not revert unrelated frontend/docs. |
+| T1 — Harness-source registry and identity contracts | **New only:** `dash/kyber/refresh/types.ts`, `registry.ts`, `registry.test.ts`. Import `dash/src/providers/index.js` / `SessionSource` — **do not edit `dash/src/**`.** | T0 | `typescript` | Registry exhaustively accounts for every actual `getAllProviders()` entry; required split identities match inventory; Gemini/Vercel exclusions have reasons; unknown provider fails the audit. |
+| T2 — Checkpoint/provenance migration | `dash/kyber/canon/store.ts` (`SCHEMA_VERSION`, `MIGRATIONS`, accessors); **new** `dash/kyber/canon/source-state.ts`; `migration.test.ts`, `store.test.ts`, **new** `source-state.test.ts`. Bump from **live 10**. **Not** spine Q3 / `retention.ts`. | T1 | `typescript` | Current-version fixture migrates forward without changing/deleting raw records; checkpoint+rows commit atomically; failure leaves prior checkpoint; coverage expansion and provenance lookup work; reopen is stable. |
+| T3 — Native-unit boundary adapter | **New:** `dash/kyber/refresh/source-reader.ts` + tests/fixtures. Reuse exported Provider/`DateRange`/`SessionCache`/parser seams. **No `dash/src/**`.** | T1 | `typescript` | Fixtures: cross-cutoff slice, Claude special-path, Codex originator split, Antigravity root split, Copilot source-type split, Kiro path split, Kilo shared fallback, changed-unit detection, bounded iteration. |
+| T4 — Identity-aware synthesis and dedup | `dash/kyber/synth/synth.ts`, `provider.ts`, `dedup.ts`, reader types, focused tests. Envelope provenance fields; do not weaken validation. | T1 | `typescript` | Unchanged rerun is zero writes; changed record updates in place; no position-only joins; OTLP counters win; never Gemini harness or guessed client. |
+| T5 — Bounded scheduler, writer queue, and CLI | **New:** `dash/kyber/refresh/orchestrator.ts`, `scheduler.ts`, `writer.ts`, report formatter; replace `dash/kyber/cli/refresh.ts`; `dash/kyber/cli/register.ts`, `register.test.ts`, refresh tests. Remove public `--provider`. `--history-weeks`, exit 0/1/2, close store. | T2, T3, T4 | `typescript` | Help/validation exact; one job per descriptor; injected concurrency cap; bounded queue; one failure does not cancel others; every row printed; store always closes. |
+| T6 — Split-aware derivation and availability | `dash/kyber/canon/measurability.ts`, `harnesses.ts`, `sessions.ts`, `runs.ts`, affected analysis/data accessors **except `store.ts`** (T2 owns store; T6 uses accessors T2 already added, or wait). Their tests. Do not collapse identities. Do not break spine G4a’s visible Gemini **selector label** unless it is proven to be stored harness `gemini`. | T1, T4 | `typescript` | Required surfaces stay separate; Gemini absent as **harness id** in rows/rollups; filters return own rows; unavailable ≠ zero. |
+| T7 — End-to-end refresh fixtures | **New:** `dash/kyber/refresh/refresh.integration.test.ts` + sanitized fixtures. Temp `canon.db` only — never `~/.kyberdash/canon.db`. | T2–T6 | `typescript` | Default two weeks, `--history-weeks 6`, cross-cutoff, unchanged rerun, one changed unit, range expansion, restart after partial failure, one unreadable harness, raw-history preservation. |
+| T8 — API and live browser acceptance, no refresh UI | `dash/kyber/server/routes.ts`, `bridge.ts` left unchanged (store-backed filters already used canonical ids). Playwright against **temp** fixture DB. **No refresh button/endpoint.** | T6, T7, spine Q5Q6 | `playwright` | Done against temp DB (`refresh-filters.spec.ts`). Live-source smoke and findings `harness` query not claimed. |
+| T9 — Documentation and closeout (**pipeline only**) | [architecture](../../dash/architecture.md), [runbook](../../dash/runbook.md), [telemetry inventory](../../dash/telemetry-inventory.md), ADR 0016 harvest | T7, T8 | `app-docs-standard`, `kyber-weave-docs` | Done 2026-09-13 |
+| T10 — Independent review and delivery | Review the implementation-owned diff only. No commit unless separately requested. | T9 | code-review (orchestrator maps) | Not this docs closeout |
 
-T2, T3, and T4 may run in parallel after T1. T6 may begin after T1/T4 while T5 integrates T2/T3/T4. T7 is the convergence gate; T8 and T9 do not begin from a partial pipeline. Parallel workers must receive disjoint file ownership, and a single integration owner resolves shared-file changes.
+T2, T3, and T4 may run in parallel after T1 (**disjoint:** T2=`store.ts`+`source-state.ts`; T3=`refresh/source-reader*`; T4=`synth/*`). T6 may begin after T1/T4 while T5 integrates T2/T3/T4; T6 must not edit `store.ts`. T7 is the convergence gate. T8 waits for T7 **and** spine Q5Q6. Spine Q3 waits for T2. Parallel workers must receive disjoint file ownership.
 
 ## Required verification
 
@@ -449,6 +476,8 @@ dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.
 | A new provider silently disappears from refresh. | Registry-exhaustiveness test against `getAllProviders()` with explicit job/exclusion/alias dispositions. |
 | Dirty worktree changes are overwritten or bundled. | T0 ownership map, path-scoped staging, independent diff review, and no cleanup/reset of unrelated files. |
 | Browser shows blanks despite stored rows. | API/filter/KPI contract tests plus live Playwright acceptance against the same temporary refreshed DB. |
+| **T8 live-source coverage (residual).** Copilot VS Code/JetBrains/Agent, Codex/Claude splits, Cline, and Kiro were registered-empty in the T8 fixture set. The suite treats them as unavailable-with-reason. Installed-root smoke on a temp `--db` was not recorded as T8 evidence. |
+| **Findings harness filter (residual).** `GET /api/kyber/findings` has no `harness` query. HarnessDetail scopes via client-side `fetchFindings` filter. Unstamped legacy findings are not covered. Not claimed shipped. |
 
 ## Rollback and recovery
 
@@ -460,15 +489,4 @@ dotnet run --project src/KyberWeave.Cli -- review gates . --out artifacts/gates.
 
 ## Completion criteria
 
-This plan is complete only when all of the following are true:
-
-- `kyber-weave dash refresh` defaults to two weeks and accepts a validated `--history-weeks N`.
-- One bounded logical job runs for every registry harness-source descriptor and processes every eligible native unit in its requested interval.
-- Required surfaces remain separate; Gemini is never a harness; Kilo is split only to the granularity its data proves.
-- Reruns, changed units, widened windows, partial failures, interrupts, and migration are proven idempotent and recoverable.
-- Successful jobs persist canonical/provenance/checkpoint rows and drive sessions, runs, executions, rollups, Attention filters, and KPI availability.
-- Per-harness output and exit codes match the command contract.
-- The full TypeScript, local CLI, API/browser, documentation, CodeGraph, and repository governance evidence is recorded.
-- No `dash/src/**` file or unrelated dirty path is changed by this implementation.
-
-There is no remaining product decision required before execution. Unsupported client separation must resolve to an explicit shared/unclassified identity until native evidence exists; it must not be guessed during implementation.
+This plan is complete for the CLI/store/identity contract and for fixture T8. Residual risks above are **not** shipped claims. Canonical docs now describe the implemented command.

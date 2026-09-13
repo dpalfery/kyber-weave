@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { CanonStore, SCHEMA_VERSION, compressRaw } from './store.js'
+import type { RecordProvenance, SourceCheckpoint } from './source-state.js'
 import { TOKEN_SUM_MISMATCH, notMeasurable, type CanonicalRecord, type TokenUsage } from './types.js'
 
 // The measured floor the store exists to break (R12.4): 2.9 GB across 37,623
@@ -564,3 +565,198 @@ describe('sessionTokenTotals', () => {
     store.close()
   })
 })
+
+function checkpoint(overrides: Partial<SourceCheckpoint> = {}): SourceCheckpoint {
+  return {
+    harnessId: 'pi',
+    sourceKey: 'session:agent-7f3',
+    providerId: 'pi',
+    parserId: 'pi-jsonl',
+    parserContractVersion: '1',
+    format: 'jsonl',
+    sourceRootLabel: '~/.pi/agent/sessions',
+    revisionToken: 'inode:1:mtime:100:size:40',
+    coveredFromUtc: '2026-08-29T00:00:00.000Z',
+    coveredThroughUtc: '2026-09-12T00:00:00.000Z',
+    lastAttemptUtc: '2026-09-12T00:00:00.000Z',
+    lastSuccessUtc: '2026-09-12T00:00:01.000Z',
+    lastStatus: 'ok',
+    lastErrorCode: null,
+    unitCount: 1,
+    recordCount: 1,
+    ...overrides,
+  }
+}
+
+function provenance(overrides: Partial<RecordProvenance> = {}): RecordProvenance {
+  return {
+    spanId: 'span-1',
+    harnessId: 'pi',
+    sourceKey: 'session:agent-7f3',
+    nativeSessionId: 'agent-7f3',
+    nativeRecordId: 'turn-1',
+    sourceRevision: 'inode:1:mtime:100:size:40',
+    parserVersion: '1',
+    importedAtUtc: '2026-09-12T00:00:01.000Z',
+    locationToken: 'pi-sessions/agent-7f3.jsonl#turn-1',
+    ...overrides,
+  }
+}
+
+describe('source checkpoint and provenance', () => {
+  it('never opens the operator home canon.db from these tests', () => {
+    const path = tempStorePath()
+    expect(path.startsWith(tmpdir())).toBe(true)
+    expect(path).not.toContain('.kyberdash')
+    new CanonStore(path).close()
+  })
+
+  it('commits canonical rows, provenance, and checkpoint in one transaction', () => {
+    const store = new CanonStore(':memory:')
+    const stored = record({ sessionId: 'agent-7f3' })
+    store.commitSourceUnit({
+      records: [stored],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+
+    expect(store.get('span-1')).toEqual(stored)
+    expect(store.getRecordProvenance('span-1')).toEqual(provenance())
+    expect(store.getSourceCheckpoint('pi', 'session:agent-7f3')).toEqual(checkpoint())
+    store.close()
+  })
+
+  it('leaves the prior checkpoint and rows when the commit fails', () => {
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    store.commitSourceUnit({
+      records: [record({ sessionId: 'agent-7f3' })],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+
+    expect(() =>
+      store.commitSourceUnit({
+        records: [record({ spanId: 'span-new', sessionId: 'agent-7f3' })],
+        provenance: [provenance({ spanId: null as unknown as string, nativeRecordId: 'turn-2' })],
+        checkpoint: checkpoint({
+          revisionToken: 'inode:1:mtime:200:size:80',
+          lastStatus: 'ok',
+          recordCount: 2,
+        }),
+      }),
+    ).toThrow()
+
+    expect(store.get('span-new')).toBeUndefined()
+    expect(store.get('span-1')?.spanId).toBe('span-1')
+    expect(store.getSourceCheckpoint('pi', 'session:agent-7f3')?.revisionToken).toBe(
+      'inode:1:mtime:100:size:40',
+    )
+    store.close()
+  })
+
+  it('looks up provenance by native identity and source unit without listAll', () => {
+    const store = new CanonStore(':memory:')
+    const owned = record({ spanId: 'span-1', sessionId: 'agent-7f3', harness: 'pi' })
+    const unrelated = record({
+      spanId: 'span-other',
+      sessionId: 'other',
+      harness: 'cursor',
+      source: 'cursor:other',
+    })
+    store.upsert(unrelated)
+    store.commitSourceUnit({
+      records: [owned],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+
+    expect(store.findByNativeIdentity('pi', 'agent-7f3', 'turn-1')?.spanId).toBe('span-1')
+    expect(store.spanIdsForSource('pi', 'session:agent-7f3')).toEqual(['span-1'])
+    expect(store.recordsForHarnessSession('pi', 'agent-7f3').map((r) => r.spanId)).toEqual(['span-1'])
+    expect(
+      store
+        .recordsForHarnessWindow('pi', '2026-08-29T00:00:00.000Z', '2026-09-12T00:00:00.000Z')
+        .map((r) => r.spanId),
+    ).toEqual(['span-1'])
+    store.close()
+  })
+
+  it('expands covered interval on a later successful commit of the same revision', () => {
+    const store = new CanonStore(':memory:')
+    store.commitSourceUnit({
+      records: [record({ sessionId: 'agent-7f3' })],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+    store.commitSourceUnit({
+      records: [],
+      provenance: [],
+      checkpoint: checkpoint({
+        coveredFromUtc: '2026-08-01T00:00:00.000Z',
+        lastAttemptUtc: '2026-09-12T01:00:00.000Z',
+        lastSuccessUtc: '2026-09-12T01:00:01.000Z',
+        recordCount: 1,
+      }),
+    })
+
+    expect(store.getSourceCheckpoint('pi', 'session:agent-7f3')?.coveredFromUtc).toBe(
+      '2026-08-01T00:00:00.000Z',
+    )
+    expect(store.get('span-1')?.spanId).toBe('span-1')
+    store.close()
+  })
+
+  it('invalidates a checkpoint on parser-contract change without deleting canonical rows', () => {
+    const store = new CanonStore(':memory:')
+    store.commitSourceUnit({
+      records: [record({ sessionId: 'agent-7f3' })],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+    store.invalidateSourceCheckpoint('pi', 'session:agent-7f3', '2')
+
+    expect(store.get('span-1')?.spanId).toBe('span-1')
+    expect(store.getRecordProvenance('span-1')?.spanId).toBe('span-1')
+    const after = store.getSourceCheckpoint('pi', 'session:agent-7f3')
+    expect(after?.lastStatus).toBe('invalidated')
+    expect(after?.parserContractVersion).toBe('2')
+    store.close()
+  })
+
+  it('reopens the same checkpoint and provenance from the database file', () => {
+    const path = tempStorePath()
+    const first = new CanonStore(path)
+    first.commitSourceUnit({
+      records: [record({ sessionId: 'agent-7f3' })],
+      provenance: [provenance()],
+      checkpoint: checkpoint(),
+    })
+    first.close()
+
+    const reopened = new CanonStore(path)
+    expect(reopened.getSourceCheckpoint('pi', 'session:agent-7f3')).toEqual(checkpoint())
+    expect(reopened.getRecordProvenance('span-1')).toEqual(provenance())
+    expect(reopened.get('span-1')?.sessionId).toBe('agent-7f3')
+    reopened.close()
+  })
+
+  it('plans harness/session/time lookup as an index seek', () => {
+    const path = tempStorePath()
+    new CanonStore(path).close()
+    const db = new DatabaseSync(path)
+    const rows = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT * FROM records WHERE harness = ? AND session_id = ? AND timestamp >= ? AND timestamp <= ?`,
+      )
+      .all('pi', 'agent-7f3', '2026-08-29T00:00:00.000Z', '2026-09-12T00:00:00.000Z') as {
+      detail: string
+    }[]
+    db.close()
+    const plan = rows.map((row) => row.detail).join(' | ')
+    expect(plan).toContain('records_by_harness_session_time')
+    expect(plan).not.toMatch(/SCAN records/)
+  })
+})
+

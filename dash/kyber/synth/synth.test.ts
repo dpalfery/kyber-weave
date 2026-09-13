@@ -107,7 +107,7 @@ function corpus(): ParsedProviderCall[] {
 describe('R1.1 — first run with no configuration covers every provider', () => {
   it('synthesizes a valid record for every provider the upstream parser supports', () => {
     const synthesizer = new Synthesizer() // no options: the first-run path
-    const names = allProviderNames()
+    const names = allProviderNames().filter((provider) => provider !== 'gemini' && provider !== 'vercel-gateway')
     expect(names.length).toBeGreaterThan(30)
 
     const records = synthesizer.synthesize(
@@ -168,7 +168,8 @@ describe('R1.4 — no key, proxy, network call, or agent-tool wrapper', () => {
 
     try {
       const records = new Synthesizer().synthesize(corpus())
-      expect(records).toHaveLength(corpus().length)
+      expect(records.map((record) => record.harness)).not.toContain('gemini')
+      expect(records).toHaveLength(corpus().filter((item) => item.provider !== 'gemini').length)
       expect(fetchStub).not.toHaveBeenCalled()
     } finally {
       vi.unstubAllGlobals()
@@ -223,7 +224,9 @@ describe('R1.5 — parallel and serial produce identical output', () => {
     const calls = corpus()
     const synthesizer = new Synthesizer()
     const serial = synthesizer.synthesizeSerial(calls)
-    expect(serial.map((record) => record.spanId)).toEqual(calls.map(spanIdFor))
+    expect(serial.map((record) => record.spanId)).toEqual(
+      calls.filter((item) => item.provider !== 'gemini').map((item) => spanIdFor(item)),
+    )
     const parallel = await synthesizer.synthesizeParallel(calls)
     expect(parallel.map((record) => record.spanId)).toEqual(serial.map((record) => record.spanId))
   })
@@ -398,13 +401,11 @@ describe('measurability declarations for the file-sourced path', () => {
     expect(record.content).toEqual({})
   })
 
-  it('adds per-provider counter gaps — gemini has no cache-creation counter', () => {
-    const gemini = synthesizeCall(call({ provider: 'gemini' }))
-    expect(gemini.measurability?.['cache_creation']).toMatchObject({ availability: 'not_measurable' })
-    // The same metric stays undeclared for a provider that measures it —
-    // absence from the map means measured, the vocabulary compare.ts reads.
-    const claude = synthesizeCall(call())
-    expect(claude.measurability?.['cache_creation']).toBeUndefined()
+  it('omits Gemini as a harness rather than declaring its cache-creation gap on a gemini row', () => {
+    expect(new Synthesizer().synthesize([call({ provider: 'gemini' })])).toEqual([])
+    const antigravity = synthesizeCall(call({ provider: 'antigravity', model: 'gemini-2.5-pro' }))
+    expect(antigravity.harness).toBe('antigravity')
+    expect(antigravity.harness).not.toBe('gemini')
   })
 })
 
@@ -440,3 +441,115 @@ describe('canonical record shape', () => {
     expect(synthesizeCall(call({ activeDurationMs: undefined })).durationMs).toBe(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// T4 — identity-aware synthesis (split harness, provenance, no Gemini harness)
+// ---------------------------------------------------------------------------
+
+function envelope(
+  spec: Partial<import('./readers/types.js').SourceRecordEnvelope> & {
+    call?: ParsedProviderCall
+  } = {},
+): import('./readers/types.js').SourceRecordEnvelope {
+  const parsed = spec.call ?? call({ provider: 'antigravity', deduplicationKey: 'antigravity:s-1:m-1' })
+  return {
+    harnessId: spec.harnessId ?? 'antigravity-cli',
+    sourceKey: spec.sourceKey ?? 'antigravity-cli:s-1',
+    nativeSessionId: spec.nativeSessionId ?? parsed.sessionId,
+    nativeRecordId: Object.prototype.hasOwnProperty.call(spec, 'nativeRecordId') ? spec.nativeRecordId : 'm-1',
+    sourceRevision: spec.sourceRevision ?? 'rev-1',
+    parserContractVersion: spec.parserContractVersion ?? '1',
+    importedAt: spec.importedAt ?? '2026-09-12T00:00:00.000Z',
+    locationToken: spec.locationToken ?? '~/.gemini/antigravity-cli',
+    call: parsed,
+    ...(spec.readerTurn !== undefined ? { readerTurn: spec.readerTurn } : {}),
+    ...(spec.recordDigest !== undefined ? { recordDigest: spec.recordDigest } : {}),
+  }
+}
+
+describe('T4 — identity-aware synthesis', () => {
+  it('stamps classified harness and provenance without changing token validation', () => {
+    const record = synthesizeCall(call({ provider: 'antigravity' }), undefined, undefined, envelope())
+    expect(record.harness).toBe('antigravity-cli')
+    expect(record.harness).not.toBe('gemini')
+    expect(record.spanId).toBe('synth:antigravity-cli:s-1:m-1')
+    expect(record.traceId).toBe('synth:antigravity-cli:s-1')
+    const provenance = (record.raw as { provenance?: Record<string, string> }).provenance
+    expect(provenance).toMatchObject({
+      harnessId: 'antigravity-cli',
+      sourceKey: 'antigravity-cli:s-1',
+      nativeSessionId: 's-1',
+      nativeRecordId: 'm-1',
+      sourceRevision: 'rev-1',
+      parserContractVersion: '1',
+      locationToken: '~/.gemini/antigravity-cli',
+    })
+    expect(validateTokens(record.tokens, record.spanId)).toEqual({ valid: true })
+    expect(tokenValidator(record)).toBeUndefined()
+  })
+
+  it('keeps split-surface span ids stable across an unchanged rerun', () => {
+    const first = new Synthesizer().synthesizeEnvelopes([envelope()])
+    const second = new Synthesizer().synthesizeEnvelopes([envelope()])
+    expect(second).toEqual(first)
+    expect(second[0]?.spanId).toBe(first[0]?.spanId)
+  })
+
+  it('updates a changed record in place: same span id, new counters', () => {
+    const original = envelope()
+    const changed = envelope({
+      call: call({
+        provider: 'antigravity',
+        inputTokens: 2_000,
+        deduplicationKey: 'antigravity:s-1:m-1',
+      }),
+    })
+    const [before] = new Synthesizer().synthesizeEnvelopes([original])
+    const [after] = new Synthesizer().synthesizeEnvelopes([changed])
+    expect(after?.spanId).toBe(before?.spanId)
+    expect(after?.tokens.freshInput).toBe(2_000)
+    expect(after?.tokens.freshInput).not.toBe(before?.tokens.freshInput)
+  })
+
+  it('never persists Gemini as a harness, even when the model is Gemini', () => {
+    const geminiCall = call({ provider: 'gemini', model: 'gemini-2.5-pro', deduplicationKey: 'gemini:s-1:m-1' })
+    expect(new Synthesizer().synthesize([geminiCall]).map((record) => record.harness)).not.toContain('gemini')
+    expect(
+      new Synthesizer()
+        .synthesizeEnvelopes([envelope({ harnessId: 'gemini', call: geminiCall, sourceKey: 'gemini:s-1' })])
+        .map((record) => record.harness),
+    ).not.toContain('gemini')
+    const antigravityGemini = synthesizeCall(
+      call({ provider: 'antigravity', model: 'gemini-2.5-pro' }),
+      undefined,
+      undefined,
+      envelope({ harnessId: 'antigravity' }),
+    )
+    expect(antigravityGemini.harness).toBe('antigravity')
+    expect(antigravityGemini.name).toContain('gemini-2.5-pro')
+  })
+
+  it('does not guess a Copilot client surface from the provider name alone', () => {
+    const record = synthesizeCall(call({ provider: 'copilot', deduplicationKey: 'copilot:s-1:m-1' }))
+    expect(record.harness).toBe('copilot')
+    expect(record.harness).not.toBe('copilot-cli')
+    expect(record.harness).not.toBe('copilot-vscode')
+  })
+
+  it('derives a refresh-time-free digest when the native record id is absent', () => {
+    const first = envelope({
+      nativeRecordId: undefined,
+      call: call({ provider: 'pi', turnId: undefined, deduplicationKey: 'pi:s-1', sessionId: 's-1' }),
+    })
+    const second = envelope({
+      nativeRecordId: undefined,
+      importedAt: '2026-09-12T23:00:00.000Z',
+      call: call({ provider: 'pi', turnId: undefined, deduplicationKey: 'pi:s-1', sessionId: 's-1' }),
+    })
+    const [a] = new Synthesizer().synthesizeEnvelopes([first])
+    const [b] = new Synthesizer().synthesizeEnvelopes([second])
+    expect(a?.spanId).toBe(b?.spanId)
+    expect(a?.spanId).toMatch(/^synth:antigravity-cli:s-1:[0-9a-f]{16}$/)
+  })
+})
+

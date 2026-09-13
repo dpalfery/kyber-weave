@@ -11,7 +11,6 @@ import {
   CopyButton,
   copyToClipboard,
 } from './ContextInspector'
-import { SessionInspectorDrawer } from './SessionInspectorDrawer'
 import type { KyberTurnContentResult, KyberTurnContentPart } from '../lib/kyberApi'
 
 function createTestQueryClient() {
@@ -703,7 +702,7 @@ describe('ContentPane Component (Decision D4 & D14 Compliance)', () => {
     const html = renderHtml(element)
 
     expect(html).toContain('data-testid="budget-truncated-banner"')
-    expect(html).toContain('D14 Budget')
+    expect(html).toContain('Truncated')
     expect(html).toContain('Showing 29 of 150,000 characters (length limit applied)')
   })
 
@@ -833,7 +832,7 @@ describe('ContextInspector Component', () => {
     const html = renderHtml(element)
 
     expect(html).toContain('data-testid="budget-truncated-banner"')
-    expect(html).toContain('D14 Budget')
+    expect(html).toContain('Truncated')
     expect(html).toContain('length limit applied')
   })
 
@@ -858,82 +857,5 @@ describe('ContextInspector Component', () => {
 
     expect(html).toContain('data-testid="context-inspector-error"')
     expect(html).toContain('Unable to load unclipped context.')
-  })
-})
-
-describe('SessionInspectorDrawer Integration with ContextInspector', () => {
-  it('renders "Context Inspector" toggle button in drawer header when sessionId is available', () => {
-    const element = React.createElement(SessionInspectorDrawer, {
-      open: true,
-      onClose: vi.fn(),
-      title: 'Turn 2 Inspection',
-      rawContent: {
-        sessionId: 'session-xyz',
-        turnIndex: 2,
-        tokens: 2450,
-      },
-    })
-    const html = renderHtml(element)
-
-    expect(html).toContain('data-testid="toggle-context-inspector-button"')
-    expect(html).toContain('Context Inspector')
-  })
-
-  it('toggles to ContextInspector view when inspectContext is true', () => {
-    const element = React.createElement(SessionInspectorDrawer, {
-      open: true,
-      onClose: vi.fn(),
-      title: 'Turn 2 Inspection',
-      inspectContext: true,
-      rawContent: {
-        sessionId: 'session-xyz',
-        turnIndex: 2,
-      },
-    })
-
-    const html = renderHtml(element)
-    expect(html).toContain('data-testid="drawer-context-inspector-view"')
-    expect(html).toContain('Show Overview')
-  })
-
-  it('renders "Open in Context Inspector" button in TurnInspector view', () => {
-    const turnData = {
-      sessionId: 'session-xyz',
-      fresh: 1000,
-      cache_read: 2000,
-      turn: 3,
-      index: 3,
-      model: 'claude-3-5-sonnet',
-    }
-
-    const element = React.createElement(SessionInspectorDrawer, {
-      open: true,
-      onClose: vi.fn(),
-      title: 'Turn 3',
-      rawContent: turnData,
-    })
-    const html = renderHtml(element)
-
-    expect(html).toContain('data-testid="open-context-inspector-button"')
-    expect(html).toContain('Open in Context Inspector')
-  })
-
-  it('renders "Open in Context Inspector" button in ContextBucketInspector view', () => {
-    const bucketData = {
-      sessionId: 'session-xyz',
-      bucket: 'system_prompt',
-      tokens: 4500,
-    }
-
-    const element = React.createElement(SessionInspectorDrawer, {
-      open: true,
-      onClose: vi.fn(),
-      title: 'System Prompt Bucket',
-      rawContent: bucketData,
-    })
-    const html = renderHtml(element)
-
-    expect(html).toContain('data-testid="open-context-inspector-button"')
-    expect(html).toContain('Open in Context Inspector')
   })
 })

@@ -4,14 +4,20 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 ---
 
 # Telemetry inventory — verified harness signal and content availability
 
 This inventory records implemented collection behavior and the remaining runtime gates as
-of 2026-09-04. It does not treat an absent source as a zero: unavailable dimensions are
+of 2026-09-13. It does not treat an absent source as a zero: unavailable dimensions are
 serialized as `not_measurable` with a source-specific reason.
+
+Local-history ingest is `dash refresh` ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)):
+schema **11** (`source_checkpoint`, `record_provenance`), UTC `--history-weeks` default 2,
+split client identities, Gemini never a stored harness id. `SURVEYED_HARNESSES` still names
+`gemini` as an E4 **survey family** for cache-counter vocabulary; that is not a coding-harness
+filter. A Gemini selector **label** may remain in the UI.
 
 ## Collector and canonical-record contract
 
@@ -20,8 +26,9 @@ serialized as `not_measurable` with a source-specific reason.
 sessions. A log correlates by `(trace_id, span_id)`, then by session and bounded timestamp
 window; it enriches one existing span-shaped record, is idempotent, and is quarantined if
 it remains unmatched. These are the durable decisions in [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md).
-The Context page contract — ASAD only, payload from `canon.db`, harnesses in scope with
+The Context **view** contract — ASAD only, payload from `canon.db`, harnesses in scope with
 reasons rather than zeros — is [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md).
+That view is reached from the **Sessions** rail, not a Context tab.
 
 **[VERIFIED]** The `canon.db` session projection emits the ASAD payload directly and is
 rebuilt from canonical records. For a turn present in both OTLP and a dot-folder source,
@@ -33,9 +40,9 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 
 | Harness/source | Verified collection outcome | Availability or gate |
 |---|---|---|
-| Gemini statusline / Antigravity | Gemini attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. | Tool names are available; per-server schemas remain source-dependent. |
+| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. Canonical records must not use harness `gemini`. | Tool names are available; per-server schemas remain source-dependent. |
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. A live canonical session (`08551cf5-b064-4095-9552-8a9a0a0f78d2`) renders the ASAD dashboard. | The observed per-server schema result was 0 of 81; this is an availability outcome, not a zero-valued schema measurement. |
-| Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. | Omitted reported buckets remain unavailable rather than zero. |
+| Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
 | Claude Code | Enhanced-telemetry counters and dot-folder conversation/tool-result content can enter canonical records. | System prompts and tool schemas from raw API-body logs require the owner to enable `OTEL_LOG_RAW_API_BODIES=1`; that has not been assumed or configured here. |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
@@ -96,7 +103,7 @@ Absent signals are never rendered as zero spend or zero cache hit rate.
 
 ## Dashboard verification boundary
 
-**[VERIFIED]** The Context page uses the ASAD session dashboard and canonical session
+**[VERIFIED]** The Sessions rail uses the ASAD session dashboard and canonical session
 payload. The six views consume the payload directly: overview, per-turn token spend,
 context composition, tool/schema cost, timeline, and cost/token accounting. Fixture and
 live rendering evidence exist for the Copilot session above.
@@ -113,6 +120,11 @@ per-server schema bands.
 2. Register `codeburn kyber cursor-hook` alongside the owner's existing Cursor hooks and
    execute one turn. This repository does not edit `~/.cursor/hooks.json`.
 3. Exercise the full-content drawer against a live canonical session.
+4. Live-source `dash refresh` smoke against installed roots on a **temporary** `--db`
+   remains an operator gate; T8 browser acceptance used a fixture-populated temp store,
+   not `~/.kyberdash/canon.db`.
+5. `GET /api/kyber/findings` has no `harness` query. HarnessDetail filters findings in
+   `fetchFindings` on the client; unstamped legacy finding rows are visible on every tab.
 
 ## Sources
 

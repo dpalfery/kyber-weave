@@ -29,6 +29,7 @@ import tseslint from 'typescript-eslint';
 
 const ignorePaths = [
   'dist/**',
+  'dist-sea/**',
   'build/**',
   'node_modules/**',
   'dash/**',         // nested Electron subdashboard build/install

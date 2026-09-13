@@ -181,12 +181,13 @@ describe('buildHarnessRollup — Empty / uncollected harnesses', () => {
 
     expect(rollups.length).toBeGreaterThanOrEqual(10)
     const harnesses = rollups.map((r) => r.harness)
-    expect(harnesses).toContain('copilot')
-    expect(harnesses).toContain('claude-code')
+    expect(harnesses).toContain('copilot-cli')
+    expect(harnesses).toContain('copilot-vscode')
+    expect(harnesses).toContain('claude-cli')
     expect(harnesses).toContain('cursor')
-    expect(harnesses).toContain('aider')
-    expect(harnesses).toContain('codex')
-    expect(harnesses).toContain('gemini')
+    expect(harnesses).toContain('cursor-agent')
+    expect(harnesses).toContain('codex-cli')
+    expect(harnesses).not.toContain('gemini')
 
     for (const r of rollups) {
       expect(r.sampleCount).toBe(0)

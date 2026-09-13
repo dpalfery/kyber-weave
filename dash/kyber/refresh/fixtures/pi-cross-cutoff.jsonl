@@ -1,0 +1,5 @@
+{"type":"session","id":"pi-cross"}
+{"type":"message","timestamp":"2026-08-20T12:00:00.000Z","sessionId":"pi-cross","turnId":"pre-cutoff","provider":"pi","model":"test-model","message":{"role":"user","content":"fixture turn before the two-week cutoff"}}
+{"type":"message","timestamp":"2026-08-10T12:00:00.000Z","sessionId":"pi-cross","turnId":"six-week-only","provider":"pi","model":"test-model","message":{"role":"user","content":"fixture turn inside six weeks only"}}
+{"type":"message","timestamp":"2026-09-06T10:00:00.000Z","sessionId":"pi-cross","turnId":"in-window","provider":"pi","model":"test-model","message":{"role":"assistant","content":"fixture turn inside the default two-week window"}}
+{"type":"message","timestamp":"2026-09-20T12:00:00.000Z","sessionId":"pi-cross","turnId":"future","provider":"pi","model":"test-model","message":{"role":"assistant","content":"fixture turn after command start"}}

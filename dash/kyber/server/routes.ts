@@ -203,6 +203,34 @@ export function handleKyberRequest(
     return true
   }
 
+  // Phase-aligned run comparison (`docs/plans/2026-09-06-kyberdash-spine.md` § B4-api).
+  // Must run before `/api/kyber/compare` if that path ever becomes a prefix match.
+  if (url.pathname === '/api/kyber/compare/runs') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const runA = (url.searchParams.get('runA') ?? url.searchParams.get('a') ?? '').trim()
+    const runB = (url.searchParams.get('runB') ?? url.searchParams.get('b') ?? '').trim()
+    if (!runA || !runB) {
+      sendKyberJson(res, 400, { error: 'Missing runA or runB' })
+      return true
+    }
+    const pairCountParam = url.searchParams.get('completedPairCount')
+    const completedPairCount = pairCountParam ? parseInt(pairCountParam, 10) : undefined
+    const comparison = bridge.compareRuns(
+      runA,
+      runB,
+      completedPairCount !== undefined && !isNaN(completedPairCount) ? { completedPairCount } : undefined,
+    )
+    if (!comparison) {
+      sendKyberJson(res, 404, { error: 'Run not found' })
+      return true
+    }
+    sendKyberJson(res, 200, comparison)
+    return true
+  }
+
   if (url.pathname === '/api/kyber/compare') {
     if (req.method !== 'GET') {
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })

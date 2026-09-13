@@ -1,19 +1,20 @@
 ---
-id: plans/2026-08-29-kyber-squad-hotshot-golden-sync
+id: archive/plans/2026-08-29-kyber-squad-hotshot-golden-sync
 title: Kyber-Squad Hotshot Golden Copy Synchronization
 doc-type: plan
-status: current
-lifecycle: approved
-approval: approved
+status: archived
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-09-12
 ---
 
 # Kyber-Squad Hotshot golden copy synchronization
 
-**Status:** Approved — current HEAD baseline recorded
-**Approval:** Approved by the user on 2026-08-29 through the instruction to update and execute from current HEAD
+**Status:** Superseded (Archived)
+**Date:** 2026-08-29
+**Superseded Date:** 2026-09-12
+**Archive Date:** 2026-09-12
+**Approval:** Approved by the user on 2026-08-29 through the instruction to update and execute from current HEAD. Roster and `-v3` identity decisions were replaced the next day by [2026-08-30-unified-conductor-orchestration.md](2026-08-30-unified-conductor-orchestration.md) (D1/D3).
 **Execution model:** Test-first; establish the golden-output contract before changing canonical source or rendering
 **Goal:** Make Kyber-Squad's GitHub Copilot deployment reproduce the current
 `hotshot-logistics-demo/.github/agents` and `.github/skills` trees, except for one approved
@@ -244,7 +245,7 @@ skills resolve both in canonical source and in the package.
 
 The deferred migration of this knowledge into `products/kyber-squad/standards/*`, governed
 documentation baselines, and appropriate durable homes for procedural or lens material is tracked
-in [migrate-skill-resources-into-standards](../todo/migrate-skill-resources-into-standards.md).
+in [migrate-skill-resources-into-standards](../../todo/migrate-skill-resources-into-standards.md).
 Skill routing changes only after migrated content is verified; resources stay packaged until then.
 
 Removing the two conductor skills makes the agent/skill namespace intersection seven
@@ -387,16 +388,32 @@ Expected final invariants:
   self-deployment, not canonical input. Any diff in those paths is blocking for this plan; do not
   refresh or reconcile it. The human performs that operation after a fresh RC.
 
-## 7. Closeout
+## 7. Closeout — Superseded & Archived 2026-09-12
 
-After T7 completes local verification and the authorized branch/PR delivery, report the baseline
-target HEAD, exact changed/deleted path summary, golden parity result, retained-resource and
-package-reference results, local gate results, commit and pull-request identifiers, GitHub CI
-results, the `@coderabbitai` review request, and any intentionally untracked verification output.
-Confirm the intentional root self-deployment and its `.kyber-weave` state remained untouched and
-that
-[migrate-skill-resources-into-standards](../todo/migrate-skill-resources-into-standards.md) remains
-indexed as authorized deferred work. Its completion does not block this synchronization plan, but
-the resources remain packaged until that todo's migration and routing acceptance criteria pass.
-Do not archive this plan until the implementation is complete and canonical documentation has
-absorbed the final behavior.
+This plan is **Superseded and Archived** as of 2026-09-12. It is not an incomplete T3 and
+is not waiting on further Hotshot roster import. The user confirmed that the 24-agent
+Hotshot roster — including separate `architect-v3`, `conductor-v3`, and `task-reviewer-v3`
+identities — was replaced the next day by
+[2026-08-30-unified-conductor-orchestration.md](2026-08-30-unified-conductor-orchestration.md):
+
+- **D1** — one canonical orchestration stack: keep only `conductor`, `architect`, and
+  `task-reviewer`; hard-delete the three `-v3` identities.
+- **D3** — test-first default with explicit opt-out via
+  `development-mode: test-first | standard` on plan/spec task artifacts, not a separate v3
+  identity.
+
+Canonical Squad docs now record **21 canonical agents** and **24 skills**
+([architecture](../../kyber-squad/architecture.md),
+[requirements](../../kyber-squad/requirements.md) KS-001). Renderers project each owner's
+validated resource closure; a fresh Copilot render is 113 files, not Hotshot's 48-file
+no-resource emit.
+
+What still stands from this plan is Copilot `copilot-tools` membership and one global
+`CopilotToolCatalog` emission order, harvested as
+[ADR 0017](../../adr/0017-copilot-deterministic-tool-order.md). Skill golden-byte,
+retained-resource, and self-deployment-boundary facts that still match current code remain
+in those canonical documents.
+
+[migrate-skill-resources-into-standards](../../todo/migrate-skill-resources-into-standards.md)
+remains authorized deferred work; surplus packaged resources stay until that todo's
+acceptance criteria pass.

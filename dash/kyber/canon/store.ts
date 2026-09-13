@@ -26,6 +26,15 @@ type Database = import('node:sqlite').DatabaseSync
 import { deflateSync, inflateSync } from 'node:zlib'
 
 import type { TokenCacheStore } from './tokens.js'
+import {
+  SOURCE_STATE_SQL,
+  toRecordProvenance,
+  toSourceCheckpoint,
+  type RecordProvenance,
+  type RecordProvenanceRow,
+  type SourceCheckpoint,
+  type SourceCheckpointRow,
+} from './source-state.js'
 import { contentFromParts } from './types.js'
 import type {
   CanonicalRecord,
@@ -61,7 +70,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 10
+export const SCHEMA_VERSION = 11
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -262,7 +271,7 @@ CREATE TABLE IF NOT EXISTS prediction (
 CREATE INDEX IF NOT EXISTS prediction_by_finding ON prediction (finding_id);
 CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
-`
+` + SOURCE_STATE_SQL
 
 /**
  * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
@@ -414,6 +423,11 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   9: (db) => {
     db.exec(`CREATE INDEX IF NOT EXISTS records_by_session_key
       ON records (COALESCE(session_id, trace_id), timestamp);`)
+  },
+  // v10 -> v11: harness-source checkpoints and per-span provenance. Additive
+  // only — existing records.raw and derived history are left untouched.
+  10: (db) => {
+    db.exec(SOURCE_STATE_SQL)
   },
 }
 
@@ -919,40 +933,216 @@ export class CanonStore {
     if (records.length === 0) return
     this.db.exec('BEGIN')
     try {
-      for (const record of records) {
-        const timestamp =
-          record.timestamp instanceof Date ? record.timestamp.toISOString() : record.timestamp
-        this.upsertStatement.run(
-          record.spanId,
-          record.traceId,
-          record.parentSpanId,
-          record.source,
-          record.harness,
-          record.sessionId ?? null,
-          record.name,
-          record.op,
-          record.kind,
-          timestamp,
-          record.durationMs,
-          record.status,
-          JSON.stringify(record.tokens),
-          // Derivable from parts, so it is not stored alongside them (R12.4).
-          record.parts === undefined || record.parts.length === 0
-            ? JSON.stringify(record.content)
-            : '{}',
-          JSON.stringify(record.cost),
-          record.measurability === undefined ? null : JSON.stringify(record.measurability),
-          // Parts repeat the content text, so they are compressed like `raw`
-          // rather than stored verbatim (R12.4).
-          record.parts === undefined ? null : compressRaw(record.parts),
-          record.raw === undefined ? null : compressRaw(record.raw),
-        )
-      }
+      for (const record of records) this.writeRecord(record)
       this.db.exec('COMMIT')
     } catch (err) {
       this.db.exec('ROLLBACK')
       throw err
     }
+  }
+
+  private writeRecord(record: CanonicalRecord): void {
+    const timestamp =
+      record.timestamp instanceof Date ? record.timestamp.toISOString() : record.timestamp
+    this.upsertStatement.run(
+      record.spanId,
+      record.traceId,
+      record.parentSpanId,
+      record.source,
+      record.harness,
+      record.sessionId ?? null,
+      record.name,
+      record.op,
+      record.kind,
+      timestamp,
+      record.durationMs,
+      record.status,
+      JSON.stringify(record.tokens),
+      // Derivable from parts, so it is not stored alongside them (R12.4).
+      record.parts === undefined || record.parts.length === 0
+        ? JSON.stringify(record.content)
+        : '{}',
+      JSON.stringify(record.cost),
+      record.measurability === undefined ? null : JSON.stringify(record.measurability),
+      // Parts repeat the content text, so they are compressed like `raw`
+      // rather than stored verbatim (R12.4).
+      record.parts === undefined ? null : compressRaw(record.parts),
+      record.raw === undefined ? null : compressRaw(record.raw),
+    )
+  }
+
+  private writeProvenance(row: RecordProvenance): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO record_provenance (
+           span_id, harness_id, source_key, native_session_id, native_record_id,
+           source_revision, parser_version, imported_at_utc, location_token
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.spanId,
+        row.harnessId,
+        row.sourceKey,
+        row.nativeSessionId,
+        row.nativeRecordId,
+        row.sourceRevision,
+        row.parserVersion,
+        row.importedAtUtc,
+        row.locationToken,
+      )
+  }
+
+  private writeCheckpoint(row: SourceCheckpoint): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO source_checkpoint (
+           harness_id, source_key, provider_id, parser_id, parser_contract_version,
+           format, source_root_label, revision_token, covered_from_utc, covered_through_utc,
+           last_attempt_utc, last_success_utc, last_status, last_error_code,
+           unit_count, record_count
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.harnessId,
+        row.sourceKey,
+        row.providerId,
+        row.parserId,
+        row.parserContractVersion,
+        row.format,
+        row.sourceRootLabel,
+        row.revisionToken,
+        row.coveredFromUtc,
+        row.coveredThroughUtc,
+        row.lastAttemptUtc,
+        row.lastSuccessUtc,
+        row.lastStatus,
+        row.lastErrorCode,
+        row.unitCount,
+        row.recordCount,
+      )
+  }
+
+  /**
+   * Persist accepted rows, their provenance, and the source-unit checkpoint
+   * in one transaction. A failure rolls back all three so the last successful
+   * checkpoint remains the resume point.
+   */
+  commitSourceUnit(input: {
+    records: readonly CanonicalRecord[]
+    provenance: readonly RecordProvenance[]
+    checkpoint: SourceCheckpoint
+  }): void {
+    this.db.exec('BEGIN')
+    try {
+      for (const record of input.records) this.writeRecord(record)
+      for (const row of input.provenance) this.writeProvenance(row)
+      this.writeCheckpoint(input.checkpoint)
+      this.db.exec('COMMIT')
+    } catch (err) {
+      this.db.exec('ROLLBACK')
+      throw err
+    }
+  }
+
+  getSourceCheckpoint(harnessId: string, sourceKey: string): SourceCheckpoint | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM source_checkpoint WHERE harness_id = ? AND source_key = ?')
+      .get(harnessId, sourceKey) as SourceCheckpointRow | undefined
+    return row === undefined ? undefined : toSourceCheckpoint(row)
+  }
+
+  listSourceCheckpoints(harnessId?: string): SourceCheckpoint[] {
+    const rows = (
+      harnessId === undefined
+        ? this.db.prepare('SELECT * FROM source_checkpoint ORDER BY harness_id, source_key').all()
+        : this.db
+            .prepare(
+              'SELECT * FROM source_checkpoint WHERE harness_id = ? ORDER BY source_key',
+            )
+            .all(harnessId)
+    ) as SourceCheckpointRow[]
+    return rows.map(toSourceCheckpoint)
+  }
+
+  /**
+   * Mark a unit's checkpoint unusable after a parser-contract change.
+   * Canonical rows and provenance stay; the next refresh reopens coverage.
+   */
+  invalidateSourceCheckpoint(
+    harnessId: string,
+    sourceKey: string,
+    parserContractVersion: string,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE source_checkpoint
+         SET parser_contract_version = ?, last_status = 'invalidated',
+             last_error_code = 'PARSER_CONTRACT_CHANGED',
+             last_attempt_utc = ?
+         WHERE harness_id = ? AND source_key = ?`,
+      )
+      .run(parserContractVersion, new Date().toISOString(), harnessId, sourceKey)
+  }
+
+  getRecordProvenance(spanId: string): RecordProvenance | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM record_provenance WHERE span_id = ?')
+      .get(spanId) as RecordProvenanceRow | undefined
+    return row === undefined ? undefined : toRecordProvenance(row)
+  }
+
+  listProvenanceForSource(harnessId: string, sourceKey: string): RecordProvenance[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM record_provenance WHERE harness_id = ? AND source_key = ? ORDER BY span_id',
+      )
+      .all(harnessId, sourceKey) as RecordProvenanceRow[]
+    return rows.map(toRecordProvenance)
+  }
+
+  spanIdsForSource(harnessId: string, sourceKey: string): string[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT span_id FROM record_provenance WHERE harness_id = ? AND source_key = ? ORDER BY span_id',
+        )
+        .all(harnessId, sourceKey) as { span_id: string }[]
+    ).map((row) => row.span_id)
+  }
+
+  findByNativeIdentity(
+    harnessId: string,
+    nativeSessionId: string,
+    nativeRecordId: string,
+  ): CanonicalRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT r.* FROM records r
+         INNER JOIN record_provenance p ON p.span_id = r.span_id
+         WHERE p.harness_id = ? AND p.native_session_id = ? AND p.native_record_id = ?`,
+      )
+      .get(harnessId, nativeSessionId, nativeRecordId) as RecordRow | undefined
+    return row === undefined ? undefined : toRecord(row)
+  }
+
+  recordsForHarnessSession(harness: string, sessionId: string): CanonicalRecord[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM records WHERE harness = ? AND session_id = ? ORDER BY timestamp',
+      )
+      .all(harness, sessionId) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
+  recordsForHarnessWindow(harness: string, fromUtc: string, throughUtc: string): CanonicalRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM records
+         WHERE harness = ? AND timestamp >= ? AND timestamp <= ?
+         ORDER BY timestamp`,
+      )
+      .all(harness, fromUtc, throughUtc) as RecordRow[]
+    return rows.map(toRecord)
   }
 
   /** Fetch a record by span id, decompressing the raw payload; absent id gives undefined. */

@@ -139,12 +139,12 @@ describe('Task E4 — Harness Cache and Prefix Survey Parity Integration', () =>
   })
 
   it('normalizes known aliases for all harnesses', () => {
-    expect(normalizeHarnessName('Claude')).toBe('claude-code')
-    expect(normalizeHarnessName('copilot-chat')).toBe('copilot')
-    expect(normalizeHarnessName('cursor-agent')).toBe('cursor')
+    expect(normalizeHarnessName('Claude')).toBe('claude-unclassified')
+    expect(normalizeHarnessName('copilot-chat')).toBe('copilot-vscode')
+    expect(normalizeHarnessName('cursor-agent')).toBe('cursor-agent')
     expect(normalizeHarnessName('cascade')).toBe('windsurf')
     expect(normalizeHarnessName('roo')).toBe('roo-code')
-    expect(normalizeHarnessName('cline-cli')).toBe('cline')
+    expect(normalizeHarnessName('cline-cli')).toBe('cline-cli')
     expect(normalizeHarnessName('antigravity')).toBe('antigravity')
     expect(normalizeHarnessName('agy')).toBe('antigravity')
     expect(normalizeHarnessName('gemini')).toBe('gemini')

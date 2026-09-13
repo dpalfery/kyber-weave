@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-09-12
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -26,7 +26,7 @@ declared targets—`opencode`, `kilo`, `warp`, and `factory`—fail renderer-cov
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 24 specialized agent roles and 24 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 21 specialized agent roles and 24 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.
@@ -55,11 +55,11 @@ golden copy. It also retains 64 supplemental references, scripts, provider instr
 metadata files, for 88 files under `products/kyber-squad/skills/`. Recursive APM and Agent Plugins
 packages carry all 88 files and preserve each retained local reference.
 
-The GitHub Copilot renderer has a narrower golden-parity boundary: exactly 24
-`.github/agents/<name>.agent.md` files and 24 `.github/skills/<name>/SKILL.md` files, 48 files
-total. It emits no supplemental resources. The Hotshot golden tree therefore
-has a known dangling-reference defect for 61 resource links; Kyber-Squad preserves the missing
-knowledge in canonical source and packages until the
+A fresh GitHub Copilot render projects each owner's validated resource closure beside its
+principal: 21 `.github/agents/<name>.agent.md` files, 24 `.github/skills/<name>/SKILL.md`
+files, and the linked resources, 113 files total, with authored relative links resolving in
+the output. Kyber-Squad preserves retained skill knowledge in canonical source and packages
+until the
 [skill-resource migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted and
 verified. Generated `.github` output remains a deployment artifact rather than canonical product
 source.

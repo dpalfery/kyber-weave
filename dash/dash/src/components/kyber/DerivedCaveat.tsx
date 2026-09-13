@@ -1,5 +1,3 @@
-
-
 function fmtTokens(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B'
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
@@ -29,17 +27,3 @@ export function DerivedTokens({ count, model, derived, testId }: DerivedTokenPro
     </span>
   )
 }
-
-/**
- * Inline caveat text for summary rows where the whole session was derived.
- * Used by ContextView / SchemaView when derivedCounts is true.
- */
-export function DerivedCaveat({ model }: { model: string }) {
-  return (
-    <span data-testid="derived-caveat" className="text-xs text-tertiary-foreground">
-      lower bound (model: {model})
-    </span>
-  )
-}
-
-export const DEFAULT_DERIVED_MODEL = 'o200k_base'

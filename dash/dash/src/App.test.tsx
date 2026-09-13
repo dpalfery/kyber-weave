@@ -7,7 +7,6 @@ import {
   App,
   harnessTabsFrom,
   NAV_TABS,
-  KyberComparePanel,
   KyberQuarantinePanel,
   KyberProblemsPanel,
   type KyberPage,
@@ -103,15 +102,15 @@ describe('App: Top Navigation Refactoring', () => {
     clearHooks()
   })
 
-  it('exports exactly the 5 approved navigation tabs in NAV_TABS', () => {
-    expect(NAV_TABS).toHaveLength(5)
+  it('exports exactly the 4 header navigation tabs in NAV_TABS', () => {
+    expect(NAV_TABS).toHaveLength(4)
     const keys = NAV_TABS.map((t) => t.key)
-    expect(keys).toEqual(['attention', 'usage', 'compare', 'quarantine', 'problems'])
+    expect(keys).toEqual(['attention', 'usage', 'quarantine', 'problems'])
     const labels = NAV_TABS.map((t) => t.label)
-    expect(labels).toEqual(['Attention', 'Usage', 'Compare', 'Quarantine', 'Problems'])
+    expect(labels).toEqual(['Attention', 'Usage', 'Quarantine', 'Problems'])
   })
 
-  it('renders exactly the 5 navigation tabs in the header and excludes disconnected buttons', () => {
+  it('renders exactly the 4 header tabs and spine rail destinations, excluding Compare as a peer tab', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
@@ -119,28 +118,29 @@ describe('App: Top Navigation Refactoring', () => {
       </QueryClientProvider>
     )
 
-    // All 5 tabs render
     expect(html).toContain('data-testid="nav-tab-attention"')
     expect(html).toContain('data-testid="nav-tab-usage"')
-    expect(html).toContain('data-testid="nav-tab-compare"')
     expect(html).toContain('data-testid="nav-tab-quarantine"')
     expect(html).toContain('data-testid="nav-tab-problems"')
-
-    // Redundant disconnected tabs are removed
+    expect(html).not.toContain('data-testid="nav-tab-compare"')
+    expect(html).not.toContain('data-testid="nav-tab-context"')
     expect(html).not.toContain('data-testid="nav-tab-schema"')
     expect(html).not.toContain('data-testid="nav-tab-timeline"')
     expect(html).not.toContain('data-testid="nav-tab-buckets"')
     expect(html).not.toContain('data-testid="nav-tab-kyber-context"')
 
-    // Exactly 5 buttons in data-testid="nav-tabs"
     const navTabsMatch = html.match(/data-testid="nav-tab-[^"]+"/g)
-    expect(navTabsMatch).toHaveLength(5)
+    expect(navTabsMatch).toHaveLength(4)
+
+    expect(html).toContain('data-testid="nav-rail-attention"')
+    expect(html).toContain('data-testid="nav-rail-sessions"')
+    expect(html).toContain('data-testid="nav-rail-compare"')
+    expect((html.match(/data-testid="harness-selector"/g) ?? [])).toHaveLength(1)
   })
 
   it('applies active styling to the currently active page tab and inactive to others', () => {
     const qc = createTestQueryClient()
 
-    // Test with initialPage="usage"
     clearHooks()
     const usageHtml = renderHtml(
       <QueryClientProvider client={qc}>
@@ -148,25 +148,23 @@ describe('App: Top Navigation Refactoring', () => {
       </QueryClientProvider>
     )
     expect(usageHtml).toContain('data-testid="nav-tab-usage"')
-    // active tab has bg-active-primary
     const usageBtn = usageHtml.match(/<button[^>]*data-testid="nav-tab-usage"[^>]*>/)?.[0]
     expect(usageBtn).toContain('bg-active-primary')
-    const compareBtnFromUsage = usageHtml.match(/<button[^>]*data-testid="nav-tab-compare"[^>]*>/)?.[0]
-    expect(compareBtnFromUsage).toContain('text-tertiary-foreground')
-    expect(compareBtnFromUsage).not.toContain('bg-active-primary')
+    const quarantineBtnFromUsage = usageHtml.match(/<button[^>]*data-testid="nav-tab-quarantine"[^>]*>/)?.[0]
+    expect(quarantineBtnFromUsage).toContain('text-tertiary-foreground')
+    expect(quarantineBtnFromUsage).not.toContain('bg-active-primary')
 
-    // Test with initialPage="compare"
     clearHooks()
-    const compareHtml = renderHtml(
+    const quarantineHtml = renderHtml(
       <QueryClientProvider client={qc}>
-        <App initialPage="compare" />
+        <App initialPage="quarantine" />
       </QueryClientProvider>
     )
-    const compareBtn = compareHtml.match(/<button[^>]*data-testid="nav-tab-compare"[^>]*>/)?.[0]
-    expect(compareBtn).toContain('bg-active-primary')
-    const usageBtnFromCompare = compareHtml.match(/<button[^>]*data-testid="nav-tab-usage"[^>]*>/)?.[0]
-    expect(usageBtnFromCompare).toContain('text-tertiary-foreground')
-    expect(usageBtnFromCompare).not.toContain('bg-active-primary')
+    const quarantineBtn = quarantineHtml.match(/<button[^>]*data-testid="nav-tab-quarantine"[^>]*>/)?.[0]
+    expect(quarantineBtn).toContain('bg-active-primary')
+    const usageBtnFromQuarantine = quarantineHtml.match(/<button[^>]*data-testid="nav-tab-usage"[^>]*>/)?.[0]
+    expect(usageBtnFromQuarantine).toContain('text-tertiary-foreground')
+    expect(usageBtnFromQuarantine).not.toContain('bg-active-primary')
   })
 
   it('updates active page styling for attention, quarantine, and problems tabs', () => {
@@ -241,13 +239,9 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).toContain('data-testid="page-attention"')
   })
 
-  it('renders page title "Compare" and CompareView when on compare page', () => {
+  it('renders page title "Compare" and the CompareRuns workspace when on compare page', () => {
     const qc = createTestQueryClient()
-    qc.setQueryData(['kyber-compare'], {
-      harnesses: ['copilot', 'pi'],
-      rows: [],
-      problems: [],
-    })
+    qc.setQueryData(['kyber-runs'], [])
     const html = renderHtml(
       <QueryClientProvider client={qc}>
         <App initialPage="compare" />
@@ -255,7 +249,48 @@ describe('App: Page Switching & Title Rendering', () => {
     )
     expect(html).toContain('data-testid="page-title"')
     expect(html).toContain('Compare')
-    expect(html).toContain('Per-turn ratios (lead)')
+    expect(html).toContain('data-testid="page-compare"')
+    expect(html).toContain('Run Comparison Workspace')
+    expect(html).toContain('data-testid="compare-empty"')
+    expect(html).not.toContain('data-testid="nav-tab-compare"')
+    const compareRail = html.match(/<button[^>]*data-testid="nav-rail-compare"[^>]*>/)?.[0]
+    expect(compareRail).toContain('bg-interactive-secondary')
+  })
+
+  it('renders the Sessions page from the spine rail destination', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="sessions" />
+      </QueryClientProvider>
+    )
+    expect(html).toContain('data-testid="page-title"')
+    expect(html).toContain('Sessions')
+    expect(html).toContain('data-testid="page-sessions"')
+    expect(html).not.toContain('data-testid="nav-tab-context"')
+    const sessionsRail = html.match(/<button[^>]*data-testid="nav-rail-sessions"[^>]*>/)?.[0]
+    expect(sessionsRail).toContain('bg-interactive-secondary')
+  })
+
+  it('shows Share controls on Usage and not on Attention', () => {
+    const qc = createTestQueryClient()
+
+    clearHooks()
+    const usageHtml = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="usage" />
+      </QueryClientProvider>
+    )
+    expect(usageHtml).toContain('Share this device')
+
+    clearHooks()
+    const attentionHtml = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialPage="attention" />
+      </QueryClientProvider>
+    )
+    expect(attentionHtml).not.toContain('Share this device')
+    expect(attentionHtml).not.toMatch(/\bD20\b|\bD21\b/)
   })
 
   it('renders page title "Quarantine" and QuarantineView when on quarantine page', () => {
@@ -291,84 +326,6 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).toContain('Problems')
     expect(html).toContain('reconciliation_failed')
     expect(html).toContain('Token mismatch')
-  })
-})
-
-describe('KyberComparePanel', () => {
-  beforeEach(() => {
-    clearHooks()
-  })
-
-  it('renders live comparison matrix with harnesses, rows, and cells without throwing', () => {
-    const qc = createTestQueryClient()
-    qc.setQueryData(['kyber-compare'], {
-      harnesses: ['copilot', 'pi'],
-      rows: [
-        {
-          metric: 'tokens_per_turn',
-          kind: 'per_turn',
-          label: 'Tokens per turn',
-          unit: 'tokens',
-          cells: {
-            copilot: { measurable: true, availability: 'measured', value: 1250, render: '1,250' },
-            pi: { measurable: false, availability: 'not_measurable', render: 'not measurable' },
-          },
-        },
-      ],
-      problems: [],
-    })
-
-    const html = renderHtml(
-      <QueryClientProvider client={qc}>
-        <KyberComparePanel />
-      </QueryClientProvider>
-    )
-
-    expect(html).toContain('Tokens per turn')
-    expect(html).toContain('1,250')
-    expect(html).toContain('copilot')
-    expect(html).toContain('pi')
-    expect(html).toContain('Per-turn ratios (lead)')
-  })
-
-  it('renders fallback comparison table with warning problem when data is empty or missing', () => {
-    const qc = createTestQueryClient()
-    qc.setQueryData(['kyber-compare'], {
-      harnesses: [],
-      rows: [],
-      problems: [],
-    })
-
-    const html = renderHtml(
-      <QueryClientProvider client={qc}>
-        <KyberComparePanel />
-      </QueryClientProvider>
-    )
-
-    expect(html).toContain('Per-turn ratios (lead)')
-    expect(html).toContain('Totals (trail)')
-  })
-
-  it('handles query error gracefully without throwing or crashing', () => {
-    const qc = createTestQueryClient()
-    // Pre-populate query as error state
-    qc.setQueryDefaults(['kyber-compare'], { retry: false })
-
-    // Simulate failed query without throwing
-    const origFetch = globalThis.fetch
-    globalThis.fetch = () => Promise.reject(new Error('Network error'))
-
-    try {
-      const html = renderHtml(
-        <QueryClientProvider client={qc}>
-          <KyberComparePanel />
-        </QueryClientProvider>
-      )
-      // When isLoading or error, it returns Skeleton or fallback CompareView
-      expect(html).toBeDefined()
-    } finally {
-      globalThis.fetch = origFetch
-    }
   })
 })
 

@@ -428,14 +428,14 @@ describe('cacheAvailability and prefixAvailability (Task E4)', () => {
   })
 
   it('normalizes aliases to canonical surveyed harness names', () => {
-    expect(normalizeHarnessName('claude')).toBe('claude-code')
+    expect(normalizeHarnessName('claude')).toBe('claude-unclassified')
     expect(normalizeHarnessName('Claude-Code')).toBe('claude-code')
-    expect(normalizeHarnessName('copilot-chat')).toBe('copilot')
-    expect(normalizeHarnessName('copilot-cli')).toBe('copilot')
-    expect(normalizeHarnessName('cursor-agent')).toBe('cursor')
+    expect(normalizeHarnessName('copilot-chat')).toBe('copilot-vscode')
+    expect(normalizeHarnessName('copilot-cli')).toBe('copilot-cli')
+    expect(normalizeHarnessName('cursor-agent')).toBe('cursor-agent')
     expect(normalizeHarnessName('cascade')).toBe('windsurf')
     expect(normalizeHarnessName('roo')).toBe('roo-code')
-    expect(normalizeHarnessName('cline-cli')).toBe('cline')
+    expect(normalizeHarnessName('cline-cli')).toBe('cline-cli')
     // Antigravity writes under ~/.gemini/ and borrows Gemini's counter
     // vocabulary, but it is its own harness: aliasing it onto Gemini filed one
     // harness's rollup under another harness's name.
@@ -444,7 +444,7 @@ describe('cacheAvailability and prefixAvailability (Task E4)', () => {
     expect(normalizeHarnessName('gemini')).toBe('gemini')
 
     expect(cacheAvailability('antigravity').harness).toBe('antigravity')
-    expect(cacheAvailability('claude').harness).toBe('claude-code')
+    expect(cacheAvailability('claude').harness).toBe('claude-unclassified')
     expect(prefixAvailability('roo').harness).toBe('roo-code')
   })
 

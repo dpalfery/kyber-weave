@@ -66,4 +66,4 @@ Previous context diagnostic reporting often suffered from three core flaws:
 - [ADR 0012: Progressive Disclosure Six-Level Diagnostic Spine](0012-progressive-disclosure-6-level-diagnostic-spine.md)
 - [ADR 0014: Unclipped Turn Inspection and Copy-Out Protocol](0014-unclipped-turn-inspection-and-copy-out-protocol.md)
 - [KyberDash architecture](../dash/architecture.md)
-- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../archive/plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)

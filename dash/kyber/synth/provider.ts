@@ -39,8 +39,8 @@ import { codexReader } from './readers/codex.js'
 import { kiloReader } from './readers/kilo.js'
 import { opencodeReader } from './readers/opencode.js'
 import { piReader } from './readers/pi.js'
-import type { ContentReader, ReaderTurn } from './readers/types.js'
-import { Synthesizer } from './synth.js'
+import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
+import { isExcludedHarness, Synthesizer } from './synth.js'
 
 /** Problem code for a session store that exists but cannot be parsed (R1.3). */
 export const PROVIDER_PARSE_ERROR = 'PROVIDER_PARSE_ERROR'
@@ -71,6 +71,12 @@ export type ProviderLoad = {
   calls: ParsedProviderCall[]
   /** The same session file the registered reader must inspect. */
   filePath: string
+  /** Classified harness id for this source unit, when the job already knows it. */
+  harnessId?: string
+  /** Stable source-unit key for checkpoints and parse problems. */
+  sourceKey?: string
+  /** Parse failure for this unit; remaining units still ingest. */
+  error?: Error
 }
 
 export type ProviderLoaderResult = ParsedProviderCall[] | ProviderLoad | Error | null | undefined
@@ -90,13 +96,26 @@ export type ProviderIngestResult = {
 export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['claude', claudeReader],
   ['claude-code', claudeReader],
+  ['claude-cli', claudeReader],
+  ['claude-desktop', claudeReader],
+  ['claude-unclassified', claudeReader],
   ['codex', codexReader],
+  ['codex-cli', codexReader],
+  ['codex-desktop', codexReader],
+  ['codex-unclassified', codexReader],
   ['opencode', opencodeReader],
   ['kilo', kiloReader],
   ['kilo-code', kiloReader],
+  ['kilo-shared-runtime', kiloReader],
+  ['kilo-vscode-legacy', kiloReader],
   ['copilot', copilotCliReader],
+  ['copilot-cli', copilotCliReader],
   ['pi', piReader],
 ])
+
+function readerFor(identity: string): ContentReader | undefined {
+  return PROVIDER_READERS.get(identity)
+}
 
 function callsAndTurns(
   provider: string,
@@ -113,9 +132,9 @@ function callsAndTurns(
   // In both cases the on-disk source IS the record, so the counters are read
   // straight off it here.
   const calls = load.calls.length === 0
-    ? provider === 'copilot'
+    ? provider === 'copilot' || provider === 'copilot-cli'
       ? loadCopilotCliCalls(load.filePath)
-      : provider === 'claude' || provider === 'claude-code'
+      : provider === 'claude' || provider === 'claude-code' || provider.startsWith('claude-')
         ? loadClaudeCalls(load.filePath)
         : load.calls
     : load.calls
@@ -139,9 +158,12 @@ function matchingTurns(
 ): Array<ReaderTurn | undefined> {
   return calls.map((call, index) => {
     const turn = turns[index]
-    return turn === undefined || turn.sessionId === undefined || turn.sessionId === call.sessionId
-      ? turn
-      : undefined
+    if (turn === undefined) return undefined
+    if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined
+    if (turn.nativeRecordId !== undefined && call.turnId !== undefined && turn.nativeRecordId !== call.turnId) {
+      return undefined
+    }
+    return turn
   })
 }
 
@@ -171,13 +193,14 @@ function isAbsent(error: Error): boolean {
   return (error as ErrorCarrier).code === 'ENOENT'
 }
 
-/** The R1.3 problem: severity error, provider and file named. */
-function parseProblem(provider: string, error: Error): Problem {
+/** The R1.3 problem: severity error, harness/source unit and file named. */
+function parseProblem(identity: string, error: Error, sourceKey?: string): Problem {
   const file = fileOf(error)
+  const unit = sourceKey ?? file
   return {
     severity: 'error',
     code: PROVIDER_PARSE_ERROR,
-    message: `provider '${provider}': session store${file ? ` ${file}` : ''} could not be parsed: ${error.message}`,
+    message: `harness '${identity}' source unit${unit ? ` ${unit}` : ''} could not be parsed: ${error.message}`,
     ...(file !== undefined ? { location: file } : {}),
   }
 }
@@ -191,6 +214,23 @@ function parseProblem(provider: string, error: Error): Problem {
  * through 9.1's {@link Synthesizer} — records land exactly as if that
  * synthesizer had been called directly, preserving input order.
  */
+function envelopesFor(
+  identity: string,
+  load: ProviderLoad,
+  calls: readonly ParsedProviderCall[],
+  turns: readonly (ReaderTurn | undefined)[] | undefined,
+): SourceRecordEnvelope[] {
+  const harnessId = load.harnessId ?? identity
+  return calls.map((call, index) => ({
+    harnessId,
+    sourceKey: load.sourceKey ?? `${harnessId}:${call.sessionId}`,
+    nativeSessionId: call.sessionId,
+    nativeRecordId: call.turnId,
+    call,
+    ...(turns?.[index] !== undefined ? { readerTurn: turns[index] } : {}),
+  }))
+}
+
 export async function ingestProviders(
   providers: readonly string[],
   loader: ProviderLoader,
@@ -220,15 +260,31 @@ export async function ingestProviders(
 
     try {
       if (Array.isArray(loaded)) {
+        if (isExcludedHarness(provider)) continue
         records.push(...synthesizer.synthesize(loaded))
         continue
       }
 
-      const [calls, turns] = await callsAndTurns(provider, loaded, PROVIDER_READERS.get(provider))
-      records.push(...synthesizer.synthesize(calls, turns === undefined ? undefined : matchingTurns(calls, turns)))
+      const identity = loaded.harnessId ?? provider
+      if (loaded.error !== undefined) {
+        if (isAbsent(loaded.error)) continue
+        problems.push(parseProblem(identity, loaded.error, loaded.sourceKey))
+        continue
+      }
+      if (isExcludedHarness(identity) || isExcludedHarness(provider)) continue
+
+      const reader = readerFor(identity) ?? readerFor(provider)
+      const [calls, turns] = await callsAndTurns(identity, loaded, reader)
+      const paired = turns === undefined ? undefined : matchingTurns(calls, turns)
+      if (loaded.harnessId !== undefined) {
+        records.push(...synthesizer.synthesizeEnvelopes(envelopesFor(identity, loaded, calls, paired)))
+      } else {
+        records.push(...synthesizer.synthesize(calls, paired))
+      }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
-      problems.push(parseProblem(provider, error))
+      const identity = Array.isArray(loaded) ? provider : (loaded.harnessId ?? provider)
+      problems.push(parseProblem(identity, error, Array.isArray(loaded) ? undefined : loaded.sourceKey))
     }
   }
 

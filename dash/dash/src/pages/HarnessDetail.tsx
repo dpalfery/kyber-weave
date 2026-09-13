@@ -214,6 +214,19 @@ export function HarnessDetail({
         </div>
       </div>
 
+      {/* Findings first on the harness spine (B1). Keep fetchFindings({ harness }). */}
+      {loadingFindings ? (
+        <Skeleton className="h-44 w-full" />
+      ) : (
+        <FindingList
+          findings={findings}
+          title={`${harness?.name || harnessId} Diagnostic Findings`}
+          description="Deterministic waste outranks inferred claims."
+          onSelectFinding={onSelectFinding}
+          onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
+        />
+      )}
+
       {rollupMissing && (
         <div
           data-testid="harness-rollup-missing"
@@ -246,19 +259,6 @@ export function HarnessDetail({
           rollupMissing ? unbuiltReason : 'Telemetry missing: context pressure unrecorded on this harness'
         }
       />
-
-      {/* Harness-Specific Findings */}
-      {loadingFindings ? (
-        <Skeleton className="h-44 w-full" />
-      ) : (
-        <FindingList
-          findings={findings}
-          title={`${harness?.name || harnessId} Diagnostic Findings`}
-          description="Deterministic waste outranks inferred claims."
-          onSelectFinding={onSelectFinding}
-          onSelectTurn={(turnIdx, execId) => onSelectTurn?.(turnIdx, execId)}
-        />
-      )}
 
       {/* Recent Runs Table (Level 3 Drill-Down) */}
       <Card className="p-4" data-testid="harness-runs-table">
@@ -351,6 +351,7 @@ export function HarnessDetail({
                       {/* Decision D13: Explicit vs Derived grouping basis */}
                       <td className="py-2.5 px-3">
                         <span
+                          data-testid="run-grouping-basis"
                           className={cn(
                             'rounded px-1.5 py-0.5 text-[10px] font-mono',
                             isDerived

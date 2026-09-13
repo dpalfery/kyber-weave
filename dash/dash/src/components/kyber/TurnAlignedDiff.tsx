@@ -245,14 +245,17 @@ export function TurnAlignedDiff({
 
   if (pairs.length === 0) {
     return (
-      <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-tertiary-foreground">
+      <div
+        data-testid="turn-aligned-diff"
+        className="rounded-lg border border-border bg-card p-8 text-center text-sm text-tertiary-foreground"
+      >
         No phase-aligned turn pairs available to compare.
       </div>
     )
   }
 
   return (
-    <div className={`flex flex-col gap-5 ${className}`}>
+    <div data-testid="turn-aligned-diff" className={`flex flex-col gap-5 ${className}`}>
       {/* Phase Filter Tabs */}
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border pb-3">
         <button

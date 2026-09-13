@@ -37,7 +37,7 @@ function renderHtml(element: React.ReactElement): string {
   return renderToStaticMarkup(element)
 }
 
-describe('ContextReviewPanel (Decision D10 & D8 Compliance)', () => {
+describe('ContextReviewPanel (opt-in advisory review)', () => {
   it('renders payload preview and token size calculation before confirmation (Criterion 2)', () => {
     const content = 'System prompt instructions: obey project conventions.\n'.repeat(20) // ~1,100 chars
     const blocks = [
@@ -53,9 +53,9 @@ describe('ContextReviewPanel (Decision D10 & D8 Compliance)', () => {
       }),
     )
 
-    // Asserts Decision D10 opt-in badge and advisory labeling
     expect(html).toContain('LLM Context Review')
-    expect(html).toContain('Decision D10 Opt-In')
+    expect(html).toContain('Opt-in')
+    expect(html).not.toContain('Decision D10')
     expect(html).toContain('Advisory Only')
 
     // Asserts token calculation and character count preview
@@ -65,7 +65,7 @@ describe('ContextReviewPanel (Decision D10 & D8 Compliance)', () => {
     expect(html).toContain('Run Context Review')
   })
 
-  it('Decision D10 compliance: never triggers review automatically on render (Criterion 1)', () => {
+  it('never triggers review automatically on render (Criterion 1)', () => {
     const mockRunner = vi.fn().mockResolvedValue({
       status: 'completed',
       source: 'model_review',
@@ -85,15 +85,14 @@ describe('ContextReviewPanel (Decision D10 & D8 Compliance)', () => {
     expect(mockRunner).not.toHaveBeenCalled()
   })
 
-  it('renders Decision D8 non-destructive strategy information', () => {
+  it('describes non-destructive recommendations without Decision D8 product copy', () => {
     const html = renderHtml(
       React.createElement(ContextReviewPanel, {
         content: 'Sample content',
       }),
     )
 
-    // Asserts that the panel mentions D8 non-destructive principles
-    expect(html).toContain('Decision D8')
+    expect(html).not.toContain('Decision D8')
     expect(html).toContain('relocation')
     expect(html).toContain('progressive disclosure')
   })

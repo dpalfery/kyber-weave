@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-05
+last-reviewed: 2026-09-13
 ---
 
 # Architecture decision records
@@ -33,6 +33,9 @@ cite it still resolve.
 | [0013](0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) | [Telemetry-Grounded Finding Contracts, Waste Ranking, and Relocation Discipline](0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) | Accepted | 2026-09-05 | Full finding contracts with ≥2 evidence rows and outcome-risk caveats, waste ranking formula, relocation over deletion discipline, and evidence of use classification vocabulary. |
 | [0014](0014-unclipped-turn-inspection-and-copy-out-protocol.md) | [Unclipped Turn Inspection, Content Retention Window, and Copy-Out Protocol](0014-unclipped-turn-inspection-and-copy-out-protocol.md) | Accepted | 2026-09-05 | Progressive-disclosure Context Inspector with full plain-text inspection and multi-part copy out, bounded by a 14-day rolling retention window and CLI purge command. |
 | [0015](0015-opt-in-llm-context-review-seam.md) | [Opt-In LLM Context Review Seam and Finding Isolation](0015-opt-in-llm-context-review-seam.md) | Accepted | 2026-09-05 | On-demand opt-in LLM review seam requiring discrete per-invocation user action, prompt-enforced relocation and risk constraints, and strict isolation from canonical finding tables. |
+| [0016](0016-kyberdash-harness-source-refresh.md) | [Harness-Source Jobs, Client-Surface Identity, and Checkpointed Local Refresh](0016-kyberdash-harness-source-refresh.md) | Accepted | 2026-09-12 | Local-history refresh is one job per harness source type with split client identity, UTC record windows, schema-11 checkpoints, and `commitSourceUnit`; Gemini is not a harness. |
+| [0017](0017-copilot-deterministic-tool-order.md) | [Exact Copilot Tool Membership with One Cross-Agent Emission Order](0017-copilot-deterministic-tool-order.md) | Accepted | 2026-09-12 | Copilot `tools` membership comes from canonical `copilot-tools`; emission order is one global catalog sequence with no per-agent exceptions. |
+| [0018](0018-kyberdash-content-retention-purge.md) | [Stored Content with a 14-Day Automatic Purge](0018-kyberdash-content-retention-purge.md) | Accepted | 2026-09-13 | Persist inspector content; `purgeExpiredContent` after refresh empties `content_json`/`parts_json` after 14 days and never deletes `records.raw`. |
 
 ## Writing one
 

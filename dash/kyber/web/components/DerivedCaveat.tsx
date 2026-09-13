@@ -32,7 +32,6 @@ export function DerivedTokens({ count, model, derived, testId }: DerivedTokenPro
 
 /**
  * Inline caveat text for summary rows where the whole session was derived.
- * Used by ContextView / SchemaView when derivedCounts is true.
  */
 export function DerivedCaveat({ model }: { model: string }) {
   return (

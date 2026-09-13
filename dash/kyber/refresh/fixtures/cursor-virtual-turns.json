@@ -1,0 +1,18 @@
+[
+  {
+    "sessionId": "cursor-virtual-1",
+    "turnId": "cursor-turn-1",
+    "timestamp": "2026-09-06T13:00:00.000Z",
+    "model": "gpt-5",
+    "inputTokens": 40,
+    "outputTokens": 12
+  },
+  {
+    "sessionId": "cursor-virtual-1",
+    "turnId": "cursor-older",
+    "timestamp": "2026-08-12T13:00:00.000Z",
+    "model": "gpt-5",
+    "inputTokens": 8,
+    "outputTokens": 3
+  }
+]

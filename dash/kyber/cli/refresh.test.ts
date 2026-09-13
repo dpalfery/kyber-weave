@@ -1,6 +1,5 @@
-// End-to-end contract for the local-provider refresh lifecycle. The command
-// must turn native provider sources into the same durable corpus that the
-// dashboard reads; a parser that merely returns calls is not a refresh.
+// Harness-source refresh contract: one job per registry descriptor, isolated
+// failures, no Gemini harness, and writes proportional to changed units.
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -10,7 +9,10 @@ import { join } from 'node:path'
 import type { ParsedProviderCall, Provider, SessionSource } from '../synth/provider.js'
 import { PROVIDER_PARSE_ERROR } from '../synth/provider.js'
 import { CanonStore } from '../canon/store.js'
-import { refreshLocalProviders } from './refresh.js'
+import { descriptorFor } from '../refresh/registry.js'
+import type { NativeUnit } from '../refresh/source-reader.js'
+import { refreshHarnessSources } from '../refresh/orchestrator.js'
+import { formatRefreshReport } from '../refresh/report.js'
 
 const temporaryRoots: string[] = []
 
@@ -27,7 +29,7 @@ function temporaryStore(): CanonStore {
 function source(provider: string, name: string): SessionSource {
   return {
     path: `/native/${provider}/${name}.jsonl`,
-    project: 'kyber-weave',
+    project: provider === 'antigravity' ? 'antigravity' : 'kyber-weave',
     provider,
   }
 }
@@ -77,8 +79,40 @@ function nativeProvider(
   }
 }
 
-describe('refreshLocalProviders', () => {
-  it('persists discovered native calls, records a provider parse failure, then derives sessions, runs, executions, and rollups', async () => {
+function descriptors(...ids: string[]) {
+  return ids.map((id) => {
+    const descriptor = descriptorFor(id)
+    if (descriptor === undefined) throw new Error(`missing descriptor ${id}`)
+    return descriptor
+  })
+}
+
+function unit(harnessId: string, name: string, parsed: ParsedProviderCall[]): NativeUnit {
+  const session = source(harnessId, name)
+  return {
+    harnessId,
+    sourceKey: `${harnessId}:${name}`,
+    source: session,
+    status: 'new',
+    revision: {
+      fingerprint: { dev: 1, ino: 1, mtimeMs: 1, sizeBytes: 1 },
+      token: '1:1:1:1',
+    },
+    envelopes: parsed.map((entry) => ({
+      harnessId,
+      sourceKey: `${harnessId}:${name}`,
+      source: session,
+      nativeSessionId: entry.sessionId,
+      timestamp: entry.timestamp,
+      call: entry,
+      revisionToken: '1:1:1:1',
+    })),
+    problems: [],
+  }
+}
+
+describe('refreshHarnessSources', () => {
+  it('persists split harness jobs, records a parse failure, and still derives the healthy harness', async () => {
     const store = temporaryStore()
     try {
       const antigravitySource = source('antigravity', 'conversation')
@@ -86,7 +120,7 @@ describe('refreshLocalProviders', () => {
       const brokenSource = source('pi', 'corrupt')
       const parseFailure = Object.assign(new SyntaxError('unexpected end of JSON'), { file: brokenSource.path })
 
-      const report = await refreshLocalProviders(store, {
+      const report = await refreshHarnessSources(store, {
         getAllProviders: async () => [
           nativeProvider('antigravity', [antigravitySource], new Map([
             [antigravitySource.path, [call('antigravity', 'agy-session')]],
@@ -98,73 +132,156 @@ describe('refreshLocalProviders', () => {
             [brokenSource.path, parseFailure],
           ])),
         ],
+        descriptors: descriptors('antigravity', 'pi', 'codex-cli'),
+        jobConcurrency: 2,
+        writerCapacity: 2,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
       })
 
-      // Discovery and synthesis have durable results, not just a parsed-call
-      // array that disappears when the CLI exits.
-      expect(report).toMatchObject({
-        providers: 3,
-        sources: 3,
-        synthesized: 2,
-        accepted: 2,
-        problems: 1,
-        sessions: { built: 2, skipped: 0, pruned: 0 },
-      })
-      expect(store.listAll()).toHaveLength(2)
-      expect(store.listAll().map((record) => record.source).sort()).toEqual([
-        'codeburn/antigravity',
-        'codeburn/gemini',
-      ])
+      expect(report.rows.map((row) => row.harnessId)).toEqual(['antigravity', 'pi', 'codex-cli'])
+      expect(report.rows.find((row) => row.harnessId === 'codex-cli')?.status).toBe('unavailable')
+      expect(report.rows.find((row) => row.harnessId === 'pi')?.status).toBe('failed')
+      expect(report.rows.find((row) => row.harnessId === 'antigravity')?.status).toBe('ok')
+      expect(report.exitCode).toBe(1)
 
-      // A native Antigravity directory is an Antigravity harness even if it
-      // used a Claude model. A generic Gemini source remains Gemini; it is
-      // never silently relabelled as Antigravity.
-      expect(store.listAll().map((record) => [record.harness, record.name]).sort()).toEqual([
-        ['antigravity', 'antigravity:claude-sonnet-4.5'],
-        ['gemini', 'gemini:gemini-2.5-pro'],
-      ])
-
-      // Provider-local failures are visible but do not prevent healthy
-      // providers from reaching every dashboard-derived table.
-      expect(store.getProblems()).toEqual([
-        expect.objectContaining({
-          spanId: `provider:pi:${brokenSource.path}`,
-          code: PROVIDER_PARSE_ERROR,
-          location: brokenSource.path,
-        }),
-      ])
-      expect(store.listSessions().map((session) => session.harness).sort()).toEqual(['antigravity', 'gemini'])
-      expect(store.listRuns().map((run) => run.harness).sort()).toEqual(['antigravity', 'gemini'])
-      expect(store.listExecutions().map((execution) => execution.harness).sort()).toEqual(['antigravity', 'gemini'])
+      expect(store.listAll().map((record) => record.harness).sort()).toEqual(['antigravity'])
+      expect(store.listAll().some((record) => record.harness === 'gemini')).toBe(false)
+      expect(store.getProblems().some((problem) => problem.code === PROVIDER_PARSE_ERROR)).toBe(true)
+      expect(store.listSessions().map((session) => session.harness)).toEqual(['antigravity'])
+      expect(store.listRuns().map((run) => run.harness)).toEqual(['antigravity'])
       expect(store.getHarnessRollup('antigravity')).toMatchObject({ harness: 'antigravity', sampleCount: 1 })
-      expect(store.getHarnessRollup('gemini')).toMatchObject({ harness: 'gemini', sampleCount: 1 })
-      expect(report.rollups).toBe(store.harnessRollupCount())
+      expect(store.getHarnessRollup('gemini')).toBeUndefined()
+      expect(formatRefreshReport(report)).not.toMatch(/\/native\//)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not cancel a healthy job when a sibling harness fails', async () => {
+    const store = temporaryStore()
+    const started: string[] = []
+    try {
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('antigravity', 'pi'),
+        jobConcurrency: 2,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (harnessId) => {
+          started.push(harnessId)
+          if (harnessId === 'pi') {
+            await new Promise((resolve) => setTimeout(resolve, 15))
+            throw new Error('pi unreadable')
+          }
+          await new Promise((resolve) => setTimeout(resolve, 40))
+          return [unit('antigravity', 'conversation', [call('antigravity', 'agy-session')])]
+        },
+      })
+      expect(started.sort()).toEqual(['antigravity', 'pi'])
+      expect(report.rows.find((row) => row.harnessId === 'antigravity')?.status).toBe('ok')
+      expect(report.rows.find((row) => row.harnessId === 'pi')?.status).toBe('failed')
+      expect(store.listAll()).toHaveLength(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('counts an unchanged rerun as zero new writes', async () => {
+    const store = temporaryStore()
+    let passes = 0
+    try {
+      const dependencies = {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          passes += 1
+          if (passes === 1) return [unit('pi', 'session', [call('pi', 'pi-session')])]
+          return [{
+            ...unit('pi', 'session', [call('pi', 'pi-session')]),
+            status: 'unchanged' as const,
+            envelopes: [],
+          }]
+        },
+      }
+      const first = await refreshHarnessSources(store, dependencies)
+      const second = await refreshHarnessSources(store, dependencies)
+      expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1, updated: 0 })
+      expect(second.rows[0]).toMatchObject({ status: 'unchanged', created: 0, updated: 0 })
+      expect(store.listAll()).toHaveLength(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not count already-covered records as Updated when --history-weeks expands', async () => {
+    const store = temporaryStore()
+    const started = new Date('2026-09-12T18:00:00.000Z')
+    let historyWeeks = 2
+    const recent = {
+      ...call('pi', 'pi-cross'),
+      timestamp: '2026-09-06T10:00:00.000Z',
+      deduplicationKey: 'pi:pi-cross:recent',
+      userMessage: 'recent pi turn',
+    }
+    const older = [
+      {
+        ...call('pi', 'pi-cross'),
+        timestamp: '2026-08-10T12:00:00.000Z',
+        deduplicationKey: 'pi:pi-cross:older-1',
+        userMessage: 'older pi turn 1',
+      },
+      {
+        ...call('pi', 'pi-cross'),
+        timestamp: '2026-08-20T12:00:00.000Z',
+        deduplicationKey: 'pi:pi-cross:older-2',
+        userMessage: 'older pi turn 2',
+      },
+    ]
+    try {
+      const dependencies = {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: started,
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => {
+          const parsed = historyWeeks === 2 ? [recent] : [...older, recent]
+          return [unit('pi', 'session', parsed)]
+        },
+      }
+      const first = await refreshHarnessSources(store, dependencies, { historyWeeks: 2 })
+      expect(first.rows[0]).toMatchObject({ created: 1, updated: 0 })
+      const revision = store.listSourceCheckpoints('pi')[0]?.revisionToken
+      historyWeeks = 6
+      const second = await refreshHarnessSources(store, dependencies, { historyWeeks: 6 })
+      expect(second.historyWeeks).toBe(6)
+      expect(second.rows[0]).toMatchObject({ created: 2, updated: 0 })
+      expect(store.listAll()).toHaveLength(3)
+      const checkpoint = store.listSourceCheckpoints('pi')[0]
+      expect(checkpoint?.revisionToken).toBe(revision)
+      expect(checkpoint?.coveredFromUtc).toBe(new Date(started.getTime() - 6 * 7 * 24 * 60 * 60 * 1000).toISOString())
     } finally {
       store.close()
     }
   })
 })
 
-describe('refreshLocalProviders — write volume', () => {
-  // Regression: the loop handed every OTLP record to `deduplicate` for each
-  // source. `deduplicate` returns the complete merged corpus, including the
-  // OTLP rows no file record touched, so each source re-upserted the entire
-  // OTLP side — measured at 23,695 rows rewritten to ingest one 28-record
-  // transcript, ~52M upserts across a real machine's ~2,200 sources. Each of
-  // those writes recompresses its payload, which is what made a full refresh
-  // take hours. Writes must stay proportional to what was actually parsed.
+describe('refreshHarnessSources — write volume', () => {
   it('does not rewrite the OTLP side once per source', async () => {
     const store = temporaryStore()
     try {
-      // An OTLP-sourced record sharing no session with anything discovered.
       store.upsertMany([
         {
           spanId: 'aa11bb22cc33dd44',
           traceId: 'ff00ee11dd22cc33bb44aa5566778899',
           parentSpanId: null,
           source: 'gemini',
-          harness: 'gemini',
-          name: 'gemini:gemini-2.5-pro',
+          harness: 'cursor',
+          name: 'cursor:gpt-5',
           op: 'llm.invoke',
           kind: 'internal',
           timestamp: '2026-09-06T13:00:00.000Z',
@@ -185,42 +302,28 @@ describe('refreshLocalProviders — write volume', () => {
       ])
 
       const untouchedBefore = store.storedRawBytes('aa11bb22cc33dd44')
-
-      // A provider with no registered content reader, so the fixture's
-      // non-existent paths do not turn into read failures.
-      const sources = [source('gemini', 'a'), source('gemini', 'b'), source('gemini', 'c')]
+      const sources = [source('pi', 'a'), source('pi', 'b'), source('pi', 'c')]
       const parsed = new Map(
-        sources.map((s, i) => [s.path, [call('gemini', `gemini-session-${i}`)]] as const),
+        sources.map((entry, index) => [entry.path, [call('pi', `pi-session-${index}`)]] as const),
       )
-      const provider = nativeProvider('gemini', sources, parsed)
 
-      const report = await refreshLocalProviders(store, {
-        getAllProviders: async () => [provider],
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [nativeProvider('pi', sources, parsed)],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
       })
 
-      expect(report.sources).toBe(3)
-      expect(report.accepted).toBe(3)
-
-      // The unrelated OTLP row is still there, untouched — not rewritten three
-      // times over, once per discovered source.
+      expect(report.rows[0]?.units).toBe(3)
       expect(store.storedRawBytes('aa11bb22cc33dd44')).toBe(untouchedBefore)
-      const otlp = store.listOtlpSourced()
-      expect(otlp).toHaveLength(1)
-      expect(otlp[0]!.spanId).toBe('aa11bb22cc33dd44')
-
-      // And the parsed calls did land.
+      expect(store.listOtlpSourced()).toHaveLength(1)
       expect(store.listAll()).toHaveLength(4)
     } finally {
       store.close()
     }
   })
 
-  // The user-visible symptom of the cross-path bug: the Claude Code harness
-  // listed two runs for one conversation, one per ingest path. Two separate
-  // defects produced it — the dedup key spelled the harness differently on each
-  // side, and a synthesized record carried no `sessionId`, so `sessionKeys()`
-  // fell back to the namespaced trace id and grouped the two paths apart even
-  // once their records had been matched.
   it('derives ONE run for a session both paths describe, not one per path', async () => {
     const store = temporaryStore()
     try {
@@ -230,9 +333,9 @@ describe('refreshLocalProviders — write volume', () => {
           traceId: 'bb00cc11dd22ee33ff44005566778899',
           parentSpanId: null,
           source: 'claude-code-desktop',
-          harness: 'claude-code',
+          harness: 'claude-cli',
           sessionId: 'both-paths-session',
-          name: 'claude-code:claude-opus-5',
+          name: 'claude-cli:claude-opus-5',
           op: 'llm.invoke',
           kind: 'internal',
           timestamp: '2026-09-06T14:00:00.000Z',
@@ -252,9 +355,6 @@ describe('refreshLocalProviders — write volume', () => {
         },
       ])
 
-      // The file path sees more turns than the collector caught — the ordinary
-      // case when the collector was started mid-session. The extra turns must
-      // still land in the same run.
       const sources = [source('claude', 'both')]
       const provider = nativeProvider(
         'claude',
@@ -263,17 +363,24 @@ describe('refreshLocalProviders — write volume', () => {
           sources[0]!.path,
           [0, 1, 2].map((turn) => ({
             ...call('claude', 'both-paths-session'),
-            deduplicationKey: `claude:both-paths-session:turn-${turn}`,
+            provider: 'claude-cli',
+            deduplicationKey: `claude-cli:both-paths-session:turn-${turn}`,
+            turnId: `turn-${turn}`,
           })),
         ]]),
       )
 
-      await refreshLocalProviders(store, { getAllProviders: async () => [provider] })
+      await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: descriptors('claude-cli'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        peekEvidence: async () => ({ entrypoint: 'cli' }),
+      })
 
-      // Three distinct file turns against the collector's one, so the run
-      // genuinely spans records from both paths rather than collapsing to one.
       expect(store.listAll().length).toBeGreaterThan(1)
-      expect(store.listRuns('claude-code')).toHaveLength(1)
+      expect(store.listRuns('claude-cli')).toHaveLength(1)
       expect(store.listRuns()).toHaveLength(1)
     } finally {
       store.close()
@@ -289,8 +396,9 @@ describe('refreshLocalProviders — write volume', () => {
           traceId: 'aa00bb11cc22dd33ee44ff5566778899',
           parentSpanId: null,
           source: 'claude-code-desktop',
-          harness: 'claude-code',
-          name: 'claude-code:claude-opus-5',
+          harness: 'claude-cli',
+          sessionId: 'shared-session',
+          name: 'claude-cli:claude-opus-5',
           op: 'llm.invoke',
           kind: 'internal',
           timestamp: '2026-09-06T14:00:00.000Z',
@@ -306,9 +414,7 @@ describe('refreshLocalProviders — write volume', () => {
           },
           content: {},
           cost: { basis: 'unknown', status: 'no_rate' },
-          // The file path will call this provider `claude`; the OTLP path
-          // votes `claude-code`. The collapse must still find them.
-          raw: { 'session.id': 'shared-session' },
+          raw: { 'session.id': 'shared-session', turnId: 'turn-1' },
         },
       ])
 
@@ -316,12 +422,23 @@ describe('refreshLocalProviders — write volume', () => {
       const provider = nativeProvider(
         'claude',
         sources,
-        new Map([[sources[0]!.path, [call('claude', 'shared-session')]]]),
+        new Map([[sources[0]!.path, [{
+          ...call('claude', 'shared-session'),
+          provider: 'claude-cli',
+          turnId: 'turn-1',
+          deduplicationKey: 'claude-cli:shared-session:turn-1',
+        }]]]),
       )
 
-      await refreshLocalProviders(store, { getAllProviders: async () => [provider] })
+      await refreshHarnessSources(store, {
+        getAllProviders: async () => [provider],
+        descriptors: descriptors('claude-cli'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        peekEvidence: async () => ({ entrypoint: 'cli' }),
+      })
 
-      // One turn, not two: the two paths describe the same work.
       const all = store.listAll()
       expect(all).toHaveLength(1)
       expect(all[0]!.spanId).toBe('bb22cc33dd44ee55')
