@@ -1,4 +1,0 @@
-npm warn Unknown env config "devdir". This will error in a future major version of npm. See `npm help npmrc` for supported config options.
-npm notice run npx
-npm notice run 'eslint' --no-ignore dash/dash/src/pages/Attention.tsx dash/dash/src/components/kyber/index.ts dash/dash/src/components/kyber/ScorecardMatrix.tsx
-eslint_exit: 0
