@@ -1,0 +1,13 @@
+npm warn Unknown env config "devdir". This will error in a future major version of npm. See `npm help npmrc` for supported config options.
+npm notice run npx
+npm notice run 'eslint' --no-error-on-unmatched-pattern dash/dash/src/pages/Attention.tsx dash/dash/src/components/kyber/index.ts
+
+/Users/dave/git/personal/kyber-weave/dash/dash/src/components/kyber/index.ts
+  0:0  warning  File ignored because of a matching ignore pattern. Use "--no-ignore" to disable file ignore settings or use "--no-warn-ignored" to suppress this warning
+
+/Users/dave/git/personal/kyber-weave/dash/dash/src/pages/Attention.tsx
+  0:0  warning  File ignored because of a matching ignore pattern. Use "--no-ignore" to disable file ignore settings or use "--no-warn-ignored" to suppress this warning
+
+✖ 2 problems (0 errors, 2 warnings)
+
+eslint_exit: 0

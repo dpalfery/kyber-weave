@@ -1,0 +1,5 @@
+npm warn Unknown env config "devdir". This will error in a future major version of npm. See `npm help npmrc` for supported config options.
+npm notice run 'eslint' --no-error-on-unmatched-pattern dash/src/App.tsx dash/src/App.test.tsx
+eslint_exit=0
+
+IDE ReadLints on dash/dash/src/App.tsx and dash/dash/src/App.test.tsx: no linter errors found.

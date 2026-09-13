@@ -1,0 +1,5 @@
+npm warn Unknown env config "devdir". This will error in a future major version of npm. See `npm help npmrc` for supported config options.
+npm warn exec The following package was not found and will be installed: eslint@10.10.0
+npm notice run npx
+npm notice run 'eslint' --no-error-on-unmatched-pattern dash/src/App.tsx dash/src/pages/CompareRuns.tsx dash/src/components/kyber/TurnAlignedDiff.tsx
+eslint_exit=0
