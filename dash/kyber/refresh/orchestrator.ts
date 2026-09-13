@@ -276,7 +276,6 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
   }
   if (row.status === 'partial' && row.diagnostic === undefined) {
     row.diagnostic = `${row.problems} unit recorded validation problems`
-      .replace(/^1 unit/, '1 unit')
   }
   return row
 }
