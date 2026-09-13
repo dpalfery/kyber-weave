@@ -30,6 +30,15 @@ RELEASE_BASE="https://github.com/${OWNER}/${REPO}/releases/download"
 LATEST_API="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
 RELEASES_API="https://api.github.com/repos/${OWNER}/${REPO}/releases"
 
+# First release whose build-kyberdash job succeeded and published
+# kyberdash-<rid> assets. Every earlier tag carries no KyberDash archive at
+# all. This script is served unversioned from the default branch and has to
+# stay installable against every tag it can resolve, so the KyberDash step is
+# gated on the resolved version instead of assumed. Raising this floor is a
+# behaviour change for anyone pinning an older release: leave it at the tag
+# that first shipped the assets.
+KYBERDASH_MIN_VERSION="0.1.7-rc.9"
+
 VERSION="${KYBER_WEAVE_VERSION:-}"
 INSTALL_DIR="${KYBER_WEAVE_INSTALL_DIR:-}"
 NO_MCP="${KYBER_WEAVE_NO_MCP:-}"
@@ -159,6 +168,82 @@ kyber_weave_kyberdash_rid() {
         linux-x64|linux-arm64|win-x64) printf '%s' "$1" ;;
         *) printf '%s' "$1" ;;
     esac
+}
+
+# kyber_weave_semver_compare <a> <b> -> prints -1 when a sorts below b, 0 when
+# the two are equal, 1 when a sorts above. SemVer 2.0.0 precedence: the numeric
+# core compares field by field as integers; a version carrying a pre-release
+# ranks below the same core without one; pre-release identifiers compare
+# dot-field by dot-field, numerically when both fields are all digits and by
+# ASCII otherwise, a numeric field ranking below an alphanumeric one, and the
+# longer identifier list winning a shared prefix. Build metadata and a leading
+# 'v' are ignored. Plain string comparison is not enough: it sorts rc.10 below
+# rc.9, which would strand exactly the releases this gate exists to admit.
+kyber_weave_semver_compare() {
+    awk -v a="$1" -v b="$2" '
+        function cmpnum(x, y) { return (x < y) ? -1 : ((x > y) ? 1 : 0) }
+        function core(v) {
+            sub(/^[vV]/, "", v)
+            sub(/\+.*$/, "", v)
+            sub(/-.*$/, "", v)
+            return v
+        }
+        function pre(v) {
+            sub(/^[vV]/, "", v)
+            sub(/\+.*$/, "", v)
+            if (v !~ /-/) return ""
+            sub(/^[^-]*-/, "", v)
+            return v
+        }
+        function cmpcore(x, y,   xa, ya, nx, ny, n, i, xv, yv) {
+            nx = split(x, xa, ".")
+            ny = split(y, ya, ".")
+            n = (nx > ny) ? nx : ny
+            for (i = 1; i <= n; i++) {
+                xv = (i <= nx) ? xa[i] + 0 : 0
+                yv = (i <= ny) ? ya[i] + 0 : 0
+                if (xv != yv) return cmpnum(xv, yv)
+            }
+            return 0
+        }
+        function cmppre(x, y,   xa, ya, nx, ny, n, i, xv, yv, xn, yn) {
+            if (x == "" && y == "") return 0
+            # A pre-release ranks below the release it precedes.
+            if (x == "") return 1
+            if (y == "") return -1
+            nx = split(x, xa, ".")
+            ny = split(y, ya, ".")
+            n = (nx < ny) ? nx : ny
+            for (i = 1; i <= n; i++) {
+                xv = xa[i]
+                yv = ya[i]
+                xn = (xv ~ /^[0-9]+$/)
+                yn = (yv ~ /^[0-9]+$/)
+                if (xn && yn) {
+                    if (xv + 0 != yv + 0) return cmpnum(xv + 0, yv + 0)
+                } else if (xn) {
+                    return -1
+                } else if (yn) {
+                    return 1
+                } else if (xv != yv) {
+                    return (xv < yv) ? -1 : 1
+                }
+            }
+            if (nx != ny) return cmpnum(nx, ny)
+            return 0
+        }
+        BEGIN {
+            r = cmpcore(core(a), core(b))
+            if (r == 0) r = cmppre(pre(a), pre(b))
+            print r
+        }'
+}
+
+# kyber_weave_release_has_kyberdash <version>
+#   exit 0 — the release publishes kyberdash-<rid> assets
+#   exit 1 — the release predates KyberDash and has none
+kyber_weave_release_has_kyberdash() {
+    [ "$(kyber_weave_semver_compare "$1" "$KYBERDASH_MIN_VERSION")" -ge 0 ]
 }
 
 # kyber_weave_lookup_checksum <sums-file> <archive> -> prints the expected
@@ -310,6 +395,19 @@ TMPDIR_KW="$(mktemp -d 2>/dev/null || mktemp -d -t kyber-weave)"
 
 log "installing ${TAG} (${RID}) → ${INSTALL_DIR}"
 
+# One decision, read by the download, the install, the quarantine strip and
+# the closing log. A release older than KYBERDASH_MIN_VERSION has no
+# kyberdash asset; fetching it anyway 404s, and because every archive is
+# verified before any is installed, that failure used to abort the whole
+# install — leaving the user with no CLI and no MCP either.
+INSTALL_KYBERDASH=1
+if [ -n "${NO_KYBERDASH}" ]; then
+    INSTALL_KYBERDASH=""
+elif ! kyber_weave_release_has_kyberdash "$VERSION"; then
+    INSTALL_KYBERDASH=""
+    log "release ${VERSION} predates KyberDash (first published in ${KYBERDASH_MIN_VERSION}); skipping kyberdash"
+fi
+
 SUMS="${TMPDIR_KW}/SHA256SUMS.txt"
 fetch "${RELEASE_BASE}/${TAG}/SHA256SUMS.txt" "$SUMS" \
     || die "could not download SHA256SUMS.txt for ${TAG}. Does that release exist?"
@@ -353,7 +451,7 @@ verify_and_extract "kyber-weave-${RID}.tar.gz"
 # stable set uses darwin-* for macOS while .NET uses osx-*. Same SHA256SUMS.txt
 # from the GitHub Release covers all assets; an unverified KyberDash would
 # surface as a missing entry or hash mismatch and abort the install.
-if [ -z "${NO_KYBERDASH}" ]; then
+if [ -n "${INSTALL_KYBERDASH}" ]; then
     verify_and_extract "kyberdash-${KYBERDASH_RID}.tar.gz"
 fi
 
@@ -374,20 +472,23 @@ install_binary() {
 
 install_binary "kyber-weave"
 [ -n "$NO_MCP" ] || install_binary "kyber-weave-mcp"
-if [ -z "${NO_KYBERDASH}" ]; then
+if [ -n "${INSTALL_KYBERDASH}" ]; then
     install_binary "kyberdash"
 fi
 
 # macOS quarantines files downloaded by some tools; clear it if xattr exists.
-if [ "$os_part" = "osx" ] && command -v xattr >/dev/null 2>&1; then
+# The OS half comes off RID rather than a bare os_part: that variable is
+# assigned inside kyber_weave_resolve_rid, which runs in a command
+# substitution, so it is never set in this shell and `set -u` aborts on it.
+if [ "${RID%%-*}" = "osx" ] && command -v xattr >/dev/null 2>&1; then
     xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave" 2>/dev/null || true
     [ -n "$NO_MCP" ] || xattr -d com.apple.quarantine "${INSTALL_DIR}/kyber-weave-mcp" 2>/dev/null || true
-    [ -z "${NO_KYBERDASH}" ] && xattr -d com.apple.quarantine "${INSTALL_DIR}/kyberdash" 2>/dev/null || true
+    [ -n "${INSTALL_KYBERDASH}" ] && xattr -d com.apple.quarantine "${INSTALL_DIR}/kyberdash" 2>/dev/null || true
 fi
 
 log "installed kyber-weave ${VERSION} → ${INSTALL_DIR}/kyber-weave"
 [ -n "$NO_MCP" ] || log "installed kyber-weave-mcp ${VERSION} → ${INSTALL_DIR}/kyber-weave-mcp"
-[ -z "${NO_KYBERDASH}" ] && log "installed kyberdash ${VERSION} → ${INSTALL_DIR}/kyberdash"
+[ -n "${INSTALL_KYBERDASH}" ] && log "installed kyberdash ${VERSION} → ${INSTALL_DIR}/kyberdash"
 
 case ":${PATH}:" in
     *":${INSTALL_DIR}:"*) ;;
@@ -409,8 +510,8 @@ esac
 # tampered bundle aborts the install rather than slipping into ~/Applications.
 
 if [ -n "$WITH_MENUBAR" ]; then
-    if [ "$os_part" != "osx" ]; then
-        log "--with-menubar is macOS only; skipping on ${os_part}"
+    if [ "${RID%%-*}" != "osx" ]; then
+        log "--with-menubar is macOS only; skipping on ${RID%%-*}"
     else
         KYBER_CLI="${INSTALL_DIR}/kyber-weave"
         [ -x "$KYBER_CLI" ] || die "--with-menubar: ${KYBER_CLI} is not executable after install"

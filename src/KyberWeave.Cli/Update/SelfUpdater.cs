@@ -15,6 +15,16 @@ internal sealed class SelfUpdater : IDisposable
 {
     private const string CliBaseName = "kyber-weave";
     private const string McpBaseName = "kyber-weave-mcp";
+    private const string KyberDashBaseName = "kyberdash";
+
+    /// <summary>
+    /// First release whose <c>build-kyberdash</c> job succeeded and published
+    /// <c>kyberdash-&lt;rid&gt;</c> assets; every earlier tag has none. An update that
+    /// resolves an older release must not ask for the archive, because a missing asset
+    /// fails the whole update — including the CLI replacement that would have worked.
+    /// <c>KYBERDASH_MIN_VERSION</c> in <c>scripts/install.sh</c> is the same floor.
+    /// </summary>
+    private const string KyberDashMinVersion = "0.1.7-rc.9";
 
     private readonly GitHubReleaseClient _releases;
     private readonly SelfUpdateHost _host;
@@ -106,10 +116,22 @@ internal sealed class SelfUpdater : IDisposable
             string sums = _releases.DownloadChecksums(tag);
             List<(string BaseName, string ExtractedPath, string Destination)> staged =
             [
-                StageBinary(CliBaseName, tag, windows, sums, work.FullName)
+                StageBinary(CliBaseName, _host.Rid, tag, windows, sums, work.FullName)
             ];
             if (!options.NoMcp)
-                staged.Add(StageBinary(McpBaseName, tag, windows, sums, work.FullName));
+                staged.Add(StageBinary(McpBaseName, _host.Rid, tag, windows, sums, work.FullName));
+
+            // KyberDash carries the Node SEA RID, not this host's .NET RID.
+            if (ShouldUpdateKyberDash(options, version, windows))
+            {
+                staged.Add(StageBinary(
+                    KyberDashBaseName,
+                    PlatformRid.KyberDashRid(_host.Rid),
+                    tag,
+                    windows,
+                    sums,
+                    work.FullName));
+            }
 
             // This process's own image is committed last. Overwriting it costs the runtime
             // the ability to load any assembly it has not already touched, because a
@@ -197,12 +219,13 @@ internal sealed class SelfUpdater : IDisposable
 
     private (string BaseName, string ExtractedPath, string Destination) StageBinary(
         string baseName,
+        string rid,
         string tag,
         bool windows,
         string sums,
         string workDirectory)
     {
-        string archiveName = BinaryInstaller.ArchiveName(baseName, _host.Rid);
+        string archiveName = BinaryInstaller.ArchiveName(baseName, rid);
         string archivePath = Path.Combine(workDirectory, archiveName);
         _log($"downloading {archiveName}…");
         _releases.DownloadAsset(tag, archiveName, archivePath);
@@ -231,6 +254,37 @@ internal sealed class SelfUpdater : IDisposable
     {
         BinaryInstaller.Replace(extractedPath, destination, windows, _host.IsMacOs);
         _log($"installed {baseName} {ReleaseVersion.Normalize(tag)} → {destination}");
+    }
+
+    /// <summary>Decides whether this update should replace an installed KyberDash.</summary>
+    /// <remarks>
+    /// Update replaces what is installed; it does not add a binary the user left out.
+    /// <c>install.sh --no-kyberdash</c> is an explicit opt-out, and a machine that installed
+    /// before KyberDash existed never chose to run it either — so an absent binary is reported
+    /// rather than silently created. Both skips are logged, because a silent one reads as the
+    /// update having covered KyberDash when it did not.
+    /// </remarks>
+    private bool ShouldUpdateKyberDash(SelfUpdateOptions options, string version, bool windows)
+    {
+        if (options.NoKyberDash)
+            return false;
+
+        if (ReleaseVersion.Compare(version, KyberDashMinVersion) < 0)
+        {
+            _log($"release {version} predates KyberDash (first published in {KyberDashMinVersion}); leaving kyberdash unchanged");
+            return false;
+        }
+
+        string installed = Path.Combine(
+            _host.InstallDirectory,
+            BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
+        if (!File.Exists(installed))
+        {
+            _log($"kyberdash is not installed in {_host.InstallDirectory}; add it with scripts/install.sh");
+            return false;
+        }
+
+        return true;
     }
 
     private bool IsRunningImage(string destination)

@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-05
+last-reviewed: 2026-09-10
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -22,6 +22,27 @@ under the `dash/` subtree, it delivers metrics, span analyses, and token breakdo
 
 This runbook covers the local prerequisites, build workflows, dev runners, CLI operations, and test suites
 for each surface.
+
+---
+
+## Installing the released binary
+
+Everything below builds KyberDash from this repository, which is what contributors want. To
+*run* a released KyberDash instead, take the `kyberdash` single-executable from the standard
+install path — it needs no Node toolchain and no checkout:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh \
+  | sh -s -- --prerelease
+```
+
+`--prerelease` is required until 0.1.7 is promoted to stable: `kyberdash-<rid>` assets first
+appear in 0.1.7-rc.9, and the installer skips KyberDash on any release below that floor. See
+[Installing Kyber-Weave](../install.md#kyberdash-and-the-version-floor) for the flags, the
+Node SEA RID names, and how `kyber-weave update` treats an installed `kyberdash`.
+
+The released binary is the CLI engine — `kyberdash web`, `kyberdash kyber otel`, and the TUI.
+The Electron and Tauri surfaces are not packaged by it and are still built from source below.
 
 ---
 
@@ -284,7 +305,7 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    *(Or run `codeburn web` if linked in your PATH).*
 
    **Supported CLI Options & Environment Variables**:
-   - `--port <number>`: Target HTTP port (default: `3000` or next open port).
+   - `--port <number>`: Target HTTP port (default: `4747`, falling back to a free port if taken).
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 

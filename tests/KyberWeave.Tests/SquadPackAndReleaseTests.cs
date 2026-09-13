@@ -130,8 +130,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             {
                 using StreamReader reader = new StreamReader(entry.Open(), Encoding.UTF8);
                 string text = reader.ReadToEnd();
-                Assert.DoesNotContain("\r\n", text);
-                Assert.DoesNotContain("\r", text);
+                Assert.DoesNotContain("\r\n", text, StringComparison.Ordinal);
+                Assert.DoesNotContain("\r", text, StringComparison.Ordinal);
             }
         }
 
@@ -221,8 +221,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             {
                 using StreamReader reader = new StreamReader(entry.Open(), Encoding.UTF8);
                 string text = reader.ReadToEnd();
-                Assert.DoesNotContain("\r\n", text);
-                Assert.DoesNotContain("\r", text);
+                Assert.DoesNotContain("\r\n", text, StringComparison.Ordinal);
+                Assert.DoesNotContain("\r", text, StringComparison.Ordinal);
             }
         }
 
@@ -407,8 +407,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         string apmHash = ComputeSha256(File.ReadAllBytes(apmArchive));
         string pluginHash = ComputeSha256(File.ReadAllBytes(pluginArchive));
 
-        Assert.Contains($"{apmHash}  {Path.GetFileName(apmArchive)}", checksumContent);
-        Assert.Contains($"{pluginHash}  {Path.GetFileName(pluginArchive)}", checksumContent);
+        Assert.Contains($"{apmHash}  {Path.GetFileName(apmArchive)}", checksumContent, StringComparison.Ordinal);
+        Assert.Contains($"{pluginHash}  {Path.GetFileName(pluginArchive)}", checksumContent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -517,11 +517,13 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         return false;
     }
 
-    private static bool IsTextFile(string entryName)
-    {
-        string ext = Path.GetExtension(entryName).ToLowerInvariant();
-        return ext is ".md" or ".yml" or ".yaml" or ".json" or ".toml" or ".txt";
-    }
+    private static readonly string[] TextFileExtensions =
+        [".md", ".yml", ".yaml", ".json", ".toml", ".txt"];
+
+    private static bool IsTextFile(string entryName) =>
+        TextFileExtensions.Contains(
+            Path.GetExtension(entryName),
+            StringComparer.OrdinalIgnoreCase);
 
     private static string ReadArchiveText(ZipArchive archive, string entryName)
     {
