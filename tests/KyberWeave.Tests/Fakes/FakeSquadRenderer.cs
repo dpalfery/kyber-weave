@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
@@ -174,6 +175,10 @@ public sealed class FakeSquadRenderer : ISquadRenderer
             Errors: errors));
     }
 
+    [SuppressMessage(
+        "Globalization",
+        "CA1308:Normalize strings to uppercase",
+        Justification = "SHA256SUMS.txt and the digests it is compared against are lowercase hex by sha256sum convention; ToUpperInvariant would not match the published format.")]
     private static string ComputeSha256(string utf8LfText)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(utf8LfText.Replace("\r\n", "\n", StringComparison.Ordinal));

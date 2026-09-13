@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-09-10
 ---
 
 # Distribution and release flow
@@ -27,15 +27,32 @@ latest release tag (or pre-release tags when `--prerelease` / `KYBER_WEAVE_PRERE
 is set, or a specific release via `--version`), verifies SHA-256 against `SHA256SUMS.txt`,
 follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo.
 
+It installs `kyber-weave`, `kyber-weave-mcp`, and — from releases that publish it —
+`kyberdash`. `--no-mcp` and `--no-kyberdash` narrow that set.
+
 Once those binaries are on PATH, `kyber-weave update` reads the same Release assets and
-checksums and replaces the running CLI plus sibling MCP in place. `--release-candidate`
-is the CLI name for the script's `--prerelease` behaviour (newest non-draft tag from the
-Releases list). A positional version pins a tag without colliding with global
-`kyber-weave --version`.
+checksums and replaces the running CLI, the sibling MCP, and an installed `kyberdash` in
+place. `--release-candidate` is the CLI name for the script's `--prerelease` behaviour
+(newest non-draft tag from the Releases list). A positional version pins a tag without
+colliding with global `kyber-weave --version`.
 
 The script is served from the **default branch**, not versioned with a release. It only
 ever reads Release assets, so it stays backward-compatible with older tags and a script
 fix never requires a re-release. Keep it that way when editing it.
+
+### Per-asset version floors
+
+Backward compatibility is not free once an asset is added mid-line. A release before that
+asset existed publishes nothing under its name, and because the script verifies every
+archive before installing any binary, one absent asset aborts the entire install — the
+user ends up with no CLI and no MCP either, not merely a missing extra.
+
+KyberDash is the current case: `kyberdash-<rid>` assets first appear in **0.1.7-rc.9**.
+`KYBERDASH_MIN_VERSION` in `install.sh` and `SelfUpdater.KyberDashMinVersion` hold that
+floor, and both compare against it with SemVer 2.0.0 precedence rather than string order —
+`kyber_weave_semver_compare` and `ReleaseVersion.Compare` respectively, since an ordinal
+comparison sorts `rc.10` below `rc.9`. Any future asset added to an existing release line
+needs the same treatment.
 
 It covers `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`. Windows is out of scope for
 the script — no `.zip` handling — so Windows users take the Release asset directly.
@@ -46,18 +63,29 @@ install.
 
 The `npm/` wrapper and `homebrew/` formula live in-tree for local experiments and
 manual packaging, but the release workflow does **not** publish them. The documented
-install path is `scripts/install.sh` against GitHub Release assets.
+install path is `scripts/install.sh` against GitHub Release assets. Neither carries
+KyberDash; adding it there would mean maintaining a second unpublished channel.
 
 `nuget.org` is never used. A `dotnet tool` package may go to GitHub Packages as an
 optional secondary channel for .NET specialists.
 
 ## RID matrix
 
-`linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`
+The .NET binaries publish `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, `win-x64`.
 
 Asset names follow `kyber-weave-<rid>` and `kyber-weave-mcp-<rid>`, `.tar.gz` everywhere
 except `win-x64`, which is `.zip`. Windows archives contain `*.exe`; others contain
 extensionless binaries.
+
+KyberDash is a Node single-executable (SEA), so it publishes Node's stable RID names
+instead: `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, `win-x64` — macOS is
+`darwin-*` where .NET is `osx-*`. Assets follow `kyberdash-<rid>` with the same archive
+extensions. Two mappings translate between the sets and must stay in step:
+`kyber_weave_kyberdash_rid` in `install.sh` and `PlatformRid.KyberDashRid` for the
+self-updater.
+
+All three tools share one `SHA256SUMS.txt` per release, so a KyberDash archive is verified
+by exactly the mechanism the .NET binaries are.
 
 ## Squad release assets and packaging
 

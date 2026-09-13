@@ -595,7 +595,7 @@ public class DocSpecValidatorTests
 
         DiagnosticReport report = fixture.Validate();
 
-        Diagnostic item = Assert.Single(report.Items.Where(i => i.Code == DocSpecValidator.InvalidVocabulary));
+        Diagnostic item = Assert.Single(report.Items, i => i.Code == DocSpecValidator.InvalidVocabulary);
         Assert.Equal("Each keyword must be a non-empty string.", item.Hint);
     }
 
@@ -620,7 +620,7 @@ public class DocSpecValidatorTests
 
         DiagnosticReport report = fixture.Validate();
 
-        Diagnostic item = Assert.Single(report.Items.Where(i => i.Code == DocSpecValidator.InvalidVocabulary));
+        Diagnostic item = Assert.Single(report.Items, i => i.Code == DocSpecValidator.InvalidVocabulary);
         Assert.Equal("Each keyword must be a non-empty string.", item.Hint);
     }
 }

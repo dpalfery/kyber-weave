@@ -26,7 +26,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
             SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions(
                 settings.Version,
                 settings.ReleaseCandidate,
-                settings.NoMcp));
+                settings.NoMcp,
+                settings.NoKyberDash));
             WriteOutcome(outcome);
             return outcome.ExitCode;
         }

@@ -34,7 +34,7 @@ internal sealed class CodeGraphFixtureDb : IDisposable
 
     public void IndexFile(string filePath) =>
         RunSqlite(
-            $"INSERT INTO nodes VALUES ('file-{filePath.GetHashCode()}', 'import', 'file', 'file', '{filePath}', 'csharp', 0, 0);");
+            $"INSERT INTO nodes VALUES ('file-{filePath.GetHashCode(StringComparison.Ordinal)}', 'import', 'file', 'file', '{filePath}', 'csharp', 0, 0);");
 
     public void IndexEdge(string sourceId, string targetId, string kind) =>
         RunSqlite($"INSERT INTO edges VALUES ('{sourceId}', '{targetId}', '{kind}');");

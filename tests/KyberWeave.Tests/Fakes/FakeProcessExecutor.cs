@@ -27,7 +27,7 @@ public sealed class FakeProcessExecutor : IProcessExecutor
         return this;
     }
 
-    public ProcessResult Run(ProcessStartInfo startInfo, string input = "")
+    public ProcessResult Run(ProcessStartInfo startInfo, string standardInput = "")
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         _calls.Add(startInfo);

@@ -51,7 +51,7 @@ public class CodeGraphPortTests
         IReadOnlyList<DocumentHit> hits = index.ForSymbol("BillingService");
         DocumentHit hit = Assert.Single(hits);
 
-        Assert.Contains(hit.CodeJoins, j => j.Reference == "BillingService" && j.Location.Contains("Svc.cs"));
+        Assert.Contains(hit.CodeJoins, j => j.Reference == "BillingService" && j.Location.Contains("Svc.cs", StringComparison.Ordinal));
     }
 
     [Fact]

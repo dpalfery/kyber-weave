@@ -278,6 +278,11 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         public int EmbeddingConstructions { get; private set; }
     }
 
+    [SuppressMessage(
+        "Globalization",
+        "CA1308:Normalize strings to uppercase",
+        Justification = "The YAML enum vocabulary this fixture writes is lowercase; an "
+            + "uppercased value would not round-trip through the config loader.")]
     private void WriteConfig(DocsAnalysisEmbeddingMode mode)
     {
         string state = Path.Combine(_temp.Path, ".kyber-weave");
