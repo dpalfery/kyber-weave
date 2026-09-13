@@ -1,7 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- The repository rule is that a warning fails the build (Directory.Build.props,
+         TreatWarningsAsErrors + AnalysisMode=all). This project now holds to it. The
+         blanket `false` that used to sit here was an unexplained exemption, and 270
+         analyzer warnings accumulated behind it: it silenced nothing (they all still
+         printed) and enforced nothing (real defects sat in the noise). Anything that
+         genuinely should not be fixed is suppressed below or at its site, with a
+         reason, per the NoWarn rule in AGENTS.md. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- CA1707 (192 sites): xUnit tests here are named Method_Condition_Expectation.
+         The rule exists to keep underscores out of public API identifiers; test
+         methods are not API, and renaming the suite would lose the convention that
+         makes a failing test name readable. Scoped to this project so the rule stays
+         armed across src/. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

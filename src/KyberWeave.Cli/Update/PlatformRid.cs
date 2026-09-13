@@ -46,4 +46,19 @@ internal static class PlatformRid
 
     internal static bool IsWindowsRid(string rid) =>
         rid.StartsWith("win-", StringComparison.Ordinal);
+
+    /// <summary>Maps a Kyber-Weave RID to the KyberDash Node SEA RID for the same platform.</summary>
+    /// <remarks>
+    /// KyberDash ships as a Node single-executable, and Node's stable RID set names macOS
+    /// <c>darwin-*</c> where .NET names it <c>osx-*</c>; the Linux and Windows names coincide.
+    /// <c>kyber_weave_kyberdash_rid</c> in <c>scripts/install.sh</c> is the same mapping for the
+    /// first-install path. An unrecognised RID is returned verbatim rather than reshaped into a
+    /// name no release publishes.
+    /// </remarks>
+    internal static string KyberDashRid(string rid) => rid switch
+    {
+        "osx-x64" => "darwin-x64",
+        "osx-arm64" => "darwin-arm64",
+        _ => rid
+    };
 }

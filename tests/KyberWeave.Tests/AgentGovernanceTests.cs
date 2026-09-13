@@ -35,7 +35,7 @@ public class AgentGovernanceTests
             Assert.Equal("architect", agent.RoleName);
             Assert.Equal("Produces an implementation plan before coding.", agent.Description);
             Assert.Equal("gpt-5.6-sol", agent.ModelPreference);
-            Assert.Contains("Planning behavior", agent.InstructionsBody);
+            Assert.Contains("Planning behavior", agent.InstructionsBody, StringComparison.Ordinal);
         }
         finally
         {
@@ -67,7 +67,7 @@ public class AgentGovernanceTests
             Assert.Equal("David R Palfery", agent.FrontmatterOrMetadata["author"]);
             Assert.Equal("1.0.0", agent.FrontmatterOrMetadata["version"]);
             Assert.Equal("MIT", agent.FrontmatterOrMetadata["license"]);
-            Assert.Contains("CI/CD ownership", agent.Description);
+            Assert.Contains("CI/CD ownership", agent.Description, StringComparison.Ordinal);
             Assert.Empty(AgentPromptScanner.Scan(agent).Items);
         }
         finally
@@ -98,7 +98,7 @@ public class AgentGovernanceTests
             AgentModel agent = parser.Parse(tempFile, HarnessKind.Cursor);
             Assert.Equal("csharp-dev", agent.RoleName);
             Assert.Equal("Use when writing C# and .NET code.", agent.Description);
-            Assert.Contains("senior .NET engineer", agent.InstructionsBody);
+            Assert.Contains("senior .NET engineer", agent.InstructionsBody, StringComparison.Ordinal);
         }
         finally
         {

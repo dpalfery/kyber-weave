@@ -49,3 +49,6 @@ appstore/
 
 # WIP / not ready
 src/summit.ts
+
+# SEA bundle output (tsup.sea.config.ts)
+dist-sea/

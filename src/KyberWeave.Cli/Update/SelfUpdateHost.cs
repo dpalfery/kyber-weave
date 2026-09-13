@@ -36,6 +36,10 @@ internal sealed record SelfUpdateHost(
     }
 }
 
-internal readonly record struct SelfUpdateOptions(string? Version, bool ReleaseCandidate, bool NoMcp);
+internal readonly record struct SelfUpdateOptions(
+    string? Version,
+    bool ReleaseCandidate,
+    bool NoMcp,
+    bool NoKyberDash = false);
 
 internal sealed record SelfUpdateOutcome(int ExitCode, string Message);

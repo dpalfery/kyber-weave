@@ -69,8 +69,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
               tag-commit: 0123456789abcdef
               asset-sha256: {{Digest("apm")}}
 
-            """.Replace("\r\n", "\n"),
-            lockYaml.Replace("\r\n", "\n"));
+            """.Replace("\r\n", "\n", StringComparison.Ordinal),
+            lockYaml.Replace("\r\n", "\n", StringComparison.Ordinal));
         Assert.Equal(
             $$"""
             {
@@ -101,8 +101,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
               ]
             }
 
-            """.Replace("\r\n", "\n"),
-            receiptJson.Replace("\r\n", "\n"));
+            """.Replace("\r\n", "\n", StringComparison.Ordinal),
+            receiptJson.Replace("\r\n", "\n", StringComparison.Ordinal));
         Assert.DoesNotContain(fixture.Path, lockYaml, StringComparison.Ordinal);
         Assert.DoesNotContain(fixture.Path, receiptJson, StringComparison.Ordinal);
         Assert.DoesNotContain("TOP-SECRET", lockYaml, StringComparison.Ordinal);
@@ -2182,6 +2182,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     [Theory]
     [InlineData("preparing")]
     [InlineData("prepared")]
+    [SuppressMessage(
+        "Globalization",
+        "CA1308:Normalize strings to uppercase",
+        Justification = "The serializer emits scope tokens in lowercase; asserting an "
+            + "uppercased token would assert a format it never writes.")]
     public void SerializeAuthorityStrictReaderRoundTripsEverySupportedShape(string journalPhase)
     {
         using TransactionFixture fixture = TransactionFixture.Create();
@@ -2569,6 +2574,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     [Fact]
+    [SuppressMessage(
+        "Globalization",
+        "CA1308:Normalize strings to uppercase",
+        Justification = "Derives the canonical lowercase token the serializer emits, which "
+            + "is the baseline the non-canonical variants are generated from.")]
     public void DeserializeAuthorityNoncanonicalEnumCaseIsRejected()
     {
         using RichTransactionFixture fixture = RichTransactionFixture.Create();
@@ -3975,6 +3985,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         }
     }
 
+    [SuppressMessage(
+        "Globalization",
+        "CA1308:Normalize strings to uppercase",
+        Justification = "Case variance is the subject under test. The lowercase variant is "
+            + "one of the inputs being asserted on, not a normalization to be made safe.")]
     private static IReadOnlyList<string> NoncanonicalCaseVariants(string canonical) =>
         new[]
             {
@@ -4289,6 +4304,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "The raced leaf bytes changed during claim/publication.");
     }
 
+    [SuppressMessage(
+        "Globalization",
+        "CA1308:Normalize strings to uppercase",
+        Justification = "Generates a deliberately case-varied path fixture; the lowercasing "
+            + "is the test input, not a normalization.")]
     public static IEnumerable<object[]> PortableInvalidPaths()
     {
         foreach (char forbidden in "<>:\"|?*")

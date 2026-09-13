@@ -12,7 +12,9 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 ```
 
 Installs the latest release as self-contained binaries in `~/.local/bin` — no .NET runtime,
-no sudo, checksum-verified. Already installed? `kyber-weave update`. [Install details →](docs/install.md)
+no sudo, checksum-verified: the `kyber-weave` CLI, the `kyber-weave-mcp` server, and, from
+releases that publish it, the [`kyberdash`](docs/dash/README.md) observability binary. Already
+installed? `kyber-weave update`. [Install details →](docs/install.md)
 
 > **This repository governs its own documentation.** Everything under [`docs/`](docs/)
 > carries conformant frontmatter and passes `kyber-weave docs validate` and `docs drift`
@@ -20,14 +22,15 @@ no sudo, checksum-verified. Already installed? `kyber-weave update`. [Install de
 
 ---
 
-## Four Premier Features
+## Five Premier Features
 
-Kyber-Weave provides four integrated features for agent governance and lifecycle management:
+Kyber-Weave provides five integrated features for agent governance and lifecycle management:
 
 1. **[DocGraph (Kyber-Docs)](#feature-1--docgraph)** — Typed, governed documentation corpus, drift detection, integrity analysis, and MCP graph retrieval.
 2. **[ContextHygiene](#feature-2--contexthygiene)** — Skill and harness agent linting, routing readiness scoring, parity drift detection, and security scanning.
 3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 9 IDE/CLI harnesses with transactional recovery.
 4. **[CI Pipelines](#feature-4--ci-pipelines)** — Unified diagnostic engine with stable `KW-*` rules, SARIF reporting, and GitHub Actions workflows.
+5. **[KyberDash](#feature-5--kyberdash)** — Local telemetry observability and context tuning for agentic workflows, across four execution surfaces.
 
 ---
 
@@ -186,6 +189,40 @@ gating tuned per branch so adopting scanning does not immediately break every ho
 
 ---
 
+## Feature 5 — KyberDash
+
+An agent session is a black box: hundreds of thousands of tokens spent per run with no view
+of what went to system prompts, tool schemas, or conversation history, and no way to tell a
+slow tool call from a circular subagent delegation. KyberDash makes that spend **observable
+and tunable, entirely on your machine** — no telemetry leaves localhost.
+
+**One canonical store.** An OTLP receiver on `127.0.0.1:4318` ingests traces and logs into a
+single SQLite store at `~/.kyberdash/canon.db`, normalizing every supported harness into one
+span-shaped record. Sessions, runs, execution trees, and findings are derived projections over
+it, rebuildable without re-ingesting.
+
+**Progressive-disclosure diagnostics.** A six-level spine from attention down to the
+individual context item: per-turn token breakdown (fresh input, cache read, cache creation,
+output), context composition by part type, ranked tool-schema cost with unused-schema waste,
+hierarchical execution timelines, and an inspector that shows the unclipped assembled turn.
+
+**Four local surfaces.** Terminal TUI, browser dashboard, Electron desktop app, and a
+Windows tray companion — all reading the same store.
+
+```bash
+kyberdash kyber otel        # OTLP receiver on 127.0.0.1:4318
+kyberdash web               # browser dashboard on :4747
+kyberdash report            # terminal TUI
+```
+
+Installed by the same one-line installer as the CLI, from releases that publish it.
+KyberDash is a soft fork of [`getagentseal/codeburn`](https://github.com/getagentseal/codeburn)
+vendored under `dash/`, with Kyber-Weave's own analyzers isolated in a merge zone.
+
+[Overview →](docs/dash/README.md) · [Architecture →](docs/dash/architecture.md) · [Runbook →](docs/dash/runbook.md) · [Telemetry inventory →](docs/dash/telemetry-inventory.md) · [Install →](docs/install.md#kyberdash-and-the-version-floor)
+
+---
+
 ## Documentation
 
 Full corpus in [`docs/`](docs/README.md). Start with
@@ -208,6 +245,9 @@ src/
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
   kyber-squad/            canonical 23 agents, 26 skills, profiles, and schemas
+dash/                     Feature 5 — KyberDash, a vendored soft fork of codeburn
+  src/ dash/ app/ windows/  upstream CLI engine and the four surfaces
+  kyber/                    the merge zone — Kyber-Weave's analyzers, OTLP receiver, canon store
 tests/KyberWeave.Tests/
 .apm/skills/              kyber-weave-docs — the authoring skill, shipped as an APM package
 samples/                  exemplar and deliberately bad skills; routing eval set

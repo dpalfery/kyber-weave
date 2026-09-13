@@ -16,4 +16,8 @@ public sealed class UpdateSettings : CommandSettings
     [CommandOption("--no-mcp")]
     [Description("Replace only the CLI; leave kyber-weave-mcp unchanged.")]
     public bool NoMcp { get; set; }
+
+    [CommandOption("--no-kyberdash")]
+    [Description("Leave an installed kyberdash unchanged.")]
+    public bool NoKyberDash { get; set; }
 }
