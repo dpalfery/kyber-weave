@@ -31,7 +31,7 @@ internal static class SquadCommandComposition
 
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
-    /// files. Copilot, Cursor, Claude, Codex, and OpenCode are native; Antigravity is fallback
+    /// files. Copilot, Cursor, Claude, Codex, OpenCode, and Kilo are native; Antigravity is fallback
     /// role-skill lowering to <c>.agents/skills/</c>. Every other approved target fails
     /// closed with a pointer to its <c>docs/todo/</c> entry rather than being silently
     /// dropped from the roster.
@@ -45,6 +45,7 @@ internal static class SquadCommandComposition
             new AntigravityRenderer(),
             new CodexRenderer(),
             new OpenCodeRenderer(),
+            new KiloRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>

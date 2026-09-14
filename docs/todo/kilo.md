@@ -4,11 +4,21 @@ title: Add a native Kilo renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-31
-status: draft
+last-reviewed: 2026-09-14
+status: superseded
 ---
 
 # Add a native Kilo renderer to Kyber-Squad
+
+> [!NOTE]
+> **Status: Completed**  
+> This todo has been completed and superseded by implementation plan
+> [docs/plans/2026-09-14-kilo-native-renderer.md](../plans/2026-09-14-kilo-native-renderer.md).
+>
+> **Implementation summary:**
+> - **Core Renderer:** [`KiloRenderer.cs`](file:///Users/dave/git/personal/kyber-weave/src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs) implements `ISquadRenderer` for `SquadTarget.Kilo`, projecting 21 native agents to `.kilo/agents/<name>.md` and 24 skills to `.kilo/skills/<name>/SKILL.md` along with linked resource closures (113 files total).
+> - **Contract Tests:** [`KiloRendererContractTests.cs`](file:///Users/dave/git/personal/kyber-weave/tests/KyberWeave.Tests/KiloRendererContractTests.cs) validates supported targets, non-Kilo target guards, canonical corpus rendering, deterministic serialization, frontmatter schemas, and degradation SHA-256 digest invariants.
+> - **CLI Wiring:** Registered in `SquadCommandComposition.ResolveRenderer()` (`src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`) and verified via `SquadCliCommandTests.cs` doctor assertions.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
@@ -16,11 +26,10 @@ implementation.
 
 ## Why this exists
 
-`squad install --target kilo` fails today, in preflight, before any network call:
-`SquadRendererRegistry` (`src/KyberWeave.Core/Squad/Rendering/SquadRendererRegistry.cs`)
-has renderers for Copilot, Cursor, Claude, Codex, and Antigravity. This target has no
-`ISquadRenderer` implementation, so requesting it is rejected with a message
-naming the gap and pointing here. See
+Historically, `squad install --target kilo` failed in preflight before any network call
+because `SquadRendererRegistry` only had renderers for Copilot, Cursor, Claude, Codex,
+Antigravity, and OpenCode. This gap is resolved by `KiloRenderer`
+(`src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs`). See
 [architecture.md §8](../kyber-squad/architecture.md#8-rendering) for how the render pipeline
 as a whole works, and
 [onboarding.md](../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
