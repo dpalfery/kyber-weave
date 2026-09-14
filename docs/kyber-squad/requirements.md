@@ -63,10 +63,10 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Kilo** | Native `.kilo/agents` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
 | **Antigravity** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Safety-narrowed |
 | **Warp** | Role skills | Unsupported; coverage preflight fails | Unavailable | Lowered (`role-*` on collision) | Not implemented |
-| **Factory Droids** | Native `.factory/` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
+| **Factory Droids** | Native `.factory/` | Implemented and registered | Supported | Not lowered | Permission-not-expressible (unverified mapping omitted) |
 
 The nine rows are the declared target roster. Only `copilot`, `cursor`, `claude`, `codex`,
-`antigravity`, and `opencode` have implemented and registered renderers. `kilo`, `warp`, and `factory`
+`antigravity`, `opencode`, and `factory` have implemented and registered renderers. `kilo` and `warp`
 fail renderer-coverage preflight before deployment.
 
 ---

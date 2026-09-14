@@ -401,8 +401,10 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("copilot", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("claude", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("opencode", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("factory", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("opencode", pendingSection, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("factory", pendingSection, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

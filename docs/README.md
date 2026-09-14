@@ -36,7 +36,7 @@ correct in a repository that arranges its documentation differently.
 
 - [Context Hygiene](context-hygiene/README.md) — Why and how to govern agent prompts and skills across coding harnesses
 - [DocGraph](docgraph/README.md) — Why and how to turn markdown docs into a queryable in-memory graph joined to live code
-- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a nine-target harness catalog; six targets render today with rollback
+- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a nine-target harness catalog; seven targets render today with rollback
 - [KyberDash](dash/README.md) — Why and how to observe and tune agent context with local .NET Aspire OTEL telemetry
 
 ---
@@ -118,9 +118,9 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 Unified multi-harness deployment and lifecycle control plane for 21 canonical agents and
 24 skills, each owner projecting a validated resource closure beside its rendered principal.
-The product declares nine harness targets; six are implemented and registered today
-(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, and `opencode`), while `kilo`, `warp`,
-and `factory` fail renderer-coverage preflight.
+The product declares nine harness targets; seven are implemented and registered today
+(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, and `factory`), while `kilo`
+and `warp` fail renderer-coverage preflight.
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.
 
 | Page | Covers |
