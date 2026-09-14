@@ -401,6 +401,11 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("copilot", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("claude", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
+
+        // A plain substring check would false-positive here: "copilot" contains "pi" at
+        // index 2-3, so the pi renderer's presence has to be asserted as a whole word.
+        Assert.Matches(@"\bpi\b", availableSection);
+        Assert.DoesNotMatch(@"\bpi\b", pendingSection);
     }
 
     [Fact]

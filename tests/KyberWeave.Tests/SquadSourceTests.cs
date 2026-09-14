@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -38,6 +39,64 @@ public sealed class SquadSourceTests
         Assert.Equal(
             first.Skills.Select(skill => (skill.Name, skill.SourcePath)),
             second.Skills.Select(skill => (skill.Name, skill.SourcePath)));
+    }
+
+    /// <summary>
+    /// Pi model tokens are <c>provider/modelId</c> values tied to each user's configured
+    /// providers, so the checked-in corpus carries no <c>pi:</c> value. A host that adds one
+    /// must still load: the model-profile field set is closed, and a declared target missing
+    /// from it would reject the profile as an unknown field.
+    /// </summary>
+    [Fact]
+    public void LoadModelProfileWithPiHarnessModelExposesThePiModel()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("profiles/models.yml", """
+            schema: kyber-squad.model-profiles/v1
+            profiles:
+              deep-planning:
+                default: inherit
+                pi: provider/model
+              general:
+                default: inherit
+            """);
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+
+        SquadModelProfile profile = source.ModelProfiles.Profiles["deep-planning"];
+        Assert.Equal("inherit", profile.Default);
+        Assert.True(
+            profile.HarnessModels.TryGetValue("pi", out string? piModel),
+            "The deep-planning profile does not expose its 'pi' harness model.");
+        Assert.Equal("provider/model", piModel);
+    }
+
+    /// <summary>
+    /// The published schema is a second copy of the loader's model-profile field set. Every
+    /// other declared target already has a harness-model property there; without a <c>pi</c>
+    /// property, schema-aware editors reject a profile the loader accepts.
+    /// </summary>
+    [Fact]
+    public void ModelProfilesSchemaDeclaresAPiHarnessModelField()
+    {
+        string schemaPath = Path.Combine(
+            KyberWeaveTestPaths.ToolRoot,
+            "products",
+            "kyber-squad",
+            "schemas",
+            "model-profiles.schema.json");
+        using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        JsonElement harnessModelFields = schema.RootElement
+            .GetProperty("properties")
+            .GetProperty("profiles")
+            .GetProperty("additionalProperties")
+            .GetProperty("properties");
+
+        Assert.True(
+            harnessModelFields.TryGetProperty("pi", out JsonElement piField),
+            "model-profiles.schema.json declares no 'pi' harness-model property.");
+        Assert.Equal("string", piField.GetProperty("type").GetString());
+        Assert.Equal(1, piField.GetProperty("minLength").GetInt32());
     }
 
     [Theory]

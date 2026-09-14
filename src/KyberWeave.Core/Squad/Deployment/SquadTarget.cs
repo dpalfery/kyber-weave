@@ -11,7 +11,8 @@ public enum SquadTarget
     Kilo,
     Antigravity,
     Warp,
-    Factory
+    Factory,
+    Pi
 }
 
 /// <summary>Canonical target tokens, aliases, and parsing for Kyber-Squad.</summary>
@@ -28,7 +29,8 @@ public static class SquadTargetCatalog
             SquadTarget.Kilo,
             SquadTarget.Antigravity,
             SquadTarget.Warp,
-            SquadTarget.Factory
+            SquadTarget.Factory,
+            SquadTarget.Pi
         ]);
 
     private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByToken =
@@ -44,7 +46,8 @@ public static class SquadTargetCatalog
             ["antigravity"] = SquadTarget.Antigravity,
             ["warp"] = SquadTarget.Warp,
             ["factory"] = SquadTarget.Factory,
-            ["factory-droids"] = SquadTarget.Factory
+            ["factory-droids"] = SquadTarget.Factory,
+            ["pi"] = SquadTarget.Pi
         };
 
     /// <summary>The approved target roster in stable presentation order.</summary>
@@ -62,6 +65,7 @@ public static class SquadTargetCatalog
         SquadTarget.Antigravity => "antigravity",
         SquadTarget.Warp => "warp",
         SquadTarget.Factory => "factory",
+        SquadTarget.Pi => "pi",
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
     };
 

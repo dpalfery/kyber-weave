@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-12
+last-reviewed: 2026-09-14
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -33,7 +33,7 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments. Its catalog declares nine target coding harnesses; five have
+atomic, recoverable deployments. Its catalog declares ten target coding harnesses; six have
 implemented and registered renderers today.
 
 ---
@@ -55,7 +55,7 @@ flowchart TD
     end
 
     subgraph Compiler["Target Resolution & Lowering"]
-        SquadTargetResolver["SquadTargetResolver\n(9 Harness Targets)"]
+        SquadTargetResolver["SquadTargetResolver\n(10 Harness Targets)"]
         Lattice["Semantic Permission Lattice\n(deny < ask < allow)"]
         Lowering["Role-Skill Lowering\n(Unoccupied vs Collision role-*)"]
     end
@@ -68,7 +68,7 @@ flowchart TD
     end
 
     subgraph TargetHarnesses["Declared Target Harnesses"]
-        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity)"]
+        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, Pi)"]
         UnsupportedTargets["Coverage Preflight Failure\n(OpenCode, Kilo, Warp, Factory)"]
     end
 
@@ -149,6 +149,17 @@ flowchart TD
    - Agents with no matching skill name lower directly to `<name>` as a skill on fallback targets.
    - `conductor` follows this rule because it has no canonical skill. The fallback profile's
      `shared-identities` list is empty, and the canonical catalog carries no version aliases.
+
+### Native Branch: Pi with Primary-Agent Lowering
+
+Pi is a native agent target that projects subagents natively but lowers its one primary-invocation
+agent (`conductor`) to a skill, per its fallback profile's `no-primary-agent: skill` value. Pi
+core has no primary-agent primitive: `.pi/SYSTEM.md` or `--system-prompt` replaces the whole
+session prompt. Rendering `conductor` as a subagent instead would place it at depth 1, pushing its
+delegated specialists to depth 2 — where Pi's default `maxSubagentDepth: 2` removes the nested
+delegation that `architect` and `code-reviewer` need. Lowering it to a top-level skill keeps it at
+depth 0, where the extension's `Agent` tool is available, and its specialists' nested rosters
+still work.
 
 ---
 
@@ -262,7 +273,8 @@ and validates.
   `CopilotRenderer` for `.github/agents/*.agent.md` and `.github/skills/*/SKILL.md`,
   `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
   `CodexRenderer` for `.codex/agents/*.toml` and `.codex/skills/*/SKILL.md`,
-  and `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`.
+  `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`,
+  and `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering.
 - **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
   may name a target-scoped `copilot-capability-profile`. These fields validate and render the
   Copilot allow-list and safety degradation only. They do not replace or widen the shared
@@ -307,8 +319,8 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), and `antigravity` (fallback role-skill lowering to
-  `.agents/skills/`) are implemented and registered. The remaining declared targets—`opencode`,
+- **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (fallback role-skill lowering to
+  `.agents/skills/`), and `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`) are implemented and registered. The remaining declared targets—`opencode`,
   `kilo`, `warp`, and `factory`—fail coverage preflight. `kyber-weave squad doctor` reports which
   targets are covered; `docs/todo/<target>.md` has what implementing the rest needs.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package

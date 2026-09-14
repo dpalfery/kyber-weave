@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-14
 ---
 
 # Kyber-Weave Plan Inventory
@@ -15,7 +15,11 @@ Every plan document under `docs/plans/` must be reachable from this inventory, d
 
 ## Active Plans
 
-None. Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
+| Plan | Status | Date | Development Mode | Goal |
+|---|---|---|---|---|
+| [2026-09-14-pi-harness-target.md](2026-09-14-pi-harness-target.md) | Ready | 2026-09-14 | test-first | Declare `pi` as a Kyber-Squad target and register a `PiRenderer` (agents in `.pi/agents/` via `@tintinweb/pi-subagents`, skills in `.pi/skills/`, conductor as a skill) so `squad install --target pi` works end to end. |
+
+Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
 ## Archived Plans
 

@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-09-14
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -149,9 +149,9 @@ While ContextHygiene validates individual skill specifications, scores routing r
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
 unified multi-harness deployment control plane. Kyber-Squad maintains 24 canonical skills
 (alongside 21 canonical agent roles and lowering rules) under `products/kyber-squad/` and
-manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares nine
-harness targets. Five renderers are implemented and registered (`copilot`, `cursor`, `claude`,
-`codex`, and `antigravity`); `opencode`, `kilo`, `warp`, and `factory` fail renderer-coverage
+manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares ten
+harness targets. Six renderers are implemented and registered (`copilot`, `cursor`, `claude`,
+`codex`, `antigravity`, and `pi`); `opencode`, `kilo`, `warp`, and `factory` fail renderer-coverage
 preflight until their renderers are implemented.
 
 Every raw `SKILL.md` except the explicitly evolved `product-owner` and `bug-crusher` matches the

@@ -108,7 +108,8 @@ public static class SquadPacker
                 relPath.StartsWith(".opencode/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".kilo/", StringComparison.OrdinalIgnoreCase) ||
                 relPath.StartsWith(".warp/", StringComparison.OrdinalIgnoreCase) ||
-                relPath.StartsWith(".factory/", StringComparison.OrdinalIgnoreCase))
+                relPath.StartsWith(".factory/", StringComparison.OrdinalIgnoreCase) ||
+                relPath.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

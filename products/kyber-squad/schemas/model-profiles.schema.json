@@ -22,7 +22,8 @@
           "kilo": { "type": "string", "minLength": 1 },
           "antigravity": { "type": "string", "minLength": 1 },
           "warp": { "type": "string", "minLength": 1 },
-          "factory": { "type": "string", "minLength": 1 }
+          "factory": { "type": "string", "minLength": 1 },
+          "pi": { "type": "string", "minLength": 1 }
         }
       }
     }
