@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-09-14
 status: current
 code-refs:
   - SquadDeploymentPlan
@@ -16,7 +16,7 @@ code-refs:
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
 **24 canonical skills**, with transactional recovery and state governance. Nine harness targets
-are declared; five are currently implemented and registered.
+are declared; six are currently implemented and registered.
 
 ---
 
@@ -56,7 +56,7 @@ Kyber-Squad declares nine coding-harness targets:
 | `cursor` | — | `.cursor/` | Native agents | Implemented and registered |
 | `claude` | — | `.claude/` | Native agents | Implemented and registered |
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
-| `opencode` | — | `.opencode/` | Native agents | Unsupported; fails coverage preflight |
+| `opencode` | — | `.opencode/` | Native agents | Implemented and registered |
 | `kilo` | — | `.kilo/` | Native agents | Unsupported; fails coverage preflight |
 | `antigravity` | — | *Explicit or configured target only* | Role-skill lowering | Implemented and registered |
 | `warp` | — | `.warp/` | Role-skill lowering | Unsupported; fails coverage preflight |
@@ -65,7 +65,7 @@ Kyber-Squad declares nine coding-harness targets:
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
-`codex` (native), and `antigravity` (fallback role-skill lowering to `.agents/skills/`) have renderers. Requesting any other target fails before the release is even downloaded,
+`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), and `opencode` (native) have renderers. Requesting any other target fails before the release is even downloaded,
 naming the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
 implementer needs to add it. `kyber-weave squad doctor` reports current coverage.
 

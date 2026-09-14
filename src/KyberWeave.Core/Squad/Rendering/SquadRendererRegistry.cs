@@ -362,6 +362,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Cursor => $".cursor/agents/{name}.md",
             SquadTarget.Claude => $".claude/agents/{name}.md",
             SquadTarget.Codex => $".codex/agents/{name}.toml",
+            SquadTarget.OpenCode => $".opencode/agents/{name}.md",
             SquadTarget.Antigravity =>
                 $".agents/skills/{ResolveFallbackOutputIdentity(name, skillNames, sharedIdentities)}/SKILL.md",
             _ => null
@@ -376,6 +377,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Cursor when !sharedIdentities.Contains(name) => $".cursor/skills/{name}/SKILL.md",
             SquadTarget.Claude when !sharedIdentities.Contains(name) => $".claude/skills/{name}/SKILL.md",
             SquadTarget.Codex when !sharedIdentities.Contains(name) => $".codex/skills/{name}/SKILL.md",
+            SquadTarget.OpenCode when !sharedIdentities.Contains(name) => $".opencode/skills/{name}/SKILL.md",
             SquadTarget.Antigravity => $".agents/skills/{name}/SKILL.md",
             _ => null
         };
