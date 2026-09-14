@@ -16,7 +16,7 @@ This is the task the last two windows should have been. Read all of it before st
 
 ---
 
-TASK: Five page components — `ContextDoctor`, `HarnessDetail`, `RunDetail`, `FindingDetail`, `CompareRuns` — exist in `dash/dash/src/pages/` and are imported by nothing except three test files. `App.tsx` navigation is `useState<KyberPage>` over a five-entry `NAV_TABS` const (`usage · context · compare · quarantine · problems`), dispatched by a ternary chain in `<main>`. The diagnostic hierarchy the product is organised around is not reachable in the running app.
+TASK: Five page components — `Attention`, `HarnessDetail`, `RunDetail`, `FindingDetail`, `CompareRuns` — exist in `dash/dash/src/pages/` and are imported by nothing except three test files. `App.tsx` navigation is `useState<KyberPage>` over a five-entry `NAV_TABS` const (`usage · context · compare · quarantine · problems`), dispatched by a ternary chain in `<main>`. The diagnostic hierarchy the product is organised around is not reachable in the running app.
 
 Make it reachable. **Ugly is fine. Reachable is the requirement.**
 
@@ -39,7 +39,7 @@ dash/dash/src/components/kyber/HierarchyBreadcrumb.tsx
 dash/dash/src/App.test.tsx
 ```
 
-`pages/ContextDoctor.tsx` was rewritten by T3 and already emits `data-testid="page-context-doctor"` and `drill-harness-<id>`. Read it; do not restructure it.
+`pages/Attention.tsx` was rewritten by T3 and already emits `data-testid="page-attention"` and `drill-harness-<id>`. Read it; do not restructure it.
 
 ## What to build
 
@@ -47,7 +47,7 @@ dash/dash/src/App.test.tsx
 
 ```ts
 type SpineLocation = {
-  level: 'context-doctor' | 'harness' | 'run' | 'execution' | 'turn' | 'finding' | 'compare'
+  level: 'attention' | 'harness' | 'run' | 'execution' | 'turn' | 'finding' | 'compare'
   harnessId?: string
   runId?: string
   executionId?: string
@@ -58,7 +58,7 @@ type SpineLocation = {
 
 A reducer with `push` / `pop` / `replace` / `goTo(level)`. `useState<KyberPage>` cannot express a six-level hierarchy; that is why nothing connects today.
 
-**2. `ContextDoctor` becomes the landing page.** The app opens on it. `Usage` survives as a tab; it does not open the app. If the first thing a developer sees is a spend grid, this is CodeBurn.
+**2. `Attention` becomes the landing page.** The app opens on it. `Usage` survives as a tab; it does not open the app. If the first thing a developer sees is a spend grid, this is CodeBurn.
 
 **3. Wire every `onSelect*` prop the pages already declare.** `onSelectHarness`, `onSelectRun`, `onSelectFinding`, `onSelectTurn`, `onSelectExecution` are all declared and all unconnected. Connect them to `push`.
 
@@ -66,7 +66,7 @@ A reducer with `push` / `pop` / `replace` / `goTo(level)`. `useState<KyberPage>`
 
 **5. `TurnDetail` — new, minimal.** Reachable from `RunDetail`. Lists the turn's context composition bands with `data-testid="context-band-<key>"`. Clicking a band puts that block's text into `data-testid="context-content"`. `ContextInspector.tsx` already does this well and is wired into `SessionInspectorDrawer` — **read it and reuse it**; do not reimplement. If it needs a turn-scoped prop it does not have, report that; rehoming it properly is task K4, not this one.
 
-**6. Breadcrumb navigation.** `breadcrumb-context-doctor` … `breadcrumb-turn`, each clickable, popping the stack. Browser back/forward is out of scope.
+**6. Breadcrumb navigation.** `breadcrumb-attention` … `breadcrumb-turn`, each clickable, popping the stack. Browser back/forward is out of scope.
 
 ## What NOT to build
 

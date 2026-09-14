@@ -1,6 +1,6 @@
 ---
 id: plans/tasks/T3-fabricated-harnesses
-title: T3 — Delete the fabricated harness catalogue and Context Doctor's narration
+title: T3 — Delete the fabricated harness catalogue and Attention's narration
 doc-type: plan
 status: needs-review
 owner: dpalfery
@@ -8,13 +8,13 @@ last-reviewed: 2026-09-06
 component: KyberDash
 ---
 
-# T3 — Delete the fabricated harness catalogue and Context Doctor's narration
+# T3 — Delete the fabricated harness catalogue and Attention's narration
 
 **Model:** Haiku. **Parallel with:** T1, T2, T4.
 
 ---
 
-TASK: `ContextDoctor.tsx` hardcodes six harnesses with invented `fieldCoverage` values (`0.83`, `0.33`, `0.67`, `0.5`) and `sampleCount: 0`, then renders them through the same table cells as live rollups. A screen whose entire purpose is honest measurement is currently shipping made-up coverage percentages. The list also disagrees with `App.tsx`'s eleven-entry `HARNESS_TABS`.
+TASK: `Attention.tsx` hardcodes six harnesses with invented `fieldCoverage` values (`0.83`, `0.33`, `0.67`, `0.5`) and `sampleCount: 0`, then renders them through the same table cells as live rollups. A screen whose entire purpose is honest measurement is currently shipping made-up coverage percentages. The list also disagrees with `App.tsx`'s eleven-entry `HARNESS_TABS`.
 
 You own this file exclusively, so also do the decision-id sweep within it (T1 does the other components).
 
@@ -30,7 +30,7 @@ Plus this check by hand, which no gate covers: point the dev server at an **empt
 FILES YOU OWN (touch nothing else):
 
 ```
-dash/dash/src/pages/ContextDoctor.tsx
+dash/dash/src/pages/Attention.tsx
 ```
 
 WHAT TO CHANGE:
@@ -39,7 +39,7 @@ WHAT TO CHANGE:
 2. A harness with no live rollup renders as unconnected with a reason, reusing `components/kyber/NotMeasurable.tsx`. It must not render a numeric cell.
 3. Export the catalogue, or import `HARNESS_TABS` from `App.tsx`, so the two lists cannot diverge again. One source.
 4. Remove the decision-id narration in this file: both `<p>` descriptions ("Six-level spine landing page: All Harnesses…", "Ranked by Decision D6 formula (estimated waste × outcome risk × confidence)…") and the `(Decision D16)` inside the `skillUtilisation` reason. Replace each with one plain sentence, or nothing.
-5. Add `data-testid="page-context-doctor"` to the root if it is missing, and `data-testid="drill-harness-<id>"` to each row's clickable element.
+5. Add `data-testid="page-attention"` to the root if it is missing, and `data-testid="drill-harness-<id>"` to each row's clickable element.
 
 CONSTRAINTS:
 
