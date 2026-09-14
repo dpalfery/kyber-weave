@@ -815,7 +815,7 @@ public sealed class SquadSourceTests
                   "mcpServers": {
                     "kyber-weave": {
                       "command": "kyber-weave-mcp",
-                      "args": []
+                      "args": ["--repo-root", "."]
                     }
                   }
                 }

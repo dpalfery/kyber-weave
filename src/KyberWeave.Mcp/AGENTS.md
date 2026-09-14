@@ -26,9 +26,10 @@ needs. Tools receive it by injection. Core never builds these itself — see
 [`../KyberWeave.Core/AGENTS.md`](../KyberWeave.Core/AGENTS.md).
 
 Repository root resolution order is `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the
-nearest ancestor containing `.git`, then the working directory. Guessing wrong yields an
-**empty corpus rather than an error**, which is the failure to suspect first when every
-query returns a miss.
+working directory. The working directory is accepted only when it contains a Kyber-Weave
+host configuration created by `kyber-weave docs init`; the server never walks up to a parent
+Git repository and never serves an unbound default corpus. A missing binding is reported on
+stderr with an actionable `kyber-weave docs init` command.
 
 ## Tools return text for a model, not data for a program
 

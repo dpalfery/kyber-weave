@@ -24,7 +24,21 @@ HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
 // Every log line goes to stderr. One stray line on stdout breaks the transport.
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-string repoRoot = ResolveRepoRoot(args);
+string repoRoot;
+try
+{
+    repoRoot = RepositoryRootResolver.Resolve(
+        args,
+        Directory.GetCurrentDirectory(),
+        Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
+}
+catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+{
+    // stdout is the JSON-RPC transport; startup diagnostics belong on stderr.
+    await Console.Error.WriteLineAsync($"KW-MCP-ROOT-001: {ex.Message}").ConfigureAwait(false);
+    return 1;
+}
+
 OntologyConfig ontology = ResolveOntology(repoRoot);
 
 // Composition root: factories for DocumentIndexHost. Core never invents these collaborators.
@@ -44,36 +58,9 @@ builder.Services
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;
 
-// The repository root, from `--repo-root`, else `KYBER_WEAVE_REPO_ROOT`, else
-// the nearest ancestor of the working directory that contains a `.git` entry.
-// Hosts launch the server with an unpredictable working directory, so guessing wrong
-// here means an empty corpus rather than an error.
-static string ResolveRepoRoot(string[] args)
-{
-    for (int i = 0; i < args.Length - 1; i++)
-    {
-        if (args[i] == "--repo-root") return Path.GetFullPath(args[i + 1]);
-    }
-
-    string? fromEnvironment = Environment.GetEnvironmentVariable("KYBER_WEAVE_REPO_ROOT");
-    if (!string.IsNullOrWhiteSpace(fromEnvironment)) return Path.GetFullPath(fromEnvironment);
-
-    DirectoryInfo? directory = new DirectoryInfo(Directory.GetCurrentDirectory());
-    while (directory is not null)
-    {
-        if (Directory.Exists(Path.Combine(directory.FullName, ".git")) ||
-            File.Exists(Path.Combine(directory.FullName, ".git")))
-        {
-            return directory.FullName;
-        }
-        directory = directory.Parent;
-    }
-
-    return Directory.GetCurrentDirectory();
-}
-
-// The host's ontology from `.kyber-weave/kyber-weave.yml`, or product defaults when
-// the repository has no config.
+// The host's ontology from `.kyber-weave/kyber-weave.yml`. Root resolution requires a
+// host config before startup; the default below remains the safe fallback for a config
+// that exists but cannot be parsed.
 //
 // The server reads the same configuration the CLI does. Without this it served the product
 // default root, so every repository that had moved its documentation — the common case,

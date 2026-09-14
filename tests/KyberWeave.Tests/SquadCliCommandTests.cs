@@ -1179,7 +1179,7 @@ public sealed class SquadCliCommandTests : IDisposable
                   "mcpServers": {
                     "kyber-weave": {
                       "command": "kyber-weave-mcp",
-                      "args": []
+                      "args": ["--repo-root", "."]
                     }
                   }
                 }
