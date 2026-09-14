@@ -12,7 +12,7 @@ status: draft
 
 `squad install`/`squad update` render canonical Squad source into a harness's native files
 through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), and `opencode` (native) have
+`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), and `factory` (native) have
 renderers today; every other approved target fails in preflight, before any network call,
 naming the gap and pointing here.
 
@@ -23,7 +23,6 @@ harness's real documentation, the code seam to implement against, and how to ver
 | Target | Kind | Page |
 |---|---|---|
 | `kilo` | Native | [kilo.md](kilo.md) |
-| `factory` | Native | [factory.md](factory.md) |
 | `warp` | Fallback (role-skill lowering) | [warp.md](warp.md) |
 | `pi` | Fallback (role-skill lowering); not yet declared in the target catalog | [pi.md](pi.md) |
 
@@ -32,8 +31,9 @@ harness's real documentation, the code seam to implement against, and how to ver
 (`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`), `claude` by `ClaudeRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs`), `codex` by
 `CodexRenderer` (`src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`), `antigravity` by
-`AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`), and `opencode` by
-`OpenCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`) —
+`AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`), `opencode` by
+`OpenCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`), and `factory` by
+`FactoryRenderer` (`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`) —
 none is listed above.
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.
