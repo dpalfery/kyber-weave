@@ -12,9 +12,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <remarks>
 /// <para>
 /// Native agent target: canonical agents render as Markdown with YAML frontmatter at
-/// <c>.kilo/agents/&lt;name&gt;.md</c>. Required keys are <c>name</c> and <c>description</c>;
-/// optional <c>model</c> resolves from <c>models.yml</c> for harness <c>kilo</c> (omitted when
-/// <c>inherit</c> or empty).
+/// <c>.kilo/agents/&lt;name&gt;.md</c>. Required keys are <c>name</c>, <c>description</c>, and <c>mode</c>
+/// (<c>primary</c> or <c>subagent</c>); optional <c>model</c> resolves from <c>models.yml</c> for harness <c>kilo</c>
+/// (omitted when <c>inherit</c> or empty).
 /// </para>
 /// <para>
 /// Canonical skills render as harness skills at <c>.kilo/skills/&lt;name&gt;/SKILL.md</c>
@@ -24,8 +24,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// Permission degradation: Kilo agent configuration has no frontmatter tool allow-list or
-/// capability permission lattice. Non-deny profile decisions are recorded as structured
-/// degradations with code <c>permission-not-expressible</c> rather than inventing unenforceable fields.
+/// capability permission lattice. Configured profile decisions (including allow, ask, and deny)
+/// are recorded as structured degradations with code <c>permission-not-expressible</c> rather
+/// than inventing unenforceable fields or silently dropping constraints (preventing capability widening).
 /// </para>
 /// </remarks>
 public sealed class KiloRenderer : ISquadRenderer
@@ -33,14 +34,8 @@ public sealed class KiloRenderer : ISquadRenderer
     private const string AgentsDirectory = ".kilo/agents";
     private const string SkillsDirectory = ".kilo/skills";
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
-
-    /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
-    /// registry may dispatch renderers concurrently; serialization takes this lock so a
-    /// shared static instance cannot interleave emitter state.
-    /// </summary>
-    private static readonly object SerializerLock = new();
+    private static readonly ThreadLocal<ISerializer> YamlSerializer = new(
+        () => new SerializerBuilder().Build());
 
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Kilo];
@@ -121,7 +116,8 @@ public sealed class KiloRenderer : ISquadRenderer
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = agent.Name,
-            ["description"] = agent.Description
+            ["description"] = agent.Description,
+            ["mode"] = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent"
         };
 
         string? model = ResolveKiloModel(agent, modelProfiles);
@@ -130,11 +126,10 @@ public sealed class KiloRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
+        string content = SquadMarkdownDocument.Compose(
+            YamlSerializer.Value!,
+            frontmatter,
+            agent.InstructionBody);
 
         return new SquadDeploymentFile(
             $"{AgentsDirectory}/{agent.Name}.md",
@@ -155,11 +150,10 @@ public sealed class KiloRenderer : ISquadRenderer
             ["license"] = "MIT"
         };
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
-        }
+        string content = SquadMarkdownDocument.Compose(
+            YamlSerializer.Value!,
+            frontmatter,
+            skill.InstructionBody);
 
         return new SquadDeploymentFile(
             $"{SkillsDirectory}/{skill.Name}/SKILL.md",
@@ -198,9 +192,11 @@ public sealed class KiloRenderer : ISquadRenderer
             return null;
         }
 
+        // Kilo has no capability permission lattice. All configured permissions (allow, ask,
+        // deny) are unexpressed at the harness boundary; recording deny constraints ensures
+        // canonical restrictions are not silently dropped (preventing capability widening).
         List<string> unexpressed = capabilityVocabulary
-            .Where(cap => profile.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
-                          decision != SquadPermissionDecision.Deny)
+            .Where(cap => profile.Permissions.ContainsKey(cap))
             .ToList();
 
         if (unexpressed.Count == 0)

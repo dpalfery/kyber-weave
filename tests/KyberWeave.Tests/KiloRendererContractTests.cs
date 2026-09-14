@@ -115,6 +115,9 @@ public sealed class KiloRendererContractTests : IDisposable
         });
 
         Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
+        int inheritedModelAgentCount = 0;
+        int concreteModelAgentCount = 0;
+
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile file = Assert.Single(
@@ -129,18 +132,23 @@ public sealed class KiloRendererContractTests : IDisposable
                 string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
+            string expectedMode = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent";
+            Assert.Equal(expectedMode, RequireScalar(frontmatter, "mode", agent.Name));
+
             // Model resolution: verify against loaded ModelProfiles.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             if (modelProfile.HarnessModels.TryGetValue("kilo", out string? expectedModel))
             {
                 if (string.Equals(expectedModel, "inherit", StringComparison.Ordinal))
                 {
+                    inheritedModelAgentCount++;
                     Assert.False(
                         frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
                         $"Agent '{agent.Name}' should omit 'model' when resolved to inherit.");
                 }
                 else
                 {
+                    concreteModelAgentCount++;
                     Assert.True(
                         string.Equals(expectedModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
                         $"Agent '{agent.Name}' model mismatch: expected '{expectedModel}'.");
@@ -148,12 +156,14 @@ public sealed class KiloRendererContractTests : IDisposable
             }
             else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
             {
+                concreteModelAgentCount++;
                 Assert.True(
                     string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
                     $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
             }
             else
             {
+                inheritedModelAgentCount++;
                 Assert.False(
                     frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
                     $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
@@ -170,6 +180,32 @@ public sealed class KiloRendererContractTests : IDisposable
                 string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
                 $"Agent '{agent.Name}' body mismatch.");
         }
+
+        // Canonical model resolution verification:
+        // 'conductor' uses the orchestration profile (kilo: inherit) and must omit 'model'.
+        // All non-conductor agents configure concrete kilo models and must emit them.
+        Assert.Equal(1, inheritedModelAgentCount);
+        Assert.Equal(source.Agents.Count - 1, concreteModelAgentCount);
+
+        SquadDeploymentFile conductorFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".kilo/agents/conductor.md");
+        (YamlMappingNode conductorFrontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(conductorFile.Content.Span),
+            "conductor");
+        Assert.False(
+            conductorFrontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            "Agent 'conductor' must omit 'model' key in frontmatter because orchestration has kilo: inherit.");
+
+        SquadDeploymentFile architectFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".kilo/agents/architect.md");
+        (YamlMappingNode architectFrontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(architectFile.Content.Span),
+            "architect");
+        Assert.Equal(
+            "glm5.3",
+            RequireScalar(architectFrontmatter, "model", "architect"));
 
         // Shared identities suppression verification
         foreach (string sharedIdentity in sharedIdentities)
@@ -215,15 +251,14 @@ public sealed class KiloRendererContractTests : IDisposable
                 $"Skill '{skill.Name}' body mismatch.");
         }
 
-        // Degradations: exactly the non-all-deny agents carry 'permission-not-expressible'
+        // Degradations: all agents whose capability profile configures permissions carry 'permission-not-expressible',
+        // including Deny decisions to prevent silent capability widening.
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
         string[] expectedDegraded = source.Agents
             .Where(a =>
             {
                 SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
-                return capabilityVocabulary.Any(cap =>
-                    prof.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
-                    decision != SquadPermissionDecision.Deny);
+                return capabilityVocabulary.Any(cap => prof.Permissions.ContainsKey(cap));
             })
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
@@ -233,6 +268,13 @@ public sealed class KiloRendererContractTests : IDisposable
         Assert.Equal(
             expectedDegraded,
             result.Degradations.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+
+        // Verify canonical denies are recorded in degradation details (preventing capability widening)
+        SquadDegradationRecord conductorDegradation = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == "conductor");
+        Assert.Contains("filesystem.search", conductorDegradation.Details, StringComparison.Ordinal);
+        Assert.Contains("process.execute", conductorDegradation.Details, StringComparison.Ordinal);
 
         foreach (SquadDegradationRecord degradation in result.Degradations)
         {
@@ -290,6 +332,102 @@ public sealed class KiloRendererContractTests : IDisposable
             ".kilo/skills");
     }
 
+    [Fact]
+    public async Task RenderAsync_Kilo_ResolvesConcreteModelsAndSuppressesInheritedModels()
+    {
+        using KiloModelResolutionSquadFixture fixture = KiloModelResolutionSquadFixture.Create();
+        KiloRenderer renderer = new();
+        SquadRenderRequest request = new(
+            SourceDirectory: fixture.Path,
+            Targets: [SquadTarget.Kilo],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await renderer.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // 1. Explicit kilo harness model (non-inherit) -> emits frontmatter model
+        SquadDeploymentFile explicitFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".kilo/agents/{KiloModelResolutionSquadFixture.ExplicitModelAgent}.md");
+        (YamlMappingNode explicitFrontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(explicitFile.Content.Span),
+            KiloModelResolutionSquadFixture.ExplicitModelAgent);
+        Assert.Equal(
+            KiloModelResolutionSquadFixture.ExplicitKiloModel,
+            RequireScalar(explicitFrontmatter, "model", KiloModelResolutionSquadFixture.ExplicitModelAgent));
+
+        // 2. Explicit kilo harness model set to "inherit" -> omits frontmatter model
+        SquadDeploymentFile inheritFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".kilo/agents/{KiloModelResolutionSquadFixture.InheritModelAgent}.md");
+        (YamlMappingNode inheritFrontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(inheritFile.Content.Span),
+            KiloModelResolutionSquadFixture.InheritModelAgent);
+        Assert.False(
+            inheritFrontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            "Explicit 'inherit' kilo override must omit the 'model' key even when profile default is non-inherit.");
+
+        // 3. Fallback to profile default when kilo harness is unspecified (non-inherit default) -> emits default model
+        SquadDeploymentFile fallbackFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".kilo/agents/{KiloModelResolutionSquadFixture.FallbackModelAgent}.md");
+        (YamlMappingNode fallbackFrontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(fallbackFile.Content.Span),
+            KiloModelResolutionSquadFixture.FallbackModelAgent);
+        Assert.Equal(
+            KiloModelResolutionSquadFixture.FallbackDefaultModel,
+            RequireScalar(fallbackFrontmatter, "model", KiloModelResolutionSquadFixture.FallbackModelAgent));
+
+        // 4. Fallback to profile default when default is "inherit" and kilo harness is unspecified -> omits frontmatter model
+        SquadDeploymentFile fallbackInheritFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".kilo/agents/{KiloModelResolutionSquadFixture.FallbackInheritAgent}.md");
+        (YamlMappingNode fallbackInheritFrontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(fallbackInheritFile.Content.Span),
+            KiloModelResolutionSquadFixture.FallbackInheritAgent);
+        Assert.False(
+            fallbackInheritFrontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            "Profile default 'inherit' without kilo override must omit the 'model' key.");
+
+        // 5. Verify degradation records preserve Deny permissions without capability widening
+        Assert.Equal(4, result.Degradations.Count);
+        Assert.All(result.Degradations, degradation =>
+        {
+            Assert.Equal("kilo", degradation.Target);
+            Assert.Equal("permission-not-expressible", degradation.Code);
+            Assert.Contains("filesystem.read", degradation.Details, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task RenderAsync_ConcurrentRenders_ProduceConsistentOutputWithoutLocking()
+    {
+        KiloRenderer renderer = new();
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Kilo],
+            Scope: SquadDeploymentScope.Project);
+
+        Task<SquadRenderResult>[] tasks = Enumerable.Range(0, 10)
+            .Select(_ => Task.Run(() => renderer.RenderAsync(request)))
+            .ToArray();
+
+        SquadRenderResult[] results = await Task.WhenAll(tasks);
+
+        Assert.All(results, r => Assert.True(r.Success));
+        SquadRenderResult first = results[0];
+        foreach (SquadRenderResult other in results.Skip(1))
+        {
+            Assert.Equal(first.Files.Count, other.Files.Count);
+            for (int i = 0; i < first.Files.Count; i++)
+            {
+                Assert.Equal(first.Files[i].RelativePath, other.Files[i].RelativePath);
+                Assert.True(first.Files[i].Content.Span.SequenceEqual(other.Files[i].Content.Span));
+            }
+        }
+    }
+
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
     {
         const string delimiter = "---\n";
@@ -321,5 +459,170 @@ public sealed class KiloRendererContractTests : IDisposable
 
         return Assert.IsType<YamlScalarNode>(value).Value
             ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
+    }
+
+    /// <summary>
+    /// Minimal synthetic squad fixture exercising all branches of Kilo model resolution:
+    /// explicit non-inherit model, explicit inherit override, fallback to non-inherit default,
+    /// and fallback to inherit default.
+    /// </summary>
+    private sealed class KiloModelResolutionSquadFixture : IDisposable
+    {
+        internal const string ExplicitModelAgent = "explicit-model-agent";
+        internal const string InheritModelAgent = "inherit-model-agent";
+        internal const string FallbackModelAgent = "fallback-model-agent";
+        internal const string FallbackInheritAgent = "fallback-inherit-agent";
+
+        internal const string ExplicitKiloModel = "kilo-custom-v1";
+        internal const string FallbackDefaultModel = "default-custom-v2";
+
+        private readonly TempDirectory _tempDirectory = new();
+
+        private KiloModelResolutionSquadFixture()
+        {
+        }
+
+        internal string Path => _tempDirectory.Path;
+
+        internal static KiloModelResolutionSquadFixture Create()
+        {
+            KiloModelResolutionSquadFixture fixture = new();
+            fixture.Write("squad.yml", """
+                schema: kyber-squad.squad/v1
+                name: kilo-model-resolution-fixture
+                version-source: kyber-weave-assembly
+                default-bundle: full
+                bundles:
+                  full: bundles/full.yml
+                profiles:
+                  models: profiles/models.yml
+                  capabilities: profiles/capabilities.yml
+                  fallbacks: profiles/fallbacks.yml
+                toolchain: toolchain.yml
+                mcp: mcp.json
+                """);
+            fixture.Write("bundles/full.yml", $"""
+                schema: kyber-squad.bundle/v1
+                name: full
+                agents:
+                  - {ExplicitModelAgent}
+                  - {InheritModelAgent}
+                  - {FallbackModelAgent}
+                  - {FallbackInheritAgent}
+                skills: []
+                """);
+            fixture.Write("profiles/models.yml", $"""
+                schema: kyber-squad.model-profiles/v1
+                profiles:
+                  explicit-profile:
+                    default: inherit
+                    kilo: {ExplicitKiloModel}
+                  inherit-profile:
+                    default: {FallbackDefaultModel}
+                    kilo: inherit
+                  fallback-profile:
+                    default: {FallbackDefaultModel}
+                  fallback-inherit-profile:
+                    default: inherit
+                """);
+            fixture.Write("profiles/capabilities.yml", """
+                schema: kyber-squad.capability-profiles/v1
+                capabilities:
+                  - filesystem.read
+                profiles:
+                  worker:
+                    permissions:
+                      filesystem.read: deny
+                """);
+            fixture.Write("profiles/fallbacks.yml", """
+                schema: kyber-squad.fallback-profiles/v1
+                profiles:
+                  role-skill:
+                    no-primary-agent: skill
+                    no-agent-primitive: skill
+                    body-source: agent
+                    output-identity:
+                      unoccupied: agent-name
+                      shared: reuse-skill
+                      collision: role-prefixed-agent-name
+                      prefix: role-
+                    shared-identities: []
+                """);
+            fixture.Write("toolchain.yml", """
+                schema: kyber-squad.toolchain/v1
+                required-features:
+                  - agent-ir/v1
+                validated-release: null
+                """);
+            fixture.Write("mcp.json", """
+                {
+                  "mcpServers": {}
+                }
+                """);
+
+            WriteAgent(fixture, ExplicitModelAgent, "explicit-profile");
+            WriteAgent(fixture, InheritModelAgent, "inherit-profile");
+            WriteAgent(fixture, FallbackModelAgent, "fallback-profile");
+            WriteAgent(fixture, FallbackInheritAgent, "fallback-inherit-profile");
+
+            foreach (string schema in new[]
+                     {
+                         "squad",
+                         "bundle",
+                         "agent",
+                         "model-profiles",
+                         "capability-profiles"
+                     })
+            {
+                fixture.Write($"schemas/{schema}.schema.json", """
+                    {
+                      "$schema": "https://json-schema.org/draft/2020-12/schema",
+                      "type": "object"
+                    }
+                    """);
+            }
+            fixture.Write("schemas/fallback-profiles.schema.json", """
+                {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "$id": "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
+                  "type": "object"
+                }
+                """);
+
+            return fixture;
+        }
+
+        private static void WriteAgent(KiloModelResolutionSquadFixture fixture, string name, string modelProfile)
+        {
+            fixture.Write($"agents/{name}.md", $"""
+                ---
+                schema: kyber-squad.agent/v1
+                name: {name}
+                description: Synthetic agent exercising model resolution for {name}.
+                invocation: subagent
+                model-profile: {modelProfile}
+                capability-profile: worker
+                copilot-tools: [vscode]
+                delegates-to: []
+                fallback: role-skill
+                aliases: []
+                ---
+                Instruction body for {name}.
+                """);
+        }
+
+        public void Dispose() => _tempDirectory.Dispose();
+
+        private void Write(string relativePath, string content)
+        {
+            string fullPath = System.IO.Path.Combine(Path, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            string? directory = System.IO.Path.GetDirectoryName(fullPath);
+            if (directory is not null)
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(fullPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        }
     }
 }

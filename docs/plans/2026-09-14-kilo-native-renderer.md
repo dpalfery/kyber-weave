@@ -10,7 +10,7 @@ component: KyberSquad
 
 # Add a native Kilo renderer to Kyber-Squad
 
-**Status:** Completed  
+**Status:** Ready  
 **Date:** 2026-09-14  
 **Goal:** Implement and register an `ISquadRenderer` for `SquadTarget.Kilo` (`kilo`) so `kyber-weave squad install --target kilo` succeeds with native Kilo agent and skill layouts, verified against repository safety and rendering invariants.
 
@@ -48,7 +48,7 @@ The system lacks an `ISquadRenderer` implementation for Kilo, registration in CL
 
 - **D2 (Agent Frontmatter Schema):**
   - Agents are formatted in Markdown with YAML frontmatter bounded by `---`.
-  - Required keys: `name: string`, `description: string`.
+  - Required keys: `name: string`, `description: string`, `mode: string` (`primary` for conductor / primary agents, `subagent` for delegate subagents, mapped from `agent.Invocation`).
   - Optional key: `model: string` (resolved from `models.yml` for harness `kilo`; omitted when `inherit` or unresolved default).
   - Body: Verbatim `agent.InstructionBody` following frontmatter, normalized with LF line endings (`\n`) and guaranteed trailing newline.
 
@@ -64,6 +64,12 @@ The system lacks an `ISquadRenderer` implementation for Kilo, registration in CL
 
 - **D5 (Model Resolution & `models.yml`):**
   - Support model resolution from `products/kyber-squad/profiles/models.yml` for target key `kilo`.
+  - Defined Kilo model tokens mapped per profile:
+    - `deep-planning`: `glm5.3`
+    - `general`: `muse-spark1.3 contributor`
+    - `fast`: `spark1.3 contributor`
+    - `mai-code-flash`: `kimi k2.7 code`
+    - `orchestration`: `inherit` (only conductor inherits)
   - If `kilo` is not specified in a profile, fallback to profile default or `inherit`. If resolved value is `"inherit"`, omit `model` from frontmatter.
 
 - **D6 (Deterministic Serialization):**

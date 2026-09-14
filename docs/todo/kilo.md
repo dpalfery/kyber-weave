@@ -16,8 +16,8 @@ status: superseded
 > [docs/plans/2026-09-14-kilo-native-renderer.md](../plans/2026-09-14-kilo-native-renderer.md).
 >
 > **Implementation summary:**
-> - **Core Renderer:** [`KiloRenderer.cs`](file:///Users/dave/git/personal/kyber-weave/src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs) implements `ISquadRenderer` for `SquadTarget.Kilo`, projecting 21 native agents to `.kilo/agents/<name>.md` and 24 skills to `.kilo/skills/<name>/SKILL.md` along with linked resource closures (113 files total).
-> - **Contract Tests:** [`KiloRendererContractTests.cs`](file:///Users/dave/git/personal/kyber-weave/tests/KyberWeave.Tests/KiloRendererContractTests.cs) validates supported targets, non-Kilo target guards, canonical corpus rendering, deterministic serialization, frontmatter schemas, and degradation SHA-256 digest invariants.
+> - **Core Renderer:** [`KiloRenderer.cs`](../../src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs) implements `ISquadRenderer` for `SquadTarget.Kilo`, projecting 21 native agents to `.kilo/agents/<name>.md` and 24 skills to `.kilo/skills/<name>/SKILL.md` along with linked resource closures (113 files total). On native targets like Kilo, agents and skills have separate directory structures (`.kilo/agents/` and `.kilo/skills/`), so all 21 agents and all 24 skills (plus 68 resources = 113 files) are emitted. `shared-identities` in `fallbacks.yml` is empty (`[]`), so no skills are suppressed (the 7 corpus collisions only trigger `role-` prefixes on fallback targets where agents are lowered into skills).
+> - **Contract Tests:** [`KiloRendererContractTests.cs`](../../tests/KyberWeave.Tests/KiloRendererContractTests.cs) validates supported targets, non-Kilo target guards, canonical corpus rendering, deterministic serialization, frontmatter schemas, and degradation SHA-256 digest invariants.
 > - **CLI Wiring:** Registered in `SquadCommandComposition.ResolveRenderer()` (`src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`) and verified via `SquadCliCommandTests.cs` doctor assertions.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
@@ -37,7 +37,7 @@ full target roster and its current coverage.
 
 ## Classification
 
-**Native agent target.** Canonical agents render as this harness's own native agent primitive (Markdown with YAML frontmatter (unverified)) at `.kilo/agents/<name>.md`. All canonical skills render as harness skills at `.kilo/skills/<name>/SKILL.md`; there are no shared product identities to suppress.
+**Native agent target.** Canonical agents render as this harness's own native agent primitive (Markdown with YAML frontmatter) at `.kilo/agents/<name>.md`. All 24 canonical skills render as harness skills at `.kilo/skills/<name>/SKILL.md`. Because agents and skills occupy separate directory structures (`.kilo/agents/` and `.kilo/skills/`), and `shared-identities` in `fallbacks.yml` is empty (`[]`), all 21 agents and all 24 skills are emitted without suppressing any skill files or colliding (the seven distinct-body collisions only apply to fallback targets where agents are lowered into skills).
 
 ## What is known (from the canonical source and the codebase)
 
@@ -81,7 +81,7 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   pass and the receipt's degradation records exist to make impossible to ship unnoticed.
 - **Validation will hold this renderer to the same invariants as Copilot's**: portable output
   paths contained under the extraction root, only requested targets in the output, the
-  native/fallback projection rules (seven distinct-body collisions and no shared identities),
+  native projection rules (separate directories for agents and skills, all 24 canonical skills emitted because `shared-identities` is empty, and no `role-` prefixes because Kilo supports native agents),
   and every degradation's `InstructionDigest` matching the
   named agent's real `SquadAgent.BodyDigest`. See `SquadRendererRegistry.ValidateRenderResult`
   for the exact checks — this runs against every renderer, not something to reimplement.
@@ -94,9 +94,8 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   literals, so the test can't silently drift from the canonical source it's supposed to be
   checking.
 - Confirm `kyber-weave squad install --target kilo --dry-run` plans a file for every
-  agent and skill this target should cover (native: 21 agents + 24 skills = 45, matching
-  Copilot's count, unless this target's own agent-primitive support differs; fallback: 24
-  skills + 21 role-lowered agents = 45, with seven `role-` collisions and the remaining
-  unoccupied identities emitted under their own names).
+  agent and skill this target should cover (native: 21 agents + 24 skills = 45 principals plus
+  68 resources = 113 files, matching Copilot's native count; in contrast to fallback targets
+  where 21 role-lowered agents and 24 skills result in seven `role-` collisions).
 - Confirm `kyber-weave squad doctor` reports `kilo` under renderers available, not
   pending.

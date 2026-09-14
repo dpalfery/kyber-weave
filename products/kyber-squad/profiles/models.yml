@@ -6,7 +6,7 @@ profiles:
     codex: gpt-5.6-sol
     copilot: GPT-5.6 Sol (copilot)
     cursor: gpt-5.6-sol[context=272k,reasoning=high,fast=false]
-    kilo: inherit
+    kilo: glm5.3
     opencode: zai-coding-plan/glm-5.2
   fast:
     default: inherit
@@ -14,7 +14,7 @@ profiles:
     codex: gpt-5.6-luna
     copilot: GPT-5.6 Luna (copilot)
     cursor: composer-2.5[]
-    kilo: inherit
+    kilo: spark1.3 contributor
     opencode: opencode-go/gpt-5.6-luna
   general:
     default: inherit
@@ -22,12 +22,12 @@ profiles:
     codex: gpt-5.6-terra
     copilot: Grok 4.5 (copilot)
     cursor: grok-4.5[]
-    kilo: inherit
+    kilo: muse-spark1.3 contributor
     opencode: zai-coding-plan/glm-5.2
   mai-code-flash:
     default: inherit
     copilot: MAI-Code-1.1-Flash (copilot)
-    kilo: inherit
+    kilo: kimi k2.7 code
   orchestration:
     default: inherit
     kilo: inherit
