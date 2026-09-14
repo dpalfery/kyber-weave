@@ -26,7 +26,7 @@ import { QuarantineView, type QuarantineEntry } from '@/components/kyber/Quarant
 import { ProblemsView, type ProblemEntry } from '@/components/kyber/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
 import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
-import { Attention, HARNESS_CATALOG, harnessDisplayName } from '@/pages/Attention'
+import { ContextDoctor, HARNESS_CATALOG, harnessDisplayName } from '@/pages/ContextDoctor'
 import { CompareRuns } from '@/pages/CompareRuns'
 import { Sessions } from '@/pages/Sessions'
 import { HarnessDetail } from '@/pages/HarnessDetail'
@@ -72,7 +72,7 @@ function useHarnessTabs(): Array<{ harness: string; name: string }> {
 }
 
 export type SpineLocation = {
-  level: 'attention' | 'harness' | 'run' | 'execution' | 'turn' | 'finding' | 'compare'
+  level: 'context-doctor' | 'harness' | 'run' | 'execution' | 'turn' | 'finding' | 'compare'
   harnessId?: string
   runId?: string
   executionId?: string
@@ -545,7 +545,7 @@ function ThemeToggle() {
 }
 
 export const NAV_TABS = [
-  { key: 'attention', label: 'Attention' },
+  { key: 'context-doctor', label: 'Context Doctor' },
   { key: 'usage', label: 'Usage' },
   { key: 'quarantine', label: 'Quarantine' },
   { key: 'problems', label: 'Problems' },
@@ -634,10 +634,10 @@ export interface AppProps {
   initialPage?: KyberPage
 }
 
-export function App({ initialPage = 'attention' }: AppProps = {}) {
+export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
   const [section, setSection] = useState<KyberPage>(initialPage)
   const [spine, dispatchSpine] = useReducer(spineReducer, [
-    { level: initialPage === 'compare' ? 'compare' : 'attention' },
+    { level: initialPage === 'compare' ? 'compare' : 'context-doctor' },
   ])
   const location = spine.at(-1)!
   const [period, setPeriod] = useState<Period>('today')
@@ -762,9 +762,9 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
   const viewTitle = showCombined ? 'All devices' : (primary ? primary.name + (primary.local ? ' · this Mac' : '') : 'Loading…')
   const label = local?.payload?.current?.label ?? ''
 
-  const showSpine = section === 'attention' || section === 'compare'
+  const showSpine = section === 'context-doctor' || section === 'compare'
   const openSpine = (next: SpineLocation, action: 'push' | 'replace' | 'goTo' = 'push') => {
-    setSection('attention')
+    setSection('context-doctor')
     dispatchSpine({ type: action, location: next })
   }
 
@@ -800,7 +800,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                 data-testid={`nav-tab-${pg.key}`}
                 onClick={() => {
                   setSection(pg.key)
-                  if (pg.key === 'attention') dispatchSpine({ type: 'goTo', location: { level: 'attention' } })
+                  if (pg.key === 'context-doctor') dispatchSpine({ type: 'goTo', location: { level: 'context-doctor' } })
                 }}
                 className={cn(
                   'rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
@@ -881,7 +881,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                 onClick={() => {
                   setProvider(tab.harness)
                   if (tab.harness === 'all') {
-                    openSpine({ level: 'attention' }, 'goTo')
+                    openSpine({ level: 'context-doctor' }, 'goTo')
                   } else {
                     openSpine({ level: 'harness', harnessId: tab.harness })
                   }
@@ -930,15 +930,15 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
             </button>
             <div className="flex flex-col gap-1">
               <SideLink
-                testId="nav-rail-attention"
-                active={section === 'attention'}
+                testId="nav-rail-context-doctor"
+                active={section === 'context-doctor'}
                 onClick={() => {
-                  setSection('attention')
-                  dispatchSpine({ type: 'goTo', location: { level: 'attention' } })
+                  setSection('context-doctor')
+                  dispatchSpine({ type: 'goTo', location: { level: 'context-doctor' } })
                   setSidebarOpen(false)
                 }}
               >
-                Attention
+                Context Doctor
               </SideLink>
               <SideLink
                 testId="nav-rail-sessions"
@@ -1035,7 +1035,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                   : section === 'sessions'
                     ? 'Sessions'
                     : showSpine
-                      ? 'Attention'
+                      ? 'Context Doctor'
                       : section === 'quarantine'
                         ? 'Quarantine'
                         : section === 'problems'
@@ -1048,8 +1048,8 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
             {section === 'usage' && <IndexingNotice payload={primary?.payload} />}
 
             {showSpine ? (
-              location.level === 'attention' ? (
-                <Attention
+              location.level === 'context-doctor' ? (
+                <ContextDoctor
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId })}
                   onSelectRun={(runId, harnessId) => openSpine({ level: 'run', runId, harnessId })}
                   onSelectFinding={(findingId) => openSpine({ level: 'finding', findingId })}
@@ -1058,7 +1058,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
               ) : location.level === 'harness' ? (
                 <HarnessDetail
                   harnessId={location.harnessId!}
-                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
                   onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId })}
                   onSelectFinding={(findingId) => openSpine({ level: 'finding', harnessId: location.harnessId, findingId })}
                   onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId, executionId, turnIndex })}
@@ -1067,7 +1067,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                 <RunDetail
                   runId={location.runId!}
                   executionId={location.level === 'execution' ? location.executionId : undefined}
-                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
                   onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId })}
                   onSelectTurn={(turnIndex, executionId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: location.runId, executionId, turnIndex })}
@@ -1078,7 +1078,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                   runId={location.runId!}
                   executionId={location.executionId}
                   turnIndex={location.turnIndex!}
-                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
                   onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId }, 'goTo')}
                   onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId }, 'goTo')}
@@ -1088,7 +1088,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
               ) : (
                 <FindingDetail
                   findingId={location.findingId}
-                  onSelectAll={() => openSpine({ level: 'attention' }, 'goTo')}
+                  onSelectAll={() => openSpine({ level: 'context-doctor' }, 'goTo')}
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId }, 'goTo')}
                   onSelectRun={(runId) => openSpine({ level: 'run', runId }, 'goTo')}
                   onSelectExecution={(executionId) => openSpine({ level: 'execution', executionId })}

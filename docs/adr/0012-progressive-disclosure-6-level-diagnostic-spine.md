@@ -23,8 +23,8 @@ ADR 0007 and ADR 0011 established the Agent Session Analysis Dashboard (ASAD) as
 ## Decision
 
 1. **Six-Level Diagnostic Spine**: The navigation topology is strictly structured as:
-   `All Harnesses (Attention) → Harness → Run → AgentExecution → Turn → ContextItem`.
-   - The cross-harness landing page (Attention) summarizes and directs attention; the harness is the first actionable tier.
+   `All Harnesses (Context Doctor) → Harness → Run → AgentExecution → Turn → ContextItem`.
+   - The cross-harness landing page (Context Doctor) summarizes where context is being wasted or broken; the harness is the first actionable tier.
    - Every level preserves breadcrumb context, scope, active baseline, and relative deltas.
 2. **First-Class Canonical Entities (`Run` and `AgentExecution`)**:
    - A `Run` represents one user-initiated unit of work and groups all executions belonging to that task.
@@ -50,7 +50,7 @@ ADR 0007 and ADR 0011 established the Agent Session Analysis Dashboard (ASAD) as
 ## Consequences
 
 - The store schema introduces `run` and `execution` derived tables migrated in `CanonStore`, rebuildable via `kyber build`.
-- Navigation in the web dashboard spans `Attention`, `HarnessDetail`, `RunDetail`, down to `AgentSessionDashboard` and `ContextInspector`.
+- Navigation in the web dashboard spans `ContextDoctor`, `HarnessDetail`, `RunDetail`, down to `AgentSessionDashboard` and `ContextInspector`.
 - Rollup metrics and scorecards preserve measurability contracts; harnesses without telemetry produce dashes rather than misleading zeros.
 - Comparison views align runs by phase and guard against premature recommendations (requiring sufficiency thresholds before promoting findings).
 

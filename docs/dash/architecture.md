@@ -337,7 +337,7 @@ them as a lower bound.
 KyberDash structures agent context analysis into a six-level progressive-disclosure hierarchy:
 
 ```
-Level 1: All Harnesses (Attention)
+Level 1: All Harnesses (Context Doctor)
    └── Level 2: Harness
           └── Level 3: Run
                  └── Level 4: AgentExecution (Session)
@@ -345,13 +345,13 @@ Level 1: All Harnesses (Attention)
                                └── Level 6: ContextItem (Block / Part)
 ```
 
-The web app lands on Attention (`App` default `initialPage` / `spineReducer` stack
-`{ level: 'attention' }`). Header tabs are `Attention · Usage · Quarantine · Problems`
+The web app lands on Context Doctor (`App` default `initialPage` / `spineReducer` stack
+`{ level: 'context-doctor' }`). Header tabs are `Context Doctor · Usage · Quarantine · Problems`
 (`NAV_TABS`). Usage is the CodeBurn spend grid; it does not open the app. There is no
 Context tab: session browsing is the **Sessions** rail destination wrapping
 `ContextExplorer` / `AgentSessionDashboard` (D17). Compare is not a header peer; it is a
 spine-rail destination that mounts `CompareRuns` (D20). The sidebar is the spine rail
-(`nav-rail-attention`, `nav-rail-sessions`, `nav-rail-compare`); Share chrome is on Usage
+(`nav-rail-context-doctor`, `nav-rail-sessions`, `nav-rail-compare`); Share chrome is on Usage
 only (D21). Density tokens live in the dashboard `@theme` (D22). A single shell harness
 strip (`data-testid="harness-selector"`) is the harness level of the spine; selecting a
 canonical id pushes `{ level: 'harness', harnessId }` and loads `runs?harness=`. A second
@@ -361,7 +361,7 @@ canonical rows and rollups do not use harness id `gemini`.
 Live gates G1–G7 and G4a have passed on a local host against a real store: drill the six
 levels, one diagnostic harness selector, canonical ids (including Claude Code), no
 decision-id copy, empty charts marked empty rather than plotted as zero, layout inside the
-shell. Findings-first Attention, scorecard matrix, Turn inspector, and live Compare are on
+shell. Findings-first Context Doctor, scorecard matrix, Turn inspector, and live Compare are on
 the spine. Derived runs show a labelled grouping basis (`derived run` / `explicit run`,
 `data-testid="run-grouping-basis"`) and are never silent clusters (D19). Calibration is
 wired on Finding detail (`CalibrationSummary`). Content older than 14 days is purged after
@@ -369,7 +369,7 @@ refresh ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). Scorecar
 `formatDimensionDisplay`: unmeasurable or absent values render as `—`
 with a reason, never as a fabricated `0`. A genuine measured zero is still `0`.
 
-1. **All Harnesses (`Attention.tsx`)**: Cross-harness landing view ranking attention by
+1. **All Harnesses (`ContextDoctor.tsx`)**: Cross-harness landing view ranking harnesses by
    aggregate context pressure, cache invalidation volume, and top telemetry-grounded findings.
 2. **Harness (`HarnessDetail.tsx`)**: Deep dive into a single agent harness (e.g. Claude Code,
    Copilot, Cursor) showing harness rollups, coverage percentages, and run inventory.
@@ -480,7 +480,7 @@ payload delivery surfaces consume (R11.1).
 ### Web Dashboard (dash/dash/)
 
 The React web dashboard provides progressive-disclosure views matching the 6-level spine:
-- **`Attention.tsx`**: Cross-harness dashboard and fleet-wide finding leaderboard.
+- **`ContextDoctor.tsx`**: Cross-harness dashboard and fleet-wide finding leaderboard.
 - **`Sessions.tsx`**: Sessions rail wrapping `ContextExplorer` (ASAD + timeline); not a Context tab.
 - **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
 - **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
@@ -488,7 +488,7 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached from the spine rail.
 - **`ContextInspector.tsx`**: Full unclipped context viewer with part tabs and copy-out protocol.
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
-- **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Attention.
+- **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
 
 ### Backend REST API Contract (dash/kyber/server/routes.ts)
 

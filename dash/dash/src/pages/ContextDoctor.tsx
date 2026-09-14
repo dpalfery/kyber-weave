@@ -16,7 +16,7 @@ import {
 } from '../components/kyber'
 import type { ScorecardMatrixRow } from '../components/kyber/ScorecardMatrix'
 
-export interface AttentionProps {
+export interface ContextDoctorProps {
   initialHarnesses?: KyberHarnessSummary[]
   initialFindings?: KyberFinding[]
   onSelectHarness?: (harnessId: string) => void
@@ -71,14 +71,14 @@ function isObservedHarness(harness: string): boolean {
   return harness.length > 0 && harness !== 'all'
 }
 
-export function Attention({
+export function ContextDoctor({
   initialHarnesses,
   initialFindings,
   onSelectHarness,
   onSelectRun,
   onSelectFinding,
   onSelectTurn,
-}: AttentionProps) {
+}: ContextDoctorProps) {
   const [baseline, setBaseline] = useState('none')
 
   // Query live harnesses
@@ -119,7 +119,7 @@ export function Attention({
   const loadingMatrix = loadingHarnesses || (!harnessesData?.length && loadingRuns)
 
   return (
-    <div className="flex flex-col gap-density-stack" data-testid="page-attention">
+    <div className="flex flex-col gap-density-stack" data-testid="page-context-doctor">
       {/* Top Header & Spine Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-density-cluster">
         <HierarchyBreadcrumb />
@@ -129,10 +129,10 @@ export function Attention({
       <div className="flex flex-wrap items-baseline justify-between gap-density-cluster">
         <div>
           <h2 className="font-display text-density-display font-bold tracking-density text-foreground">
-            Workspace Attention
+            Context Doctor
           </h2>
           <p className="text-density-xs text-muted-foreground mt-density-hair leading-density">
-            Telemetry health, high-leverage findings, and harness postures.
+            What's bloating or breaking your agents' context, per harness, and what to change.
           </p>
         </div>
       </div>

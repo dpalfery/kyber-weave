@@ -337,11 +337,11 @@ To run the complete production bundle served directly by the KyberDash CLI engin
 
 #### Navigating the web dashboard
 
-Header tabs (`nav-tabs`) are four: **Attention**, **Usage**, **Quarantine**, **Problems**.
-The sidebar is the diagnostic spine rail: **Attention**, **Sessions**, **Compare**. Share
+Header tabs (`nav-tabs`) are four: **Context Doctor**, **Usage**, **Quarantine**, **Problems**.
+The sidebar is the diagnostic spine rail: **Context Doctor**, **Sessions**, **Compare**. Share
 controls appear on Usage only.
 
-- **Attention**: Cross-harness landing (findings, scorecard matrix). Drill harness → run →
+- **Context Doctor**: Cross-harness landing (findings, scorecard matrix). Drill harness → run →
   execution → turn → context item.
 - **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
   Dashboard from `canon.db` — not a restored Context tab:

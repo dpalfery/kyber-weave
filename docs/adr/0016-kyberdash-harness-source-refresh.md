@@ -15,7 +15,7 @@ Accepted, 2026-09-12; harvested as shipped 2026-09-13. Extends [ADR 0008](0008-k
 
 ## Context
 
-KyberDash fills `canon.db` from local coding-harness history as well as OTLP. Vendor folders, model names, and provider objects are not the same as the surfaces a developer filters on. A Gemini chat store is not Antigravity; Copilot CLI is not Copilot for VS Code; Codex Desktop and Codex CLI share a root and differ by native originator. Collapsing those identities makes Attention filters lie, and a full-corpus reparse on every run does not scale.
+KyberDash fills `canon.db` from local coding-harness history as well as OTLP. Vendor folders, model names, and provider objects are not the same as the surfaces a developer filters on. A Gemini chat store is not Antigravity; Copilot CLI is not Copilot for VS Code; Codex Desktop and Codex CLI share a root and differ by native originator. Collapsing those identities makes Context Doctor filters lie, and a full-corpus reparse on every run does not scale.
 
 The [refresh pipeline plan](../archive/plans/2026-09-06-kyberdash-refresh-pipeline.md) fixed the product contract before the checkpointed, record-windowed scheduler landed. This record keeps those constraints from being renegotiated.
 

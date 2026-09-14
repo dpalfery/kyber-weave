@@ -71,10 +71,10 @@ test.afterAll(async () => {
   child?.kill('SIGTERM')
 })
 
-test('T8 Attention filters split identities from the temp refreshed DB', async ({ page }) => {
+test('T8 Context Doctor filters split identities from the temp refreshed DB', async ({ page }) => {
   test.setTimeout(120_000)
   await page.goto(app)
-  await expect(page.getByTestId('page-attention')).toBeVisible()
+  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
   await expect(page.getByRole('button', { name: /refresh/i })).toHaveCount(0)
 
   const harnesses = await page.request.get(`${app}/api/kyber/harnesses`)
@@ -123,11 +123,11 @@ test('T8 Attention filters split identities from the temp refreshed DB', async (
       expect(title ?? '').toMatch(/\(.+\)/)
     }
 
-    await page.getByTestId('breadcrumb-attention').click()
-    await expect(page.getByTestId('page-attention')).toBeVisible()
+    await page.getByTestId('breadcrumb-context-doctor').click()
+    await expect(page.getByTestId('page-context-doctor')).toBeVisible()
   }
 
-  await page.screenshot({ path: join(scratch, 'attention.png'), fullPage: true })
+  await page.screenshot({ path: join(scratch, 'context-doctor.png'), fullPage: true })
 
   const emptyDrill = page.getByTestId('drill-harness-cline')
   if (await emptyDrill.count()) {

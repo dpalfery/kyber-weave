@@ -201,9 +201,9 @@ single SQLite store at `~/.kyberdash/canon.db`, normalizing every supported harn
 span-shaped record. Sessions, runs, execution trees, and findings are derived projections over
 it, rebuildable without re-ingesting.
 
-**Progressive-disclosure diagnostics.** A six-level spine from attention down to the
-individual context item: per-turn token breakdown (fresh input, cache read, cache creation,
-output), context composition by part type, ranked tool-schema cost with unused-schema waste,
+**Progressive-disclosure diagnostics.** A six-level spine from the cross-harness Context
+Doctor down to the individual context item: per-turn token breakdown (fresh input, cache
+read, cache creation, output), context composition by part type, ranked tool-schema cost with unused-schema waste,
 hierarchical execution timelines, and an inspector that shows the unclipped assembled turn.
 
 **Four local surfaces.** Terminal TUI, browser dashboard, Electron desktop app, and a
