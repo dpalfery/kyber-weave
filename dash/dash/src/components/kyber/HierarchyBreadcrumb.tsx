@@ -15,6 +15,10 @@ export interface HierarchyBreadcrumbProps {
   className?: string
 }
 
+/**
+ * Renders the current diagnostic-spine path and exposes navigation callbacks
+ * for each ancestor level.
+ */
 export function HierarchyBreadcrumb({
   harness,
   runId,

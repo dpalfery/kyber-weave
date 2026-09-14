@@ -67,10 +67,15 @@ export const HARNESS_CATALOG: readonly HarnessCatalogEntry[] = [
   { harness: 'all', name: 'All Harnesses' },
 ]
 
+/** Returns whether a harness id represents collected, harness-specific data. */
 function isObservedHarness(harness: string): boolean {
   return harness.length > 0 && harness !== 'all'
 }
 
+/**
+ * Renders the Context Doctor landing page with workspace findings and a
+ * per-harness diagnostic scorecard.
+ */
 export function ContextDoctor({
   initialHarnesses,
   initialFindings,

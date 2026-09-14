@@ -634,6 +634,10 @@ export interface AppProps {
   initialPage?: KyberPage
 }
 
+/**
+ * Renders the KyberDash shell and coordinates its top-level navigation,
+ * device filters, sharing controls, and diagnostic spine.
+ */
 export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
   const [section, setSection] = useState<KyberPage>(initialPage)
   const [spine, dispatchSpine] = useReducer(spineReducer, [
@@ -763,6 +767,7 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
   const label = local?.payload?.current?.label ?? ''
 
   const showSpine = section === 'context-doctor' || section === 'compare'
+  /** Opens a diagnostic spine location and makes Context Doctor active. */
   const openSpine = (next: SpineLocation, action: 'push' | 'replace' | 'goTo' = 'push') => {
     setSection('context-doctor')
     dispatchSpine({ type: action, location: next })
