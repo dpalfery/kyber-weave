@@ -26,6 +26,7 @@ harness's real documentation, the code seam to implement against, and how to ver
 | `kilo` | Native | [kilo.md](kilo.md) |
 | `factory` | Native | [factory.md](factory.md) |
 | `warp` | Fallback (role-skill lowering) | [warp.md](warp.md) |
+| `pi` | Fallback (role-skill lowering); not yet declared in the target catalog | [pi.md](pi.md) |
 
 `copilot` is covered by `CopilotRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`), `cursor` by `CursorRenderer`

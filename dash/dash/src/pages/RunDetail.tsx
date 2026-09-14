@@ -9,6 +9,8 @@ import {
   type KyberRunDetail,
   type KyberExecutionSummary,
   type ScorecardData,
+  type ScorecardDimensionKey,
+  type ScorecardDimensionValue,
   type KyberRunTurn,
 } from '../lib/kyberApi'
 import {
@@ -16,8 +18,8 @@ import {
   Scorecard,
   FindingList,
   BaselineSelect,
+  DIMENSION_METADATA,
 } from '../components/kyber'
-import { SessionInspectorDrawer } from '../components/SessionInspectorDrawer'
 
 export interface RunDetailProps {
   runId: string
@@ -115,6 +117,17 @@ function ExecutionTreeItem({
   )
 }
 
+function unmeasuredDimension(key: ScorecardDimensionKey): ScorecardDimensionValue {
+  const meta = DIMENSION_METADATA[key]
+  return {
+    key,
+    name: meta.name,
+    status: 'not_measurable',
+    reason: meta.defaultUnmeasuredReason,
+    value: null,
+  }
+}
+
 export function RunDetail({
   runId,
   executionId,
@@ -128,7 +141,6 @@ export function RunDetail({
   const [baseline, setBaseline] = useState('none')
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | undefined>(undefined)
   const [selectedTurnIndex, setSelectedTurnIndex] = useState<number | undefined>(undefined)
-  const [drawerOpen, setDrawerOpen] = useState(false)
 
   // Query run detail
   const { data: run, isLoading } = useQuery({
@@ -163,69 +175,33 @@ export function RunDetail({
     }
 
     const turnCount = executionSession?.turnCount ?? executionSession?.turn_count
-    if (!activeExecutionId || !Number.isInteger(turnCount) || turnCount < 1) return []
+    if (
+      !activeExecutionId ||
+      typeof turnCount !== 'number' ||
+      !Number.isInteger(turnCount) ||
+      turnCount < 1
+    ) {
+      return []
+    }
     return Array.from({ length: turnCount }, (_, turnIndex) => ({
       turnIndex,
       executionId: activeExecutionId,
-      sessionId: activeExecution?.sessionId,
+      sessionId: activeExecution?.sessionId ?? undefined,
     }))
   }, [run, activeExecutionId, activeExecution?.sessionId, executionSession])
 
-  // Build run scorecard data (NO composite score per D3, secondary cost per D9)
+  // Honest scorecard: live run.scorecard or not_measurable dashes — never fabricated values.
   const scorecardData: ScorecardData = useMemo(() => {
     if (run?.scorecard) return run.scorecard
 
     return {
       dimensions: {
-        contextHygiene: {
-          key: 'contextHygiene',
-          name: 'Context Hygiene',
-          status: 'measured',
-          value: 0.76,
-          formatted: '76%',
-          detail: 'Measured context reuse and compaction stability',
-          measurementClass: 'deterministic',
-        },
-        cacheEfficiency: {
-          key: 'cacheEfficiency',
-          name: 'Cache Efficiency',
-          status: 'measured',
-          value: 0.84,
-          formatted: '84%',
-          detail: 'Prefix cache hit ratio across turns',
-          measurementClass: 'inferred',
-        },
-        toolYield: {
-          key: 'toolYield',
-          name: 'Tool Yield',
-          status: 'measured',
-          value: 2.5,
-          formatted: '2.5x',
-          detail: 'Invocations per resident schema overhead',
-        },
-        skillUtilisation: {
-          key: 'skillUtilisation',
-          name: 'Skill Utilisation',
-          status: 'not_measurable',
-          reason: 'Skill activation unobserved on current run (Decision D16)',
-          measurementClass: 'coverage-gap',
-        },
-        delegationOverhead: {
-          key: 'delegationOverhead',
-          name: 'Delegation Overhead',
-          status: run?.executionCount && run.executionCount > 1 ? 'measured' : 'not_measurable',
-          value: run?.executionCount && run.executionCount > 1 ? 0.18 : null,
-          formatted: run?.executionCount && run.executionCount > 1 ? '18%' : undefined,
-          reason: run?.executionCount && run.executionCount > 1 ? undefined : 'Single-agent execution (no delegation events)',
-        },
-        continuity: {
-          key: 'continuity',
-          name: 'Continuity',
-          status: 'measured',
-          value: 0.95,
-          formatted: '95%',
-          detail: 'Zero unhandled errors and zero user corrections',
-        },
+        contextHygiene: unmeasuredDimension('contextHygiene'),
+        cacheEfficiency: unmeasuredDimension('cacheEfficiency'),
+        toolYield: unmeasuredDimension('toolYield'),
+        skillUtilisation: unmeasuredDimension('skillUtilisation'),
+        delegationOverhead: unmeasuredDimension('delegationOverhead'),
+        continuity: unmeasuredDimension('continuity'),
       },
       secondaryCost: {
         costUsd: run?.costUsd ?? null,
@@ -236,12 +212,7 @@ export function RunDetail({
   }, [run])
 
   const handleOpenTurn = (turnIdx: number) => {
-    if (onSelectTurn) {
-      onSelectTurn(turnIdx, activeExecutionId)
-      return
-    }
-    setSelectedTurnIndex(turnIdx)
-    setDrawerOpen(true)
+    onSelectTurn?.(turnIdx, activeExecutionId)
   }
 
   const outcome = run?.outcome
@@ -287,6 +258,7 @@ export function RunDetail({
                 </h2>
                 {/* Decision D13: Grouping Basis badge */}
                 <span
+                  data-testid="run-grouping-basis"
                   className={cn(
                     'rounded px-2 py-0.5 text-xs font-mono',
                     isDerived
@@ -425,7 +397,7 @@ export function RunDetail({
                     </span>
                   </div>
                   <p className="text-[10.5px] text-muted-foreground mt-0.5">
-                    Click a turn to open full-fidelity context inspection & text export (Level 6).
+                    Click a turn to open the Turn inspector (unclipped copy-out).
                   </p>
                 </div>
               </div>
@@ -512,22 +484,6 @@ export function RunDetail({
             onSelectFinding={onSelectFinding}
             onSelectTurn={(turnIdx) => handleOpenTurn(turnIdx)}
           />
-
-          {/* Drawer for Turn Content & Context Inspection (Level 6: ContextItem) */}
-          {run && (
-            <SessionInspectorDrawer
-              open={drawerOpen}
-              onClose={() => setDrawerOpen(false)}
-              title={`Turn #${selectedTurnIndex ?? 0} Content Inspector`}
-              subtitle={`Run ${run.runId} · Harness: ${run.harness}`}
-              // A run id is not a session id — every derived run is
-              // `derived:<harness>:<session>`, so asking for content under the
-              // run id 404s for all of them. The active execution names the
-              // session whose records the inspector should read.
-              contentRequest={{ sessionId: activeExecution?.sessionId ?? activeExecutionId ?? run.runId }}
-              inspectContext={true}
-            />
-          )}
         </>
       )}
     </div>

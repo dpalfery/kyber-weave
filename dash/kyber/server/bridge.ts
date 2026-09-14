@@ -27,7 +27,12 @@ import {
   type CalibrationCurveResult,
   type PredictionRecord,
 } from '../analysis/calibration.js'
-import { compareHarnesses } from '../analysis/compare.js'
+import {
+  compareHarnesses,
+  compareRuns as compareStoredRuns,
+  type ComparisonSummary,
+  type RunComparisonOptions,
+} from '../analysis/compare.js'
 import type { Finding } from '../analysis/findings.js'
 import {
   CANONICAL_CONTENT_KEYS,
@@ -1351,6 +1356,98 @@ export class KyberBridge {
       } catch {
         return []
       }
+    }
+  }
+
+  /**
+   * Canonical records for one session key, timestamp order. Empty when the
+   * session is unknown — never a fabricated corpus.
+   */
+  private recordsForSessionKey(sessionKey: string): CanonicalRecord[] {
+    if (this.store) return this.store.recordsForSession(sessionKey)
+    if (!this.hasTable(this.canonDb, 'records')) return []
+    try {
+      const rows = this.canonDb!
+        .prepare(
+          'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
+        )
+        .all(sessionKey) as unknown as import('../canon/store.js').RecordRow[]
+      return rows.map(toRecord)
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Records belonging to a run via its executions' session keys.
+   * Thin load for `compareRuns` — does not re-derive run boundaries (D16).
+   */
+  private recordsForRun(runId: string): CanonicalRecord[] {
+    const executions = this.listExecutions(runId)
+    const keys = [
+      ...new Set(
+        executions.map((execution) => execution.sessionId ?? execution.executionId).filter((key) => key.length > 0),
+      ),
+    ]
+    if (keys.length === 0) {
+      return this.recordsForSessionKey(runId)
+    }
+    const seen = new Set<string>()
+    const records: CanonicalRecord[] = []
+    for (const key of keys) {
+      for (const record of this.recordsForSessionKey(key)) {
+        if (seen.has(record.spanId)) continue
+        seen.add(record.spanId)
+        records.push(record)
+      }
+    }
+    records.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
+    return records
+  }
+
+  /**
+   * Phase-aligned comparison of two stored runs (`docs/plans/2026-09-06-kyberdash-spine.md` § B4-api).
+   * Missing ids return `null` so the route can 404; never sample data.
+   */
+  compareRuns(runAId: string, runBId: string, options?: RunComparisonOptions): ComparisonSummary | null {
+    const runA = this.getRun(runAId)
+    const runB = this.getRun(runBId)
+    if (runA === undefined || runB === undefined) return null
+
+    const summary = compareStoredRuns(
+      {
+        runId: runA.runId,
+        harness: runA.harness,
+        ...(runA.label ? { label: runA.label } : {}),
+        ...(runA.workingDirectory !== undefined ? { workingDirectory: runA.workingDirectory } : {}),
+        ...(runA.outcome !== undefined ? { outcome: runA.outcome } : {}),
+        turns: this.recordsForRun(runA.runId),
+      },
+      {
+        runId: runB.runId,
+        harness: runB.harness,
+        ...(runB.label ? { label: runB.label } : {}),
+        ...(runB.workingDirectory !== undefined ? { workingDirectory: runB.workingDirectory } : {}),
+        ...(runB.outcome !== undefined ? { outcome: runB.outcome } : {}),
+        turns: this.recordsForRun(runB.runId),
+      },
+      options,
+    )
+
+    return {
+      ...summary,
+      pairs: summary.pairs.map((pair) => {
+        const stripRaw = (turn: (typeof pair)['runATurn']) => {
+          if (turn === null) return null
+          const { raw: _raw, ...rest } = turn
+          return rest
+        }
+        return {
+          ...pair,
+          runATurn: stripRaw(pair.runATurn),
+          runBTurn: stripRaw(pair.runBTurn),
+        }
+      }),
     }
   }
 

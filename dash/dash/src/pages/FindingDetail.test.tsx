@@ -7,7 +7,7 @@ import { FindingDetail } from './FindingDetail'
 import { EvidenceTable } from '../components/kyber/EvidenceTable'
 import { ConfidencePanel } from '../components/kyber/ConfidencePanel'
 import { RecommendationPanel } from '../components/kyber/RecommendationPanel'
-import type { KyberFinding, KyberEvidenceLink } from '../lib/kyberApi'
+import type { KyberFinding } from '../lib/kyberApi'
 
 // Setup React 19 test hook dispatcher
 let hookStates: unknown[] = []
@@ -77,6 +77,12 @@ function findNodeByTestId(node: unknown, testId: string): React.ReactElement<any
     const props = node.props as Record<string, any>
     if (props && props['data-testid'] === testId) {
       return node
+    }
+    const type = node.type as unknown
+    if (typeof type === 'function') {
+      const result = (type as (p: unknown) => unknown)(node.props)
+      const found = findNodeByTestId(result, testId)
+      if (found) return found
     }
     if (props && props.children) {
       const found = findNodeByTestId(props.children, testId)
@@ -273,25 +279,40 @@ describe('FindingDetail Screen (Task G3 Compliance)', () => {
     expect(html).toContain('Third identical read after test runner execution')
   })
 
-  it('Criterion 2: deep-link trigger opens SessionInspectorDrawer pre-selected to target span/turn', () => {
-    const targetLink: KyberEvidenceLink = sampleDeterministicFinding.evidenceLinks[1] // Turn 3, span-read-002
+  it('Criterion 2: evidence inspect pushes spine Turn via onSelectTurn and does not mount SessionInspectorDrawer', () => {
+    const onSelectTurn = vi.fn()
     const html = renderHtml(
       <FindingDetail
         initialFinding={sampleDeterministicFinding}
-        initialSelectedLink={targetLink}
-        initialDrawerOpen={true}
+        onSelectTurn={onSelectTurn}
       />,
     )
 
-    // Drawer is opened
-    expect(html).toContain('data-testid="session-inspector-drawer"')
-    expect(html).toContain('Turn #3 Evidence Inspector')
-    expect(html).toContain('span-read-002')
+    expect(html).not.toContain('data-testid="session-inspector-drawer"')
+    expect(html).not.toContain('evidence-drawer-target-banner')
+    expect(html).toContain('data-testid="inspect-evidence-1"')
 
-    // Target evidence banner in drawer
-    expect(html).toContain('data-testid="evidence-drawer-target-banner"')
-    expect(html).toContain('Target Telemetry Evidence Link')
-    expect(html).toContain(targetLink.description)
+    hookIndex = 0
+    const qc = createTestQueryClient()
+    let tree: React.ReactElement | null = null
+    renderToStaticMarkup(
+      React.createElement(
+        QueryClientProvider,
+        { client: qc },
+        React.createElement(() => {
+          tree = FindingDetail({
+            initialFinding: sampleDeterministicFinding,
+            onSelectTurn,
+          }) as React.ReactElement
+          return tree
+        }),
+      ),
+    )
+
+    const inspectBtn = findNodeByTestId(tree, 'inspect-evidence-1')
+    expect(inspectBtn).not.toBeNull()
+    inspectBtn!.props.onClick()
+    expect(onSelectTurn).toHaveBeenCalledWith(3, 'exec-root-1', 'run-auth-001')
   })
 
   it('Criterion 3: Confidence panel displays tier, measurement basis, and what-would-raise-it', () => {

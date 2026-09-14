@@ -64,4 +64,4 @@ However, integrating LLM-based analysis presents serious privacy and architectur
 - [ADR 0014: Unclipped Turn Inspection and Copy-Out Protocol](0014-unclipped-turn-inspection-and-copy-out-protocol.md)
 - [KyberDash architecture](../dash/architecture.md)
 - [KyberDash runbook](../dash/runbook.md)
-- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../archive/plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)

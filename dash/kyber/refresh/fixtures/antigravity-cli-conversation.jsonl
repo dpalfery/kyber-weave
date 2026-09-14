@@ -1,0 +1,1 @@
+{"type":"message","timestamp":"2026-09-06T11:30:00.000Z","sessionId":"agy-cli","turnId":"agy-cli-1","provider":"antigravity","model":"gemini-2.5-pro","message":{"role":"assistant","content":"antigravity CLI fixture using a Gemini model"}}

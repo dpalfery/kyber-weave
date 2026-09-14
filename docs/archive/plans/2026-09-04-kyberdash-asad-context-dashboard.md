@@ -271,7 +271,7 @@ npx --prefix dash vitest run dash/src/components
 The plan is **Superseded and Archived** as of 2026-09-05. Implementation and
 repository review are complete (14/14 declared gates pass). The plan's three
 open live owner/runtime gates have been audited and closed as superseded by the
-successor plan [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](../../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+successor plan [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
 (Task H2) and documented in the [telemetry inventory](../../dash/telemetry-inventory.md).
 
 B2 follow-up remains **PASS**: production code under `dash/kyber` has no
@@ -299,6 +299,6 @@ D5, and D6 are [ADR 0011](../../adr/0011-asad-only-context-view-and-payload-cont
 
 **docs-dev closeout & archival (2026-09-05):** With all in-tree code, tests, and ADRs
 (0008, 0009, 0011) in place, the three open live gates from 2026-09-04 are formally retired
-from this plan and transferred to [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](../../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+from this plan and transferred to [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
 Task H2 and [docs/dash/telemetry-inventory.md](../../dash/telemetry-inventory.md). This plan
 is **Superseded and Archived**.

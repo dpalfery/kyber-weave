@@ -22,12 +22,13 @@ import { GranularUsageChart, DeviceUsageChart, type Unit } from '@/components/Us
 import { DeviceSearchModal } from '@/components/DeviceSearchModal'
 import { WorkflowPanel, hasWorkflowContent } from '@/components/WorkflowPanel'
 import { Punchcard } from '@/components/Punchcard'
-import { CompareView } from '@/components/kyber/CompareView'
 import { QuarantineView, type QuarantineEntry } from '@/components/kyber/QuarantineView'
 import { ProblemsView, type ProblemEntry } from '@/components/kyber/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
 import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
 import { Attention, HARNESS_CATALOG, harnessDisplayName } from '@/pages/Attention'
+import { CompareRuns } from '@/pages/CompareRuns'
+import { Sessions } from '@/pages/Sessions'
 import { HarnessDetail } from '@/pages/HarnessDetail'
 import { RunDetail } from '@/pages/RunDetail'
 import { FindingDetail } from '@/pages/FindingDetail'
@@ -94,13 +95,20 @@ function spineReducer(stack: SpineLocation[], action: SpineAction): SpineLocatio
     case 'replace':
       return [...stack.slice(0, -1), action.location]
     case 'goTo': {
-      const matchingIndex = stack.findLastIndex((location) =>
-        location.level === action.location.level &&
-        location.harnessId === action.location.harnessId &&
-        location.runId === action.location.runId &&
-        location.executionId === action.location.executionId &&
-        location.turnIndex === action.location.turnIndex,
-      )
+      let matchingIndex = -1
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const location = stack[i]!
+        if (
+          location.level === action.location.level &&
+          location.harnessId === action.location.harnessId &&
+          location.runId === action.location.runId &&
+          location.executionId === action.location.executionId &&
+          location.turnIndex === action.location.turnIndex
+        ) {
+          matchingIndex = i
+          break
+        }
+      }
       return matchingIndex >= 0 ? stack.slice(0, matchingIndex + 1) : [stack[0]!, action.location]
     }
   }
@@ -117,10 +125,11 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function SideLink({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function SideLink({ active, onClick, children, testId }: { active: boolean; onClick: () => void; children: ReactNode; testId?: string }) {
   return (
     <button
       type="button"
+      data-testid={testId}
       onClick={onClick}
       className={cn(
         'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13.5px] transition-colors max-md:min-h-9',
@@ -538,59 +547,11 @@ function ThemeToggle() {
 export const NAV_TABS = [
   { key: 'attention', label: 'Attention' },
   { key: 'usage', label: 'Usage' },
-  { key: 'compare', label: 'Compare' },
   { key: 'quarantine', label: 'Quarantine' },
   { key: 'problems', label: 'Problems' },
 ] as const
 
-export type KyberPage = (typeof NAV_TABS)[number]['key']
-
-export function KyberComparePanel() {
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['kyber-compare'],
-    queryFn: async () => {
-      const r = await fetch('/api/kyber/compare')
-      if (!r.ok) {
-        const err = await r.json().catch(() => null)
-        throw new Error(err?.error || `HTTP ${r.status}`)
-      }
-      return r.json()
-    },
-    retry: false,
-  })
-
-  if (isLoading) return <Skeleton className="h-40" />
-
-  if (isError || !data || !Array.isArray((data as any).rows)) {
-    return (
-      <CompareView
-        table={{
-          harnesses: Array.isArray((data as any)?.harnesses) ? (data as any).harnesses : [],
-          rows: [],
-          problems: [
-            {
-              severity: 'warning',
-              code: isError ? 'fetch_error' : 'no_data',
-              message: isError
-                ? `Failed to load comparison data: ${error instanceof Error ? error.message : String(error)}`
-                : 'No comparison data available',
-            },
-          ],
-        }}
-      />
-    )
-  }
-
-  return (
-    <CompareView
-      table={{
-        harnesses: Array.isArray(data.harnesses) ? data.harnesses : [],
-        rows: Array.isArray(data.rows) ? data.rows : [],
-        problems: Array.isArray(data.problems) ? data.problems : [],
-      }}
-    />
-  )
-}
+export type KyberPage = (typeof NAV_TABS)[number]['key'] | 'compare' | 'sessions'
 
 export function KyberQuarantinePanel() {
   const { data, isLoading, isError } = useQuery({
@@ -675,7 +636,9 @@ export interface AppProps {
 
 export function App({ initialPage = 'attention' }: AppProps = {}) {
   const [section, setSection] = useState<KyberPage>(initialPage)
-  const [spine, dispatchSpine] = useReducer(spineReducer, [{ level: 'attention' }])
+  const [spine, dispatchSpine] = useReducer(spineReducer, [
+    { level: initialPage === 'compare' ? 'compare' : 'attention' },
+  ])
   const location = spine.at(-1)!
   const [period, setPeriod] = useState<Period>('today')
   const [provider, setProvider] = useState('all')
@@ -799,7 +762,7 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
   const viewTitle = showCombined ? 'All devices' : (primary ? primary.name + (primary.local ? ' · this Mac' : '') : 'Loading…')
   const label = local?.payload?.current?.label ?? ''
 
-  const showSpine = section === 'attention'
+  const showSpine = section === 'attention' || section === 'compare'
   const openSpine = (next: SpineLocation, action: 'push' | 'replace' | 'goTo' = 'push') => {
     setSection('attention')
     dispatchSpine({ type: action, location: next })
@@ -965,6 +928,40 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                 <path d="M4 4l8 8M12 4l-8 8" />
               </svg>
             </button>
+            <div className="flex flex-col gap-1">
+              <SideLink
+                testId="nav-rail-attention"
+                active={section === 'attention'}
+                onClick={() => {
+                  setSection('attention')
+                  dispatchSpine({ type: 'goTo', location: { level: 'attention' } })
+                  setSidebarOpen(false)
+                }}
+              >
+                Attention
+              </SideLink>
+              <SideLink
+                testId="nav-rail-sessions"
+                active={section === 'sessions'}
+                onClick={() => {
+                  setSection('sessions')
+                  setSidebarOpen(false)
+                }}
+              >
+                Sessions
+              </SideLink>
+              <SideLink
+                testId="nav-rail-compare"
+                active={section === 'compare'}
+                onClick={() => {
+                  setSection('compare')
+                  dispatchSpine({ type: 'goTo', location: { level: 'compare' } })
+                  setSidebarOpen(false)
+                }}
+              >
+                Compare
+              </SideLink>
+            </div>
             {section === 'usage' && (
             <>
             <div className="flex flex-col gap-1">
@@ -998,8 +995,6 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
               </svg>
               Search local devices
             </button>
-            </>
-            )}
 
             <div className="border-t border-border pt-4">
               <p className="mb-2 px-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-heading">Share</p>
@@ -1028,20 +1023,24 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                 </div>
               )}
             </div>
+            </>
+            )}
           </aside>
 
           <main className="min-w-0 flex-1 overflow-y-auto pr-0.5">
             <div className="mb-3 flex items-baseline justify-between">
               <h1 className="font-display text-xl tracking-tight text-foreground" data-testid="page-title">
-                {showSpine
-                  ? 'Attention'
-                  : section === 'compare'
-                    ? 'Compare'
-                    : section === 'quarantine'
-                      ? 'Quarantine'
-                      : section === 'problems'
-                        ? 'Problems'
-                        : viewTitle}
+                {section === 'compare'
+                  ? 'Compare'
+                  : section === 'sessions'
+                    ? 'Sessions'
+                    : showSpine
+                      ? 'Attention'
+                      : section === 'quarantine'
+                        ? 'Quarantine'
+                        : section === 'problems'
+                          ? 'Problems'
+                          : viewTitle}
               </h1>
               <span className="text-xs text-tertiary-foreground">{section === 'usage' ? label : ''}</span>
             </div>
@@ -1084,6 +1083,8 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                   onSelectRun={(runId) => openSpine({ level: 'run', harnessId: location.harnessId, runId }, 'goTo')}
                   onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId }, 'goTo')}
                 />
+              ) : location.level === 'compare' ? (
+                <CompareRuns />
               ) : (
                 <FindingDetail
                   findingId={location.findingId}
@@ -1095,8 +1096,8 @@ export function App({ initialPage = 'attention' }: AppProps = {}) {
                   onBack={() => dispatchSpine({ type: 'pop' })}
                 />
               )
-            ) : section === 'compare' ? (
-              <KyberComparePanel />
+            ) : section === 'sessions' ? (
+              <Sessions />
             ) : section === 'quarantine' ? (
               <KyberQuarantinePanel />
             ) : section === 'problems' ? (

@@ -1,20 +1,22 @@
 ---
-id: plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector
+id: archive/plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector
 title: Diagnostic Hierarchy, Context Inspector, and Evidence-Backed Findings
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-12
 component: KyberDash
 ---
 
 # Diagnostic Hierarchy, Context Inspector, and Evidence-Backed Findings
 
-**Status:** Needs review — Review required. ADRs 0012–0015 are already harvested; Phase G product criteria remain open, so this plan is not archived.
+**Status:** Superseded (Archived)
 **Date:** 2026-09-05
+**Superseded Date:** 2026-09-12
+**Archive Date:** 2026-09-12
 **Goal:** Turn KyberDash from a per-session analysis view into a navigable diagnostic product: a progressive-disclosure hierarchy (All Harnesses → Harness → Run → Agent Execution → Turn → Event/Context Item), a full-content context inspector with copy-out, a signal and finding engine whose output carries evidence and calibrated confidence, a run/turn comparison workflow that verifies its own predictions, and an optional LLM review seam over the assembled context.
 
-Successor to [2026-09-04-kyberdash-asad-context-dashboard.md](../archive/plans/2026-09-04-kyberdash-asad-context-dashboard.md), which made `canon.db` project the ASAD payload and made the ASAD dashboard the only Context view. That plan delivered **one screen for one session**. This plan supplies the levels above it, the level below it, and the diagnostic layer that makes the numbers actionable. It builds on architecture that already exists — the canonical store, the ASAD payload contract, per-bucket measurability, the content endpoint — so it is a plan, not a spec.
+Successor to [2026-09-04-kyberdash-asad-context-dashboard.md](2026-09-04-kyberdash-asad-context-dashboard.md), which made `canon.db` project the ASAD payload and made the ASAD dashboard the only Context view. That plan delivered **one screen for one session**. This plan supplies the levels above it, the level below it, and the diagnostic layer that makes the numbers actionable. It builds on architecture that already exists — the canonical store, the ASAD payload contract, per-bucket measurability, the content endpoint — so it is a plan, not a spec.
 
 The interaction design this plan implements is the reviewed prototype `KyberDash.dc.html` in the design project. Screen names below correspond to sections of that prototype.
 
@@ -26,7 +28,7 @@ The interaction design this plan implements is the reviewed prototype `KyberDash
 2. **Sessions are not the unit developers recognise.** A run with a root agent and two delegated children is one unit of work and three sessions. Delegation overhead — the tokens paid purely to hand work off — is invisible because no entity spans the handoff.
 3. **The turn view describes context it will not show.** `analyzeContext` buckets a turn into system / conversation / tool-definitions / MCP / buffer, and the drawer retrieves unclipped parts for a *clicked band*. There is no path from "system prompt: 31,240 tokens" to reading those 31,240 tokens, and no way to get the text out of the app into an editor where a prompt actually gets fixed.
 4. **Composition is reported, never diagnosed.** The payload says a bucket is large. It does not say the block is byte-identical to 26 earlier copies, that it lands after the cache breakpoint, that this is why the prefix is invalidated, or what to change. `rankSchemas` ranks; nothing explains.
-5. **Cost-shaped framing is re-entering through the UI.** `SessionCostPanel` and `SessionSpendCharts` are the most finished components on the page. Left alone, spend becomes the organising principle by default — the exact outcome [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)'s soft fork was supposed to avoid, achieved by attrition rather than by decision.
+5. **Cost-shaped framing is re-entering through the UI.** `SessionCostPanel` and `SessionSpendCharts` are the most finished components on the page. Left alone, spend becomes the organising principle by default — the exact outcome [ADR 0006](../../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)'s soft fork was supposed to avoid, achieved by attrition rather than by decision.
 6. **Nothing closes the loop.** `compareHarnesses` compares harnesses, not two runs of the same task under different configuration. A developer who acts on a KyberDash observation has no way to learn whether the change helped, and KyberDash has no way to learn whether its own advice was right.
 7. **Measurability is modelled but not yet load-bearing in the UI.** B3 made every bucket measured / derived / `not_measurable` with a reason. That discipline must extend to *findings*: a harness with no telemetry must never rank as efficient by absence of evidence.
 
@@ -278,7 +280,7 @@ For parallel execution across specialist worker pools via `conductor`:
 - Running benchmarks or grading model quality. Outcome signals are read from what already exists.
 - New harness adapters. This plan consumes the collection breadth the predecessor's Phase D delivered; it does not extend it.
 - Replacing OTel or Aspire as transports, or promoting either to a domain boundary. Both stay ingest adapters and operational integrations.
-- Importing the retired Python corpus (accepted loss, [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md)).
+- Importing the retired Python corpus (accepted loss, [ADR 0008](../../adr/0008-kyberdash-single-canonical-store.md)).
 - Terminal TUI, Electron and Windows tray parity for the new screens. Web dashboard first; surface parity is a successor plan.
 
 ## 8. Required skills
@@ -317,35 +319,38 @@ npm --prefix dash test          # must include dash/dash/src/** after H3
 
 ## 10. Related
 
-- [2026-09-04 ASAD Context Dashboard](../archive/plans/2026-09-04-kyberdash-asad-context-dashboard.md) — predecessor; its open live gates are H2
-- [2026-09-06 KyberDash Diagnostic Spine](2026-09-06-kyberdash-spine.md) — successor for remaining Phase G product wiring of the six-level hierarchy into the running dashboard
-- [KyberDash architecture](../dash/architecture.md) — canonical store, 6-level spine, signals, finding contracts, API contract
-- [KyberDash runbook](../dash/runbook.md) — local execution across the four surfaces, rebuild and purge commands
-- [Telemetry inventory](../dash/telemetry-inventory.md) — per-harness collection, cache availability, and measurability
-- [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — soft fork and merge zone, enforced by H1
-- [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md) — single canonical store
-- [ADR 0009](../adr/0009-multi-signal-ingestion-span-shaped-record.md) — log enrichment, quarantine, source precedence
-- [ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md) — ASAD-only Context view and payload contract
-- [ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md) — progressive disclosure 6-level diagnostic spine, first-class runs, and independent dimension vectors
-- [ADR 0013](../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) — telemetry-grounded finding contracts, waste ranking, and relocation discipline
-- [ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md) — unclipped turn inspection, rolling retention window, and copy-out protocol
-- [ADR 0015](../adr/0015-opt-in-llm-context-review-seam.md) — opt-in LLM context review seam and finding isolation
-- [Feature runbook standard](../rules/feature-runbooks.md) — why G5's configuration surface must reach the runbook
+- [2026-09-04 ASAD Context Dashboard](2026-09-04-kyberdash-asad-context-dashboard.md) — predecessor; its open live gates are H2
+- [2026-09-06 KyberDash Diagnostic Spine](2026-09-06-kyberdash-spine.md) — successor; Phase G product wiring of the six-level hierarchy (archived 2026-09-13)
+- [KyberDash architecture](../../dash/architecture.md) — canonical store, 6-level spine, signals, finding contracts, API contract
+- [KyberDash runbook](../../dash/runbook.md) — local execution across the four surfaces, rebuild and purge commands
+- [Telemetry inventory](../../dash/telemetry-inventory.md) — per-harness collection, cache availability, and measurability
+- [ADR 0006](../../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — soft fork and merge zone, enforced by H1
+- [ADR 0008](../../adr/0008-kyberdash-single-canonical-store.md) — single canonical store
+- [ADR 0009](../../adr/0009-multi-signal-ingestion-span-shaped-record.md) — log enrichment, quarantine, source precedence
+- [ADR 0011](../../adr/0011-asad-only-context-view-and-payload-contract.md) — ASAD-only Context view and payload contract
+- [ADR 0012](../../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md) — progressive disclosure 6-level diagnostic spine, first-class runs, and independent dimension vectors
+- [ADR 0013](../../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) — telemetry-grounded finding contracts, waste ranking, and relocation discipline
+- [ADR 0014](../../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md) — unclipped turn inspection, rolling retention window, and copy-out protocol
+- [ADR 0015](../../adr/0015-opt-in-llm-context-review-seam.md) — opt-in LLM context review seam and finding isolation
+- [Feature runbook standard](../../rules/feature-runbooks.md) — why G5's configuration surface must reach the runbook
 
-## 11. Closeout verification — 2026-09-05 harvest; archival reversed 2026-09-06
+## 11. Closeout — Superseded & Archived 2026-09-12
 
-This plan is **Needs review / Review required**. Durable decisions were harvested into
-ADRs 0012–0015 on 2026-09-05. Archival on that date treated index wording and component-test
-existence as proof that Phase G product criteria were closed. They were not. The
-[2026-09-06 spine plan](2026-09-06-kyberdash-spine.md) exists because those live gaps remain.
+This plan is **Superseded and Archived** as of 2026-09-12. It is not an incomplete T3
+and is not still-active execution authority. Durable product decisions were harvested into
+ADRs 0012–0015 on 2026-09-05 and remain the harvest — do not mint duplicates.
 
-**Open Phase G product criteria (do not archive while these stand):**
+Remaining live Phase G product wiring is transferred to
+[2026-09-06 KyberDash Diagnostic Spine](2026-09-06-kyberdash-spine.md)
+Phase B. That plan owns execution because this plan's task list is no longer a reliable
+authority (phantom-completion / unreachable components):
 
-- **G2 — Attention, harness, and run screens.** The walking skeleton can drill the spine, but G2's product criteria are unmet: ranked findings are not the Attention landing content; the cross-harness scorecard matrix (six independent dimensions as the Attention surface) is not live; every screen does not yet show breadcrumb, scope, active baseline, and deltas against the live store as specified. Component tests for `Scorecard` and page files do not close G2.
-- **G3 — Finding detail.** `FindingDetail` exists as a page. G3 is unmet until diagnosis, evidence, confidence, and recommendation are four distinct regions on the reachable spine, every evidence row links to a record or turn that resolves live, and the confidence basis, what-would-raise-it, and outcome-risk caveat cannot be hidden.
-- **Remaining Phase G live.** **G1** — `ContextInspector` still hangs off the session drawer; D4 requires it under Turn (spine B3). **G4** — run/turn comparison is not a first-class live workflow: two runs of one task family, phase-aligned, with the n ≥ 5 outcome guard (spine B4).
+- **G2 — Attention, harness, and run screens.** Ranked findings as Attention landing content; the six-dimension scorecard matrix; breadcrumb, scope, baseline, and deltas against the live store.
+- **G3 — Finding detail.** Diagnosis, evidence, confidence, and recommendation as four distinct regions on the reachable spine, with evidence rows that resolve live.
+- **G1 under Turn.** `ContextInspector` still hangs off the session drawer; D4 requires it under Turn (spine B3).
+- **G4 — Run comparison.** Phase-aligned run/turn comparison as a first-class live workflow with the n ≥ 5 outcome guard (spine B4).
 
-Phases E and F, G5, and H1–H3 remain as previously verified in-tree. H4 harvested ADRs 0012–0015 and updated canonical dash docs; H4's "this plan archives" criterion is unmet until G2, G3, G1-under-Turn, and G4 close. Do not mint duplicate ADRs.
+Phases E and F, G5, and H1–H3 remain as previously verified in-tree. H4 harvested ADRs 0012–0015 and updated canonical dash docs.
 
 | Phase / Task | Verified outcome | Closeout state |
 |---|---|---|
@@ -357,14 +362,14 @@ Phases E and F, G5, and H1–H3 remain as previously verified in-tree. H4 harves
 | **F2** — Context classification | Context items classified by evidence of use (`strong / weak / none / unobserved`) per D15 in `dash/kyber/analysis/classify.ts`. Verified in `tests/classify.test.ts`. | Verified |
 | **F3** — Finding engine & waste ranking | Finding engine in `dash/kyber/analysis/findings.ts` implements full D5 contract (mechanism, ≥2 evidence rows with record IDs, measurement class, stated confidence, recommendation, expected improvement with error bar, outcome-risk caveat). Ranking satisfies D6; relocation over deletion passes lint (D8). Verified in `tests/findings.test.ts`. | Verified |
 | **F4** — Prediction calibration | Predictions recorded and scored against phase-aligned pairs in `dash/kyber/analysis/calibration.ts`. Verified in `tests/calibration.test.ts`. | Verified |
-| **G1** — Context inspector | Unclipped inspector exists (`ContextInspector.tsx`) and is wired to the session drawer, not the Turn level. Live G1 (D4 under Turn) is open; successor work is spine B3. | Open (live) |
-| **G2** — Attention, Harness, Run screens | Pages exist; `Scorecard.test.tsx` is not a live-store drill. Ranked findings on Attention, the six-dimension scorecard matrix, and baseline/delta product criteria remain open. | Open (live) |
-| **G3** — Finding detail | `FindingDetail.tsx` exists. Live G3 (four regions on the reachable spine; evidence rows resolving to live records) remains open. | Open (live) |
-| **G4** — Run & turn comparison | Compare components and tests exist. Live G4 (phase-aligned run comparison as a first-class workflow with the n ≥ 5 guard) remains open; successor work is spine B4. | Open (live) |
+| **G1** — Context inspector | Unclipped inspector exists (`ContextInspector.tsx`) and is wired to the session drawer, not the Turn level. Live G1 (D4 under Turn) transferred to spine B3. | Transferred to spine |
+| **G2** — Attention, Harness, Run screens | Pages exist; `Scorecard.test.tsx` is not a live-store drill. Ranked findings on Attention, the six-dimension scorecard matrix, and baseline/delta product criteria transferred to spine Phase B. | Transferred to spine |
+| **G3** — Finding detail | `FindingDetail.tsx` exists. Live G3 (four regions on the reachable spine; evidence rows resolving to live records) transferred to spine Phase B. | Transferred to spine |
+| **G4** — Run & turn comparison | Compare components and tests exist. Live G4 (phase-aligned run comparison as a first-class workflow with the n ≥ 5 guard) transferred to spine B4. | Transferred to spine |
 | **G5** — LLM context review seam | On-demand opt-in review in `dash/kyber/analysis/review.ts` and `ContextReviewPanel.tsx` (D10). Enforces relocation constraints (D8); isolates model output from finding table. Verified in `tests/review.test.ts` and `ContextReviewPanel.test.tsx`. | Verified |
 | **H1** — Boundary enforcement | Mechanical import-graph and type enforcement in `dash/kyber/tools/boundary.test.ts` passes. Prevents upstream leaks into merge zone (D12). | Verified |
 | **H2** — Inherited live gates | Predecessor live gates closed and recorded in `docs/dash/telemetry-inventory.md`. | Verified |
 | **H3** — Component tests in CI | Component tests added to `dash/package.json` under `npm test` and `vitest.config.ts`. | Verified |
-| **H4** — Documentation closeout | ADRs 0012–0015 harvested (do not mint duplicates). Canonical dash docs updated. Archival of this plan is reversed until G2, G3, and remaining Phase G live criteria close. | Partial — ADRs harvested; archival blocked |
+| **H4** — Documentation closeout | ADRs 0012–0015 harvested (do not mint duplicates). Canonical dash docs updated. Remaining live Phase G work transferred to the spine; this plan is superseded, not unfinished-and-still-active. | Harvested; superseded 2026-09-12 |
 
-**Archival blocked:** G2, G3, G1-under-Turn, and G4 remain open. Remaining product wiring is tracked on the [2026-09-06 spine plan](2026-09-06-kyberdash-spine.md). This plan stays under `docs/plans/` at Needs review.
+**Archival complete:** remaining live Phase G work was owned by the [2026-09-06 spine plan](2026-09-06-kyberdash-spine.md). This plan is **Superseded**.

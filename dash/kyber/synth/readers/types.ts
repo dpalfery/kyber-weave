@@ -12,6 +12,34 @@
 // shape here would drift the first time a bucket is added.
 
 import type { ContentPart } from '../../canon/types.js'
+import type { ParsedProviderCall } from '../../../src/providers/types.js'
+
+/**
+ * Provenance a refresh source unit carries onto a synthesized record.
+ * These fields identify the native row for checkpointed replacement; they
+ * are not a second validation path.
+ */
+export type SourceRecordProvenance = {
+  harnessId: string
+  sourceKey: string
+  nativeSessionId: string
+  nativeRecordId: string
+  recordDigest?: string
+  sourceRevision?: string
+  parserContractVersion?: string
+  importedAt?: string
+  locationToken?: string
+}
+
+/**
+ * Adapter projection of one native record into synthesis. Classification
+ * happens before this envelope is built; Gemini is never a harness id here.
+ */
+export type SourceRecordEnvelope = Omit<SourceRecordProvenance, 'nativeRecordId'> & {
+  nativeRecordId?: string
+  call: ParsedProviderCall
+  readerTurn?: ReaderTurn
+}
 
 /**
  * One model turn's content as the file recorded it. Optional fields are
@@ -32,6 +60,8 @@ export type ReaderTurn = {
   isCorrection?: boolean
   /** The rule that identified this turn as a user correction. */
   correctionRule?: string
+  /** Native turn/message id when the transcript named one. */
+  nativeRecordId?: string
 }
 
 /**

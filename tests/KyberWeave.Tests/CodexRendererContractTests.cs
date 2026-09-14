@@ -528,7 +528,7 @@ public sealed class CodexRendererContractTests : IDisposable
               "mcpServers": {
                 "kyber-weave": {
                   "command": "kyber-weave-mcp",
-                  "args": []
+                  "args": ["--repo-root", "."]
                 }
               }
             }

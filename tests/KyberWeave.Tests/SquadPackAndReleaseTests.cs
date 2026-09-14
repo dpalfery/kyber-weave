@@ -707,7 +707,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                   "mcpServers": {
                     "kyber-weave": {
                       "command": "kyber-weave-mcp",
-                      "args": []
+                      "args": ["--repo-root", "."]
                     }
                   }
                 }

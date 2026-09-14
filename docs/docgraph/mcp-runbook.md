@@ -208,24 +208,27 @@ first-run compile.
 
 ### Resolving the repository root
 
-Clients launch servers with an unpredictable working directory, so the root is resolved in
-this order:
+The project-local configuration emitted by the Squad package uses `--repo-root .`. That
+binding is resolved against the client's working directory, which must be the directory
+initialized by `kyber-weave docs init` (the command defaults to the current directory). For
+global or headless clients, use an explicit absolute path or the generic
+`KYBER_WEAVE_REPO_ROOT` setting. The root is resolved in this order:
 
 1. `--repo-root <path>`
 2. the `KYBER_WEAVE_REPO_ROOT` environment variable
-3. the nearest ancestor of the working directory containing a `.git` entry
-4. the working directory itself
+3. the working directory itself, only when it contains a Kyber-Weave host configuration
 
-Guessing wrong yields an **empty corpus rather than an error**, which is the failure mode
-to suspect first when every query returns a miss. Pass `--repo-root` explicitly in a client
-config.
+The server never walks up to a parent Git repository and never serves an unbound default
+corpus. If the selected directory was not initialized, startup fails on stderr with an
+actionable `kyber-weave docs init "<path>"` command. This prevents two repositories under a
+shared parent directory from accidentally reading one another's documentation.
 
 ### The ontology comes from the host config
 
 Once the root is resolved, the server reads `.kyber-weave/kyber-weave.yml` from it and
 serves the same corpus [`docs validate`](governance.md) does — every `docs-root`, and the
-catalog wherever [config](../configuration.md) puts it. A repository with no config gets
-product defaults.
+catalog wherever [config](../configuration.md) puts it. Run `kyber-weave docs init .` first
+when adopting a repository without a host configuration.
 
 A config that cannot be read is reported on **stderr** as `KW-CONFIG-001` and the server
 keeps running on defaults. That combination — a corpus that looks empty and a line on

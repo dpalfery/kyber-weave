@@ -341,7 +341,7 @@ export function ContentPane({
             </span>
           </div>
           <span className="font-mono text-[10px] uppercase font-semibold text-amber-600 dark:text-amber-400">
-            D14 Budget
+            Truncated
           </span>
         </div>
       )}
@@ -400,8 +400,8 @@ export interface ContextInspectorProps {
 }
 
 /**
- * Context Inspector component (Task G1 / Decisions D4 & D14).
- * Provides unclipped, block-level and turn-level inspection with plain text copy-out.
+ * Context Inspector — unclipped block- and turn-level inspection with plain-text
+ * copy-out. Spine entry is TurnDetail (docs/plans/2026-09-06-kyberdash-spine.md § B3).
  */
 export function ContextInspector({
   sessionId,

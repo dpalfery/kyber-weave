@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Reflection;
+using System.Text.Json;
 using System.Xml.Linq;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
@@ -23,6 +24,20 @@ public class McpPackagingTests
         Assert.Equal("true", PropertyValue(doc, ns, "PackAsTool"));
         Assert.Equal("kyber-weave-mcp", PropertyValue(doc, ns, "ToolCommandName"));
         Assert.Equal("true", PropertyValue(doc, ns, "IsPackable"));
+    }
+
+    [Fact]
+    public void PackagedMcpConfigurationBindsTheServerToTheCurrentRepository()
+    {
+        using JsonDocument document = JsonDocument.Parse(
+            File.ReadAllText(KyberWeaveTestPaths.SquadMcpConfigurationPath));
+        JsonElement server = document.RootElement
+            .GetProperty("mcpServers")
+            .GetProperty("kyber-weave");
+
+        Assert.Equal(
+            ["--repo-root", "."],
+            server.GetProperty("args").EnumerateArray().Select(item => item.GetString()!).ToArray());
     }
 
     [Fact]

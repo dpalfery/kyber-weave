@@ -41,7 +41,7 @@ function makeRecord(spanId: string, over: Partial<CanonicalRecord> = {}): Canoni
     traceId: 'trace-1',
     parentSpanId: null,
     source: 'antigravity',
-    harness: 'gemini',
+    harness: 'antigravity',
     sessionId: 'sess-1',
     name: 'llm_request',
     op: 'llm.invoke',
@@ -99,7 +99,7 @@ describe('Decision D13 — Run boundary derivation', () => {
     expect(identity.groupingBasis).toBe('derived')
     expect(identity.groupingRule).toBe('working_directory_and_inactivity_window')
     expect(identity.workingDirectory).toBe('/repo/app')
-    expect(identity.runId).toMatch(/^derived:gemini:_repo_app:/)
+    expect(identity.runId).toMatch(/^derived:antigravity:_repo_app:/)
   })
 
   it('never silently presents a heuristic grouping as raw fact', () => {
@@ -238,7 +238,7 @@ describe('Parent/child execution linkage & execution trees', () => {
       executionId: 'exec-root',
       runId: 'run-trace-tree',
       sessionId: 'sess-root',
-      harness: 'gemini',
+      harness: 'antigravity',
       agentName: 'orchestrator',
       started: '2026-09-03T10:00:00.000Z',
       ended: '2026-09-03T10:02:00.000Z',
@@ -251,7 +251,7 @@ describe('Parent/child execution linkage & execution trees', () => {
       executionId: 'exec-child',
       runId: 'run-trace-tree',
       sessionId: 'sess-child',
-      harness: 'gemini',
+      harness: 'antigravity',
       agentName: 'code-analyzer',
       started: '2026-09-03T10:00:30.000Z',
       ended: '2026-09-03T10:01:30.000Z',
@@ -307,7 +307,7 @@ describe('Parent/child execution linkage & execution trees', () => {
       executionId: 'exec-1',
       runId: 'run-unlinked',
       sessionId: 'sess-1',
-      harness: 'gemini',
+      harness: 'antigravity',
       records: [makeRecord('span-1', { parentSpanId: null })],
     }
 
@@ -315,7 +315,7 @@ describe('Parent/child execution linkage & execution trees', () => {
       executionId: 'exec-2',
       runId: 'run-unlinked',
       sessionId: 'sess-2',
-      harness: 'gemini',
+      harness: 'antigravity',
       records: [makeRecord('span-2', { parentSpanId: null })],
     }
 
@@ -501,7 +501,7 @@ describe('Schema migration & store accessors', () => {
     // Verify run and execution tables are functional
     store.upsertRun({
       runId: 'run-v5-test',
-      harness: 'gemini',
+      harness: 'antigravity',
       groupingBasis: 'explicit',
       groupingRule: 'explicit_run_id',
     })
@@ -509,7 +509,7 @@ describe('Schema migration & store accessors', () => {
     store.upsertExecution({
       executionId: 'exec-v5-test',
       runId: 'run-v5-test',
-      harness: 'gemini',
+      harness: 'antigravity',
       isRoot: true,
       parentLinkage: 'measured',
     })
@@ -525,7 +525,7 @@ describe('Schema migration & store accessors', () => {
 
     store.upsertRun({
       runId: 'run-gemini-1',
-      harness: 'gemini',
+      harness: 'antigravity',
       groupingBasis: 'derived',
       started: '2026-09-03T10:00:00.000Z',
     })
@@ -537,7 +537,7 @@ describe('Schema migration & store accessors', () => {
     })
     store.upsertRun({
       runId: 'run-gemini-2',
-      harness: 'gemini',
+      harness: 'antigravity',
       groupingBasis: 'explicit',
       started: '2026-09-03T12:00:00.000Z',
     })
@@ -545,9 +545,9 @@ describe('Schema migration & store accessors', () => {
     const allRuns = store.listRuns()
     expect(allRuns).toHaveLength(3)
 
-    const geminiRuns = store.listRuns('gemini')
-    expect(geminiRuns).toHaveLength(2)
-    expect(geminiRuns.map((r) => r.runId)).toEqual(['run-gemini-2', 'run-gemini-1'])
+    const antigravityRuns = store.listRuns('antigravity')
+    expect(antigravityRuns).toHaveLength(2)
+    expect(antigravityRuns.map((r) => r.runId)).toEqual(['run-gemini-2', 'run-gemini-1'])
 
     const copilotRuns = store.listRuns('copilot')
     expect(copilotRuns).toHaveLength(1)

@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchRun, fetchTurnContent } from '../lib/kyberApi'
+import { cn } from '../lib/utils'
 import { Card } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
 import { ContextInspector } from '../components/ContextInspector'
-import { HierarchyBreadcrumb } from '../components/kyber'
+import { ContextReviewPanel, HierarchyBreadcrumb } from '../components/kyber'
 
 export interface TurnDetailProps {
   runId: string
@@ -39,9 +40,9 @@ export function resolveTurnSessionId(
 }
 
 /**
- * The turn surface deliberately reuses the established context inspector rather
- * than creating a second content representation. The small band list is the
- * spine's direct entry point into that existing inspection contract.
+ * Turn is the spine entry for unclipped context inspection. Band clicks select
+ * a block inside ContextInspector rather than swapping in a raw pre that would
+ * hide clipping banners. See docs/plans/2026-09-06-kyberdash-spine.md § B3.
  */
 export function TurnDetail({
   runId,
@@ -64,22 +65,15 @@ export function TurnDetail({
     enabled: !!sessionId,
   })
 
-  const selectedBlock = useMemo(
-    () => data?.blocks.find((block) => block.key === selectedBlockKey),
-    [data, selectedBlockKey],
-  )
   const recordedBlocks = useMemo(
     () => data?.blocks.filter((block) =>
       Boolean(block.notMeasurable?.reason || block.text.trim() || block.parts.some((part) => part.text.trim())),
     ) ?? [],
     [data],
   )
-  const selectedContent = selectedBlock
-    ? selectedBlock.notMeasurable?.reason || selectedBlock.text || selectedBlock.parts.map((part) => part.text).join('\n\n')
-    : undefined
 
   return (
-    <div className="flex flex-col gap-4" data-testid="page-turn">
+    <div className="flex flex-col gap-density-stack" data-testid="page-turn">
       <HierarchyBreadcrumb
         runId={runId}
         executionId={executionId}
@@ -90,40 +84,57 @@ export function TurnDetail({
         onSelectExecution={onSelectExecution}
       />
 
-      <Card className="p-4">
-        <h2 className="font-display text-2xl font-bold tracking-tight text-foreground">Turn {turnIndex}</h2>
-        <p className="mt-1 text-xs text-muted-foreground">Select a context band to inspect its recorded content.</p>
+      <Card className="p-chrome">
+        <h2 className="font-display text-density-display font-bold tracking-density text-foreground">Turn {turnIndex}</h2>
+        <p className="mt-density-hair text-density-xs text-muted-foreground leading-density">Select a context band to inspect its recorded content.</p>
 
         {isLoading ? (
-          <Skeleton className="mt-4 h-20 w-full" />
+          <Skeleton className="mt-density-stack h-20 w-full" />
         ) : recordedBlocks.length ? (
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-density-stack flex flex-wrap gap-density-cluster">
             {recordedBlocks.map((block) => (
               <button
                 key={block.key}
                 type="button"
                 data-testid={`context-band-${block.key}`}
                 onClick={() => setSelectedBlockKey(block.key)}
-                className="rounded border border-border bg-interactive-secondary px-2.5 py-1 text-xs text-foreground hover:bg-primary hover:text-primary-foreground"
+                className={cn(
+                  'rounded-chrome border border-border px-chrome-sm py-chrome-xs text-density-xs hover:bg-primary hover:text-primary-foreground',
+                  selectedBlockKey === block.key
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-interactive-secondary text-foreground',
+                )}
               >
                 {block.label}
               </button>
             ))}
           </div>
         ) : (
-          <p className="mt-4 text-xs text-tertiary-foreground">No context bands were recorded for this turn.</p>
+          <p className="mt-density-stack text-density-xs text-tertiary-foreground">No context bands were recorded for this turn.</p>
         )}
       </Card>
 
-      <Card className="p-4" data-testid="context-content">
-        {selectedBlock ? (
-          <pre className="whitespace-pre-wrap break-words text-xs font-mono text-foreground">
-            {selectedContent}
-          </pre>
-        ) : (
-          <ContextInspector sessionId={sessionId} turnIndex={turnIndex} data={data} />
-        )}
+      <Card className="p-chrome" data-testid="context-content">
+        <ContextInspector
+          sessionId={sessionId}
+          turnIndex={turnIndex}
+          data={data}
+          initialBlockKey={selectedBlockKey}
+        />
       </Card>
+
+      <ContextReviewPanel
+        content={data?.assembledText ?? ''}
+        turnIndex={turnIndex}
+        sessionId={sessionId}
+        blocks={data?.blocks.map((block) => ({
+          key: block.key,
+          label: block.label,
+          text: block.text,
+        }))}
+        harness={run?.harness}
+        model={data?.model}
+      />
     </div>
   )
 }

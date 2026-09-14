@@ -1,0 +1,1 @@
+{"type":"message","timestamp":"2026-09-06T14:00:00.000Z","sessionId":"droid-1","turnId":"droid-turn-1","provider":"droid","model":"test-model","message":{"role":"assistant","content":"droid fixture recovered after a partial failure"}}

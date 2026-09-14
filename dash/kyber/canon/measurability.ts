@@ -110,6 +110,8 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
 export const PROVIDER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new Map([
   ['gemini', ['cache_creation']],
   ['antigravity', ['cache_creation']],
+  ['antigravity-cli', ['cache_creation']],
+  ['antigravity-ide', ['cache_creation']],
 ])
 
 function unavailable(reason: string): NotMeasurable {
@@ -121,24 +123,131 @@ function availabilityOf(value: MetricAvailability | undefined): string | undefin
   return typeof value === 'object' ? value.availability : value
 }
 
+/**
+ * Display-only Gemini label for selector copy. Gemini is a model/chat identity,
+ * not a persisted coding-harness id on derived rows or rollups.
+ */
+export const GEMINI_SELECTOR_LABEL = 'Gemini'
+
+const EXCLUDED_HARNESS_IDENTITIES = new Set(['gemini'])
+
+/** True when `harness` must not appear as a stored session/run/rollup harness id. */
+export function isExcludedHarnessIdentity(harness: string): boolean {
+  return EXCLUDED_HARNESS_IDENTITIES.has(harness.trim().toLowerCase())
+}
+
+/**
+ * Map split client surfaces onto the E4 cache/prefix survey family they inherit.
+ * The survey family is telemetry vocabulary, not a persisted identity.
+ */
+const SURVEY_FAMILY: Readonly<Record<string, string>> = {
+  'antigravity-cli': 'antigravity',
+  'antigravity-ide': 'antigravity',
+  'copilot-cli': 'copilot',
+  'copilot-vscode': 'copilot',
+  'copilot-jetbrains': 'copilot',
+  'copilot-agent': 'copilot',
+  'cursor-agent': 'cursor',
+  'cline-cli': 'cline',
+  'claude-cli': 'claude-code',
+  'claude-desktop': 'claude-code',
+  'claude-unclassified': 'claude-code',
+  'codex-cli': 'codex',
+  'codex-desktop': 'codex',
+  'codex-unclassified': 'codex',
+  'kilo-shared-runtime': 'kilo-code',
+  'kilo-vscode-legacy': 'kilo-code',
+}
+
+function surveyFamily(harness: string): string {
+  const canonical = normalizeHarnessName(harness)
+  if (canonical === 'gemini') return 'gemini'
+  return SURVEY_FAMILY[canonical] ?? canonical
+}
+
+/**
+ * Canonical persisted harness id. Split client surfaces stay distinct.
+ * Gemini remains the excluded identity string so callers can refuse it;
+ * it is never seeded into rollups or derived session/run rows.
+ */
+export function normalizeHarnessName(harness: string): string {
+  const lower = harness.trim().toLowerCase()
+  if (lower === 'claude-cli' || lower === 'claude-desktop' || lower === 'claude-unclassified') return lower
+  if (lower === 'claude' || lower === 'claude-code') return lower === 'claude' ? 'claude-unclassified' : 'claude-code'
+  if (lower === 'copilot-cli' || lower === 'copilot-vscode' || lower === 'copilot-jetbrains' || lower === 'copilot-agent') {
+    return lower
+  }
+  if (lower === 'copilot-chat') return 'copilot-vscode'
+  if (lower === 'copilot' || lower === 'github-copilot') return 'copilot'
+  if (lower === 'cursor-agent') return 'cursor-agent'
+  if (lower === 'cursor') return 'cursor'
+  if (lower === 'windsurf' || lower === 'cascade') return 'windsurf'
+  if (lower === 'roo' || lower === 'roo-code' || lower === 'roo-cline') return 'roo-code'
+  if (lower === 'cline-cli') return 'cline-cli'
+  if (lower === 'cline') return 'cline'
+  if (lower === 'aider') return 'aider'
+  if (lower === 'codex-cli' || lower === 'codex-desktop' || lower === 'codex-unclassified') return lower
+  if (lower === 'codex' || lower === 'openai-codex') return lower === 'openai-codex' ? 'codex-unclassified' : 'codex'
+  if (lower === 'gemini') return 'gemini'
+  if (lower === 'antigravity-cli' || lower === 'antigravity-ide') return lower
+  if (lower === 'antigravity' || lower === 'agy') return 'antigravity'
+  if (lower === 'opencode') return 'opencode'
+  if (lower === 'kilo-vscode-legacy') return 'kilo-vscode-legacy'
+  if (lower === 'kilo-shared-runtime' || lower === 'kilo' || lower === 'kilo-code' || lower.startsWith('kilo')) {
+    return 'kilo-shared-runtime'
+  }
+  if (lower === 'kimicode' || lower === 'kimi-code') return 'kimi-code'
+  return lower
+}
+
+/** Canonical coding-harness id, or `null` when the name is excluded (Gemini). */
+export function canonicalHarnessId(harness: string): string | null {
+  const id = normalizeHarnessName(harness)
+  return isExcludedHarnessIdentity(id) ? null : id
+}
+
+export function groupByCanonicalHarness<T extends { harness: string }>(items: readonly T[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>()
+  for (const item of items) {
+    const id = canonicalHarnessId(item.harness)
+    if (id === null) continue
+    const list = groups.get(id) ?? []
+    list.push(item)
+    groups.set(id, list)
+  }
+  return groups
+}
+
 /** The measurability map a file-sourced record declares for its provider. */
 export function measurabilityFor(
   provider: string,
   unmeasurable: ReadonlyMap<string, readonly string[]> = PROVIDER_UNMEASURABLE,
 ): Measurability {
-  const metrics = new Set(READER_UNMEASURABLE.get(provider) ?? FILE_SOURCE_UNMEASURABLE)
-  for (const metric of unmeasurable.get(provider) ?? []) metrics.add(metric)
+  const family = surveyFamily(provider)
+  const metrics = new Set(
+    READER_UNMEASURABLE.get(provider) ?? READER_UNMEASURABLE.get(family) ?? FILE_SOURCE_UNMEASURABLE,
+  )
+  for (const metric of unmeasurable.get(provider) ?? unmeasurable.get(family) ?? []) metrics.add(metric)
   return Object.fromEntries(
     [...metrics].sort().map((metric) => [
       metric,
       unavailable(
-        metric === 'cache_creation' && provider === 'gemini'
-          ? 'Gemini session files do not export a cache-creation counter.'
-          : metric === 'system_prompt' && (provider === 'claude' || provider === 'claude-code')
+        metric === 'cache_creation' &&
+        (provider === 'gemini' || surveyFamily(provider) === 'antigravity')
+          ? provider === 'gemini'
+            ? 'Gemini session files do not export a cache-creation counter.'
+            : 'Antigravity conversation stores do not export a cache-creation counter.'
+          : metric === 'system_prompt' &&
+              (provider === 'claude' ||
+                provider === 'claude-code' ||
+                surveyFamily(provider) === 'claude-code')
             ? 'Claude Code session files do not store the runtime system_prompt.'
-            : metric === 'tool_definitions' && (provider === 'claude' || provider === 'claude-code')
+            : metric === 'tool_definitions' &&
+                (provider === 'claude' ||
+                  provider === 'claude-code' ||
+                  surveyFamily(provider) === 'claude-code')
             ? 'Claude Code session files record tool invocations, not tool_definitions.'
-              : metric === 'tool_definitions' && provider === 'codex'
+              : metric === 'tool_definitions' && surveyFamily(provider) === 'codex'
                 ? 'Codex session files record tool names, not tool definition schemas.'
                 : `Session files for ${provider} do not include ${metric} data.`,
       ),
@@ -257,7 +366,7 @@ export function getMeasurability(source: string, harness: string): Measurability
     execution_structure: 'measured',
   }
   for (const key of CANONICAL_CONTENT_KEYS) declared[key] = 'measured'
-  const adapter = ADAPTERS_BY_HARNESS.get(harness)
+  const adapter = ADAPTERS_BY_HARNESS.get(harness) ?? ADAPTERS_BY_HARNESS.get(surveyFamily(harness))
   for (const metric of adapter?.unexportedMetrics() ?? []) {
     declared[metric] = unavailable(`${harness} telemetry does not export the ${metric} metric.`)
   }
@@ -324,23 +433,6 @@ export const SURVEYED_HARNESSES = [
 ] as const
 
 export type SurveyedHarness = (typeof SURVEYED_HARNESSES)[number]
-
-/** Normalize harness aliases to their canonical surveyed harness name. */
-export function normalizeHarnessName(harness: string): SurveyedHarness | string {
-  const lower = harness.trim().toLowerCase()
-  if (lower === 'claude' || lower === 'claude-code') return 'claude-code'
-  if (lower === 'copilot' || lower === 'copilot-chat' || lower === 'copilot-cli') return 'copilot'
-  if (lower === 'cursor' || lower === 'cursor-agent') return 'cursor'
-  if (lower === 'windsurf' || lower === 'cascade') return 'windsurf'
-  if (lower === 'roo' || lower === 'roo-code' || lower === 'roo-cline') return 'roo-code'
-  if (lower === 'cline' || lower === 'cline-cli') return 'cline'
-  if (lower === 'aider') return 'aider'
-  if (lower === 'codex' || lower === 'openai-codex') return 'codex'
-  if (lower === 'gemini') return 'gemini'
-  if (lower === 'antigravity' || lower === 'agy') return 'antigravity'
-  if (lower === 'opencode') return 'opencode'
-  return lower
-}
 
 const HARNESS_CACHE_SURVEY: ReadonlyMap<SurveyedHarness, Omit<CacheAvailability, 'harness'>> = new Map([
   [
@@ -594,13 +686,14 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
  * Return the typed cache counter availability and confidence tag for a harness.
  */
 export function cacheAvailability(harness: string): CacheAvailability {
-  const normalized = normalizeHarnessName(harness) as SurveyedHarness
-  const survey = HARNESS_CACHE_SURVEY.get(normalized)
+  const canonical = normalizeHarnessName(harness)
+  const family = surveyFamily(canonical) as SurveyedHarness
+  const survey = HARNESS_CACHE_SURVEY.get(family)
   if (survey !== undefined) {
-    return { harness: normalized, ...survey }
+    return { harness: canonical, ...survey }
   }
   return {
-    harness,
+    harness: canonical,
     status: 'not_measurable',
     confidence: 'assumed',
     cacheRead: false,
@@ -613,13 +706,14 @@ export function cacheAvailability(harness: string): CacheAvailability {
  * Return the typed prefix byte availability, confidence tag, and fallback mode for a harness.
  */
 export function prefixAvailability(harness: string): PrefixAvailability {
-  const normalized = normalizeHarnessName(harness) as SurveyedHarness
-  const survey = HARNESS_PREFIX_SURVEY.get(normalized)
+  const canonical = normalizeHarnessName(harness)
+  const family = surveyFamily(canonical) as SurveyedHarness
+  const survey = HARNESS_PREFIX_SURVEY.get(family)
   if (survey !== undefined) {
-    return { harness: normalized, ...survey }
+    return { harness: canonical, ...survey }
   }
   return {
-    harness,
+    harness: canonical,
     status: 'not_measurable',
     confidence: 'assumed',
     prefixBytes: false,
@@ -639,6 +733,7 @@ export function prefixAvailability(harness: string): PrefixAvailability {
  */
 export function harnessDimensionAvailability(harness: string, dimension: string): MetricAvailability {
   const normalized = normalizeHarnessName(harness)
+  const family = surveyFamily(normalized)
   const dim = dimension.trim().toLowerCase()
 
   // 1. Cache hit rate / cache efficiency: consult the Task E4 cache survey
@@ -678,7 +773,7 @@ export function harnessDimensionAvailability(harness: string, dimension: string)
 
   // 4. Tool yield: requires tool definition schemas and invocation tracking
   if (dim === 'tool_yield' || dim === 'tool_definitions' || dim === 'schema_cost') {
-    if (normalized === 'cursor') {
+    if (family === 'cursor') {
       return unavailable('Cursor hook telemetry does not export tool definition schemas.')
     }
     if (normalized === 'aider') {
@@ -690,10 +785,10 @@ export function harnessDimensionAvailability(harness: string, dimension: string)
     if (normalized === 'opencode') {
       return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
     }
-    if (normalized === 'claude-code') {
+    if (family === 'claude-code') {
       return unavailable('Claude Code session files record tool invocations, not tool definition schemas; raw API body export is required.')
     }
-    if (normalized === 'codex') {
+    if (family === 'codex') {
       return unavailable('Codex session files record tool names, not tool definition schemas.')
     }
     if (normalized === 'pi') {
@@ -704,7 +799,7 @@ export function harnessDimensionAvailability(harness: string, dimension: string)
 
   // 5. Delegation overhead: requires execution hierarchy or subagent parent/child linkage
   if (dim === 'delegation_overhead' || dim === 'execution_structure' || dim === 'delegation') {
-    if (normalized === 'cursor') {
+    if (family === 'cursor') {
       return unavailable('Cursor does not export execution hierarchy or subagent delegation linkage.')
     }
     if (normalized === 'aider') {
@@ -716,7 +811,7 @@ export function harnessDimensionAvailability(harness: string, dimension: string)
     if (normalized === 'opencode') {
       return unavailable('OpenCode is installed with experimental OpenTelemetry disabled.')
     }
-    if (normalized === 'codex') {
+    if (family === 'codex') {
       return unavailable('Codex session files record standalone sessions without execution hierarchy.')
     }
     return 'measured'
@@ -747,7 +842,9 @@ export function harnessDimensionAvailability(harness: string, dimension: string)
   }
 
   // Uncatalogued harness fallback
-  const isCatalogued = (SURVEYED_HARNESSES as readonly string[]).includes(normalized)
+  const isCatalogued =
+    (SURVEYED_HARNESSES as readonly string[]).includes(normalized) ||
+    (SURVEYED_HARNESSES as readonly string[]).includes(family)
   if (!isCatalogued) {
     return unavailable(`Harness "${harness}" is not catalogued in the telemetry inventory.`)
   }

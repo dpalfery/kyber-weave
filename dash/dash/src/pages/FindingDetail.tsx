@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { cn, fmtTokens } from '../lib/utils'
 import { Card } from '../components/ui/card'
 import { Skeleton } from '../components/ui/skeleton'
 import {
+  fetchCalibration,
   fetchFinding,
   type KyberFinding,
   type KyberEvidenceLink,
@@ -15,8 +16,8 @@ import {
   EvidenceTable,
   ConfidencePanel,
   RecommendationPanel,
+  CalibrationSummary,
 } from '../components/kyber'
-import { SessionInspectorDrawer } from '../components/SessionInspectorDrawer'
 
 export interface FindingDetailProps {
   findingId?: string
@@ -38,16 +39,14 @@ export interface FindingDetailProps {
  * Renders four distinct regions so a developer can disagree with a finding:
  * 1. Diagnosis: Title, detector mechanism explanation, and waste summary.
  * 2. Confidence: Tier, measurement basis, and what would raise it (always uncollapsed).
- * 3. Recommendation: Decision D8 relocation/progressive disclosure actions, recoverable waste, and error bars.
- * 4. Evidence Table: Deep-linkable rows resolving to span/turn in SessionInspectorDrawer.
+ * 3. Recommendation: relocation/progressive disclosure actions, recoverable waste, and error bars.
+ * 4. Evidence Table: Deep-linkable rows that push spine Turn (`onSelectTurn`).
  *
  * Non-collapsible outcome-risk caveat protects against regression when outcomes are unmeasured or high-risk.
  */
 export function FindingDetail({
   findingId,
   initialFinding,
-  initialSelectedLink = null,
-  initialDrawerOpen = false,
   onSelectAll,
   onSelectHarness,
   onSelectRun,
@@ -56,9 +55,6 @@ export function FindingDetail({
   onBack,
   className,
 }: FindingDetailProps) {
-  const [selectedLink, setSelectedLink] = useState<KyberEvidenceLink | null>(() => initialSelectedLink)
-  const [drawerOpen, setDrawerOpen] = useState<boolean>(() => initialDrawerOpen)
-
   // Fetch finding data if findingId is provided and no initialFinding
   const { data: fetchedFinding, isLoading, isError } = useQuery({
     queryKey: ['kyber-finding', findingId],
@@ -68,20 +64,17 @@ export function FindingDetail({
     retry: false,
   })
 
-  const finding: KyberFinding | undefined = fetchedFinding ?? initialFinding
+  const {
+    data: calibration,
+    isLoading: calibrationLoading,
+    isError: calibrationError,
+  } = useQuery({
+    queryKey: ['kyber-calibration'],
+    queryFn: () => fetchCalibration(),
+    retry: false,
+  })
 
-  // Deep-link trigger handler opening SessionInspectorDrawer pre-selected to target span/turn
-  const handleOpenEvidence = (link: KyberEvidenceLink) => {
-    setSelectedLink(link)
-    setDrawerOpen(true)
-    if (onSelectTurn && link.turnIndex !== undefined && link.turnIndex !== null) {
-      // A turn is only resolvable through the execution that ran it and the run
-      // that owns it. Selecting one from a finding used to pass the index
-      // alone, so the turn view opened with no run: its content query had no
-      // session to ask about and every band came back empty.
-      onSelectTurn(link.turnIndex, link.executionId ?? finding?.executionId, finding?.runId)
-    }
-  }
+  const finding: KyberFinding | undefined = fetchedFinding ?? initialFinding
 
   // D6 rank score computation
   const rankScore = useMemo(() => {
@@ -121,8 +114,6 @@ export function FindingDetail({
       </div>
     )
   }
-
-  const targetSessionId = finding.sessionId || finding.runId || 'session'
 
   return (
     <div className={cn('flex flex-col gap-5 p-2 sm:p-4 max-w-6xl mx-auto', className)} data-testid="page-finding">
@@ -260,53 +251,19 @@ export function FindingDetail({
         errorBar={finding.errorBar}
       />
 
-      {/* Region 2: Evidence Table */}
+      <CalibrationSummary
+        data={calibration}
+        isLoading={calibrationLoading}
+        isError={calibrationError}
+      />
+
+      {/* Region 2: Evidence Table — inspect / deep-link pushes spine Turn, not a drawer */}
       <EvidenceTable
         evidenceLinks={finding.evidenceLinks}
-        onSelectEvidence={handleOpenEvidence}
         onSelectTurn={(turnIdx, executionId) => {
           if (onSelectTurn) onSelectTurn(turnIdx, executionId ?? finding.executionId, finding.runId)
         }}
       />
-
-      {/* Slide-out SessionInspectorDrawer pre-selected to target span/turn */}
-      {drawerOpen && (
-        <SessionInspectorDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          title={`Turn #${selectedLink?.turnIndex ?? 0} Evidence Inspector`}
-          subtitle={`Span: ${selectedLink?.spanId ?? '—'} · ${finding.title}`}
-          rawContent={{
-            sessionId: targetSessionId,
-            turnIndex: selectedLink?.turnIndex ?? 0,
-            spanId: selectedLink?.spanId,
-            description: selectedLink?.description,
-          }}
-          contentRequest={{
-            sessionId: targetSessionId,
-            span: selectedLink?.spanId,
-          }}
-          inspectContext={true}
-        >
-          {selectedLink && (
-            <div
-              className="rounded border border-primary/30 bg-primary/10 p-3 text-xs text-foreground space-y-1"
-              data-testid="evidence-drawer-target-banner"
-            >
-              <div className="flex items-center gap-1.5 font-semibold text-primary uppercase text-[10.5px]">
-                <span aria-hidden="true">📍</span>
-                <span>Target Telemetry Evidence Link</span>
-              </div>
-              <p className="text-muted-foreground">{selectedLink.description}</p>
-              <div className="font-mono text-[11px] text-tertiary-foreground pt-1 flex items-center gap-3">
-                <span>Turn: #{selectedLink.turnIndex}</span>
-                {selectedLink.spanId && <span>Span: {selectedLink.spanId}</span>}
-                {selectedLink.executionId && <span>Exec: {selectedLink.executionId}</span>}
-              </div>
-            </div>
-          )}
-        </SessionInspectorDrawer>
-      )}
     </div>
   )
 }

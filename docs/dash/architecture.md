@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-05
+last-reviewed: 2026-09-13
 decided-by:
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
@@ -16,6 +16,8 @@ decided-by:
   - adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking
   - adr/0014-unclipped-turn-inspection-and-copy-out-protocol
   - adr/0015-opt-in-llm-context-review-seam
+  - adr/0016-kyberdash-harness-source-refresh
+  - adr/0018-kyberdash-content-retention-purge
 keywords:
   - dashboard
   - codeburn
@@ -24,6 +26,8 @@ keywords:
   - desktop
   - menubar
   - tui
+  - refresh
+  - sessions
 code-refs:
   - Synthesizer
   - OtlpReceiver
@@ -37,6 +41,11 @@ code-refs:
   - analyzeContext
   - ParityDigest
   - DashboardData
+  - refreshHarnessSources
+  - registerKyberCommands
+  - commitSourceUnit
+  - purgeExpiredContent
+  - formatDimensionDisplay
 ---
 
 # KyberDash architecture
@@ -67,6 +76,7 @@ the embedded receiver — are recorded in [ADR 0006](../adr/0006-kyberdash-soft-
 flowchart TB
     subgraph sources["Ingest sources"]
         FS["Session files<br/>41 providers, upstream parser"]
+        RF["dash refresh<br/>harness-source jobs"]
         OT["OTLP/HTTP :4318<br/>traces + logs, JSON + protobuf"]
         AS["Aspire export<br/>optional"]
     end
@@ -99,6 +109,7 @@ flowchart TB
     end
 
     FS --> SY
+    RF --> SY
     OT --> AD
     AS --> AD
     SY --> ST
@@ -161,6 +172,33 @@ dashboard is a ring buffer — eviction is a measured data-loss class (R2.7) —
 Requirement 2 must hold without Docker, a container runtime, or a collector. The existing
 collectors already post OTLP JSON to port 4318, so they work unchanged. Non-model and
 unmatched telemetry is quarantined with an auditable reason instead of becoming a session.
+
+## Local harness-source refresh
+
+Session files also enter the store through `kyber-weave dash refresh` (`registerKyberCommands`
+in `dash/kyber/cli/register.ts`, `refreshHarnessSources` in `dash/kyber/refresh/orchestrator.ts`).
+That path is the production local-history ingest; OTLP remains a separate receiver. The
+scheduler, source reader, writer queue, and registry live under `dash/kyber/refresh/**`, an
+ADR 0006 adapter seam already allowlisted in `dash/kyber/tools/boundary.ts`.
+
+The command opens `~/.kyberdash/canon.db` (or `--db`), audits the harness-source registry
+against `getAllProviders()`, and runs **one logical job per harness source type**. Native
+files or database records are the units of work. Inclusion uses a UTC record window
+`[commandStartedAt − N×7 days, commandStartedAt]`; `--history-weeks` is a positive integer
+and defaults to **2**. There is no public `--provider` flag. Invalid `--history-weeks`
+exits **2** before the store opens. Failed harness jobs or derivation failure exit **1**.
+Success, including absent (`unavailable`) sources, exits **0**.
+
+Each accepted unit is persisted with `CanonStore.commitSourceUnit`: canonical rows,
+`record_provenance`, and `source_checkpoint` in one transaction (schema **11**). After jobs
+drain, `purgeExpiredContent` empties content older than 14 days without touching
+`records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then
+`buildSessions` rebuilds derived tables. Gemini is never a stored harness id; split client
+surfaces stay distinct. A Gemini **selector label** may still appear in the UI as usage /
+survey chrome; it is not `harness=gemini` in `canon.db`. There is no dashboard refresh
+button.
+
+The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
 
 ## Normalization layer
 
@@ -235,11 +273,16 @@ cannot report renders as "not measurable", never as zero — rendering an unrepo
 
 `CanonStore` (`dash/kyber/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 3;
+schema is a version-controlled constant executed on construction, currently at version 11;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
-`session`, `token_cache`, `quarantine`, `problems`, `ingest_log`, and `metadata`. The raw column is compressed (R12.4); the measured cost of not doing
+`session`, `run`, `execution`, `token_cache`, `quarantine`, `pending_logs`,
+`quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
+`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, and `record_provenance`.
+Schema 11 adds the last two additively ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md));
+`commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
+column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
 
 Two `records` columns carry the grouping and content model. `session_id` holds the harness's
@@ -302,6 +345,30 @@ Level 1: All Harnesses (Attention)
                                └── Level 6: ContextItem (Block / Part)
 ```
 
+The web app lands on Attention (`App` default `initialPage` / `spineReducer` stack
+`{ level: 'attention' }`). Header tabs are `Attention · Usage · Quarantine · Problems`
+(`NAV_TABS`). Usage is the CodeBurn spend grid; it does not open the app. There is no
+Context tab: session browsing is the **Sessions** rail destination wrapping
+`ContextExplorer` / `AgentSessionDashboard` (D17). Compare is not a header peer; it is a
+spine-rail destination that mounts `CompareRuns` (D20). The sidebar is the spine rail
+(`nav-rail-attention`, `nav-rail-sessions`, `nav-rail-compare`); Share chrome is on Usage
+only (D21). Density tokens live in the dashboard `@theme` (D22). A single shell harness
+strip (`data-testid="harness-selector"`) is the harness level of the spine; selecting a
+canonical id pushes `{ level: 'harness', harnessId }` and loads `runs?harness=`. A second
+provider `<select>` exists only on the Usage tab. Gemini may appear as a selector **label**;
+canonical rows and rollups do not use harness id `gemini`.
+
+Live gates G1–G7 and G4a have passed on a local host against a real store: drill the six
+levels, one diagnostic harness selector, canonical ids (including Claude Code), no
+decision-id copy, empty charts marked empty rather than plotted as zero, layout inside the
+shell. Findings-first Attention, scorecard matrix, Turn inspector, and live Compare are on
+the spine. Derived runs show a labelled grouping basis (`derived run` / `explicit run`,
+`data-testid="run-grouping-basis"`) and are never silent clusters (D19). Calibration is
+wired on Finding detail (`CalibrationSummary`). Content older than 14 days is purged after
+refresh ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)). Scorecard cells use
+`formatDimensionDisplay`: unmeasurable or absent values render as `—`
+with a reason, never as a fabricated `0`. A genuine measured zero is still `0`.
+
 1. **All Harnesses (`Attention.tsx`)**: Cross-harness landing view ranking attention by
    aggregate context pressure, cache invalidation volume, and top telemetry-grounded findings.
 2. **Harness (`HarnessDetail.tsx`)**: Deep dive into a single agent harness (e.g. Claude Code,
@@ -314,6 +381,7 @@ Level 1: All Harnesses (Attention)
    composition bands, fresh input spikes (cache invalidation), and schema residency.
 6. **ContextItem (`ContextInspector.tsx`)**: Full unclipped plain-text inspection per semantic
    bucket, subdivided by part, with whole-turn and per-block copy out ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)).
+   The inspector is reachable from Turn on the spine.
 
 ### Independent Dimension Vectors — No Composite Score (Decision D3)
 
@@ -413,12 +481,14 @@ payload delivery surfaces consume (R11.1).
 
 The React web dashboard provides progressive-disclosure views matching the 6-level spine:
 - **`Attention.tsx`**: Cross-harness dashboard and fleet-wide finding leaderboard.
-- **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, and run browser.
-- **`RunDetail.tsx`**: Multi-agent run topology, execution tree, and run scorecard.
-- **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, and risk caveats.
-- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards.
+- **`Sessions.tsx`**: Sessions rail wrapping `ContextExplorer` (ASAD + timeline); not a Context tab.
+- **`HarnessDetail.tsx`**: Per-harness rollups, coverage indicators, labelled grouping basis, and run browser.
+- **`RunDetail.tsx`**: Multi-agent run topology, execution tree, run scorecard, and grouping label.
+- **`FindingDetail.tsx`**: In-depth finding view with evidence table, confidence basis, risk caveats, and calibration summary.
+- **`CompareRuns.tsx`**: Phase-aligned run diffing with outcome regression guards, reached from the spine rail.
 - **`ContextInspector.tsx`**: Full unclipped context viewer with part tabs and copy-out protocol.
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
+- **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Attention.
 
 ### Backend REST API Contract (dash/kyber/server/routes.ts)
 
@@ -504,6 +574,8 @@ project; the measured rationale the retirement would otherwise take with it is p
 - [ADR 0013](../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md) — telemetry-grounded finding contracts, waste ranking formula, and relocation discipline.
 - [ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md) — unclipped turn context inspection, rolling retention window, and copy-out protocol.
 - [ADR 0015](../adr/0015-opt-in-llm-context-review-seam.md) — opt-in LLM context review seam and finding isolation.
+- [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md) — harness-source jobs, split client identity, schema-11 checkpoints, and `dash refresh`.
+- [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) — stored content with a 14-day automatic purge after refresh.
 - [Relocation over context deletion standard](../rules/relocation-over-deletion.md) — diagnostic recommendations prioritize moving and progressive disclosure over context removal (D8).
 - [Honest unobservability standard](../rules/honest-unobservability.md) — missing telemetry and coverage gaps are explicit and never coerced to zero.
 - [Secondary cost display standard](../rules/secondary-cost-display.md) — cost is strictly a derived secondary metric behind token and latency health (D9).

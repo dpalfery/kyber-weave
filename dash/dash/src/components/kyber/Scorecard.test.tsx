@@ -404,13 +404,16 @@ describe('Pages Smoke Rendering: Attention, HarnessDetail, RunDetail', () => {
             measurability: { token_usage: 'measured' },
           },
         ]}
+        initialFindings={[]}
       />,
     )
 
     expect(html).toContain('Workspace Attention')
-    expect(html).toContain('Workspace Diagnostic Scorecard')
-    expect(html).toContain('harness-health-table')
+    expect(html).toContain('finding-list')
+    expect(html).toContain('Highest-Leverage Workspace Findings')
+    expect(html).toContain('scorecard-matrix')
     expect(html).toContain('Claude Code')
+    expect(html.indexOf('finding-list')).toBeLessThan(html.indexOf('scorecard-matrix'))
   })
 
   it('renders HarnessDetail page (Level 2)', () => {

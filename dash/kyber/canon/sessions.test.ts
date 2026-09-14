@@ -100,7 +100,7 @@ function turn(spanId: string, parts: ContentPart[], over: Partial<CanonicalRecor
     traceId: 'trace-1',
     parentSpanId: null,
     source: 'antigravity',
-    harness: 'gemini',
+    harness: 'antigravity',
     sessionId: 'sess-1',
     name: 'llm_request',
     op: 'llm.invoke',
@@ -230,7 +230,7 @@ describe('buildSessionRow', () => {
     expect(row.agentName).toBe('antigravity')
     expect(row.repo).toBe('kyber-weave')
     expect(row.branch).toBe('main')
-    expect(row.harness).toBe('gemini')
+    expect(row.harness).toBe('antigravity')
   })
 
   it('serializes capture-off content, schema, and execution structure as unavailable buckets with reasons', () => {
@@ -328,7 +328,7 @@ describe('buildSessions', () => {
     // A rebuild is idempotent — the row is a cache over `records`.
     expect((await buildSessions(store)).built).toBe(1)
     expect(store.sessionCount()).toBe(1)
-    expect((store.getSessionPayload('sess-1') as SessionPayloadView | undefined)?.harness).toBe('gemini')
+    expect((store.getSessionPayload('sess-1') as SessionPayloadView | undefined)?.harness).toBe('antigravity')
     store.close()
   })
 
@@ -354,7 +354,7 @@ describe('buildSessions', () => {
 
   it('prunes rows whose session no longer builds', async () => {
     const store = new CanonStore(':memory:')
-    store.upsertSession({ sessionId: 'stale', harness: 'gemini', payload: {} })
+    store.upsertSession({ sessionId: 'stale', harness: 'antigravity', payload: {} })
     store.upsertMany([turn('s1', [{ part: 'system_prompt', text: 'hello', tokens: 10 }])])
 
     const report = await buildSessions(store)
@@ -420,8 +420,8 @@ describe('buildSessions derived-table completeness', () => {
     const report = await buildSessions(store)
 
     expect(report.rollups).toBeGreaterThan(0)
-    expect(store.getHarnessRollup('gemini')).toBeDefined()
-    expect(store.getHarnessRollup('gemini')?.sampleCount).toBeGreaterThan(0)
+    expect(store.getHarnessRollup('antigravity')).toBeDefined()
+    expect(store.getHarnessRollup('antigravity')?.sampleCount).toBeGreaterThan(0)
     store.close()
   })
 
@@ -446,7 +446,7 @@ describe('buildSessions derived-table completeness', () => {
     // Every persisted finding carries the harness that produced it, so the
     // dashboard can scope findings to one harness tab.
     for (const finding of store.listFindings()) {
-      expect((finding as { harness?: string }).harness).toBe('gemini')
+      expect((finding as { harness?: string }).harness).toBe('antigravity')
       expect(finding.runId).toBeTruthy()
     }
     store.close()
@@ -587,14 +587,14 @@ describe('canonical harness on derived sessions', () => {
   it('stamps the canonical harness, not the front-end name', () => {
     const row = buildSessionRow('s1', [aliased('a1', 'cursor-agent', 's1')], approximateO200kBase)
 
-    expect(row.harness).toBe('cursor')
-    expect((row.payload as { harness: string }).harness).toBe('cursor')
+    expect(row.harness).toBe('cursor-agent')
+    expect((row.payload as { harness: string }).harness).toBe('cursor-agent')
   })
 
-  it('maps claude to claude-code, the name the rollup looks under', () => {
+  it('maps a generic Claude client to unclassified rather than guessing CLI', () => {
     const row = buildSessionRow('s1', [aliased('a1', 'claude', 's1')], approximateO200kBase)
 
-    expect(row.harness).toBe('claude-code')
+    expect(row.harness).toBe('claude-unclassified')
   })
 
   it('leaves a session findable by the harness its runs are keyed under', async () => {
@@ -605,14 +605,12 @@ describe('canonical harness on derived sessions', () => {
 
     await buildSessions(store)
 
-    expect(store.listSessions('cursor')).toHaveLength(1)
-    expect(store.listSessions('cursor-agent')).toHaveLength(0)
+    expect(store.listSessions('cursor-agent')).toHaveLength(1)
+    expect(store.listSessions('cursor')).toHaveLength(0)
     store.close()
   })
 
-  it('builds one session and one run for a key split across front-end names', async () => {
-    // Two candidates sharing an execution id left one planned run with no
-    // execution, and a run with no records produces no findings.
+  it('builds separate sessions when the same native id arrives on split surfaces', async () => {
     const store = new CanonStore(':memory:')
     store.upsertMany([
       aliased('a1', 'cursor', 'sess-alias'),
@@ -621,10 +619,12 @@ describe('canonical harness on derived sessions', () => {
 
     const report = await buildSessions(store)
 
-    expect(report.built).toBe(1)
-    expect(store.sessionCount()).toBe(1)
+    expect(report.built).toBe(2)
+    expect(store.sessionCount()).toBe(2)
+    expect(store.listSessions('cursor')).toHaveLength(1)
+    expect(store.listSessions('cursor-agent')).toHaveLength(1)
     const runs = store.listRuns()
-    expect(runs).toHaveLength(1)
+    expect(runs).toHaveLength(2)
     for (const run of runs) {
       expect(store.listExecutions(run.runId).length).toBeGreaterThan(0)
     }

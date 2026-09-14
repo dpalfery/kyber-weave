@@ -168,13 +168,13 @@ export function Scorecard({
 
   return (
     <Card
-      className={cn('overflow-hidden p-4', className)}
+      className={cn('overflow-hidden p-chrome', className)}
       data-testid="scorecard"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-density-cluster border-b border-border/60 pb-chrome-sm">
         <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-heading">
+          <div className="flex items-center gap-density-cluster">
+            <h3 className="text-density-xs font-semibold uppercase tracking-density text-heading">
               {title}
             </h3>
           </div>
@@ -183,17 +183,17 @@ export function Scorecard({
         {/* Decision D9: Secondary derived cost (muted/subordinate indicator) */}
         {secondaryCost?.costUsd !== undefined && secondaryCost.costUsd !== null && (
           <div
-            className="flex items-center gap-1.5 rounded-md border border-border/60 bg-interactive-secondary/40 px-2 py-1 text-right text-xs text-muted-foreground"
+            className="flex items-center gap-density-inline rounded-chrome border border-border/60 bg-interactive-secondary/40 px-chrome-sm py-chrome-xs text-right text-density-xs text-muted-foreground"
             data-testid="secondary-cost"
             title={`Cost: ${usd(secondaryCost.costUsd)} (${secondaryCost.basis || 'derived estimate'})`}
           >
-            <span className="text-[10px] uppercase tracking-wider text-tertiary-foreground">
+            <span className="text-density-2xs uppercase tracking-density text-tertiary-foreground">
               Secondary Cost:
             </span>
-            <span className="font-mono text-xs font-normal text-muted-foreground tabular-nums">
+            <span className="font-mono text-density-xs font-normal text-muted-foreground tabular-nums">
               {usd(secondaryCost.costUsd)}
             </span>
-            <span className="text-[9.5px] italic text-tertiary-foreground/80">
+            <span className="text-density-2xs italic text-tertiary-foreground/80">
               (derived)
             </span>
           </div>
@@ -202,7 +202,7 @@ export function Scorecard({
 
       <div
         className={cn(
-          'grid gap-3 pt-3.5',
+          'grid gap-density-cluster pt-chrome',
           compact
             ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6'
             : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6',
@@ -227,19 +227,19 @@ export function Scorecard({
               }}
               title={`${meta.name}: ${formatted.display} (${formatted.reason})`}
               className={cn(
-                'flex flex-col justify-between rounded-lg border border-border/70 bg-card p-3 transition-colors',
+                'flex flex-col justify-between rounded-chrome border border-border/70 bg-card p-chrome-sm transition-colors',
                 isClickable && 'cursor-pointer hover:border-primary/40 hover:bg-interactive-secondary/30',
                 formatted.isUnmeasurable && 'bg-interactive-secondary/15',
               )}
             >
               <div>
-                <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-[11px] font-medium text-tertiary-foreground">
+                <div className="flex items-center justify-between gap-density-hair">
+                  <span className="truncate text-density-xs font-medium text-tertiary-foreground">
                     {meta.name}
                   </span>
                   <span
                     className={cn(
-                      'rounded px-1.5 py-0.2 text-[9px] font-medium tracking-wide uppercase',
+                      'rounded-chrome px-chrome-sm py-chrome-xs text-density-2xs font-medium tracking-density uppercase',
                       formatted.isUnmeasurable
                         ? 'bg-interactive-secondary text-tertiary-foreground'
                         : dim.status === 'derived'
@@ -252,10 +252,10 @@ export function Scorecard({
                   </span>
                 </div>
 
-                <div className="mt-2.5 flex items-baseline gap-1">
+                <div className="mt-density-cluster flex items-baseline gap-density-hair">
                   <span
                     className={cn(
-                      'font-display text-2xl tracking-tight tabular-nums',
+                      'font-display text-density-xl tracking-density tabular-nums',
                       formatted.isUnmeasurable
                         ? 'font-mono text-tertiary-foreground'
                         : 'text-foreground font-semibold',
@@ -267,7 +267,7 @@ export function Scorecard({
                 </div>
               </div>
 
-              <div className="mt-3 border-t border-border/40 pt-2 text-[10.5px]">
+              <div className="mt-density-cluster border-t border-border/40 pt-chrome-xs text-density-2xs">
                 {formatted.isUnmeasurable ? (
                   <p
                     className="truncate text-tertiary-foreground/90 italic"
@@ -277,12 +277,12 @@ export function Scorecard({
                     {formatted.reason}
                   </p>
                 ) : (
-                  <div className="flex items-center justify-between gap-1 text-tertiary-foreground">
+                  <div className="flex items-center justify-between gap-density-hair text-tertiary-foreground">
                     <span className="truncate" title={dim.detail || meta.description}>
                       {dim.detail || meta.unitLabel || 'diagnostic'}
                     </span>
                     {measurementClass && (
-                      <span className="text-[9.5px] font-mono text-tertiary-foreground/75">
+                      <span className="text-density-2xs font-mono text-tertiary-foreground/75">
                         {measurementClass}
                       </span>
                     )}

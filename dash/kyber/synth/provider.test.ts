@@ -175,7 +175,7 @@ describe('R1.3 — an unparseable store is recorded and the run continues', () =
 
     expect(result.problems).toHaveLength(1)
     expect(result.problems[0]!.message).toContain('codex')
-    expect(result.records.map((record) => record.harness)).toEqual(['claude', 'claude', 'gemini'])
+    expect(result.records.map((record) => record.harness)).toEqual(['claude', 'claude'])
   })
 
   it('records the same problem when the loader throws instead of returning', async () => {
@@ -314,3 +314,39 @@ describe('D6 Copilot CLI SQLite integration', () => {
     expect(result.records[0]?.raw).not.toHaveProperty('context_buffer_tokens')
   })
 })
+
+describe('T4 — source-unit ingest seam', () => {
+  it('names the harness and source unit on a parse problem, not only the provider', async () => {
+    const unit = '/home/dev/.gemini/antigravity-cli/session.pb'
+    const result = await ingestProviders(['antigravity'], () => ({
+      calls: [],
+      filePath: unit,
+      harnessId: 'antigravity-cli',
+      sourceKey: 'antigravity-cli:session.pb',
+      error: Object.assign(new SyntaxError('bad protobuf'), { file: unit }),
+    }))
+    expect(result.records).toEqual([])
+    expect(result.problems).toHaveLength(1)
+    expect(result.problems[0]?.message).toContain('antigravity-cli')
+    expect(result.problems[0]?.message).toContain('antigravity-cli:session.pb')
+    expect(result.problems[0]?.location).toBe(unit)
+  })
+
+  it('does not persist Gemini as a harness when asked to ingest that provider', async () => {
+    const result = await ingestProviders(['gemini'], () => callsFor('gemini', 2))
+    expect(result.records.map((record) => record.harness)).not.toContain('gemini')
+  })
+
+  it('reads Claude transcripts under a classified claude-cli harness id', async () => {
+    const result = await ingestProviders(['claude-cli'], () => ({
+      calls: [call({ provider: 'claude', deduplicationKey: 'claude:s-1:m-1' })],
+      filePath: claudeTranscript(),
+      harnessId: 'claude-cli',
+      sourceKey: 'claude-cli:s-1',
+    }))
+    expect(result.problems).toEqual([])
+    expect(result.records[0]?.harness).toBe('claude-cli')
+    expect(result.records[0]?.content.conversation_history).toBe('reader-provided conversation')
+  })
+})
+

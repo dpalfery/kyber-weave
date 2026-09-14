@@ -1,7 +1,25 @@
-export type KyberContextAnalysis = import('@/components/kyber/ContextView').ContextAnalysis
-export type KyberSchemaAnalysis = import('@/components/kyber/SchemaView').SchemaCostAnalysis
 export type KyberTimelineNode = import('@/components/kyber/TimelineView').TimelineNode
-export type KyberComparisonTable = import('@/components/kyber/CompareView').ComparisonTable
+export type KyberComparisonTable = {
+  harnesses: string[]
+  rows: Array<{
+    metric: string
+    kind: 'per_turn' | 'total'
+    label: string
+    unit: string
+    cells: Record<
+      string,
+      {
+        measurable: boolean
+        availability: string
+        value?: number
+        basis?: string
+        currency?: string
+        render: string
+      }
+    >
+  }>
+  problems: Array<{ severity: string; code: string; message: string }>
+}
 export type KyberQuarantineEntry = import('@/components/kyber/QuarantineView').QuarantineEntry
 export type KyberProblemEntry = import('@/components/kyber/ProblemsView').ProblemEntry
 
@@ -11,12 +29,6 @@ async function fetchJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export function fetchKyberContext(): Promise<KyberContextAnalysis> {
-  return fetchJson<KyberContextAnalysis>('/api/kyber/context')
-}
-export function fetchKyberSchema(): Promise<KyberSchemaAnalysis> {
-  return fetchJson<KyberSchemaAnalysis>('/api/kyber/schema')
-}
 export function fetchKyberTimeline(): Promise<KyberTimelineNode> {
   return fetchJson<KyberTimelineNode>('/api/kyber/timeline')
 }
@@ -384,6 +396,117 @@ export async function fetchFindings(opts?: {
 
 export async function fetchFinding(findingId: string): Promise<KyberFinding> {
   return fetchJson<KyberFinding>(`/api/kyber/finding/${encodeURIComponent(findingId)}`)
+}
+
+/** One bin on `GET /api/kyber/calibration` (`CalibrationCurveResult.bins`). */
+export interface KyberCalibrationBin {
+  bin: string
+  lower: number
+  upper: number
+  predictionCount: number
+  meanConfidence: number
+  observedAccuracy: number
+  calibrationError: number
+}
+
+/**
+ * Payload of `GET /api/kyber/calibration`. The route spreads
+ * `CalibrationCurveResult` at the top level and also nests it under `calibration`.
+ */
+export interface KyberCalibrationSummary {
+  bins: KyberCalibrationBin[]
+  totalPredictions: number
+  scoredPredictions: number
+  meanCalibrationError: number
+  expectedCalibrationError: number
+  maxCalibrationError: number
+  brierScore: number
+  isCalibrated: boolean
+  status: 'calibrated' | 'not_yet_calibrated'
+  statusMessage: string
+  demoteConfidence: boolean
+  threshold: number
+}
+
+type KyberCalibrationResponse = KyberCalibrationSummary & {
+  calibration?: KyberCalibrationSummary
+}
+
+export async function fetchCalibration(opts?: { runId?: string }): Promise<KyberCalibrationSummary> {
+  const params = new URLSearchParams()
+  if (opts?.runId) params.set('runId', opts.runId)
+  const qs = params.toString()
+  const json = await fetchJson<KyberCalibrationResponse>(`/api/kyber/calibration${qs ? `?${qs}` : ''}`)
+  return json.calibration ?? json
+}
+
+/** Task phase used by phase-aligned run comparison. */
+export type KyberTaskPhase = 'exploration' | 'implementation' | 'verification' | 'resolution'
+
+export interface KyberComparisonVerdict {
+  status: 'promoted' | 'candidate_only' | 'insufficient_history' | 'outcome_regression' | 'neutral'
+  pairCount: number
+  completedPairCount: number
+  meetsSufficiencyThreshold: boolean
+  outcomeRegression: boolean
+  canPromote: boolean
+  recommendation: string
+  refusalReason?: string
+  summary: string
+}
+
+export interface KyberPhaseAlignedTurnPair {
+  phase: KyberTaskPhase
+  phaseIndex: number
+  runATurn: Record<string, unknown> | null
+  runBTurn: Record<string, unknown> | null
+  signals: Array<Record<string, unknown>>
+  reading: string
+}
+
+/** `GET /api/kyber/compare/runs` body — engine `ComparisonSummary` without turn `raw`. */
+export interface KyberRunComparison {
+  runA: {
+    runId: string
+    harness: string
+    label?: string
+    outcome?: unknown
+    totalTokens: number
+    totalCost?: number
+    turnCount: number
+  }
+  runB: {
+    runId: string
+    harness: string
+    label?: string
+    outcome?: unknown
+    totalTokens: number
+    totalCost?: number
+    turnCount: number
+  }
+  taskFamily?: string
+  pairs: KyberPhaseAlignedTurnPair[]
+  phaseSummaries: Record<KyberTaskPhase, Record<string, unknown>>
+  totals: Record<string, unknown>
+  verdict: KyberComparisonVerdict
+}
+
+/**
+ * Phase-aligned comparison of two canon runs (`docs/plans/2026-09-06-kyberdash-spine.md` § B4-api).
+ * Missing runs fail with the same `Request failed (404)` pattern as `fetchRun`.
+ */
+export async function fetchRunComparison(
+  runAId: string,
+  runBId: string,
+  opts?: { completedPairCount?: number },
+): Promise<KyberRunComparison> {
+  const params = new URLSearchParams()
+  params.set('runA', runAId)
+  params.set('runB', runBId)
+  if (opts?.completedPairCount !== undefined) {
+    params.set('completedPairCount', String(opts.completedPairCount))
+  }
+  return fetchJson<KyberRunComparison>(`/api/kyber/compare/runs?${params.toString()}`)
 }
 
 export interface KyberReviewRecommendation {

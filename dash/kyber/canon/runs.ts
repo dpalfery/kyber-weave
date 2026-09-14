@@ -10,7 +10,7 @@
 // or session parentage exists; otherwise it is reported as not_measurable with
 // an explicit explanation.
 
-import { isFileSource, measurabilityFor } from './measurability.js'
+import { groupByCanonicalHarness, isFileSource, measurabilityFor } from './measurability.js'
 import { deriveOutcome, type OutcomeBlock } from './outcome.js'
 import { CanonStore } from './store.js'
 import { notMeasurable } from './types.js'
@@ -405,47 +405,56 @@ export async function buildRuns(
   // 1. Gather all candidate executions from session keys
   const candidates: ExecutionCandidate[] = []
   for (const sessionKey of store.sessionKeys()) {
-    const records = store.recordsForSession(sessionKey.key)
-    if (records.length === 0 || !hasTurnEvidence(records)) {
-      continue
+    const grouped = groupByCanonicalHarness(store.recordsForSession(sessionKey.key))
+    for (const [harness, records] of grouped) {
+      if (records.length === 0 || !hasTurnEvidence(records)) {
+        continue
+      }
+
+      const started = records[0]!.timestamp
+      const ended = records[records.length - 1]!.timestamp
+      const cwd = records.map((r) => rawAttribute(r, WORKING_DIRECTORY_ATTRIBUTE_KEYS)).find(Boolean) ?? null
+      const parentSession = records.map((r) => rawAttribute(r, PARENT_SESSION_ATTRIBUTE_KEYS)).find(Boolean) ?? null
+      const agentName = records.map((r) => rawAttribute(r, AGENT_NAME_KEYS)).find(Boolean) ?? null
+
+      const explicitRunId = records.map((r) => rawAttribute(r, RUN_ID_ATTRIBUTE_KEYS)).find(Boolean)
+      const sessionId = grouped.size > 1 ? `${harness}:${sessionKey.key}` : sessionKey.key
+
+      candidates.push({
+        executionId: sessionId,
+        sessionId,
+        harness,
+        agentName,
+        started: typeof started === 'string' ? started : started.toISOString(),
+        ended: typeof ended === 'string' ? ended : ended.toISOString(),
+        records: records.map(toLinkageRecord),
+        parentSessionId: parentSession,
+        workingDirectory: cwd,
+        ...(explicitRunId === undefined ? {} : { explicitRunId }),
+      })
     }
-
-    const started = records[0]!.timestamp
-    const ended = records[records.length - 1]!.timestamp
-    const cwd = records.map((r) => rawAttribute(r, WORKING_DIRECTORY_ATTRIBUTE_KEYS)).find(Boolean) ?? null
-    const parentSession = records.map((r) => rawAttribute(r, PARENT_SESSION_ATTRIBUTE_KEYS)).find(Boolean) ?? null
-    const agentName = records.map((r) => rawAttribute(r, AGENT_NAME_KEYS)).find(Boolean) ?? null
-
-    const explicitRunId = records.map((r) => rawAttribute(r, RUN_ID_ATTRIBUTE_KEYS)).find(Boolean)
-
-    // Everything the later passes need is read here, while this session's full
-    // records are in hand, and only the linkage projection is retained. The
-    // records themselves go out of scope with this iteration.
-    candidates.push({
-      executionId: sessionKey.key,
-      sessionId: sessionKey.key,
-      harness: sessionKey.harness,
-      agentName,
-      started: typeof started === 'string' ? started : started.toISOString(),
-      ended: typeof ended === 'string' ? ended : ended.toISOString(),
-      records: records.map(toLinkageRecord),
-      parentSessionId: parentSession,
-      workingDirectory: cwd,
-      ...(explicitRunId === undefined ? {} : { explicitRunId }),
-    })
   }
 
   // 2. Group candidate executions into Runs
   // Group A: Explicit run identity emitted by harness
+  const explicitOwners = new Map<string, Set<string>>()
+  for (const cand of candidates) {
+    if (cand.explicitRunId === undefined) continue
+    const owners = explicitOwners.get(cand.explicitRunId) ?? new Set<string>()
+    owners.add(cand.harness)
+    explicitOwners.set(cand.explicitRunId, owners)
+  }
+
   const explicitGroups = new Map<string, ExecutionCandidate[]>()
   const unassigned: ExecutionCandidate[] = []
 
   for (const cand of candidates) {
     const explicitRunId = cand.explicitRunId
     if (explicitRunId !== undefined) {
-      const group = explicitGroups.get(explicitRunId) ?? []
+      const groupKey = `${cand.harness}\0${explicitRunId}`
+      const group = explicitGroups.get(groupKey) ?? []
       group.push(cand)
-      explicitGroups.set(explicitRunId, group)
+      explicitGroups.set(groupKey, group)
     } else {
       unassigned.push(cand)
     }
@@ -459,15 +468,17 @@ export async function buildRuns(
   const plannedRuns: PlannedRun[] = []
 
   // Create explicit runs
-  for (const [explicitRunId, execs] of explicitGroups) {
+  for (const execs of explicitGroups.values()) {
     const sorted = [...execs].sort((a, b) => Date.parse(a.started ?? '') - Date.parse(b.started ?? ''))
     const first = sorted[0]!
     const last = sorted[sorted.length - 1]!
     const cwd = sorted.map((e) => e.workingDirectory).find(Boolean) ?? null
+    const emittedId = first.explicitRunId!
+    const runId = (explicitOwners.get(emittedId)?.size ?? 0) > 1 ? `${first.harness}:${emittedId}` : emittedId
 
     plannedRuns.push({
       run: {
-        runId: explicitRunId,
+        runId,
         harness: first.harness,
         label: first.agentName ?? first.executionId,
         groupingBasis: 'explicit',

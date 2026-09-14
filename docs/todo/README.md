@@ -51,6 +51,7 @@ last-reviewed: YYYY-MM-DD
 | [mistyped-release-tag.md](mistyped-release-tag.md) | Distribution | draft | The mistyped `v1.0.6-rc.6` tag outranks every real release in version-sorted resolution. |
 | [kilo.md](kilo.md) | KyberSquad | draft | Add a native Kilo renderer to Kyber-Squad. |
 | [opencode.md](opencode.md) | KyberSquad | draft | Add a native OpenCode renderer to Kyber-Squad. |
+| [pi.md](pi.md) | KyberSquad | draft | Declare Pi as a Kyber-Squad target and add a role-skill lowering renderer; today it is absent from the catalog entirely. |
 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | draft | Add a `--version` flag to squad install and squad update. |
 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | draft | squad commands' positional path argument can silently target the wrong directory. |
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |

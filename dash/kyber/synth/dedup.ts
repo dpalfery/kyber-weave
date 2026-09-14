@@ -23,11 +23,10 @@
 // structured parts. Values from the two paths are never summed. A disagreement
 // is still recorded for audit, but precedence is not a richness contest.
 
-import { normalizeHarnessName } from '../canon/measurability.js'
 import type { CanonStore, SpanProblem } from '../canon/store.js'
 import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
 import { DEFAULT_GROUP_ATTRIBUTE } from '../otel/aspire.js'
-import { SYNTH_SPAN_PREFIX } from './synth.js'
+import { isExcludedHarness, SYNTH_SPAN_PREFIX } from './synth.js'
 
 /** Code stamped on a recorded cross-path value disagreement (R3.3). */
 export const DEDUP_DISAGREEMENT = 'DEDUP_DISAGREEMENT'
@@ -73,21 +72,9 @@ export function deduplicationKeyFor(record: CanonicalRecord): string | null {
   return sessionKey(record.harness, sessionId)
 }
 
-/**
- * The one key, with its harness segment canonicalized.
- *
- * The two paths name the same harness in different vocabularies: the file path
- * carries the provider entry that parsed the transcript (`claude`,
- * `cursor-agent`, `copilot-cli`), while the OTLP path carries the harness voted
- * at normalization (`claude-code`, `cursor`, `copilot`). Building the key from
- * those names as given puts the same session under two strings, so no session
- * whose provider name differs from its harness name ever collapsed — Claude
- * Code's transcripts and its OTLP export were stored as two runs of the same
- * work. Canonicalizing here keeps R3.2's single mechanism: one key scheme, one
- * namespace, now spelled one way on both sides.
- */
+/** Session-level key; split harness ids stay distinct and are never guessed. */
 function sessionKey(harness: string, sessionId: string): string {
-  return `${SYNTH_SPAN_PREFIX}${normalizeHarnessName(harness)}:${sessionId}`
+  return `${SYNTH_SPAN_PREFIX}${harness}:${sessionId}`
 }
 
 /**
@@ -97,6 +84,47 @@ function sessionKey(harness: string, sessionId: string): string {
  * nothing, and the record passes through uncollapsed rather than being
  * forced under a key the telemetry never stated.
  */
+type ProvenanceCarrier = {
+  provenance?: { nativeRecordId?: unknown }
+  turnId?: unknown
+  'gen_ai.response.id'?: unknown
+  'gen_ai.message.id'?: unknown
+}
+
+function nativeRecordIdOf(record: CanonicalRecord): string | null {
+  const raw = record.raw
+  if (typeof raw !== 'object' || raw === null) return null
+  const carrier = raw as ProvenanceCarrier
+  if (typeof carrier.provenance?.nativeRecordId === 'string' && carrier.provenance.nativeRecordId !== '') {
+    return carrier.provenance.nativeRecordId
+  }
+  if (typeof carrier.turnId === 'string' && carrier.turnId !== '') return carrier.turnId
+  if (typeof carrier['gen_ai.response.id'] === 'string' && carrier['gen_ai.response.id'] !== '') {
+    return carrier['gen_ai.response.id']
+  }
+  if (typeof carrier['gen_ai.message.id'] === 'string' && carrier['gen_ai.message.id'] !== '') {
+    return carrier['gen_ai.message.id']
+  }
+  return null
+}
+
+function sessionIdOf(record: CanonicalRecord): string | null {
+  if (typeof record.sessionId === 'string' && record.sessionId !== '') return record.sessionId
+  return rawSessionId(record)
+}
+
+/**
+ * Cross-path join requires the same classified harness, native session, and
+ * native turn/message id. Position in either array is not evidence.
+ */
+export function turnJoinKeyFor(record: CanonicalRecord): string | null {
+  if (isExcludedHarness(record.harness)) return null
+  const sessionId = sessionIdOf(record)
+  const nativeRecordId = nativeRecordIdOf(record)
+  if (sessionId === null || nativeRecordId === null) return null
+  return `${record.harness}:${sessionId}:${nativeRecordId}`
+}
+
 function rawSessionId(record: CanonicalRecord): string | null {
   const raw = record.raw
   if (typeof raw !== 'object' || raw === null) return null
@@ -257,71 +285,51 @@ export function joinOtelAndFileTurn(
   }
 }
 
-function groupByKey(records: readonly CanonicalRecord[]): Map<string, CanonicalRecord[]> {
-  const groups = new Map<string, CanonicalRecord[]>()
-  for (const record of records) {
-    const key = deduplicationKeyFor(record)
-    if (key === null) continue
-    const group = groups.get(key)
-    if (group === undefined) groups.set(key, [record])
-    else group.push(record)
-  }
-  return groups
-}
-
-/** Records that claimed no session identity; they pass through uncollapsed. */
-function keylessRecords(records: readonly CanonicalRecord[]): CanonicalRecord[] {
-  return records.filter((record) => deduplicationKeyFor(record) === null)
-}
-
 /**
- * Collapse a session observed through both ingest paths into one identity
- * (R3.1, R3.2): returns the records to store — every single-path session
- * unchanged, and duplicate turns joined under D7. A pair is matched by its
- * position in the shared session stream; unmatched turns remain distinct.
- *
- * Keyless records — a synthesized orphan, an OTLP span that carried no
- * `session.id` — claim no session identity and pass through untouched.
+ * Collapse turns observed through both ingest paths (R3.1, R3.2): a pair
+ * matches only when classified harness, native session, and native turn id
+ * agree. Array position is not a join key. Gemini rows are dropped rather
+ * than stored as a harness. Unmatched turns remain distinct.
  *
  * Disagreements between the paths are persisted to `store` as
  * `DEDUP_DISAGREEMENT` problems while OTLP remains the accounting authority.
- * The caller persists the returned records through the store's idempotent
- * `upsertMany` (R2.5), whose span-id primary key is the same identity
- * scheme this collapse runs on.
  */
 export function deduplicate(
   synthRecords: readonly CanonicalRecord[],
   otlpRecords: readonly CanonicalRecord[],
   store: CanonStore,
 ): CanonicalRecord[] {
-  const fileByKey = groupByKey(synthRecords)
-  const otlpByKey = groupByKey(otlpRecords)
+  const files = synthRecords.filter((record) => !isExcludedHarness(record.harness))
+  const otel = otlpRecords.filter((record) => !isExcludedHarness(record.harness))
 
-  const kept: CanonicalRecord[] = []
-  const collapsed = new Set<string>()
-
-  for (const [key, fileRecords] of fileByKey) {
-    const otlpRecords = otlpByKey.get(key)
-    if (otlpRecords === undefined) {
-      kept.push(...fileRecords)
+  const fileByTurn = new Map<string, CanonicalRecord>()
+  const unmatchedFile: CanonicalRecord[] = []
+  for (const record of files) {
+    const key = turnJoinKeyFor(record)
+    if (key === null) {
+      unmatchedFile.push(record)
       continue
     }
-    collapsed.add(key)
-    const sharedTurns = Math.min(fileRecords.length, otlpRecords.length)
-    for (let index = 0; index < sharedTurns; index += 1) {
-      kept.push(joinOtelAndFileTurn(otlpRecords[index]!, fileRecords[index]!))
+    fileByTurn.set(key, record)
+  }
+
+  const kept: CanonicalRecord[] = []
+  const joinedFileKeys = new Set<string>()
+  for (const otlp of otel) {
+    const key = turnJoinKeyFor(otlp)
+    const file = key === null ? undefined : fileByTurn.get(key)
+    if (file === undefined || key === null) {
+      kept.push(otlp)
+      continue
     }
-    kept.push(...fileRecords.slice(sharedTurns), ...otlpRecords.slice(sharedTurns))
-    recordDisagreement(key, fileRecords, otlpRecords, 'otlp', store)
+    joinedFileKeys.add(key)
+    kept.push(joinOtelAndFileTurn(otlp, file))
+    recordDisagreement(key, [file], [otlp], 'otlp', store)
   }
 
-  // Sessions only the OTLP path saw: untouched, in arrival order. Keyless
-  // records — a synthesized orphan, an OTLP span that carried no
-  // `session.id` — claimed no identity and pass through uncollapsed too.
-  for (const [key, otlpRecords] of otlpByKey) {
-    if (!collapsed.has(key)) kept.push(...otlpRecords)
+  for (const [key, file] of fileByTurn) {
+    if (!joinedFileKeys.has(key)) kept.push(file)
   }
-  kept.push(...keylessRecords(synthRecords), ...keylessRecords(otlpRecords))
-
+  kept.push(...unmatchedFile)
   return kept
 }

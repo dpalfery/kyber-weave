@@ -3,8 +3,9 @@
 //
 // Acceptance Criteria:
 // 1. Parse imports across `dash/kyber/**` and `dash/dash/src/**`.
-// 2. Mechanically fail if non-adapter modules (outside `dash/kyber/adapter/**` or `dash/kyber/synth/**`)
-//    import vendored CodeBurn internals (`dash/src/**` or root `src/**`).
+// 2. Mechanically fail if non-adapter modules (outside `dash/kyber/adapter/**`,
+//    `dash/kyber/synth/**`, or `dash/kyber/refresh/**`) import vendored CodeBurn
+//    internals (`dash/src/**` or root `src/**`).
 // 3. Mechanically fail if cost types or pricing calculations pollute diagnostic / context contracts
 //    in `dash/kyber/analysis/**` or `dash/kyber/canon/**` (per D9 cost secondary rule).
 // 4. Ensure `npx --prefix dash vitest run kyber/tools/boundary.test.ts` passes with 100%.
@@ -42,8 +43,8 @@ describe('ADR 0006 Merge-Zone Boundary & D9 Cost Isolation (Task H1)', () => {
     it('enforces merge-zone boundaries across dash/kyber/** and dash/dash/src/**', () => {
       // Acceptance Criterion 1 & 2:
       // Parse imports across dash/kyber/** and dash/dash/src/**.
-      // Mechanically fail if non-adapter modules (outside canon/adapters/** or synth/**)
-      // import vendored CodeBurn internals (dash/src/** or root src/**).
+      // Mechanically fail if non-adapter modules (outside canon/adapters/**, synth/**,
+      // or refresh/**) import vendored CodeBurn internals (dash/src/** or root src/**).
       const violations = scanMergeZoneBoundaries(DASH_ROOT)
 
       if (violations.length > 0) {
@@ -155,6 +156,26 @@ describe('ADR 0006 Merge-Zone Boundary & D9 Cost Isolation (Task H1)', () => {
 
       expect(checkImportBoundary(synthFilePath, imports[0]!, DASH_ROOT)).toBeNull()
       expect(checkImportBoundary(adapterFilePath, imports[0]!, DASH_ROOT)).toBeNull()
+    })
+
+    it('permits refresh adapters to import vendored providers while other kyber modules cannot', () => {
+      const refreshFilePath = path.resolve(DASH_ROOT, 'kyber/refresh/registry.ts')
+      const nonAdapterFilePath = path.resolve(DASH_ROOT, 'kyber/cli/refresh-caller.ts')
+
+      expect(isAllowedUpstreamImporter(refreshFilePath)).toBe(true)
+      expect(isAllowedUpstreamImporter(nonAdapterFilePath)).toBe(false)
+
+      const fakeSource = `import { getAllProviders } from '../../src/providers/index.js'`
+      const sf = ts.createSourceFile('test.ts', fakeSource, ts.ScriptTarget.Latest, true)
+      const imports = extractImportsFromAst(sf)
+
+      expect(checkImportBoundary(refreshFilePath, imports[0]!, DASH_ROOT)).toBeNull()
+
+      const violation = checkImportBoundary(nonAdapterFilePath, imports[0]!, DASH_ROOT)
+      expect(violation).not.toBeNull()
+      expect(violation?.reason).toContain('boundary violation')
+      expect(violation?.reason).toContain('refresh-caller.ts')
+      expect(violation?.reason).toContain('src/providers/index.js')
     })
 
     it('permits imports of KyberDash own brand overlay from src/brand-overlay', () => {

@@ -4,14 +4,14 @@ title: Unclipped Turn Inspection, Content Retention Window, and Copy-Out Protoco
 doc-type: adr
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-05
+last-reviewed: 2026-09-13
 ---
 
 # ADR 0014: Unclipped Turn Inspection, Content Retention Window, and Copy-Out Protocol
 
 ## Status
 
-Accepted, 2026-09-05. Extends [ADR 0008](0008-kyberdash-single-canonical-store.md) and [ADR 0011](0011-asad-only-context-view-and-payload-contract.md).
+Accepted, 2026-09-05. Extends [ADR 0008](0008-kyberdash-single-canonical-store.md) and [ADR 0011](0011-asad-only-context-view-and-payload-contract.md). The 14-day window stands. The named `kyber purge-content` command was not shipped; automatic purge after `dash refresh` is [ADR 0018](0018-kyberdash-content-retention-purge.md).
 
 ## Context
 
@@ -55,4 +55,5 @@ At the same time, storing the complete plaintext of every prompt, tool parameter
 - [ADR 0013: Telemetry-Grounded Finding Contracts and Waste Ranking](0013-telemetry-grounded-finding-contracts-and-waste-ranking.md)
 - [KyberDash architecture](../dash/architecture.md)
 - [KyberDash runbook](../dash/runbook.md)
-- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)
+- [ADR 0018: Stored Content with a 14-Day Automatic Purge](0018-kyberdash-content-retention-purge.md)
+- [Plan: 2026-09-05 Diagnostic Hierarchy and Context Inspector](../archive/plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md)

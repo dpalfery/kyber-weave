@@ -15,18 +15,40 @@ test('G1 — app opens on the attention level', async ({ page }) => {
 })
 
 test('G2 — a developer can drill all six levels by clicking', async ({ page }) => {
+  test.setTimeout(180_000)
   await page.goto(APP)
 
-  await page.getByTestId(/^drill-harness-/).first().click()
+  // The matrix lists every rollup row, including zero-sample harnesses. The
+  // first `drill-harness-*` is therefore often empty (e.g. aider). Claude Code
+  // is the canonical filter G4a already requires, and it has recorded runs.
+  await page.getByTestId('drill-harness-claude-code').click()
   await expect(page.getByTestId('page-harness')).toBeVisible()
 
-  await page.getByTestId(/^drill-run-/).first().click()
-  await expect(page.getByTestId('page-run')).toBeVisible()
-
-  await page.getByTestId(/^drill-execution-/).first().click()
-  await expect(page.getByTestId('page-execution')).toBeVisible()
-
-  await page.getByTestId(/^drill-turn-/).first().click()
+  // List rows do not carry turnCount; many runs render "No turns recorded"
+  // until a matching session supplies turn_count. Skip empty executions.
+  const runRows = page.getByTestId(/^drill-run-/)
+  await expect(runRows.first()).toBeVisible()
+  const runLimit = Math.min(await runRows.count(), 15)
+  let openedTurn = false
+  for (let i = 0; i < runLimit; i++) {
+    await runRows.nth(i).click()
+    await expect(page.getByTestId('page-run')).toBeVisible()
+    await page.getByTestId(/^drill-execution-/).first().click()
+    await expect(page.getByTestId('page-execution')).toBeVisible()
+    const firstTurn = page.getByTestId(/^drill-turn-/).first()
+    const hasTurn = await firstTurn
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (hasTurn) {
+      await firstTurn.click()
+      openedTurn = true
+      break
+    }
+    await page.getByTestId('breadcrumb-harness').click()
+    await expect(page.getByTestId('page-harness')).toBeVisible()
+  }
+  expect(openedTurn).toBe(true)
   await expect(page.getByTestId('page-turn')).toBeVisible()
 
   await page.getByTestId(/^context-band-/).first().click()

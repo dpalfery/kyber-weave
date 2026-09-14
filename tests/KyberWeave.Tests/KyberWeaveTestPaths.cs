@@ -11,6 +11,9 @@ internal static class KyberWeaveTestPaths
     public static string McpDocsToolsSourcePath =>
         Path.Combine(ToolRoot, "src", "KyberWeave.Mcp", "DocsTools.cs");
 
+    public static string SquadMcpConfigurationPath =>
+        Path.Combine(ToolRoot, "products", "kyber-squad", "mcp.json");
+
     private static string LocateToolRoot()
     {
         DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);

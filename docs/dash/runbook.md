@@ -4,8 +4,13 @@ title: KyberDash runbook — Local development, execution, and testing
 doc-type: runbook
 status: current
 component: KyberDash
+source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-10
+last-reviewed: 2026-09-13
+code-refs:
+  - registerKyberCommands
+  - refreshHarnessSources
+  - purgeExpiredContent
 ---
 
 # KyberDash runbook — Local development, execution, and testing
@@ -106,6 +111,28 @@ This rebuilds:
 - First-class `run` tasks and `execution` parent/child delegation trees ([ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md)).
 - Finding materializations stamped with `detector_version` ([ADR 0013](../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md)).
 
+### 2a. Local harness-source refresh (`dash refresh`)
+
+Fill or update `canon.db` from installed native session stores, then purge expired content
+and rebuild derived tables:
+
+```bash
+node dash/dist/cli.js dash refresh
+node dash/dist/cli.js dash refresh --history-weeks 2
+node dash/dist/cli.js dash refresh --db /tmp/canon.db
+```
+
+`--db` selects the store (default `~/.kyberdash/canon.db`). `--history-weeks <n>` is a
+positive integer; omission is **2**. There is no public `--provider` flag. Usage errors
+exit **2** before the database is opened. Any failed harness job or derivation failure
+exits **1**. Complete success, including sources that are not installed, exits **0**.
+
+The command runs one job per harness-source descriptor ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
+commits with `commitSourceUnit`, then runs `purgeExpiredContent` (14-day content window;
+`records.raw` kept) and `buildSessions`. Output is a per-harness table plus a derived
+summary; diagnostics for `failed`/`partial` rows go to stderr without chat content or raw
+paths. Use a temporary `--db` when experimenting. There is no dashboard refresh button.
+
 ### 3. Raw Content Backfill and Re-normalization
 
 ```bash
@@ -116,19 +143,18 @@ node dash/dist/cli.js kyber backfill
 node dash/dist/cli.js kyber renormalize
 ```
 
-### 4. Content Retention Policy and Purging (`kyber purge-content`)
+### 4. Content Retention Policy
 
 Retaining unclipped plaintext of every prompt, tool parameter, and file snippet creates a
-standing privacy and storage liability ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md)):
+standing privacy and storage liability ([ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md),
+[ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)):
 
-- **Default 14-day rolling retention**: Full plaintext content blocks in `parts_json` are retained
-  for 14 days by default to support the Context Inspector.
-- **Explicit Content Purge**: To purge unclipped plaintext content immediately while preserving
-  token metrics, span timings, and diagnostic findings:
-  ```bash
-  node dash/dist/cli.js kyber purge-content --older-than 14d
-  node dash/dist/cli.js kyber purge-content --all
-  ```
+- **Default 14-day rolling retention**: Full plaintext in `content_json` / `parts_json` is
+  retained for 14 days to support the Context Inspector.
+- **Automatic purge on refresh**: `dash refresh` calls `purgeExpiredContent` after source
+  jobs drain. Rows older than 14 days have content emptied in place (`'{}'` / NULL parts).
+  Token metrics, timestamps, findings, and `records.raw` stay.
+- There is no shipped `kyber purge-content` CLI. Re-run `dash refresh` to apply the window.
 
 ### 5. LLM Review Provider Configuration & Privacy Guardrails
 
@@ -309,20 +335,26 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    - `--period <today|week|month|all>`: Pre-filter metrics and cost aggregations.
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 
-#### Navigating the 5 Web Dashboard Views
+#### Navigating the web dashboard
 
-The web dashboard provides five top-level tabs:
-- **`[Usage]`**: Device spend overview, multi-provider cost rollups, top projects, and daily spend timelines.
-- **`[Context]`**: One canonical session explorer for every harness. Expanding a session loads the **Agent Session Analysis Dashboard** (`AgentSessionDashboard`) from `canon.db`:
+Header tabs (`nav-tabs`) are four: **Attention**, **Usage**, **Quarantine**, **Problems**.
+The sidebar is the diagnostic spine rail: **Attention**, **Sessions**, **Compare**. Share
+controls appear on Usage only.
+
+- **Attention**: Cross-harness landing (findings, scorecard matrix). Drill harness → run →
+  execution → turn → context item.
+- **Sessions**: Session explorer (`page-sessions`) wrapping the Agent Session Analysis
+  Dashboard from `canon.db` — not a restored Context tab:
   - *Overview Strip*: Spans, turns, total tokens, cache hit ratio, cost USD/credits, exact reconciliation status, and subagent links.
   - *Per-Turn Spend Chart (`SessionSpendCharts`)*: Stacked token breakdown per turn (fresh input, cache read, cache creation, output).
   - *Context Composition Heatmap & Chart*: Semantic token distribution by part type (`system_prompt`, `instruction_context`, `tool_definitions`, `conversation_history`, `tool_result_content`, `residual`).
   - *Tool & Schema Cost Table*: Ranked tool schema sizes, resident turns, invocations, and unused schema waste range.
   - *Execution Timeline / Call Tree*: Hierarchical span call tree with duration, status badges, and auxiliary flags.
   - *Inspector Drawer (`SessionInspectorDrawer`)*: Slide-out drawer with XML tag folding (`<instructions>`, `<environment_info>`, `<context>`) and formatted tool call/result trees.
-- **`[Compare]`**: Cross-harness comparison matrix across all active agents.
-- **`[Quarantine]`**: Quarantined spans holding unrecognized namespaces or malformed attributes for triage.
-- **`[Problems]`**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
+- **Compare** (rail): Phase-aligned run comparison (`page-compare`), not a fifth header tab.
+- **Usage**: Device spend overview, multi-provider cost rollups, top projects, daily spend, Share.
+- **Quarantine**: Quarantined spans holding unrecognized namespaces or malformed attributes.
+- **Problems**: Recorded token reconciliation mismatches, validation anomalies, and parser errors.
 
 #### Querying REST Endpoints Directly
 

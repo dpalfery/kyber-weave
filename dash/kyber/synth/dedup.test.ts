@@ -33,15 +33,7 @@ import {
 import { DEFAULT_GROUP_ATTRIBUTE } from '../otel/aspire.js'
 import { decodeOtlpJson, type OtlpSpan } from '../otel/receiver.js'
 import { DEDUP_DISAGREEMENT, deduplicate, deduplicationKeyFor, joinOtelAndFileTurn } from './dedup.js'
-import { Synthesizer, synthesizeCall, traceIdFor } from './synth.js'
-import { normalizeHarnessName } from '../canon/measurability.js'
-
-/** `traceIdFor` with its harness segment canonicalized — the dedup key's shape. */
-function normalizedTraceId(spec: ParsedProviderCall): string {
-  const rest = traceIdFor(spec).slice('synth:'.length)
-  const separator = rest.indexOf(':')
-  return `synth:${normalizeHarnessName(rest.slice(0, separator))}:${rest.slice(separator + 1)}`
-}
+import { Synthesizer, synthesizeCall } from './synth.js'
 
 // ---------------------------------------------------------------------------
 // Fixture kit — the file path
@@ -129,6 +121,7 @@ function otlpExport(spanId: string, attributes: SpanAttributes): string {
 function turnAttributes(spec: Record<string, string | number | undefined> = {}): SpanAttributes {
   const attributes: SpanAttributes = {
     [DEFAULT_GROUP_ATTRIBUTE]: 's-1',
+    'gen_ai.response.id': 'm-1',
     'gen_ai.usage.input_tokens': 1_000,
     'gen_ai.usage.cache_read.input_tokens': 3_800,
     'gen_ai.usage.cache_creation.input_tokens': 120,
@@ -197,15 +190,14 @@ describe('identity (R3.2 — upstream’s key, extended, not a second mechanism)
     expect(record!.traceId).toBe('synth:claude:s-1')
     // The trace id keeps the provider entry that parsed the transcript; the
     // key canonicalizes it so the OTLP path's voted harness meets it.
-    expect(deduplicationKeyFor(record!)).toBe('synth:claude-code:s-1')
+    expect(deduplicationKeyFor(record!)).toBe('synth:claude:s-1')
   })
 
   it('derives the same key for the OTLP record of the same session', () => {
     const [synthRecord] = fileSession([call()])
     const [otlpRecord] = otlpSession(SPAN_ID_1, turnAttributes())
-    expect(deduplicationKeyFor(otlpRecord!)).toBe('synth:claude-code:s-1')
+    expect(deduplicationKeyFor(otlpRecord!)).toBe('synth:claude:s-1')
     expect(deduplicationKeyFor(otlpRecord!)).toBe(deduplicationKeyFor(synthRecord!))
-    expect(deduplicationKeyFor(otlpRecord!)).toBe(normalizedTraceId(call()))
   })
 
   // The regression this suite missed: its fixtures named the harness `claude`
@@ -215,24 +207,15 @@ describe('identity (R3.2 — upstream’s key, extended, not a second mechanism)
   // session was stored twice — once per path. One case per alias pair, so a
   // harness whose front-end name differs from its harness name cannot regress.
   it.each([
-    ['claude', 'claude-code'],
     ['copilot-cli', 'copilot'],
-    ['copilot-chat', 'copilot'],
     ['cursor-agent', 'cursor'],
-    ['roo', 'roo-code'],
     ['cline-cli', 'cline'],
-    ['cascade', 'windsurf'],
-    ['openai-codex', 'codex'],
-    ['agy', 'antigravity'],
-  ])('collapses %s (file path) onto %s (OTLP path)', (providerName, votedHarness) => {
+  ])('does not collapse split surface %s onto %s', (providerName, votedHarness) => {
     const [fileRecord] = fileSession([call({ provider: providerName })])
     const [span] = decodeOtlpJson(otlpExport(SPAN_ID_1, turnAttributes()))
     const otlpRecord = normalizeOtlpSpan(span!, votedHarness)
 
-    const key = deduplicationKeyFor(fileRecord!)
-    expect(key).not.toBeNull()
-    expect(deduplicationKeyFor(otlpRecord)).toBe(key)
-    expect(key).toBe(`synth:${votedHarness}:s-1`)
+    expect(deduplicationKeyFor(fileRecord!)).not.toBe(deduplicationKeyFor(otlpRecord))
   })
 
   it('keeps distinct harnesses apart rather than collapsing everything together', () => {
@@ -408,7 +391,10 @@ describe('R3.1 — a session observed through both paths is counted once', () =>
       const otlpRecords = turns.map((turn, index) =>
         otlpSession(
           [SPAN_ID_1, SPAN_ID_2, SPAN_ID_3][index]!,
-          turnAttributes({ 'gen_ai.usage.input_tokens': 1_000 + turn * 100 }),
+          turnAttributes({
+            'gen_ai.usage.input_tokens': 1_000 + turn * 100,
+            'gen_ai.response.id': `m-${turn + 1}`,
+          }),
         )[0]!,
       )
 
@@ -504,7 +490,7 @@ describe('R3.3 — D7 precedence, disagreement recorded', () => {
       const problem = problems[0]!
       expect(problem.code).toBe(DEDUP_DISAGREEMENT)
       expect(problem.severity).toBe('warning')
-      expect(problem.location).toBe('synth:claude-code:s-1')
+      expect(problem.location).toBe('claude:s-1:m-1')
       expect(problem.spanId).toBe(kept[0]!.spanId)
       // Both sides' figures are in the message — the dropped side's values
       // are recorded, not discarded with its records.
@@ -593,3 +579,134 @@ describe('R3.3 — D7 precedence, disagreement recorded', () => {
     }
   })
 })
+
+describe('T4 — identity-aware OTLP/file join', () => {
+  it('does not join records that share only array position', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const fileRecords = fileSession([
+        call({ provider: 'claude-cli', sessionId: 's-1', turnId: 'file-a', deduplicationKey: 'claude-cli:s-1:file-a' }),
+      ])
+      const otlpRecords = otlpSession(SPAN_ID_1, {
+        ...turnAttributes(),
+        'gen_ai.response.id': 'otlp-b',
+      }).map((record) => ({ ...record, harness: 'claude-cli' }))
+
+      const kept = deduplicate(fileRecords, otlpRecords, store)
+      expect(kept).toHaveLength(2)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('joins by native turn id even when array order differs', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const fileRecords = fileSession([
+        call({ provider: 'claude-cli', sessionId: 's-1', turnId: 'm-2', deduplicationKey: 'claude-cli:s-1:m-2', inputTokens: 1_100 }),
+        call({ provider: 'claude-cli', sessionId: 's-1', turnId: 'm-1', deduplicationKey: 'claude-cli:s-1:m-1' }),
+      ]).map((record) => ({
+        ...record,
+        parts: [{ part: 'conversation_history' as const, text: `file ${record.spanId}`, order: 0 }],
+        content: { conversation_history: `file ${record.spanId}` },
+      }))
+      const otlpFirst = otlpSession(SPAN_ID_1, {
+        ...turnAttributes({ 'gen_ai.usage.input_tokens': 1_000 }),
+        'gen_ai.response.id': 'm-1',
+      }).map((record) => ({ ...record, harness: 'claude-cli' }))
+      const otlpSecond = otlpSession(SPAN_ID_2, {
+        ...turnAttributes({ 'gen_ai.usage.input_tokens': 1_100 }),
+        'gen_ai.response.id': 'm-2',
+      }).map((record) => ({ ...record, harness: 'claude-cli' }))
+
+      const kept = deduplicate(fileRecords, [...otlpFirst, ...otlpSecond], store)
+      expect(kept).toHaveLength(2)
+      const joinedM1 = kept.find((record) => nativeTurnOf(record) === 'm-1')
+      const fileM1 = fileRecords.find((record) => nativeTurnOf(record) === 'm-1')
+      expect(joinedM1?.spanId).toBe(SPAN_ID_1)
+      expect(joinedM1?.tokens.freshInput).toBe(1_000)
+      expect(joinedM1?.content.conversation_history).toBe(`file ${fileM1?.spanId}`)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps OTLP counters and fills file content only when OTLP has no parts', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const [fileRecord] = fileSession([
+        call({ provider: 'claude-cli', sessionId: 's-1', turnId: 'm-1', deduplicationKey: 'claude-cli:s-1:m-1' }),
+      ])
+      const fileRecords = [
+        {
+          ...fileRecord!,
+          parts: [{ part: 'conversation_history' as const, text: 'file-only turn content', order: 0 }],
+          content: { conversation_history: 'file-only turn content' },
+        },
+      ]
+      const otlpRecords = otlpSession(SPAN_ID_1, {
+        ...turnAttributes({
+          'gen_ai.usage.input_tokens': 990,
+          'gen_ai.usage.reasoning_tokens': 96,
+        }),
+        'gen_ai.response.id': 'm-1',
+      }).map((record) => ({ ...record, harness: 'claude-cli' }))
+
+      const kept = deduplicate(fileRecords, otlpRecords, store)
+      expect(kept).toHaveLength(1)
+      expect(kept[0]?.tokens.freshInput).toBe(990)
+      expect(kept[0]?.tokens.reasoning).toBe(96)
+      expect(kept[0]?.parts).toEqual(fileRecords[0]!.parts)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not guess a client: copilot-cli file rows do not join generic copilot OTLP', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const fileRecords = fileSession([
+        call({ provider: 'copilot-cli', sessionId: 's-1', turnId: 'm-1', deduplicationKey: 'copilot-cli:s-1:m-1' }),
+      ])
+      const otlpRecords = otlpSession(SPAN_ID_1, {
+        ...turnAttributes(),
+        'gen_ai.response.id': 'm-1',
+      }).map((record) => ({ ...record, harness: 'copilot' }))
+
+      const kept = deduplicate(fileRecords, otlpRecords, store)
+      expect(kept).toHaveLength(2)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('never joins Gemini OTLP onto an Antigravity file turn', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      const fileRecords = fileSession([
+        call({ provider: 'antigravity', sessionId: 's-1', turnId: 'm-1', deduplicationKey: 'antigravity:s-1:m-1' }),
+      ])
+      const otlpRecords = otlpSession(SPAN_ID_1, {
+        ...turnAttributes(),
+        'gen_ai.response.id': 'm-1',
+      }).map((record) => ({ ...record, harness: 'gemini' }))
+
+      const kept = deduplicate(fileRecords, otlpRecords, store)
+      expect(kept.map((record) => record.harness)).not.toContain('gemini')
+      expect(kept).toHaveLength(1)
+      expect(kept[0]?.harness).toBe('antigravity')
+    } finally {
+      store.close()
+    }
+  })
+})
+
+function nativeTurnOf(record: CanonicalRecord): string | undefined {
+  const raw = record.raw as Record<string, unknown> | undefined
+  const provenance = raw?.provenance as { nativeRecordId?: string } | undefined
+  if (typeof provenance?.nativeRecordId === 'string') return provenance.nativeRecordId
+  if (typeof raw?.['gen_ai.response.id'] === 'string') return raw['gen_ai.response.id']
+  if (typeof raw?.turnId === 'string') return raw.turnId
+  return undefined
+}
+

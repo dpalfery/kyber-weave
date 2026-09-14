@@ -5,13 +5,37 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Command } from 'commander'
+import { CommanderError, InvalidArgumentError } from 'commander'
 import { CanonStore } from '../canon/store.js'
 import type { CursorHookStdinOptions } from '../otel/cursor-hook.js'
+import { DEFAULT_HISTORY_WEEKS, refreshHarnessSources } from '../refresh/orchestrator.js'
+import { formatRefreshDiagnostics, formatRefreshReport } from '../refresh/report.js'
 
 export type KyberCommandDependencies = {
   readStdin?: () => Promise<string>
   write?: (line: string) => void
+  writeError?: (line: string) => void
   postCursorHookOtlp?: CursorHookStdinOptions['post']
+  createStore?: (path: string) => CanonStore
+  refreshHarnessSources?: typeof refreshHarnessSources
+}
+
+function createHistoryWeeksParser(): (value: string) => number {
+  let seen: number | undefined
+  return (value: string) => {
+    if (!/^[1-9][0-9]*$/.test(value)) {
+      throw new InvalidArgumentError('--history-weeks must be a positive integer')
+    }
+    const weeks = Number(value)
+    if (!Number.isSafeInteger(weeks)) {
+      throw new InvalidArgumentError('--history-weeks exceeds a safe integer')
+    }
+    if (seen !== undefined && seen !== weeks) {
+      throw new InvalidArgumentError('conflicting --history-weeks values')
+    }
+    seen = weeks
+    return weeks
+  }
 }
 
 /**
@@ -130,32 +154,40 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .command('dash')
     .description('Manage KyberDash canonical telemetry and derived dashboard data')
 
-  dash
+  const refresh = dash
     .command('refresh')
-    .description('Discover local provider sessions and rebuild KyberDash canonical data')
+    .description('Refresh KyberDash from local harness-source history')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
-    .option('--provider <name>', 'Refresh one native provider identity (for example: pi)')
-    .action(async (opts: { db?: string; provider?: string }) => {
-      const store = new CanonStore(resolveDbPath(opts.db))
-      try {
-        const { refreshLocalProviders } = await import('./refresh.js')
-        const report = await refreshLocalProviders(
-          store,
-          undefined,
-          opts.provider === undefined ? undefined : { providers: [opts.provider] },
-        )
-        console.log(`Providers:   ${report.providers}`)
-        console.log(`Sources:     ${report.sources}`)
-        console.log(`Synthesized: ${report.synthesized}`)
-        console.log(`Accepted:    ${report.accepted}`)
-        console.log(`Problems:    ${report.problems}`)
-        console.log(`Sessions:    ${report.sessions.built} built, ${report.sessions.skipped} skipped, ${report.sessions.pruned} pruned`)
-        console.log(`Rollups:     ${report.rollups}`)
-        console.log(`Findings:    ${report.findings}`)
-      } finally {
-        store.close()
-      }
-    })
+    .option(
+      '--history-weeks <n>',
+      'UTC history window in whole weeks (default: 2)',
+      createHistoryWeeksParser(),
+      DEFAULT_HISTORY_WEEKS,
+    )
+  refresh.exitOverride((error) => {
+    if (error.code === 'commander.invalidArgument') {
+      throw new CommanderError(2, error.code, error.message)
+    }
+    throw error
+  })
+  refresh.action(async (opts: { db?: string; historyWeeks?: number }) => {
+    const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
+    const refreshSources = dependencies.refreshHarnessSources ?? refreshHarnessSources
+    const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
+    const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
+    const store = createStore(resolveDbPath(opts.db))
+    try {
+      const report = await refreshSources(store, undefined, {
+        historyWeeks: opts.historyWeeks ?? DEFAULT_HISTORY_WEEKS,
+      })
+      write(formatRefreshReport(report).trimEnd())
+      const diagnostics = formatRefreshDiagnostics(report.rows)
+      if (diagnostics !== '') writeError(diagnostics)
+      process.exitCode = report.exitCode
+    } finally {
+      store.close()
+    }
+  })
 
   kyber
     .command('cursor-hook')

@@ -43,12 +43,16 @@
 // and the adapters follow the same split — `normalize` emits, `validate`
 // rejects. Re-validating here would be a second mechanism for one job.
 
+import { createHash } from 'node:crypto'
+
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 export type { ParsedProviderCall } from '../../src/providers/types.js'
 import { contentFromParts, type CanonicalRecord, type CostBlock, type TokenUsage } from '../canon/types.js'
 import { exclusiveConvention, inclusiveConvention } from '../canon/adapters/copilot.js'
 import { FILE_SOURCE_PREFIX, measurabilityFor } from '../canon/measurability.js'
-import type { ReaderTurn } from './readers/types.js'
+import type { ReaderTurn, SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
+
+export type { SourceRecordEnvelope, SourceRecordProvenance } from './readers/types.js'
 
 // ---------------------------------------------------------------------------
 // Identity scheme (R3.2: extend upstream's key, don't add a mechanism)
@@ -57,28 +61,94 @@ import type { ReaderTurn } from './readers/types.js'
 /** Namespace for span ids derived from upstream's deduplication key. */
 export const SYNTH_SPAN_PREFIX = 'synth:'
 
-/** The trace a synthesized session's calls form: one per (provider, session). */
-export function traceIdFor(call: ParsedProviderCall): string {
-  return `${SYNTH_SPAN_PREFIX}${call.provider}:${call.sessionId}`
+/** Model/network identities that must never be persisted as a coding harness. */
+export const EXCLUDED_HARNESS_IDS = new Set(['gemini', 'vercel-gateway'])
+
+export function isExcludedHarness(id: string): boolean {
+  return EXCLUDED_HARNESS_IDS.has(id)
+}
+
+export function harnessIdFor(call: ParsedProviderCall, envelope?: SourceRecordEnvelope): string {
+  return envelope?.harnessId ?? call.provider
+}
+
+export function nativeSessionIdFor(call: ParsedProviderCall, envelope?: SourceRecordEnvelope): string {
+  if (envelope?.nativeSessionId) return envelope.nativeSessionId
+  return String(call.sessionId)
 }
 
 /**
- * The synthesized span id: upstream's cross-provider deduplication key, kept
- * verbatim under the `synth:` namespace. The key already encodes provider,
- * session and message identity — that is the whole point of reusing it.
+ * Native record identity: prefer an explicit id, then `turnId`, then the
+ * message segment of upstream's key. When none exist, a digest of session,
+ * timestamp, kind, and ordinal — never refresh time or a database row number.
  */
-export function spanIdFor(call: ParsedProviderCall): string {
-  return `${SYNTH_SPAN_PREFIX}${call.deduplicationKey}`
+export function nativeRecordIdentity(
+  call: ParsedProviderCall,
+  envelope?: SourceRecordEnvelope,
+  ordinal = 0,
+): { nativeRecordId: string; recordDigest?: string } {
+  if (envelope?.nativeRecordId) return { nativeRecordId: envelope.nativeRecordId }
+  if (call.turnId !== undefined && call.turnId !== '') return { nativeRecordId: call.turnId }
+  const prefix = `${call.provider}:${call.sessionId}:`
+  if (call.deduplicationKey.startsWith(prefix) && call.deduplicationKey.length > prefix.length) {
+    return { nativeRecordId: call.deduplicationKey.slice(prefix.length) }
+  }
+  const digest = createHash('sha256')
+    .update(`${nativeSessionIdFor(call, envelope)}\0${call.timestamp}\0llm.invoke\0${ordinal}`, 'utf8')
+    .digest('hex')
+    .slice(0, 16)
+  return { nativeRecordId: digest, recordDigest: digest }
+}
+
+export function provenanceFor(
+  call: ParsedProviderCall,
+  envelope?: SourceRecordEnvelope,
+  ordinal = 0,
+): SourceRecordProvenance {
+  const harnessId = harnessIdFor(call, envelope)
+  const nativeSessionId = nativeSessionIdFor(call, envelope)
+  const identity = nativeRecordIdentity(call, envelope, ordinal)
+  return {
+    harnessId,
+    sourceKey: envelope?.sourceKey ?? `${harnessId}:${nativeSessionId}`,
+    nativeSessionId,
+    nativeRecordId: identity.nativeRecordId,
+    ...(identity.recordDigest !== undefined ? { recordDigest: identity.recordDigest } : {}),
+    ...(envelope?.sourceRevision !== undefined ? { sourceRevision: envelope.sourceRevision } : {}),
+    ...(envelope?.parserContractVersion !== undefined
+      ? { parserContractVersion: envelope.parserContractVersion }
+      : {}),
+    ...(envelope?.importedAt !== undefined ? { importedAt: envelope.importedAt } : {}),
+    ...(envelope?.locationToken !== undefined ? { locationToken: envelope.locationToken } : {}),
+  }
+}
+
+/** The trace a synthesized session's calls form: one per (harness, session). */
+export function traceIdFor(call: ParsedProviderCall, envelope?: SourceRecordEnvelope): string {
+  return `${SYNTH_SPAN_PREFIX}${harnessIdFor(call, envelope)}:${nativeSessionIdFor(call, envelope)}`
+}
+
+/**
+ * Canonical source identity `<harness-id>:<native-session-id>:<native-record-id>`
+ * under the `synth:` namespace so it cannot collide with an OTLP hex span id.
+ */
+export function spanIdFor(
+  call: ParsedProviderCall,
+  envelope?: SourceRecordEnvelope,
+  ordinal = 0,
+): string {
+  const provenance = provenanceFor(call, envelope, ordinal)
+  return `${SYNTH_SPAN_PREFIX}${provenance.harnessId}:${provenance.nativeSessionId}:${provenance.nativeRecordId}`
 }
 
 /**
  * The telemetry source name stamped on synthesized records. Identifies the
  * ingest path instance (the vendored parser reading this provider's files);
  * attribution never reads it (R6.2) — for a file-sourced record the harness
- * is the provider by construction, not a claim to be voted on.
+ * is the classified id when an envelope supplied one, otherwise the provider.
  */
-export function sourceFor(call: ParsedProviderCall): string {
-  return `${FILE_SOURCE_PREFIX}${call.provider}`
+export function sourceFor(call: ParsedProviderCall, envelope?: SourceRecordEnvelope): string {
+  return `${FILE_SOURCE_PREFIX}${harnessIdFor(call, envelope)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +324,8 @@ export function synthesizeCall(
   call: ParsedProviderCall,
   conventions: ReadonlyMap<string, TokenConvention> = PROVIDER_CONVENTIONS,
   readerTurn?: ReaderTurn,
+  envelope?: SourceRecordEnvelope,
+  ordinal = 0,
 ): CanonicalRecord {
   const counts = {
     input: call.inputTokens,
@@ -273,12 +345,24 @@ export function synthesizeCall(
       ? inclusiveConvention(counts)
       : exclusiveConvention(counts)
 
+  const harness = harnessIdFor(call, envelope)
+  const sessionId = nativeSessionIdFor(call, envelope)
+  const provenance = provenanceFor(call, envelope, ordinal)
+  const rawCall = readerTurn === undefined
+    ? call
+    : {
+        ...call,
+        ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
+        ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
+        ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
+      }
+
   return {
-    spanId: spanIdFor(call),
-    traceId: traceIdFor(call),
+    spanId: spanIdFor(call, envelope, ordinal),
+    traceId: traceIdFor(call, envelope),
     parentSpanId: null,
-    source: sourceFor(call),
-    harness: call.provider,
+    source: sourceFor(call, envelope),
+    harness,
     name: `${call.provider}:${call.model}`,
     op: 'llm.invoke',
     kind: 'internal',
@@ -290,9 +374,7 @@ export function synthesizeCall(
     // bare `session.id`. One session observed through both paths therefore
     // produced two derived sessions and two runs even after the cross-path
     // collapse had matched its records.
-    ...(call.sessionId === undefined || call.sessionId === null || call.sessionId === ''
-      ? {}
-      : { sessionId: String(call.sessionId) }),
+    ...(sessionId === '' ? {} : { sessionId }),
     durationMs: call.activeDurationMs ?? 0,
     status: readerTurn?.exitCode !== undefined && readerTurn.exitCode !== 0
       ? 'error'
@@ -302,14 +384,7 @@ export function synthesizeCall(
     ...(readerTurn !== undefined ? { parts: readerTurn.parts } : {}),
     cost: costBlockFor(call),
     measurability: measurabilityFor(call.provider),
-    raw: readerTurn === undefined
-      ? call
-      : {
-          ...call,
-          ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
-          ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
-          ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),
-        },
+    raw: { ...rawCall, provenance },
   }
 }
 
@@ -369,7 +444,22 @@ export class Synthesizer {
     parsedCalls: readonly ParsedProviderCall[],
     readerTurns?: readonly (ReaderTurn | undefined)[],
   ): CanonicalRecord[] {
-    return parsedCalls.map((call, index) => synthesizeCall(call, this.conventions, readerTurns?.[index]))
+    return parsedCalls.flatMap((call, index) => {
+      if (isExcludedHarness(call.provider)) return []
+      return [synthesizeCall(call, this.conventions, readerTurns?.[index], undefined, index)]
+    })
+  }
+
+  /**
+   * Synthesize classified source envelopes. Split-surface harness ids are
+   * taken from the envelope; Gemini/Vercel identities are dropped rather than
+   * persisted as harnesses. Token validation remains the quarantine seam.
+   */
+  synthesizeEnvelopes(envelopes: readonly SourceRecordEnvelope[]): CanonicalRecord[] {
+    return envelopes.flatMap((envelope, index) => {
+      if (isExcludedHarness(envelope.harnessId) || isExcludedHarness(envelope.call.provider)) return []
+      return [synthesizeCall(envelope.call, this.conventions, envelope.readerTurn, envelope, index)]
+    })
   }
 
   /** The serial path's explicit name; identical to {@link synthesize}. */

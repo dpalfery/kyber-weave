@@ -1,10 +1,22 @@
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Card } from '../components/ui/card'
+import { Skeleton } from '../components/ui/skeleton'
 import {
   TurnAlignedDiff,
   type PhaseAlignedTurnPair,
   type RunTurnSummary,
+  type SignalComparison,
+  type SignalComparisonStatus,
   type TaskPhase,
 } from '../components/kyber/TurnAlignedDiff'
+import {
+  fetchRunComparison,
+  fetchRuns,
+  type KyberPhaseAlignedTurnPair,
+  type KyberRunComparison,
+  type KyberRunSummary,
+} from '../lib/kyberApi'
 
 export type OutcomeSummary = {
   status: 'success' | 'failure' | 'abandoned' | 'inconclusive' | 'not_measurable'
@@ -52,159 +64,156 @@ export type CompareRunsProps = {
   selectedAId?: string
   selectedBId?: string
   taskFamily?: string
+  comparison?: KyberRunComparison | null
   onConfirmPair?: (pairId: string) => void
   onSelectRunA?: (id: string) => void
   onSelectRunB?: (id: string) => void
 }
 
-const SAMPLE_RUNS: RunCandidate[] = [
-  {
-    runId: 'run-claude-baseline',
-    harness: 'claude-code',
-    label: 'Claude Code (Baseline)',
-    taskFamily: 'auth-jwt-refresh',
-    workingDirectory: '/workspace/kyber-weave',
-    repo: 'kyber-weave',
-    started: '2026-09-06T14:00:00Z',
-    outcome: {
-      status: 'success',
-      exitCode: 0,
-      passingTests: 18,
-      failingTests: 0,
-      errorCount: 0,
-      reason: 'All tests passed cleanly',
-    },
-    turns: [
-      {
-        turnIndex: 0,
-        phase: 'exploration',
-        tools: ['find_by_name', 'read_file'],
-        tokens: { freshInput: 1200, cacheRead: 300, output: 250, all: 1750 },
-        cost: { basis: 'published', status: 'priced', value: 0.025, currency: 'USD' },
-      },
-      {
-        turnIndex: 1,
-        phase: 'exploration',
-        tools: ['grep_search'],
-        tokens: { freshInput: 850, cacheRead: 900, output: 180, all: 1930 },
-        cost: { basis: 'published', status: 'priced', value: 0.015, currency: 'USD' },
-      },
-      {
-        turnIndex: 2,
-        phase: 'implementation',
-        tools: ['replace_file_content'],
-        tokens: { freshInput: 1500, cacheRead: 1200, output: 600, all: 3300 },
-        cost: { basis: 'published', status: 'priced', value: 0.045, currency: 'USD' },
-      },
-      {
-        turnIndex: 3,
-        phase: 'verification',
-        tools: ['run_tests'],
-        commands: ['npm test'],
-        tokens: { freshInput: 900, cacheRead: 1800, output: 120, all: 2820 },
-        cost: { basis: 'published', status: 'priced', value: 0.018, currency: 'USD' },
-      },
-      {
-        turnIndex: 4,
-        phase: 'resolution',
-        tools: ['git_commit'],
-        commands: ['git commit -m "fix(auth): handle expired token refresh"'],
-        tokens: { freshInput: 400, cacheRead: 2100, output: 90, all: 2590 },
-        cost: { basis: 'published', status: 'priced', value: 0.012, currency: 'USD' },
-      },
-    ],
-  },
-  {
-    runId: 'run-copilot-candidate',
-    harness: 'copilot',
-    label: 'Copilot (Candidate)',
-    taskFamily: 'auth-jwt-refresh',
-    workingDirectory: '/workspace/kyber-weave',
-    repo: 'kyber-weave',
-    started: '2026-09-06T14:30:00Z',
-    outcome: {
-      status: 'success',
-      exitCode: 0,
-      passingTests: 18,
-      failingTests: 0,
-      errorCount: 0,
-      reason: 'All tests passed cleanly',
-    },
-    turns: [
-      {
-        turnIndex: 0,
-        phase: 'exploration',
-        tools: ['grep_search'],
-        tokens: { freshInput: 950, cacheRead: 200, output: 210, all: 1360 },
-        cost: { basis: 'published', status: 'priced', value: 0.018, currency: 'USD' },
-      },
-      {
-        turnIndex: 1,
-        phase: 'implementation',
-        tools: ['edit_file'],
-        tokens: { freshInput: 1100, cacheRead: 800, output: 450, all: 2350 },
-        cost: { basis: 'published', status: 'priced', value: 0.032, currency: 'USD' },
-      },
-      {
-        turnIndex: 2,
-        phase: 'implementation',
-        tools: ['edit_file'],
-        tokens: { freshInput: 600, cacheRead: 1400, output: 300, all: 2300 },
-        cost: { basis: 'published', status: 'priced', value: 0.024, currency: 'USD' },
-      },
-      {
-        turnIndex: 3,
-        phase: 'verification',
-        tools: ['test'],
-        commands: ['npm test'],
-        tokens: { freshInput: 750, cacheRead: 1700, output: 110, all: 2560 },
-        cost: { basis: 'published', status: 'priced', value: 0.016, currency: 'USD' },
-      },
-      {
-        turnIndex: 4,
-        phase: 'resolution',
-        tools: ['task_complete'],
-        tokens: { freshInput: 300, cacheRead: 1900, output: 80, all: 2280 },
-        cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
-      },
-    ],
-  },
-]
+const PHASES: TaskPhase[] = ['exploration', 'implementation', 'verification', 'resolution']
+const SIGNAL_STATUSES: ReadonlySet<string> = new Set([
+  'compared',
+  'not_comparable',
+  'missing_in_a',
+  'missing_in_b',
+])
+const OUTCOME_STATUSES: ReadonlySet<string> = new Set([
+  'success',
+  'failure',
+  'abandoned',
+  'inconclusive',
+  'not_measurable',
+])
 
-const SAMPLE_PROPOSED_PAIRS: ProposedPairCandidate[] = [
-  {
-    pairId: 'pair:run-claude-baseline:run-copilot-candidate',
-    runAId: 'run-claude-baseline',
-    runBId: 'run-copilot-candidate',
-    taskFamily: 'auth-jwt-refresh',
-    confidence: 0.85,
-    heuristics: [
-      'same_task_family',
-      'same_working_directory',
-      'different_harness',
-      'outcome_comparable',
-      'temporal_proximity',
-    ],
-    reasons: [
-      'Identical task family: "auth-jwt-refresh"',
-      'Matching workspace: "/workspace/kyber-weave"',
-      'Cross-harness comparison (claude-code vs copilot)',
-      'Both runs achieved clean exit status: success',
-    ],
-    completedPairCount: 6,
-    meetsSufficiencyThreshold: true,
-    canPromote: true,
-    recommendationStatus: 'promoted',
-    verdictMessage:
-      'Sufficiency threshold satisfied (n = 6 >= 5 completed pairs). Recommendations promoted for task family "auth-jwt-refresh". User confirmation required.',
-  },
-]
+function isPhase(value: unknown): value is TaskPhase {
+  return value === 'exploration' || value === 'implementation' || value === 'verification' || value === 'resolution'
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function toOutcome(raw: unknown): OutcomeSummary | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const record = raw as Record<string, unknown>
+  const status = asString(record.status)
+  const mapped = status && OUTCOME_STATUSES.has(status)
+    ? (status as OutcomeSummary['status'])
+    : record.abandoned === true
+      ? 'abandoned'
+      : undefined
+  if (!mapped) return undefined
+  const testDelta = record.testDelta
+  const failingFromDelta =
+    testDelta && typeof testDelta === 'object' && !Array.isArray(testDelta)
+      ? asNumber((testDelta as Record<string, unknown>).failed)
+      : undefined
+  return {
+    status: mapped,
+    exitCode: asNumber(record.exitCode),
+    failingTests: asNumber(record.failingTests) ?? failingFromDelta,
+    passingTests: asNumber(record.passingTests),
+    errorCount: asNumber(record.errorCount),
+    reason: asString(record.reason),
+  }
+}
+
+function toCandidate(row: KyberRunSummary): RunCandidate {
+  return {
+    runId: row.runId,
+    harness: row.harness,
+    label: row.label ?? undefined,
+    workingDirectory: row.workingDirectory,
+    started: row.started ?? undefined,
+    ended: row.ended ?? undefined,
+    outcome: toOutcome(row.outcome),
+    turns: [],
+  }
+}
+
+function toTurn(raw: Record<string, unknown> | null): RunTurnSummary | null {
+  if (!raw) return null
+  const tokensRaw = raw.tokens
+  const tokens =
+    tokensRaw && typeof tokensRaw === 'object' && !Array.isArray(tokensRaw)
+      ? (tokensRaw as Record<string, unknown>)
+      : undefined
+  const costRaw = raw.cost
+  const cost =
+    costRaw && typeof costRaw === 'object' && !Array.isArray(costRaw)
+      ? (costRaw as Record<string, unknown>)
+      : undefined
+  const tools = Array.isArray(raw.tools) ? raw.tools.filter((t): t is string => typeof t === 'string') : undefined
+  const commands = Array.isArray(raw.commands)
+    ? raw.commands.filter((t): t is string => typeof t === 'string')
+    : undefined
+  return {
+    turnIndex: asNumber(raw.turnIndex) ?? 0,
+    spanId: asString(raw.spanId),
+    phase: isPhase(raw.phase) ? raw.phase : undefined,
+    tokens: tokens
+      ? {
+          freshInput: asNumber(tokens.freshInput),
+          cacheRead: asNumber(tokens.cacheRead),
+          cacheCreation: asNumber(tokens.cacheCreation),
+          output: asNumber(tokens.output),
+          reportedInput: asNumber(tokens.reportedInput),
+          reportedOutput: asNumber(tokens.reportedOutput),
+          all: asNumber(tokens.all),
+        }
+      : undefined,
+    cost: (() => {
+      if (!cost) return undefined
+      const basis = asString(cost.basis)
+      const status = asString(cost.status)
+      if (!basis || !status) return undefined
+      return {
+        basis,
+        status,
+        value: asNumber(cost.value),
+        currency: asString(cost.currency),
+      }
+    })(),
+    tools,
+    commands,
+    status: asString(raw.status),
+    summary: asString(raw.summary),
+  }
+}
+
+function toSignal(raw: Record<string, unknown>): SignalComparison {
+  const status = asString(raw.status)
+  return {
+    name: asString(raw.name) ?? 'signal',
+    label: asString(raw.label) ?? 'Signal',
+    unit: asString(raw.unit),
+    runAValue: typeof raw.runAValue === 'number' || typeof raw.runAValue === 'string' ? raw.runAValue : undefined,
+    runBValue: typeof raw.runBValue === 'number' || typeof raw.runBValue === 'string' ? raw.runBValue : undefined,
+    delta: asNumber(raw.delta),
+    status: status && SIGNAL_STATUSES.has(status) ? (status as SignalComparisonStatus) : 'not_comparable',
+    reason: asString(raw.reason),
+  }
+}
+
+function toAlignedPair(pair: KyberPhaseAlignedTurnPair): PhaseAlignedTurnPair {
+  return {
+    phase: pair.phase,
+    phaseIndex: pair.phaseIndex,
+    runATurn: toTurn(pair.runATurn),
+    runBTurn: toTurn(pair.runBTurn),
+    signals: pair.signals.map(toSignal),
+    reading: pair.reading,
+  }
+}
 
 function alignTurnsByPhase(turnsA: RunTurnSummary[], turnsB: RunTurnSummary[]): PhaseAlignedTurnPair[] {
-  const phases: TaskPhase[] = ['exploration', 'implementation', 'verification', 'resolution']
   const pairs: PhaseAlignedTurnPair[] = []
 
-  for (const phase of phases) {
+  for (const phase of PHASES) {
     const phaseTurnsA = turnsA.filter((t) => t.phase === phase)
     const phaseTurnsB = turnsB.filter((t) => t.phase === phase)
     const maxCount = Math.max(phaseTurnsA.length, phaseTurnsB.length)
@@ -252,63 +261,134 @@ function alignTurnsByPhase(turnsA: RunTurnSummary[], turnsB: RunTurnSummary[]): 
   return pairs
 }
 
+function turnTokenTotal(turn: RunTurnSummary): number {
+  return turn.tokens?.all ?? (turn.tokens?.reportedInput ?? 0) + (turn.tokens?.output ?? 0)
+}
+
 export function CompareRuns({
-  runs = SAMPLE_RUNS,
-  proposedPairs = SAMPLE_PROPOSED_PAIRS,
+  runs: injectedRuns,
+  proposedPairs = [],
   confirmedPairs = new Set<string>(),
   initialRunAId,
   initialRunBId,
   selectedAId: propA,
   selectedBId: propB,
-  taskFamily = 'auth-jwt-refresh',
+  taskFamily: taskFamilyProp,
+  comparison: injectedComparison,
   onConfirmPair,
   onSelectRunA,
   onSelectRunB,
 }: CompareRunsProps) {
-  const selectedAId = propA ?? initialRunAId ?? runs[0]?.runId ?? ''
-  const selectedBId = propB ?? initialRunBId ?? runs[1]?.runId ?? ''
-  const showProposedDrawer = true
+  const live = injectedRuns === undefined
+  const [localA, setLocalA] = useState<string | undefined>(undefined)
+  const [localB, setLocalB] = useState<string | undefined>(undefined)
+  const [showProposedDrawer, setShowProposedDrawer] = useState(true)
 
+  const {
+    data: fetchedRuns,
+    isLoading: loadingRuns,
+    isError: runsError,
+    error: runsErr,
+  } = useQuery({
+    queryKey: ['kyber-runs'],
+    queryFn: () => fetchRuns(),
+    enabled: live,
+  })
+
+  const runs = useMemo<RunCandidate[]>(
+    () => injectedRuns ?? (fetchedRuns ?? []).map(toCandidate),
+    [injectedRuns, fetchedRuns],
+  )
+
+  const selectedAId = propA ?? localA ?? initialRunAId ?? runs[0]?.runId ?? ''
+  const selectedBId =
+    propB ??
+    localB ??
+    initialRunBId ??
+    runs.find((r) => r.runId !== selectedAId)?.runId ??
+    ''
+
+  const canFetchComparison = live && selectedAId !== '' && selectedBId !== '' && selectedAId !== selectedBId
+
+  const {
+    data: fetchedComparison,
+    isLoading: loadingComparison,
+    isError: comparisonError,
+    error: comparisonErr,
+  } = useQuery({
+    queryKey: ['kyber-compare-runs', selectedAId, selectedBId],
+    queryFn: () => fetchRunComparison(selectedAId, selectedBId),
+    enabled: canFetchComparison && injectedComparison === undefined,
+    retry: false,
+  })
+
+  const comparison = injectedComparison === undefined ? fetchedComparison : injectedComparison
   const runA = runs.find((r) => r.runId === selectedAId)
   const runB = runs.find((r) => r.runId === selectedBId)
-  const pairs = runA && runB ? alignTurnsByPhase(runA.turns, runB.turns) : []
 
-  // Total metrics
-  const totalTokensA = (runA?.turns ?? []).reduce(
-    (sum, t) =>
-      sum + (t.tokens?.all ?? (t.tokens?.reportedInput ?? 0) + (t.tokens?.output ?? 0)),
-    0
-  )
-  const totalTokensB = (runB?.turns ?? []).reduce(
-    (sum, t) =>
-      sum + (t.tokens?.all ?? (t.tokens?.reportedInput ?? 0) + (t.tokens?.output ?? 0)),
-    0
-  )
-  const tokenDelta = totalTokensB - totalTokensA
+  const pairs =
+    comparison?.pairs.map(toAlignedPair) ??
+    (runA && runB ? alignTurnsByPhase(runA.turns, runB.turns) : [])
 
-  // Sufficiency and outcome guard evaluation (Criterion 3)
+  const totalTokensA =
+    asNumber(comparison?.runA.totalTokens) ??
+    (runA?.turns ?? []).reduce((sum, t) => sum + turnTokenTotal(t), 0)
+  const totalTokensB =
+    asNumber(comparison?.runB.totalTokens) ??
+    (runB?.turns ?? []).reduce((sum, t) => sum + turnTokenTotal(t), 0)
+  const tokenDelta = asNumber(comparison?.totals.tokenDelta) ?? totalTokensB - totalTokensA
+
   const activeProposedPair = proposedPairs.find(
     (p) =>
       (p.runAId === selectedAId && p.runBId === selectedBId) ||
-      (p.runAId === selectedBId && p.runBId === selectedAId)
+      (p.runAId === selectedBId && p.runBId === selectedAId),
   )
 
-  const completedPairCount = activeProposedPair?.completedPairCount ?? 6
-  const meetsSufficiency = completedPairCount >= 5
+  const verdict = comparison?.verdict
+  // Honest n: API 0/1 for this pair when the client omits completedPairCount. Never invent 6.
+  const completedPairCount = verdict?.completedPairCount ?? activeProposedPair?.completedPairCount ?? 0
   const isOutcomeRegression =
-    runA?.outcome?.status === 'success' &&
-    (runB?.outcome?.status === 'failure' || runB?.outcome?.status === 'abandoned')
-  const canPromote = meetsSufficiency && !isOutcomeRegression
+    verdict?.outcomeRegression ??
+    (runA?.outcome?.status === 'success' &&
+      (runB?.outcome?.status === 'failure' || runB?.outcome?.status === 'abandoned'))
+  const canPromote = verdict?.canPromote ?? (completedPairCount >= 5 && !isOutcomeRegression)
+  const taskFamily = comparison?.taskFamily ?? taskFamilyProp ?? runA?.taskFamily ?? runB?.taskFamily
+  const outcomeA = toOutcome(comparison?.runA.outcome) ?? runA?.outcome
+  const outcomeB = toOutcome(comparison?.runB.outcome) ?? runB?.outcome
 
+  const handleSelectA = (id: string) => {
+    setLocalA(id)
+    onSelectRunA?.(id)
+  }
+  const handleSelectB = (id: string) => {
+    setLocalB(id)
+    onSelectRunB?.(id)
+  }
   const handleConfirmPair = (pairId: string, pAId: string, pBId: string) => {
-    onSelectRunA?.(pAId)
-    onSelectRunB?.(pBId)
+    handleSelectA(pAId)
+    handleSelectB(pBId)
     onConfirmPair?.(pairId)
   }
 
+  const guardMessage = isOutcomeRegression
+    ? (verdict?.refusalReason ??
+      'Outcome regression detected between Run A and Run B. Modifications cannot be promoted to recommendations when task correctness degrades.')
+    : canPromote
+      ? (verdict?.recommendation ??
+        'The comparison between baseline and candidate satisfies the documented sufficiency threshold (n ≥ 5 completed pairs) with zero outcome regressions.')
+      : (verdict?.refusalReason ??
+        `Recommendation promotion refused: observed ${completedPairCount} completed pair(s)${taskFamily ? ` for task family "${taskFamily}"` : ''}. Minimum threshold is n ≥ 5 completed pairs. Auto-pairing is proposed only.`)
+
+  if (live && loadingRuns) {
+    return (
+      <div className="flex flex-col gap-6 p-6" data-testid="page-compare">
+        <Skeleton className="h-40" />
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-6 p-6">
-      {/* Workspace Header */}
+    <div className="flex flex-col gap-6 p-6" data-testid="page-compare">
       <div className="flex flex-col gap-1 border-b border-border pb-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-heading">
@@ -319,20 +399,36 @@ export function CompareRuns({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
-            Task Family: {taskFamily}
-          </span>
-          <button
-            type="button"
-            className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-interactive-secondary"
-          >
-            {showProposedDrawer ? 'Hide Proposed Pairs' : 'Show Proposed Pairs'} (
-            {proposedPairs.length})
-          </button>
+          {taskFamily ? (
+            <span className="rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
+              Task Family: {taskFamily}
+            </span>
+          ) : null}
+          {proposedPairs.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowProposedDrawer((open) => !open)}
+              className="rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-interactive-secondary"
+            >
+              {showProposedDrawer ? 'Hide Proposed Pairs' : 'Show Proposed Pairs'} (
+              {proposedPairs.length})
+            </button>
+          ) : null}
         </div>
       </div>
 
-      {/* Auto-Pairing Proposals (Proposed Only / User Confirmed Rule - Criterion 3) */}
+      {runsError ? (
+        <Card className="p-4 text-sm text-rose-700 dark:text-rose-300">
+          Failed to load runs: {runsErr instanceof Error ? runsErr.message : String(runsErr)}
+        </Card>
+      ) : null}
+
+      {runs.length === 0 && !runsError ? (
+        <Card className="p-8 text-center text-sm text-tertiary-foreground" data-testid="compare-empty">
+          No runs in the live store. Ingest telemetry into canon.db before comparing.
+        </Card>
+      ) : null}
+
       {showProposedDrawer && proposedPairs.length > 0 && (
         <Card className="flex flex-col gap-3 border-sky-500/30 bg-sky-500/5 p-4 dark:border-sky-500/20 dark:bg-sky-500/10">
           <div className="flex items-center justify-between">
@@ -415,136 +511,151 @@ export function CompareRuns({
         </Card>
       )}
 
-      {/* Comparison Selectors */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Card className="flex flex-col gap-2 p-4">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-heading">
-            Run A (Baseline)
-          </label>
-          <select
-            value={selectedAId}
-            onChange={(e) => onSelectRunA?.(e.target.value)}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {runs.map((r) => (
-              <option key={r.runId} value={r.runId}>
-                {r.label ?? r.runId} ({r.harness})
-              </option>
-            ))}
-          </select>
-          {runA && (
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
-              <span>Harness: <strong className="text-foreground">{runA.harness}</strong></span>
-              <span>Turns: <strong className="text-foreground">{runA.turns.length}</strong></span>
-              <span>
-                Outcome:{' '}
-                <strong
-                  className={
-                    runA.outcome?.status === 'success'
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-rose-600 dark:text-rose-400'
-                  }
-                >
-                  {runA.outcome?.status ?? 'unobserved'}
-                </strong>
-              </span>
-            </div>
-          )}
-        </Card>
-
-        <Card className="flex flex-col gap-2 p-4">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-heading">
-            Run B (Candidate)
-          </label>
-          <select
-            value={selectedBId}
-            onChange={(e) => onSelectRunB?.(e.target.value)}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            {runs.map((r) => (
-              <option key={r.runId} value={r.runId}>
-                {r.label ?? r.runId} ({r.harness})
-              </option>
-            ))}
-          </select>
-          {runB && (
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
-              <span>Harness: <strong className="text-foreground">{runB.harness}</strong></span>
-              <span>Turns: <strong className="text-foreground">{runB.turns.length}</strong></span>
-              <span>
-                Outcome:{' '}
-                <strong
-                  className={
-                    runB.outcome?.status === 'success'
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-rose-600 dark:text-rose-400'
-                  }
-                >
-                  {runB.outcome?.status ?? 'unobserved'}
-                </strong>
-              </span>
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* Sufficiency Verdict Banner (Acceptance Criterion 3) */}
-      <Card
-        className={`flex flex-col gap-2 p-4 ${
-          isOutcomeRegression
-            ? 'border-rose-500/40 bg-rose-500/5 dark:border-rose-500/30 dark:bg-rose-500/10'
-            : canPromote
-              ? 'border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/30 dark:bg-emerald-500/10'
-              : 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/30 dark:bg-amber-500/10'
-        }`}
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span
-              className={`rounded px-2 py-0.5 text-xs font-semibold uppercase ${
-                isOutcomeRegression
-                  ? 'bg-rose-500/20 text-rose-800 dark:text-rose-200'
-                  : canPromote
-                    ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200'
-                    : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
-              }`}
+      {runs.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Card className="flex flex-col gap-2 p-4">
+            <label htmlFor="compare-run-a" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
+              Run A (Baseline)
+            </label>
+            <select
+              id="compare-run-a"
+              data-testid="compare-run-a"
+              value={selectedAId}
+              onChange={(e) => handleSelectA(e.target.value)}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              {isOutcomeRegression
-                ? 'Outcome Regression Guard Refusal'
-                : canPromote
-                  ? 'Sufficiency Threshold Met (n ≥ 5)'
-                  : 'Candidate Only (n < 5 Minimum Required)'}
-            </span>
-            <span className="text-xs font-medium text-foreground">
-              Completed Pairs: {completedPairCount} / 5 minimum
+              {runs.map((r) => (
+                <option key={r.runId} value={r.runId}>
+                  {r.label ?? r.runId} ({r.harness})
+                </option>
+              ))}
+            </select>
+            {runA && (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
+                <span>Harness: <strong className="text-foreground">{runA.harness}</strong></span>
+                <span>Turns: <strong className="text-foreground">{comparison?.runA.turnCount ?? runA.turns.length}</strong></span>
+                <span>
+                  Outcome:{' '}
+                  <strong
+                    className={
+                      outcomeA?.status === 'success'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }
+                  >
+                    {outcomeA?.status ?? 'unobserved'}
+                  </strong>
+                </span>
+              </div>
+            )}
+          </Card>
+
+          <Card className="flex flex-col gap-2 p-4">
+            <label htmlFor="compare-run-b" className="text-[11px] font-semibold uppercase tracking-wider text-heading">
+              Run B (Candidate)
+            </label>
+            <select
+              id="compare-run-b"
+              data-testid="compare-run-b"
+              value={selectedBId}
+              onChange={(e) => handleSelectB(e.target.value)}
+              className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Select a run</option>
+              {runs.map((r) => (
+                <option key={r.runId} value={r.runId}>
+                  {r.label ?? r.runId} ({r.harness})
+                </option>
+              ))}
+            </select>
+            {runB && (
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-tertiary-foreground">
+                <span>Harness: <strong className="text-foreground">{runB.harness}</strong></span>
+                <span>Turns: <strong className="text-foreground">{comparison?.runB.turnCount ?? runB.turns.length}</strong></span>
+                <span>
+                  Outcome:{' '}
+                  <strong
+                    className={
+                      outcomeB?.status === 'success'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }
+                  >
+                    {outcomeB?.status ?? 'unobserved'}
+                  </strong>
+                </span>
+              </div>
+            )}
+          </Card>
+        </div>
+      ) : null}
+
+      {comparisonError ? (
+        <Card className="p-4 text-sm text-rose-700 dark:text-rose-300">
+          Failed to compare runs: {comparisonErr instanceof Error ? comparisonErr.message : String(comparisonErr)}
+        </Card>
+      ) : null}
+
+      {canFetchComparison && loadingComparison ? <Skeleton className="h-24" /> : null}
+
+      {verdict || (!live && selectedAId && selectedBId && selectedAId !== selectedBId) ? (
+        <Card
+          data-testid="compare-n-guard"
+          className={`flex flex-col gap-2 p-4 ${
+            isOutcomeRegression
+              ? 'border-rose-500/40 bg-rose-500/5 dark:border-rose-500/30 dark:bg-rose-500/10'
+              : canPromote
+                ? 'border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/30 dark:bg-emerald-500/10'
+                : 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/30 dark:bg-amber-500/10'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-semibold uppercase ${
+                  isOutcomeRegression
+                    ? 'bg-rose-500/20 text-rose-800 dark:text-rose-200'
+                    : canPromote
+                      ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-200'
+                      : 'bg-amber-500/20 text-amber-800 dark:text-amber-200'
+                }`}
+              >
+                {isOutcomeRegression
+                  ? 'Outcome Regression Guard Refusal'
+                  : canPromote
+                    ? 'Sufficiency Threshold Met (n ≥ 5)'
+                    : 'Candidate Only (n < 5 Minimum Required)'}
+              </span>
+              <span className="text-xs font-medium text-foreground">
+                Completed Pairs: {completedPairCount} / 5 minimum
+              </span>
+            </div>
+
+            <span className="text-xs tabular-nums text-tertiary-foreground">
+              Token Delta: {tokenDelta > 0 ? `+${tokenDelta.toLocaleString()}` : tokenDelta.toLocaleString()}
             </span>
           </div>
 
-          <span className="text-xs tabular-nums text-tertiary-foreground">
-            Token Delta: {tokenDelta > 0 ? `+${tokenDelta.toLocaleString()}` : tokenDelta.toLocaleString()}
-          </span>
+          <p className="text-xs text-muted-foreground">{guardMessage}</p>
+        </Card>
+      ) : null}
+
+      {selectedAId && selectedBId && selectedAId !== selectedBId ? (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-heading">
+            Phase-Aligned Turn Diff
+          </h2>
+          {loadingComparison && live ? (
+            <Skeleton className="h-40" />
+          ) : (
+            <TurnAlignedDiff
+              pairs={pairs}
+              runALabel={runA?.label ?? comparison?.runA.label ?? 'Run A'}
+              runBLabel={runB?.label ?? comparison?.runB.label ?? 'Run B'}
+            />
+          )}
         </div>
-
-        <p className="text-xs text-muted-foreground">
-          {isOutcomeRegression
-            ? 'Outcome regression detected between Run A and Run B. Modifications cannot be promoted to recommendations when task correctness degrades.'
-            : canPromote
-              ? 'The comparison between baseline and candidate satisfies the documented sufficiency threshold (n ≥ 5 completed pairs) with zero outcome regressions.'
-              : `Recommendation promotion refused: observed ${completedPairCount} completed pairs for task family "${taskFamily}". Minimum threshold is n ≥ 5 completed pairs. Auto-pairing is proposed only.`}
-        </p>
-      </Card>
-
-      {/* Phase-Aligned Turn Diff */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-heading">
-          Phase-Aligned Turn Diff
-        </h2>
-        <TurnAlignedDiff
-          pairs={pairs}
-          runALabel={runA?.label ?? 'Run A'}
-          runBLabel={runB?.label ?? 'Run B'}
-        />
-      </div>
+      ) : null}
     </div>
   )
 }

@@ -1,0 +1,12 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`formatRefreshReport > prints a stable header, one row per harness, and a derived summary without local paths 1`] = `
+"Harness                 Units  Changed  Skipped  New  Updated  Problems  Status
+antigravity                24        1       23  18        0         0  ok
+antigravity-cli           475        2      473  31        4         1  partial
+antigravity-ide             2        0        2   0        0         0  unchanged
+pi                          0        0        0   0        0         0  unavailable
+Derived: 49 sessions, 47 runs, 63 executions, 38 harness rollups
+Refresh completed.
+"
+`;

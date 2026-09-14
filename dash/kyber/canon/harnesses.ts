@@ -9,8 +9,9 @@
 
 import {
   harnessDimensionAvailability,
-  SURVEYED_HARNESSES,
+  isExcludedHarnessIdentity,
 } from './measurability.js'
+import { HARNESS_DESCRIPTORS } from '../refresh/registry.js'
 import { CanonStore } from './store.js'
 import {
   isNotMeasurable,
@@ -411,7 +412,8 @@ export function buildRollupForHarness(store: CanonStore, harness: string): Harne
  * Compute aggregate harness rollups and store them in the canonical store (Task E2).
  *
  * Overload 1: Build and persist rollup for a single specified harness.
- * Overload 2: Build and persist rollups for all surveyed and observed harnesses in the store.
+ * Overload 2: Build and persist rollups for every registered harness source plus
+ * observed coding-harness ids. Gemini is never seeded.
  */
 export function buildHarnessRollup(store: CanonStore, harnessId: string): HarnessRollupRow
 export function buildHarnessRollup(store: CanonStore): HarnessRollupRow[]
@@ -425,9 +427,9 @@ export function buildHarnessRollup(
     return row
   }
 
-  const allHarnesses = Array.from(
-    new Set([...SURVEYED_HARNESSES, ...store.listHarnesses()]),
-  ).sort()
+  const registered = HARNESS_DESCRIPTORS.map((descriptor) => descriptor.harnessId)
+  const observed = store.listHarnesses().filter((harness) => !isExcludedHarnessIdentity(harness))
+  const allHarnesses = Array.from(new Set([...registered, ...observed])).sort()
 
   const results: HarnessRollupRow[] = []
   const built = new Set<string>()

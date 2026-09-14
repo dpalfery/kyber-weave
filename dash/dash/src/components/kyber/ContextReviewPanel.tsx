@@ -1,14 +1,11 @@
 // Context Review Panel for KyberDash
-// (Plan: docs/plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md,
-// Task G5: LLM Context Review Seam; Decision D8, Decision D10; ADR 0006, ADR 0011).
+// (Plan: docs/plans/2026-09-06-kyberdash-spine.md § B3; ADR 0015 opt-in LLM context review seam).
 //
-// Acceptance Criteria:
-// 1. Decision D10 compliance: Explicit opt-in per invocation. Review is NEVER invoked automatically or during ingestion.
-// 2. Shows payload preview and token size before user confirms and sends to provider.
-// 3. Default is unconfigured (graceful notice with instructions on setting API key / endpoint, no error throws).
-// 4. Decision D8 compliance: Recommendations strictly emphasize relocation, progressive disclosure, on-demand loading,
-//    or tool deferral, and forbid advising deletion of skills or rules outright.
-// 5. Output is strictly informational and is NEVER written into a `Finding` or `findings` table in SQLite.
+// Review is NEVER invoked automatically or during ingestion — the user must click.
+// Payload preview and token size are shown before confirm. Default is unconfigured.
+// Recommendations emphasize relocation, progressive disclosure, on-demand loading,
+// or tool deferral, and never advise deleting skills or rules. Output is advisory
+// only and is never written into a Finding or findings table.
 
 import { useState, useId } from 'react'
 import {
@@ -95,7 +92,7 @@ export function ContextReviewPanel({
   const tokenEstimate = estimateTokens(content)
   const charCount = (content || '').length
 
-  // Explicit opt-in handler (Decision D10 compliance: never invoked on mount or automatically)
+  // Explicit opt-in: never invoked on mount or automatically (ADR 0015).
   const handleExecuteReview = async () => {
     setLoading(true)
     setResult(null)
@@ -163,7 +160,7 @@ export function ContextReviewPanel({
               LLM Context Review
             </h3>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-              Decision D10 Opt-In
+              Opt-in
             </span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
               Advisory Only
@@ -171,7 +168,7 @@ export function ContextReviewPanel({
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
             On-demand second-opinion diagnostic review. Never modifies canonical findings or runs automatically.
-            Adheres strictly to Decision D8 non-destructive strategies (relocation, progressive disclosure, on-demand loading).
+            Recommendations stay non-destructive: relocation, progressive disclosure, or on-demand loading.
           </p>
         </div>
 
@@ -258,7 +255,7 @@ export function ContextReviewPanel({
               )}
             </div>
             <p className="text-[11px] text-muted-foreground italic">
-              Decision D10 Guarantee: The exact text above will only leave this machine upon your confirmation.
+              The exact text above will only leave this machine upon your confirmation.
             </p>
           </div>
         )}
@@ -362,7 +359,7 @@ export function ContextReviewPanel({
             <h4 className="text-xs font-semibold">LLM Review Provider Not Configured</h4>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            KyberDash defaults to unconfigured per Decision D10 to ensure zero telemetry egress.
+            KyberDash defaults to unconfigured so nothing leaves this machine until you confirm.
             To enable context reviews on-demand, configure one of the following:
           </p>
           <div className="rounded bg-background p-3 font-mono text-[11px] text-foreground border border-border/80 space-y-1">
@@ -438,11 +435,11 @@ export function ContextReviewPanel({
             </span>
           </div>
 
-          {/* Structured Recommendations (Decision D8) */}
+          {/* Structured recommendations */}
           {result.recommendations && result.recommendations.length > 0 && (
             <div className="space-y-3 pt-2">
               <h4 className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                Recommendations (Adhering to Decision D8)
+                Recommendations
               </h4>
               <div className="grid grid-cols-1 gap-3">
                 {result.recommendations.map((rec: KyberReviewRecommendation, idx: number) => (
@@ -468,7 +465,7 @@ export function ContextReviewPanel({
 }
 
 /**
- * Recommendation card presenting a structured Decision D8 recommendation.
+ * Recommendation card for a relocation / disclosure / deferral suggestion.
  */
 function RecommendationCard({
   recommendation,
