@@ -1,10 +1,10 @@
 ---
-id: plans/tasks/T8-walking-skeleton
+id: archive/plans/2026-09-06-kyberdash-spine-tasks/T8-walking-skeleton
 title: T8 — The walking skeleton
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 

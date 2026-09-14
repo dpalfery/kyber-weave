@@ -15,6 +15,10 @@ export interface HierarchyBreadcrumbProps {
   className?: string
 }
 
+/**
+ * Renders the current diagnostic-spine path and exposes navigation callbacks
+ * for each ancestor level.
+ */
 export function HierarchyBreadcrumb({
   harness,
   runId,
@@ -48,7 +52,7 @@ export function HierarchyBreadcrumb({
     isCurrent: isAllCurrent,
     onClick: isAllCurrent ? undefined : onSelectAll,
     tag: 'Workspace',
-    testId: 'breadcrumb-attention',
+    testId: 'breadcrumb-context-doctor',
   })
 
   // Level 2: Harness

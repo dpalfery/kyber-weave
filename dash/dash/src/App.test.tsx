@@ -105,9 +105,9 @@ describe('App: Top Navigation Refactoring', () => {
   it('exports exactly the 4 header navigation tabs in NAV_TABS', () => {
     expect(NAV_TABS).toHaveLength(4)
     const keys = NAV_TABS.map((t) => t.key)
-    expect(keys).toEqual(['attention', 'usage', 'quarantine', 'problems'])
+    expect(keys).toEqual(['context-doctor', 'usage', 'quarantine', 'problems'])
     const labels = NAV_TABS.map((t) => t.label)
-    expect(labels).toEqual(['Attention', 'Usage', 'Quarantine', 'Problems'])
+    expect(labels).toEqual(['Context Doctor', 'Usage', 'Quarantine', 'Problems'])
   })
 
   it('renders exactly the 4 header tabs and spine rail destinations, excluding Compare as a peer tab', () => {
@@ -118,7 +118,7 @@ describe('App: Top Navigation Refactoring', () => {
       </QueryClientProvider>
     )
 
-    expect(html).toContain('data-testid="nav-tab-attention"')
+    expect(html).toContain('data-testid="nav-tab-context-doctor"')
     expect(html).toContain('data-testid="nav-tab-usage"')
     expect(html).toContain('data-testid="nav-tab-quarantine"')
     expect(html).toContain('data-testid="nav-tab-problems"')
@@ -132,7 +132,7 @@ describe('App: Top Navigation Refactoring', () => {
     const navTabsMatch = html.match(/data-testid="nav-tab-[^"]+"/g)
     expect(navTabsMatch).toHaveLength(4)
 
-    expect(html).toContain('data-testid="nav-rail-attention"')
+    expect(html).toContain('data-testid="nav-rail-context-doctor"')
     expect(html).toContain('data-testid="nav-rail-sessions"')
     expect(html).toContain('data-testid="nav-rail-compare"')
     expect((html.match(/data-testid="harness-selector"/g) ?? [])).toHaveLength(1)
@@ -167,9 +167,9 @@ describe('App: Top Navigation Refactoring', () => {
     expect(usageBtnFromQuarantine).not.toContain('bg-active-primary')
   })
 
-  it('updates active page styling for attention, quarantine, and problems tabs', () => {
+  it('updates active page styling for Context Doctor, quarantine, and problems tabs', () => {
     const qc = createTestQueryClient()
-    const pages: KyberPage[] = ['attention', 'quarantine', 'problems']
+    const pages: KyberPage[] = ['context-doctor', 'quarantine', 'problems']
 
     for (const page of pages) {
       clearHooks()
@@ -227,16 +227,16 @@ describe('App: Page Switching & Title Rendering', () => {
     clearHooks()
   })
 
-  it('renders the attention landing page by default', () => {
+  it('renders the Context Doctor landing page by default', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
-        <App initialPage="attention" />
+        <App initialPage="context-doctor" />
       </QueryClientProvider>
     )
     expect(html).toContain('data-testid="page-title"')
-    expect(html).toContain('Attention')
-    expect(html).toContain('data-testid="page-attention"')
+    expect(html).toContain('Context Doctor')
+    expect(html).toContain('data-testid="page-context-doctor"')
   })
 
   it('renders page title "Compare" and the CompareRuns workspace when on compare page', () => {
@@ -272,7 +272,7 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(sessionsRail).toContain('bg-interactive-secondary')
   })
 
-  it('shows Share controls on Usage and not on Attention', () => {
+  it('shows Share controls on Usage and not on Context Doctor', () => {
     const qc = createTestQueryClient()
 
     clearHooks()
@@ -284,13 +284,13 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(usageHtml).toContain('Share this device')
 
     clearHooks()
-    const attentionHtml = renderHtml(
+    const contextDoctorHtml = renderHtml(
       <QueryClientProvider client={qc}>
-        <App initialPage="attention" />
+        <App initialPage="context-doctor" />
       </QueryClientProvider>
     )
-    expect(attentionHtml).not.toContain('Share this device')
-    expect(attentionHtml).not.toMatch(/\bD20\b|\bD21\b/)
+    expect(contextDoctorHtml).not.toContain('Share this device')
+    expect(contextDoctorHtml).not.toMatch(/\bD20\b|\bD21\b/)
   })
 
   it('renders page title "Quarantine" and QuarantineView when on quarantine page', () => {

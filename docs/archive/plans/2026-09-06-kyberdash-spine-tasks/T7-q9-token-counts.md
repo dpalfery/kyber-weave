@@ -1,10 +1,10 @@
 ---
-id: plans/tasks/T7-q9-token-counts
+id: archive/plans/2026-09-06-kyberdash-spine-tasks/T7-q9-token-counts
 title: T7 — Are Antigravity's token counts absent, or dropped in ingest?
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 

@@ -12,7 +12,7 @@ import { FindingList, getFindingRankScore } from './FindingList'
 import { HierarchyBreadcrumb } from './HierarchyBreadcrumb'
 import { ContextPressureStrip } from './ContextPressureStrip'
 import { BaselineSelect } from './BaselineSelect'
-import { Attention } from '../../pages/Attention'
+import { ContextDoctor } from '../../pages/ContextDoctor'
 import { HarnessDetail } from '../../pages/HarnessDetail'
 import { RunDetail } from '../../pages/RunDetail'
 import type {
@@ -257,7 +257,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
   it('renders Level 1: All Harnesses as active root', () => {
     const html = renderToStaticMarkup(<HierarchyBreadcrumb />)
     expect(html).toContain('hierarchy-breadcrumb')
-    expect(html).toContain('breadcrumb-attention')
+    expect(html).toContain('breadcrumb-context-doctor')
     expect(html).toContain('All Harnesses')
     expect(html).toContain('aria-current="page"')
   })
@@ -269,7 +269,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
         onSelectAll={() => {}}
       />,
     )
-    expect(html).toContain('breadcrumb-attention')
+    expect(html).toContain('breadcrumb-context-doctor')
     expect(html).toContain('breadcrumb-harness')
     expect(html).toContain('claude')
   })
@@ -283,7 +283,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
         onSelectHarness={() => {}}
       />,
     )
-    expect(html).toContain('breadcrumb-attention')
+    expect(html).toContain('breadcrumb-context-doctor')
     expect(html).toContain('breadcrumb-harness')
     expect(html).toContain('breadcrumb-run')
     expect(html).toContain('run-1234')
@@ -299,7 +299,7 @@ describe('HierarchyBreadcrumb (6-Level Spine Navigation)', () => {
         itemKey="System Prompt"
       />,
     )
-    expect(html).toContain('breadcrumb-attention')
+    expect(html).toContain('breadcrumb-context-doctor')
     expect(html).toContain('breadcrumb-harness')
     expect(html).toContain('breadcrumb-run')
     expect(html).toContain('breadcrumb-execution')
@@ -389,10 +389,10 @@ describe('FindingList (Decision D6 Ranking & D8 Recommendations)', () => {
   })
 })
 
-describe('Pages Smoke Rendering: Attention, HarnessDetail, RunDetail', () => {
-  it('renders Attention page (Level 1)', () => {
+describe('Pages Smoke Rendering: Context Doctor, HarnessDetail, RunDetail', () => {
+  it('renders Context Doctor page (Level 1)', () => {
     const html = renderWithQuery(
-      <Attention
+      <ContextDoctor
         initialHarnesses={[
           {
             harness: 'claude',
@@ -408,7 +408,7 @@ describe('Pages Smoke Rendering: Attention, HarnessDetail, RunDetail', () => {
       />,
     )
 
-    expect(html).toContain('Workspace Attention')
+    expect(html).toContain('Context Doctor')
     expect(html).toContain('finding-list')
     expect(html).toContain('Highest-Leverage Workspace Findings')
     expect(html).toContain('scorecard-matrix')

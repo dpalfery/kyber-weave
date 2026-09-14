@@ -1,10 +1,10 @@
 ---
-id: plans/tasks/T4-empty-chart-guard
+id: archive/plans/2026-09-06-kyberdash-spine-tasks/T4-empty-chart-guard
 title: T4 — A chart with no data is not a chart
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 

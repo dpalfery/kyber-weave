@@ -43,7 +43,7 @@ Observability belongs where the developer already works:
 
 | Capability | How It Solves the Problem |
 |---|---|
-| **6-Level Diagnostic Spine** | Progressive-disclosure navigation across All Harnesses (Attention) → Harness → Run → AgentExecution → Turn → ContextItem. Evaluated across 6 independent dimension vectors without composite scoring. |
+| **6-Level Diagnostic Spine** | Progressive-disclosure navigation across All Harnesses (Context Doctor) → Harness → Run → AgentExecution → Turn → ContextItem. Evaluated across 6 independent dimension vectors without composite scoring. |
 | **Context Inspector & Copy-Out** | Reads unclipped plain-text context blocks subdivided by part, with whole-turn and per-block clipboard export. Governed by a default 14-day rolling retention window and CLI purge command (`kyber purge-content`). |
 | **Telemetry-Grounded Finding Engine** | Detects structural context defects (duplicate schemas, prefix instability, compaction bloat) with ≥2 linked evidence rows, outcome-risk caveats, and waste ranking (`waste × risk × confidence`). Enforces relocation over deletion. |
 | **Phase-Aligned Run Comparison** | Compares runs of a task family aligned by logical phase rather than turn index. Enforces statistical sufficiency ($n \ge 5$ completed pairs without regression) and tracks prediction calibration curves. |

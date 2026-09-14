@@ -24,6 +24,7 @@ public sealed class DocsValidateCommand : Command<DocsSettings>
         DocumentSet set = new DocumentLoader(settings.Path, ontology).Load();
         report.AddRange(new DocSpecValidator(settings.Path, ontology).Validate(set).Items);
         report.AddRange(new ConfigRegValidator(settings.Path, config.WithOntology(ontology)).Validate().Items);
+        report.AddRange(new PlanInventoryValidator(config.WithOntology(ontology)).Validate(set).Items);
         try
         {
             report.AddRange(new ManagedGlossaryService(

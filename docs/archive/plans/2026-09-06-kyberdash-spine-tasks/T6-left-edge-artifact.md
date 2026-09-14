@@ -1,10 +1,10 @@
 ---
-id: plans/tasks/T6-left-edge-artifact
+id: archive/plans/2026-09-06-kyberdash-spine-tasks/T6-left-edge-artifact
 title: T6 — Find what renders outside the shell
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 

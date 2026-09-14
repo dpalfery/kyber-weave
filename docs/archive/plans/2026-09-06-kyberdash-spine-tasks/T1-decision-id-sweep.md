@@ -1,10 +1,10 @@
 ---
-id: plans/tasks/T1-decision-id-sweep
+id: archive/plans/2026-09-06-kyberdash-spine-tasks/T1-decision-id-sweep
 title: T1 — Delete decision-id narration from spine components
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 
