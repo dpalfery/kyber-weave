@@ -1,2 +1,7 @@
 # Default owners for everything in the repo.
 * @dpalfery
+
+# Release publishing is admin-only. CODEOWNERS cannot stop workflow_dispatch;
+# .github/workflows/release.yml also refuses any actor other than dpalfery.
+.github/workflows/release.yml @dpalfery
+scripts/next-release-version.sh @dpalfery

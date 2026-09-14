@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-10
+last-reviewed: 2026-09-13
 ---
 
 # Distribution and release flow
@@ -131,21 +131,50 @@ leaves them untouched for a human refresh after a fresh Kyber-Weave release cand
 
 ## Release flow
 
-Cut a release in either way (the `v*` tag is the version source of truth):
+The usual cut is Actions → Release → Run workflow, **from `main`**. Only
+`dpalfery` can start it (the workflow refuses any other actor; CODEOWNERS
+requires the same review on changes to the pipeline itself). There is no
+version field:
 
-1. **Push a tag:** `git tag v0.1.1 && git push origin v0.1.1` (or pre-release tags like `v0.2.0-rc.1` or `v0.2.0-dev.1`)
-2. **Or Run workflow:** Actions → Release → Run workflow → enter `0.1.1` (or `v0.1.1`, `0.2.0-rc.1`, `0.2.0-dev.1`).  
-   The workflow creates tag `v0.1.1` at that commit via `gh release create --target`  
-   (it does not `git push` a tag, so the workflow is not re-triggered).
+- Leave **Make production release** unchecked (the default) to publish the next
+  RC. `scripts/next-release-version.sh` increments only the RC number
+  (`0.1.7-rc.9` → `0.1.7-rc.10`; after a stable `0.1.6` with no RC line,
+  `0.1.7-rc.1`).
+- Check it to publish the next stable: promote the current RC line
+  (`0.1.7-rc.9` → `0.1.7`) or, when the highest origin tag is already stable,
+  bump patch (`0.1.7` → `0.1.8`).
+
+That run is the whole cut except one click from David Palfery. Builds start
+immediately. Publish waits on the `release` environment.
+
+**Where to approve:** open the workflow run you just started (Actions → Release →
+that run). After the build jobs go green, two jobs sit on a yellow clock named
+**David Palfery must approve**. At the **top right of that same page**, click
+**Review deployments**, tick `release`, then **Approve and deploy**. GitHub also
+emails a “review pending deployment” notice. Nobody else is a reviewer, so
+nobody else can publish.
+
+`GITHUB_TOKEN` then creates tag `v…` at that commit via `gh release create
+--target` (it does not `git push` a tag, and events from `GITHUB_TOKEN` do not
+re-trigger the workflow). There is no PAT and no version to type.
+
+Pushing a tag remains the path for a minor, major, or `-dev.N` cut:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
 
 Then `.github/workflows/release.yml` stamps that version onto the binaries, publishes
 each RID, builds the Squad archives via `squad pack`, and creates a GitHub Release with
-all archives and `SHA256SUMS.txt` (passing `--prerelease=auto` for pre-release tags and
+all archives and `SHA256SUMS.txt` (passing `--prerelease` for hyphenated pre-releases and
 `--generate-notes` for changelogs).
 Pushes `PackAsTool` nupkgs (including pre-release versions) to GitHub Packages
 (`https://nuget.pkg.github.com/dpalfery`) — never to nuget.org.
 
-Check **dry_run** on a manual run to build artifacts only (no tag, no Release).
+The `refs/tags/v*` ruleset still blocks rewriting or deleting a published tag
+except for repository admins. Creating a tag is allowed so the workflow can mint
+one. Only `dpalfery` can run this workflow; a tag push from anyone else is
+refused at the authorize job.
 
 No npm or Homebrew secrets are required. Since the install script reads only Release
 assets, creating the GitHub Release alone is enough for the documented install path.
