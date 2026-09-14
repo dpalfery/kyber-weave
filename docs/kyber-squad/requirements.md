@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-30
+last-reviewed: 2026-09-14
 status: current
 ---
 
@@ -59,14 +59,14 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Cursor** | Native `.cursor/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **Claude** | Native `.claude/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **GitHub Copilot** | Native instructions/agents | Implemented and registered | Supported | Not lowered | Native execution |
-| **OpenCode** | Native `.opencode/agents` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
+| **OpenCode** | Native `.opencode/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **Kilo** | Native `.kilo/agents` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
 | **Antigravity** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Safety-narrowed |
 | **Warp** | Role skills | Unsupported; coverage preflight fails | Unavailable | Lowered (`role-*` on collision) | Not implemented |
 | **Factory Droids** | Native `.factory/` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
 
-The nine rows are the declared target roster. Only `copilot`, `cursor`, `claude`, `codex`, and
-`antigravity` have implemented and registered renderers. `opencode`, `kilo`, `warp`, and `factory`
+The nine rows are the declared target roster. Only `copilot`, `cursor`, `claude`, `codex`,
+`antigravity`, and `opencode` have implemented and registered renderers. `kilo`, `warp`, and `factory`
 fail renderer-coverage preflight before deployment.
 
 ---

@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-14
 ---
 
 # Kyber-Weave Plan Inventory
@@ -15,12 +15,13 @@ Every plan document under `docs/plans/` must be reachable from this inventory, d
 
 ## Active Plans
 
-None. Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
+None.
 
 ## Archived Plans
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-09-14-opencode-native-renderer.md](2026-09-14-opencode-native-renderer.md) | Completed | 2026-09-14 | | | Implement and register an ISquadRenderer for SquadTarget.OpenCode (opencode) with native OpenCode agent and skill layouts. |
 | [2026-09-06-kyberdash-refresh-pipeline.md](../archive/plans/2026-09-06-kyberdash-refresh-pipeline.md) | Complete | 2026-09-06 | 2026-09-13 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) | Implement `kyber-weave dash refresh` as a bounded, checkpointed, record-windowed local harness-source pipeline. Residual: T8 live-source smoke and findings API harness filter not claimed shipped. |
 | [2026-09-06-kyberdash-spine.md](../archive/plans/2026-09-06-kyberdash-spine.md) | Complete | 2026-09-06 | 2026-09-13 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md)–[0015](../adr/0015-opt-in-llm-context-review-seam.md), [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) | Deliver the KyberDash six-level diagnostic spine (D17–D22 harvested). Same residual T8/findings-filter notes as the refresh plan. Its Phase A dispatch pack (T1–T8 and the `spine.spec.ts` gate) is archived alongside in [2026-09-06-kyberdash-spine-tasks/](../archive/plans/2026-09-06-kyberdash-spine-tasks/README.md). |
 | [2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md](../archive/plans/2026-09-05-kyberdash-diagnostic-hierarchy-and-context-inspector.md) | Superseded | 2026-09-05 | 2026-09-12 | [dash/architecture.md](../dash/architecture.md), [ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md), [ADR 0013](../adr/0013-telemetry-grounded-finding-contracts-and-waste-ranking.md), [ADR 0014](../adr/0014-unclipped-turn-inspection-and-copy-out-protocol.md), [ADR 0015](../adr/0015-opt-in-llm-context-review-seam.md), superseded by [2026-09-06-kyberdash-spine.md](../archive/plans/2026-09-06-kyberdash-spine.md) | Turn KyberDash from a per-session analysis view into a navigable diagnostic product. ADRs 0012–0015 remain the harvest. Remaining live Phase G work (G2/G3, G1-under-Turn, G4) transferred to the 2026-09-06 spine (Phase B); this plan is no longer execution authority. |

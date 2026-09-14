@@ -400,7 +400,9 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("antigravity", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("copilot", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("claude", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("opencode", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("opencode", pendingSection, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

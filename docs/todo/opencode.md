@@ -4,11 +4,16 @@ title: Add a native OpenCode renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-31
-status: draft
+last-reviewed: 2026-09-14
+status: superseded
 ---
 
 # Add a native OpenCode renderer to Kyber-Squad
+
+> [!NOTE]
+> **Superseded by implementation plan:** This todo has been superseded by active plan
+> [docs/plans/2026-09-14-opencode-native-renderer.md](../plans/2026-09-14-opencode-native-renderer.md),
+> which defines the architecture decisions and task breakdown for implementing `OpenCodeRenderer`.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
@@ -16,15 +21,12 @@ implementation.
 
 ## Why this exists
 
-`squad install --target opencode` fails today, in preflight, before any network call:
-`SquadRendererRegistry` (`src/KyberWeave.Core/Squad/Rendering/SquadRendererRegistry.cs`)
-has renderers for Copilot, Cursor, Claude, Codex, and Antigravity. This target has no
-`ISquadRenderer` implementation, so requesting it is rejected with a message
-naming the gap and pointing here. See
-[architecture.md §8](../kyber-squad/architecture.md#8-rendering) for how the render pipeline
-as a whole works, and
-[onboarding.md](../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
-full target roster and its current coverage.
+Historically, `squad install --target opencode` failed in preflight before any network call
+because `SquadRendererRegistry` only had renderers for Copilot, Cursor, Claude, Codex, and
+Antigravity. This gap is addressed by `OpenCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`).
+See [architecture.md §8](../kyber-squad/architecture.md#8-rendering) for how the render pipeline
+as a whole works, and [onboarding.md](../kyber-squad/onboarding.md#harness-targets-and-auto-detection)
+for the full target roster and its current coverage.
 
 ## Classification
 
