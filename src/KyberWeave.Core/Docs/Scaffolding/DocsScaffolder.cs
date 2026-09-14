@@ -612,7 +612,8 @@ public static class DocsScaffolder
         "plans" => ("Plans",
             "Sequenced implementation work: what will be done, in what order, and how it will be\n"
             + "verified. A plan is a record of intent rather than current guidance — retrieval\n"
-            + "demotes it accordingly, and it is archived once closed."),
+            + "demotes it accordingly. While open it is linked from this index; once closed it is\n"
+            + "archived."),
         "specs" => ("Specifications",
             "Upfront specification work for a greenfield project or a large feature, written when\n"
             + "requirements and architecture still need defining before a plan can exist."),

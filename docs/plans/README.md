@@ -11,6 +11,8 @@ last-reviewed: 2026-09-13
 
 This inventory tracks architectural and implementation plans across their lifecycle. Active plans guide current execution; completed plans have their durable architectural decisions harvested into [ADRs](../adr/README.md) and canonical documentation, and are archived to `docs/archive/plans/`.
 
+Every plan document under `docs/plans/` must be reachable from this inventory, directly or through a plan it links. `docs validate` reports one that is not as `KW-DOC-LIFECYCLE-001`.
+
 ## Active Plans
 
 None. Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.

@@ -5,10 +5,11 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-09-13
 code-refs:
   - DocSpecValidator
   - DocDriftLinter
+  - PlanInventoryValidator
 ---
 
 # Documentation governance gates
@@ -43,11 +44,21 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-SPEC-007` | `technology` declared on a document that is not a coding standard, or naming a technology other than its folder |
 | `KW-CONFIG-REG-001` | A configuration registry property names a path that does not exist |
 | `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
+| `KW-DOC-LIFECYCLE-001` | A `plan` document sits in the plans folder but the plan index does not reach it |
 
 The two `KW-CONFIG-REG` rules fire only once a repository has adopted the registry — its
 `AGENTS.md` carries the generated block, or it declared `config-reg` entries. A corpus that
 predates the registry is silent rather than failing on a structure it never asked for. Both
 are fixed by re-running `docs init`, which regenerates the block.
+
+`KW-DOC-LIFECYCLE-001` keeps the plan inventory honest. A plan is open while it is in the
+plans folder and closed once archived, so a plan document in that folder that the index
+does not list is live to retrieval but invisible to anyone reading the inventory. Listed
+means reachable: the index links a plan, and a plan may link the documents it dispatches,
+so a task pack is listed through its own README. Only links between documents inside the
+plans folder count — a canonical page linking a plan does not list it. The index is the
+`plan-index` registry property; a corpus without that document reports nothing. Fix it by
+linking the plan from the index, or by archiving it.
 
 `KW-DOC-SPEC-004` and `-006` carry a **nearest-match hint** computed by edit distance,
 offered only when the distance is plausibly a typo rather than a different word. A
