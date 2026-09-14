@@ -1,10 +1,10 @@
 ---
-id: plans/tasks/T3-fabricated-harnesses
+id: archive/plans/2026-09-06-kyberdash-spine-tasks/T3-fabricated-harnesses
 title: T3 — Delete the fabricated harness catalogue and Attention's narration
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 

@@ -1,10 +1,10 @@
 ---
-id: plans/tasks/T5-mono-numerals
+id: archive/plans/2026-09-06-kyberdash-spine-tasks/T5-mono-numerals
 title: T5 — Every number is mono and tabular
 doc-type: plan
-status: needs-review
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-06
+last-reviewed: 2026-09-13
 component: KyberDash
 ---
 

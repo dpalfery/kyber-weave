@@ -52,7 +52,7 @@ tasks below. No third plan file.
 
 Consolidates and replaces three earlier drafts (the 09-05 diagnostic-hierarchy plan, the 09-06 spine-structure plan, the 09-06 execution playbook). Interaction reference: `KyberDash.dc.html` is **not in this repository** — density mapped onto Tailwind is the goal (D22), not a pixel copy of a missing file.
 
-Task prompts (Phase A only): [`tasks/`](../../plans/tasks/). Gate: [`tasks/spine.spec.ts`](../../plans/tasks/spine.spec.ts) copied to `dash/e2e/spine.spec.ts`. Playwright `data-testid` contract: [`tasks/README.md`](../../plans/tasks/README.md). Phase A `npx --prefix dash playwright test e2e/spine.spec.ts` **must stay green**.
+Task prompts (Phase A only): [`tasks/`](2026-09-06-kyberdash-spine-tasks/). Gate: [`tasks/spine.spec.ts`](2026-09-06-kyberdash-spine-tasks/spine.spec.ts) copied to `dash/e2e/spine.spec.ts`. Playwright `data-testid` contract: [`tasks/README.md`](2026-09-06-kyberdash-spine-tasks/README.md). Phase A `npx --prefix dash playwright test e2e/spine.spec.ts` **must stay green**.
 
 ---
 
@@ -137,7 +137,7 @@ No `dash/src/**` edits. Unrelated dirty frontend/docs must not be reverted.
 
 ## 4. Task list
 
-Acceptance for every UI task is a **browser path** against `npm --prefix dash run dev` and live `~/.kyberdash/canon.db` (D1). Named `data-testid`s from [`tasks/README.md`](../../plans/tasks/README.md) plus the ids below — do not rename Phase A ids.
+Acceptance for every UI task is a **browser path** against `npm --prefix dash run dev` and live `~/.kyberdash/canon.db` (D1). Named `data-testid`s from [`tasks/README.md`](2026-09-06-kyberdash-spine-tasks/README.md) plus the ids below — do not rename Phase A ids.
 
 | Testid | On |
 |--------|-----|
@@ -331,7 +331,7 @@ Per-task browser paths are in §4. Completion report must answer **what did you 
 
 ## 11. Phase A (historical)
 
-Prompts remain in [`tasks/`](../../plans/tasks/). Do not re-run T8 as if pages were unreachable.
+Prompts remain in [`tasks/`](2026-09-06-kyberdash-spine-tasks/). Do not re-run T8 as if pages were unreachable.
 
 ## 12. Phase C — look and feel
 
@@ -343,7 +343,7 @@ D1–D6 as originally specified **already have in-tree implementations**. Remain
 
 ## 14. Related
 
-- [`tasks/`](../../plans/tasks/) — Phase A dispatch prompts and the Playwright gate
+- [`tasks/`](2026-09-06-kyberdash-spine-tasks/) — Phase A dispatch prompts and the Playwright gate
 - [Refresh pipeline plan](2026-09-06-kyberdash-refresh-pipeline.md) — archived with residual T8 live-source / findings-filter risks
 - 09-05 diagnostic-hierarchy plan — **superseded**; not execution authority (archived 2026-09-12)
 - [KyberDash architecture](../../dash/architecture.md), [runbook](../../dash/runbook.md), [telemetry inventory](../../dash/telemetry-inventory.md)
