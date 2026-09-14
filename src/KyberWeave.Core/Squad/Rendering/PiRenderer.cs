@@ -139,6 +139,18 @@ public sealed class PiRenderer : ISquadRenderer
     /// </summary>
     private static readonly object SerializerLock = new();
 
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".pi/", StringComparison.Ordinal)
+            ? baseDirectory[".pi/".Length..]
+            : baseDirectory;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Pi];
 
@@ -189,7 +201,8 @@ public sealed class PiRenderer : ISquadRenderer
                 SquadDeploymentFile principal = RenderSubagentAgent(
                     agent,
                     source.ModelProfiles.Profiles,
-                    source.CapabilityProfiles.Profiles);
+                    source.CapabilityProfiles.Profiles,
+                    request.Scope);
                 files.Add(principal);
                 SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -210,7 +223,7 @@ public sealed class PiRenderer : ISquadRenderer
                         "collision this renderer can resolve on its own.");
                 }
 
-                SquadDeploymentFile principal = RenderSkill(agent.Name, agent.Description, agent.InstructionBody);
+                SquadDeploymentFile principal = RenderSkill(agent.Name, agent.Description, agent.InstructionBody, request.Scope);
                 files.Add(principal);
                 SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -251,7 +264,7 @@ public sealed class PiRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill.Name, skill.Description, skill.InstructionBody);
+            SquadDeploymentFile principal = RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -262,7 +275,8 @@ public sealed class PiRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderSubagentAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -294,13 +308,14 @@ public sealed class PiRenderer : ISquadRenderer
             content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
         }
 
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
+            $"{agentsDir}/{agent.Name}.md",
             Encoding.UTF8.GetBytes(content),
             "pi");
     }
 
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody)
+    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody, SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -315,8 +330,9 @@ public sealed class PiRenderer : ISquadRenderer
             content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, instructionBody);
         }
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{name}/SKILL.md",
+            $"{skillsDir}/{name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "pi");
     }

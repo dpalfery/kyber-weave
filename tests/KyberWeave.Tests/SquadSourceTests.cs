@@ -11,6 +11,9 @@ namespace KyberWeave.Tests;
 
 public sealed class SquadSourceTests
 {
+    private static readonly string ProductRoot =
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
     private const string NormalizedArchitectBody = "You are architect.\nPlan first.\n";
     private const string NormalizedArchitectBodySha256 =
         "856711e391c077cbee5211b2dfb76861163472c622bf414b5a52d6ce15e0b546";
@@ -69,6 +72,132 @@ public sealed class SquadSourceTests
             profile.HarnessModels.TryGetValue("pi", out string? piModel),
             "The deep-planning profile does not expose its 'pi' harness model.");
         Assert.Equal("provider/model", piModel);
+    }
+
+    /// <summary>
+    /// Asserts every changed cell in models.yml per plan section 6b (the profile × harness table,
+    /// final state). Data-driven over (profileName, harbessName, expectedValue) tuples covering:
+    /// - All six harness columns (claude, codex, copilot, cursor, opencode, pi)
+    /// - Every profile; the `mai-code-flash` key (a model name, not a profile) must be absent from models.yml
+    /// - Both changed values and unchanged values, to catch regressions
+    /// </summary>
+    [Theory]
+    [InlineData("deep-planning", "claude", "opus")]
+    [InlineData("deep-planning", "codex", "gpt-5.6-sol")]
+    [InlineData("deep-planning", "copilot", "GPT-5.6 Sol (copilot)")]
+    [InlineData("deep-planning", "cursor", "gpt-5.6-sol[context=272k,reasoning=high,fast=false]")]
+    [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
+    [InlineData("deep-planning", "pi", "zai/glm-5.3")]
+    [InlineData("fast", "claude", "haiku")]
+    [InlineData("fast", "codex", "gpt-5.6-luna")]
+    [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
+    [InlineData("fast", "cursor", "composer-2.5[]")]
+    [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
+    [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free")]
+    [InlineData("general", "claude", "haiku")]
+    [InlineData("general", "codex", "gpt-5.6-terra")]
+    [InlineData("general", "copilot", "Grok 4.6 (copilot)")]
+    [InlineData("general", "cursor", "grok-4.6[]")]
+    [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
+    [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free")]
+    [InlineData("reviewer", "claude", "sonnet")]
+    [InlineData("reviewer", "codex", "gpt-5.6-terra")]
+    [InlineData("reviewer", "copilot", "Kimi K2.7 Code (copilot)")]
+    [InlineData("reviewer", "cursor", "kimi-k2.7-code[]")]
+    [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
+    [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code")]
+    [InlineData("orchestration", "claude", "haiku")]
+    [InlineData("orchestration", "opencode", "opencode/big-pickle")]
+    [InlineData("orchestration", "pi", "inherit")]
+    public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        Assert.True(
+            source.ModelProfiles.Profiles.ContainsKey(profileName),
+            $"models.yml does not declare the '{profileName}' profile.");
+        SquadModelProfile profile = source.ModelProfiles.Profiles[profileName];
+
+        // default: inherit is always required
+        Assert.True(
+            profile.Default == "inherit",
+            $"Profile '{profileName}' default is '{profile.Default}' instead of 'inherit'.");
+
+        if (expectedValue == "inherit")
+        {
+            // The harness-model entry should be absent or resolve to inherit
+            bool hasEntry = profile.HarnessModels.TryGetValue(harbessName, out string? actualValue);
+            Assert.True(
+                !hasEntry || actualValue == "inherit",
+                $"Profile '{profileName}' harness '{harbessName}' should be absent or 'inherit', but got '{(hasEntry ? actualValue : "(absent)")}' from models.yml.");
+        }
+        else
+        {
+            // The harness-model entry must exist and match exactly
+            Assert.True(
+                profile.HarnessModels.TryGetValue(harbessName, out string? actualValue),
+                $"Profile '{profileName}' harness '{harbessName}' is missing from models.yml.");
+            Assert.True(
+                actualValue == expectedValue,
+                $"Profile '{profileName}' harness '{harbessName}' is '{actualValue}' but should be '{expectedValue}'.");
+        }
+    }
+
+    /// <summary>
+    /// Guard against vacuous tests: reviewer must have members when it exists (plan section 7, T16 criterion 3).
+    /// </summary>
+    [Fact]
+    public void ReviewerProfileHasNonEmptyMembership()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        Assert.True(
+            source.ModelProfiles.Profiles.ContainsKey("reviewer"),
+            "models.yml does not declare a 'reviewer' profile.");
+
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+        int reviewerMemberCount = source.Agents.Count(agent => reviewerAgents.Contains(agent.Name));
+        Assert.True(
+            reviewerMemberCount > 0,
+            "No agents are assigned to the 'reviewer' profile; criterion 3 model assertion would be vacuous.");
+    }
+
+    [Fact]
+    public void MaiCodeFlashKeyIsRemovedFromModelsYml()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        Assert.False(
+            source.ModelProfiles.Profiles.ContainsKey("mai-code-flash"),
+            "models.yml still contains the 'mai-code-flash' key; it is a model name and must be removed.");
+    }
+
+    [Fact]
+    public void CodeReviewerReviewLensReviewTriageTaskReviewerDeclareReviewerProfile()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage", "task-reviewer"];
+
+        foreach (string agentName in reviewerAgents)
+        {
+            SquadAgent agent = Assert.Single(
+                source.Agents,
+                candidate => candidate.Name == agentName);
+            Assert.True(
+                agent.ModelProfile == "reviewer",
+                $"Agent '{agentName}' declares 'model-profile: {agent.ModelProfile}' instead of 'reviewer'.");
+        }
+    }
+
+    [Fact]
+    public void TestDevDeclaresModelProfileFast()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        SquadAgent testDev = Assert.Single(
+            source.Agents,
+            candidate => candidate.Name == "test-dev");
+        Assert.Equal("fast", testDev.ModelProfile);
     }
 
     /// <summary>

@@ -16,7 +16,8 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<SquadFileMutation> fileMutations,
         IReadOnlyList<SquadFilePrecondition> filePreconditions,
         SquadStateMutation lockMutation,
-        SquadStateMutation receiptMutation)
+        SquadStateMutation receiptMutation,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         TargetRoot = targetRoot;
         PhysicalRootPath = physicalRootIdentity.PhysicalPath;
@@ -28,6 +29,7 @@ public sealed class SquadDeploymentPlan
         FilePreconditions = filePreconditions;
         LockMutation = lockMutation;
         ReceiptMutation = receiptMutation;
+        _globalRoots = globalRoots;
     }
 
     /// <summary>The absolute root into which harness-native files are deployed.</summary>
@@ -54,6 +56,85 @@ public sealed class SquadDeploymentPlan
 
     internal SquadStateMutation ReceiptMutation { get; }
 
+    private readonly ISquadGlobalRootResolver? _globalRoots;
+
+    /// <summary>
+    /// Resolves the absolute physical path where <c>file.RelativePath</c> will be written,
+    /// based on the deployment scope: for <see cref="SquadDeploymentScope.Project"/> that is
+    /// <c>PhysicalRootPath</c> (the project root) combined with the relative path unchanged;
+    /// for <see cref="SquadDeploymentScope.Global"/> it is the resolver's root for
+    /// <c>file.Target</c> combined with the relative path.
+    /// </summary>
+    internal string ResolvePhysicalPath(SquadOwnedFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        return ResolvePhysicalPath(file.Target, file.RelativePath);
+    }
+
+    /// <summary>
+    /// Resolves the absolute physical path for a bare target token and relative path, for
+    /// callers such as <see cref="SquadTransaction"/> whose in-flight mutations carry a target
+    /// token rather than a full <see cref="SquadOwnedFile"/>.
+    /// </summary>
+    internal string ResolvePhysicalPath(string target, string relativePath) =>
+        SquadPathPolicy.ResolveFile(ResolvePhysicalRoot(target), relativePath);
+
+    /// <summary>
+    /// Resolves the physical root directory for a file based on its target and this plan's scope.
+    /// Used for path verification and containment checks in both Project and Global deployments.
+    /// </summary>
+    internal string ResolvePhysicalRoot(SquadOwnedFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        return ResolvePhysicalRoot(file.Target);
+    }
+
+    /// <summary>Resolves the physical root directory for a bare target token.</summary>
+    /// <remarks>
+    /// <c>globalRoots</c> is an opt-in, purely-additive parameter (R18/U8): every deployment
+    /// that predates it wrote every file under the single provided <c>PhysicalRootPath</c>
+    /// regardless of scope, because Global scope by itself only ever changed where lock,
+    /// receipt, and journal state lived (<see cref="SquadStateStore"/>), never where deployed
+    /// files landed. Falling back to <c>PhysicalRootPath</c> here when no resolver was supplied
+    /// keeps that legacy single-root behavior byte-for-byte unchanged. Once a resolver is
+    /// supplied, an unmapped target is a real bug: <see cref="SquadGlobalRoots"/> throws for it
+    /// directly, and this method never substitutes the project root for a resolver's answer.
+    /// </remarks>
+    internal string ResolvePhysicalRoot(string target) =>
+        ResolvePhysicalRoot(Scope, PhysicalRootPath, _globalRoots, target);
+
+    private static string ResolvePhysicalRoot(
+        SquadDeploymentScope scope,
+        string physicalRootPath,
+        ISquadGlobalRootResolver? globalRoots,
+        string target)
+    {
+        if (globalRoots is null)
+        {
+            return physicalRootPath;
+        }
+
+        return scope switch
+        {
+            SquadDeploymentScope.Project => physicalRootPath,
+            SquadDeploymentScope.Global => globalRoots.ResolveGlobalRoot(
+                SquadTargetCatalog.Parse([target]).Single()),
+            _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown deployment scope.")
+        };
+    }
+
+    private static string ResolvePhysicalPath(
+        SquadDeploymentScope scope,
+        string physicalRootPath,
+        ISquadGlobalRootResolver? globalRoots,
+        string target,
+        string relativePath) =>
+        SquadPathPolicy.ResolveFile(
+            ResolvePhysicalRoot(scope, physicalRootPath, globalRoots, target),
+            relativePath);
+
     /// <summary>Preflights a new installation without changing the deployment tree.</summary>
     public static SquadDeploymentPlan CreateInstall(
         string targetRoot,
@@ -62,7 +143,8 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<SquadDeploymentFile> renderedFiles,
         IReadOnlyList<SquadDegradation> degradations,
         bool adopt,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
@@ -99,6 +181,7 @@ public sealed class SquadDeploymentPlan
             preconditions.Add(SquadFilePrecondition.Missing(rendered.File.RelativePath));
             mutations.Add(SquadFileMutation.Write(
                 rendered.File.RelativePath,
+                rendered.File.Target,
                 rendered.File.Content));
             ownedFiles.Add(new SquadOwnedFile(
                 rendered.File.RelativePath,
@@ -117,7 +200,8 @@ public sealed class SquadDeploymentPlan
             mutations,
             preconditions,
             SquadStateMutation.Write,
-            SquadStateMutation.Write);
+            SquadStateMutation.Write,
+            globalRoots);
     }
 
     /// <summary>Preflights an update while preserving locally edited receipt-owned files by default.</summary>
@@ -129,7 +213,8 @@ public sealed class SquadDeploymentPlan
         SquadReceipt previousReceipt,
         IReadOnlyList<SquadDegradation> degradations,
         bool replaceManaged,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         ArgumentNullException.ThrowIfNull(previousReceipt);
@@ -155,7 +240,7 @@ public sealed class SquadDeploymentPlan
                     throw UnmanagedCollision(relativePath);
 
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath));
-                mutations.Add(SquadFileMutation.Write(relativePath, rendered.File.Content));
+                mutations.Add(SquadFileMutation.Write(relativePath, rendered.File.Target, rendered.File.Content));
                 nextOwnedFiles.Add(new SquadOwnedFile(
                     relativePath,
                     renderedDigest,
@@ -174,7 +259,7 @@ public sealed class SquadDeploymentPlan
             if (!File.Exists(rendered.FullPath))
             {
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath));
-                mutations.Add(SquadFileMutation.Write(relativePath, rendered.File.Content));
+                mutations.Add(SquadFileMutation.Write(relativePath, rendered.File.Target, rendered.File.Content));
                 nextOwnedFiles.Add(new SquadOwnedFile(
                     relativePath,
                     renderedDigest,
@@ -200,7 +285,7 @@ public sealed class SquadDeploymentPlan
                 renderedDigest,
                 StringComparison.Ordinal);
             if (fileWillBeWritten)
-                mutations.Add(SquadFileMutation.Write(relativePath, rendered.File.Content));
+                mutations.Add(SquadFileMutation.Write(relativePath, rendered.File.Target, rendered.File.Content));
 
             nextOwnedFiles.Add(new SquadOwnedFile(
                 relativePath,
@@ -214,7 +299,8 @@ public sealed class SquadDeploymentPlan
             if (renderedPaths.Contains(previous.RelativePath))
                 continue;
 
-            string fullPath = SquadPathPolicy.ResolveFile(root, previous.RelativePath);
+            string fullPath = ResolvePhysicalPath(scope, root, globalRoots, previous.Target, previous.RelativePath);
+
             if (Directory.Exists(fullPath))
             {
                 nextOwnedFiles.Add(previous);
@@ -230,7 +316,7 @@ public sealed class SquadDeploymentPlan
                 preconditions.Add(SquadFilePrecondition.Exact(
                     previous.RelativePath,
                     currentDigest));
-                mutations.Add(SquadFileMutation.Delete(previous.RelativePath));
+                mutations.Add(SquadFileMutation.Delete(previous.RelativePath, previous.Target));
             }
             else
                 nextOwnedFiles.Add(previous);
@@ -246,14 +332,16 @@ public sealed class SquadDeploymentPlan
             mutations,
             preconditions,
             SquadStateMutation.Write,
-            SquadStateMutation.Write);
+            SquadStateMutation.Write,
+            globalRoots);
     }
 
     /// <summary>Preflights an ownership-aware uninstall without changing the deployment tree.</summary>
     public static SquadDeploymentPlan CreateUninstall(
         string targetRoot,
         SquadDeploymentScope scope,
-        SquadReceipt receipt)
+        SquadReceipt receipt,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(receipt);
@@ -267,7 +355,8 @@ public sealed class SquadDeploymentPlan
         List<SquadOwnedFile> retained = new List<SquadOwnedFile>();
         foreach (SquadOwnedFile owned in receipt.Files)
         {
-            string fullPath = SquadPathPolicy.ResolveFile(root, owned.RelativePath);
+            string fullPath = ResolvePhysicalPath(scope, root, globalRoots, owned.Target, owned.RelativePath);
+
             if (Directory.Exists(fullPath))
             {
                 retained.Add(owned);
@@ -283,7 +372,7 @@ public sealed class SquadDeploymentPlan
                 preconditions.Add(SquadFilePrecondition.Exact(
                     owned.RelativePath,
                     currentDigest));
-                mutations.Add(SquadFileMutation.Delete(owned.RelativePath));
+                mutations.Add(SquadFileMutation.Delete(owned.RelativePath, owned.Target));
             }
             else
                 retained.Add(owned);
@@ -300,7 +389,8 @@ public sealed class SquadDeploymentPlan
             mutations,
             preconditions,
             hasRetainedFiles ? SquadStateMutation.Keep : SquadStateMutation.Delete,
-            hasRetainedFiles ? SquadStateMutation.Write : SquadStateMutation.Delete);
+            hasRetainedFiles ? SquadStateMutation.Write : SquadStateMutation.Delete,
+            globalRoots);
     }
 
     private static void ValidateCommon(
@@ -436,18 +526,25 @@ internal enum SquadFileMutationKind
     Delete
 }
 
+/// <summary>
+/// A pending write or delete for one deployed file, identified by <c>(Target, RelativePath)</c>
+/// so that Global scope's per-target physical roots (<see cref="SquadDeploymentPlan.ResolvePhysicalRoot(string)"/>)
+/// can be resolved without cross-referencing the receipt by relative path alone.
+/// </summary>
 internal sealed record SquadFileMutation(
     string RelativePath,
+    string Target,
     SquadFileMutationKind Kind,
     byte[]? Content)
 {
     public static SquadFileMutation Write(
         string relativePath,
+        string target,
         ReadOnlyMemory<byte> content) =>
-        new(relativePath, SquadFileMutationKind.Write, content.ToArray());
+        new(relativePath, target, SquadFileMutationKind.Write, content.ToArray());
 
-    public static SquadFileMutation Delete(string relativePath) =>
-        new(relativePath, SquadFileMutationKind.Delete, null);
+    public static SquadFileMutation Delete(string relativePath, string target) =>
+        new(relativePath, target, SquadFileMutationKind.Delete, null);
 }
 
 internal enum SquadStateMutation

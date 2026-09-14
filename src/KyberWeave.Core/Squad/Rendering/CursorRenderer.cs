@@ -56,6 +56,18 @@ public sealed class CursorRenderer : ISquadRenderer
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".cursor/", StringComparison.Ordinal)
+            ? baseDirectory[".cursor/".Length..]
+            : baseDirectory;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Cursor];
 
@@ -92,7 +104,8 @@ public sealed class CursorRenderer : ISquadRenderer
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles);
+                source.CapabilityProfiles.Profiles,
+                request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -113,7 +126,7 @@ public sealed class CursorRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill);
+            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -124,7 +137,8 @@ public sealed class CursorRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -145,13 +159,14 @@ public sealed class CursorRenderer : ISquadRenderer
 
         string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
 
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
+            $"{agentsDir}/{agent.Name}.md",
             Encoding.UTF8.GetBytes(content),
             "cursor");
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill)
+    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
     {
         string singleLineDescription = string.Join(" ", skill.Description.Split(
             ['\r', '\n'],
@@ -166,8 +181,9 @@ public sealed class CursorRenderer : ISquadRenderer
 
         string content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+            $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "cursor");
     }

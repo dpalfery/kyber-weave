@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: review-triage
 description: "Attributes machine-produced output (analyzer diagnostics, manifest and lock diffs) to the change under review and reports it by rule or package identifier. Use when code-reviewer runs a lens whose input is a tool artifact rather than source code."
 invocation: subagent
-model-profile: fast
+model-profile: reviewer
 capability-profile: read-only
 copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []

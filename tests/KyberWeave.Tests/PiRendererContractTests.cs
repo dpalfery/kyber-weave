@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -231,11 +232,32 @@ public sealed class PiRendererContractTests : IDisposable
                 string.Equals(expectedDescription, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
-            // R12: no `pi:` override exists anywhere in the shipped models.yml, so every
-            // agent resolves to the harness default 'inherit' and must omit 'model'.
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-                $"Agent '{agent.Name}' should omit 'model' (no 'pi:' override in the shipped corpus).");
+            // T2 criterion 3: model value per profile. The renderer emits `model` only when
+            // the resolved Pi model is not `inherit`. Expected values hardcoded per plan section 6b.
+            // Derive agent membership from the loaded source, but assert against approved tokens.
+            string expectedModel = agent.ModelProfile switch
+            {
+                "deep-planning" => "zai/glm-5.3",
+                "fast" => "opencode/muse-spark-1.3-contributor-free",
+                "general" => "opencode/muse-spark-1.3-contributor-free",
+                "reviewer" => "opencode-go/kimi-k2.7-code",
+                "orchestration" => "inherit",
+                _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
+            };
+
+            if (expectedModel == "inherit")
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' on profile '{agent.ModelProfile}' should omit 'model' (resolves to inherit).");
+            }
+            else
+            {
+                string emittedModel = RequireScalar(frontmatter, "model", agent.Name);
+                Assert.True(
+                    expectedModel == emittedModel,
+                    $"Agent '{agent.Name}' model '{emittedModel}' does not match expected '{expectedModel}'.");
+            }
 
             SquadCapabilityProfile capabilityProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             IReadOnlyList<string> expectedTools = ComputeExpectedTools(capabilityProfile);
@@ -271,10 +293,16 @@ public sealed class PiRendererContractTests : IDisposable
                 Assert.False(hasAllowedSubagentsKey, $"Agent '{agent.Name}' should omit 'allowed_subagents'.");
             }
 
-            // Key order is the frontmatter contract (section 6): name, description, [model],
-            // tools, extensions, [allowed_subagents]. 'model' never appears in the shipped
-            // corpus (asserted above), so it is intentionally absent from this ordered list.
-            List<string> expectedKeyOrder = ["name", "description", "tools", "extensions"];
+            // Key order is the frontmatter contract (plan section 6): name, description, [model],
+            // tools, extensions, [allowed_subagents]. 'model' appears only when the resolved Pi
+            // model is not 'inherit' (plan section 7, T16 criterion 3).
+            List<string> expectedKeyOrder = ["name", "description"];
+            if (expectedModel != "inherit")
+            {
+                expectedKeyOrder.Add("model");
+            }
+            expectedKeyOrder.Add("tools");
+            expectedKeyOrder.Add("extensions");
             if (expectRoster)
             {
                 expectedKeyOrder.Add("allowed_subagents");
@@ -695,25 +723,61 @@ internal sealed class PiModelOverrideFixture : IDisposable
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
         string original = File.ReadAllText(modelsPath);
-        string mutated = original
-            .Replace(
-                $"  {OverriddenProfile}:\n    default: inherit\n",
-                $"  {OverriddenProfile}:\n    default: inherit\n    pi: {OverrideModel}\n",
-                StringComparison.Ordinal)
-            .Replace(
-                $"  {InheritProfile}:\n    default: inherit\n",
-                $"  {InheritProfile}:\n    default: inherit\n    pi: inherit\n",
-                StringComparison.Ordinal);
+
+        // Set or replace pi: values in the target profiles, whether they exist or not.
+        // Regex pattern matches a profile section and replaces or inserts its pi: value.
+        string mutated = ReplaceOrInsertPiValue(original, OverriddenProfile, OverrideModel);
+        mutated = ReplaceOrInsertPiValue(mutated, InheritProfile, "inherit");
 
         if (string.Equals(original, mutated, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                $"Expected '{modelsPath}' to contain 'default: inherit' blocks for profiles " +
-                $"'{OverriddenProfile}' and '{InheritProfile}' to mutate.");
+                $"Expected '{modelsPath}' to contain profiles '{OverriddenProfile}' and " +
+                $"'{InheritProfile}' to mutate.");
         }
 
         File.WriteAllText(modelsPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         return fixture;
+    }
+
+    /// <summary>
+    /// Replaces or inserts a pi: value in a profile section. Handles both cases where the
+    /// pi: line already exists and where it doesn't. Uses regex to robustly find and replace
+    /// within the profile block.
+    /// </summary>
+    private static string ReplaceOrInsertPiValue(string content, string profileName, string piValue)
+    {
+        // Use regex to find the profile section and its pi: line (if it exists)
+        Regex profileRegex = new(
+            $@"^  {Regex.Escape(profileName)}:\n    default: inherit\n((?:    \w+:.*\n)*)",
+            RegexOptions.Multiline);
+
+        Match match = profileRegex.Match(content);
+        if (!match.Success)
+        {
+            throw new InvalidOperationException($"Profile '{profileName}' not found in models.yml.");
+        }
+
+        // Check if pi: already exists in the captured lines
+        string existingLines = match.Groups[1].Value;
+        Regex piLineRegex = new(@"    pi:.*\n");
+        Match piMatch = piLineRegex.Match(existingLines);
+
+        string newProfile;
+        if (piMatch.Success)
+        {
+            // Replace existing pi: line
+            newProfile = piLineRegex.Replace(existingLines, $"    pi: {piValue}\n", 1);
+        }
+        else
+        {
+            // Insert new pi: line after default: inherit
+            newProfile = existingLines + $"    pi: {piValue}\n";
+        }
+
+        // Replace the entire matched section with the modified version
+        string replacement = $"  {profileName}:\n    default: inherit\n" + newProfile;
+        return content.Replace(match.Value, replacement, StringComparison.Ordinal);
     }
 
     public void Dispose() => _temp.Dispose();
