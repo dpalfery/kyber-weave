@@ -14,9 +14,9 @@ import { test, expect } from '@playwright/test'
 
 const APP = 'http://127.0.0.1:4747'
 
-test('G1 — app opens on the attention level', async ({ page }) => {
+test('G1 — app opens on the Context Doctor level', async ({ page }) => {
   await page.goto(APP)
-  await expect(page.getByTestId('page-attention')).toBeVisible()
+  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
 })
 
 test('G2 — a developer can drill all six levels by clicking', async ({ page }) => {
@@ -38,8 +38,8 @@ test('G2 — a developer can drill all six levels by clicking', async ({ page })
   await expect(page.getByTestId('context-content')).not.toBeEmpty()
 
   // and back out again
-  await page.getByTestId('breadcrumb-attention').click()
-  await expect(page.getByTestId('page-attention')).toBeVisible()
+  await page.getByTestId('breadcrumb-context-doctor').click()
+  await expect(page.getByTestId('page-context-doctor')).toBeVisible()
 })
 
 test('G3 — no unreported counter renders as zero', async ({ page }) => {

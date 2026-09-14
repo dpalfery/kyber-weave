@@ -35,7 +35,7 @@ dash/dash/src/components/kyber/TurnAlignedDiff.tsx
 dash/dash/src/pages/CompareRuns.tsx
 ```
 
-`pages/Attention.tsx` is owned by T3 and also carries this narration. Do not touch it.
+`pages/ContextDoctor.tsx` is owned by T3 and also carries this narration. Do not touch it.
 
 WHAT TO REMOVE:
 

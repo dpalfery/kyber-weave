@@ -43,12 +43,12 @@ T5  mono numerals         Haiku, AFTER T8 merges
 |---|---|
 | `components/kyber/Scorecard.tsx`, `FindingList.tsx`, `EvidenceTable.tsx`, `ConfidencePanel.tsx`, `RecommendationPanel.tsx`, `TurnAlignedDiff.tsx`, `pages/CompareRuns.tsx` | T1 |
 | `lib/utils.ts`, `components/MetricCard.tsx` | T2 |
-| `pages/Attention.tsx` | T3 |
+| `pages/ContextDoctor.tsx` | T3 |
 | `components/SessionSpendCharts.tsx`, `UsageChart.tsx`, `components/kyber/ContextPressureStrip.tsx` | T4 |
 | `App.tsx`, `pages/HarnessDetail.tsx`, `RunDetail.tsx`, `FindingDetail.tsx`, `pages/TurnDetail.tsx` (new), `HierarchyBreadcrumb.tsx` | T8 |
 | everything under `pages/` and `components/kyber/` | T5 — which is why it runs alone, last |
 
-`Attention.tsx` belongs to T3 alone — T3 does both the fabricated-data deletion and the narration sweep inside that one file, so T1 must not touch it. T6 must not touch `App.tsx`; if the artifact originates there, T6 reports and stops.
+`ContextDoctor.tsx` belongs to T3 alone — T3 does both the fabricated-data deletion and the narration sweep inside that one file, so T1 must not touch it. T6 must not touch `App.tsx`; if the artifact originates there, T6 reports and stops.
 
 ## The `data-testid` contract
 
@@ -56,9 +56,9 @@ Every task implements against these names. Do not rename them.
 
 | Testid | On |
 |---|---|
-| `page-attention` / `page-harness` / `page-run` / `page-execution` / `page-turn` / `page-finding` | each level's root element |
+| `page-context-doctor` / `page-harness` / `page-run` / `page-execution` / `page-turn` / `page-finding` | each level's root element |
 | `drill-harness-<id>` / `drill-run-<id>` / `drill-execution-<id>` / `drill-turn-<n>` / `drill-finding-<id>` | the clickable element that descends a level |
-| `breadcrumb-attention` … `breadcrumb-turn` | breadcrumb segments |
+| `breadcrumb-context-doctor` … `breadcrumb-turn` | breadcrumb segments |
 | `harness-selector` | the single harness selector, in the shell |
 | `metric-<key>` + `data-measured="true\|false"` | every metric card |
 | `chart-<key>` + `data-empty="true\|false"` | every chart container |
