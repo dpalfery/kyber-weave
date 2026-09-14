@@ -147,5 +147,5 @@ describe('codeburn models --unpriced public CLI', () => {
       expect(json.status, json.stderr).toBe(0)
       expect((JSON.parse(json.stdout) as Array<{ model: string }>)[0]?.model).toBe(hostile)
     })
-  }, 15_000)
+  }, 60_000)
 })

@@ -365,6 +365,8 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.OpenCode => $".opencode/agents/{name}.md",
             SquadTarget.Antigravity =>
                 $".agents/skills/{ResolveFallbackOutputIdentity(name, skillNames, sharedIdentities)}/SKILL.md",
+            SquadTarget.Warp =>
+                $".warp/skills/{ResolveFallbackOutputIdentity(name, skillNames, sharedIdentities)}/SKILL.md",
             _ => null
         };
 
@@ -379,6 +381,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Codex when !sharedIdentities.Contains(name) => $".codex/skills/{name}/SKILL.md",
             SquadTarget.OpenCode when !sharedIdentities.Contains(name) => $".opencode/skills/{name}/SKILL.md",
             SquadTarget.Antigravity => $".agents/skills/{name}/SKILL.md",
+            SquadTarget.Warp => $".warp/skills/{name}/SKILL.md",
             _ => null
         };
 
