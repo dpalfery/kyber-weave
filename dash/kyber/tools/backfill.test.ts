@@ -82,8 +82,12 @@ describe('renormalizeRecords — retained raw evidence', () => {
       namespaces: ['gen_ai'],
       reason: 'non-model span',
     })
-    expect(rebuild.pruned).toBe(1)
+    // Noise is gone, and the retained span is now harness `gemini`. Gemini is a
+    // model identity, not a stored session/run harness (ADR 0016), so the
+    // copilot-misattributed session built before reclassify is pruned too.
+    expect(rebuild.pruned).toBe(2)
     expect(store.getSessionPayload(NOISE_TRACE)).toBeUndefined()
+    expect(store.getSessionPayload(RETAINED_TRACE)).toBeUndefined()
 
     store.close()
   })
