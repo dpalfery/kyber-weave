@@ -1,20 +1,22 @@
 # Release — self-contained binaries and GitHub Release
 #
-# Cutting a release is a tag push by a repository admin:
-#   git tag v0.1.2 && git push origin v0.1.2      (v0.2.0-rc.1 for a pre-release)
+# Kick off from Actions → Release → Run workflow on main. Only dpalfery may
+# start it. Builds run immediately. Publish waits on the `release` environment
+# until David Palfery clicks Review deployments on that same run and approves.
+# Leave "Make production release" unchecked to publish the next RC
+# (0.1.7-rc.9 → 0.1.7-rc.10). Check it to publish the next stable
+# (0.1.7-rc.9 → 0.1.7). scripts/next-release-version.sh picks the number.
+# No PAT and no version field. GITHUB_TOKEN mints the tag after approval.
 #
-# A `refs/tags/v*` ruleset limits tag creation to admins, so GITHUB_TOKEN cannot
-# mint a tag from a dispatched run — a tag push is the only path that publishes.
-# Actions → Release → Run workflow builds and packages a candidate without
-# creating a tag or Release.
+# The refs/tags/v* ruleset still blocks rewriting or deleting a tag except
+# for admins. Creating a tag is allowed so this workflow can mint one.
+# Tag push remains for minor/major/dev cuts:
+#   git tag v0.2.0 && git push origin v0.2.0
 #
 # Builds the RID matrix, stamps Version from the tag, attaches archives +
-# SHA256SUMS.txt to a GitHub Release (passing --prerelease for hyphenated pre-releases),
-# and publishes PackAsTool packages (including pre-releases) to GitHub Packages.
-#
-# The `release` and `gh-packages` jobs run in the `release` environment, which
-# requires a reviewer approval before any tag, GitHub Release, or package is
-# published. Builds and packaging run unapproved so failures surface early.
+# SHA256SUMS.txt to a GitHub Release (passing --prerelease for hyphenated
+# pre-releases), and publishes PackAsTool packages (including pre-releases)
+# to GitHub Packages.
 #
 # npm and Homebrew are not published from this workflow. nuget.org is forbidden.
 
@@ -26,14 +28,10 @@ name: Release
       - "v*"
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to build (e.g. 0.1.2, v0.1.2, or 0.2.0-rc.1). Dispatch builds only — publish by pushing the tag."
-        type: string
-        required: true
-      dry_run:
-        description: "Must stay true. Dispatch cannot publish; tag creation is admin-only."
+      prod_release:
+        description: "Make production release. Leave unchecked to publish the next RC."
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -49,8 +47,33 @@ env:
   CONFIGURATION: Release
 
 jobs:
+  authorize:
+    name: Authorize
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restrict to dpalfery on an allowed ref
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          TRIGGERING_ACTOR="${TRIGGERING_ACTOR:-${ACTOR}}"
+          if [[ "${ACTOR}" != "dpalfery" ]] || [[ "${TRIGGERING_ACTOR}" != "dpalfery" ]]
+          then
+            echo "::error::Only dpalfery may run the Release workflow (actor=${ACTOR}, triggering_actor=${TRIGGERING_ACTOR})."
+            exit 1
+          fi
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" && "${REF}" != "refs/heads/main" ]]
+          then
+            echo "::error::Run the workflow from main. The release environment rejects any other branch."
+            exit 1
+          fi
+
   version:
     name: Resolve version
+    needs: [authorize]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
@@ -67,44 +90,42 @@ jobs:
       - name: Derive version
         id: meta
         env:
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_PROD_RELEASE: ${{ inputs.prod_release }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
           then
-            RAW="${INPUT_VERSION:-}"
-            if [[ -z "${RAW}" ]]
+            bash scripts/next-release-version.sh --self-test
+            if [[ "${INPUT_PROD_RELEASE}" == "true" ]]
             then
-              echo "::error::version input is required when running via workflow_dispatch"
-              exit 1
+              eval "$(bash scripts/next-release-version.sh --prod)"
+            else
+              eval "$(bash scripts/next-release-version.sh)"
             fi
-            # Accept 0.1.2, v0.1.2, or 0.2.0-rc.1
-            RAW="${RAW#v}"
-            if [[ ! "${RAW}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
-            then
-              echo "::error::version '${INPUT_VERSION}' is not a valid SemVer (expected X.Y.Z or vX.Y.Z)"
-              exit 1
-            fi
-            TAG="v${RAW}"
-            VERSION="${RAW}"
-
             if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1 \
               || gh release view "${TAG}" >/dev/null 2>&1
             then
-              echo "::error::tag or Release ${TAG} already exists. Choose a new version."
+              echo "::error::tag or Release ${TAG} already exists. Re-run after the collision is gone."
               exit 1
             fi
-
-            if [[ "${INPUT_DRY_RUN}" != "true" ]]
-            then
-              echo "::error::Publishing from workflow_dispatch is disabled — a refs/tags/v* ruleset limits tag creation to repository admins. Cut the release with: git tag ${TAG} && git push origin ${TAG}. Re-run with dry_run=true to build ${TAG} artifacts without publishing."
-              exit 1
-            fi
-            CREATE_RELEASE=false
-            echo "Dry run — will build ${TAG} artifacts without creating the tag or Release"
+            CREATE_RELEASE=true
+            {
+              echo "## Releasing \`${TAG}\`"
+              if [[ "${INPUT_PROD_RELEASE}" == "true" ]]
+              then
+                echo "Production release (next stable)."
+              else
+                echo "Release candidate (RC number incremented)."
+              fi
+              echo
+              echo "### David Palfery — approve here"
+              echo "Builds run first. When they finish, this run waits."
+              echo "On **this same workflow run page**, click **Review deployments**"
+              echo "(top right, yellow banner). Tick \`release\` → **Approve and deploy**."
+              echo "Nobody else can approve. That click publishes \`${TAG}\`."
+            } >> "${GITHUB_STEP_SUMMARY}"
           else
             # Tag push: GITHUB_REF_NAME is the tag
             TAG="${GITHUB_REF_NAME}"
@@ -425,7 +446,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: GitHub Release
+    name: Publish GitHub Release (David Palfery must approve)
     needs: [version, build, build-kyberdash, pack-squad]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
@@ -457,9 +478,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
           VERSION: ${{ needs.version.outputs.version }}
-          # Only reachable on a tag push, where the tag already exists. The --target
-          # branch below is retained as a no-op guard: dispatched runs never set
-          # create_release, so they never reach this job.
           TARGET_SHA: ${{ github.sha }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -506,7 +524,7 @@ jobs:
           gh "${ARGS[@]}"
 
   gh-packages:
-    name: Optional GitHub Packages (dotnet tool)
+    name: Publish GitHub Packages (David Palfery must approve)
     needs: [version, build]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
