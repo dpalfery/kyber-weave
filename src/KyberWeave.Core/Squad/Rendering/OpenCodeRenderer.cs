@@ -2,8 +2,6 @@ using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
-using YamlDotNet.Core;
-using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
 
 namespace KyberWeave.Core.Squad.Rendering;
@@ -15,25 +13,27 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// Subagent and skill contract verified against OpenCode specifications on 2026-09-14:
 /// subagents are stored at <c>.opencode/agents/&lt;name&gt;.md</c> containing Markdown with
-/// YAML frontmatter. Required keys are <c>name</c> and <c>description</c>; optional
-/// <c>model</c> resolves from <c>models.yml</c> for harness <c>opencode</c> (omitted when
-/// <c>inherit</c> or empty). Skills are stored at <c>.opencode/skills/&lt;name&gt;/SKILL.md</c>.
+/// YAML frontmatter. Required keys are <c>name</c>, <c>description</c>, and <c>mode</c>
+/// (<c>primary</c> for conductor, <c>subagent</c> for subagents); optional <c>model</c> resolves
+/// from <c>models.yml</c> for harness <c>opencode</c> (omitted when <c>inherit</c> or empty).
+/// Skills are stored at <c>.opencode/skills/&lt;name&gt;/SKILL.md</c>.
 /// </para>
 /// <para>
-/// OpenCode's <c>tools</c> frontmatter key is an explicit allowlist. Omitting it inherits
+/// OpenCode's <c>permission</c> frontmatter key is an explicit map. Omitting it inherits
 /// ambient tool access — silent permission widening for any canonical <c>deny</c> — so this
-/// renderer always emits an explicit list. Only <c>allow</c> grants a tool; <c>ask</c> and
+/// renderer always emits an explicit map. Only <c>allow</c> grants a permission; <c>ask</c> and
 /// <c>deny</c> both withhold. <c>ask</c> is recorded as <see cref="SquadDegradationRecord"/>
 /// with code <c>safety-narrowed</c> because OpenCode subagents do not support interactive
 /// per-capability confirmation gates.
 /// </para>
 /// <para>
-/// Base ungoverned tools on every agent: <c>todo</c>, <c>skill</c>. Semantic capabilities lower
-/// onto OpenCode's tool taxonomy: <c>filesystem.read</c> -&gt; <c>read</c>, <c>filesystem.search</c> -&gt;
-/// <c>grep</c>, <c>glob</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>write</c>, <c>patch</c>,
-/// <c>process.execute</c> -&gt; <c>bash</c>, <c>network.read</c> -&gt; <c>fetch</c>, <c>search</c>,
-/// and <c>delegate</c> -&gt; <c>task</c> (or <c>task(roster)</c>). <c>network.publish</c> has no
-/// native tool and is withheld, emitting <c>permission-not-expressible</c>.
+/// Base ungoverned permissions on every agent: <c>todowrite</c>, <c>skill</c>. Semantic capabilities lower
+/// onto OpenCode's permission taxonomy: <c>filesystem.read</c> -&gt; <c>read</c>, <c>filesystem.search</c> -&gt;
+/// <c>grep</c>, <c>glob</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>process.execute</c> -&gt; <c>bash</c>,
+/// <c>network.read</c> -&gt; <c>webfetch</c>, <c>websearch</c>, and <c>delegate</c> -&gt; pattern-based <c>task</c> rules.
+/// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to agents
+/// with <c>filesystem.read: allow</c>, excluding pure orchestrators and shared identities.
+/// <c>network.publish</c> has no native tool and is withheld, emitting <c>permission-not-expressible</c>.
 /// </para>
 /// <para>
 /// Skills carry <c>name</c>, single-line <c>description</c>, and <c>license: MIT</c>.
@@ -46,47 +46,44 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     private const string AgentsDirectory = ".opencode/agents";
     private const string SkillsDirectory = ".opencode/skills";
 
-    private static readonly string[] BaseUngovernedTools = ["todo", "skill"];
+    private const string KyberWeaveMcpPermission = "kyber-weave_*";
+
+    private static readonly string[] BaseUngovernedPermissions = ["todowrite", "skill"];
 
     /// <summary>
-    /// Lowers the semantic capability vocabulary onto OpenCode's built-in tool names.
+    /// Lowers the semantic capability vocabulary onto OpenCode's built-in permission names.
     /// <c>network.publish</c> is absent deliberately: no built-in publish tool exists.
-    /// <c>delegate</c> is handled separately so a non-empty
-    /// <see cref="SquadAgent.DelegatesTo"/> can emit <c>task(roster)</c>.
+    /// <c>delegate</c> is handled separately to emit pattern-based <c>task</c> rules.
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityTools =
+    private static readonly (string Capability, string[] Permissions)[] CapabilityPermissions =
     [
         ("filesystem.read", ["read"]),
         ("filesystem.search", ["grep", "glob"]),
-        ("filesystem.write", ["edit", "write", "patch"]),
+        ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
-        ("network.read", ["fetch", "search"]),
+        ("network.read", ["webfetch", "websearch"]),
     ];
 
     /// <summary>
     /// Emission order, fixed so a rendered agent file is byte-stable regardless of how the
-    /// profile's permissions enumerate. <c>task</c> is a placeholder: a roster form
-    /// <c>task(name1, name2, …)</c> occupies the same slot when present.
+    /// profile's permissions enumerate.
     /// </summary>
-    private static readonly string[] ToolOrder =
+    private static readonly string[] PermissionOrder =
     [
-        "todo",
+        "todowrite",
         "skill",
         "read",
         "grep",
         "glob",
         "edit",
-        "write",
-        "patch",
         "bash",
-        "fetch",
-        "search",
+        "webfetch",
+        "websearch",
+        KyberWeaveMcpPermission,
         "task"
     ];
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder()
-        .WithTypeConverter(new OpenCodeToolsFlowSequenceConverter())
-        .Build();
+    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
     /// <summary>
     /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
@@ -131,7 +128,8 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
-                source.CapabilityProfiles.Profiles);
+                source.CapabilityProfiles.Profiles,
+                sharedIdentities);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -159,12 +157,14 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlySet<string> sharedIdentities)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = agent.Name,
-            ["description"] = agent.Description
+            ["description"] = agent.Description,
+            ["mode"] = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent"
         };
 
         string? model = ResolveOpenCodeModel(agent, modelProfiles);
@@ -173,8 +173,8 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        // Always emit tools: omitting the key inherits ambient tool access (widening).
-        frontmatter["tools"] = new OpenCodeToolsFlowSequence(ResolveTools(agent, capabilityProfiles));
+        // Always emit permission map: omitting it inherits ambient tool access (widening).
+        frontmatter["permission"] = ResolvePermissions(agent, capabilityProfiles, sharedIdentities);
 
         string content;
         lock (SerializerLock)
@@ -236,59 +236,83 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// Lowers a capability profile onto OpenCode's closed tool allowlist. Only
+    /// Lowers a capability profile onto OpenCode's closed permission map. Only
     /// <see cref="SquadPermissionDecision.Allow"/> grants: <c>ask</c> and <c>deny</c> both
     /// withhold, which keeps the lowering non-broadening by construction.
     /// </summary>
-    private static IReadOnlyList<string> ResolveTools(
+    private static Dictionary<string, object> ResolvePermissions(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlySet<string> sharedIdentities)
     {
-        HashSet<string> granted = new(BaseUngovernedTools, StringComparer.Ordinal);
-        string? taskToolEntry = null;
+        HashSet<string> granted = new(BaseUngovernedPermissions, StringComparer.Ordinal);
+        object? taskPermissionValue = null;
 
-        // An unresolvable profile grants nothing beyond the ungoverned tools. Falling back
+        // An unresolvable profile grants nothing beyond the ungoverned permissions. Falling back
         // to "grant everything" here would turn a source error into silent widening.
         if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
-            foreach ((string capability, string[] tools) in CapabilityTools)
+            foreach ((string capability, string[] permissions) in CapabilityPermissions)
             {
                 if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
                     decision == SquadPermissionDecision.Allow)
                 {
-                    foreach (string tool in tools)
+                    foreach (string permission in permissions)
                     {
-                        granted.Add(tool);
+                        granted.Add(permission);
                     }
                 }
+            }
+
+            bool isPureOrchestrator = string.Equals(
+                agent.CapabilityProfile,
+                "orchestrator",
+                StringComparison.Ordinal);
+
+            if (!isPureOrchestrator &&
+                !sharedIdentities.Contains(agent.Name) &&
+                profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
+                readDecision == SquadPermissionDecision.Allow)
+            {
+                granted.Add(KyberWeaveMcpPermission);
             }
 
             if (profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
                 delegateDecision == SquadPermissionDecision.Allow)
             {
-                taskToolEntry = agent.DelegatesTo.Count > 0
-                    ? $"task({string.Join(", ", agent.DelegatesTo)})"
-                    : "task";
-                granted.Add(taskToolEntry);
+                if (agent.DelegatesTo.Count > 0)
+                {
+                    Dictionary<string, string> delegatesMap = new(StringComparer.Ordinal);
+                    foreach (string target in agent.DelegatesTo.OrderBy(x => x, StringComparer.Ordinal))
+                    {
+                        delegatesMap[target] = "allow";
+                    }
+
+                    taskPermissionValue = delegatesMap;
+                }
+                else
+                {
+                    taskPermissionValue = "allow";
+                }
             }
         }
 
-        List<string> ordered = [];
-        foreach (string tool in ToolOrder)
+        Dictionary<string, object> ordered = new(StringComparer.Ordinal);
+        foreach (string key in PermissionOrder)
         {
-            if (string.Equals(tool, "task", StringComparison.Ordinal))
+            if (string.Equals(key, "task", StringComparison.Ordinal))
             {
-                if (taskToolEntry is not null)
+                if (taskPermissionValue is not null)
                 {
-                    ordered.Add(taskToolEntry);
+                    ordered["task"] = taskPermissionValue;
                 }
 
                 continue;
             }
 
-            if (granted.Contains(tool))
+            if (granted.Contains(key))
             {
-                ordered.Add(tool);
+                ordered[key] = "allow";
             }
         }
 
@@ -321,9 +345,9 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 Code: "safety-narrowed",
                 InstructionDigest: agent.BodyDigest,
                 Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. OpenCode's tool allowlist is binary " +
-                    "and cannot prompt for per-capability confirmation, so these narrow to " +
-                    "'deny' and the corresponding tools are withheld from the agent's 'tools' list.");
+                    $"{string.Join(", ", narrowed)}. OpenCode's permissions cannot prompt " +
+                    "for per-capability confirmation, so these narrow to 'deny' and the " +
+                    "corresponding permissions are withheld.");
         }
 
         List<string> notExpressibleDetails = [];
@@ -355,53 +379,6 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 Code: "permission-not-expressible",
                 InstructionDigest: agent.BodyDigest,
                 Details: string.Join(" ", notExpressibleDetails));
-        }
-    }
-
-    /// <summary>
-    /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through
-    /// <see cref="OpenCodeToolsFlowSequenceConverter"/>.
-    /// </summary>
-    private sealed class OpenCodeToolsFlowSequence(IEnumerable<string> tools) : List<string>(tools);
-
-    /// <summary>
-    /// Serializes OpenCode agent tools as an inline YAML flow sequence. Entries containing
-    /// <c>(</c> or <c>,</c> emit as single-quoted scalars so YamlDotNet and downstream parsers
-    /// do not misparse <c>task(roster)</c> forms.
-    /// </summary>
-    private sealed class OpenCodeToolsFlowSequenceConverter : IYamlTypeConverter
-    {
-        public bool Accepts(Type type) => type == typeof(OpenCodeToolsFlowSequence);
-
-        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
-        {
-            throw new NotSupportedException("Deserialization of OpenCodeToolsFlowSequence is not supported.");
-        }
-
-        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
-        {
-            if (value is not OpenCodeToolsFlowSequence tools)
-            {
-                return;
-            }
-
-            emitter.Emit(new SequenceStart(AnchorName.Empty, TagName.Empty, isImplicit: true, SequenceStyle.Flow));
-            foreach (string tool in tools)
-            {
-                bool needsQuoting = tool.Contains('(', StringComparison.Ordinal) ||
-                    tool.Contains('*', StringComparison.Ordinal) ||
-                    tool.Contains(',', StringComparison.Ordinal);
-
-                emitter.Emit(new Scalar(
-                    AnchorName.Empty,
-                    TagName.Empty,
-                    tool,
-                    needsQuoting ? ScalarStyle.SingleQuoted : ScalarStyle.Plain,
-                    isPlainImplicit: true,
-                    isQuotedImplicit: true));
-            }
-
-            emitter.Emit(new SequenceEnd());
         }
     }
 }

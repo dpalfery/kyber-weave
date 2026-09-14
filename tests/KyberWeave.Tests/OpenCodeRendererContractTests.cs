@@ -27,59 +27,56 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     /// <summary>
-    /// OpenCode's built-in tool vocabulary, grounded in OpenCode runtime telemetry
-    /// from <c>dash/src/providers/opencode.ts</c>. A tool outside this vocabulary
-    /// would be unhandled by the harness. <c>task(roster)</c> forms are validated
-    /// separately because the roster is agent-specific.
+    /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent configurations
+    /// and schema validation. A permission outside this vocabulary would be rejected or unhandled by
+    /// the harness.
     /// </summary>
-    private static readonly string[] DocumentedOpenCodeTools =
+    private static readonly string[] DocumentedOpenCodePermissions =
     [
-        "todo",
+        "todowrite",
         "skill",
         "read",
         "grep",
         "glob",
         "edit",
-        "write",
-        "patch",
         "bash",
-        "fetch",
-        "search",
+        "webfetch",
+        "websearch",
+        "kyber-weave_*",
         "task"
     ];
 
     /// <summary>
-    /// Capability-to-tool lowering contract pinned for OpenCode subagents.
+    /// Capability-to-permission lowering contract pinned for OpenCode subagents.
     /// Declared independently of the renderer so a change to either side must be made
     /// deliberately in both. <c>network.publish</c> is absent because OpenCode has no built-in
-    /// publish tool (recorded as <c>permission-not-expressible</c>). <c>delegate</c> is handled
-    /// separately so non-empty <see cref="SquadAgent.DelegatesTo"/> emits <c>task(roster)</c>.
+    /// publish permission (recorded as <c>permission-not-expressible</c>). <c>delegate</c> is handled
+    /// separately to emit pattern-based <c>task</c> rules.
     /// </summary>
-    private static readonly (string Capability, string[] Tools)[] CapabilityToolContract =
+    private static readonly (string Capability, string[] Permissions)[] CapabilityPermissionContract =
     [
         ("filesystem.read", ["read"]),
         ("filesystem.search", ["grep", "glob"]),
-        ("filesystem.write", ["edit", "write", "patch"]),
+        ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
-        ("network.read", ["fetch", "search"])
+        ("network.read", ["webfetch", "websearch"])
     ];
 
     /// <summary>
-    /// Emission order of tools in OpenCode agent frontmatter, strictly deterministic.
+    /// Emission order of permissions in OpenCode agent frontmatter, strictly deterministic.
     /// </summary>
-    private static readonly string[] ToolOrder =
+    private static readonly string[] PermissionOrder =
     [
-        "todo",
+        "todowrite",
         "skill",
         "read",
         "grep",
         "glob",
         "edit",
-        "write",
-        "patch",
         "bash",
-        "fetch",
-        "search",
+        "webfetch",
+        "websearch",
+        "kyber-weave_*",
         "task"
     ];
 
@@ -215,6 +212,9 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
+            string expectedMode = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent";
+            Assert.Equal(expectedMode, RequireScalar(frontmatter, "mode", agent.Name));
+
             // Model resolution: verify against loaded ModelProfiles for target opencode
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
             if (modelProfile.HarnessModels.TryGetValue("opencode", out string? opencodeHarnessModel))
@@ -245,34 +245,57 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                     $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
             }
 
-            // Tools allowlist: omitting tools key inherits ambient access (silent widening),
-            // so every OpenCode agent must carry an explicit tools allowlist.
+            // OpenCode agents emit 'permission' map instead of 'tools' sequence
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("tools")),
+                $"Agent '{agent.Name}' should not emit 'tools'.");
+
             SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
-            IReadOnlyList<string> tools = RequireSequence(frontmatter, "tools", agent.Name);
+            YamlMappingNode permissionMap = RequireMapping(frontmatter, "permission", agent.Name);
 
-            Assert.All(tools, tool => Assert.True(
-                IsOpenCodeTool(tool),
-                $"Agent '{agent.Name}' tool '{tool}' is not in the documented OpenCode vocabulary."));
+            // Verify all permission keys belong to documented vocabulary
+            foreach (YamlNode keyNode in permissionMap.Children.Keys)
+            {
+                string permKey = Assert.IsType<YamlScalarNode>(keyNode).Value!;
+                Assert.True(
+                    IsOpenCodePermission(permKey),
+                    $"Agent '{agent.Name}' permission '{permKey}' is not in the documented OpenCode vocabulary.");
+            }
 
-            Assert.True(
-                tools.Distinct(StringComparer.Ordinal).Count() == tools.Count,
-                $"Agent '{agent.Name}' has duplicate tool entries: {string.Join(", ", tools)}.");
-
-            // Ungoverned base tools
-            Assert.Contains("todo", tools);
-            Assert.Contains("skill", tools);
+            // Ungoverned base permissions
+            Assert.Equal("allow", RequireScalar(permissionMap, "todowrite", agent.Name));
+            Assert.Equal("allow", RequireScalar(permissionMap, "skill", agent.Name));
 
             // Governed capabilities lowering
-            foreach ((string capability, string[] mapped) in CapabilityToolContract)
+            foreach ((string capability, string[] mapped) in CapabilityPermissionContract)
             {
                 bool allowed = capProfile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
                                decision == SquadPermissionDecision.Allow;
-                foreach (string tool in mapped)
+                foreach (string perm in mapped)
                 {
+                    bool hasPerm = permissionMap.Children.ContainsKey(new YamlScalarNode(perm));
                     Assert.True(
-                        allowed == tools.Contains(tool, StringComparer.Ordinal),
-                        $"Agent '{agent.Name}' capability '{capability}' allowed={allowed} tool '{tool}'.");
+                        allowed == hasPerm,
+                        $"Agent '{agent.Name}' capability '{capability}' allowed={allowed} permission '{perm}'.");
+                    if (hasPerm)
+                    {
+                        Assert.Equal("allow", RequireScalar(permissionMap, perm, agent.Name));
+                    }
                 }
+            }
+
+            // D8 MCP mapping: kyber-weave_* granted to agents with filesystem.read: allow, excluding pure orchestrators and shared identities
+            bool isPureOrchestrator = string.Equals(agent.CapabilityProfile, "orchestrator", StringComparison.Ordinal);
+            bool readAllowed = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
+                               readDecision == SquadPermissionDecision.Allow;
+            bool expectedKwMcp = !isPureOrchestrator && !sharedIdentities.Contains(agent.Name) && readAllowed;
+            bool hasKwMcp = permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*"));
+            Assert.True(
+                expectedKwMcp == hasKwMcp,
+                $"Agent '{agent.Name}' kyber-weave_* expected={expectedKwMcp}, actual={hasKwMcp}");
+            if (hasKwMcp)
+            {
+                Assert.Equal("allow", RequireScalar(permissionMap, "kyber-weave_*", agent.Name));
             }
 
             // Delegation lowering
@@ -280,31 +303,44 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                                    delegateDecision == SquadPermissionDecision.Allow;
             if (delegateAllowed)
             {
+                Assert.True(
+                    permissionMap.Children.TryGetValue(new YamlScalarNode("task"), out YamlNode? taskNode),
+                    $"Agent '{agent.Name}' missing 'task' permission.");
                 if (agent.DelegatesTo.Count > 0)
                 {
-                    string expectedTaskTool = $"task({string.Join(", ", agent.DelegatesTo)})";
-                    Assert.Contains(
-                        tools,
-                        tool => string.Equals(tool, expectedTaskTool, StringComparison.Ordinal));
+                    YamlMappingNode taskMap = Assert.IsType<YamlMappingNode>(taskNode);
+                    string[] sortedDelegates = agent.DelegatesTo.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                    string[] taskKeys = taskMap.Children.Keys
+                        .OfType<YamlScalarNode>()
+                        .Select(k => k.Value!)
+                        .ToArray();
+                    Assert.Equal(sortedDelegates, taskKeys);
+                    foreach (string target in sortedDelegates)
+                    {
+                        Assert.Equal("allow", RequireScalar(taskMap, target, agent.Name));
+                    }
                 }
                 else
                 {
-                    Assert.Contains("task", tools);
+                    YamlScalarNode taskScalar = Assert.IsType<YamlScalarNode>(taskNode);
+                    Assert.Equal("allow", taskScalar.Value);
                 }
             }
             else
             {
-                Assert.DoesNotContain(tools, tool => tool.StartsWith("task", StringComparison.Ordinal));
+                Assert.False(
+                    permissionMap.Children.ContainsKey(new YamlScalarNode("task")),
+                    $"Agent '{agent.Name}' should not have 'task' permission.");
             }
 
-            // Ordering: tools list must be deterministically ordered
+            // Ordering: permission map keys must be deterministically ordered
             int lastOrderIndex = -1;
-            foreach (string tool in tools)
+            foreach (YamlNode keyNode in permissionMap.Children.Keys)
             {
-                string toolKey = tool.StartsWith("task(", StringComparison.Ordinal) ? "task" : tool;
-                int orderIndex = Array.IndexOf(ToolOrder, toolKey);
-                Assert.True(orderIndex >= 0, $"Agent '{agent.Name}' tool '{tool}' not found in ToolOrder.");
-                Assert.True(orderIndex > lastOrderIndex, $"Agent '{agent.Name}' tool '{tool}' is out of order.");
+                string permKey = Assert.IsType<YamlScalarNode>(keyNode).Value!;
+                int orderIndex = Array.IndexOf(PermissionOrder, permKey);
+                Assert.True(orderIndex >= 0, $"Agent '{agent.Name}' permission '{permKey}' not found in PermissionOrder.");
+                Assert.True(orderIndex > lastOrderIndex, $"Agent '{agent.Name}' permission '{permKey}' is out of order.");
                 lastOrderIndex = orderIndex;
             }
 
@@ -324,15 +360,59 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
-        AssertTools(result, "architect", ["todo", "skill", "read", "grep", "glob", "fetch", "search", "task(azure-reader, research-agent)"]);
+        AssertPermissions(
+            result,
+            "architect",
+            new Dictionary<string, object>
+            {
+                ["todowrite"] = "allow",
+                ["skill"] = "allow",
+                ["read"] = "allow",
+                ["grep"] = "allow",
+                ["glob"] = "allow",
+                ["webfetch"] = "allow",
+                ["websearch"] = "allow",
+                ["kyber-weave_*"] = "allow",
+                ["task"] = new Dictionary<string, string>
+                {
+                    ["azure-reader"] = "allow",
+                    ["research-agent"] = "allow"
+                }
+            });
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
-        AssertTools(result, "docs-dev", ["todo", "skill", "read", "grep", "glob", "edit", "write", "patch"]);
+        AssertPermissions(
+            result,
+            "docs-dev",
+            new Dictionary<string, object>
+            {
+                ["todowrite"] = "allow",
+                ["skill"] = "allow",
+                ["read"] = "allow",
+                ["grep"] = "allow",
+                ["glob"] = "allow",
+                ["edit"] = "allow",
+                ["kyber-weave_*"] = "allow"
+            });
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
         Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
-        AssertTools(result, "bug-crusher-investigator", ["todo", "skill", "read", "grep", "glob", "bash", "fetch", "search"]);
+        AssertPermissions(
+            result,
+            "bug-crusher-investigator",
+            new Dictionary<string, object>
+            {
+                ["todowrite"] = "allow",
+                ["skill"] = "allow",
+                ["read"] = "allow",
+                ["grep"] = "allow",
+                ["glob"] = "allow",
+                ["bash"] = "allow",
+                ["webfetch"] = "allow",
+                ["websearch"] = "allow",
+                ["kyber-weave_*"] = "allow"
+            });
 
         // Skills verification
         foreach (SquadSkill skill in source.Skills)
@@ -543,10 +623,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             file => file.RelativePath == $".opencode/skills/{SharedIdentitySquadFixture.Identity}/SKILL.md");
     }
 
-    private static void AssertTools(
+    private static void AssertPermissions(
         SquadRenderResult result,
         string agentName,
-        IReadOnlyList<string> expectedTools)
+        IReadOnlyDictionary<string, object> expectedPermissions)
     {
         SquadDeploymentFile file = Assert.Single(
             result.Files,
@@ -556,13 +636,46 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             Encoding.UTF8.GetString(file.Content.Span),
             agentName);
 
-        IReadOnlyList<string> actualTools = RequireSequence(frontmatter, "tools", agentName);
-        Assert.Equal(expectedTools, actualTools);
+        YamlMappingNode actualPermissions = RequireMapping(frontmatter, "permission", agentName);
+
+        string[] expectedKeys = expectedPermissions.Keys.ToArray();
+        string[] actualKeys = actualPermissions.Children.Keys
+            .OfType<YamlScalarNode>()
+            .Select(k => k.Value!)
+            .ToArray();
+        Assert.Equal(expectedKeys, actualKeys);
+
+        foreach ((string key, object expectedVal) in expectedPermissions)
+        {
+            YamlNode actualValNode = actualPermissions.Children[new YamlScalarNode(key)];
+            if (expectedVal is string expectedScalar)
+            {
+                YamlScalarNode actualScalar = Assert.IsType<YamlScalarNode>(actualValNode);
+                Assert.Equal(expectedScalar, actualScalar.Value);
+            }
+            else if (expectedVal is IReadOnlyDictionary<string, string> expectedMap)
+            {
+                YamlMappingNode actualMap = Assert.IsType<YamlMappingNode>(actualValNode);
+                string[] expectedSubKeys = expectedMap.Keys.ToArray();
+                string[] actualSubKeys = actualMap.Children.Keys
+                    .OfType<YamlScalarNode>()
+                    .Select(k => k.Value!)
+                    .ToArray();
+                Assert.Equal(expectedSubKeys, actualSubKeys);
+                foreach ((string subKey, string expectedSubVal) in expectedMap)
+                {
+                    Assert.Equal(expectedSubVal, RequireScalar(actualMap, subKey, agentName));
+                }
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unexpected expectedVal type {expectedVal?.GetType()}");
+            }
+        }
     }
 
-    private static bool IsOpenCodeTool(string tool) =>
-        DocumentedOpenCodeTools.Contains(tool, StringComparer.Ordinal) ||
-        (tool.StartsWith("task(", StringComparison.Ordinal) && tool.EndsWith(')'));
+    private static bool IsOpenCodePermission(string permission) =>
+        DocumentedOpenCodePermissions.Contains(permission, StringComparer.Ordinal);
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
     {
@@ -582,7 +695,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         return (root, body);
     }
 
-    private static IReadOnlyList<string> RequireSequence(YamlMappingNode node, string key, string identity)
+    private static YamlMappingNode RequireMapping(YamlMappingNode node, string key, string identity)
     {
         if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
         {
@@ -593,11 +706,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
         }
 
-        YamlSequenceNode sequence = Assert.IsType<YamlSequenceNode>(value);
-        return sequence.Children
-            .Select(child => Assert.IsType<YamlScalarNode>(child).Value
-                ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null sequence entry."))
-            .ToArray();
+        return Assert.IsType<YamlMappingNode>(value);
     }
 
     private static string RequireScalar(YamlMappingNode node, string key, string identity)

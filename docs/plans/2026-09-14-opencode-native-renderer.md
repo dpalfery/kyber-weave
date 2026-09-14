@@ -22,6 +22,7 @@ component: KyberSquad
 `SquadRendererRegistry` (`src/KyberWeave.Core/Squad/Rendering/SquadRendererRegistry.cs`) only dispatches targets claimed by registered renderers. Currently, `SquadCommandComposition.ResolveRenderer()` (`src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`) registers `CopilotRenderer`, `CursorRenderer`, `ClaudeRenderer`, `AntigravityRenderer`, and `CodexRenderer`.
 
 Requesting `opencode` fails closed with:
+
 ```text
 No renderer is implemented yet for target(s): opencode. See docs/todo/<target>.md for what is needed to add support. Targets available today: antigravity, claude, codex, copilot, cursor.
 ```
@@ -50,9 +51,9 @@ These decisions form the immutable implementation contract for the plan:
 
 - **D2 (Agent Frontmatter Schema):**
   - Agent files are authored in Markdown with YAML frontmatter bounded by `---`.
-  - Required keys: `name: string`, `description: string`.
+  - Required keys: `name: string`, `description: string`, `mode: "primary" | "subagent"` (derived from `agent.Invocation`: `primary` for `conductor`, `subagent` for all others).
   - Optional key: `model: string` (resolved from `models.yml` for target `opencode`; omitted when `inherit` or unresolved default).
-  - Explicit `tools` key: Array/flow sequence of granted tools (see D4 and D5).
+  - Explicit `permission` key: Map of granted permissions (see D4 and D5).
   - Body: Verbatim `agent.InstructionBody` following the closing `---`, normalized to LF line endings (`\n`) with guaranteed trailing newline.
 
 - **D3 (Skill Frontmatter Schema & Single-Projection Rule):**
@@ -60,22 +61,22 @@ These decisions form the immutable implementation contract for the plan:
   - Required keys: `name: string`, `description: string` (multi-line descriptions collapsed to a single line with normalized whitespace), and `license: MIT`.
   - Conductor / Shared Identity Suppression: Profile-declared shared identities (from `source.FallbackProfiles.Profiles.Values.SelectMany(p => p.SharedIdentities)`) suppress their skill projection per the native single-projection rule enforced by `SquadRendererRegistry`. No `role-` prefixes are emitted on native targets.
 
-- **D4 (Explicit Tools Allowlist & Anti-Widening Invariant):**
-  - OpenCode agent frontmatter MUST always emit an explicit `tools` allowlist.
-  - Omitting `tools` or using a wildcard inherits ambient/unrestricted tool access in OpenCode, causing silent permission widening for any canonical `deny` decision (violating KS-003 and anti-widening invariants).
-  - Only capabilities with decision `allow` grant tools; `ask` and `deny` withhold tools.
-  - Base ungoverned tools included on every agent: `todo` (`TodoWrite`), `skill` (`Skill`).
+- **D4 (Explicit Permissions Allowlist & Anti-Widening Invariant):**
+  - OpenCode agent frontmatter MUST always emit an explicit `permission` map.
+  - Omitting permissions inherits ambient/unrestricted tool access in OpenCode, causing silent permission widening for any canonical `deny` decision (violating KS-003 and anti-widening invariants).
+  - Only capabilities with decision `allow` grant permissions; `ask` and `deny` withhold permissions.
+  - Base ungoverned permissions included on every agent: `todowrite: allow`, `skill: allow`.
 
-- **D5 (Capability-to-Tool Lowering Vocabulary):**
-  - Grounded in OpenCode tool taxonomy (verified against `dash/src/providers/opencode.ts` runtime telemetry):
-    - `filesystem.read` -> `read`
-    - `filesystem.search` -> `grep`, `glob`
-    - `filesystem.write` -> `edit`, `write`, `patch`
-    - `process.execute` -> `bash`
-    - `network.read` -> `fetch`, `search`
+- **D5 (Capability-to-Permission Lowering Vocabulary):**
+  - Grounded in OpenCode permission taxonomy:
+    - `filesystem.read` -> `read: allow`
+    - `filesystem.search` -> `grep: allow`, `glob: allow`
+    - `filesystem.write` -> `edit: allow`
+    - `process.execute` -> `bash: allow`
+    - `network.read` -> `webfetch: allow`, `websearch: allow`
     - `network.publish` -> withheld (no built-in publish tool; recorded as `permission-not-expressible`)
-    - `delegate` -> `task` (or `task(name1, name2, ...)` when `agent.DelegatesTo` is non-empty)
-  - Emission order in serialized output is strictly deterministic: `todo`, `skill`, `read`, `grep`, `glob`, `edit`, `write`, `patch`, `bash`, `fetch`, `search`, `task`.
+    - `delegate` -> `task: allow` (or pattern map `task: { <delegate>: allow, ... }` when `agent.DelegatesTo` is non-empty)
+  - Key ordering in serialized output is strictly deterministic: `todowrite`, `skill`, `read`, `grep`, `glob`, `edit`, `bash`, `webfetch`, `websearch`, `kyber-weave_*`, `task`.
 
 - **D6 (Structured Degradation Accounting):**
   - `ask` decisions: OpenCode subagent frontmatter does not support an interactive per-tool confirmation gate. Any capability configured as `ask` is narrowed to withhold the tool (`safety-narrowed`) and recorded as a `SquadDegradationRecord` with code `safety-narrowed`.
@@ -92,12 +93,12 @@ These decisions form the immutable implementation contract for the plan:
   - Fallback logic: If profile has no `opencode` entry, use `profile.Default` unless `profile.Default == "inherit"`. If resolved value is `"inherit"`, omit `model` from frontmatter.
 
 - **D8 (MCP Server Integration):**
-  - OpenCode configures MCP servers project-wide via `.opencode/mcp.json`. Subagent frontmatter tool lists do not admit arbitrary unbounded wildcards without declared server names.
-  - When `filesystem.read: allow` and the agent is not a pure orchestrator (`agent.CapabilityProfile == "orchestrator"` or shared identity), standard repository MCP access is assumed ambiently configured; orchestrators have MCP tools withheld. Any unexpressible per-agent MCP isolation is recorded under `permission-not-expressible`.
+  - OpenCode configures MCP servers project-wide via `.opencode/mcp.json`.
+  - When `filesystem.read: allow` and the agent is not a pure orchestrator (`agent.CapabilityProfile == "orchestrator"` or shared identity), server-scoped MCP access for the declared `kyber-weave` server is granted via `"kyber-weave_*": allow`; orchestrators have MCP tools withheld. Any unexpressible per-agent MCP isolation is recorded under `permission-not-expressible`.
 
 - **D9 (Deterministic Serialization & Shared Document Assembly):**
   - Serialization must be 100% deterministic and thread-safe. YamlDotNet serialization takes a lock (`SerializerLock`) around `YamlSerializer`.
-  - Tool sequences are serialized as YAML flow sequences `[...]` with stable element ordering.
+  - Permissions are serialized as an ordered YAML map with stable key ordering.
   - Document composition delegates to `SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, body)` ensuring normalized LF line endings (`\n`) and trailing newline.
 
 ---
@@ -146,11 +147,12 @@ Each task defines an objective, exact files and symbols, acceptance criteria, re
 | T4 | CLI Tests | `KyberWeave.Tests` | Update `Doctor_ReportsRendererCoverageAndMcpProbeStatus` in `tests/KyberWeave.Tests/SquadCliCommandTests.cs`: assert `opencode` is present in "Renderers available:" and absent from "Not yet implemented:". | `test-dev`, `csharp-dev` |
 | T5 | Docs | `docs/kyber-squad` | Update `docs/kyber-squad/architecture.md` §8 to document `OpenCodeRenderer` (`.opencode/agents/*.md`, `.opencode/skills/*/SKILL.md`) under native renderers and update coverage summary. Update `docs/kyber-squad/onboarding.md` target table and renderer coverage section to mark `opencode` as "Implemented and registered". | `app-docs-standard` |
 | T6 | Todo / Hygiene | `docs/todo` | Update `docs/todo/kyber-squad-renderer-coverage.md` to move `opencode` from remaining gaps table to covered renderers list. Update `docs/todo/opencode.md` frontmatter status to completed/retired or archive note. Update `docs/todo/README.md` if necessary. | `app-docs-standard` |
-| T7 | Verification | Gates | Execute full verification harness: `dotnet format --verify-no-changes`, `dotnet build -c Release`, `dotnet test`, dry-run smoke test `kyber-weave squad install --target opencode --dry-run`, `kyber-weave squad doctor` verification, and documentation validation with `docs validate .` and `docs drift .`. | `csharp-dev`, `test-dev` |
+| T7 | Verification | Gates | Execute full verification harness: `dotnet format --verify-no-changes`, `dotnet build -c Release`, `dotnet test`, dry-run smoke test `kyber-weave squad install --target opencode --dry-run`, `kyber-weave squad doctor` verification, and documentation validation with `kyber-weave docs validate .` and `kyber-weave docs drift .`. | `csharp-dev`, `test-dev` |
 
 ### Per-task acceptance criteria
 
 #### Task 1: Contract Tests (`tests/KyberWeave.Tests/OpenCodeRendererContractTests.cs`)
+
 - New test class `OpenCodeRendererContractTests` implements `IDisposable`.
 - Tests:
   - `SupportedTargets_IsExactlyOpenCode`: Registry with `OpenCodeRenderer` reports exactly `[SquadTarget.OpenCode]`.
@@ -159,7 +161,7 @@ Each task defines an objective, exact files and symbols, acceptance criteria, re
   - `RenderAsync_OpenCode_RendersTheRealCanonicalCorpus`: Renders real `products/kyber-squad` corpus:
     - Asserts total file count matches derived formula (45 principals + 68 resources = 113 files).
     - Every file starts with `.opencode/agents/` or `.opencode/skills/`.
-    - Every agent file has valid YAML frontmatter with `name`, `description`, `model` (matching `models.yml`), and explicit `tools` allowlist.
+    - Every agent file has valid YAML frontmatter with `name`, `description`, `mode` (`primary` or `subagent`), `model` (matching `models.yml`), and explicit `permission` map.
     - Every skill file has valid YAML frontmatter with `name`, `description` (single-line), and `license: MIT`.
     - Conductor / shared identity skill suppression verified if shared identities are configured.
     - Exact instruction body preserved with LF line endings.
@@ -169,6 +171,7 @@ Each task defines an objective, exact files and symbols, acceptance criteria, re
 - Fails initially before Task 2 (Red).
 
 #### Task 2: Core Implementation (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`)
+
 - Implements `ISquadRenderer`.
 - `SupportedTargets` is `[SquadTarget.OpenCode]`.
 - Implements `RenderAsync`:
@@ -176,24 +179,28 @@ Each task defines an objective, exact files and symbols, acceptance criteria, re
   - Renders each `SquadAgent` to `.opencode/agents/<name>.md`.
   - Renders each non-suppressed `SquadSkill` to `.opencode/skills/<name>/SKILL.md`.
   - Projects resources beside principals via `SquadResourceProjection.Append`.
+  - Derives `mode` from `agent.Invocation` (`primary` for conductor, `subagent` for others).
   - Resolves models from `models.yml` for target `opencode` (omits `model` when `inherit`).
-  - Lowers capabilities to explicit tools allowlist per D4–D5 (`todo`, `skill`, `read`, `grep`, `glob`, `edit`, `write`, `patch`, `bash`, `fetch`, `search`, `task`).
+  - Lowers capabilities to explicit permission map per D4–D5 (`todowrite`, `skill`, `read`, `grep`, `glob`, `edit`, `bash`, `webfetch`, `websearch`, `kyber-weave_*`, `task`).
   - Emits `safety-narrowed` degradation records for `ask` capabilities.
   - Emits `permission-not-expressible` degradation records for unexpressible capabilities (`network.publish`, nested delegation roster).
   - Uses `SquadMarkdownDocument.Compose` with `SerializerLock` for thread-safe deterministic output.
 - Clean compilation under `TreatWarningsAsErrors` / `AnalysisMode=all`.
 
 #### Task 3: CLI Composition Registration (`src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`)
+
 - `ResolveRenderer()` includes `new OpenCodeRenderer()` in the `SquadRendererRegistry` instantiation list.
 - Method remarks XML comment updated to list OpenCode as a native renderer.
 
 #### Task 4: CLI Command & Doctor Tests (`tests/KyberWeave.Tests/SquadCliCommandTests.cs`)
+
 - `Doctor_ReportsRendererCoverageAndMcpProbeStatus` updated:
   - Asserts `opencode` is present in `availableSection`.
   - Asserts `opencode` is absent from `pendingSection`.
 - All other tests in `SquadCliCommandTests` continue to pass.
 
 #### Task 5: Architecture & Onboarding Documentation (`docs/kyber-squad/architecture.md`, `docs/kyber-squad/onboarding.md`)
+
 - `docs/kyber-squad/architecture.md` §8 updated:
   - Mentions `OpenCodeRenderer` (`.opencode/agents/*.md`, `.opencode/skills/*/SKILL.md`).
   - Updates coverage paragraph from 5 to 6 supported targets.
@@ -202,6 +209,7 @@ Each task defines an objective, exact files and symbols, acceptance criteria, re
   - Coverage summary text updated to include `opencode`.
 
 #### Task 6: Todo / Hygiene (`docs/todo/kyber-squad-renderer-coverage.md`, `docs/todo/opencode.md`, `docs/todo/README.md`)
+
 - `docs/todo/kyber-squad-renderer-coverage.md`:
   - `opencode` moved from remaining targets table to implemented renderers text.
 - `docs/todo/opencode.md`:
@@ -210,6 +218,7 @@ Each task defines an objective, exact files and symbols, acceptance criteria, re
   - Inventory updated to reflect status of `opencode.md`.
 
 #### Task 7: Full Gate Verification & Dry-Run Smoke
+
 - `dotnet format --verify-no-changes` passes cleanly.
 - `dotnet build -c Release` builds with 0 errors, 0 warnings.
 - `dotnet test` passes 100% across the solution.
