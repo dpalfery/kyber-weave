@@ -15,7 +15,9 @@ Every plan document under `docs/plans/` must be reachable from this inventory, d
 
 ## Active Plans
 
-None.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-09-14-kilo-native-renderer.md](2026-09-14-kilo-native-renderer.md) | Ready | 2026-09-14 | Implement and register an ISquadRenderer for SquadTarget.Kilo (kilo) with native Kilo agent and skill layouts. |
 
 ## Archived Plans
 
