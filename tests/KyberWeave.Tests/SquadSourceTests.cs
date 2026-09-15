@@ -45,10 +45,9 @@ public sealed class SquadSourceTests
     }
 
     /// <summary>
-    /// Pi model tokens are <c>provider/modelId</c> values tied to each user's configured
-    /// providers, so the checked-in corpus carries no <c>pi:</c> value. A host that adds one
-    /// must still load: the model-profile field set is closed, and a declared target missing
-    /// from it would reject the profile as an unknown field.
+    /// Pi model tokens use <c>provider/modelId</c> values. This fixture writes a
+    /// <c>pi:</c> value into its profile data and verifies that the closed model-profile
+    /// field set accepts and exposes it.
     /// </summary>
     [Fact]
     public void LoadModelProfileWithPiHarnessModelExposesThePiModel()

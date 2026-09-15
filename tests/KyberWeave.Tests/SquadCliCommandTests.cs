@@ -503,6 +503,39 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     [Fact]
+    public void Doctor_GlobalScope_SkipsCollisionScanWhenCanonicalSourceIsInvalid()
+    {
+        string repoPath = Path.Combine(_temp.Path, "invalid-squad-repo");
+        Directory.CreateDirectory(Path.Combine(repoPath, "products", "kyber-squad"));
+        File.WriteAllText(Path.Combine(repoPath, "KyberWeave.sln"), string.Empty);
+        File.WriteAllText(
+            Path.Combine(repoPath, "products", "kyber-squad", "squad.yml"),
+            "this is not a valid squad manifest\n");
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "invalid-source-user"));
+        SquadDoctorCommand command = new SquadDoctorCommand(
+            executor,
+            userPaths,
+            workingDirectory: repoPath,
+            globalRoots: new SquadGlobalRoots(_ => null, Path.Combine(_temp.Path, "invalid-source-home")));
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = repoPath,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Canonical source", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("scan skipped", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Global unmanaged collisions: none", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Install_GlobalScope_StillRefusesUnmanagedCollision()
     {
         string tempHome = Path.Combine(_temp.Path, "install-global-collision-home");

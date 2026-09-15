@@ -388,7 +388,7 @@ and the usual cause needs a person.
 
 ## Current limitations
 
-Six renderers are implemented and registered (`CopilotRenderer`, `CursorRenderer`, `ClaudeRenderer`, `CodexRenderer`, `AntigravityRenderer`, and `PiRenderer`). On these targets these permissions lower to their native representations and are enforced; on the four unimplemented targets (`opencode`, `kilo`, `warp`, `factory`) the council and the narrowing are instruction-only until
+Eight renderers are implemented and registered (`CopilotRenderer`, `CursorRenderer`, `ClaudeRenderer`, `CodexRenderer`, `AntigravityRenderer`, `OpenCodeRenderer`, `KiloRenderer`, and `PiRenderer`). On these targets these permissions lower to their native representations and are enforced; on the two unimplemented targets (`warp`, `factory`) the council and the narrowing are instruction-only until
 those renderers land — see
 [renderer coverage](../todo/kyber-squad-renderer-coverage.md).
 

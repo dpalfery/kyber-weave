@@ -166,6 +166,7 @@ public sealed class SquadLifecycleService
                 .ToArray();
 
             SquadDeploymentPlan plan;
+            IReadOnlyList<SquadReceipt>? siblingReceipts = SiblingGlobalReceipts(targetRoot, request.Scope);
             if (existingReceipt is null)
             {
                 plan = SquadDeploymentPlan.CreateInstall(
@@ -176,7 +177,8 @@ public sealed class SquadLifecycleService
                     degradations: degradations,
                     adopt: request.Adopt,
                     timeProvider: _timeProvider,
-                    globalRoots: _globalRoots);
+                    globalRoots: _globalRoots,
+                    siblingGlobalReceipts: siblingReceipts);
             }
             else
             {
@@ -189,7 +191,8 @@ public sealed class SquadLifecycleService
                     degradations: degradations,
                     replaceManaged: false,
                     timeProvider: _timeProvider,
-                    globalRoots: _globalRoots);
+                    globalRoots: _globalRoots,
+                    siblingGlobalReceipts: siblingReceipts);
             }
 
             if (request.DryRun)
@@ -310,7 +313,8 @@ public sealed class SquadLifecycleService
                 degradations: degradations,
                 replaceManaged: request.ReplaceManaged,
                 timeProvider: _timeProvider,
-                globalRoots: _globalRoots);
+                globalRoots: _globalRoots,
+                siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
 
             if (request.DryRun)
             {
@@ -371,7 +375,8 @@ public sealed class SquadLifecycleService
             targetRoot: targetRoot,
             scope: request.Scope,
             receipt: receipt,
-            globalRoots: _globalRoots);
+            globalRoots: _globalRoots,
+            siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
 
         if (request.DryRun)
         {
@@ -395,6 +400,13 @@ public sealed class SquadLifecycleService
             Degradations: plan.Receipt.Degradations,
             DryRun: false));
     }
+
+    private IReadOnlyList<SquadReceipt>? SiblingGlobalReceipts(
+        string targetRoot,
+        SquadDeploymentScope scope) =>
+        scope == SquadDeploymentScope.Global
+            ? _stateStore.ListOtherGlobalReceipts(targetRoot)
+            : null;
 
     /// <summary>
     /// Rejects any requested target with no registered renderer before the release is

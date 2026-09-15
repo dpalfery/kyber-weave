@@ -17,7 +17,7 @@ implementation.
 ## Why this exists
 
 Found on 2026-09-14 while running the conductor flow in Claude Code against
-[pi.md](pi.md). `squad install --target claude` rendered an `architect` subagent with no
+[pi.md](../archive/todo/pi.md). `squad install --target claude` rendered an `architect` subagent with no
 `Edit`, `Write`, or `Bash`. The conductor's plan path requires `architect` to save a Draft plan
 under the directory named by **<plan-index>** and re-run `docs validate` and `docs drift`.
 The rendered agent can do neither, so the plan path stops at its first write.

@@ -472,14 +472,14 @@ public sealed class SquadTransaction
     private static void ValidatePreconditions(SquadDeploymentPlan plan)
     {
         foreach (SquadFilePrecondition precondition in plan.FilePreconditions)
-            ValidatePrecondition(plan.PhysicalRootPath, precondition);
+            ValidatePrecondition(plan, precondition);
     }
 
     private static void ValidatePrecondition(
-        string targetRoot,
+        SquadDeploymentPlan plan,
         SquadFilePrecondition precondition)
     {
-        string fullPath = SquadPathPolicy.ResolveFile(targetRoot, precondition.RelativePath);
+        string fullPath = plan.ResolvePhysicalPath(precondition.Target, precondition.RelativePath);
         OriginalEntryKind kind = GetEntryKind(fullPath);
         if (precondition.Kind == SquadFilePreconditionKind.Missing)
         {
@@ -510,10 +510,11 @@ public sealed class SquadTransaction
             if (mutation.Kind != SquadFileMutationKind.Write)
                 continue;
 
+            string stagingRelativePath = TargetWorkRelative("staging", mutation.Target, mutation.RelativePath);
             string stagingPath = TransactionFilePath(
                 workDirectory,
                 "staging",
-                mutation.RelativePath);
+                $"{mutation.Target}/{mutation.RelativePath}");
             byte[] content = mutation.Content
                 ?? throw new InvalidOperationException(
                     $"Write mutation '{mutation.RelativePath}' has no content.");
@@ -522,7 +523,7 @@ public sealed class SquadTransaction
                 ArtifactArea.Work,
                 ArtifactRole.TargetStage,
                 transactionId,
-                $"staging/{mutation.RelativePath}",
+                stagingRelativePath,
                 stagingPath,
                 content,
                 artifacts);
@@ -540,24 +541,27 @@ public sealed class SquadTransaction
     {
         List<string> backedUp = new List<string>();
         Dictionary<string, IntentFile> intentByPath = intent.Files.ToDictionary(
-            file => file.RelativePath,
+            file => FileKey(file.Target, file.RelativePath),
             StringComparer.Ordinal);
 
         foreach (SquadFileMutation mutation in plan.FileMutations)
         {
-            IntentFile original = intentByPath[mutation.RelativePath];
+            IntentFile original = intentByPath[FileKey(mutation.Target, mutation.RelativePath)];
             if (original.OriginalKind == OriginalEntryKind.Missing)
                 continue;
 
             string targetPath = SquadPathPolicy.ResolveFile(original.PhysicalRoot, mutation.RelativePath);
-            string backupPath = TransactionFilePath(workDirectory, "backups", mutation.RelativePath);
+            string backupPath = TransactionFilePath(
+                workDirectory,
+                "backups",
+                $"{mutation.Target}/{mutation.RelativePath}");
             BackupEntry(
                 targetPath,
                 backupPath,
                 original.OriginalKind,
-                TransactionFilePath(workDirectory, "links", mutation.RelativePath),
+                TransactionFilePath(workDirectory, "links", $"{mutation.Target}/{mutation.RelativePath}"),
                 workDirectory,
-                mutation.RelativePath,
+                $"{mutation.Target}/{mutation.RelativePath}",
                 intent.TransactionId,
                 artifacts);
 
@@ -641,27 +645,29 @@ public sealed class SquadTransaction
         ref int checkpointSequence)
     {
         Dictionary<string, SquadFilePrecondition> preconditions = plan.FilePreconditions.ToDictionary(
-            precondition => precondition.RelativePath,
+            precondition => FileKey(precondition.Target, precondition.RelativePath),
             StringComparer.Ordinal);
 
         foreach (SquadFileMutation mutation in plan.FileMutations)
         {
             IntentFile fileIntent = intent.Files.Single(file =>
-                string.Equals(file.RelativePath, mutation.RelativePath, StringComparison.Ordinal));
-            SquadFilePrecondition precondition = preconditions[mutation.RelativePath];
+                string.Equals(file.RelativePath, mutation.RelativePath, StringComparison.Ordinal) &&
+                string.Equals(file.Target, mutation.Target, StringComparison.Ordinal));
+            SquadFilePrecondition precondition = preconditions[FileKey(mutation.Target, mutation.RelativePath)];
             string boundRoot = fileIntent.PhysicalRoot;
+            string stagingRelativePath = TargetWorkRelative("staging", mutation.Target, mutation.RelativePath);
 
             if (mutation.Kind == SquadFileMutationKind.Write)
             {
                 string stagingPath = TransactionFilePath(
                     workDirectory,
                     "staging",
-                    mutation.RelativePath);
+                    $"{mutation.Target}/{mutation.RelativePath}");
                 VerifyPreparedStage(
                     intent,
                     ArtifactArea.Work,
                     ArtifactRole.TargetStage,
-                    $"staging/{mutation.RelativePath}",
+                    stagingRelativePath,
                     stagingPath,
                     mutation.RelativePath);
             }
@@ -669,6 +675,7 @@ public sealed class SquadTransaction
             ClaimExistingNoOverwrite(
                 boundRoot,
                 mutation.RelativePath,
+                FileKey(mutation.Target, mutation.RelativePath),
                 workDirectory,
                 ArtifactArea.Work,
                 fileIntent.OriginalKind,
@@ -684,14 +691,13 @@ public sealed class SquadTransaction
 
             if (mutation.Kind == SquadFileMutationKind.Write)
             {
-                string stageRelativePath = $"staging/{mutation.RelativePath}";
                 string stagingPath = TransactionFilePath(
                     workDirectory,
                     "staging",
-                    mutation.RelativePath);
+                    $"{mutation.Target}/{mutation.RelativePath}");
                 BeginArtifactTransition(
                     ArtifactArea.Work,
-                    stageRelativePath,
+                    stagingRelativePath,
                     intentPath,
                     lease,
                     ref intent);
@@ -701,7 +707,7 @@ public sealed class SquadTransaction
                     intent,
                     ArtifactArea.Work,
                     ArtifactRole.TargetStage,
-                    stageRelativePath,
+                    stagingRelativePath,
                     boundRoot,
                     mutation.RelativePath,
                     stagingPath,
@@ -719,7 +725,7 @@ public sealed class SquadTransaction
                     mutation.RelativePath);
                 CompleteArtifactTransition(
                     ArtifactArea.Work,
-                    stageRelativePath,
+                    stagingRelativePath,
                     intentPath,
                     lease,
                     ref intent);
@@ -943,6 +949,7 @@ public sealed class SquadTransaction
         ClaimExistingNoOverwrite(
             Path.GetDirectoryName(targetPath)!,
             Path.GetFileName(targetPath),
+            Path.GetFileName(targetPath),
             SquadFileSystemPathSemantics.AreSame(
                 workDirectory,
                 Path.GetDirectoryName(intentPath)!)
@@ -965,6 +972,7 @@ public sealed class SquadTransaction
     private static void ClaimExistingNoOverwrite(
         string boundRoot,
         string relativePath,
+        string claimIdentity,
         string claimRoot,
         ArtifactArea claimArea,
         OriginalEntryKind expectedKind,
@@ -985,7 +993,7 @@ public sealed class SquadTransaction
             return;
         }
 
-        string claimRelativePath = ClaimRelativePath(intent.TransactionId, relativePath);
+        string claimRelativePath = ClaimRelativePath(intent.TransactionId, claimIdentity);
         string claimPath = SquadPathPolicy.ResolveFile(claimRoot, claimRelativePath);
         IntentArtifact artifact = CaptureNodeArtifact(
             intent.TransactionId,
@@ -1178,11 +1186,11 @@ public sealed class SquadTransaction
             string backupPath = TransactionFilePath(
                 workDirectory,
                 "backups",
-                file.RelativePath);
+                $"{file.Target}/{file.RelativePath}");
             string linkMetadataPath = TransactionFilePath(
                 workDirectory,
                 "links",
-                file.RelativePath);
+                $"{file.Target}/{file.RelativePath}");
             CompareAndRestoreEntry(
                 intent,
                 targetPath,
@@ -1190,9 +1198,9 @@ public sealed class SquadTransaction
                 file.OriginalKind,
                 linkMetadataPath,
                 ArtifactRole.TargetBackup,
-                $"backups/{file.RelativePath}",
+                TargetWorkRelative("backups", file.Target, file.RelativePath),
                 ArtifactRole.TargetLinkMetadata,
-                $"links/{file.RelativePath}",
+                TargetWorkRelative("links", file.Target, file.RelativePath),
                 file.AfterKind,
                 file.AfterSha256,
                 file.RelativePath,
@@ -1264,7 +1272,7 @@ public sealed class SquadTransaction
             {
                 if (string.Equals(
                         artifact.Path,
-                        ClaimRelativePath(intent.TransactionId, file.RelativePath),
+                        ClaimRelativePath(intent.TransactionId, FileKey(file.Target, file.RelativePath)),
                         StringComparison.Ordinal))
                 {
                     targetPath = SquadPathPolicy.ResolveFile(file.PhysicalRoot, file.RelativePath);
@@ -1403,9 +1411,9 @@ public sealed class SquadTransaction
                 intent,
                 file.OriginalKind,
                 ArtifactRole.TargetBackup,
-                $"backups/{file.RelativePath}",
+                TargetWorkRelative("backups", file.Target, file.RelativePath),
                 ArtifactRole.TargetLinkMetadata,
-                $"links/{file.RelativePath}");
+                TargetWorkRelative("links", file.Target, file.RelativePath));
         }
 
         VerifyRestoreArtifacts(
@@ -2598,7 +2606,7 @@ public sealed class SquadTransaction
                 expected.Add(SemanticArtifactIdentity(
                     ArtifactArea.Work,
                     ArtifactRole.TargetStage,
-                    $"staging/{file.RelativePath}"));
+                    TargetWorkRelative("staging", file.Target, file.RelativePath)));
             }
 
             if (file.OriginalKind is OriginalEntryKind.File or
@@ -2608,7 +2616,7 @@ public sealed class SquadTransaction
                 expected.Add(SemanticArtifactIdentity(
                     ArtifactArea.Work,
                     ArtifactRole.TargetBackup,
-                    $"backups/{file.RelativePath}"));
+                    TargetWorkRelative("backups", file.Target, file.RelativePath)));
             }
 
             if (file.OriginalKind is OriginalEntryKind.FileSymbolicLink or
@@ -2617,7 +2625,7 @@ public sealed class SquadTransaction
                 expected.Add(SemanticArtifactIdentity(
                     ArtifactArea.Work,
                     ArtifactRole.TargetLinkMetadata,
-                    $"links/{file.RelativePath}"));
+                    TargetWorkRelative("links", file.Target, file.RelativePath)));
             }
         }
 
@@ -2644,7 +2652,7 @@ public sealed class SquadTransaction
             optionalClaims.Add(SemanticArtifactIdentity(
                 ArtifactArea.Work,
                 ArtifactRole.ClaimedOriginal,
-                ClaimRelativePath(intent.TransactionId, file.RelativePath)));
+                ClaimRelativePath(intent.TransactionId, FileKey(file.Target, file.RelativePath))));
         }
 
         ArtifactArea stateClaimArea = SquadFileSystemPathSemantics.AreSame(
@@ -3109,6 +3117,17 @@ public sealed class SquadTransaction
         string categoryRoot = Path.Combine(workDirectory, category);
         return SquadPathPolicy.ResolveFile(categoryRoot, relativePath);
     }
+
+    /// <summary>
+    /// Work-tree artifact path qualified by harness target so two Global-scope files that
+    /// share a relative path (Claude and Pi both emit <c>agents/architect.md</c>) do not
+    /// collide under staging, backups, or links.
+    /// </summary>
+    private static string TargetWorkRelative(string category, string target, string relativePath) =>
+        $"{category}/{target}/{relativePath}";
+
+    private static string FileKey(string target, string relativePath) =>
+        SquadDeploymentPlan.DeployedFileIdentity(target, relativePath);
 
     private static string Digest(ReadOnlySpan<byte> content) =>
         Convert.ToHexStringLower(SHA256.HashData(content));

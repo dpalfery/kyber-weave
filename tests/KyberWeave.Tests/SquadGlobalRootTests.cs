@@ -302,6 +302,127 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(projectRoot, "*", SearchOption.AllDirectories));
     }
 
+    [Fact]
+    public async Task InstallAsync_DryRunGlobalScope_ClaudeAndPiShareRelativePathsUnderDistinctRoots()
+    {
+        string tempHome = Path.Combine(_temp.Path, "multi-target-home");
+        Directory.CreateDirectory(tempHome);
+        string projectRoot = Path.Combine(_temp.Path, "multi-target-project");
+        Directory.CreateDirectory(projectRoot);
+        string userData = Path.Combine(_temp.Path, "multi-target-user-data");
+
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        FakeSquadUserPaths userPaths = new(userData);
+        SquadStateStore stateStore = new(userPaths);
+        using CorpusSquadReleaseSource releaseSource = new();
+        SquadLifecycleService service = new(
+            releaseSource,
+            SquadCommandComposition.ResolveRenderer(),
+            stateStore,
+            globalRoots: globalRoots);
+
+        SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
+            TargetRoot: projectRoot,
+            Scope: SquadDeploymentScope.Global,
+            Targets: [SquadTarget.Claude, SquadTarget.Pi],
+            Version: "1.2.3",
+            DryRun: true));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors ?? Array.Empty<string>()));
+        Assert.NotNull(result.Plan);
+        Assert.NotNull(result.Receipt);
+
+        SquadOwnedFile claudeArchitect = Assert.Single(
+            result.Receipt.Files,
+            file => file.Target == "claude" && file.RelativePath == "agents/architect.md");
+        SquadOwnedFile piArchitect = Assert.Single(
+            result.Receipt.Files,
+            file => file.Target == "pi" && file.RelativePath == "agents/architect.md");
+
+        string claudePath = result.Plan.ResolvePhysicalPath(claudeArchitect);
+        string piPath = result.Plan.ResolvePhysicalPath(piArchitect);
+        Assert.NotEqual(claudePath, piPath);
+        Assert.True(
+            SquadFileSystemPathSemantics.IsWithin(globalRoots.ResolveGlobalRoot(SquadTarget.Claude), claudePath));
+        Assert.True(
+            SquadFileSystemPathSemantics.IsWithin(globalRoots.ResolveGlobalRoot(SquadTarget.Pi), piPath));
+    }
+
+    [Fact]
+    public void CreateInstall_GlobalScope_RefusesPathOwnedByAnotherProjectsReceipt()
+    {
+        string tempHome = Path.Combine(_temp.Path, "sibling-home");
+        Directory.CreateDirectory(tempHome);
+        string projectRoot = Path.Combine(_temp.Path, "sibling-project");
+        Directory.CreateDirectory(projectRoot);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+
+        byte[] content = "owned-elsewhere"u8.ToArray();
+        SquadReceipt sibling = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            DateTimeOffset.UtcNow,
+            [],
+            [new SquadOwnedFile(
+                "agents/architect.md",
+                Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content)),
+                "pi",
+                false)]);
+
+        SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(
+            () => SquadDeploymentPlan.CreateInstall(
+                projectRoot,
+                SquadDeploymentScope.Global,
+                GlobalLock(["pi"]),
+                [new SquadDeploymentFile("agents/architect.md", content, "pi")],
+                [],
+                adopt: true,
+                TimeProvider.System,
+                globalRoots,
+                [sibling]));
+
+        Assert.Contains("already owned by another", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("agents/architect.md", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateUninstall_GlobalScope_LeavesFileOwnedByAnotherProjectsReceipt()
+    {
+        string tempHome = Path.Combine(_temp.Path, "uninstall-sibling-home");
+        Directory.CreateDirectory(tempHome);
+        string projectRoot = Path.Combine(_temp.Path, "uninstall-sibling-project");
+        Directory.CreateDirectory(projectRoot);
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+
+        byte[] content = "shared-global-bytes"u8.ToArray();
+        string digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content));
+        string physical = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Pi), "agents", "architect.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(physical)!);
+        File.WriteAllBytes(physical, content);
+
+        SquadOwnedFile owned = new("agents/architect.md", digest, "pi", false);
+        SquadReceipt receipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            DateTimeOffset.UtcNow,
+            [],
+            [owned]);
+        SquadReceipt sibling = receipt;
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
+            projectRoot,
+            SquadDeploymentScope.Global,
+            receipt,
+            globalRoots,
+            [sibling]);
+
+        Assert.Empty(plan.FileMutations);
+        Assert.DoesNotContain(plan.Receipt.Files, file => file.RelativePath == "agents/architect.md");
+        Assert.True(File.Exists(physical));
+    }
+
     // ---------------------------------------------------------------------------------------
     // Criterion 3: project scope is unchanged (regression guard).
     // ---------------------------------------------------------------------------------------
@@ -421,4 +542,18 @@ public sealed class SquadGlobalRootTests : IDisposable
             + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
     }
+
+    private static SquadLock GlobalLock(IReadOnlyList<string> targets) =>
+        new(
+            "kyber-squad.lock/v1",
+            "1.2.3",
+            "1.2.3",
+            "1.2.3",
+            "full",
+            targets,
+            [],
+            "best-effort",
+            "a".PadRight(64, '0'),
+            "b".PadRight(64, '0'),
+            new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 }
