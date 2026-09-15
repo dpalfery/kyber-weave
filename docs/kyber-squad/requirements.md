@@ -59,15 +59,15 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Cursor** | Native `.cursor/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **Claude** | Native `.claude/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **GitHub Copilot** | Native instructions/agents | Implemented and registered | Supported | Not lowered | Native execution |
-| **OpenCode** | Native `.opencode/agents` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
-| **Kilo** | Native `.kilo/agents` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
+| **OpenCode** | Native `.opencode/agents` | Implemented and registered | Supported | Not lowered | Native execution |
+| **Kilo** | Native `.kilo/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **Antigravity** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Safety-narrowed |
 | **Pi** | Native `.pi/agents` + lowered conductor | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agent only) | Native execution + safety-narrowed |
 | **Warp** | Role skills | Unsupported; coverage preflight fails | Unavailable | Lowered (`role-*` on collision) | Not implemented |
 | **Factory Droids** | Native `.factory/` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
 
-The ten rows are the declared target roster. `copilot`, `cursor`, `claude`, `codex`, `antigravity`, and
-`pi` have implemented and registered renderers. `opencode`, `kilo`, `warp`, and `factory`
+The ten rows are the declared target roster. `copilot`, `cursor`, `claude`, `codex`,
+`antigravity`, `opencode`, `kilo`, and `pi` have implemented and registered renderers. `warp` and `factory`
 fail renderer-coverage preflight before deployment.
 
 ---

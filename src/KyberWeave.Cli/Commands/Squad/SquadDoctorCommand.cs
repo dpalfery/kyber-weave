@@ -19,6 +19,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private readonly IProcessExecutor? _executor;
     private readonly string? _workingDirectory;
+    private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly ISquadRenderer? _renderer;
 
     /// <summary>Creates a new doctor command using default dependencies.</summary>
     public SquadDoctorCommand()
@@ -29,11 +31,15 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     internal SquadDoctorCommand(
         IProcessExecutor? executor = null,
         ISquadUserPaths? userPaths = null,
-        string? workingDirectory = null)
+        string? workingDirectory = null,
+        ISquadGlobalRootResolver? globalRoots = null,
+        ISquadRenderer? renderer = null)
     {
         _ = userPaths;
         _executor = executor;
         _workingDirectory = workingDirectory;
+        _globalRoots = globalRoots;
+        _renderer = renderer;
     }
 
     /// <inheritdoc />
@@ -103,6 +109,11 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             }
         }
 
+        if (settings.Global)
+        {
+            ReportGlobalCollisions(workingDirectory, canonicalSourcePath);
+        }
+
         AnsiConsole.WriteLine();
         if (hasIssues)
         {
@@ -115,6 +126,52 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     public int Execute(CommandContext context, SquadDoctorSettings settings) => Execute(context, settings, CancellationToken.None);
+
+    private void ReportGlobalCollisions(string workingDirectory, string? canonicalSourcePath)
+    {
+        if (canonicalSourcePath is null)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source is not available from this working directory.");
+            return;
+        }
+
+        ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
+        ISquadGlobalRootResolver globalRoots = _globalRoots
+            ?? new SquadGlobalRoots(
+                Environment.GetEnvironmentVariable,
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+        List<SquadUnmanagedPathCollision> collisions = [];
+        foreach (SquadTarget target in renderer.SupportedTargets)
+        {
+            SquadRenderResult render = renderer.RenderAsync(
+                    new SquadRenderRequest(
+                        canonicalSourcePath,
+                        [target],
+                        SquadDeploymentScope.Global))
+                .GetAwaiter()
+                .GetResult();
+
+            collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
+                workingDirectory,
+                SquadDeploymentScope.Global,
+                render.Files,
+                globalRoots));
+        }
+
+        if (collisions.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
+            return;
+        }
+
+        foreach (SquadUnmanagedPathCollision collision in collisions)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
+        }
+    }
 
     private static string GetCliVersion()
     {

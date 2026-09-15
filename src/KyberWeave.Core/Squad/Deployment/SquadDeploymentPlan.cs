@@ -149,7 +149,11 @@ public sealed class SquadDeploymentPlan
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
         string root = identity.PhysicalPath;
-        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(root, renderedFiles);
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
+            root,
+            scope,
+            globalRoots,
+            renderedFiles);
         List<SquadFileMutation> mutations = new List<SquadFileMutation>();
         List<SquadFilePrecondition> preconditions = new List<SquadFilePrecondition>();
         List<SquadOwnedFile> ownedFiles = new List<SquadOwnedFile>();
@@ -222,7 +226,11 @@ public sealed class SquadDeploymentPlan
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
         string root = identity.PhysicalPath;
-        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(root, renderedFiles);
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
+            root,
+            scope,
+            globalRoots,
+            renderedFiles);
         Dictionary<string, SquadOwnedFile> previousByPath = ReceiptFilesByPath(root, previousReceipt);
         List<SquadFileMutation> mutations = new List<SquadFileMutation>();
         List<SquadFilePrecondition> preconditions = new List<SquadFilePrecondition>();
@@ -407,8 +415,80 @@ public sealed class SquadDeploymentPlan
         ArgumentNullException.ThrowIfNull(timeProvider);
     }
 
+    /// <summary>
+    /// Lists every rendered path that already exists at its resolved physical location
+    /// with bytes that do not match the render. <c>squad doctor --global</c> surfaces
+    /// the whole set as warnings; <see cref="CreateInstall"/> still throws on the first
+    /// via the existing unmanaged-collision rule.
+    /// </summary>
+    public static IReadOnlyList<SquadUnmanagedPathCollision> CollectUnmanagedCollisions(
+        string targetRoot,
+        SquadDeploymentScope scope,
+        IReadOnlyList<SquadDeploymentFile> renderedFiles,
+        ISquadGlobalRootResolver? globalRoots)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+        ArgumentNullException.ThrowIfNull(renderedFiles);
+
+        string root = SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath;
+        IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
+            root,
+            scope,
+            globalRoots,
+            renderedFiles);
+        List<SquadUnmanagedPathCollision> collisions = [];
+        foreach (NormalizedDeploymentFile rendered in normalizedFiles)
+        {
+            if (Directory.Exists(rendered.FullPath))
+            {
+                collisions.Add(ToCollision(rendered));
+                continue;
+            }
+
+            if (!File.Exists(rendered.FullPath))
+            {
+                continue;
+            }
+
+            string currentDigest = Digest(File.ReadAllBytes(rendered.FullPath));
+            string renderedDigest = Digest(rendered.File.Content.Span);
+            if (!string.Equals(currentDigest, renderedDigest, StringComparison.Ordinal))
+            {
+                collisions.Add(ToCollision(rendered));
+            }
+        }
+
+        return collisions;
+    }
+
+    private static SquadUnmanagedPathCollision ToCollision(NormalizedDeploymentFile rendered) =>
+        new(
+            rendered.File.RelativePath,
+            rendered.FullPath,
+            rendered.File.Target,
+            IdentityFromRelativePath(rendered.File.RelativePath));
+
+    internal static string IdentityFromRelativePath(string relativePath)
+    {
+        string fileName = Path.GetFileName(relativePath);
+        if (fileName.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase))
+        {
+            string? parent = Path.GetDirectoryName(relativePath);
+            return string.IsNullOrEmpty(parent) ? fileName : Path.GetFileName(parent);
+        }
+
+        if (fileName.EndsWith(".agent.md", StringComparison.Ordinal))
+        {
+            return fileName[..^".agent.md".Length];
+        }
+
+        return Path.GetFileNameWithoutExtension(fileName);
+    }
+
     private static IReadOnlyList<NormalizedDeploymentFile> NormalizeRenderedFiles(
         string root,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots,
         IReadOnlyList<SquadDeploymentFile> renderedFiles)
     {
         List<NormalizedDeploymentFile> normalized = new List<NormalizedDeploymentFile>(renderedFiles.Count);
@@ -436,7 +516,7 @@ public sealed class SquadDeploymentPlan
             SquadDeploymentFile normalizedFile = rendered with { RelativePath = relativePath };
             normalized.Add(new NormalizedDeploymentFile(
                 normalizedFile,
-                SquadPathPolicy.ResolveFile(root, relativePath)));
+                ResolvePhysicalPath(scope, root, globalRoots, rendered.Target, relativePath)));
         }
 
         return normalized;
@@ -519,6 +599,16 @@ public sealed class SquadDeploymentPlan
         SquadDeploymentFile File,
         string FullPath);
 }
+
+/// <summary>
+/// One unmanaged file whose name matches a canonical Squad identity and whose
+/// bytes do not match the current render. Doctor lists these; install refuses them.
+/// </summary>
+public sealed record SquadUnmanagedPathCollision(
+    string RelativePath,
+    string FullPath,
+    string Target,
+    string Identity);
 
 internal enum SquadFileMutationKind
 {

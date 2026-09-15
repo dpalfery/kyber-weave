@@ -47,7 +47,7 @@ public sealed partial class HotshotGoldenContractTests
 
     /// <summary>
     /// Agents whose Copilot model values diverged from the Hotshot golden snapshot on 2026-09-14
-    /// per plan <c>docs/plans/2026-09-14-pi-harness-target.md</c> §6b, decisions U10–U12 (owner-approved
+    /// per plan <c>docs/archive/plans/2026-09-14-pi-harness-target.md</c> §6b, decisions U10–U12 (owner-approved
     /// model profile changes). Only the model field is allowed to diverge; all other fields
     /// (description, body, tools, capability, delegation, aliases, invocation) must match the golden.
     /// </summary>

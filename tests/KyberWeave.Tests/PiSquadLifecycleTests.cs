@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 /// the isolated <c>PiRendererContractTests</c> render path.
 /// </summary>
 /// <remarks>
-/// Covers docs/plans/2026-09-14-pi-harness-target.md section 7, row T3 (R13, R14, R15, R17):
+/// Covers docs/archive/plans/2026-09-14-pi-harness-target.md section 7, row T3 (R13, R14, R15, R17):
 /// a dry-run Pi install renders the whole corpus under the <c>pi</c> target only; Pi and
 /// Antigravity coexist with disjoint output trees; a real Pi install never touches this
 /// repository's pre-existing <c>.pi/subagents.json</c>; and <c>squad doctor</c> lists <c>pi</c>.

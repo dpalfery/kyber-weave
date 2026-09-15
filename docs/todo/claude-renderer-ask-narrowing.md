@@ -1,6 +1,6 @@
 ---
 id: todo/claude-renderer-ask-narrowing
-title: Claude renderer leaves architect and product-owner unable to persist their artifacts
+title: Claude and Pi renderers leave architect and product-owner unable to persist their artifacts
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
@@ -8,7 +8,7 @@ last-reviewed: 2026-09-14
 status: draft
 ---
 
-# Claude renderer leaves architect and product-owner unable to persist their artifacts
+# Claude and Pi renderers leave architect and product-owner unable to persist their artifacts
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
@@ -80,6 +80,19 @@ In the worktree where this was found, the untracked `.claude/agents/architect.md
 - The hook (`.claude/hooks/architect-plans-only.sh`) resolves the requested path and exits 2
   unless it falls under `docs/plans/`.
 - `Bash` was not granted. `task-reviewer` runs the documentation checks on the saved plan.
+
+## Pi
+
+`PiRenderer` has the same narrowing, for a different reason. Pi has no permission prompts
+(P2 of the archived Pi plan), and `tools` is binary: a tool is listed or it is not. Every
+`ask` therefore withholds its tools and records `safety-narrowed`. `architect` and
+`product-owner` lose `edit`/`write`/`bash` on Pi exactly as they lose `Edit`/`Write`/`Bash`
+on Claude. There is no Pi-side hook or path-scoped grant to restore the narrow write those
+roles need.
+
+A fix that only teaches `ClaudeRenderer` a hook or a `claude-capability-profile` leaves Pi
+broken. Prefer a lattice-level path-scoped `ask` (or an equivalent per-target envelope on
+both renderers) so both harnesses regain the write without opening the whole tree.
 
 ## How to verify
 

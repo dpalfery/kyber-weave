@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-10
+last-reviewed: 2026-09-14
 ---
 
 # Todos
@@ -49,10 +49,9 @@ last-reviewed: YYYY-MM-DD
 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | draft | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
 | [kyberdash-local-release-loop.md](kyberdash-local-release-loop.md) | Distribution | draft | The local release loop builds no `kyberdash`, so the KyberDash install and update path is unverifiable offline. |
 | [mistyped-release-tag.md](mistyped-release-tag.md) | Distribution | draft | The mistyped `v1.0.6-rc.6` tag outranks every real release in version-sorted resolution. |
-| [kilo.md](kilo.md) | KyberSquad | draft | Add a native Kilo renderer to Kyber-Squad. |
-| [opencode.md](opencode.md) | KyberSquad | draft | Add a native OpenCode renderer to Kyber-Squad. |
-| [claude-renderer-ask-narrowing.md](claude-renderer-ask-narrowing.md) | KyberSquad | draft | The Claude renderer narrows `ask` to deny, so the rendered `architect` and `product-owner` cannot save their plans and specs. |
-| [pi.md](pi.md) | KyberSquad | superseded | Declare Pi as a Kyber-Squad target and add a role-skill lowering renderer; today it is absent from the catalog entirely. Superseded by the Draft plan [2026-09-14-pi-harness-target.md](../plans/2026-09-14-pi-harness-target.md). |
+| [kilo.md](kilo.md) | KyberSquad | superseded | Add a native Kilo renderer to Kyber-Squad (completed via [plan](../plans/2026-09-14-kilo-native-renderer.md)). |
+| [opencode.md](opencode.md) | KyberSquad | superseded | Add a native OpenCode renderer to Kyber-Squad (superseded by [plan](../plans/2026-09-14-opencode-native-renderer.md)). |
+| [claude-renderer-ask-narrowing.md](claude-renderer-ask-narrowing.md) | KyberSquad | draft | Claude and Pi both narrow `ask` to deny, so the rendered `architect` and `product-owner` cannot save their plans and specs on those harnesses. |
 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | draft | Add a `--version` flag to squad install and squad update. |
 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | draft | squad commands' positional path argument can silently target the wrong directory. |
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |

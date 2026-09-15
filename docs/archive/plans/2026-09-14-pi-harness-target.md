@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-14-pi-harness-target
+id: archive/plans/2026-09-14-pi-harness-target
 title: Add Pi as a Kyber-Squad harness target with a pi-subagents renderer
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-09-14
 component: KyberSquad
@@ -17,11 +17,12 @@ keywords:
 
 # Add Pi as a Kyber-Squad harness target with a pi-subagents renderer
 
-**Status:** Ready
+**Status:** Archived
+**Archive Date:** 2026-09-14
 **Date:** 2026-09-14 (revision of the 2026-09-14 Ready plan, reopened same day)
 **Approval:** Approved by the owner (dpalfery) on 2026-09-14 through the explicit **approve and execute** choice ("now execute the plan"), relayed by the conductor, covering sections 2, 3, 6, and 7 **as they stood at that save**. That approval is **reopened** as of 2026-09-14 — see section 4, "Reopening (2026-09-14)" — because the owner's T8 live-Pi observations changed two requirements after the approved Test contract and scope were already executing. Re-approval is required before implementation resumes.
 **Development mode:** test-first
-**Source todo:** [pi.md](../todo/pi.md)
+**Source todo:** [pi.md](../todo/pi.md) (archived)
 **Goal:** Declare `pi` in the Squad target catalog and register a `PiRenderer`, so that
 `kyber-weave squad install --target pi` renders the canonical corpus into `.pi/agents/` and
 `.pi/skills/` end to end. Update the Kyber-Squad docs, then close the todo out.

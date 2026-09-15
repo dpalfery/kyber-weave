@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Covers docs/plans/2026-09-14-pi-harness-target.md section 7, row T12 (criteria 1-4). This
+/// Covers docs/archive/plans/2026-09-14-pi-harness-target.md section 7, row T12 (criteria 1-4). This
 /// file declares no production type. It references a seam that does not exist yet, so the whole
 /// test assembly fails to compile until T13 adds it — the intended RED signal. The predecessor
 /// this file replaces declared <c>ISquadGlobalRootResolver</c> and its own fake inline, so it
@@ -80,6 +80,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Copilot, ".copilot")]
     [InlineData(SquadTarget.Antigravity, ".gemini/config")]
     [InlineData(SquadTarget.Pi, ".pi/agent")]
+    [InlineData(SquadTarget.OpenCode, ".config/opencode")]
+    [InlineData(SquadTarget.Kilo, ".config/kilo")]
     public void ResolveGlobalRoot_NoOverrideSet_ReturnsHomeDirectoryDefault(
         SquadTarget target,
         string defaultRelativePath)
@@ -103,6 +105,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Cursor, "CURSOR_CONFIG_DIR")]
     [InlineData(SquadTarget.Copilot, "COPILOT_HOME")]
     [InlineData(SquadTarget.Pi, "PI_CODING_AGENT_DIR")]
+    [InlineData(SquadTarget.OpenCode, "OPENCODE_CONFIG_DIR")]
     public void ResolveGlobalRoot_OverrideSetAndNonEmpty_ReturnsTheOverridePath(
         SquadTarget target,
         string overrideEnvironmentVariable)
@@ -128,6 +131,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Cursor, "CURSOR_CONFIG_DIR", ".cursor")]
     [InlineData(SquadTarget.Copilot, "COPILOT_HOME", ".copilot")]
     [InlineData(SquadTarget.Pi, "PI_CODING_AGENT_DIR", ".pi/agent")]
+    [InlineData(SquadTarget.OpenCode, "OPENCODE_CONFIG_DIR", ".config/opencode")]
     public void ResolveGlobalRoot_OverrideSetToEmptyString_FallsBackToTheDefault(
         SquadTarget target,
         string overrideEnvironmentVariable,
@@ -167,6 +171,44 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Equal(expectedRoot, actualRoot);
     }
 
+    [Theory]
+    [InlineData(SquadTarget.OpenCode, "opencode")]
+    [InlineData(SquadTarget.Kilo, "kilo")]
+    public void ResolveGlobalRoot_XdgConfigHomeSet_ReturnsXdgAppDirectory(
+        SquadTarget target,
+        string applicationDirectoryName)
+    {
+        string tempHome = Path.Combine(_temp.Path, $"home-xdg-{target}");
+        Directory.CreateDirectory(tempHome);
+        string xdgConfigHome = Path.Combine(tempHome, "xdg-config");
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "XDG_CONFIG_HOME", StringComparison.Ordinal) ? xdgConfigHome : null,
+            tempHome);
+
+        string actualRoot = resolver.ResolveGlobalRoot(target);
+
+        Assert.Equal(Path.Combine(xdgConfigHome, applicationDirectoryName), actualRoot);
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_OpenCode_ConfigDirOverrideBeatsXdgConfigHome()
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-opencode-override-beats-xdg");
+        Directory.CreateDirectory(tempHome);
+        string overridePath = Path.Combine(tempHome, "opencode-override");
+        string xdgConfigHome = Path.Combine(tempHome, "xdg-config");
+        SquadGlobalRoots resolver = new(
+            name => name switch
+            {
+                "OPENCODE_CONFIG_DIR" => overridePath,
+                "XDG_CONFIG_HOME" => xdgConfigHome,
+                _ => null
+            },
+            tempHome);
+
+        Assert.Equal(overridePath, resolver.ResolveGlobalRoot(SquadTarget.OpenCode));
+    }
+
     // ---------------------------------------------------------------------------------------
     // Criterion 2: a global dry run per target plans bare relative paths under the resolved root.
     // ---------------------------------------------------------------------------------------
@@ -178,6 +220,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Copilot)]
     [InlineData(SquadTarget.Antigravity)]
     [InlineData(SquadTarget.Pi)]
+    [InlineData(SquadTarget.OpenCode)]
+    [InlineData(SquadTarget.Kilo)]
     public async Task InstallAsync_GlobalScopeDryRun_PlansEveryFileUnderTheResolvedTargetRootWithBareRelativePaths(
         SquadTarget target)
     {
@@ -269,6 +313,8 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Copilot, ".github/")]
     [InlineData(SquadTarget.Antigravity, ".agents/skills/")]
     [InlineData(SquadTarget.Pi, ".pi/")]
+    [InlineData(SquadTarget.OpenCode, ".opencode/")]
+    [InlineData(SquadTarget.Kilo, ".kilo/")]
     public async Task InstallAsync_ProjectScopeDryRun_RelativePathsKeepTodaysHarnessPrefix(
         SquadTarget target,
         string expectedPrefix)

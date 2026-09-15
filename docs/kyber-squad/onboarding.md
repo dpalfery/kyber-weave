@@ -16,7 +16,7 @@ code-refs:
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
 **24 canonical skills**, with transactional recovery and state governance. Ten harness targets
-are declared; six are currently implemented and registered.
+are declared; eight are currently implemented and registered.
 
 ---
 
@@ -56,8 +56,8 @@ Kyber-Squad declares ten coding-harness targets:
 | `cursor` | — | `.cursor/` | Native agents | Implemented and registered |
 | `claude` | — | `.claude/` | Native agents | Implemented and registered |
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
-| `opencode` | — | `.opencode/` | Native agents | Unsupported; fails coverage preflight |
-| `kilo` | — | `.kilo/` | Native agents | Unsupported; fails coverage preflight |
+| `opencode` | — | `.opencode/` | Native agents | Implemented and registered |
+| `kilo` | — | `.kilo/` | Native agents | Implemented and registered |
 | `antigravity` | — | *Explicit or configured target only* | Role-skill lowering | Implemented and registered |
 | `pi` | — | *Explicit or configured target only* | Native agents (with conductor lowered to skill) | Implemented and registered |
 | `warp` | — | `.warp/` | Role-skill lowering | Unsupported; fails coverage preflight |
@@ -66,7 +66,7 @@ Kyber-Squad declares ten coding-harness targets:
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), and `pi` (native subagents with primary-agent lowering) have renderers. Requesting any other target fails before the release is even downloaded,
+`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), and `pi` (native subagents with primary-agent lowering) have renderers. Requesting any other target fails before the release is even downloaded,
 naming the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
 implementer needs to add it. `kyber-weave squad doctor` reports current coverage.
 
@@ -140,10 +140,36 @@ When run without `--global`, `kyber-weave squad` deploys agents and skills direc
 
 ### 2. Global Scope (`--global`)
 
-Passing `--global` targets the user's home/global environment rather than a project workspace:
+Passing `--global` keeps Squad's lock and receipt in the per-user application-data tree
+(`KyberWeave/squad/roots/<root-key>/`) and writes the rendered agents and skills into each
+harness's own global directory — not into the project path and not into a single shared
+"home" folder. `--global` is symmetric across `install`, `update`, `uninstall`, `status`,
+and `doctor`.
 
-- `--global` is **strictly symmetric** across all commands: `install`, `update`, `uninstall`, `status`, and `doctor`.
-- Global state is isolated under the OS application data directory: `KyberWeave/squad/roots/<root-key>/`, where `<root-key>` is the SHA-256 hash of the canonical physical root path.
+| Target | Global root (override env var → default) | Global-scope relative paths |
+|---|---|---|
+| `claude` | `$CLAUDE_CONFIG_DIR` → `~/.claude` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `codex` | `$CODEX_HOME` → `~/.codex` | `agents/<name>.toml`, `skills/<name>/SKILL.md` |
+| `cursor` | `$CURSOR_CONFIG_DIR` → `~/.cursor` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `copilot` | `$COPILOT_HOME` → `~/.copilot` | `agents/<name>.agent.md`, `skills/<name>/SKILL.md` |
+| `antigravity` | `~/.gemini/config` (no override) | `skills/<role-or-name>/SKILL.md` |
+| `opencode` | `$OPENCODE_CONFIG_DIR` → `$XDG_CONFIG_HOME/opencode` → `~/.config/opencode` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `kilo` | `$XDG_CONFIG_HOME/kilo` → `~/.config/kilo` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `pi` | `$PI_CODING_AGENT_DIR` → `~/.pi/agent` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+
+Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
+`.agents/skills/…` / `.github/…`) prefix under the project root.
+
+**Pre-migration for existing global files.** Squad never deletes an unmanaged file. If a
+global root already holds a file whose name matches a canonical Squad identity but whose
+bytes differ, `squad install --global` refuses that path (`UnmanagedCollision`) unless
+`--adopt` finds identical bytes. Run `squad doctor --global` first: it lists every such
+collision as a warning so the whole set is visible before install. Move or rename the
+hand-authored file, or adopt it only when the bytes already match.
+
+**Model pins.** Per-harness model tokens in `models.yml` are user-provider specific. An
+unresolvable pin inherits silently (the renderer omits `model`) rather than failing the
+install; confirm the resolved model in the harness itself after a first deploy.
 
 ---
 

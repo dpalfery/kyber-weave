@@ -12,7 +12,7 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Renders the real canonical Squad source (<c>products/kyber-squad</c>) through
 /// <see cref="SquadRendererRegistry"/> with <see cref="PiRenderer"/> and validates the result
-/// against the Pi rendering contract (plan <c>docs/plans/2026-09-14-pi-harness-target.md</c>,
+/// against the Pi rendering contract (plan <c>docs/archive/plans/2026-09-14-pi-harness-target.md</c>,
 /// section 6).
 /// </summary>
 /// <remarks>

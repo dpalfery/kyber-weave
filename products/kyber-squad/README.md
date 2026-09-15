@@ -6,9 +6,9 @@ governed by explicit schemas, model profiles, semantic capability profiles, and 
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
 skill deployments and release packages are built. The target catalog declares ten harnesses.
-Six renderers are implemented and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, and
-`pi`. The other four declared targets—`opencode`, `kilo`, `warp`, and `factory`—fail
-renderer-coverage preflight.
+Eight renderers are implemented and registered today: `copilot`, `cursor`, `claude`, `codex`,
+`antigravity`, `opencode`, `kilo`, and `pi`. The other two declared targets—`warp` and
+`factory`—fail renderer-coverage preflight.
 
 ---
 

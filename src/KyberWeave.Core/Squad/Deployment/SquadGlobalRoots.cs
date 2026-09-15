@@ -16,8 +16,9 @@ public interface ISquadGlobalRootResolver
 /// Resolves each target's verified global root from an override environment variable
 /// or its documented default path. Verified against live harness configurations on 2026-09-14:
 /// Claude Code (P40, `.claude/`), Codex (P41, `.codex/`), Cursor (P42, `.cursor/`),
-/// Copilot (P43, `.copilot/`), Antigravity (P44, `.gemini/config/`), and Pi (P9, P3, `.pi/agent/`).
-/// Only `CODEX_HOME` was observed live; the others are documented and verified in the plan.
+/// Copilot (P43, `.copilot/`), Antigravity (P44, `.gemini/config/`), Pi (P9, P3, `.pi/agent/`),
+/// OpenCode (`~/.config/opencode/`, verified against OpenCode's agents/skills/config docs),
+/// and Kilo (`~/.config/kilo/`, verified against Kilo's custom-subagents and settings docs).
 /// </summary>
 /// <remarks>
 /// Each target's root was verified for 2026-09-14:
@@ -28,6 +29,13 @@ public interface ISquadGlobalRootResolver
 /// - Copilot: `.copilot/agents/` and `.copilot/skills/` under `$COPILOT_HOME` (default `~/.copilot`)
 /// - Antigravity: `skills/` under `~/.gemini/config/` (no override, no agent primitive)
 /// - Pi: `agents/` and `skills/` under `$PI_CODING_AGENT_DIR` (default `~/.pi/agent`)
+/// - OpenCode: `agents/` and `skills/` under a three-tier root — `$OPENCODE_CONFIG_DIR` first,
+///   then `$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode` — unlike every other target's
+///   two-tier (one override, one default) chain, because OpenCode's own config resolution
+///   respects `XDG_CONFIG_HOME` as a documented middle tier.
+/// - Kilo: `agents/` and `skills/` under `$XDG_CONFIG_HOME/kilo` if set, otherwise
+///   `~/.config/kilo`. Kilo's own docs place global agent markdown at
+///   `~/.config/kilo/agents/` and global config at `~/.config/kilo/kilo.jsonc`.
 /// </remarks>
 public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 {
@@ -52,6 +60,8 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.Copilot => ResolveWithOverride("COPILOT_HOME", ".copilot"),
             SquadTarget.Antigravity => ResolveWithOverride(null, Path.Combine(".gemini", "config")),
             SquadTarget.Pi => ResolveWithOverride("PI_CODING_AGENT_DIR", Path.Combine(".pi", "agent")),
+            SquadTarget.OpenCode => ResolveOpenCodeRoot(),
+            SquadTarget.Kilo => ResolveXdgConfigAppRoot("kilo"),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,
@@ -72,5 +82,33 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         }
 
         return Path.Combine(_homeDirectory, defaultRelativePath);
+    }
+
+    /// <summary>
+    /// OpenCode's own config resolution (https://opencode.ai/docs/config) checks
+    /// <c>OPENCODE_CONFIG_DIR</c> first, then respects <c>XDG_CONFIG_HOME</c> before falling
+    /// back to <c>~/.config/opencode</c> — the one target whose fallback chain has three tiers
+    /// rather than the two <see cref="ResolveWithOverride"/> covers.
+    /// </summary>
+    private string ResolveOpenCodeRoot()
+    {
+        string? configDirOverride = _getEnvironmentVariable("OPENCODE_CONFIG_DIR");
+        if (!string.IsNullOrEmpty(configDirOverride))
+        {
+            return configDirOverride;
+        }
+
+        return ResolveXdgConfigAppRoot("opencode");
+    }
+
+    private string ResolveXdgConfigAppRoot(string applicationDirectoryName)
+    {
+        string? xdgConfigHome = _getEnvironmentVariable("XDG_CONFIG_HOME");
+        if (!string.IsNullOrEmpty(xdgConfigHome))
+        {
+            return Path.Combine(xdgConfigHome, applicationDirectoryName);
+        }
+
+        return Path.Combine(_homeDirectory, ".config", applicationDirectoryName);
     }
 }
