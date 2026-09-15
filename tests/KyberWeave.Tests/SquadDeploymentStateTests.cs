@@ -3546,14 +3546,14 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 SquadTransactionStepKind.FileApplied,
                 ToPlatformPath(
                     Path.Combine(transactionDirectory, "backups"),
-                    targetRelativePath),
+                    $"codex/{targetRelativePath}"),
                 targetRelativePath,
                 "updated body"u8.ToArray()),
             "target-link-metadata" => (
                 SquadTransactionStepKind.FileApplied,
                 ToPlatformPath(
                     Path.Combine(transactionDirectory, "links"),
-                    targetRelativePath),
+                    $"codex/{targetRelativePath}"),
                 targetRelativePath,
                 "updated body"u8.ToArray()),
             "lock-original" => (
@@ -4383,7 +4383,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string intentPath = Path.Combine(transactionDirectory, "intent.json");
         string backupPath = ToPlatformPath(
             Path.Combine(transactionDirectory, "backups"),
-            relativePath);
+            $"codex/{relativePath}");
         switch (corruption)
         {
             case "truncated-journal":
@@ -4423,10 +4423,10 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             "journal" => Path.Combine(transactionDirectory, "intent.json"),
             "staging" => ToPlatformPath(
                 Path.Combine(transactionDirectory, "staging"),
-                relativePath),
+                $"codex/{relativePath}"),
             "backup" => ToPlatformPath(
                 Path.Combine(transactionDirectory, "backups"),
-                relativePath),
+                $"codex/{relativePath}"),
             _ => throw new ArgumentOutOfRangeException(nameof(artifact), artifact, null)
         };
         byte[] bytes = File.ReadAllBytes(publishedPath);
@@ -5230,7 +5230,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                 {
                     "target-file" => ToPlatformPath(
                         Path.Combine(transactionDirectory, "staging"),
-                        relativePath),
+                        $"codex/{relativePath}"),
                     "lock-state" => Path.Combine(
                         transactionDirectory,
                         "state-staging",
@@ -5363,7 +5363,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
                     ".squad-transaction");
                 string stagePath = ToPlatformPath(
                     Path.Combine(transactionDirectory, "staging"),
-                    relativePath);
+                    $"codex/{relativePath}");
                 switch (corruption)
                 {
                     case "missing":
@@ -5453,7 +5453,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         public string StageRelativePath => subject switch
         {
-            "target" => $".kyber-weave/.squad-transaction/staging/{targetRelativePath}",
+            "target" => $".kyber-weave/.squad-transaction/staging/codex/{targetRelativePath}",
             "lock" => ".kyber-weave/.squad-transaction/state-staging/lock",
             "receipt" => ".kyber-weave/.squad-transaction/state-staging/receipt",
             _ => throw new ArgumentOutOfRangeException(nameof(subject), subject, null)

@@ -256,7 +256,7 @@ public sealed class SquadCanonicalContentTests
         Assert.Equal(["conductor"], defaultAgents);
         Assert.Equal("orchestration", conductor.ModelProfile);
         Assert.Equal("deep-planning", architect.ModelProfile);
-        Assert.Equal("mai-code-flash", taskReviewer.ModelProfile);
+        Assert.Equal("reviewer", taskReviewer.ModelProfile);
         Assert.Contains("architect", conductor.DelegatesTo);
         Assert.Contains("product-owner", conductor.DelegatesTo);
         Assert.Contains("task-reviewer", conductor.DelegatesTo);

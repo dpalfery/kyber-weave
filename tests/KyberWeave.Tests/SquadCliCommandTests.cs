@@ -405,6 +405,11 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.DoesNotContain("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("opencode", pendingSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("kilo", pendingSection, StringComparison.OrdinalIgnoreCase);
+
+        // A plain substring check would false-positive here: "copilot" contains "pi" at
+        // index 2-3, so the pi renderer's presence has to be asserted as a whole word.
+        Assert.Matches(@"\bpi\b", availableSection);
+        Assert.DoesNotMatch(@"\bpi\b", pendingSection);
     }
 
     [Fact]
@@ -459,6 +464,106 @@ public sealed class SquadCliCommandTests : IDisposable
         // Inside repo root, doctor validates canonical source
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("canonical source", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Doctor_GlobalScope_WarnsOnUnmanagedNameCollidingFile()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-global-home");
+        string collidingRelative = Path.Combine("agents", "architect.md");
+        string collidingFull = Path.Combine(tempHome, ".pi", "agent", collidingRelative);
+        Directory.CreateDirectory(Path.GetDirectoryName(collidingFull)!);
+        File.WriteAllText(collidingFull, "not-the-canonical-architect-bytes");
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadDoctorCommand command = new SquadDoctorCommand(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("warn", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("architect", normalizedOutput, StringComparison.Ordinal);
+        Assert.Contains("agents/architect.md", normalizedOutput.Replace('\\', '/'), StringComparison.Ordinal);
+        Assert.Contains("canonical identity", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Doctor_GlobalScope_SkipsCollisionScanWhenCanonicalSourceIsInvalid()
+    {
+        string repoPath = Path.Combine(_temp.Path, "invalid-squad-repo");
+        Directory.CreateDirectory(Path.Combine(repoPath, "products", "kyber-squad"));
+        File.WriteAllText(Path.Combine(repoPath, "KyberWeave.sln"), string.Empty);
+        File.WriteAllText(
+            Path.Combine(repoPath, "products", "kyber-squad", "squad.yml"),
+            "this is not a valid squad manifest\n");
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "invalid-source-user"));
+        SquadDoctorCommand command = new SquadDoctorCommand(
+            executor,
+            userPaths,
+            workingDirectory: repoPath,
+            globalRoots: new SquadGlobalRoots(_ => null, Path.Combine(_temp.Path, "invalid-source-home")));
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = repoPath,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Canonical source", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("scan skipped", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Global unmanaged collisions: none", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Install_GlobalScope_StillRefusesUnmanagedCollision()
+    {
+        string tempHome = Path.Combine(_temp.Path, "install-global-collision-home");
+        string projectRoot = Path.Combine(_temp.Path, "install-global-collision-project");
+        Directory.CreateDirectory(projectRoot);
+        string collidingFull = Path.Combine(tempHome, ".pi", "agent", "agents", "architect.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(collidingFull)!);
+        await File.WriteAllTextAsync(collidingFull, "not-the-canonical-architect-bytes");
+
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "install-global-user"));
+        SquadStateStore stateStore = new(userPaths);
+        using CorpusSquadReleaseSource releaseSource = new();
+        SquadLifecycleService service = new(
+            releaseSource,
+            SquadCommandComposition.ResolveRenderer(),
+            stateStore,
+            globalRoots: globalRoots);
+
+        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(
+            () => service.InstallAsync(new SquadInstallRequest(
+                TargetRoot: projectRoot,
+                Scope: SquadDeploymentScope.Global,
+                Targets: [SquadTarget.Pi],
+                Version: "1.2.3")));
+
+        Assert.Contains("Unmanaged path", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("agents/architect.md", exception.Message, StringComparison.Ordinal);
     }
 
     #endregion

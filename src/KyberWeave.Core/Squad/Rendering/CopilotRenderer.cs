@@ -52,6 +52,26 @@ public sealed class CopilotRenderer : ISquadRenderer
         .WithTypeConverter(new CopilotAgentsFlowSequenceConverter())
         .Build();
 
+    /// <summary>
+    /// Resolves the directory prefix for agents/skills based on deployment scope.
+    /// Under Project scope, keeps `.github/` prefix; under Global scope, removes it.
+    /// </summary>
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        // baseDirectory is like ".github/agents" or ".github/skills"
+        // Under Project scope, return as-is
+        // Under Global scope, strip the ".github/" prefix
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        // Strip ".github/" prefix for global scope
+        return baseDirectory.StartsWith(".github/", StringComparison.Ordinal)
+            ? baseDirectory[".github/".Length..]
+            : baseDirectory;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Copilot];
 
@@ -89,7 +109,8 @@ public sealed class CopilotRenderer : ISquadRenderer
             SquadDeploymentFile principal = RenderAgent(
                 agent,
                 source.ModelProfiles.Profiles,
-                warnings);
+                warnings,
+                request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -110,7 +131,7 @@ public sealed class CopilotRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill);
+            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -121,7 +142,8 @@ public sealed class CopilotRenderer : ISquadRenderer
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
-        List<SquadRenderWarning> warnings)
+        List<SquadRenderWarning> warnings,
+        SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -202,13 +224,14 @@ public sealed class CopilotRenderer : ISquadRenderer
                 "copilot"));
         }
 
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{AgentsDirectory}/{agent.Name}.agent.md",
+            $"{agentsDir}/{agent.Name}.agent.md",
             Encoding.UTF8.GetBytes(content),
             "copilot");
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill)
+    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -235,8 +258,9 @@ public sealed class CopilotRenderer : ISquadRenderer
             builder.Append('\n');
         }
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+            $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(builder.ToString()),
             "copilot");
     }

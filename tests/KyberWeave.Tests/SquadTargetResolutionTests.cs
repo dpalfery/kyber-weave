@@ -9,7 +9,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadTargetResolutionTests : IDisposable
 {
-    private static readonly SquadTarget[] NineTargets =
+    private static readonly SquadTarget[] TenTargets =
     [
         SquadTarget.Codex,
         SquadTarget.Cursor,
@@ -19,7 +19,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
         SquadTarget.Kilo,
         SquadTarget.Antigravity,
         SquadTarget.Warp,
-        SquadTarget.Factory
+        SquadTarget.Factory,
+        SquadTarget.Pi
     ];
 
     private readonly TempDirectory _temp = new();
@@ -40,12 +41,16 @@ public sealed class SquadTargetResolutionTests : IDisposable
         { ".factory", true, SquadTarget.Factory }
     };
 
+    /// <summary>
+    /// Receipts persist target tokens, so existing members keep their positions and a new
+    /// target is appended: Pi follows Factory.
+    /// </summary>
     [Fact]
-    public void CatalogContainsExactlyNineTargetsInStableOrder()
+    public void CatalogContainsExactlyTenTargetsInStableOrder()
     {
-        Assert.Equal(NineTargets, SquadTargetCatalog.All);
+        Assert.Equal(TenTargets, SquadTargetCatalog.All);
         Assert.Equal(
-            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory"],
+            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi"],
             SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
     }
 
@@ -61,11 +66,21 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void ParseAllExpandsToTheApprovedNineTargetRoster()
+    public void ParseAllExpandsToTheApprovedTenTargetRoster()
     {
         IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 
-        Assert.Equal(NineTargets, targets);
+        Assert.Equal(TenTargets, targets);
+    }
+
+    [Theory]
+    [InlineData("pi")]
+    [InlineData("PI")]
+    public void ParsePiTokenSelectsPiCaseInsensitively(string token)
+    {
+        IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse([token]);
+
+        Assert.Equal(SquadTarget.Pi, Assert.Single(targets));
     }
 
     [Fact]
@@ -76,6 +91,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
 
         Assert.Contains("not-a-harness", exception.Message, StringComparison.Ordinal);
         Assert.Contains("codex", exception.Message, StringComparison.Ordinal);
+        // Whole word: "copilot" already contains "pi", so a substring check passes vacuously.
+        Assert.Matches(@"\bpi\b", exception.Message);
         Assert.Contains("all", exception.Message, StringComparison.Ordinal);
     }
 
@@ -132,7 +149,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
             SquadTarget.OpenCode,
             SquadTarget.Kilo,
             SquadTarget.Antigravity,
-            SquadTarget.Factory);
+            SquadTarget.Factory,
+            SquadTarget.Pi);
     }
 
     [Theory]
@@ -184,6 +202,28 @@ public sealed class SquadTargetResolutionTests : IDisposable
 
         Assert.Equal(SquadTargetResolutionKind.Failure, markerDecision.Kind);
         AssertResolved(explicitDecision, SquadTargetResolutionSource.Explicit, SquadTarget.Antigravity);
+    }
+
+    /// <summary>
+    /// This repository carries <c>.pi/subagents.json</c>, the pi-subagents extension's project
+    /// settings. Pi is selected by explicit or configured targets only, so a <c>.pi/</c> tree,
+    /// even one that already holds agents, must never select it on its own.
+    /// </summary>
+    [Fact]
+    public void InstallPiHasNoFilesystemMarkerAndRequiresExplicitOrConfiguredSelection()
+    {
+        CreateFixture(".pi/subagents.json", isDirectory: false);
+        CreateFixture(".pi/agents", isDirectory: true);
+
+        SquadTargetResolutionDecision markerDecision = ResolveInstall(isInteractive: false);
+        SquadTargetResolutionDecision explicitDecision = ResolveInstall(explicitTargets: ["pi"]);
+        SquadTargetResolutionDecision configuredDecision = ResolveInstall(configuredTargets: [SquadTarget.Pi]);
+
+        Assert.Equal(SquadTargetResolutionKind.Failure, markerDecision.Kind);
+        Assert.Empty(markerDecision.Targets);
+        Assert.Equal(SquadTargetResolutionSource.None, markerDecision.Source);
+        AssertResolved(explicitDecision, SquadTargetResolutionSource.Explicit, SquadTarget.Pi);
+        AssertResolved(configuredDecision, SquadTargetResolutionSource.Configuration, SquadTarget.Pi);
     }
 
     [Theory]

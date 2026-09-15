@@ -223,15 +223,16 @@ public sealed class CopilotRendererTests
     }
 
     /// <summary>
-    /// The triage seat exists to run cheaper than the judgement seat. If its model profile
-    /// silently resolved to the same tier, the second role would be pure overhead — so the
-    /// tier is asserted rather than assumed.
+    /// Both review-lens and review-triage resolve to the `reviewer` model profile as of 2026-09-14.
+    /// The redesigned assertion verifies they both resolve to the same Copilot model value via
+    /// that shared profile, rather than assuming different tier assignments (plan section 7, T16).
     /// </summary>
     [Theory]
-    [InlineData("review-lens", "Grok 4.5 (copilot)")]
-    [InlineData("review-triage", "GPT-5.6 Luna (copilot)")]
-    public async Task RenderAsync_LensSeatsResolveToTheirDeclaredModelTier(string agentName, string expectedModel)
+    [InlineData("review-lens")]
+    [InlineData("review-triage")]
+    public async Task RenderAsync_ReviewerProfileAgentsResolveToTheirSharedReviewerCopilotModel(string agentName)
     {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new CopilotRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: ProductRoot,
@@ -240,6 +241,17 @@ public sealed class CopilotRendererTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
+        // Both agents should declare model-profile: reviewer
+        SquadAgent agent = Assert.Single(
+            source.Agents,
+            candidate => candidate.Name == agentName);
+        Assert.Equal("reviewer", agent.ModelProfile);
+
+        // The reviewer profile's Copilot value is the expected model
+        string expectedModel = source.ModelProfiles.Profiles["reviewer"].HarnessModels["copilot"];
+        Assert.Equal("Kimi K2.7 Code (copilot)", expectedModel);
+
+        // Verify the rendered file contains that model
         SquadDeploymentFile file = Assert.Single(
             result.Files,
             f => f.RelativePath == $".github/agents/{agentName}.agent.md");
@@ -251,14 +263,30 @@ public sealed class CopilotRendererTests
     }
 
     [Theory]
-    [InlineData("task-reviewer")]
-    [InlineData("test-dev")]
-    public async Task MaiCodeProfileResolvesToExactCopilotModel(string agentName)
+    [InlineData("task-reviewer", "reviewer", "Kimi K2.7 Code (copilot)")]
+    [InlineData("test-dev", "fast", "MAI-Code-1.1-Flash (copilot)")]
+    public async Task RenderAsync_ReviewerAndFastAgentsResolveToTheirProfileCopilotModels(
+        string agentName,
+        string expectedProfile,
+        string expectedModel)
     {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
         string frontmatter = await RenderFrontmatterAsync(agentName);
 
+        // Verify the agent declares the correct profile
+        SquadAgent agent = Assert.Single(
+            source.Agents,
+            candidate => candidate.Name == agentName);
+        Assert.Equal(expectedProfile, agent.ModelProfile);
+
+        // Verify that profile's Copilot value matches expected
+        Assert.Equal(
+            expectedModel,
+            source.ModelProfiles.Profiles[expectedProfile].HarnessModels["copilot"]);
+
+        // Verify the frontmatter contains the expected model
         Assert.Contains(
-            "model: MAI-Code-1.1-Flash (copilot)",
+            $"model: {expectedModel}",
             frontmatter,
             StringComparison.Ordinal);
     }

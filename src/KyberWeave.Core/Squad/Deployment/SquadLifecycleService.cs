@@ -61,13 +61,15 @@ public sealed class SquadLifecycleService
     private readonly SquadStateStore _stateStore;
     private readonly TimeProvider _timeProvider;
     private readonly ISquadTransactionObserver? _observer;
+    private readonly ISquadGlobalRootResolver? _globalRoots;
 
     public SquadLifecycleService(
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
         SquadStateStore stateStore,
         TimeProvider? timeProvider = null,
-        ISquadTransactionObserver? observer = null)
+        ISquadTransactionObserver? observer = null,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         ArgumentNullException.ThrowIfNull(releaseSource);
         ArgumentNullException.ThrowIfNull(renderer);
@@ -77,6 +79,7 @@ public sealed class SquadLifecycleService
         _stateStore = stateStore;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _observer = observer;
+        _globalRoots = globalRoots;
     }
 
     /// <summary>
@@ -163,6 +166,7 @@ public sealed class SquadLifecycleService
                 .ToArray();
 
             SquadDeploymentPlan plan;
+            IReadOnlyList<SquadReceipt>? siblingReceipts = SiblingGlobalReceipts(targetRoot, request.Scope);
             if (existingReceipt is null)
             {
                 plan = SquadDeploymentPlan.CreateInstall(
@@ -172,7 +176,9 @@ public sealed class SquadLifecycleService
                     renderedFiles: renderResult.Files,
                     degradations: degradations,
                     adopt: request.Adopt,
-                    timeProvider: _timeProvider);
+                    timeProvider: _timeProvider,
+                    globalRoots: _globalRoots,
+                    siblingGlobalReceipts: siblingReceipts);
             }
             else
             {
@@ -184,7 +190,9 @@ public sealed class SquadLifecycleService
                     previousReceipt: existingReceipt,
                     degradations: degradations,
                     replaceManaged: false,
-                    timeProvider: _timeProvider);
+                    timeProvider: _timeProvider,
+                    globalRoots: _globalRoots,
+                    siblingGlobalReceipts: siblingReceipts);
             }
 
             if (request.DryRun)
@@ -304,7 +312,9 @@ public sealed class SquadLifecycleService
                 previousReceipt: previousReceipt,
                 degradations: degradations,
                 replaceManaged: request.ReplaceManaged,
-                timeProvider: _timeProvider);
+                timeProvider: _timeProvider,
+                globalRoots: _globalRoots,
+                siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
 
             if (request.DryRun)
             {
@@ -364,7 +374,9 @@ public sealed class SquadLifecycleService
         SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUninstall(
             targetRoot: targetRoot,
             scope: request.Scope,
-            receipt: receipt);
+            receipt: receipt,
+            globalRoots: _globalRoots,
+            siblingGlobalReceipts: SiblingGlobalReceipts(targetRoot, request.Scope));
 
         if (request.DryRun)
         {
@@ -388,6 +400,13 @@ public sealed class SquadLifecycleService
             Degradations: plan.Receipt.Degradations,
             DryRun: false));
     }
+
+    private IReadOnlyList<SquadReceipt>? SiblingGlobalReceipts(
+        string targetRoot,
+        SquadDeploymentScope scope) =>
+        scope == SquadDeploymentScope.Global
+            ? _stateStore.ListOtherGlobalReceipts(targetRoot)
+            : null;
 
     /// <summary>
     /// Rejects any requested target with no registered renderer before the release is

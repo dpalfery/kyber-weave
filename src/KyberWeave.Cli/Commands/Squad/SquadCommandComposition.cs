@@ -31,10 +31,13 @@ internal static class SquadCommandComposition
 
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
-    /// files. Copilot, Cursor, Claude, Codex, OpenCode, and Kilo are native; Antigravity is fallback
-    /// role-skill lowering to <c>.agents/skills/</c>. Every other approved target fails
-    /// closed with a pointer to its <c>docs/todo/</c> entry rather than being silently
-    /// dropped from the roster.
+    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, and Pi are native; Antigravity
+    /// is fallback role-skill lowering to <c>.agents/skills/</c>. Pi is native through the
+    /// third-party <c>@tintinweb/pi-subagents</c> extension's custom-agent format, with its
+    /// one <c>invocation: primary</c> agent lowered to a top-level skill because Pi core has
+    /// no primary-agent primitive (see <see cref="PiRenderer"/> remarks). Every other
+    /// approved target fails closed with a pointer to its <c>docs/todo/</c> entry rather
+    /// than being silently dropped from the roster.
     /// </summary>
     public static ISquadRenderer ResolveRenderer() =>
         new SquadRendererRegistry(
@@ -46,6 +49,7 @@ internal static class SquadCommandComposition
             new CodexRenderer(),
             new OpenCodeRenderer(),
             new KiloRenderer(),
+            new PiRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>
@@ -66,19 +70,23 @@ internal static class SquadCommandComposition
         ISquadReleaseSource? releaseSource = null,
         ISquadRenderer? renderer = null,
         ISquadTransactionObserver? observer = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         SquadStateStore resolvedStateStore = stateStore ?? ResolveStateStore(userPaths);
         ISquadReleaseSource resolvedReleaseSource = releaseSource
             ?? new GitHubSquadReleaseSource(ReleaseOrigin.Resolve(Environment.GetEnvironmentVariable).ApiRoot);
         ISquadRenderer resolvedRenderer = renderer ?? ResolveRenderer();
+        ISquadGlobalRootResolver resolvedGlobalRoots = globalRoots
+            ?? new SquadGlobalRoots(Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
         return new SquadLifecycleService(
             releaseSource: resolvedReleaseSource,
             renderer: resolvedRenderer,
             stateStore: resolvedStateStore,
             timeProvider: timeProvider,
-            observer: observer);
+            observer: observer,
+            globalRoots: resolvedGlobalRoots);
     }
 
     /// <summary>Resolves the target root directory path.</summary>

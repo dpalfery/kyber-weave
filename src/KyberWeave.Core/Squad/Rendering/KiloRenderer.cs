@@ -37,6 +37,23 @@ public sealed class KiloRenderer : ISquadRenderer
     private static readonly ThreadLocal<ISerializer> YamlSerializer = new(
         () => new SerializerBuilder().Build());
 
+    /// <summary>
+    /// Under <c>Scope: Global</c> the physical root already is Kilo's global directory
+    /// (<c>~/.config/kilo</c>), so the relative path drops the project-scope <c>.kilo/</c>
+    /// wrapper and emits the bare <c>agents/</c> / <c>skills/</c> form directly.
+    /// </summary>
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".kilo/", StringComparison.Ordinal)
+            ? baseDirectory[".kilo/".Length..]
+            : baseDirectory;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Kilo];
 
@@ -77,7 +94,8 @@ public sealed class KiloRenderer : ISquadRenderer
         {
             SquadDeploymentFile principal = RenderAgent(
                 agent,
-                source.ModelProfiles.Profiles);
+                source.ModelProfiles.Profiles,
+                request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -101,7 +119,7 @@ public sealed class KiloRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill);
+            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -111,7 +129,8 @@ public sealed class KiloRenderer : ISquadRenderer
 
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
+        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
+        SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -131,13 +150,14 @@ public sealed class KiloRenderer : ISquadRenderer
             frontmatter,
             agent.InstructionBody);
 
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
+            $"{agentsDir}/{agent.Name}.md",
             Encoding.UTF8.GetBytes(content),
             "kilo");
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill)
+    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
     {
         string singleLineDescription = string.Join(" ", skill.Description.Split(
             ['\r', '\n'],
@@ -155,8 +175,9 @@ public sealed class KiloRenderer : ISquadRenderer
             frontmatter,
             skill.InstructionBody);
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+            $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "kilo");
     }

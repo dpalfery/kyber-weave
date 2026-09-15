@@ -84,7 +84,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
     /// <summary>
     /// The fake renders whatever targets it is asked for — unlike the real registry, it
     /// carries no coverage gate, so existing lifecycle tests that exercise the full
-    /// nine-target roster keep working unchanged.
+    /// catalog roster keep working unchanged.
     /// </summary>
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
 
@@ -213,6 +213,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         SquadTarget.OpenCode => $".opencode/agents/{agentName}.md",
         SquadTarget.Kilo => $".kilo/agents/{agentName}.md",
         SquadTarget.Factory => $".factory/agents/{agentName}.md",
+        SquadTarget.Pi => $".pi/agents/{agentName}.md",
         _ => throw new ArgumentException($"Target {target} does not have a native agent file path.", nameof(target))
     };
 
@@ -227,6 +228,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         SquadTarget.Antigravity => $".agents/skills/{skillName}/SKILL.md",
         SquadTarget.Warp => $".warp/skills/{skillName}/SKILL.md",
         SquadTarget.Factory => $".factory/skills/{skillName}/SKILL.md",
+        SquadTarget.Pi => $".pi/skills/{skillName}/SKILL.md",
         _ => throw new ArgumentOutOfRangeException(nameof(target), target, "Unknown Squad target.")
     };
 }
