@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-14
 ---
 
 # Architecture decision records
@@ -36,6 +36,7 @@ cite it still resolve.
 | [0016](0016-kyberdash-harness-source-refresh.md) | [Harness-Source Jobs, Client-Surface Identity, and Checkpointed Local Refresh](0016-kyberdash-harness-source-refresh.md) | Accepted | 2026-09-12 | Local-history refresh is one job per harness source type with split client identity, UTC record windows, schema-11 checkpoints, and `commitSourceUnit`; Gemini is not a harness. |
 | [0017](0017-copilot-deterministic-tool-order.md) | [Exact Copilot Tool Membership with One Cross-Agent Emission Order](0017-copilot-deterministic-tool-order.md) | Accepted | 2026-09-12 | Copilot `tools` membership comes from canonical `copilot-tools`; emission order is one global catalog sequence with no per-agent exceptions. |
 | [0018](0018-kyberdash-content-retention-purge.md) | [Stored Content with a 14-Day Automatic Purge](0018-kyberdash-content-retention-purge.md) | Accepted | 2026-09-13 | Persist inspector content; `purgeExpiredContent` after refresh empties `content_json`/`parts_json` after 14 days and never deletes `records.raw`. |
+| [0019](0019-pi-native-subagents-and-primary-lowering.md) | [Native Pi Agents via pi-subagents, with Primary-Agent Skill Lowering](0019-pi-native-subagents-and-primary-lowering.md) | Accepted | 2026-09-14 | Pi is a native target via `@tintinweb/pi-subagents`; the primary-invocation conductor lowers to a skill so nested delegation stays inside the default depth cap. |
 
 ## Writing one
 

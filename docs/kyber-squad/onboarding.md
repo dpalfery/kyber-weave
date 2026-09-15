@@ -7,6 +7,8 @@ source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
 last-reviewed: 2026-09-14
 status: current
+decided-by:
+  - adr/0019-pi-native-subagents-and-primary-lowering
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -82,8 +84,9 @@ implementer needs to add it. `kyber-weave squad doctor` reports current coverage
 ### Pi notes
 
 Pi is a third-party coding agent that renders Squad agents natively through the
-`@tintinweb/pi-subagents` extension. The following operational details ensure correct deployment
-and coexistence with other targets:
+`@tintinweb/pi-subagents` extension
+([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)). The following operational
+details ensure correct deployment and coexistence with other targets:
 
 **Prerequisite**: Pi agent output needs `@tintinweb/pi-subagents` 0.19.0 or later, which requires
 Pi 0.84.0 or later. Install the extension via Pi's `settings.json` `packages` entry beforehand;

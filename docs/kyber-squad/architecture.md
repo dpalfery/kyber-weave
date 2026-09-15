@@ -9,6 +9,7 @@ last-reviewed: 2026-09-14
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
+  - adr/0019-pi-native-subagents-and-primary-lowering
 keywords:
   - multi-harness
   - deployment
@@ -155,7 +156,8 @@ flowchart TD
 
 ### Native Branch: Pi with Primary-Agent Lowering
 
-Pi is a native agent target that projects subagents natively but lowers its one primary-invocation
+Pi is a native agent target ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md))
+that projects subagents natively but lowers its one primary-invocation
 agent (`conductor`) to a skill, per its fallback profile's `no-primary-agent: skill` value. Pi
 core has no primary-agent primitive: `.pi/SYSTEM.md` or `--system-prompt` replaces the whole
 session prompt. Rendering `conductor` as a subagent instead would place it at depth 1, pushing its
@@ -279,7 +281,7 @@ and validates.
   `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`,
   `OpenCodeRenderer` for `.opencode/agents/*.md` and `.opencode/skills/*/SKILL.md`,
   `KiloRenderer` for `.kilo/agents/*.md` and `.kilo/skills/*/SKILL.md`,
-  and `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering.
+  and `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)).
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|

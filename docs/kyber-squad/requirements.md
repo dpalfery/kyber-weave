@@ -6,6 +6,8 @@ component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-14
 status: current
+decided-by:
+  - adr/0019-pi-native-subagents-and-primary-lowering
 ---
 
 # Kyber-Squad requirements and degradation contract
