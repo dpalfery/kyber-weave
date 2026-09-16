@@ -15,13 +15,18 @@ Every plan document under `docs/plans/` must be reachable from this inventory, d
 
 ## Active Plans
 
-None.
+| Plan | Status | Date | Development Mode | Goal |
+|---|---|---|---|---|
+| [2026-09-14-kilo-native-renderer.md](2026-09-14-kilo-native-renderer.md) | Ready | 2026-09-14 | | Implement and register an ISquadRenderer for SquadTarget.Kilo (kilo) with native Kilo agent and skill layouts. |
+
+Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
 ## Archived Plans
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
-| [2026-09-14-factory-native-renderer.md](2026-09-14-factory-native-renderer.md) | Completed | 2026-09-14 | | | Implement and register an ISquadRenderer for SquadTarget.Factory (factory / factory-droids) with native Factory agent and skill layouts. |
+| [2026-09-14-factory-native-renderer.md](../archive/plans/2026-09-14-factory-native-renderer.md) | Complete | 2026-09-14 | 2026-09-14 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [todo/factory.md](../todo/factory.md) | Implement and register an ISquadRenderer for SquadTarget.Factory (factory / factory-droids) with native Factory agent and skill layouts. |
+| [2026-09-14-pi-harness-target.md](../archive/plans/2026-09-14-pi-harness-target.md) | Complete | 2026-09-14 | 2026-09-14 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [archive/todo/pi.md](../archive/todo/pi.md) | Declare `pi` as a Kyber-Squad target and register a `PiRenderer`. Residual: T8 TUI observations in a live Pi session still need owner confirmation. |
 | [2026-09-14-opencode-native-renderer.md](2026-09-14-opencode-native-renderer.md) | Completed | 2026-09-14 | | | Implement and register an ISquadRenderer for SquadTarget.OpenCode (opencode) with native OpenCode agent and skill layouts. |
 | [2026-09-06-kyberdash-refresh-pipeline.md](../archive/plans/2026-09-06-kyberdash-refresh-pipeline.md) | Complete | 2026-09-06 | 2026-09-13 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) | Implement `kyber-weave dash refresh` as a bounded, checkpointed, record-windowed local harness-source pipeline. Residual: T8 live-source smoke and findings API harness filter not claimed shipped. |
 | [2026-09-06-kyberdash-spine.md](../archive/plans/2026-09-06-kyberdash-spine.md) | Complete | 2026-09-06 | 2026-09-13 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [ADR 0012](../adr/0012-progressive-disclosure-6-level-diagnostic-spine.md)–[0015](../adr/0015-opt-in-llm-context-review-seam.md), [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md) | Deliver the KyberDash six-level diagnostic spine (D17–D22 harvested). Same residual T8/findings-filter notes as the refresh plan. Its Phase A dispatch pack (T1–T8 and the `spine.spec.ts` gate) is archived alongside in [2026-09-06-kyberdash-spine-tasks/](../archive/plans/2026-09-06-kyberdash-spine-tasks/README.md). |

@@ -203,7 +203,8 @@ public sealed class FactoryRendererContractTests : IDisposable
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             Assert.Equal(expectedDescription, RequireScalar(frontmatter, "description", skill.Name));
-            Assert.Equal("MIT", RequireScalar(frontmatter, "license", skill.Name));
+            Assert.DoesNotContain(frontmatter.Children.Keys.OfType<YamlScalarNode>(), key =>
+                string.Equals(key.Value, "license", StringComparison.Ordinal));
 
             string expectedSkillBody = skill.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
             if (!expectedSkillBody.EndsWith('\n'))
@@ -320,7 +321,7 @@ public sealed class FactoryRendererContractTests : IDisposable
             .OfType<YamlScalarNode>()
             .Select(key => key.Value ?? string.Empty)
             .ToArray();
-        Assert.Equal(["name", "description", "license"], keys);
+        Assert.Equal(["name", "description"], keys);
     }
 
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)

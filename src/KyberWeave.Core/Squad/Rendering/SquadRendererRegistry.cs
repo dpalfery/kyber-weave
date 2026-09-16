@@ -162,7 +162,8 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         {
             string token = SquadTargetCatalog.GetToken(target);
             bool isNative = target is SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or
-                            SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or SquadTarget.Factory;
+                            SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
+                            SquadTarget.Factory or SquadTarget.Pi;
 
             List<SquadDeploymentFile> targetFiles = files
                 .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))
@@ -298,7 +299,12 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             Dictionary<string, string> principalOutputs = new(StringComparer.Ordinal);
             foreach (SquadAgent agent in source.Agents)
             {
-                string? outputPath = AgentOutputPath(target, agent.Name, skillNames, sharedIdentities);
+                string? outputPath = AgentOutputPath(
+                    target,
+                    agent,
+                    skillNames,
+                    sharedIdentities,
+                    source.FallbackProfiles.Profiles);
                 if (outputPath is not null)
                 {
                     principalOutputs.Add(agent.SourcePath, outputPath);
@@ -352,22 +358,52 @@ public sealed class SquadRendererRegistry : ISquadRenderer
         new(
             $"Resource '{resourcePath}' owned by '{ownerSourcePath}' aliases another principal and causes a portable output collision at '{outputPath}'.");
 
+    /// <remarks>
+    /// Takes the whole <see cref="SquadAgent"/> and the loaded fallback profiles, not just a
+    /// name, because Pi is the first native target whose output path depends on
+    /// <see cref="SquadAgent.Invocation"/>: a subagent-invocation agent claims
+    /// <c>.pi/agents/&lt;name&gt;.md</c>, but a primary-invocation agent claims
+    /// <c>.pi/skills/&lt;name&gt;/SKILL.md</c> only when its fallback profile's
+    /// <c>no-primary-agent</c> value is <c>skill</c> — the other four native targets render
+    /// every agent uniformly regardless of invocation, so their branches stay name-only.
+    /// </remarks>
     private static string? AgentOutputPath(
         SquadTarget target,
-        string name,
+        SquadAgent agent,
         IReadOnlySet<string> skillNames,
-        IReadOnlySet<string> sharedIdentities) => target switch
+        IReadOnlySet<string> sharedIdentities,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles) => target switch
         {
-            SquadTarget.Copilot => $".github/agents/{name}.agent.md",
-            SquadTarget.Cursor => $".cursor/agents/{name}.md",
-            SquadTarget.Claude => $".claude/agents/{name}.md",
-            SquadTarget.Codex => $".codex/agents/{name}.toml",
-            SquadTarget.OpenCode => $".opencode/agents/{name}.md",
-            SquadTarget.Factory => $".factory/agents/{name}.md",
+            SquadTarget.Copilot => $".github/agents/{agent.Name}.agent.md",
+            SquadTarget.Cursor => $".cursor/agents/{agent.Name}.md",
+            SquadTarget.Claude => $".claude/agents/{agent.Name}.md",
+            SquadTarget.Codex => $".codex/agents/{agent.Name}.toml",
+            SquadTarget.OpenCode => $".opencode/agents/{agent.Name}.md",
+            SquadTarget.Kilo => $".kilo/agents/{agent.Name}.md",
+            SquadTarget.Factory => $".factory/agents/{agent.Name}.md",
             SquadTarget.Antigravity =>
-                $".agents/skills/{ResolveFallbackOutputIdentity(name, skillNames, sharedIdentities)}/SKILL.md",
+                $".agents/skills/{ResolveFallbackOutputIdentity(agent.Name, skillNames, sharedIdentities)}/SKILL.md",
+            SquadTarget.Pi => ResolvePiAgentOutputPath(agent, fallbackProfiles),
             _ => null
         };
+
+    private static string? ResolvePiAgentOutputPath(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        if (agent.Invocation == SquadInvocation.Subagent)
+        {
+            return $".pi/agents/{agent.Name}.md";
+        }
+
+        // Primary invocation: Pi core has no primary-agent primitive (see PiRenderer remarks),
+        // so this claims the lowered skill identity only when the fallback profile actually
+        // lowers to a skill. "omit" claims no output path, matching PiRenderer emitting nothing.
+        return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
+            string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+                ? $".pi/skills/{agent.Name}/SKILL.md"
+                : null;
+    }
 
     private static string? SkillOutputPath(
         SquadTarget target,
@@ -379,8 +415,10 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Claude when !sharedIdentities.Contains(name) => $".claude/skills/{name}/SKILL.md",
             SquadTarget.Codex when !sharedIdentities.Contains(name) => $".codex/skills/{name}/SKILL.md",
             SquadTarget.OpenCode when !sharedIdentities.Contains(name) => $".opencode/skills/{name}/SKILL.md",
+            SquadTarget.Kilo when !sharedIdentities.Contains(name) => $".kilo/skills/{name}/SKILL.md",
             SquadTarget.Factory when !sharedIdentities.Contains(name) => $".factory/skills/{name}/SKILL.md",
             SquadTarget.Antigravity => $".agents/skills/{name}/SKILL.md",
+            SquadTarget.Pi when !sharedIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
             _ => null
         };
 

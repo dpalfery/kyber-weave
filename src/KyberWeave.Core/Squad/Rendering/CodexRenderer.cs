@@ -46,6 +46,18 @@ public sealed class CodexRenderer : ISquadRenderer
     /// </summary>
     private static readonly object SerializerLock = new();
 
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".codex/", StringComparison.Ordinal)
+            ? baseDirectory[".codex/".Length..]
+            : baseDirectory;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Codex];
 
@@ -86,7 +98,8 @@ public sealed class CodexRenderer : ISquadRenderer
         {
             SquadDeploymentFile principal = RenderAgent(
                 agent,
-                source.ModelProfiles.Profiles);
+                source.ModelProfiles.Profiles,
+                request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -110,7 +123,7 @@ public sealed class CodexRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill);
+            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -120,7 +133,8 @@ public sealed class CodexRenderer : ISquadRenderer
 
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
+        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
+        SquadDeploymentScope scope)
     {
         StringBuilder builder = new();
         builder.Append("name = \"");
@@ -148,13 +162,14 @@ public sealed class CodexRenderer : ISquadRenderer
         builder.Append("\"\"\"\n");
 
         string content = builder.ToString();
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{AgentsDirectory}/{agent.Name}.toml",
+            $"{agentsDir}/{agent.Name}.toml",
             Encoding.UTF8.GetBytes(content),
             "codex");
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill)
+    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
     {
         string singleLineDescription = string.Join(" ", skill.Description.Split(
             ['\r', '\n'],
@@ -173,8 +188,9 @@ public sealed class CodexRenderer : ISquadRenderer
             content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
         }
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+            $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "codex");
     }

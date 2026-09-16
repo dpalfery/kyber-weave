@@ -77,6 +77,18 @@ public sealed class AntigravityRenderer : ISquadRenderer
     /// </summary>
     private static readonly object SerializerLock = new();
 
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".agents/", StringComparison.Ordinal)
+            ? baseDirectory[".agents/".Length..]
+            : baseDirectory;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Antigravity];
 
@@ -121,9 +133,11 @@ public sealed class AntigravityRenderer : ISquadRenderer
         // without a renderer change.
         HashSet<string> sharedIdentities = ResolveSharedIdentities(source);
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, request.Scope);
+
         foreach (SquadSkill skill in source.Skills)
         {
-            files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody));
+            files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope));
         }
 
         HashSet<string> skillNames = source.Skills
@@ -152,7 +166,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
                      skillNames.Contains(agent.Name))
             {
                 string outputIdentity = $"role-{agent.Name}";
-                files.Add(RenderSkill(outputIdentity, agent.Description, agent.InstructionBody));
+                files.Add(RenderSkill(outputIdentity, agent.Description, agent.InstructionBody, request.Scope));
                 degradations.Add(new SquadDegradationRecord(
                     Target: "antigravity",
                     CanonicalIdentity: agent.Name,
@@ -164,7 +178,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
             }
             else
             {
-                files.Add(RenderSkill(agent.Name, agent.Description, agent.InstructionBody));
+                files.Add(RenderSkill(agent.Name, agent.Description, agent.InstructionBody, request.Scope));
                 degradations.Add(new SquadDegradationRecord(
                     Target: "antigravity",
                     CanonicalIdentity: agent.Name,
@@ -194,7 +208,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         {
             SquadResourceProjection.Append(
                 files,
-                $"{SkillsDirectory}/{outputIdentity}/SKILL.md",
+                $"{skillsDir}/{outputIdentity}/SKILL.md",
                 agent.Resources,
                 "antigravity");
         }
@@ -203,7 +217,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         {
             SquadResourceProjection.Append(
                 files,
-                $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+                $"{skillsDir}/{skill.Name}/SKILL.md",
                 skill.Resources,
                 "antigravity");
         }
@@ -231,7 +245,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         }
     }
 
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody)
+    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody, SquadDeploymentScope scope)
     {
         ValidateCanonicalName(name);
 
@@ -267,8 +281,9 @@ public sealed class AntigravityRenderer : ISquadRenderer
             builder.Append('\n');
         }
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{name}/SKILL.md",
+            $"{skillsDir}/{name}/SKILL.md",
             Encoding.UTF8.GetBytes(builder.ToString()),
             "antigravity");
     }

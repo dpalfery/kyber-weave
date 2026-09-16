@@ -12,7 +12,7 @@ status: superseded
 
 > [!NOTE]
 > **Superseded by implementation plan:** This todo has been superseded by plan
-> [docs/plans/2026-09-14-factory-native-renderer.md](../plans/2026-09-14-factory-native-renderer.md),
+> [docs/archive/plans/2026-09-14-factory-native-renderer.md](../archive/plans/2026-09-14-factory-native-renderer.md),
 > which defines the architecture decisions for implementing `FactoryRenderer`.
 
 This is **context for planning the work, not a plan** — it states what is known, what is

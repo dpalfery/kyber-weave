@@ -166,7 +166,36 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             name.StartsWith(".opencode/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".kilo/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".warp/", StringComparison.OrdinalIgnoreCase) ||
-            name.StartsWith(".factory/", StringComparison.OrdinalIgnoreCase));
+            name.StartsWith(".factory/", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Pi reads project agents from <c>.pi/agents/</c>. A rendered Pi tree left inside the
+    /// canonical source is target output, not corpus, and must not ship in the APM package.
+    /// The source is seeded with one so the exclusion is exercised rather than vacuously true.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_ExcludesAPiTargetTreeInsideTheSource()
+    {
+        // Arrange
+        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
+        repo.WriteSourceFile(
+            ".pi/agents/x.md",
+            "---\nname: x\ndescription: Rendered Pi agent.\ntools: read\n---\nYou are x.\n");
+        string outDir = Path.Combine(_temp.Path, "apm-pi-out");
+        SquadPackCommand command = new SquadPackCommand(new FakeProcessExecutor(), workingDirectory: repo.Path);
+
+        // Act
+        CommandExecution execution = Capture(() => command.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir }));
+
+        // Assert
+        Assert.True(execution.ExitCode == 0, execution.Output);
+        string archivePath = Assert.Single(Directory.GetFiles(outDir, "kyber-squad-*.zip"));
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
+        Assert.Contains("squad.yml", entryNames);
+        Assert.DoesNotContain(entryNames, name => name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -635,6 +664,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                 new UTF8Encoding(false));
             Write($"products/kyber-squad/{skillResource}", skillContent);
         }
+
+        public void WriteSourceFile(string sourceRelativePath, string content) =>
+            Write($"products/kyber-squad/{sourceRelativePath}", content);
 
         /// <summary>
         /// A loadable Squad tree for hosts that do not have <c>products/kyber-squad</c>. Every

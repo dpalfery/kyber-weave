@@ -37,6 +37,11 @@ Agent definitions are discovered as `<harness>/agents` beneath the project root:
 | `.opencode` | OpenCode |
 | `.kilo` | Kilo |
 
+The table is the six named `AgentLoader` mappings. `DiscoverHarnessAgentDirs` still scans
+every dot-prefixed `*/agents` directory; unmapped folders, including `.factory` and `.pi`,
+load as `HarnessKind.Custom`. Kyber-Squad renderer output is a deployment surface, not this
+inventory.
+
 Formats differ — Markdown with YAML frontmatter, TOML — so `AgentLoader` normalises each
 into one `AgentModel` before anything compares them. Every command accepts `--harness` to
 narrow to one.
@@ -47,9 +52,9 @@ While `agent validate` and `agent sync-check` audit and lint existing on-disk ag
 across individual harnesses, **[Kyber-Squad](../kyber-squad/architecture.md)** provides the
 authoritative, end-to-end deployment control plane. Kyber-Squad maintains 21 canonical agent
 definitions in `products/kyber-squad/` and compiles them into target-native configurations
-for seven currently implemented and registered renderers: `copilot`, `cursor`, `claude`, `codex`,
-`antigravity`, `opencode`, and `factory`. The product declares two more targets—`kilo` and
-`warp`—but requesting either of them currently fails renderer-coverage preflight before a
+for nine currently implemented and registered renderers: `copilot`, `cursor`, `claude`, `codex`,
+`antigravity`, `opencode`, `kilo`, `pi`, and `factory`. The product declares one more
+target—`warp`—but requesting it currently fails renderer-coverage preflight before a
 deployment starts.
 
 The current agent namespace intersects the 24-skill namespace at seven names, all distinct-body

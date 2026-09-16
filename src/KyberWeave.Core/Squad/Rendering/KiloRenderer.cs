@@ -7,47 +7,55 @@ using YamlDotNet.Serialization;
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>
-/// Renders canonical Squad source into Factory Droids' native agent and skill file formats.
+/// Renders canonical Squad source into Kilo's native agent and skill file formats.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Native agent target: canonical agents render as Markdown with YAML frontmatter at
-/// <c>.factory/agents/&lt;name&gt;.md</c>. Skills render at
-/// <c>.factory/skills/&lt;name&gt;/SKILL.md</c>. Frontmatter requires <c>name</c> and
-/// <c>description</c>; optional <c>model</c> resolves from <c>models.yml</c> for harness
-/// <c>factory</c> (omitted when <c>inherit</c> or unresolved). The Markdown-with-frontmatter
-/// shape matches every other native Markdown harness in this repository; Factory's own
-/// public schema was not verified against live documentation at implementation time
-/// (2026-09-14), so no additional keys are invented.
+/// <c>.kilo/agents/&lt;name&gt;.md</c>. Required keys are <c>name</c>, <c>description</c>, and <c>mode</c>
+/// (<c>primary</c> or <c>subagent</c>); optional <c>model</c> resolves from <c>models.yml</c> for harness <c>kilo</c>
+/// (omitted when <c>inherit</c> or empty).
 /// </para>
 /// <para>
-/// Permission degradation follows Copilot's degradation-over-guessing rule and Codex's
-/// concrete pattern: Factory's agent frontmatter permission model is unverified, so no
-/// permission-equivalent field is emitted. Non-deny profile decisions are recorded as
-/// <see cref="SquadDegradationRecord"/> with code <c>permission-not-expressible</c> rather
-/// than guessing a mapping that could silently widen access.
+/// Canonical skills render as harness skills at <c>.kilo/skills/&lt;name&gt;/SKILL.md</c>
+/// with YAML frontmatter containing <c>name</c>, single-line <c>description</c>, and <c>license: MIT</c>.
+/// Per the native single-projection rule, profile-declared shared identities suppress their
+/// skill projections.
 /// </para>
 /// <para>
-/// Profile-declared shared identities suppress their skill projections per the native
-/// single-projection rule (covering primary agents such as <c>conductor</c> when listed).
+/// Permission degradation: Kilo agent configuration has no frontmatter tool allow-list or
+/// capability permission lattice. Configured profile decisions (including allow, ask, and deny)
+/// are recorded as structured degradations with code <c>permission-not-expressible</c> rather
+/// than inventing unenforceable fields or silently dropping constraints (preventing capability widening).
 /// </para>
 /// </remarks>
-public sealed class FactoryRenderer : ISquadRenderer
+public sealed class KiloRenderer : ISquadRenderer
 {
-    private const string AgentsDirectory = ".factory/agents";
-    private const string SkillsDirectory = ".factory/skills";
+    private const string AgentsDirectory = ".kilo/agents";
+    private const string SkillsDirectory = ".kilo/skills";
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+    private static readonly ThreadLocal<ISerializer> YamlSerializer = new(
+        () => new SerializerBuilder().Build());
 
     /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
-    /// registry may dispatch renderers concurrently; serialization takes this lock so a
-    /// shared static instance cannot interleave emitter state.
+    /// Under <c>Scope: Global</c> the physical root already is Kilo's global directory
+    /// (<c>~/.config/kilo</c>), so the relative path drops the project-scope <c>.kilo/</c>
+    /// wrapper and emits the bare <c>agents/</c> / <c>skills/</c> form directly.
     /// </summary>
-    private static readonly object SerializerLock = new();
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".kilo/", StringComparison.Ordinal)
+            ? baseDirectory[".kilo/".Length..]
+            : baseDirectory;
+    }
 
     /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Factory];
+    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Kilo];
 
     /// <inheritdoc />
     public Task<SquadRenderResult> RenderAsync(
@@ -57,10 +65,10 @@ public sealed class FactoryRenderer : ISquadRenderer
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (request.Targets.Any(target => target != SquadTarget.Factory))
+        if (request.Targets.Any(target => target != SquadTarget.Kilo))
         {
             throw new ArgumentException(
-                "FactoryRenderer was asked to render a target other than Factory.",
+                "KiloRenderer was asked to render a target other than Kilo.",
                 nameof(request));
         }
 
@@ -86,7 +94,8 @@ public sealed class FactoryRenderer : ISquadRenderer
         {
             SquadDeploymentFile principal = RenderAgent(
                 agent,
-                source.ModelProfiles.Profiles);
+                source.ModelProfiles.Profiles,
+                request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -110,7 +119,7 @@ public sealed class FactoryRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill);
+            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -120,36 +129,35 @@ public sealed class FactoryRenderer : ISquadRenderer
 
     private static SquadDeploymentFile RenderAgent(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
+        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
+        SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = agent.Name,
-            ["description"] = agent.Description
+            ["description"] = agent.Description,
+            ["mode"] = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent"
         };
 
-        string? model = ResolveFactoryModel(agent, modelProfiles);
+        string? model = ResolveKiloModel(agent, modelProfiles);
         if (model is not null)
         {
             frontmatter["model"] = model;
         }
 
-        // Permission-equivalent fields are deliberately omitted: Factory's permission
-        // vocabulary is unverified, and inventing one would risk silent widening.
+        string content = SquadMarkdownDocument.Compose(
+            YamlSerializer.Value!,
+            frontmatter,
+            agent.InstructionBody);
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
-        }
-
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
+            $"{agentsDir}/{agent.Name}.md",
             Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.Factory));
+            "kilo");
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill)
+    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
     {
         string singleLineDescription = string.Join(" ", skill.Description.Split(
             ['\r', '\n'],
@@ -158,22 +166,23 @@ public sealed class FactoryRenderer : ISquadRenderer
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
             ["name"] = skill.Name,
-            ["description"] = singleLineDescription
+            ["description"] = singleLineDescription,
+            ["license"] = "MIT"
         };
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
-        }
+        string content = SquadMarkdownDocument.Compose(
+            YamlSerializer.Value!,
+            frontmatter,
+            skill.InstructionBody);
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+            $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
-            SquadTargetCatalog.GetToken(SquadTarget.Factory));
+            "kilo");
     }
 
-    private static string? ResolveFactoryModel(
+    private static string? ResolveKiloModel(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
     {
@@ -182,14 +191,14 @@ public sealed class FactoryRenderer : ISquadRenderer
             return null;
         }
 
-        if (profile.HarnessModels.TryGetValue("factory", out string? factoryModel))
+        if (profile.HarnessModels.TryGetValue("kilo", out string? kiloModel))
         {
-            return string.Equals(factoryModel, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(factoryModel)
+            return string.Equals(kiloModel, "inherit", StringComparison.Ordinal)
                 ? null
-                : factoryModel;
+                : kiloModel;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(profile.Default)
+        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal)
             ? null
             : profile.Default;
     }
@@ -204,9 +213,11 @@ public sealed class FactoryRenderer : ISquadRenderer
             return null;
         }
 
+        // Kilo has no capability permission lattice. All configured permissions (allow, ask,
+        // deny) are unexpressed at the harness boundary; recording deny constraints ensures
+        // canonical restrictions are not silently dropped (preventing capability widening).
         List<string> unexpressed = capabilityVocabulary
-            .Where(cap => profile.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
-                          decision != SquadPermissionDecision.Deny)
+            .Where(cap => profile.Permissions.ContainsKey(cap))
             .ToList();
 
         if (unexpressed.Count == 0)
@@ -215,13 +226,10 @@ public sealed class FactoryRenderer : ISquadRenderer
         }
 
         string details =
-            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but " +
-            "Factory agent frontmatter has no verified permission mapping; no permission-equivalent " +
-            "field was emitted, so the deployed agent's behaviour is governed by the harness default, " +
-            "not the canonical profile.";
+            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Kilo agents cannot express capability permissions; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
 
         return new SquadDegradationRecord(
-            Target: SquadTargetCatalog.GetToken(SquadTarget.Factory),
+            Target: "kilo",
             CanonicalIdentity: agent.Name,
             OutputIdentity: agent.Name,
             Code: "permission-not-expressible",

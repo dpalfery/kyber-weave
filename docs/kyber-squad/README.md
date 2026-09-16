@@ -9,15 +9,15 @@ last-reviewed: 2026-09-14
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 
-> **Govern a nine-target IDE harness catalog and deploy canonical AI agent squads and skills to the seven targets implemented today, with transactional safety.**
+> **Govern a ten-target IDE harness catalog and deploy canonical AI agent squads and skills to the nine targets implemented today, with transactional safety.**
 
-Engineering teams increasingly operate across heterogeneous AI development tools—some engineers build in Cursor or Windsurf, others in Claude Code, GitHub Copilot, Cline, or Antigravity. As teams author specialized agent personas (e.g. architects, database engineers, test specialists) and reusable skills, keeping these artifacts in sync across differing IDE configurations becomes an unmanageable maintenance burden.
+Engineering teams increasingly operate across heterogeneous AI development tools—some engineers build in Cursor or Windsurf, others in Claude Code, GitHub Copilot, Cline, Pi, or Antigravity. As teams author specialized agent personas (e.g. architects, database engineers, test specialists) and reusable skills, keeping these artifacts in sync across differing IDE configurations becomes an unmanageable maintenance burden.
 
 **Kyber-Squad** is the unified deployment control plane that compiles canonical agent definitions
 (`AgentIR`) and skill specifications into target-native configurations, backed by atomic
-transactional rollback. The catalog declares nine harness targets. Seven renderers are implemented
-and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, and `factory`. The other two
-declared targets—`kilo` and `warp`—fail renderer-coverage preflight.
+transactional rollback. The catalog declares ten harness targets. Nine renderers are implemented
+and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, and `factory`. The remaining
+declared target—`warp`—fails renderer-coverage preflight.
 
 ---
 
@@ -40,7 +40,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 24 skills — each projecting its validated resource closure beside the rendered principal — for seven registered renderers while retaining a governed nine-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 24 skills — each projecting its validated resource closure beside the rendered principal — for nine registered renderers while retaining a governed ten-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |

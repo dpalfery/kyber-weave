@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: test-dev
 description: "Authors and maintains automated tests (unit, integration, end-to-end) in xUnit, pytest, Vitest, and Playwright. Use when the change is in a test project or a .spec/.test file, whenever a test needs writing or updating, and for the failing test that opens a Red-Green task. Tests only, implements no application logic."
 invocation: subagent
-model-profile: mai-code-flash
+model-profile: fast
 capability-profile: worker
 copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, edit, search, todo]
 delegates-to: []

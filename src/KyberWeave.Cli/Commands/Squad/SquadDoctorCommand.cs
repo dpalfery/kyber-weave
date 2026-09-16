@@ -19,6 +19,8 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 {
     private readonly IProcessExecutor? _executor;
     private readonly string? _workingDirectory;
+    private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly ISquadRenderer? _renderer;
 
     /// <summary>Creates a new doctor command using default dependencies.</summary>
     public SquadDoctorCommand()
@@ -29,11 +31,15 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     internal SquadDoctorCommand(
         IProcessExecutor? executor = null,
         ISquadUserPaths? userPaths = null,
-        string? workingDirectory = null)
+        string? workingDirectory = null,
+        ISquadGlobalRootResolver? globalRoots = null,
+        ISquadRenderer? renderer = null)
     {
         _ = userPaths;
         _executor = executor;
         _workingDirectory = workingDirectory;
+        _globalRoots = globalRoots;
+        _renderer = renderer;
     }
 
     /// <inheritdoc />
@@ -84,12 +90,14 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // 4. Canonical Source (Maintainer check - only when inside repository root)
         string workingDirectory = _workingDirectory ?? Directory.GetCurrentDirectory();
         string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
+        bool canonicalSourceValid = false;
         if (canonicalSourcePath is not null)
         {
             try
             {
                 SquadSource source = SquadSourceLoader.Load(canonicalSourcePath);
                 AnsiConsole.MarkupLine($"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
+                canonicalSourceValid = true;
             }
             catch (SquadSourceValidationException ex)
             {
@@ -101,6 +109,12 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 AnsiConsole.MarkupLine($"  [red]fail[/] Canonical source loading failed: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
             }
+        }
+
+        if (settings.Global &&
+            ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
+        {
+            hasIssues = true;
         }
 
         AnsiConsole.WriteLine();
@@ -115,6 +129,92 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     public int Execute(CommandContext context, SquadDoctorSettings settings) => Execute(context, settings, CancellationToken.None);
+
+    /// <returns>
+    /// <see langword="true"/> when the scan itself failed and doctor should exit non-zero.
+    /// Warnings and skipped scans return <see langword="false"/>.
+    /// </returns>
+    private bool ReportGlobalCollisions(
+        string workingDirectory,
+        string? canonicalSourcePath,
+        bool canonicalSourceValid)
+    {
+        if (canonicalSourcePath is null)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source is not available from this working directory.");
+            return false;
+        }
+
+        if (!canonicalSourceValid)
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source validation failed.");
+            return false;
+        }
+
+        ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
+        ISquadGlobalRootResolver globalRoots = _globalRoots
+            ?? new SquadGlobalRoots(
+                Environment.GetEnvironmentVariable,
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+        List<SquadUnmanagedPathCollision> collisions = [];
+        try
+        {
+            foreach (SquadTarget target in renderer.SupportedTargets)
+            {
+                // Factory (and any future native renderer whose per-user directory was not
+                // verified) still registers in SupportedTargets. Probing the resolver first
+                // keeps doctor --global from crashing the whole scan, and avoids inventing a
+                // global root the way Factory already refuses to invent a permission mapping.
+                try
+                {
+                    _ = globalRoots.ResolveGlobalRoot(target);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"  [grey]info[/] Global unmanaged-collision scan skipped for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': no verified global root.");
+                    continue;
+                }
+
+                SquadRenderResult render = renderer.RenderAsync(
+                        new SquadRenderRequest(
+                            canonicalSourcePath,
+                            [target],
+                            SquadDeploymentScope.Global))
+                    .GetAwaiter()
+                    .GetResult();
+
+                collisions.AddRange(SquadDeploymentPlan.CollectUnmanagedCollisions(
+                    workingDirectory,
+                    SquadDeploymentScope.Global,
+                    render.Files,
+                    globalRoots));
+            }
+        }
+        catch (SquadRenderValidationException ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
+            return true;
+        }
+
+        if (collisions.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
+            return false;
+        }
+
+        foreach (SquadUnmanagedPathCollision collision in collisions)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
+        }
+
+        return false;
+    }
 
     private static string GetCliVersion()
     {

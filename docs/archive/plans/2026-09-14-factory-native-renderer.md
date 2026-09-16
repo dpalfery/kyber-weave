@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-14-factory-native-renderer
+id: archive/plans/2026-09-14-factory-native-renderer
 title: Implement native Factory (factory-droids) renderer
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-09-14
 component: KyberSquad
@@ -10,7 +10,7 @@ component: KyberSquad
 
 # Implement native Factory (factory-droids) renderer
 
-**Status:** Completed  
+**Status:** Archived  
 **Date:** 2026-09-14  
 **Goal:** Implement and register an `ISquadRenderer` for `SquadTarget.Factory` (`factory` /
 `factory-droids`) so `kyber-weave squad install --target factory` succeeds with native

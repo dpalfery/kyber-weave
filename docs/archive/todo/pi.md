@@ -1,14 +1,24 @@
 ---
-id: todo/pi
+id: archive/todo/pi
 title: Add Pi as a Kyber-Squad harness target
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-12
-status: draft
+last-reviewed: 2026-09-14
+status: superseded
 ---
 
 # Add Pi as a Kyber-Squad harness target
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-14
+
+Closed by shipping `PiRenderer` and registering it in `SquadCommandComposition.ResolveRenderer()`.
+See [2026-09-14-pi-harness-target.md](../plans/2026-09-14-pi-harness-target.md) for the
+implementation contract. Residual: the T8 TUI observations (`/agents`, skill-collision
+warning, `/skill:conductor`, `--global` in a live Pi session) still need owner confirmation.
+
+**Superseded by the archived plan [2026-09-14-pi-harness-target.md](../plans/2026-09-14-pi-harness-target.md).** This todo's classification ("fallback") and file-count figures are superseded by the plan.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
