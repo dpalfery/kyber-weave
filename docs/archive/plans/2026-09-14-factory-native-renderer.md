@@ -16,6 +16,9 @@ component: KyberSquad
 `factory-droids`) so `kyber-weave squad install --target factory` succeeds with native
 Factory agent and skill layouts, without inventing an unverified permission mapping.
 
+D1 (`.factory/agents/`) and D3 (omit `tools` because unverified) are replaced by
+[Correct Factory droid paths and enable Factory `--global`](2026-09-16-factory-renderer-droids-and-global.md).
+
 ## Decisions
 
 | Id | Decision |

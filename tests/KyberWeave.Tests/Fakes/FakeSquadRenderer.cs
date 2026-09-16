@@ -212,7 +212,7 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         SquadTarget.Copilot => $".github/agents/{agentName}.agent.md",
         SquadTarget.OpenCode => $".opencode/agents/{agentName}.md",
         SquadTarget.Kilo => $".kilo/agents/{agentName}.md",
-        SquadTarget.Factory => $".factory/agents/{agentName}.md",
+        SquadTarget.Factory => $".factory/droids/{agentName}.md",
         SquadTarget.Pi => $".pi/agents/{agentName}.md",
         _ => throw new ArgumentException($"Target {target} does not have a native agent file path.", nameof(target))
     };

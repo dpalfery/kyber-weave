@@ -19,6 +19,8 @@ public interface ISquadGlobalRootResolver
 /// Copilot (P43, `.copilot/`), Antigravity (P44, `.gemini/config/`), Pi (P9, P3, `.pi/agent/`),
 /// OpenCode (`~/.config/opencode/`, verified against OpenCode's agents/skills/config docs),
 /// and Kilo (`~/.config/kilo/`, verified against Kilo's custom-subagents and settings docs).
+/// Factory personal droids and skills live under `~/.factory` with no environment override
+/// (docs.factory.ai/harness/subagents and docs.factory.ai/harness/skills, 2026-09-16).
 /// </summary>
 /// <remarks>
 /// Each target's root was verified for 2026-09-14:
@@ -36,6 +38,7 @@ public interface ISquadGlobalRootResolver
 /// - Kilo: `agents/` and `skills/` under `$XDG_CONFIG_HOME/kilo` if set, otherwise
 ///   `~/.config/kilo`. Kilo's own docs place global agent markdown at
 ///   `~/.config/kilo/agents/` and global config at `~/.config/kilo/kilo.jsonc`.
+/// - Factory: `droids/` and `skills/` under `~/.factory` (no override; no all-users path).
 /// </remarks>
 public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 {
@@ -62,6 +65,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.Pi => ResolveWithOverride("PI_CODING_AGENT_DIR", Path.Combine(".pi", "agent")),
             SquadTarget.OpenCode => ResolveOpenCodeRoot(),
             SquadTarget.Kilo => ResolveXdgConfigAppRoot("kilo"),
+            SquadTarget.Factory => ResolveWithOverride(null, ".factory"),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

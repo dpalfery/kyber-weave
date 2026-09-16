@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -63,7 +63,7 @@ Kyber-Squad declares ten coding-harness targets:
 | `antigravity` | — | *Explicit or configured target only* | Role-skill lowering | Implemented and registered |
 | `pi` | — | *Explicit or configured target only* | Native agents (with conductor lowered to skill) | Implemented and registered |
 | `warp` | — | `.warp/` | Role-skill lowering | Unsupported; fails coverage preflight |
-| `factory` | `factory-droids` | `.factory/` | Native agents | Implemented and registered |
+| `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
@@ -126,6 +126,21 @@ example `conductor` — and prints a diagnostic naming the skipped `.agents/skil
 which is not loaded. Pi also lists Antigravity's lowered agent skills whose names don't collide.
 This exposure already exists with `--target antigravity` alone; the renderer cannot prevent it.
 
+### Factory notes
+
+Factory custom droids are Markdown files under `.factory/droids/` (project) and
+`~/.factory/droids/` (personal / `--global`). Skills live at
+`.factory/skills/<name>/SKILL.md` and `~/.factory/skills/<name>/SKILL.md`. Squad does not
+write `.factory/agents/` or the compatibility trees `~/.agents/skills/` and
+`~/.agent/skills/`.
+
+**Override:** when a project droid or skill shares a name with a personal one, the project
+`.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment
+override for `~/.factory`.
+
+**Inspect:** in a Factory session, `/droids` lists project and personal droids; `/skills`
+lists discovered skills. Confirm names there after install.
+
 ---
 
 ## Deployment Scopes
@@ -159,6 +174,7 @@ and `doctor`.
 | `opencode` | `$OPENCODE_CONFIG_DIR` → `$XDG_CONFIG_HOME/opencode` → `~/.config/opencode` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
 | `kilo` | `$XDG_CONFIG_HOME/kilo` → `~/.config/kilo` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
 | `pi` | `$PI_CODING_AGENT_DIR` → `~/.pi/agent` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `factory` | `~/.factory` (no override) | `droids/<name>.md`, `skills/<name>/SKILL.md` |
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
 `.agents/skills/…` / `.github/…`) prefix under the project root.

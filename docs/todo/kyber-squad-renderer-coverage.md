@@ -4,7 +4,7 @@ title: Kyber-Squad Renderer Coverage
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 status: draft
 ---
 
@@ -41,7 +41,7 @@ naming the gap and pointing here.
 - [x] `opencode` — `OpenCodeRenderer` (`.opencode/agents/*.md`, `.opencode/skills/*/SKILL.md`)
 - [x] `kilo` — `KiloRenderer` (`.kilo/agents/*.md`, `.kilo/skills/*/SKILL.md`)
 - [x] `pi` — `PiRenderer` (`.pi/agents/*.md`, `.pi/skills/*/SKILL.md`; conductor as skill)
-- [x] `factory` — `FactoryRenderer` (`.factory/agents/*.md`, `.factory/skills/*/SKILL.md`)
+- [x] `factory` — `FactoryRenderer` (`.factory/droids/*.md`, `.factory/skills/*/SKILL.md`; `--global` under `~/.factory`)
 - [ ] `warp` — Pending ([warp.md](warp.md))
 
 Each page for pending targets is **context for planning that target's renderer, not a plan** — what's known

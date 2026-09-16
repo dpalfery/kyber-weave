@@ -477,6 +477,10 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(collidingFull)!);
         File.WriteAllText(collidingFull, "not-the-canonical-architect-bytes");
 
+        string factoryCollidingFull = Path.Combine(tempHome, ".factory", "droids", "architect.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(factoryCollidingFull)!);
+        File.WriteAllText(factoryCollidingFull, "not-the-canonical-factory-architect-bytes");
+
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
@@ -502,8 +506,8 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("architect", normalizedOutput, StringComparison.Ordinal);
         Assert.Contains("agents/architect.md", normalizedOutput.Replace('\\', '/'), StringComparison.Ordinal);
         Assert.Contains("canonical identity", normalizedOutput, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("factory", normalizedOutput, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("no verified global root", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("no verified global root", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("droids/architect.md", normalizedOutput.Replace('\\', '/'), StringComparison.Ordinal);
     }
 
     [Fact]

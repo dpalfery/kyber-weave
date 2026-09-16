@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 ---
 
 # Kyber-Weave Plan Inventory
@@ -25,6 +25,7 @@ Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](..
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-09-16-factory-renderer-droids-and-global.md](../archive/plans/2026-09-16-factory-renderer-droids-and-global.md) | Complete | 2026-09-16 | 2026-09-16 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [todo/factory.md](../todo/factory.md), [todo/kyber-squad-renderer-coverage.md](../todo/kyber-squad-renderer-coverage.md) | Correct FactoryRenderer project output to `.factory/droids/` and enable `squad install --global --target factory` under `~/.factory`. |
 | [2026-09-14-factory-native-renderer.md](../archive/plans/2026-09-14-factory-native-renderer.md) | Complete | 2026-09-14 | 2026-09-14 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [todo/factory.md](../todo/factory.md) | Implement and register an ISquadRenderer for SquadTarget.Factory (factory / factory-droids) with native Factory agent and skill layouts. |
 | [2026-09-14-pi-harness-target.md](../archive/plans/2026-09-14-pi-harness-target.md) | Complete | 2026-09-14 | 2026-09-14 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [archive/todo/pi.md](../archive/todo/pi.md) | Declare `pi` as a Kyber-Squad target and register a `PiRenderer`. Residual: T8 TUI observations in a live Pi session still need owner confirmation. |
 | [2026-09-14-opencode-native-renderer.md](2026-09-14-opencode-native-renderer.md) | Completed | 2026-09-14 | | | Implement and register an ISquadRenderer for SquadTarget.OpenCode (opencode) with native OpenCode agent and skill layouts. |

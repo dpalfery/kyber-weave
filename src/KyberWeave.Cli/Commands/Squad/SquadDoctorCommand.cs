@@ -164,10 +164,9 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         {
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
-                // Factory (and any future native renderer whose per-user directory was not
-                // verified) still registers in SupportedTargets. Probing the resolver first
-                // keeps doctor --global from crashing the whole scan, and avoids inventing a
-                // global root the way Factory already refuses to invent a permission mapping.
+                // A future native renderer whose per-user directory is not yet verified
+                // still registers in SupportedTargets. Probing the resolver first keeps
+                // doctor --global from crashing the whole scan.
                 try
                 {
                     _ = globalRoots.ResolveGlobalRoot(target);

@@ -4,7 +4,7 @@ title: Add a native Factory (factory-droids) renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 status: superseded
 ---
 
@@ -13,7 +13,9 @@ status: superseded
 > [!NOTE]
 > **Superseded by implementation plan:** This todo has been superseded by plan
 > [docs/archive/plans/2026-09-14-factory-native-renderer.md](../archive/plans/2026-09-14-factory-native-renderer.md),
-> which defines the architecture decisions for implementing `FactoryRenderer`.
+> which defined the first `FactoryRenderer`. Custom-droid paths and `--global` were
+> corrected by
+> [docs/archive/plans/2026-09-16-factory-renderer-droids-and-global.md](../archive/plans/2026-09-16-factory-renderer-droids-and-global.md).
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
@@ -31,7 +33,7 @@ for the full target roster and its current coverage.
 
 ## Classification
 
-**Native agent target.** Canonical agents render as this harness's own native agent primitive (Markdown with YAML frontmatter (unverified)) at `.factory/agents/<name>.md`. All canonical skills render as harness skills at `.factory/skills/<name>/SKILL.md`; there are no shared product identities to suppress.
+**Native agent target.** Canonical agents render as Factory custom droids (Markdown with YAML frontmatter) at `.factory/droids/<name>.md`. Personal / `--global` droids are `droids/<name>.md` under `~/.factory`. All canonical skills render as harness skills at `.factory/skills/<name>/SKILL.md` (personal `~/.factory/skills/<name>/SKILL.md`). Profile-declared shared identities suppress their skill projections. Squad does not write `.factory/agents/`, `~/.agents/skills/`, or `~/.agent/skills/`.
 
 ## What is known (from the canonical source and the codebase)
 
@@ -64,15 +66,12 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   (`src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`) alongside `CopilotRenderer`.
   `SquadRendererRegistry` handles the coverage gate, dispatch, and post-render validation —
   a new renderer does not reimplement any of that.
-- **Permissions**: do not invent a mapping from the semantic capability vocabulary
-  (`filesystem.read`, `filesystem.write`, `process.execute`, `network.read`,
-  `network.publish`, `delegate`) to this harness's own permission model unless that mapping
-  is verified against real documentation. Where it cannot be verified, follow
-  `CopilotRenderer`'s pattern: leave the harness's permission-equivalent field unset (whatever
-  that harness's own safe default is) and record a `SquadDegradationRecord` with code
-  `permission-not-expressible` naming what could not be enforced. A guessed mapping that
-  turns out wrong is a silent permission *widening* — exactly what the registry's validation
-  pass and the receipt's degradation records exist to make impossible to ship unnoticed.
+- **Permissions**: Factory documents omit-`tools` as allow-all, so Squad always emits an
+  explicit YAML array of documented tool IDs and never emits `tools: all`. Only `allow`
+  grants a tool; `ask` withholds and records `safety-narrowed`. Unmapped `network.publish`
+  and `delegate`, plus `mcpServers: []` (parent MCP not inherited), record
+  `permission-not-expressible`. Do not invent Factory keys (`permission`, `permissions`)
+  or MCP server names.
 - **Validation will hold this renderer to the same invariants as Copilot's**: portable output
   paths contained under the extraction root, only requested targets in the output, the
   native/fallback projection rules (seven distinct-body collisions and no shared identities),
@@ -88,9 +87,7 @@ to permissions (see below) is worth carrying into any new renderer rather than r
   literals, so the test can't silently drift from the canonical source it's supposed to be
   checking.
 - Confirm `kyber-weave squad install --target factory --dry-run` plans a file for every
-  agent and skill this target should cover (native: 21 agents + 24 skills = 45, matching
-  Copilot's count, unless this target's own agent-primitive support differs; fallback: 24
-  skills + 21 role-lowered agents = 45, with seven `role-` collisions and the remaining
-  unoccupied identities emitted under their own names).
+  agent and skill this target should cover at `.factory/droids/<name>.md` and
+  `.factory/skills/<name>/SKILL.md` (never `.factory/agents/`).
 - Confirm `kyber-weave squad doctor` reports `factory` under renderers available, not
   pending.
