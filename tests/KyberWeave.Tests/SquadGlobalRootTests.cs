@@ -9,59 +9,19 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Proves R18/section 6a: under <c>Scope: Global</c>, every rendered file lands under its
-/// target's real per-user global root with a bare <c>agents/</c> or <c>skills/</c> relative
-/// path, honoring an override environment variable before the verified default. Project scope
-/// stays byte-identical to today.
+/// Proves under <c>Scope: Global</c>, every rendered file lands under its target's real
+/// per-user global root with a bare <c>agents/</c>, <c>skills/</c>, or Factory <c>droids/</c>
+/// relative path, honoring an override environment variable before the verified default.
+/// Project scope stays byte-identical to today. <see cref="SquadGlobalRoots"/> rejects a
+/// relative home directory or override so <c>--global</c> cannot resolve against the process
+/// working directory.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Covers docs/archive/plans/2026-09-14-pi-harness-target.md section 7, row T12 (criteria 1-4). This
-/// file declares no production type. It references a seam that does not exist yet, so the whole
-/// test assembly fails to compile until T13 adds it — the intended RED signal. The predecessor
-/// this file replaces declared <c>ISquadGlobalRootResolver</c> and its own fake inline, so it
-/// compiled cleanly and asserted nothing real; it never touched <see cref="SquadLifecycleService"/>
-/// at all.
-/// </para>
-/// <para>
-/// The seam T13 must add, entirely under <c>KyberWeave.Core.Squad.Deployment</c>:
-/// <list type="bullet">
-/// <item><description>
-/// <c>public interface ISquadGlobalRootResolver { string ResolveGlobalRoot(SquadTarget target); }</c>
-/// </description></item>
-/// <item><description>
-/// <c>public sealed class SquadGlobalRoots : ISquadGlobalRootResolver</c> with constructor
-/// <c>(Func&lt;string, string?&gt; getEnvironmentVariable, string homeDirectory)</c>, implementing
-/// section 6a's table: for each of the six targets, read that target's override environment
-/// variable name (none for Antigravity) through the injected delegate; when it returns a
-/// non-empty value that is the root, otherwise the root is <c>homeDirectory</c> combined with the
-/// verified default relative path (<c>.claude</c>, <c>.codex</c>, <c>.cursor</c>, <c>.copilot</c>,
-/// <c>.gemini/config</c>, <c>.pi/agent</c>).
-/// </description></item>
-/// <item><description>
-/// <see cref="SquadLifecycleService"/>'s constructor gains one new trailing optional parameter,
-/// <c>ISquadGlobalRootResolver? globalRoots = null</c>, placed after the existing <c>observer</c>
-/// parameter so every existing positional call site is unaffected. It is consulted only when
-/// <c>SquadInstallRequest.Scope == SquadDeploymentScope.Global</c>.
-/// </description></item>
-/// <item><description>
-/// <c>SquadDeploymentPlan</c> gains <c>internal string ResolvePhysicalPath(SquadOwnedFile file)</c>,
-/// returning the absolute path this plan would write <c>file.RelativePath</c> to: under
-/// <c>Scope: Project</c> that is today's only behavior (<c>PhysicalRootPath</c> combined with the
-/// relative path); under <c>Scope: Global</c> it is the injected resolver's root for
-/// <c>file.Target</c>, combined with the relative path. <c>internal</c> matches
-/// <c>PhysicalRootPath</c>'s existing visibility; this project's <c>InternalsVisibleTo</c> grant
-/// exposes it here, per this repository's "internals are in scope" test policy.
-/// </description></item>
-/// </list>
-/// </para>
-/// <para>
 /// No <c>Fakes/FakeSquadGlobalRoots.cs</c> is added. <c>SquadGlobalRoots</c>'s two constructor
 /// inputs — an environment-lookup delegate and a home-directory string — are already trivially
 /// fakeable inline; a wrapping fake would not earn its keep here and could drift from the real
 /// resolution logic it exists to prove. No test reads the real <c>HOME</c> or
 /// <c>Environment.GetEnvironmentVariable</c>.
-/// </para>
 /// </remarks>
 public sealed class SquadGlobalRootTests : IDisposable
 {
@@ -224,6 +184,52 @@ public sealed class SquadGlobalRootTests : IDisposable
         string actualRoot = resolver.ResolveGlobalRoot(SquadTarget.Factory);
 
         Assert.Equal(expectedRoot, actualRoot);
+    }
+
+    [Fact]
+    public void Constructor_RelativeHomeDirectory_ThrowsArgumentException()
+    {
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => new SquadGlobalRoots(_ => null, "relative-home"));
+
+        Assert.Equal("homeDirectory", exception.ParamName);
+        Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_RelativeOverride_ThrowsArgumentException()
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-relative-override");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal)
+                ? "relative-override"
+                : null,
+            tempHome);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => resolver.ResolveGlobalRoot(SquadTarget.Claude));
+
+        Assert.Equal("CLAUDE_CONFIG_DIR", exception.ParamName);
+        Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_RelativeXdgConfigHome_ThrowsArgumentException()
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-relative-xdg");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "XDG_CONFIG_HOME", StringComparison.Ordinal)
+                ? "relative-xdg"
+                : null,
+            tempHome);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => resolver.ResolveGlobalRoot(SquadTarget.Kilo));
+
+        Assert.Equal("XDG_CONFIG_HOME", exception.ParamName);
+        Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------------------------------

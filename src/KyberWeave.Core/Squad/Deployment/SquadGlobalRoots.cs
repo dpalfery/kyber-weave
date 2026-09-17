@@ -21,6 +21,9 @@ public interface ISquadGlobalRootResolver
 /// and Kilo (`~/.config/kilo/`, verified against Kilo's custom-subagents and settings docs).
 /// Factory personal droids and skills live under `~/.factory` with no environment override
 /// (docs.factory.ai/harness/subagents and docs.factory.ai/harness/skills, 2026-09-16).
+/// The home directory and every override environment value must be fully qualified:
+/// a relative root would be completed against the process working directory by
+/// <see cref="SquadPathPolicy.ResolveFile"/>.
 /// </summary>
 /// <remarks>
 /// Each target's root was verified for 2026-09-14:
@@ -50,7 +53,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         _getEnvironmentVariable = getEnvironmentVariable;
-        _homeDirectory = homeDirectory;
+        _homeDirectory = RequireFullyQualified(homeDirectory, nameof(homeDirectory));
     }
 
     public string ResolveGlobalRoot(SquadTarget target)
@@ -81,7 +84,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             string? overrideValue = _getEnvironmentVariable(overrideVariableName);
             if (!string.IsNullOrEmpty(overrideValue))
             {
-                return overrideValue;
+                return RequireFullyQualified(overrideValue, overrideVariableName);
             }
         }
 
@@ -99,7 +102,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         string? configDirOverride = _getEnvironmentVariable("OPENCODE_CONFIG_DIR");
         if (!string.IsNullOrEmpty(configDirOverride))
         {
-            return configDirOverride;
+            return RequireFullyQualified(configDirOverride, "OPENCODE_CONFIG_DIR");
         }
 
         return ResolveXdgConfigAppRoot("opencode");
@@ -110,9 +113,28 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
         string? xdgConfigHome = _getEnvironmentVariable("XDG_CONFIG_HOME");
         if (!string.IsNullOrEmpty(xdgConfigHome))
         {
-            return Path.Combine(xdgConfigHome, applicationDirectoryName);
+            return Path.Combine(
+                RequireFullyQualified(xdgConfigHome, "XDG_CONFIG_HOME"),
+                applicationDirectoryName);
         }
 
         return Path.Combine(_homeDirectory, ".config", applicationDirectoryName);
+    }
+
+    /// <summary>
+    /// <see cref="SquadPathPolicy.ResolveFile"/> calls <see cref="Path.GetFullPath(string)"/> on
+    /// the root. A relative value would therefore resolve against the process working directory
+    /// and a <c>--global</c> install could write outside the intended home tree.
+    /// </summary>
+    private static string RequireFullyQualified(string path, string paramName)
+    {
+        if (!Path.IsPathFullyQualified(path))
+        {
+            throw new ArgumentException(
+                "A Squad global root must be fully qualified so it cannot resolve against the process working directory.",
+                paramName);
+        }
+
+        return path;
     }
 }
