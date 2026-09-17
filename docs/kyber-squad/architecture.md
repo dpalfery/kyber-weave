@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -30,6 +30,7 @@ code-refs:
   - OpenCodeRenderer
   - KiloRenderer
   - PiRenderer
+  - FactoryRenderer
 ---
 
 # Kyber-Squad architecture
@@ -37,7 +38,7 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments. Its catalog declares ten target coding harnesses; eight have
+atomic, recoverable deployments. Its catalog declares ten target coding harnesses; nine have
 implemented and registered renderers today.
 
 ---
@@ -72,8 +73,8 @@ flowchart TD
     end
 
     subgraph TargetHarnesses["Declared Target Harnesses"]
-        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi)"]
-        UnsupportedTargets["Coverage Preflight Failure\n(Warp, Factory)"]
+        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory)"]
+        UnsupportedTargets["Coverage Preflight Failure\n(Warp)"]
     end
 
     CanonicalSource --> SquadSourceLoader
@@ -281,7 +282,8 @@ and validates.
   `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`,
   `OpenCodeRenderer` for `.opencode/agents/*.md` and `.opencode/skills/*/SKILL.md`,
   `KiloRenderer` for `.kilo/agents/*.md` and `.kilo/skills/*/SKILL.md`,
-  and `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)).
+  `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)),
+  and `FactoryRenderer` for `.factory/droids/*.md` and `.factory/skills/*/SKILL.md`.
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
@@ -293,6 +295,7 @@ and validates.
 | `opencode` | `OpenCodeRenderer` | `.opencode/agents/<name>.md` | `.opencode/skills/<name>/SKILL.md` | Native |
 | `kilo` | `KiloRenderer` | `.kilo/agents/<name>.md` | `.kilo/skills/<name>/SKILL.md` | Native |
 | `pi` | `PiRenderer` | `.pi/agents/<name>.md` | `.pi/skills/<name>/SKILL.md` (conductor lowered here) | Native |
+| `factory` | `FactoryRenderer` | `.factory/droids/<name>.md` | `.factory/skills/<name>/SKILL.md` | Native |
 - **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
   may name a target-scoped `copilot-capability-profile`. These fields validate and render the
   Copilot allow-list and safety degradation only. They do not replace or widen the shared
@@ -338,7 +341,7 @@ and validates.
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
 - **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (fallback role-skill lowering to
-  `.agents/skills/`), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), and `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`) are implemented and registered. The remaining declared targets—`warp` and `factory`—fail coverage preflight. `kyber-weave squad doctor` reports which
+  `.agents/skills/`), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), and `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`) are implemented and registered. The remaining declared target—`warp`—fails coverage preflight. `kyber-weave squad doctor` reports which
   targets are covered; `docs/todo/<target>.md` has what implementing the rest needs.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and

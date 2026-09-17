@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -50,6 +50,7 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | `safety-narrowed` | An interactive confirmation requirement (`ask`) was narrowed to `deny` because the target cannot prompt the user. | A capability requiring `ask` narrowed to `deny` on non-interactive harnesses. |
 | `omitted` | An agent or skill was omitted because a required security or execution constraint cannot be enforced by the target. | A role with unenforceable `deny` constraints omitted to prevent unauthorized execution. |
 | `workspace-binding-required` | An MCP server configuration in an Agent Plugins package requires host-specific repository path bindings. | Client loads portable skills but requires manual MCP workspace binding. |
+| `permission-not-expressible` | A non-deny capability decision cannot be expressed in the target's native permission model without inventing an unverified mapping. | Factory records this for non-deny `network.publish` and `delegate` (no documented tool / `Task` withheld from subagents) and for `mcpServers: []` so parent MCP is not inherited. |
 
 ---
 
@@ -66,11 +67,11 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Antigravity** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Safety-narrowed |
 | **Pi** | Native `.pi/agents` + lowered conductor | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agent only) | Native execution + safety-narrowed |
 | **Warp** | Role skills | Unsupported; coverage preflight fails | Unavailable | Lowered (`role-*` on collision) | Not implemented |
-| **Factory Droids** | Native `.factory/` | Unsupported; coverage preflight fails | Unavailable | Not lowered | Not implemented |
+| **Factory Droids** | Native `.factory/droids` | Implemented and registered | Supported | Not lowered | Explicit tools array (allow-only documented IDs); safety-narrowed on ask; permission-not-expressible for unmapped `network.publish`/`delegate` and `mcpServers: []` |
 
 The ten rows are the declared target roster. `copilot`, `cursor`, `claude`, `codex`,
-`antigravity`, `opencode`, `kilo`, and `pi` have implemented and registered renderers. `warp` and `factory`
-fail renderer-coverage preflight before deployment.
+`antigravity`, `opencode`, `kilo`, `pi`, and `factory` have implemented and registered renderers.
+`warp` fails renderer-coverage preflight before deployment.
 
 ---
 

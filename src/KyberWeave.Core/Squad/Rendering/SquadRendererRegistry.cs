@@ -380,6 +380,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Codex => $".codex/agents/{agent.Name}.toml",
             SquadTarget.OpenCode => $".opencode/agents/{agent.Name}.md",
             SquadTarget.Kilo => $".kilo/agents/{agent.Name}.md",
+            SquadTarget.Factory => $".factory/droids/{agent.Name}.md",
             SquadTarget.Antigravity =>
                 $".agents/skills/{ResolveFallbackOutputIdentity(agent.Name, skillNames, sharedIdentities)}/SKILL.md",
             SquadTarget.Pi => ResolvePiAgentOutputPath(agent, fallbackProfiles),
@@ -415,6 +416,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Codex when !sharedIdentities.Contains(name) => $".codex/skills/{name}/SKILL.md",
             SquadTarget.OpenCode when !sharedIdentities.Contains(name) => $".opencode/skills/{name}/SKILL.md",
             SquadTarget.Kilo when !sharedIdentities.Contains(name) => $".kilo/skills/{name}/SKILL.md",
+            SquadTarget.Factory when !sharedIdentities.Contains(name) => $".factory/skills/{name}/SKILL.md",
             SquadTarget.Antigravity => $".agents/skills/{name}/SKILL.md",
             SquadTarget.Pi when !sharedIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
             _ => null

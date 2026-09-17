@@ -9,59 +9,19 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Proves R18/section 6a: under <c>Scope: Global</c>, every rendered file lands under its
-/// target's real per-user global root with a bare <c>agents/</c> or <c>skills/</c> relative
-/// path, honoring an override environment variable before the verified default. Project scope
-/// stays byte-identical to today.
+/// Proves under <c>Scope: Global</c>, every rendered file lands under its target's real
+/// per-user global root with a bare <c>agents/</c>, <c>skills/</c>, or Factory <c>droids/</c>
+/// relative path, honoring an override environment variable before the verified default.
+/// Project scope stays byte-identical to today. <see cref="SquadGlobalRoots"/> rejects a
+/// relative home directory or override so <c>--global</c> cannot resolve against the process
+/// working directory.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Covers docs/archive/plans/2026-09-14-pi-harness-target.md section 7, row T12 (criteria 1-4). This
-/// file declares no production type. It references a seam that does not exist yet, so the whole
-/// test assembly fails to compile until T13 adds it — the intended RED signal. The predecessor
-/// this file replaces declared <c>ISquadGlobalRootResolver</c> and its own fake inline, so it
-/// compiled cleanly and asserted nothing real; it never touched <see cref="SquadLifecycleService"/>
-/// at all.
-/// </para>
-/// <para>
-/// The seam T13 must add, entirely under <c>KyberWeave.Core.Squad.Deployment</c>:
-/// <list type="bullet">
-/// <item><description>
-/// <c>public interface ISquadGlobalRootResolver { string ResolveGlobalRoot(SquadTarget target); }</c>
-/// </description></item>
-/// <item><description>
-/// <c>public sealed class SquadGlobalRoots : ISquadGlobalRootResolver</c> with constructor
-/// <c>(Func&lt;string, string?&gt; getEnvironmentVariable, string homeDirectory)</c>, implementing
-/// section 6a's table: for each of the six targets, read that target's override environment
-/// variable name (none for Antigravity) through the injected delegate; when it returns a
-/// non-empty value that is the root, otherwise the root is <c>homeDirectory</c> combined with the
-/// verified default relative path (<c>.claude</c>, <c>.codex</c>, <c>.cursor</c>, <c>.copilot</c>,
-/// <c>.gemini/config</c>, <c>.pi/agent</c>).
-/// </description></item>
-/// <item><description>
-/// <see cref="SquadLifecycleService"/>'s constructor gains one new trailing optional parameter,
-/// <c>ISquadGlobalRootResolver? globalRoots = null</c>, placed after the existing <c>observer</c>
-/// parameter so every existing positional call site is unaffected. It is consulted only when
-/// <c>SquadInstallRequest.Scope == SquadDeploymentScope.Global</c>.
-/// </description></item>
-/// <item><description>
-/// <c>SquadDeploymentPlan</c> gains <c>internal string ResolvePhysicalPath(SquadOwnedFile file)</c>,
-/// returning the absolute path this plan would write <c>file.RelativePath</c> to: under
-/// <c>Scope: Project</c> that is today's only behavior (<c>PhysicalRootPath</c> combined with the
-/// relative path); under <c>Scope: Global</c> it is the injected resolver's root for
-/// <c>file.Target</c>, combined with the relative path. <c>internal</c> matches
-/// <c>PhysicalRootPath</c>'s existing visibility; this project's <c>InternalsVisibleTo</c> grant
-/// exposes it here, per this repository's "internals are in scope" test policy.
-/// </description></item>
-/// </list>
-/// </para>
-/// <para>
 /// No <c>Fakes/FakeSquadGlobalRoots.cs</c> is added. <c>SquadGlobalRoots</c>'s two constructor
 /// inputs — an environment-lookup delegate and a home-directory string — are already trivially
 /// fakeable inline; a wrapping fake would not earn its keep here and could drift from the real
 /// resolution logic it exists to prove. No test reads the real <c>HOME</c> or
 /// <c>Environment.GetEnvironmentVariable</c>.
-/// </para>
 /// </remarks>
 public sealed class SquadGlobalRootTests : IDisposable
 {
@@ -82,6 +42,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Pi, ".pi/agent")]
     [InlineData(SquadTarget.OpenCode, ".config/opencode")]
     [InlineData(SquadTarget.Kilo, ".config/kilo")]
+    [InlineData(SquadTarget.Factory, ".factory")]
     public void ResolveGlobalRoot_NoOverrideSet_ReturnsHomeDirectoryDefault(
         SquadTarget target,
         string defaultRelativePath)
@@ -209,6 +170,68 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Equal(overridePath, resolver.ResolveGlobalRoot(SquadTarget.OpenCode));
     }
 
+    [Theory]
+    [InlineData("FACTORY_HOME")]
+    [InlineData("FACTORY_CONFIG_DIR")]
+    [InlineData("CLAUDE_CONFIG_DIR")]
+    public void ResolveGlobalRoot_Factory_IgnoresEveryEnvironmentVariable(string probedVariableName)
+    {
+        string tempHome = Path.Combine(_temp.Path, $"home-factory-{probedVariableName}");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(_ => "should-never-be-used", tempHome);
+        string expectedRoot = Path.Combine(tempHome, ".factory");
+
+        string actualRoot = resolver.ResolveGlobalRoot(SquadTarget.Factory);
+
+        Assert.Equal(expectedRoot, actualRoot);
+    }
+
+    [Fact]
+    public void Constructor_RelativeHomeDirectory_ThrowsArgumentException()
+    {
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => new SquadGlobalRoots(_ => null, "relative-home"));
+
+        Assert.Equal("homeDirectory", exception.ParamName);
+        Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_RelativeOverride_ThrowsArgumentException()
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-relative-override");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal)
+                ? "relative-override"
+                : null,
+            tempHome);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => resolver.ResolveGlobalRoot(SquadTarget.Claude));
+
+        Assert.Equal("CLAUDE_CONFIG_DIR", exception.ParamName);
+        Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_RelativeXdgConfigHome_ThrowsArgumentException()
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-relative-xdg");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "XDG_CONFIG_HOME", StringComparison.Ordinal)
+                ? "relative-xdg"
+                : null,
+            tempHome);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => resolver.ResolveGlobalRoot(SquadTarget.Kilo));
+
+        Assert.Equal("XDG_CONFIG_HOME", exception.ParamName);
+        Assert.Contains("fully qualified", exception.Message, StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------------------------------
     // Criterion 2: a global dry run per target plans bare relative paths under the resolved root.
     // ---------------------------------------------------------------------------------------
@@ -294,6 +317,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         {
             Assert.True(sawAgentFile, $"{target} is native and should emit at least one agents/ file.");
         }
+
+        // Factory uses droids/, not agents/; do not add it to this theory.
 
         Assert.True(sawSkillFile, $"{target} should emit at least one skills/ file.");
 
@@ -426,6 +451,110 @@ public sealed class SquadGlobalRootTests : IDisposable
     // ---------------------------------------------------------------------------------------
     // Criterion 3: project scope is unchanged (regression guard).
     // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task InstallAsync_GlobalScopeDryRun_Factory_PlansDroidsAndSkillsUnderHomeFactory()
+    {
+        string tempHome = Path.Combine(_temp.Path, "home-factory-global");
+        Directory.CreateDirectory(tempHome);
+        string projectRoot = Path.Combine(_temp.Path, "project-factory-global");
+        Directory.CreateDirectory(projectRoot);
+        string userData = Path.Combine(_temp.Path, "user-data-factory-global");
+
+        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        FakeSquadUserPaths userPaths = new(userData);
+        SquadStateStore stateStore = new(userPaths);
+        using CorpusSquadReleaseSource releaseSource = new();
+        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore, globalRoots: globalRoots);
+
+        SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
+            TargetRoot: projectRoot,
+            Scope: SquadDeploymentScope.Global,
+            Targets: [SquadTarget.Factory],
+            Version: "1.2.3",
+            DryRun: true));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors ?? Array.Empty<string>()));
+        Assert.NotNull(result.Plan);
+        Assert.NotNull(result.Receipt);
+        Assert.NotEmpty(result.Receipt.Files);
+        Assert.Equal(ExpectedRenderedFileCount(), result.Receipt.Files.Count);
+
+        string expectedRoot = globalRoots.ResolveGlobalRoot(SquadTarget.Factory);
+        bool sawDroidFile = false;
+        bool sawSkillFile = false;
+        foreach (SquadOwnedFile file in result.Receipt.Files)
+        {
+            Assert.False(
+                file.RelativePath.StartsWith('.'),
+                $"Global-scope path '{file.RelativePath}' for Factory still carries a project-scope dot-prefix.");
+            Assert.DoesNotContain(".factory", file.RelativePath, StringComparison.Ordinal);
+            Assert.DoesNotContain("agents/", file.RelativePath, StringComparison.Ordinal);
+
+            if (file.RelativePath.StartsWith("droids/", StringComparison.Ordinal))
+            {
+                sawDroidFile = true;
+            }
+            else if (file.RelativePath.StartsWith("skills/", StringComparison.Ordinal))
+            {
+                sawSkillFile = true;
+            }
+            else
+            {
+                Assert.Fail($"Global-scope path '{file.RelativePath}' for Factory is neither droids/ nor skills/.");
+            }
+
+            string physicalPath = result.Plan.ResolvePhysicalPath(file);
+            Assert.True(
+                SquadFileSystemPathSemantics.IsWithin(expectedRoot, physicalPath),
+                $"Physical path '{physicalPath}' for '{file.RelativePath}' (Factory) is not under " +
+                $"the resolved global root '{expectedRoot}'.");
+        }
+
+        Assert.True(sawDroidFile, "Factory should emit at least one droids/ file.");
+        Assert.True(sawSkillFile, "Factory should emit at least one skills/ file.");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(tempHome, "*", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(projectRoot, "*", SearchOption.AllDirectories));
+
+        string agentsCompat = Path.Combine(tempHome, ".agents");
+        string agentCompat = Path.Combine(tempHome, ".agent");
+        Assert.False(Directory.Exists(agentsCompat), "Factory global install must not write ~/.agents.");
+        Assert.False(Directory.Exists(agentCompat), "Factory global install must not write ~/.agent.");
+    }
+
+    [Fact]
+    public async Task InstallAsync_ProjectScopeDryRun_Factory_UsesDroidsNotAgents()
+    {
+        string projectRoot = Path.Combine(_temp.Path, "project-scope-factory");
+        Directory.CreateDirectory(projectRoot);
+        string userData = Path.Combine(_temp.Path, "user-data-project-factory");
+
+        FakeSquadUserPaths userPaths = new(userData);
+        SquadStateStore stateStore = new(userPaths);
+        using CorpusSquadReleaseSource releaseSource = new();
+        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+        SquadLifecycleService service = new(releaseSource, renderer, stateStore);
+
+        SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
+            TargetRoot: projectRoot,
+            Scope: SquadDeploymentScope.Project,
+            Targets: [SquadTarget.Factory],
+            Version: "1.2.3",
+            DryRun: true));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors ?? Array.Empty<string>()));
+        Assert.NotNull(result.Receipt);
+        Assert.NotEmpty(result.Receipt.Files);
+        Assert.All(result.Receipt.Files, file =>
+        {
+            Assert.True(
+                file.RelativePath.StartsWith(".factory/droids/", StringComparison.Ordinal) ||
+                file.RelativePath.StartsWith(".factory/skills/", StringComparison.Ordinal),
+                $"Project-scope Factory path '{file.RelativePath}' is not under .factory/droids/ or .factory/skills/.");
+            Assert.DoesNotContain(".factory/agents/", file.RelativePath, StringComparison.Ordinal);
+        });
+    }
 
     [Theory]
     [InlineData(SquadTarget.Claude, ".claude/")]

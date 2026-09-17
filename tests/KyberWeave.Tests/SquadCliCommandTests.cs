@@ -402,9 +402,11 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("claude", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("opencode", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("kilo", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("factory", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("opencode", pendingSection, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("kilo", pendingSection, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("factory", pendingSection, StringComparison.OrdinalIgnoreCase);
 
         // A plain substring check would false-positive here: "copilot" contains "pi" at
         // index 2-3, so the pi renderer's presence has to be asserted as a whole word.
@@ -475,6 +477,10 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(collidingFull)!);
         File.WriteAllText(collidingFull, "not-the-canonical-architect-bytes");
 
+        string factoryCollidingFull = Path.Combine(tempHome, ".factory", "droids", "architect.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(factoryCollidingFull)!);
+        File.WriteAllText(factoryCollidingFull, "not-the-canonical-factory-architect-bytes");
+
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
@@ -500,6 +506,47 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("architect", normalizedOutput, StringComparison.Ordinal);
         Assert.Contains("agents/architect.md", normalizedOutput.Replace('\\', '/'), StringComparison.Ordinal);
         Assert.Contains("canonical identity", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("no verified global root", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("droids/architect.md", normalizedOutput.Replace('\\', '/'), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_GlobalScope_ReportsRelativeOverrideAndExitsNonZero()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-relative-override-home");
+        Directory.CreateDirectory(tempHome);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "doctor-relative-user"));
+        SquadGlobalRoots globalRoots = new(
+            name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal)
+                ? "relative-dir"
+                : null,
+            tempHome);
+        SquadDoctorCommand command = new SquadDoctorCommand(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Invalid global root", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("fully qualified", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Global unmanaged collisions", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", normalizedOutput, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
