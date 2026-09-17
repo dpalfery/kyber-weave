@@ -160,13 +160,16 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
         List<SquadUnmanagedPathCollision> collisions = [];
+        bool invalidGlobalRoot = false;
         try
         {
             foreach (SquadTarget target in renderer.SupportedTargets)
             {
                 // A future native renderer whose per-user directory is not yet verified
                 // still registers in SupportedTargets. Probing the resolver first keeps
-                // doctor --global from crashing the whole scan.
+                // doctor --global from crashing the whole scan. Relative override values
+                // throw ArgumentException from SquadGlobalRoots; catch that per target so
+                // the remaining harnesses still scan.
                 try
                 {
                     _ = globalRoots.ResolveGlobalRoot(target);
@@ -175,6 +178,13 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 {
                     AnsiConsole.MarkupLine(
                         $"  [grey]info[/] Global unmanaged-collision scan skipped for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': no verified global root.");
+                    continue;
+                }
+                catch (ArgumentException ex)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"  [red]fail[/] Invalid global root for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': {Markup.Escape(ex.Message)}");
+                    invalidGlobalRoot = true;
                     continue;
                 }
 
@@ -203,16 +213,17 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         if (collisions.Count == 0)
         {
             AnsiConsole.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
-            return false;
         }
-
-        foreach (SquadUnmanagedPathCollision collision in collisions)
+        else
         {
-            AnsiConsole.MarkupLine(
-                $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
+            foreach (SquadUnmanagedPathCollision collision in collisions)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
+            }
         }
 
-        return false;
+        return invalidGlobalRoot;
     }
 
     private static string GetCliVersion()

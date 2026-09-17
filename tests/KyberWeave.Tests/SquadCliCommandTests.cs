@@ -511,6 +511,45 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     [Fact]
+    public void Doctor_GlobalScope_ReportsRelativeOverrideAndExitsNonZero()
+    {
+        string tempHome = Path.Combine(_temp.Path, "doctor-relative-override-home");
+        Directory.CreateDirectory(tempHome);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "doctor-relative-user"));
+        SquadGlobalRoots globalRoots = new(
+            name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal)
+                ? "relative-dir"
+                : null,
+            tempHome);
+        SquadDoctorCommand command = new SquadDoctorCommand(
+            executor,
+            userPaths,
+            workingDirectory: KyberWeaveTestPaths.ToolRoot,
+            globalRoots: globalRoots);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = KyberWeaveTestPaths.ToolRoot,
+                Global = true
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("Invalid global root", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("fully qualified", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Global unmanaged collisions", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Doctor found issues", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Doctor_GlobalScope_SkipsCollisionScanWhenCanonicalSourceIsInvalid()
     {
         string repoPath = Path.Combine(_temp.Path, "invalid-squad-repo");
