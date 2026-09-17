@@ -122,8 +122,7 @@ graph LR
 ## 3. Role-Skill Lowering and Namespace Resolution
 
 Targets without native agent primitives use **agent-to-role-skill lowering**, governed by
-`profiles/fallbacks.yml`. Antigravity has an implemented renderer for this projection. Warp is
-declared with the same projection model but remains unsupported until its renderer is implemented.
+`profiles/fallbacks.yml`. Antigravity and Warp have implemented renderers for this projection.
 
 The current canonical agent and skill namespaces intersect at exactly seven names. Every
 intersection is a distinct-body collision; the product declares no shared identities:
@@ -297,7 +296,7 @@ and validates.
 | `kilo` | `KiloRenderer` | `.kilo/agents/<name>.md` | `.kilo/skills/<name>/SKILL.md` | Native |
 | `pi` | `PiRenderer` | `.pi/agents/<name>.md` | `.pi/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 | `factory` | `FactoryRenderer` | `.factory/droids/<name>.md` | `.factory/skills/<name>/SKILL.md` | Native |
-| `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered) | `.warp/skills/<name>/SKILL.md` | Fallback |
+| `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered; see [§3](#3-role-skill-lowering-and-namespace-resolution)) | `.warp/skills/<name>/SKILL.md` | Fallback |
 - **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
   may name a target-scoped `copilot-capability-profile`. These fields validate and render the
   Copilot allow-list and safety degradation only. They do not replace or widen the shared
