@@ -297,6 +297,7 @@ and validates.
 | `pi` | `PiRenderer` | `.pi/agents/<name>.md` | `.pi/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 | `factory` | `FactoryRenderer` | `.factory/droids/<name>.md` | `.factory/skills/<name>/SKILL.md` | Native |
 | `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered; see [§3](#3-role-skill-lowering-and-namespace-resolution)) | `.warp/skills/<name>/SKILL.md` | Fallback |
+
 - **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
   may name a target-scoped `copilot-capability-profile`. These fields validate and render the
   Copilot allow-list and safety degradation only. They do not replace or widen the shared
