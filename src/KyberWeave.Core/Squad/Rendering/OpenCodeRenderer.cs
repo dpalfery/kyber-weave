@@ -92,6 +92,23 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     /// </summary>
     private static readonly object SerializerLock = new();
 
+    /// <summary>
+    /// Under <c>Scope: Global</c> the physical root already is OpenCode's global directory
+    /// (R18), so the relative path drops the project-scope <c>.opencode/</c> wrapper and
+    /// emits the bare <c>agents/</c> / <c>skills/</c> form directly.
+    /// </summary>
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".opencode/", StringComparison.Ordinal)
+            ? baseDirectory[".opencode/".Length..]
+            : baseDirectory;
+    }
+
     /// <inheritdoc />
     public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.OpenCode];
 
@@ -129,7 +146,8 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 agent,
                 source.ModelProfiles.Profiles,
                 source.CapabilityProfiles.Profiles,
-                sharedIdentities);
+                sharedIdentities,
+                request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
@@ -146,7 +164,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 continue;
             }
 
-            SquadDeploymentFile principal = RenderSkill(skill);
+            SquadDeploymentFile principal = RenderSkill(skill, request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
         }
@@ -158,7 +176,8 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlySet<string> sharedIdentities)
+        IReadOnlySet<string> sharedIdentities,
+        SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
         {
@@ -182,13 +201,14 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
         }
 
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
+            $"{agentsDir}/{agent.Name}.md",
             Encoding.UTF8.GetBytes(content),
             SquadTargetCatalog.GetToken(SquadTarget.OpenCode));
     }
 
-    private static SquadDeploymentFile RenderSkill(SquadSkill skill)
+    private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
     {
         string singleLineDescription = string.Join(" ", skill.Description.Split(
             ['\r', '\n'],
@@ -207,8 +227,9 @@ public sealed class OpenCodeRenderer : ISquadRenderer
             content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
         }
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+            $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             SquadTargetCatalog.GetToken(SquadTarget.OpenCode));
     }

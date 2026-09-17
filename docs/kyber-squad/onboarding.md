@@ -5,8 +5,10 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 status: current
+decided-by:
+  - adr/0019-pi-native-subagents-and-primary-lowering
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -15,8 +17,8 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**24 canonical skills**, with transactional recovery and state governance. Nine harness targets
-are declared; seven are currently implemented and registered.
+**24 canonical skills**, with transactional recovery and state governance. Ten harness targets
+are declared; all ten are currently implemented and registered.
 
 ---
 
@@ -48,7 +50,7 @@ kyber-weave squad pack --format <apm|plugins|all> --out <directory>
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad declares nine coding-harness targets:
+Kyber-Squad declares ten coding-harness targets:
 
 | Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
 |---|---|---|---|---|
@@ -57,26 +59,85 @@ Kyber-Squad declares nine coding-harness targets:
 | `claude` | — | `.claude/` | Native agents | Implemented and registered |
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
 | `opencode` | — | `.opencode/` | Native agents | Implemented and registered |
-| `kilo` | — | `.kilo/` | Native agents | Unsupported; fails coverage preflight |
+| `kilo` | — | `.kilo/` | Native agents | Implemented and registered |
 | `antigravity` | — | *Explicit or configured target only* | Role-skill lowering | Implemented and registered |
+| `pi` | — | *Explicit or configured target only* | Native agents (with conductor lowered to skill) | Implemented and registered |
 | `warp` | — | `.warp/` | Role-skill lowering | Implemented and registered |
-| `factory` | `factory-droids` | `.factory/` | Native agents | Unsupported; fails coverage preflight |
+| `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), and `warp` (fallback role-skill lowering to `.warp/skills/`) have renderers. Requesting any other target fails before the release is even downloaded,
-naming the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
-implementer needs to add it. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), and `warp` (fallback role-skill lowering to `.warp/skills/`) have renderers. All ten declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
 - **Strong markers only**: Detection activates a target only when its designated directory or specific configuration file is present.
 - **Negative fixtures**: Generic files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, generic `.github/` directories, and `.agents/skills/` are negative fixtures that **never** activate a target.
 - **Antigravity**: Requires explicit `--target antigravity` or configuration entry; `.agents/` will not auto-activate it.
-- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 9 targets.
+- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 10 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Update and uninstall**: Always consume the recorded target roster from the existing deployment receipt and never perform re-detection.
+
+### Pi notes
+
+Pi is a third-party coding agent that renders Squad agents natively through the
+`@tintinweb/pi-subagents` extension
+([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)). The following operational
+details ensure correct deployment and coexistence with other targets:
+
+**Prerequisite**: Pi agent output needs `@tintinweb/pi-subagents` 0.19.0 or later, which requires
+Pi 0.84.0 or later. Install the extension via Pi's `settings.json` `packages` entry beforehand;
+`squad doctor` does not detect it, so verify it is configured before installing the `pi` target.
+
+**Project trust**: Pi's agent loader has no trust check, so project `.pi/agents/` loads
+regardless of project trust. Project `.pi/skills/` loads only for projects trusted in
+`~/.pi/agent/trust.json`, so the conductor skill under `.pi/skills/conductor/` requires project
+trust. Global skills and agents are not gated by trust.
+
+**Override and collision behaviour**: Project `.pi/agents/<name>.md` files override
+identically-named global agents in `~/.pi/agent/agents/` silently — no diagnostic is printed, and
+this is the intended project authority mechanism. By contrast, project `.pi/skills/conductor/`
+taking precedence over a global `~/.pi/agent/skills/conductor` is a real name collision: Pi prints
+a diagnostic naming the skipped global file, and `/skill:conductor` then loads the Squad
+conductor. `conductor-v3` has a different name and is unaffected; outside the project, the global
+skill is unchanged.
+
+**Subagent depth and delegation**: The conductor runs as a top-level skill at depth 0, not as a
+subagent, so its specialist delegates (`architect`, `code-reviewer`, and others) start at depth 1
+and can still delegate one level further to depth 2 under Pi's default `maxSubagentDepth: 2`
+(main 0, subagent 1, nested child 2). A depth cap set below 2 silently disables the nested
+delegation that `architect` and `code-reviewer` require. Recommend `maxSubagentDepth: 2` or
+higher in `.pi/subagents.json` for full capability.
+
+**Fallback and strict dispatch**: By default, an unknown agent type falls back to Pi's
+`general-purpose` agent (all tools). To enforce strict dispatch of Squad agents only, set
+`fallbackSubagent: none` in the project's `.pi/subagents.json`; Squad does not write this file, so
+the operator manages it.
+
+**Coexistence with Antigravity**: `--target antigravity,pi` produces disjoint output trees —
+`.agents/skills/` (Antigravity) and `.pi/` (Pi) — so neither target overwrites or orphans the
+other. Pi's own skill loader also reads the project's `.agents/skills/` in addition to
+`.pi/skills/`, and within a project `.pi/skills` is added first. With both targets installed, Pi
+therefore keeps its `.pi/skills` copy for any name that also appears under `.agents/skills/` — for
+example `conductor` — and prints a diagnostic naming the skipped `.agents/skills/` duplicate,
+which is not loaded. Pi also lists Antigravity's lowered agent skills whose names don't collide.
+This exposure already exists with `--target antigravity` alone; the renderer cannot prevent it.
+
+### Factory notes
+
+Factory custom droids are Markdown files under `.factory/droids/` (project) and
+`~/.factory/droids/` (personal / `--global`). Skills live at
+`.factory/skills/<name>/SKILL.md` and `~/.factory/skills/<name>/SKILL.md`. Squad does not
+write `.factory/agents/` or the compatibility trees `~/.agents/skills/` and
+`~/.agent/skills/`.
+
+**Override:** when a project droid or skill shares a name with a personal one, the project
+`.factory/` definition wins (docs.factory.ai, 2026-09-16). There is no documented environment
+override for `~/.factory`.
+
+**Inspect:** in a Factory session, `/droids` lists project and personal droids; `/skills`
+lists discovered skills. Confirm names there after install.
 
 ---
 
@@ -95,10 +156,37 @@ When run without `--global`, `kyber-weave squad` deploys agents and skills direc
 
 ### 2. Global Scope (`--global`)
 
-Passing `--global` targets the user's home/global environment rather than a project workspace:
+Passing `--global` keeps Squad's lock and receipt in the per-user application-data tree
+(`KyberWeave/squad/roots/<root-key>/`) and writes the rendered agents and skills into each
+harness's own global directory — not into the project path and not into a single shared
+"home" folder. `--global` is symmetric across `install`, `update`, `uninstall`, `status`,
+and `doctor`.
 
-- `--global` is **strictly symmetric** across all commands: `install`, `update`, `uninstall`, `status`, and `doctor`.
-- Global state is isolated under the OS application data directory: `KyberWeave/squad/roots/<root-key>/`, where `<root-key>` is the SHA-256 hash of the canonical physical root path.
+| Target | Global root (override env var → default) | Global-scope relative paths |
+|---|---|---|
+| `claude` | `$CLAUDE_CONFIG_DIR` → `~/.claude` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `codex` | `$CODEX_HOME` → `~/.codex` | `agents/<name>.toml`, `skills/<name>/SKILL.md` |
+| `cursor` | `$CURSOR_CONFIG_DIR` → `~/.cursor` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `copilot` | `$COPILOT_HOME` → `~/.copilot` | `agents/<name>.agent.md`, `skills/<name>/SKILL.md` |
+| `antigravity` | `~/.gemini/config` (no override) | `skills/<role-or-name>/SKILL.md` |
+| `opencode` | `$OPENCODE_CONFIG_DIR` → `$XDG_CONFIG_HOME/opencode` → `~/.config/opencode` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `kilo` | `$XDG_CONFIG_HOME/kilo` → `~/.config/kilo` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `pi` | `$PI_CODING_AGENT_DIR` → `~/.pi/agent` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
+| `factory` | `~/.factory` (no override) | `droids/<name>.md`, `skills/<name>/SKILL.md` |
+
+Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
+`.agents/skills/…` / `.github/…`) prefix under the project root.
+
+**Pre-migration for existing global files.** Squad never deletes an unmanaged file. If a
+global root already holds a file whose name matches a canonical Squad identity but whose
+bytes differ, `squad install --global` refuses that path (`UnmanagedCollision`) unless
+`--adopt` finds identical bytes. Run `squad doctor --global` first: it lists every such
+collision as a warning so the whole set is visible before install. Move or rename the
+hand-authored file, or adopt it only when the bytes already match.
+
+**Model pins.** Per-harness model tokens in `models.yml` are user-provider specific. An
+unresolvable pin inherits silently (the renderer omits `model`) rather than failing the
+install; confirm the resolved model in the harness itself after a first deploy.
 
 ---
 
@@ -156,7 +244,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the nine declared targets can install today) and the Kyber-Weave MCP server:
+Run diagnostic checks on renderer coverage (which of the ten declared targets can install today) and the Kyber-Weave MCP server:
 
 ```bash
 kyber-weave squad doctor

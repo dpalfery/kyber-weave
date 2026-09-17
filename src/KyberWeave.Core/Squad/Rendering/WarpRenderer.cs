@@ -27,6 +27,18 @@ public sealed class WarpRenderer : ISquadRenderer
 {
     private const string SkillsDirectory = ".warp/skills";
 
+    private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
+    {
+        if (scope == SquadDeploymentScope.Project)
+        {
+            return baseDirectory;
+        }
+
+        return baseDirectory.StartsWith(".warp/", StringComparison.Ordinal)
+            ? baseDirectory[".warp/".Length..]
+            : baseDirectory;
+    }
+
     /// <summary>
     /// Shared identities (the fallback profile's <c>shared-identities</c> list) whose
     /// canonical skill is reused instead of emitting a role-prefixed duplicate. Read from
@@ -115,9 +127,11 @@ public sealed class WarpRenderer : ISquadRenderer
         // without a renderer change.
         HashSet<string> sharedIdentities = ResolveSharedIdentities(source);
 
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, request.Scope);
+
         foreach (SquadSkill skill in source.Skills)
         {
-            files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody));
+            files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody, skillsDir));
         }
 
         HashSet<string> skillNames = source.Skills
@@ -146,7 +160,7 @@ public sealed class WarpRenderer : ISquadRenderer
                      skillNames.Contains(agent.Name))
             {
                 string outputIdentity = $"role-{agent.Name}";
-                files.Add(RenderSkill(outputIdentity, agent.Description, agent.InstructionBody));
+                files.Add(RenderSkill(outputIdentity, agent.Description, agent.InstructionBody, skillsDir));
                 degradations.Add(new SquadDegradationRecord(
                     Target: "warp",
                     CanonicalIdentity: agent.Name,
@@ -158,7 +172,7 @@ public sealed class WarpRenderer : ISquadRenderer
             }
             else
             {
-                files.Add(RenderSkill(agent.Name, agent.Description, agent.InstructionBody));
+                files.Add(RenderSkill(agent.Name, agent.Description, agent.InstructionBody, skillsDir));
                 degradations.Add(new SquadDegradationRecord(
                     Target: "warp",
                     CanonicalIdentity: agent.Name,
@@ -188,7 +202,7 @@ public sealed class WarpRenderer : ISquadRenderer
         {
             SquadResourceProjection.Append(
                 files,
-                $"{SkillsDirectory}/{outputIdentity}/SKILL.md",
+                $"{skillsDir}/{outputIdentity}/SKILL.md",
                 agent.Resources,
                 "warp");
         }
@@ -197,7 +211,7 @@ public sealed class WarpRenderer : ISquadRenderer
         {
             SquadResourceProjection.Append(
                 files,
-                $"{SkillsDirectory}/{skill.Name}/SKILL.md",
+                $"{skillsDir}/{skill.Name}/SKILL.md",
                 skill.Resources,
                 "warp");
         }
@@ -225,7 +239,11 @@ public sealed class WarpRenderer : ISquadRenderer
         }
     }
 
-    private static SquadDeploymentFile RenderSkill(string name, string description, string instructionBody)
+    private static SquadDeploymentFile RenderSkill(
+        string name,
+        string description,
+        string instructionBody,
+        string skillsDirectory)
     {
         ValidateCanonicalName(name);
 
@@ -262,7 +280,7 @@ public sealed class WarpRenderer : ISquadRenderer
         }
 
         return new SquadDeploymentFile(
-            $"{SkillsDirectory}/{name}/SKILL.md",
+            $"{skillsDirectory}/{name}/SKILL.md",
             Encoding.UTF8.GetBytes(builder.ToString()),
             "warp");
     }

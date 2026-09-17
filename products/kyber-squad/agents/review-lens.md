@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: review-lens
 description: "Applies one named review lens to a diff and returns structured findings or an explicit skip. Use when code-reviewer fans out its council and names the lens to apply. Do not use when the request is a general review rather than one named lens. Reports only, issues no verdict and fixes nothing."
 invocation: subagent
-model-profile: general
+model-profile: reviewer
 capability-profile: read-only
 copilot-tools: [vscode, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []

@@ -7,45 +7,41 @@ using YamlDotNet.Serialization;
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>
-/// Renders canonical Squad source into Codex's native agent TOML and skill file formats.
+/// Renders canonical Squad source into Kilo's native agent and skill file formats.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Native agent target: canonical agents render as Codex's native agent TOML primitive at
-/// <c>.codex/agents/&lt;name&gt;.toml</c>. Codex agent TOML files contain the required
-/// top-level fields <c>name</c>, <c>description</c>, and multi-line
-/// <c>developer_instructions</c>, plus optional <c>model</c>.
+/// Native agent target: canonical agents render as Markdown with YAML frontmatter at
+/// <c>.kilo/agents/&lt;name&gt;.md</c>. Required keys are <c>name</c>, <c>description</c>, and <c>mode</c>
+/// (<c>primary</c> or <c>subagent</c>); optional <c>model</c> resolves from <c>models.yml</c> for harness <c>kilo</c>
+/// (omitted when <c>inherit</c> or empty).
 /// </para>
 /// <para>
-/// Canonical skills render as harness skills at <c>.codex/skills/&lt;name&gt;/SKILL.md</c>
-/// with YAML frontmatter containing <c>name</c>, <c>description</c>, and <c>license: MIT</c>.
+/// Canonical skills render as harness skills at <c>.kilo/skills/&lt;name&gt;/SKILL.md</c>
+/// with YAML frontmatter containing <c>name</c>, single-line <c>description</c>, and <c>license: MIT</c>.
 /// Per the native single-projection rule, profile-declared shared identities suppress their
 /// skill projections.
 /// </para>
 /// <para>
-/// Model resolution resolves the agent model from <c>models.yml</c> for target <c>codex</c>,
-/// falling back to the profile's default when not <c>inherit</c>.
-/// </para>
-/// <para>
-/// Permission degradation: Codex agent configuration has no frontmatter tool allow-list or
-/// capability permission lattice. Non-deny profile decisions are recorded as structured
-/// degradations with code <c>permission-not-expressible</c> rather than inventing unenforceable fields.
+/// Permission degradation: Kilo agent configuration has no frontmatter tool allow-list or
+/// capability permission lattice. Configured profile decisions (including allow, ask, and deny)
+/// are recorded as structured degradations with code <c>permission-not-expressible</c> rather
+/// than inventing unenforceable fields or silently dropping constraints (preventing capability widening).
 /// </para>
 /// </remarks>
-public sealed class CodexRenderer : ISquadRenderer
+public sealed class KiloRenderer : ISquadRenderer
 {
-    private const string AgentsDirectory = ".codex/agents";
-    private const string SkillsDirectory = ".codex/skills";
+    private const string AgentsDirectory = ".kilo/agents";
+    private const string SkillsDirectory = ".kilo/skills";
 
-    private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
+    private static readonly ThreadLocal<ISerializer> YamlSerializer = new(
+        () => new SerializerBuilder().Build());
 
     /// <summary>
-    /// YamlDotNet does not document <see cref="ISerializer"/> as thread-safe, and the
-    /// registry may dispatch renderers concurrently; serialization takes this lock so a
-    /// shared static instance cannot interleave emitter state.
+    /// Under <c>Scope: Global</c> the physical root already is Kilo's global directory
+    /// (<c>~/.config/kilo</c>), so the relative path drops the project-scope <c>.kilo/</c>
+    /// wrapper and emits the bare <c>agents/</c> / <c>skills/</c> form directly.
     /// </summary>
-    private static readonly object SerializerLock = new();
-
     private static string ResolvePrefixedDirectory(string baseDirectory, SquadDeploymentScope scope)
     {
         if (scope == SquadDeploymentScope.Project)
@@ -53,13 +49,13 @@ public sealed class CodexRenderer : ISquadRenderer
             return baseDirectory;
         }
 
-        return baseDirectory.StartsWith(".codex/", StringComparison.Ordinal)
-            ? baseDirectory[".codex/".Length..]
+        return baseDirectory.StartsWith(".kilo/", StringComparison.Ordinal)
+            ? baseDirectory[".kilo/".Length..]
             : baseDirectory;
     }
 
     /// <inheritdoc />
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Codex];
+    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Kilo];
 
     /// <inheritdoc />
     public Task<SquadRenderResult> RenderAsync(
@@ -69,10 +65,10 @@ public sealed class CodexRenderer : ISquadRenderer
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (request.Targets.Any(target => target != SquadTarget.Codex))
+        if (request.Targets.Any(target => target != SquadTarget.Kilo))
         {
             throw new ArgumentException(
-                "CodexRenderer was asked to render a target other than Codex.",
+                "KiloRenderer was asked to render a target other than Kilo.",
                 nameof(request));
         }
 
@@ -136,37 +132,29 @@ public sealed class CodexRenderer : ISquadRenderer
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles,
         SquadDeploymentScope scope)
     {
-        StringBuilder builder = new();
-        builder.Append("name = \"");
-        builder.Append(EscapeTomlString(agent.Name));
-        builder.Append("\"\ndescription = \"");
-        builder.Append(EscapeTomlString(agent.Description));
-        builder.Append("\"\n");
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+        {
+            ["name"] = agent.Name,
+            ["description"] = agent.Description,
+            ["mode"] = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent"
+        };
 
-        string? model = ResolveCodexModel(agent, modelProfiles);
+        string? model = ResolveKiloModel(agent, modelProfiles);
         if (model is not null)
         {
-            builder.Append("model = \"");
-            builder.Append(EscapeTomlString(model));
-            builder.Append("\"\n");
+            frontmatter["model"] = model;
         }
 
-        string normalizedBody = agent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (!normalizedBody.EndsWith('\n'))
-        {
-            normalizedBody += "\n";
-        }
+        string content = SquadMarkdownDocument.Compose(
+            YamlSerializer.Value!,
+            frontmatter,
+            agent.InstructionBody);
 
-        builder.Append("developer_instructions = \"\"\"\n");
-        builder.Append(EscapeTomlMultiline(normalizedBody));
-        builder.Append("\"\"\"\n");
-
-        string content = builder.ToString();
         string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
-            $"{agentsDir}/{agent.Name}.toml",
+            $"{agentsDir}/{agent.Name}.md",
             Encoding.UTF8.GetBytes(content),
-            "codex");
+            "kilo");
     }
 
     private static SquadDeploymentFile RenderSkill(SquadSkill skill, SquadDeploymentScope scope)
@@ -182,20 +170,19 @@ public sealed class CodexRenderer : ISquadRenderer
             ["license"] = "MIT"
         };
 
-        string content;
-        lock (SerializerLock)
-        {
-            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, skill.InstructionBody);
-        }
+        string content = SquadMarkdownDocument.Compose(
+            YamlSerializer.Value!,
+            frontmatter,
+            skill.InstructionBody);
 
         string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
             $"{skillsDir}/{skill.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
-            "codex");
+            "kilo");
     }
 
-    private static string? ResolveCodexModel(
+    private static string? ResolveKiloModel(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
     {
@@ -204,9 +191,11 @@ public sealed class CodexRenderer : ISquadRenderer
             return null;
         }
 
-        if (profile.HarnessModels.TryGetValue("codex", out string? codexModel))
+        if (profile.HarnessModels.TryGetValue("kilo", out string? kiloModel))
         {
-            return codexModel;
+            return string.Equals(kiloModel, "inherit", StringComparison.Ordinal)
+                ? null
+                : kiloModel;
         }
 
         return string.Equals(profile.Default, "inherit", StringComparison.Ordinal)
@@ -224,9 +213,11 @@ public sealed class CodexRenderer : ISquadRenderer
             return null;
         }
 
+        // Kilo has no capability permission lattice. All configured permissions (allow, ask,
+        // deny) are unexpressed at the harness boundary; recording deny constraints ensures
+        // canonical restrictions are not silently dropped (preventing capability widening).
         List<string> unexpressed = capabilityVocabulary
-            .Where(cap => profile.Permissions.TryGetValue(cap, out SquadPermissionDecision decision) &&
-                          decision != SquadPermissionDecision.Deny)
+            .Where(cap => profile.Permissions.ContainsKey(cap))
             .ToList();
 
         if (unexpressed.Count == 0)
@@ -235,29 +226,14 @@ public sealed class CodexRenderer : ISquadRenderer
         }
 
         string details =
-            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Codex agents cannot express capability permissions; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
+            $"Capability profile '{agent.CapabilityProfile}' constrains {string.Join(", ", unexpressed)} but Kilo agents cannot express capability permissions; the deployed agent's behaviour is governed by the harness default, not the canonical profile.";
 
         return new SquadDegradationRecord(
-            Target: "codex",
+            Target: "kilo",
             CanonicalIdentity: agent.Name,
             OutputIdentity: agent.Name,
             Code: "permission-not-expressible",
             InstructionDigest: agent.BodyDigest,
             Details: details);
     }
-
-    private static string EscapeTomlString(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal)
-             .Replace("\"", "\\\"", StringComparison.Ordinal)
-             .Replace("\r", "\\r", StringComparison.Ordinal)
-             .Replace("\n", "\\n", StringComparison.Ordinal)
-             .Replace("\t", "\\t", StringComparison.Ordinal);
-
-    /// <remarks>
-    /// Backslashes must be escaped before triple quotes: otherwise a body containing
-    /// <c>\"""</c> (or any backslash) produces invalid TOML when quotes are escaped first.
-    /// </remarks>
-    private static string EscapeTomlMultiline(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal)
-             .Replace("\"\"\"", "\\\"\\\"\\\"", StringComparison.Ordinal);
 }

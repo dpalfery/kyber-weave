@@ -4,7 +4,7 @@ title: Kyber-Squad Renderer Coverage
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-16
 status: draft
 ---
 
@@ -12,29 +12,39 @@ status: draft
 
 `squad install`/`squad update` render canonical Squad source into a harness's native files
 through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), and `warp` (fallback role-skill lowering to `.warp/skills/`) have
-renderers today; every other approved target fails in preflight, before any network call,
-naming the gap and pointing here.
+`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native, with the conductor lowered to a skill), `factory` (native), and `warp` (fallback role-skill lowering to `.warp/skills/`) have
+renderers today. All ten declared harness targets are covered.
 
-Each page below is **context for planning that target's renderer, not a plan** — what's known
-from the canonical source and the codebase, what's assumed and needs verifying against that
-harness's real documentation, the code seam to implement against, and how to verify the result.
+## Coverage Status
 
-| Target | Kind | Page |
-|---|---|---|
-| `kilo` | Native | [kilo.md](kilo.md) |
-| `factory` | Native | [factory.md](factory.md) |
-| `pi` | Fallback (role-skill lowering); not yet declared in the target catalog | [pi.md](pi.md) |
+| Target | Kind | Status | Implementation / Page |
+|---|---|---|---|
+| `copilot` | Native | Completed | `CopilotRenderer` (`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`) |
+| `cursor` | Native | Completed | `CursorRenderer` (`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`) |
+| `claude` | Native | Completed | `ClaudeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs`) |
+| `codex` | Native | Completed | `CodexRenderer` (`src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`) |
+| `antigravity` | Fallback (role-skill lowering) | Completed | `AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) |
+| `opencode` | Native | Completed | `OpenCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`) |
+| `kilo` | Native | Completed | `KiloRenderer` (`src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs`) · [kilo.md](kilo.md) |
+| `pi` | Native (conductor lowered to skill) | Completed | `PiRenderer` (`src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`) · [archived todo](../archive/todo/pi.md) |
+| `factory` | Native | Completed | `FactoryRenderer` (`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`) · [factory.md](factory.md) |
+| `warp` | Fallback (role-skill lowering) | Completed | `WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) · [warp.md](warp.md) |
 
-`copilot` is covered by `CopilotRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/CopilotRenderer.cs`), `cursor` by `CursorRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`), `claude` by `ClaudeRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs`), `codex` by
-`CodexRenderer` (`src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`), `antigravity` by
-`AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`), `opencode` by
-`OpenCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`), and `warp` by
-`WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) —
-none is listed above.
+### Target Checklist
+
+- [x] `copilot` — `CopilotRenderer` (`.github/agents/*.agent.md`, `.github/skills/*/SKILL.md`)
+- [x] `cursor` — `CursorRenderer` (`.cursor/agents/*.md`, `.cursor/skills/*/SKILL.md`)
+- [x] `claude` — `ClaudeRenderer` (`.claude/agents/*.md`, `.claude/skills/*/SKILL.md`)
+- [x] `codex` — `CodexRenderer` (`.codex/agents/*.toml`, `.codex/skills/*/SKILL.md`)
+- [x] `antigravity` — `AntigravityRenderer` (`.agents/skills/role-*/SKILL.md`, `.agents/skills/*/SKILL.md`)
+- [x] `opencode` — `OpenCodeRenderer` (`.opencode/agents/*.md`, `.opencode/skills/*/SKILL.md`)
+- [x] `kilo` — `KiloRenderer` (`.kilo/agents/*.md`, `.kilo/skills/*/SKILL.md`)
+- [x] `pi` — `PiRenderer` (`.pi/agents/*.md`, `.pi/skills/*/SKILL.md`; conductor as skill)
+- [x] `factory` — `FactoryRenderer` (`.factory/droids/*.md`, `.factory/skills/*/SKILL.md`; `--global` under `~/.factory`)
+- [x] `warp` — `WarpRenderer` (`.warp/skills/role-*/SKILL.md`, `.warp/skills/*/SKILL.md`)
+
+All ten declared targets are covered. `warp` is covered by `WarpRenderer`
+(`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) and is no longer listed as pending.
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.
 

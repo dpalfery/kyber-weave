@@ -28,7 +28,7 @@ Kyber-Weave provides five integrated features for agent governance and lifecycle
 
 1. **[DocGraph (Kyber-Docs)](#feature-1--docgraph)** — Typed, governed documentation corpus, drift detection, integrity analysis, and MCP graph retrieval.
 2. **[ContextHygiene](#feature-2--contexthygiene)** — Skill and harness agent linting, routing readiness scoring, parity drift detection, and security scanning.
-3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 9 IDE/CLI harnesses with transactional recovery.
+3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 10 IDE/CLI harnesses with transactional recovery.
 4. **[CI Pipelines](#feature-4--ci-pipelines)** — Unified diagnostic engine with stable `KW-*` rules, SARIF reporting, and GitHub Actions workflows.
 5. **[KyberDash](#feature-5--kyberdash)** — Local telemetry observability and context tuning for agentic workflows, across four execution surfaces.
 
@@ -146,10 +146,10 @@ that was fixed in `.claude` and left broken in `.cursor`.
 
 Managing agent roles and skill sets across disparate developer environments leads to
 configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
-**single, unified lifecycle and deployment control plane** for deploying 23 canonical agents
-and 26 skills across 9 coding harnesses.
+**single, unified lifecycle and deployment control plane** for deploying 21 canonical agents
+and 24 skills across 10 coding harnesses.
 
-**The canonical tree.** Maintains 23 canonical agent bodies and 26 canonical skills under
+**The canonical tree.** Maintains 21 canonical agent bodies and 24 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
 profiles, and capability profiles. Generated target trees and APM packages are never tracked.
 
@@ -163,7 +163,7 @@ leasing (`kyber-weave-squad-<root-key>`), same-filesystem no-overwrite leaf clai
 and compare-and-restore recovery that safely preserves local operator modifications.
 
 ```bash
-kyber-weave squad install                    # auto-detects targets across 9 harnesses
+kyber-weave squad install                    # auto-detects targets across 10 harnesses
 kyber-weave squad update                     # updates deployments while preserving local edits
 kyber-weave squad status                     # verifies file integrity and reports drift
 kyber-weave squad doctor                     # checks toolchain prerequisites
@@ -172,7 +172,7 @@ kyber-weave squad pack --format all --out ./dist # builds APM and Agent Plugins 
 
 | Harness Class | Supported Targets |
 |---|---|
-| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Factory Droids (`.factory`) |
+| Native Agents | Codex (`.codex`), Cursor (`.cursor`), Claude (`.claude`), GitHub Copilot (`.github`), OpenCode (`.opencode`), Kilo (`.kilo`), Pi (`.pi`), Factory Droids (`.factory`) |
 | Role-Skill Lowering | Antigravity, Warp |
 
 [Adoption & usage guide →](docs/kyber-squad/onboarding.md) · [Architecture →](docs/kyber-squad/architecture.md) · [Requirements & degradation →](docs/kyber-squad/requirements.md)
@@ -244,7 +244,7 @@ src/
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
-  kyber-squad/            canonical 23 agents, 26 skills, profiles, and schemas
+  kyber-squad/            canonical 21 agents, 24 skills, profiles, and schemas
 dash/                     Feature 5 — KyberDash, a vendored soft fork of codeburn
   src/ dash/ app/ windows/  upstream CLI engine and the four surfaces
   kyber/                    the merge zone — Kyber-Weave's analyzers, OTLP receiver, canon store

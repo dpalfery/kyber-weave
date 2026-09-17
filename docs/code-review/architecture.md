@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-08-23
+last-reviewed: 2026-09-16
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -388,9 +388,8 @@ and the usual cause needs a person.
 
 ## Current limitations
 
-Only `CopilotRenderer` exists. On Copilot these permissions lower to real tool grants and are
-enforced; on the other nine targets the council and the narrowing are instruction-only until
-those renderers land — see
+Nine renderers are implemented and registered (`CopilotRenderer`, `CursorRenderer`, `ClaudeRenderer`, `CodexRenderer`, `AntigravityRenderer`, `OpenCodeRenderer`, `KiloRenderer`, `PiRenderer`, and `FactoryRenderer`). On these targets these permissions lower to their native representations and are enforced; on the remaining unimplemented target (`warp`) the council and the narrowing are instruction-only until
+that renderer lands — see
 [renderer coverage](../todo/kyber-squad-renderer-coverage.md).
 
 There is no cost measurement and no per-repository ceiling yet. The adversarial confirmation

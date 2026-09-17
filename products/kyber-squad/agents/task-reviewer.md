@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: task-reviewer
 description: "Audits one completed task in either test-first or standard mode, checks its acceptance and evidence contract against the tree, and returns PASS or FAIL for up to three passes."
 invocation: subagent
-model-profile: mai-code-flash
+model-profile: reviewer
 capability-profile: investigator
 copilot-tools: [vscode, execute, read, codegraph/*, kyber-weave/*, context7/*, search, web, todo]
 delegates-to: []

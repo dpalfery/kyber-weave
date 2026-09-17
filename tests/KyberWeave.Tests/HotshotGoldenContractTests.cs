@@ -45,6 +45,30 @@ public sealed partial class HotshotGoldenContractTests
         "task-reviewer"
     ];
 
+    /// <summary>
+    /// Agents whose Copilot model values diverged from the Hotshot golden snapshot on 2026-09-14
+    /// per plan <c>docs/archive/plans/2026-09-14-pi-harness-target.md</c> §6b, decisions U10–U12 (owner-approved
+    /// model profile changes). Only the model field is allowed to diverge; all other fields
+    /// (description, body, tools, capability, delegation, aliases, invocation) must match the golden.
+    /// </summary>
+    private static readonly string[] ModelEvolvedAgentIdentities =
+    [
+        "azure-reader",       // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
+        "code-reviewer",      // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
+        "csharp-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
+        "dal-dev",            // general: Grok 4.5 → Grok 4.6 (copilot)
+        "docs-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
+        "github-devops",      // general: Grok 4.5 → Grok 4.6 (copilot)
+        "maui-dev",           // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
+        "pulumi-dev",         // general: Grok 4.5 → Grok 4.6 (copilot)
+        "python-dev",         // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
+        "react-dev",          // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
+        "research-agent",     // fast: GPT-5.6 Luna → MAI-Code-1.1-Flash (copilot)
+        "review-lens",        // reviewer: Grok 4.5 → Kimi K2.7 Code (copilot)
+        "review-triage",      // reviewer: GPT-5.6 Luna → Kimi K2.7 Code (copilot)
+        "tauri-dev"           // general: Grok 4.5 → Grok 4.6 (copilot)
+    ];
+
     private static readonly string[] EvolvedSkillIdentities =
     [
         "bug-crusher",
@@ -254,9 +278,13 @@ public sealed partial class HotshotGoldenContractTests
                 : SquadInvocation.Primary;
             AddMismatch(mismatches, $"{name} invocation", expectedInvocation.ToString(), actual.Invocation.ToString());
 
-            string? expectedModel = OptionalJsonString(expected.Frontmatter, "model");
-            string? actualModel = ResolveCopilotModel(source, actual);
-            AddMismatch(mismatches, $"{name} model", expectedModel ?? "<omitted>", actualModel ?? "<omitted>");
+            // Skip model comparison for agents in ModelEvolvedAgentIdentities (owner-approved model changes)
+            if (!ModelEvolvedAgentIdentities.Contains(name, StringComparer.Ordinal))
+            {
+                string? expectedModel = OptionalJsonString(expected.Frontmatter, "model");
+                string? actualModel = ResolveCopilotModel(source, actual);
+                AddMismatch(mismatches, $"{name} model", expectedModel ?? "<omitted>", actualModel ?? "<omitted>");
+            }
         }
 
         string skillRoot = Path.Combine(ProductRoot, "skills");
@@ -372,7 +400,7 @@ public sealed partial class HotshotGoldenContractTests
 
             string normalized = NormalizeLf(await File.ReadAllTextAsync(path));
             (YamlMappingNode frontmatter, string body) = SplitFrontmatter(normalized, expected.Path);
-            CompareFrontmatter(mismatches, expected.Path, expected.Frontmatter, frontmatter, normalizeToolOrder: false, manifest.ApprovedToolOrder);
+            CompareFrontmatter(mismatches, expected.Path, expected.Frontmatter, frontmatter, normalizeToolOrder: false, manifest.ApprovedToolOrder, skipModelComparison: false);
             AddMismatch(mismatches, $"{expected.Path} body SHA-256", expected.BodySha256, Sha256(body));
             AddMismatch(mismatches, $"{expected.Path} file SHA-256", expected.FileSha256, Sha256(await File.ReadAllBytesAsync(path)));
         }
@@ -441,8 +469,28 @@ public sealed partial class HotshotGoldenContractTests
 
             string normalized = NormalizeLf(Encoding.UTF8.GetString(file.Content.Span));
             (YamlMappingNode frontmatter, string body) = SplitFrontmatter(normalized, expected.Path);
-            CompareFrontmatter(mismatches, expected.Path, expected.Frontmatter, frontmatter, normalizeToolOrder: true, manifest.ApprovedToolOrder);
+            bool skipModelComparison = ModelEvolvedAgentIdentities.Contains(name, StringComparer.Ordinal);
+            CompareFrontmatter(mismatches, expected.Path, expected.Frontmatter, frontmatter, normalizeToolOrder: true, manifest.ApprovedToolOrder, skipModelComparison);
             AddMismatch(mismatches, $"{expected.Path} body SHA-256", expected.BodySha256, Sha256(body));
+        }
+
+        // Guard: verify each agent in ModelEvolvedAgentIdentities actually has a different model from golden
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        Dictionary<string, SquadAgent> sourceAgents = source.Agents.ToDictionary(agent => agent.Name, StringComparer.Ordinal);
+        foreach (string modelEvolvedName in ModelEvolvedAgentIdentities)
+        {
+            GoldenAgentEntry goldenEntry = manifest.Agents.FirstOrDefault(entry => AgentName(entry.Path) == modelEvolvedName);
+            if (string.IsNullOrEmpty(goldenEntry.Path) || !sourceAgents.TryGetValue(modelEvolvedName, out SquadAgent? sourceAgent))
+            {
+                continue;
+            }
+
+            string? goldenModel = OptionalJsonString(goldenEntry.Frontmatter, "model");
+            string? sourceModel = ResolveCopilotModel(source, sourceAgent);
+            if (goldenModel == sourceModel)
+            {
+                mismatches.Add($"model-evolved agent '{modelEvolvedName}' has unchanged model (should differ from golden)");
+            }
         }
 
         foreach (GoldenSkillEntry expected in manifest.Skills)
@@ -521,14 +569,28 @@ public sealed partial class HotshotGoldenContractTests
         JsonElement expected,
         YamlMappingNode actual,
         bool normalizeToolOrder,
-        IReadOnlyList<string> approvedToolOrder)
+        IReadOnlyList<string> approvedToolOrder,
+        bool skipModelComparison = false)
     {
         string[] expectedKeys = expected.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal).ToArray();
         string[] actualKeys = actual.Children.Keys.Select(RequireYamlScalar).Order(StringComparer.Ordinal).ToArray();
+
+        // If skipping model, adjust the expected keys to exclude it
+        if (skipModelComparison && expectedKeys.Contains("model", StringComparer.Ordinal))
+        {
+            expectedKeys = expectedKeys.Where(k => !k.Equals("model", StringComparison.Ordinal)).ToArray();
+            actualKeys = actualKeys.Where(k => !k.Equals("model", StringComparison.Ordinal)).ToArray();
+        }
+
         AddSequenceMismatch(mismatches, $"{path} frontmatter keys", expectedKeys, actualKeys);
 
         foreach (JsonProperty property in expected.EnumerateObject())
         {
+            if (skipModelComparison && property.Name == "model")
+            {
+                continue;
+            }
+
             if (!actual.Children.TryGetValue(new YamlScalarNode(property.Name), out YamlNode? actualValue))
             {
                 continue;

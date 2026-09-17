@@ -171,6 +171,35 @@ public sealed class SquadStateStore
             : null;
     }
 
+    /// <summary>
+    /// Receipts for other project roots that share this machine's Global state directory.
+    /// Two <c>--global</c> installs must not both own one harness file.
+    /// </summary>
+    internal IReadOnlyList<SquadReceipt> ListOtherGlobalReceipts(string targetRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+
+        string currentBinding = GlobalRootBinding(targetRoot);
+        string rootsDirectory = Path.Combine(ResolveGlobalStateDirectory(), "roots");
+        if (!Directory.Exists(rootsDirectory))
+            return [];
+
+        List<SquadReceipt> receipts = [];
+        foreach (string rootDirectory in Directory.EnumerateDirectories(rootsDirectory))
+        {
+            if (string.Equals(Path.GetFileName(rootDirectory), currentBinding, StringComparison.Ordinal))
+                continue;
+
+            string receiptPath = Path.Combine(rootDirectory, ReceiptFileName);
+            if (!File.Exists(receiptPath))
+                continue;
+
+            receipts.Add(DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8)));
+        }
+
+        return receipts;
+    }
+
     /// <summary>Reads the lock for a deployment, or returns <see langword="null"/> when absent.</summary>
     public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope)
     {
