@@ -1,5 +1,5 @@
 ---
-id: todo/warp
+id: archive/todo/warp
 title: Add a native Warp renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
@@ -24,8 +24,8 @@ implementation.
 Historically, `squad install --target warp` failed in preflight before any network call
 because `SquadRendererRegistry` only had renderers for Copilot, Cursor, Claude, Codex, Antigravity, and
 OpenCode. This gap is addressed by `WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`).
-See [architecture.md §8](../kyber-squad/architecture.md#8-rendering) for how the render pipeline
-as a whole works, and [onboarding.md](../kyber-squad/onboarding.md#harness-targets-and-auto-detection)
+See [architecture.md §8](../../kyber-squad/architecture.md#8-rendering) for how the render pipeline
+as a whole works, and [onboarding.md](../../kyber-squad/onboarding.md#harness-targets-and-auto-detection)
 for the full target roster and its current coverage.
 
 ## Classification
