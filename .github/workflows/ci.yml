@@ -304,8 +304,6 @@ jobs:
             --skip-dirs artifacts \
             --skip-dirs '**/bin' \
             --skip-dirs '**/obj' \
-            --skip-dirs dash/windows \
-            --skip-dirs dash/gnome \
             .
 
       - name: Convert Trivy report to SARIF

@@ -1,5 +1,4 @@
 import { Command } from 'commander'
-import { installMenubarApp } from './menubar-installer.js'
 import { findUnpricedModels, loadPricing, setModelAliases, setPriceOverrides, setLocalModelSavings, setFlatRateModels, setFlatRateRemoved, setProxyPaths } from './models.js'
 import { allProviderNames } from './providers/index.js'
 import { dateKey } from './day-aggregator.js'
@@ -471,18 +470,14 @@ program
 
 program
   .command('menubar')
-  .description('Install and launch the menubar app on macOS and Windows (one command, no clone)')
+  .description('Install and launch the KyberDash tray on macOS and Windows')
   .option('--force', 'Reinstall even if a copy is already installed')
-  .action(async (opts: { force?: boolean }) => {
-    try {
-      const result = await installMenubarApp({ force: opts.force, cliVersion: version })
-      // A cancelled Windows installer leaves nothing to point at.
-      if (result.installedPath) console.log(`\n  Ready. ${result.installedPath}\n`)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      console.error(`\n  Menubar install failed: ${message}\n`)
-      process.exit(1)
-    }
+  .action(() => {
+    // The inherited command installed the upstream CodeBurn menubar app, which shows spend,
+    // not context, and is not built from this repository. It refuses until the KyberDash
+    // tray is released from here (spec task 9.1), rather than install the wrong app.
+    console.error('\n  The KyberDash tray is not released yet; this command will install it once it is.\n')
+    process.exit(1)
   })
 
 program

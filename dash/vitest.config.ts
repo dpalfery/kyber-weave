@@ -17,12 +17,10 @@ export default defineConfig({
     ],
     // A worktree under .claude/ carries its own tests/ copy. They are stale by
     // definition (another branch's checkout) and are not this run's subject.
-    // app/ has its own separate desktop package and test suite.
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
       '**/.claude/worktrees/**',
-      'app/**',
     ],
     // Runs once per worker before any test. Scrubs the developer's shell so
     // session-discovery env vars (CLAUDE_CONFIG_DIRS, HOME, XDG_*, every

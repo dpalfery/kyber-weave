@@ -33,10 +33,6 @@ const ignorePaths = [
   'build/**',
   'node_modules/**',
   'dash/**',         // nested Electron subdashboard build/install
-  'app/**',          // upstream Electron renderer + demo bridge
-  'mac/**',          // upstream Swift menu-bar surface
-  'windows/**',      // upstream unshipped
-  'gnome/**',        // upstream unshipped
   'assets/**',
   'scripts/**',      // upstream build/release helpers
   'kyber/tools/**/*.mjs',

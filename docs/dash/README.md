@@ -13,7 +13,7 @@ last-reviewed: 2026-09-05
 
 Modern AI coding agents operate through complex, multi-turn execution loops: invoking local tools, delegating tasks across specialized subagents, and ingesting repository context. Without dedicated observability, agent workflows remain opaque black boxes: developers cannot see where token budgets are wasted, which tool calls introduce latency bottlenecks, or when context windows approach saturation thresholds.
 
-**KyberDash** delivers observability across four local execution surfaces (Terminal TUI, Web Dashboard, Electron Desktop, and Windows Menubar/Tauri). Its canonical `canon.db` store accepts OTLP traces and logs plus supported local session sources. Session APIs read that store only; the retired Python pipeline's `sessions.db` is not a production path.
+**KyberDash** delivers observability through a terminal report and a web dashboard, with a Tauri tray for macOS and Windows being built under the [context surfaces specification](../specs/kyberdash-context-surfaces/README.md). Its canonical `canon.db` store accepts OTLP traces and logs plus supported local session sources. Session APIs read that store only; the retired Python pipeline's `sessions.db` is not a production path.
 
 ---
 
@@ -30,12 +30,10 @@ In complex workflows involving orchestrators, subagents, and MCP servers, a slow
 ### 3. Tuning Instructions Without Empirical Data
 Refining agent instructions and skill definitions has historically been guesswork. With KyberDash, developers can measure the direct impact of prompt changes on token efficiency, tool call accuracy, and execution latency across iterative runs, backed by calibrated predictions and phase-aligned comparisons.
 
-### 4. Flexible UI Delivery Across 4 Local Surfaces
+### 4. Surfaces Where the Developer Already Works
 Observability belongs where the developer already works:
 - **Terminal TUI (`dash/src/dashboard.tsx`)**: Instant terminal dashboard with keyboard navigation for command-line workflows.
 - **Web Dashboard (`dash/dash/`)**: Standalone browser application for progressive-disclosure diagnostics, run comparison, and context inspection.
-- **Electron Desktop (`dash/app/`)**: Dedicated desktop window with persistent views and local IPC.
-- **Windows Menubar / Tray (`dash/windows/`)**: Lightweight background tray companion for continuous spend monitoring.
 
 ---
 

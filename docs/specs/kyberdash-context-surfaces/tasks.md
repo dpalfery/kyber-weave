@@ -112,7 +112,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     endpoints and prewarm in `dash/src/web-dashboard.ts`. Keep the loopback binding and the
     `Host`/`Origin` checks.
   - _Requirements: 2.9, 5.5_
-- [ ] 2.4 Salvage the tray files, then delete the native surfaces
+- [x] 2.4 Salvage the tray files, then delete the native surfaces
   - Stream A.
   - `git mv` `dash/windows/src-tauri/src/{cli.rs,autostart.rs,tray_badge.rs}` into
     `dash/tray/src-tauri/src/`.

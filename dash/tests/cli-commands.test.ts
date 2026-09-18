@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
 import { buildProgram } from '../src/program.js'
@@ -29,5 +30,17 @@ describe('registered top-level commands', () => {
   it('keep report as the default command', () => {
     const program = buildProgram() as unknown as { _defaultCommandName?: string }
     expect(program._defaultCommandName).toBe('report')
+  })
+})
+
+describe('menubar', () => {
+  it('refuses rather than install the upstream CodeBurn app', () => {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', 'menubar'], {
+      cwd: new URL('..', import.meta.url),
+      encoding: 'utf8',
+      timeout: 60_000,
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('KyberDash tray is not released yet')
   })
 })

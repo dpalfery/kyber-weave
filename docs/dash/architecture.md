@@ -136,7 +136,7 @@ edited on its merits, under the repository's gates.
 | `dash/src/**` | The CLI engine and the provider session parsers |
 | `dash/kyber/**` | KyberDash's ingest, canonical store, analyses and server |
 | `dash/dash/**` | The React web dashboard |
-| `dash/app/**`, `dash/mac/**`, `dash/windows/**`, `dash/gnome/**` | Inherited native surfaces, unbuilt and unshipped |
+| `dash/tray/**` | The KyberDash tray (Tauri 2), under construction; holds the Rust modules carried from the inherited Windows tray |
 
 ## Ingest layer
 
