@@ -21,6 +21,7 @@ public interface ISquadGlobalRootResolver
 /// and Kilo (`~/.config/kilo/`, verified against Kilo's custom-subagents and settings docs).
 /// Factory personal droids and skills live under `~/.factory` with no environment override
 /// (docs.factory.ai/harness/subagents and docs.factory.ai/harness/skills, 2026-09-16).
+/// Warp skills live under `~/.warp` (`~/.warp/skills/`, verified against docs.warp.dev/features/skills).
 /// The home directory and every override environment value must be fully qualified:
 /// a relative root would be completed against the process working directory by
 /// <see cref="SquadPathPolicy.ResolveFile"/>.
@@ -42,6 +43,7 @@ public interface ISquadGlobalRootResolver
 ///   `~/.config/kilo`. Kilo's own docs place global agent markdown at
 ///   `~/.config/kilo/agents/` and global config at `~/.config/kilo/kilo.jsonc`.
 /// - Factory: `droids/` and `skills/` under `~/.factory` (no override; no all-users path).
+/// - Warp: `skills/` under `~/.warp` (`~/.warp/skills/`, verified against docs.warp.dev).
 /// </remarks>
 public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 {
@@ -69,6 +71,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.OpenCode => ResolveOpenCodeRoot(),
             SquadTarget.Kilo => ResolveXdgConfigAppRoot("kilo"),
             SquadTarget.Factory => ResolveWithOverride(null, ".factory"),
+            SquadTarget.Warp => ResolveWithOverride(null, ".warp"),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

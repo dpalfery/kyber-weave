@@ -394,8 +394,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string normalizedOutput = string.Join(
             ' ',
             execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        string availableSection = ExtractDoctorSection(normalizedOutput, "Renderers available:", "Not yet implemented:");
-        string pendingSection = ExtractDoctorSection(normalizedOutput, "Not yet implemented:", "Kyber-Weave MCP:");
+        string availableSection = ExtractDoctorSection(normalizedOutput, "Renderers available:", "Kyber-Weave MCP:");
         Assert.Contains("cursor", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("antigravity", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("copilot", availableSection, StringComparison.OrdinalIgnoreCase);
@@ -403,15 +402,13 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("opencode", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("kilo", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("factory", availableSection, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("claude", pendingSection, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("opencode", pendingSection, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("kilo", pendingSection, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("factory", pendingSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("warp", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("codex", availableSection, StringComparison.OrdinalIgnoreCase);
 
         // A plain substring check would false-positive here: "copilot" contains "pi" at
         // index 2-3, so the pi renderer's presence has to be asserted as a whole word.
         Assert.Matches(@"\bpi\b", availableSection);
-        Assert.DoesNotMatch(@"\bpi\b", pendingSection);
+        Assert.DoesNotContain("Not yet implemented:", normalizedOutput, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

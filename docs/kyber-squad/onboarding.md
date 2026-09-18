@@ -18,7 +18,7 @@ code-refs:
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
 **24 canonical skills**, with transactional recovery and state governance. Ten harness targets
-are declared; nine are currently implemented and registered.
+are declared; all ten are currently implemented and registered.
 
 ---
 
@@ -62,15 +62,13 @@ Kyber-Squad declares ten coding-harness targets:
 | `kilo` | — | `.kilo/` | Native agents | Implemented and registered |
 | `antigravity` | — | *Explicit or configured target only* | Role-skill lowering | Implemented and registered |
 | `pi` | — | *Explicit or configured target only* | Native agents (with conductor lowered to skill) | Implemented and registered |
-| `warp` | — | `.warp/` | Role-skill lowering | Unsupported; fails coverage preflight |
+| `warp` | — | `.warp/` | Role-skill lowering | Implemented and registered |
 | `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), and `factory` (native) have renderers. Requesting any other target fails before the release is even downloaded,
-naming the missing target(s) and pointing at `docs/todo/<target>.md`, which has what an
-implementer needs to add it. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), and `warp` (fallback role-skill lowering to `.warp/skills/`) have renderers. All ten declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 

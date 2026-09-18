@@ -12,9 +12,8 @@ status: draft
 
 `squad install`/`squad update` render canonical Squad source into a harness's native files
 through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native, with the conductor lowered to a skill), and `factory` (native) have
-renderers today; every other approved target fails in preflight, before any network call,
-naming the gap and pointing here.
+`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native, with the conductor lowered to a skill), `factory` (native), and `warp` (fallback role-skill lowering to `.warp/skills/`) have
+renderers today. All ten declared harness targets are covered.
 
 ## Coverage Status
 
@@ -29,7 +28,7 @@ naming the gap and pointing here.
 | `kilo` | Native | Completed | `KiloRenderer` (`src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs`) · [kilo.md](kilo.md) |
 | `pi` | Native (conductor lowered to skill) | Completed | `PiRenderer` (`src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`) · [archived todo](../archive/todo/pi.md) |
 | `factory` | Native | Completed | `FactoryRenderer` (`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`) · [factory.md](factory.md) |
-| `warp` | Fallback (role-skill lowering) | Pending | [warp.md](warp.md) |
+| `warp` | Fallback (role-skill lowering) | Completed | `WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) · [archived todo](../archive/todo/warp.md) |
 
 ### Target Checklist
 
@@ -42,14 +41,10 @@ naming the gap and pointing here.
 - [x] `kilo` — `KiloRenderer` (`.kilo/agents/*.md`, `.kilo/skills/*/SKILL.md`)
 - [x] `pi` — `PiRenderer` (`.pi/agents/*.md`, `.pi/skills/*/SKILL.md`; conductor as skill)
 - [x] `factory` — `FactoryRenderer` (`.factory/droids/*.md`, `.factory/skills/*/SKILL.md`; `--global` under `~/.factory`)
-- [ ] `warp` — Pending ([warp.md](warp.md))
+- [x] `warp` — `WarpRenderer` (`.warp/skills/role-*/SKILL.md`, `.warp/skills/*/SKILL.md`)
 
-Each page for pending targets is **context for planning that target's renderer, not a plan** — what's known
-from the canonical source and the codebase, what's assumed and needs verifying against that
-harness's real documentation, the code seam to implement against, and how to verify the result.
-
-The remaining pending target is `warp`. `factory` is covered by `FactoryRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`) and is no longer listed as pending.
+All ten declared targets are covered. `warp` is covered by `WarpRenderer`
+(`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) and is no longer listed as pending.
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.
 

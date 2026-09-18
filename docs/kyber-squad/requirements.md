@@ -66,12 +66,11 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Kilo** | Native `.kilo/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **Antigravity** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Safety-narrowed |
 | **Pi** | Native `.pi/agents` + lowered conductor | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agent only) | Native execution + safety-narrowed |
-| **Warp** | Role skills | Unsupported; coverage preflight fails | Unavailable | Lowered (`role-*` on collision) | Not implemented |
+| **Warp** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Harness default; permission-not-expressible for non-deny decisions |
 | **Factory Droids** | Native `.factory/droids` | Implemented and registered | Supported | Not lowered | Explicit tools array (allow-only documented IDs); safety-narrowed on ask; permission-not-expressible for unmapped `network.publish`/`delegate` and `mcpServers: []` |
 
-The ten rows are the declared target roster. `copilot`, `cursor`, `claude`, `codex`,
-`antigravity`, `opencode`, `kilo`, `pi`, and `factory` have implemented and registered renderers.
-`warp` fails renderer-coverage preflight before deployment.
+The ten rows are the declared target roster. All ten targets (`copilot`, `cursor`, `claude`, `codex`,
+`antigravity`, `opencode`, `kilo`, `pi`, `factory`, and `warp`) have implemented and registered renderers.
 
 ---
 

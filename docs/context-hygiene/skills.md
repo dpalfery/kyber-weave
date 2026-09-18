@@ -150,9 +150,8 @@ and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)*
 unified multi-harness deployment control plane. Kyber-Squad maintains 24 canonical skills
 (alongside 21 canonical agent roles and lowering rules) under `products/kyber-squad/` and
 manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares ten
-harness targets. Nine renderers are implemented and registered (`copilot`, `cursor`, `claude`,
-`codex`, `antigravity`, `opencode`, `kilo`, `pi`, and `factory`); `warp` fails renderer-coverage
-preflight until their renderers are implemented.
+harness targets. All ten renderers are implemented and registered (`copilot`, `cursor`, `claude`,
+`codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, and `warp`).
 
 Every raw `SKILL.md` except the explicitly evolved `product-owner` and `bug-crusher` matches the
 Hotshot golden bytes. Canonical storage and recursive Squad packages preserve 64 supplemental

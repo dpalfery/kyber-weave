@@ -353,7 +353,10 @@ internal static class SquadResourceRenderingContract
             ]);
     }
 
-    internal static async Task AssertFallbackProjectionAsync(ISquadRenderer renderer, SquadTarget target)
+    internal static async Task AssertFallbackProjectionAsync(
+        ISquadRenderer renderer,
+        SquadTarget target,
+        string skillsDirectory = ".agents/skills")
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
         SquadRendererRegistry registry = new([renderer]);
@@ -370,12 +373,12 @@ internal static class SquadResourceRenderingContract
         AssertProjection(
             first,
             second,
-            $".agents/skills/{ResourceBearingSquadFixture.AgentName}/SKILL.md",
+            $"{skillsDirectory}/{ResourceBearingSquadFixture.AgentName}/SKILL.md",
             [
-                ($".agents/skills/{ResourceBearingSquadFixture.AgentName}/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt", ResourceBearingSquadFixture.AgentPayload),
-                ($".agents/skills/{ResourceBearingSquadFixture.AgentName}/{ResourceBearingSquadFixture.AgentName}/references/runbook.md", ResourceBearingSquadFixture.AgentRunbook),
-                ($".agents/skills/{ResourceBearingSquadFixture.SkillName}/assets/skill-snippet.txt", ResourceBearingSquadFixture.SkillSnippet),
-                ($".agents/skills/{ResourceBearingSquadFixture.SkillName}/references/guide.md", ResourceBearingSquadFixture.SkillGuide)
+                ($"{skillsDirectory}/{ResourceBearingSquadFixture.AgentName}/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt", ResourceBearingSquadFixture.AgentPayload),
+                ($"{skillsDirectory}/{ResourceBearingSquadFixture.AgentName}/{ResourceBearingSquadFixture.AgentName}/references/runbook.md", ResourceBearingSquadFixture.AgentRunbook),
+                ($"{skillsDirectory}/{ResourceBearingSquadFixture.SkillName}/assets/skill-snippet.txt", ResourceBearingSquadFixture.SkillSnippet),
+                ($"{skillsDirectory}/{ResourceBearingSquadFixture.SkillName}/references/guide.md", ResourceBearingSquadFixture.SkillGuide)
             ]);
     }
 

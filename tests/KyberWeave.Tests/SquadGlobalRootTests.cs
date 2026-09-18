@@ -43,6 +43,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.OpenCode, ".config/opencode")]
     [InlineData(SquadTarget.Kilo, ".config/kilo")]
     [InlineData(SquadTarget.Factory, ".factory")]
+    [InlineData(SquadTarget.Warp, ".warp")]
     public void ResolveGlobalRoot_NoOverrideSet_ReturnsHomeDirectoryDefault(
         SquadTarget target,
         string defaultRelativePath)
@@ -245,6 +246,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Pi)]
     [InlineData(SquadTarget.OpenCode)]
     [InlineData(SquadTarget.Kilo)]
+    [InlineData(SquadTarget.Warp)]
     public async Task InstallAsync_GlobalScopeDryRun_PlansEveryFileUnderTheResolvedTargetRootWithBareRelativePaths(
         SquadTarget target)
     {
@@ -309,9 +311,9 @@ public sealed class SquadGlobalRootTests : IDisposable
                 $"the resolved global root '{expectedRoot}'.");
         }
 
-        if (target == SquadTarget.Antigravity)
+        if (target == SquadTarget.Antigravity || target == SquadTarget.Warp)
         {
-            Assert.False(sawAgentFile, "Antigravity has no agent primitive; global scope must emit skills/ only.");
+            Assert.False(sawAgentFile, $"{target} has no agent primitive; global scope must emit skills/ only.");
         }
         else
         {

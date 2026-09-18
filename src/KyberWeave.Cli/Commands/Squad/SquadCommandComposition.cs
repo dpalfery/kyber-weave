@@ -32,10 +32,10 @@ internal static class SquadCommandComposition
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
     /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, and Factory are native;
-    /// Antigravity is fallback role-skill lowering to <c>.agents/skills/</c>. Pi is native
-    /// through the third-party <c>@tintinweb/pi-subagents</c> extension's custom-agent
-    /// format, with its one <c>invocation: primary</c> agent lowered to a top-level skill
-    /// because Pi core has no primary-agent primitive (see <see cref="PiRenderer"/> remarks).
+    /// Antigravity and Warp are fallback role-skill lowering (to <c>.agents/skills/</c> and
+    /// <c>.warp/skills/</c>). Pi is native through the third-party <c>@tintinweb/pi-subagents</c>
+    /// extension's custom-agent format, with its one <c>invocation: primary</c> agent lowered to
+    /// a top-level skill because Pi core has no primary-agent primitive (see <see cref="PiRenderer"/> remarks).
     /// Every other approved target fails closed with a pointer to its <c>docs/todo/</c>
     /// entry rather than being silently dropped from the roster.
     /// </summary>
@@ -51,6 +51,7 @@ internal static class SquadCommandComposition
             new KiloRenderer(),
             new PiRenderer(),
             new FactoryRenderer(),
+            new WarpRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>
