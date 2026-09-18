@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import type { ActionPlan, ActionRecord, FileChange } from './types.js'
 import { appendRecord, defaultActionsDir, withLock } from './journal.js'
 import { backupDirFor, relBackupPath, revertChange, sha256File, snapshotFile } from './backup.js'
+import { resolveCliName } from '../brand-overlay.js'
 
 // The only mutation path. Order: back up every file the plan touches, apply
 // the mutations, hash the results, then journal. If a mutation or the journal
@@ -48,7 +49,7 @@ export async function runAction(plan: ActionPlan, actionsDir: string = defaultAc
       for (const pc of plan.changes) {
         if (pc.op === 'move' || pc.expectedHash === undefined) continue
         if ((await sha256File(pc.path)) !== pc.expectedHash) {
-          throw new Error(`${pc.path} changed since the plan was built; re-run codeburn optimize --apply`)
+          throw new Error(`${pc.path} changed since the plan was built; re-run ${resolveCliName()} optimize --apply`)
         }
       }
       for (let i = 0; i < plan.changes.length; i++) {

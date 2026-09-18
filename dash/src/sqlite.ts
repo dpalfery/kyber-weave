@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { getCodeburnCacheDir } from './cache-dir.js'
+import { resolveCliName } from './brand-overlay.js'
 
 /// Thin SQLite read-only wrapper over Node's built-in `node:sqlite` module (stable in
 /// Node 24, experimental in Node 22 / 23). Replaces the earlier `better-sqlite3` binding
@@ -202,7 +203,7 @@ function warnSqliteOnce(path: string, message: string): void {
 export function warnSqliteReadonlyOnce(path: string): void {
   warnSqliteOnce(
     path,
-    `codeburn: SQLite database ${path} is in a read-only directory and needs sidecar files; using a cache copy when necessary. ` +
+    `${resolveCliName()}: SQLite database ${path} is in a read-only directory and needs sidecar files; using a cache copy when necessary. ` +
     'The original database is not modified.\n',
   )
 }
@@ -399,7 +400,7 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   } catch (err) {
     warnSqliteOnce(
       path,
-      `codeburn: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
+      `${resolveCliName()}: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
       `(${describeError(err)}); skipping this database.\n`,
     )
     throw originalError

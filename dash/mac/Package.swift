@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "CodeBurnMenubar",
+    name: "KyberDashMenubar",
     platforms: [
         // macOS 14 (Sonoma) is the floor: matches Info.plist LSMinimumSystemVersion,
         // the CLI install guard (MIN_MACOS_MAJOR=14), and mac/README. The earlier .v15
@@ -11,11 +11,11 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "CodeBurnMenubar", targets: ["CodeBurnMenubar"])
+        .executable(name: "KyberDashMenubar", targets: ["KyberDashMenubar"])
     ],
     targets: [
         .executableTarget(
-            name: "CodeBurnMenubar",
+            name: "KyberDashMenubar",
             path: "Sources/CodeBurnMenubar",
             resources: [
                 .process("Resources/ProviderIcons")
@@ -25,8 +25,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "CodeBurnMenubarTests",
-            dependencies: ["CodeBurnMenubar"],
+            name: "KyberDashMenubarTests",
+            dependencies: ["KyberDashMenubar"],
             path: "Tests/CodeBurnMenubarTests"
         )
     ]

@@ -13,20 +13,20 @@ import { basename } from 'path'
  * the upstream identity; renaming them fights every `git subtree pull`.
  */
 export const BRAND = {
-  productName: 'kyberDash',
+  productName: 'KyberDash',
   cliName: 'kyberdash',
-  htmlTitle: 'kyberDash - Local Dashboard',
+  htmlTitle: 'KyberDash - Local Dashboard',
   faviconSvgHref: '/kyberdash-logo.svg',
   faviconPngHref: '/kyberdash-logo.png',
 } as const
 
-const LAUNCHER_STEMS = new Set(['cli', 'main', 'launch'])
+const KNOWN_CLI_NAMES = new Set(['kyberdash', 'kyber-weave'])
 
 export function resolveCliName(argv1 = process.argv[1]): string {
   const fromEnv = process.env['KYBERDASH_CLI_NAME']?.trim()
   if (fromEnv) return fromEnv
   const stem = basename(argv1 ?? '').replace(/\.(js|mjs|cjs|ts|exe)$/i, '')
-  if (stem && !LAUNCHER_STEMS.has(stem.toLowerCase())) return stem
+  if (stem && KNOWN_CLI_NAMES.has(stem.toLowerCase())) return stem
   return BRAND.cliName
 }
 

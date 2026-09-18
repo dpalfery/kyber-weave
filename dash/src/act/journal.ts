@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
 import { getConfigFilePath } from '../config.js'
+import { resolveCliName } from '../brand-overlay.js'
 import type { ActionRecord } from './types.js'
 
 // Actions live beside config.json under the same CodeBurn home dir; reuse the
@@ -73,12 +74,12 @@ async function acquireLock(lock: string): Promise<void> {
         continue // holder released between write and stat; retry
       }
       if (Date.now() - mtimeMs <= LOCK_STALE_MS) {
-        throw new Error('another codeburn action is in progress (lock held); retry shortly')
+        throw new Error(`another ${resolveCliName()} action is in progress (lock held); retry shortly`)
       }
       await rm(lock, { force: true })
     }
   }
-  throw new Error('could not acquire the codeburn action lock')
+  throw new Error(`could not acquire the ${resolveCliName()} action lock`)
 }
 
 export async function withLock<T>(actionsDir: string, fn: () => Promise<T>): Promise<T> {

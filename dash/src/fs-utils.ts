@@ -1,5 +1,6 @@
 import { readFile, stat } from 'fs/promises'
 import { readFileSync, statSync, createReadStream } from 'fs'
+import { resolveCliName } from './brand-overlay.js'
 
 // Hard cap well below V8's 512 MB string limit. Callers that need line-by-line
 // processing should use readSessionLines(), which avoids materializing the
@@ -20,13 +21,13 @@ function verbose(): boolean {
 }
 
 function warn(msg: string): void {
-  if (verbose()) process.stderr.write(`codeburn: ${msg}\n`)
+  if (verbose()) process.stderr.write(`${resolveCliName()}: ${msg}\n`)
 }
 
 // Always surfaced (not verbose-gated): dropping an entire session file silently
 // understates reported usage with no signal, so oversize skips use this.
 function notice(msg: string): void {
-  process.stderr.write(`codeburn: ${msg}\n`)
+  process.stderr.write(`${resolveCliName()}: ${msg}\n`)
 }
 
 export async function readSessionFile(

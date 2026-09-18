@@ -153,7 +153,7 @@ export function TeamTabContent({ payload, tab }: { payload: MenubarPayload; tab:
   if (typeof tabData === 'object' && tabData.schemaVersion && (tabData as any).schemaVersion > 1) {
     return (
       <div style={{ padding: '1.5rem', color: 'var(--warn)' }}>
-        Update CodeBurn Desktop to view this content. This plugin data requires a newer version of CodeBurn.
+        Update KyberDash Desktop to view this content. This plugin data requires a newer version of KyberDash.
       </div>
     )
   }

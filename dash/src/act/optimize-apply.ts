@@ -9,6 +9,7 @@ import { runAction } from './apply.js'
 import { shortId } from './journal.js'
 import { REPORT_MIN_AGE_DAYS } from './types.js'
 import { planFindings, type FindingPlan, type PlanContext } from './plans.js'
+import { BRAND, resolveCliName } from '../brand-overlay.js'
 
 export type ApplyOptions = {
   yes?: boolean
@@ -155,7 +156,7 @@ export async function runOptimizeApply(
     const bad = onlyIds.filter(id => !valid.has(id))
     if (bad.length > 0) {
       const validList = valid.size > 0 ? [...valid].join(', ') : '(none)'
-      errout.write(`codeburn optimize --apply: unknown or not-appliable finding id${bad.length === 1 ? '' : 's'}: ${bad.join(', ')}. Appliable ids for this run: ${validList}\n`)
+      errout.write(`${resolveCliName()} optimize --apply: unknown or not-appliable finding id${bad.length === 1 ? '' : 's'}: ${bad.join(', ')}. Appliable ids for this run: ${validList}\n`)
       process.exitCode = 2
       return
     }
@@ -216,7 +217,7 @@ export async function runOptimizeApply(
       const record = await runAction(fp.plan!, opts.actionsDir)
       applied++
       print(`  Applied ${chalk.bold(shortId(record.id))}  ${record.description}`)
-      print(chalk.dim(`    Undo anytime: codeburn act undo ${shortId(record.id)}`))
+      print(chalk.dim(`    Undo anytime: ${resolveCliName()} act undo ${shortId(record.id)}`))
       const manualLines = manualActionLines(fp)
       if (manualLines.length > 0) {
         print(chalk.cyan('    Still requires manual action:'))
@@ -228,7 +229,7 @@ export async function runOptimizeApply(
     }
   }
   if (applied > 0) {
-    print(chalk.dim(`  CodeBurn will re-measure these on your next optimize run after ${REPORT_MIN_AGE_DAYS} days.`))
+    print(chalk.dim(`  ${BRAND.productName} will re-measure these on your next optimize run after ${REPORT_MIN_AGE_DAYS} days.`))
   }
   print()
 }

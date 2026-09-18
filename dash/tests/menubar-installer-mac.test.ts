@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  APP_BUNDLE_NAME,
   EXPECTED_BUNDLE_ID,
   installMacMenubarApp,
   installMenubarApp,
@@ -20,8 +21,8 @@ function asset(name: string) {
 }
 
 const VERSION = '0.9.19'
-const ZIP_NAME = `CodeBurnMenubar-v${VERSION}.zip`
-const ZIP_URL = `https://github.com/getagentseal/codeburn/releases/download/mac-v${VERSION}/${ZIP_NAME}`
+const ZIP_NAME = `KyberDashMenubar-v${VERSION}.zip`
+const ZIP_URL = `https://github.com/dpalfery/kyber-weave/releases/download/mac-v${VERSION}/${ZIP_NAME}`
 const CHECKSUM_URL = `${ZIP_URL}.sha256`
 const ZIP_BYTES = 'zip-bytes'
 
@@ -80,8 +81,8 @@ describe('installMacMenubarApp - R13.4 verification gate', () => {
     sandbox = await mkdtemp(join(tmpdir(), 'menubar-mac-'))
     homeSbx = await mkdtemp(join(tmpdir(), 'menubar-mac-home-'))
     stagingSbx = await mkdtemp(join(tmpdir(), 'menubar-mac-stage-'))
-    fakeAppSource = join(sandbox, 'src', 'CodeBurnMenubar.app')
-    installedAppPath = join(homeSbx, 'Applications', 'CodeBurnMenubar.app')
+    fakeAppSource = join(sandbox, 'src', APP_BUNDLE_NAME)
+    installedAppPath = join(homeSbx, 'Applications', APP_BUNDLE_NAME)
     logs = []
     await buildFakeApp(fakeAppSource)
     originalForceMac = process.env[FORCE_MAC_INSTALL_ENV]
@@ -118,7 +119,7 @@ describe('installMacMenubarApp - R13.4 verification gate', () => {
       unpack: async (_archivePath: string, destDir: string) => {
         await mkdir(destDir, { recursive: true })
         const { execFileSync } = await import('node:child_process')
-        execFileSync('cp', ['-R', fakeAppSource, join(destDir, 'CodeBurnMenubar.app')])
+        execFileSync('cp', ['-R', fakeAppSource, join(destDir, APP_BUNDLE_NAME)])
       },
       readBundleIdentifier: async () => EXPECTED_BUNDLE_ID,
       // Tests should override verifySignature to control pass/fail; the default passes so a
@@ -149,7 +150,7 @@ describe('installMacMenubarApp - R13.4 verification gate', () => {
     expect(logs).toContain(`Downloading ${ZIP_NAME}...`)
     expect(logs).toContain('Verifying checksum...')
     expect(logs).toContain('Verifying app bundle...')
-    expect(logs).toContain('Launching CodeBurn Menubar...')
+    expect(logs).toContain('Launching KyberDash Menubar...')
   })
 
   // --------- R13.4: refused on bad SHA256
@@ -239,7 +240,7 @@ describe('installMacMenubarApp - staging tmp cleanup', () => {
   beforeEach(async () => {
     sandbox = await mkdtemp(join(tmpdir(), 'menubar-mac-cleanup-'))
     homeSbx = await mkdtemp(join(tmpdir(), 'menubar-mac-home-'))
-    fakeAppSource = join(sandbox, 'src', 'CodeBurnMenubar.app')
+    fakeAppSource = join(sandbox, 'src', APP_BUNDLE_NAME)
     await buildFakeApp(fakeAppSource)
     originalForceMac = process.env[FORCE_MAC_INSTALL_ENV]
     process.env[FORCE_MAC_INSTALL_ENV] = '1'
@@ -264,7 +265,7 @@ describe('installMacMenubarApp - staging tmp cleanup', () => {
         unpack: async (_archivePath: string, destDir: string) => {
           await mkdir(destDir, { recursive: true })
           const { execFileSync } = await import('node:child_process')
-          execFileSync('cp', ['-R', fakeAppSource, join(destDir, 'CodeBurnMenubar.app')])
+          execFileSync('cp', ['-R', fakeAppSource, join(destDir, APP_BUNDLE_NAME)])
         },
         readBundleIdentifier: async () => EXPECTED_BUNDLE_ID,
         verifySignature: async () => {},

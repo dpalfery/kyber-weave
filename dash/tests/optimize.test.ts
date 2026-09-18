@@ -42,6 +42,7 @@ import {
 } from '../src/optimize.js'
 import type { ProjectSummary } from '../src/types.js'
 import type { AppliedFix } from '../src/act/types.js'
+import { BRAND, resolveCliName } from '../src/brand-overlay.js'
 
 function call(name: string, input: Record<string, unknown>, sessionId = 's1', project = 'p1'): ToolCall {
   return { name, input, sessionId, project }
@@ -1381,7 +1382,7 @@ describe('renderOptimize grouping', () => {
     const out = plain(renderOptimize(findings, 0.00001, '7 Days', 10, 5, 100, 80, 'B', [], []))
 
     const headers = [
-      'Fix now (apply-able) · ~1.0K tokens (~$0.010) · 1 finding — codeburn optimize --apply',
+      `Fix now (apply-able) · ~1.0K tokens (~$0.010) · 1 finding — ${resolveCliName()} optimize --apply`,
       'Habits · ~1.0K tokens (~$0.010) · 1 finding',
       'FYI · ~1.0K tokens (~$0.010) · 1 finding',
     ].map(h => out.indexOf(h))
@@ -1485,7 +1486,7 @@ describe('provider-scoped remediation copy (#1044)', () => {
       expect(askAgentLabel(copy, 'audit the retry-heavy capability before changing config'))
         .toBe('Ask Claude to audit the retry-heavy capability before changing config:')
       expect(optimizeEmptyScanLines(provider)).toEqual([
-        'CodeBurn optimize scans your Claude Code sessions and config for',
+        `${BRAND.productName} optimize scans your Claude Code sessions and config for`,
         'token waste: junk directory reads, duplicate file reads, unused',
         'agents/skills/MCP servers, bloated CLAUDE.md, and more.',
       ])
@@ -1495,7 +1496,7 @@ describe('provider-scoped remediation copy (#1044)', () => {
         .toBe('── Ask Claude in the current session '.padEnd(64, '─'))
     }
     const empty = strip(renderOptimize([], 0, 'lifetime', 0, 0, 0, 100, 'A', [], []))
-    expect(empty).toContain('CodeBurn optimize scans your Claude Code sessions and config for')
+    expect(empty).toContain(`${BRAND.productName} optimize scans your Claude Code sessions and config for`)
     expect(empty).toContain('bloated CLAUDE.md')
     expect(empty).not.toContain('Claude sessions')
   })

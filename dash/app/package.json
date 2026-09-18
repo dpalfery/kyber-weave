@@ -1,8 +1,8 @@
 {
-  "name": "codeburn-desktop",
+  "name": "kyberdash-desktop",
   "private": true,
   "version": "0.9.23",
-  "description": "CodeBurn Desktop \u2014 Electron app fed by the codeburn CLI",
+  "description": "KyberDash Desktop \u2014 Electron app fed by the kyberdash CLI",
   "main": "dist/electron/main.js",
   "types": "types/ds-sync-entry.d.ts",
   "scripts": {
@@ -48,8 +48,8 @@
     "wait-on": "^9.0.10"
   },
   "build": {
-    "appId": "org.agentseal.codeburn-desktop",
-    "productName": "CodeBurn",
+    "appId": "com.kyberweave.kyberdash",
+    "productName": "KyberDash",
     "directories": {
       "output": "release"
     },
@@ -82,9 +82,9 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSDocumentsFolderUsageDescription": "CodeBurn reads your local AI coding tool session logs (Claude Code, Codex, Cursor, and others) to calculate your token usage and cost. Your data never leaves your machine.",
-        "NSDesktopFolderUsageDescription": "CodeBurn reads your local AI coding tool session logs (Claude Code, Codex, Cursor, and others) to calculate your token usage and cost. Your data never leaves your machine.",
-        "NSDownloadsFolderUsageDescription": "CodeBurn reads your local AI coding tool session logs (Claude Code, Codex, Cursor, and others) to calculate your token usage and cost. Your data never leaves your machine."
+        "NSDocumentsFolderUsageDescription": "KyberDash reads your local AI coding tool session logs (Claude Code, Codex, Cursor, and others) to calculate your token usage and cost. Your data never leaves your machine.",
+        "NSDesktopFolderUsageDescription": "KyberDash reads your local AI coding tool session logs (Claude Code, Codex, Cursor, and others) to calculate your token usage and cost. Your data never leaves your machine.",
+        "NSDownloadsFolderUsageDescription": "KyberDash reads your local AI coding tool session logs (Claude Code, Codex, Cursor, and others) to calculate your token usage and cost. Your data never leaves your machine."
       }
     },
     "dmg": {},
@@ -102,15 +102,15 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "artifactName": "CodeBurn-Setup-${version}.${ext}"
+      "artifactName": "KyberDash-Setup-${version}.${ext}"
     },
     "appx": {
-      "applicationId": "CodeBurn",
-      "identityName": "Codeburn.CodeBurn",
+      "applicationId": "KyberDash",
+      "identityName": "KyberWeave.KyberDash",
       "publisher": "CN=3EFA3336-87E1-46F2-9DFA-2EB5A7693F89",
-      "publisherDisplayName": "Codeburn",
-      "displayName": "CodeBurn",
-      "artifactName": "CodeBurn-Store-${version}-${arch}.${ext}",
+      "publisherDisplayName": "KyberWeave",
+      "displayName": "KyberDash",
+      "artifactName": "KyberDash-Store-${version}-${arch}.${ext}",
       "backgroundColor": "#15100D",
       "languages": [
         "en-US"
@@ -141,14 +141,14 @@
       ],
       "category": "Development",
       "icon": "build/icon.png",
-      "maintainer": "AgentSeal <hello@agentseal.org>",
-      "executableName": "codeburn"
+      "maintainer": "KyberWeave",
+      "executableName": "kyberdash"
     },
     "snap": {
       "confinement": "strict",
       "grade": "stable",
       "summary": "See where your AI coding spend actually goes",
-      "artifactName": "codeburn_${version}_${arch}.${ext}",
+      "artifactName": "kyberdash_${version}_${arch}.${ext}",
       "plugs": [
         "desktop",
         "desktop-legacy",
@@ -234,6 +234,6 @@
       ]
     }
   },
-  "homepage": "https://github.com/getagentseal/codeburn",
-  "author": "AgentSeal <hello@agentseal.org>"
+  "homepage": "https://github.com/dpalfery/kyber-weave",
+  "author": "KyberWeave"
 }

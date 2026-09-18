@@ -28,8 +28,8 @@
 set -euo pipefail
 
 VERSION="${1:-dev}"
-BUNDLE_ID="org.agentseal.codeburn-menubar"
-EXE="CodeBurnMenubar"
+BUNDLE_ID="com.kyberweave.kyberdash-menubar"
+EXE="KyberDashMenubar"
 MIN_MACOS="14.0"
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -121,7 +121,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleDisplayName</key><string>CodeBurn Menubar</string>
+    <key>CFBundleDisplayName</key><string>KyberDash Menubar</string>
     <key>CFBundleExecutable</key><string>${EXE}</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
@@ -133,7 +133,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>${MIN_MACOS}</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSHumanReadableCopyright</key><string>© AgentSeal</string>
+    <key>NSHumanReadableCopyright</key><string>© KyberWeave</string>
 </dict>
 </plist>
 PLIST
@@ -147,4 +147,4 @@ echo ""
 echo "✓ Installed ${BUNDLE}"
 lipo -info "${BUNDLE}/Contents/MacOS/${EXE}" | sed 's/^/  /'
 vtool -show-build "${BUNDLE}/Contents/MacOS/${EXE}" 2>/dev/null | grep -iE "minos|sdk" | sed 's/^/  /'
-echo "  Launch with: codeburn menubar   (or: open '${BUNDLE}')"
+echo "  Launch with: kyberdash menubar   (or: open '${BUNDLE}')"

@@ -3,12 +3,13 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { sha256 } from '../act/backup.js'
 import type { ActionPlan, PlannedChange } from '../act/types.js'
+import { resolveCliName } from '../brand-overlay.js'
 
 // The hook entries `guard install` writes and `guard uninstall` removes. Every
 // command carries the same recognizable prefix so uninstall can find exactly
 // ours by substring even if the user later moved or reindented the file.
-export const GUARD_HOOK_PREFIX = 'codeburn guard hook'
-export const GUARD_STATUSLINE_COMMAND = 'codeburn guard statusline'
+export const GUARD_HOOK_PREFIX = `${resolveCliName()} guard hook`
+export const GUARD_STATUSLINE_COMMAND = `${resolveCliName()} guard statusline`
 
 const INSTALL_HOOKS: { event: string; matcher?: string; arg: string }[] = [
   { event: 'PreToolUse', arg: 'pretooluse' },
@@ -53,7 +54,7 @@ function asGroups(value: unknown): MatcherGroup[] {
 }
 
 function groupHasOurCommand(group: MatcherGroup, command: string): boolean {
-  return Array.isArray(group.hooks) && group.hooks.some(h => h?.command === command)
+  return Array.isArray(group.hooks) && group.hooks.some(h => h?.command === command || (typeof h?.command === 'string' && (h.command.includes(GUARD_HOOK_PREFIX) || h.command.includes('codeburn guard hook'))))
 }
 
 export type SettingsBuild = {
@@ -135,7 +136,7 @@ export function buildUninstall(path: string): SettingsBuild {
       const kept: MatcherGroup[] = []
       for (const group of groups) {
         if (!Array.isArray(group.hooks)) { kept.push(group); continue }
-        const keptHooks = group.hooks.filter(h => !(typeof h?.command === 'string' && h.command.includes(GUARD_HOOK_PREFIX)))
+        const keptHooks = group.hooks.filter(h => !(typeof h?.command === 'string' && (h.command.includes(GUARD_HOOK_PREFIX) || h.command.includes('codeburn guard hook'))))
         if (keptHooks.length !== group.hooks.length) removed = true
         if (keptHooks.length === 0) continue // drop a group that was only ours
         kept.push(keptHooks.length === group.hooks.length ? group : { ...group, hooks: keptHooks })
@@ -147,19 +148,19 @@ export function buildUninstall(path: string): SettingsBuild {
   }
 
   const statusLine = doc.statusLine as HookEntry | undefined
-  if (statusLine && typeof statusLine.command === 'string' && statusLine.command.includes(GUARD_STATUSLINE_COMMAND)) {
+  if (statusLine && typeof statusLine.command === 'string' && (statusLine.command.includes(GUARD_STATUSLINE_COMMAND) || statusLine.command.includes('codeburn guard statusline'))) {
     delete doc.statusLine
     removed = true
   }
 
   if (!removed) {
-    return { plan: null, path, existed, notes: ['no codeburn guard hooks found in that settings file'] }
+    return { plan: null, path, existed, notes: [`no ${resolveCliName()} guard hooks found in that settings file`] }
   }
   return {
     plan: {
       kind: 'guard-uninstall',
       findingId: null,
-      description: `Remove codeburn guard hooks from ${path}`,
+      description: `Remove ${resolveCliName()} guard hooks from ${path}`,
       changes: [change(path, existed, rawHash, doc)],
     },
     path,

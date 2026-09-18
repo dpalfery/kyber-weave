@@ -17,6 +17,7 @@ import { scanAndDetect } from './optimize.js'
 import { callBillableOutputTokens, sessionBillableOutputTokens } from './session-output.js'
 import { getDaysInRange, ensureCacheHydrated, emptyCache, BACKFILL_DAYS, toDateString, type DailyCache, type DailyEntry, type ProjectDayStats, type ProviderDaySlice } from './daily-cache.js'
 import { buildGranularHistory } from './granular-history.js'
+import { resolveCliName } from './brand-overlay.js'
 
 // Row caps for the by-PR / by-branch payload aggregations, ranked by cost.
 const TOP_BRANCHES = 15
@@ -111,7 +112,7 @@ async function hydrateCache(): Promise<DailyCache> {
     // longer reach here (they're isolated in parseProviderSources), so anything
     // that does is exceptional and worth surfacing.
     process.stderr.write(
-      `codeburn: daily history backfill failed; the trend chart may be incomplete. ` +
+      `${resolveCliName()}: daily history backfill failed; the trend chart may be incomplete. ` +
       `${err instanceof Error ? err.message : String(err)}\n`
     )
     return emptyCache()

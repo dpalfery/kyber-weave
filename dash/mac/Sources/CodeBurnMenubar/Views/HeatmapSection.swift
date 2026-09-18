@@ -1716,7 +1716,7 @@ private struct PlanInsight: View {
             case .notBootstrapped, .dormant:
                 PlanConnectView(
                     title: "Connect Claude subscription",
-                    message: "CodeBurn will read your Claude Code credentials once. macOS will ask permission. After that, the live quota bar shows next to the Claude tab and updates automatically."
+                    message: "KyberDash will read your Claude Code credentials once. macOS will ask permission. After that, the live quota bar shows next to the Claude tab and updates automatically."
                 ) { Task { await store.bootstrapSubscription() } }
             case .bootstrapping:
                 PlanLoadingView(message: "Reading Claude credentials...")
@@ -2023,7 +2023,7 @@ private struct CodexPlanInsight: View {
             case .notBootstrapped, .dormant:
                 PlanConnectView(
                     title: "Connect ChatGPT subscription",
-                    message: "CodeBurn will read your Codex CLI credentials once. After that, the live quota bar shows next to the Codex tab and updates automatically."
+                    message: "KyberDash will read your Codex CLI credentials once. After that, the live quota bar shows next to the Codex tab and updates automatically."
                 ) { Task { await store.bootstrapCodex() } }
             case .bootstrapping:
                 PlanLoadingView(message: "Reading Codex CLI credentials...")

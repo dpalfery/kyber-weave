@@ -27,7 +27,7 @@ describe('Onboarding', () => {
     next()
     expect(screen.getByText('Find the waste.')).toBeInTheDocument()
     next()
-    expect(screen.getByText('Help improve CodeBurn')).toBeInTheDocument()
+    expect(screen.getByText('Help improve KyberDash')).toBeInTheDocument()
     // Back returns to the previous screen.
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(screen.getByText('Find the waste.')).toBeInTheDocument()

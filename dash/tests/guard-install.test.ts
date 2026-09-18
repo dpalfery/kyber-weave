@@ -145,7 +145,7 @@ describe('guard uninstall', () => {
     await writeFile(settings, canonical({ hooks: {} }))
     const built = buildUninstall(settings)
     expect(built.plan).toBeNull()
-    expect(built.notes.join(' ')).toContain('no codeburn guard hooks')
+    expect(built.notes.join(' ')).toMatch(/no (codeburn|kyberdash) guard hooks/)
   })
 
   it('reports nothing to do when the settings file is absent', async () => {

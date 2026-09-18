@@ -112,7 +112,7 @@ describe('fetchReleases', () => {
     const result = await fetchReleases(new AbortController().signal, fakeFetch as unknown as typeof fetch)
     expect(result).toEqual([{ tag_name: 'desktop-v0.9.17' }])
     const [url, init] = fakeFetch.mock.calls[0]!
-    expect(String(url)).toContain('api.github.com/repos/getagentseal/codeburn/releases')
+    expect(String(url)).toContain('api.github.com/repos/dpalfery/kyber-weave/releases')
     // No custom headers at all → no Authorization, no app-identifying UA override.
     expect(init?.headers).toBeUndefined()
   })

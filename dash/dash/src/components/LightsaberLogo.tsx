@@ -7,7 +7,7 @@ export function LightsaberLogo({ className = 'h-6 w-6', ...props }: SVGProps<SVG
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
-      aria-label="kyberDash lightsaber logo"
+      aria-label="KyberDash lightsaber logo"
       role="img"
       {...props}
     >

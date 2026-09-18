@@ -55,7 +55,7 @@ describe('AboutModal update check', () => {
     expect(note).toHaveTextContent('Update available: 0.9.17')
 
     fireEvent.click(screen.getByRole('button', { name: 'Download' }))
-    expect(mocks.openExternal).toHaveBeenCalledWith('https://github.com/getagentseal/codeburn/releases/tag/desktop-v0.9.17')
+    expect(mocks.openExternal).toHaveBeenCalledWith('https://github.com/dpalfery/kyber-weave/releases/tag/desktop-v0.9.17')
   })
 
   it('degrades gracefully when the status is unknown (offline)', async () => {

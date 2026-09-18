@@ -18,7 +18,7 @@ function asset(name: string) {
 }
 
 const MSI_URL =
-  'https://github.com/getagentseal/codeburn/releases/download/windows-v0.9.20/CodeBurn.Menubar_0.9.20_x64_en-US.msi'
+  'https://github.com/dpalfery/kyber-weave/releases/download/windows-v0.9.20/KyberDash.Menubar_0.9.20_x64_en-US.msi'
 const MSI_BYTES = 'msi-bytes'
 
 function sha256(text: string): string {
@@ -60,7 +60,7 @@ describe('windows release asset resolution', () => {
     const resolved = resolveVersionedMenubarReleaseAssets('0.9.20', WINDOWS_RELEASE)
 
     expect(resolved.release.tag_name).toBe('windows-v0.9.20')
-    expect(resolved.zip.name).toBe('CodeBurn.Menubar_0.9.20_x64_en-US.msi')
+    expect(resolved.zip.name).toBe('KyberDash.Menubar_0.9.20_x64_en-US.msi')
     expect(resolved.zip.browser_download_url).toBe(MSI_URL)
     expect(resolved.checksum.browser_download_url).toBe(`${MSI_URL}.sha256`)
   })
@@ -143,7 +143,7 @@ describe('installMenubarApp on windows', () => {
         sleep: async () => {},
         log: (message: string) => { logs.push(message) },
         fetchImpl: async (url: string) => httpResponse(200, url.endsWith('.sha256')
-          ? `${sha256(MSI_BYTES)}  CodeBurn.Menubar_0.9.20_x64_en-US.msi`
+          ? `${sha256(MSI_BYTES)}  KyberDash.Menubar_0.9.20_x64_en-US.msi`
           : MSI_BYTES),
       },
       ...overrides,
@@ -187,14 +187,14 @@ describe('installMenubarApp on windows', () => {
 
     expect(installerCalls).toEqual([{
       exe: 'C:\\Windows\\System32\\msiexec.exe',
-      args: ['/i', join(sandbox, 'CodeBurn.Menubar_0.9.20_x64_en-US.msi'), '/passive', '/norestart'],
+      args: ['/i', join(sandbox, 'KyberDash.Menubar_0.9.20_x64_en-US.msi'), '/passive', '/norestart'],
     }])
     expect(launched).toEqual(['C:\\Program Files\\CodeBurn Menubar\\CodeBurn Menubar.exe'])
     expect(result.launched).toBe(true)
-    expect(logs).toContain('Downloading CodeBurn.Menubar_0.9.20_x64_en-US.msi...')
+    expect(logs).toContain('Downloading KyberDash.Menubar_0.9.20_x64_en-US.msi...')
     expect(logs).toContain('Verifying checksum...')
     expect(logs).toContain('Installing...')
-    expect(logs).toContain('Launched CodeBurn Menubar.')
+    expect(logs).toContain('Launched KyberDash Menubar.')
   })
 
   it('reinstalls the same version when --force is passed', async () => {
@@ -268,8 +268,8 @@ describe('installMenubarApp on windows', () => {
     const latest: ReleaseResponse[] = [{
       tag_name: 'windows-v0.9.19',
       assets: [
-        { name: 'CodeBurn.Menubar_0.9.19_x64_en-US.msi', browser_download_url: 'https://example.test/msi' },
-        { name: 'CodeBurn.Menubar_0.9.19_x64_en-US.msi.sha256', browser_download_url: 'https://example.test/msi.sha256' },
+        { name: 'KyberDash.Menubar_0.9.19_x64_en-US.msi', browser_download_url: 'https://example.test/msi' },
+        { name: 'KyberDash.Menubar_0.9.19_x64_en-US.msi.sha256', browser_download_url: 'https://example.test/msi.sha256' },
       ],
     }]
 
@@ -293,7 +293,7 @@ describe('installMenubarApp on windows', () => {
 
     expect(requested[0]).toBe(MSI_URL)
     expect(requested).toContain('https://example.test/msi')
-    expect(installerCalls[0]?.args[1]).toBe(join(sandbox, 'CodeBurn.Menubar_0.9.19_x64_en-US.msi'))
+    expect(installerCalls[0]?.args[1]).toBe(join(sandbox, 'KyberDash.Menubar_0.9.19_x64_en-US.msi'))
     expect(result.launched).toBe(true)
   })
 })

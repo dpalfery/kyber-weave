@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The "CodeBurn" wordmark filled with the website's animated flame gradient.
+/// The "KyberDash" wordmark filled with the website's animated flame gradient.
 struct FlameWordmark: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sweeping = false
@@ -20,7 +20,7 @@ struct FlameWordmark: View {
     ]
 
     private var wordmark: some View {
-        Text("CodeBurn")
+        Text("KyberDash")
             .font(.system(size: 13, weight: .semibold))
             .tracking(-0.15)
     }
@@ -46,6 +46,6 @@ struct FlameWordmark: View {
             }
             .onAppear { sweeping = true }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("CodeBurn")
+            .accessibilityLabel("KyberDash")
     }
 }

@@ -113,9 +113,9 @@ describe('codeburn models --unpriced public CLI', () => {
       expect(result.stdout).toContain('acme/unknown-alpha-969')
       expect(result.stdout).toContain('acme/unknown-beta-969')
       expect(result.stdout).not.toContain('claude-opus-4-6')
-      expect(result.stdout).toContain('If a model is billed per token, map it with: codeburn model-alias "<model>" <known-model>')
-      expect(result.stdout).toContain('codeburn model-flat-rate')
-      expect(result.stdout).not.toContain('Fix: codeburn model-alias')
+      expect(result.stdout).toMatch(/If a model is billed per token, map it with: (codeburn|kyberdash) model-alias "<model>" <known-model>/)
+      expect(result.stdout).toMatch(/(codeburn|kyberdash) model-flat-rate/)
+      expect(result.stdout).not.toMatch(/Fix: (codeburn|kyberdash) model-alias/)
     })
   })
 

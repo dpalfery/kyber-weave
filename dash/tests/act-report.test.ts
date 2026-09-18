@@ -493,7 +493,7 @@ describe('optimize header', () => {
     const actionsDir = await writeJournal([mcpRecord()])
     const report = await computeActReport({ actionsDir, now: NOW, loadProjects: load([projectOf(sessionsAt(20, daysAgo(5)))]) })
     const header = buildOptimizeAppliedHeader(report)
-    expect(header).toMatch(/^Applied fixes: 1 active, realized ~40\.0K tokens.*over 10 days\. Details: codeburn act report$/)
+    expect(header).toMatch(/^Applied fixes: 1 active, realized ~40\.0K tokens.*over 10 days\. Details: (codeburn|kyberdash) act report$/)
   })
 
   it('renders no header when every measured row is low confidence (under-claim)', async () => {
@@ -947,7 +947,7 @@ describe('applied-fix verdicts', () => {
     expect(fixes[0]!.verdict).toBe('worked')
     expect(fixes[0]!.estimatedTokens).toBe(40_000)
     expect(fixes[0]!.realizedTokens).toBe(40_000)
-    expect(fixes[0]!.undoCommand).toBe('codeburn act undo a1')
+    expect(fixes[0]!.undoCommand).toMatch(/^(codeburn|kyberdash) act undo a1$/)
   })
 
   it('holds the worked/partial boundary at the 70% ratio', async () => {
@@ -973,7 +973,7 @@ describe('applied-fix verdicts', () => {
     const { fixes } = await fixOf([rec], [projectOf(stillLoading)])
     expect(fixes[0]!.verdict).toBe('no-effect')
     expect(fixes[0]!.realizedTokens).toBe(0)
-    expect(formatAppliedFix(fixes[0]!)).toContain('did not help. Revert: codeburn act undo a1')
+    expect(formatAppliedFix(fixes[0]!)).toMatch(/did not help\. Revert: (codeburn|kyberdash) act undo a1/)
   })
 
   it('treats an estimate of zero as worked only when something was realized', async () => {
@@ -1048,7 +1048,7 @@ describe('autoRevertNoEffect', () => {
     expect(report.appliedFixes[0]!.verdict).toBe('no-effect')
     const { lines, revertedIds } = await autoRevertNoEffect(report.appliedFixes, { actionsDir })
     expect(revertedIds.size).toBe(0)
-    expect(lines).toEqual(['Not auto-reverted: read-edit-ratio edits a CLAUDE.md. Revert: codeburn act undo cm1'])
+    expect(lines[0]).toMatch(/^Not auto-reverted: read-edit-ratio edits a CLAUDE\.md\. Revert: (codeburn|kyberdash) act undo cm1$/)
   })
 
   it('ignores partial and pending entries', async () => {

@@ -239,9 +239,9 @@ describe('renderOverview unpriced models', () => {
     expect(out).toContain('Unpriced')
     expect(out).toContain('1 model at $0')
     expect(out).toContain('zz-mystery-paid-model-999')
-    expect(out).toContain('codeburn model-alias')
+    expect(out).toMatch(/(codeburn|kyberdash) model-alias/)
     expect(out).toContain('model-flat-rate')
-    expect(out).not.toContain('Fix: codeburn model-alias')
+    expect(out).not.toMatch(/Fix: (codeburn|kyberdash) model-alias/)
   })
 
   it('stays silent for subscription SKUs whose $0 is correct', () => {

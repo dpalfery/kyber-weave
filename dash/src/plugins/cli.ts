@@ -23,11 +23,12 @@ import { parsePluginManifest, type PluginManifest } from './manifest.js'
 import { readSyncConfig } from '../sync/config.js'
 import { createCredentialStore } from '../sync/credentials.js'
 import { fetchOidcConfig, refreshToken } from '../sync/auth.js'
+import { resolveCliName } from '../brand-overlay.js'
 
 export function registerPluginCommands(program: Command): void {
   const plugin = program
     .command('plugin')
-    .description('Inspect the plugin socket: list, info, verify (no installation; see docs/sync/README.md for `codeburn plugin add`)')
+    .description(`Inspect the plugin socket: list, info, verify (no installation; see docs/sync/README.md for \`${resolveCliName()} plugin add\`)`)
 
   plugin
     .command('list')
@@ -348,14 +349,14 @@ async function addRemote(name: string, pluginsDir: string): Promise<void> {
   // Read sync config
   const config = readSyncConfig()
   if (!config) {
-    throw new Error('Sync not configured. Run `codeburn sync setup <url>` first.')
+    throw new Error(`Sync not configured. Run \`${resolveCliName()} sync setup <url>\` first.`)
   }
 
   // Refresh token
   const store = createCredentialStore()
   const rt = store.retrieve()
   if (!rt) {
-    throw new Error('No auth token found. Run `codeburn sync setup` to authenticate.')
+    throw new Error(`No auth token found. Run \`${resolveCliName()} sync setup\` to authenticate.`)
   }
 
   const oidc = await fetchOidcConfig(config.issuer)

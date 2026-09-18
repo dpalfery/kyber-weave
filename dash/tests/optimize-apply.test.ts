@@ -669,9 +669,9 @@ describe('runOptimizeApply end-to-end', () => {
     const out = io.stdout()
     for (const rec of records) {
       expect(out).toContain(`Applied ${shortId(rec.id)}`)
-      expect(out).toContain(`Undo anytime: codeburn act undo ${shortId(rec.id)}`)
+      expect(out).toMatch(new RegExp(`Undo anytime: (codeburn|kyberdash) act undo ${shortId(rec.id)}`))
     }
-    expect(out).toContain('CodeBurn will re-measure these on your next optimize run after 3 days.')
+    expect(out).toMatch(/(CodeBurn|KyberDash) will re-measure these on your next optimize run after 3 days\./)
     expect(JSON.parse(await readFile(join(fx.home, '.claude.json'), 'utf-8')).mcpServers).toEqual({})
     expect(existsSync(join(fx.home, '.claude', 'skills', '.archived', 'foo'))).toBe(true)
     expect(existsSync(join(fx.home, '.zshrc'))).toBe(true)
@@ -850,7 +850,7 @@ describe('stale-plan detection', () => {
     const interim = JSON.stringify({ mcpServers: { s: {}, addedMeanwhile: {} } }, null, 2) + '\n'
     await writeFile(claudeJson, interim)
 
-    await expect(runAction(plan!, fx.actionsDir)).rejects.toThrow(/changed since the plan was built; re-run codeburn optimize --apply/)
+    await expect(runAction(plan!, fx.actionsDir)).rejects.toThrow(/changed since the plan was built; re-run (codeburn|kyberdash) optimize --apply/)
     expect(await readFile(claudeJson, 'utf-8')).toBe(interim)
     expect(await readRecords(fx.actionsDir)).toHaveLength(0)
     const backups = await readdir(join(fx.actionsDir, 'backups')).catch(() => [])

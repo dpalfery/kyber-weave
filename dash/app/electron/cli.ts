@@ -210,6 +210,7 @@ export function shutdownAll(): Promise<void> {
 export function nodeManagerDirs(): string[] {
   const home = homedir()
   const dirs = [
+    join(home, '.local', 'bin'),
     '/opt/homebrew/bin',
     '/usr/local/bin',
     join(home, '.volta', 'bin'),
@@ -220,13 +221,11 @@ export function nodeManagerDirs(): string[] {
   const nvmVersions = join(nvmDir, 'versions', 'node')
   try {
     // Scan version dirs newest-first and take the first whose bin actually holds
-    // the CLI (`kyber-weave` preferred, `codeburn` fallback). A lexicographic
-    // max ("v9" > "v22") is not a real "newest", and the top dir may not
-    // even contain the CLI — so verify, matching CodeburnCLI.swift.
+    // the CLI (`kyberdash` preferred, `kyber-weave` or `codeburn` fallback).
     const entries = readdirSync(nvmVersions).sort().reverse()
     for (const entry of entries) {
       const bin = join(nvmVersions, entry, 'bin')
-      if (isExecutableFile(join(bin, 'kyber-weave')) || isExecutableFile(join(bin, 'codeburn'))) {
+      if (isExecutableFile(join(bin, 'kyberdash')) || isExecutableFile(join(bin, 'kyber-weave')) || isExecutableFile(join(bin, 'codeburn'))) {
         dirs.push(bin)
         break
       }
@@ -304,27 +303,35 @@ function isFile(p: string): boolean {
   }
 }
 
-// Persisted-path file written by the (future) first-run "locate CLI" flow,
-// mirroring the mac app's Application Support/CodeBurn/codeburn-cli-path.v1.
-function persistedPathFile(): string {
+// Persisted-path file written by the first-run "locate CLI" flow,
+// mirroring the mac app's Application Support/KyberDash/kyberdash-cli-path.v1
+// and fallback to CodeBurn/codeburn-cli-path.v1.
+function persistedPathFiles(): string[] {
   const override = process.env.CODEBURN_CLI_PATH_FILE
-  if (override) return override
+  if (override) return [override]
   const home = homedir()
   if (platform() === 'darwin') {
-    return join(home, 'Library', 'Application Support', 'CodeBurn', 'codeburn-cli-path.v1')
+    return [
+      join(home, 'Library', 'Application Support', 'KyberDash', 'kyberdash-cli-path.v1'),
+      join(home, 'Library', 'Application Support', 'CodeBurn', 'codeburn-cli-path.v1'),
+    ]
   }
   const base = process.env.XDG_CONFIG_HOME || join(home, '.config')
-  return join(base, 'CodeBurn', 'codeburn-cli-path.v1')
+  return [
+    join(base, 'KyberDash', 'kyberdash-cli-path.v1'),
+    join(base, 'CodeBurn', 'codeburn-cli-path.v1'),
+  ]
 }
 
 function readPersistedPath(): string | null {
-  try {
-    const file = persistedPathFile()
-    if (!existsSync(file)) return null
-    const value = readFileSync(file, 'utf-8').trim()
-    if (value && isAbsolute(value) && isExecutableFile(value)) return value
-  } catch {
-    // unreadable — fall through to PATH search
+  for (const file of persistedPathFiles()) {
+    try {
+      if (!existsSync(file)) continue
+      const value = readFileSync(file, 'utf-8').trim()
+      if (value && isAbsolute(value) && isExecutableFile(value)) return value
+    } catch {
+      // unreadable — try next
+    }
   }
   return null
 }
@@ -381,7 +388,7 @@ export function resolveTarget(): CliTarget | null {
   // Only the name changes; the status contract decode path is unchanged
   // (R11.5 — native clients hold no analysis logic).
   for (const dir of searchDirs()) {
-    for (const name of ['kyber-weave', 'codeburn'] as const) {
+    for (const name of ['kyberdash', 'kyber-weave', 'codeburn'] as const) {
       const bin = join(dir, name)
       if (isExecutableFile(bin)) return { kind: 'external', bin }
     }

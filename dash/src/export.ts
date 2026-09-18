@@ -7,6 +7,7 @@ import { dateKey } from './day-aggregator.js'
 import { behavioralTurnCount, isBehavioralCall } from './behavioral-weight.js'
 import { aggregateModelEfficiency } from './model-efficiency.js'
 import { callBillableOutputTokens, sessionModelBillableOutputTokens } from './session-output.js'
+import { BRAND } from './brand-overlay.js'
 
 function escCsv(s: string): string {
   const sanitized = /^[\t\r=+\-@]/.test(s) ? `'${s}` : s
@@ -326,7 +327,7 @@ function buildReadme(periods: PeriodExport[]): string {
   const { code } = getCurrency()
   const generated = new Date().toISOString()
   const lines = [
-    'CodeBurn Usage Export',
+    `${BRAND.productName} Usage Export`,
     '====================',
     '',
     `Generated: ${generated}`,
@@ -462,7 +463,7 @@ export async function exportJson(periods: PeriodExport[], outputPath: string): P
       const head = buf.toString('utf-8', 0, bytesRead)
       if (!head.includes('"schema": "codeburn.export.v')) {
         throw new Error(
-          `Refusing to overwrite ${target}: file does not look like a codeburn export. ` +
+          `Refusing to overwrite ${target}: file does not look like a ${BRAND.productName} export. ` +
           `Delete it manually or pick a different -o path.`
         )
       }

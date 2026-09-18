@@ -8,6 +8,7 @@ import type { Command } from 'commander'
 import { randomBytes } from 'crypto'
 
 import { fetchDiscoveryDoc, DiscoveryError } from './discovery.js'
+import { BRAND, resolveCliName } from '../brand-overlay.js'
 import {
   AuthError,
   fetchOidcConfig,
@@ -221,7 +222,7 @@ export function registerSyncCommands(program: Command): void {
         process.stderr.write(`\n✓ Sync configured successfully.\n`)
         process.stderr.write(`  Endpoint: ${baseUrl}\n`)
         process.stderr.write(`  Token stored in: ${store.method()}\n`)
-        process.stderr.write(`\nRun \`codeburn sync push\` to send telemetry data.\n`)
+        process.stderr.write(`\nRun \`${resolveCliName()} sync push\` to send telemetry data.\n`)
       } catch (err) {
         // Known errors (login timeout, port exhaustion, discovery failures)
         // get a clean one-line message instead of a raw Node crash dump.
@@ -241,7 +242,7 @@ export function registerSyncCommands(program: Command): void {
     .action(async () => {
       const config = readSyncConfig()
       if (!config) {
-        process.stderr.write('Sync not configured. Run `codeburn sync setup <url>` first.\n')
+        process.stderr.write(`Sync not configured. Run \`${resolveCliName()} sync setup <url>\` first.\n`)
         process.exit(1)
       }
 
@@ -310,18 +311,18 @@ export function registerSyncCommands(program: Command): void {
     .description('Push unsent telemetry data to the configured endpoint')
     .option('--since <period>', 'Time window: today, 7d, 30d, month, all (max 6 months)', '7d')
     .option('--dry-run', 'Show what would be sent without sending')
-    .option('--attribution', 'Also push git attribution spans (session→commit correlation from `codeburn yield`, plus PR links). Sends normalized repo remotes and commit SHAs to the endpoint.')
+    .option('--attribution', `Also push git attribution spans (session→commit correlation from \`${resolveCliName()} yield\`, plus PR links). Sends normalized repo remotes and commit SHAs to the endpoint.`)
     .action(async (opts: { since: string; dryRun?: boolean; attribution?: boolean }) => {
       const config = readSyncConfig()
       if (!config) {
-        process.stderr.write('Sync not configured. Run `codeburn sync setup <url>` first.\n')
+        process.stderr.write(`Sync not configured. Run \`${resolveCliName()} sync setup <url>\` first.\n`)
         process.exit(1)
       }
 
       const store = createCredentialStore()
       const rt = store.retrieve()
       if (!rt) {
-        process.stderr.write('No auth token found. Run `codeburn sync setup` to authenticate.\n')
+        process.stderr.write(`No auth token found. Run \`${resolveCliName()} sync setup\` to authenticate.\n`)
         process.exit(1)
       }
 
@@ -513,7 +514,7 @@ export function registerSyncCommands(program: Command): void {
         }
 
         if (result.outcome === 'auth-rejected') {
-          process.stderr.write('Auth rejected by server. Run `codeburn sync setup` to re-authenticate.\n')
+          process.stderr.write(`Auth rejected by server. Run \`${resolveCliName()} sync setup\` to re-authenticate.\n`)
           process.exit(1)
         }
         if (result.outcome === 'rate-limited') {
@@ -542,7 +543,7 @@ export function registerSyncCommands(program: Command): void {
               log: msg => process.stderr.write(`${msg}\n`),
             })
             if (attrResult.outcome === 'auth-rejected') {
-              process.stderr.write('Auth rejected by server during attribution push. Run `codeburn sync setup` to re-authenticate.\n')
+              process.stderr.write(`Auth rejected by server during attribution push. Run \`${resolveCliName()} sync setup\` to re-authenticate.\n`)
               process.exit(1)
             }
             if (attrResult.outcome === 'rate-limited') {
@@ -571,7 +572,7 @@ export function registerSyncCommands(program: Command): void {
           process.stderr.write(`  ${result.totalRejected} spans rejected (will retry on next push)\n`)
         }
         if (unsent.length > MAX_PER_PUSH) {
-          process.stderr.write(`  ${unsent.length - MAX_PER_PUSH} calls remaining (safety limit). Run \`codeburn sync push\` again.\n`)
+          process.stderr.write(`  ${unsent.length - MAX_PER_PUSH} calls remaining (safety limit). Run \`${resolveCliName()} sync push\` again.\n`)
         }
 
         // Non-zero exit when the push did not complete, so cron/scripts can
@@ -600,7 +601,7 @@ export function registerSyncCommands(program: Command): void {
     .action(async (opts: { cadence?: string; attribution?: boolean; accept?: boolean }) => {
       const config = readSyncConfig()
       if (!config) {
-        process.stderr.write('Sync not configured. Run `codeburn sync setup <url>` first.\n')
+        process.stderr.write(`Sync not configured. Run \`${resolveCliName()} sync setup <url>\` first.\n`)
         process.exit(1)
       }
 
@@ -664,7 +665,7 @@ export function registerSyncCommands(program: Command): void {
         } catch (schedErr) {
           process.stderr.write(`Warning: ${(schedErr as Error).message}\n`)
           process.stderr.write(`Acceptance was stored and will take effect, but the schedule could not be installed.\n`)
-          process.stderr.write(`Run: codeburn sync auto enable --cadence ${cadence} --attribution${opts.attribution ? '' : ''}\n`)
+          process.stderr.write(`Run: ${resolveCliName()} sync auto enable --cadence ${cadence} --attribution${opts.attribution ? '' : ''}\n`)
           process.stderr.write(`Or install manually: launchctl load ~/Library/LaunchAgents/com.codeburn.sync-auto.plist\n`)
           process.exit(1)
         }
@@ -769,7 +770,7 @@ export function registerSyncCommands(program: Command): void {
 
       const acceptedRecord = config.auto.accepted
       if (typeof acceptedRecord.fingerprint !== 'string' || typeof acceptedRecord.acceptedAt !== 'string') {
-        process.stdout.write('Automatic sync acceptance record is damaged. Run: codeburn sync auto enable --cadence <daily|hourly> --accept\n')
+        process.stdout.write(`Automatic sync acceptance record is damaged. Run: ${resolveCliName()} sync auto enable --cadence <daily|hourly> --accept\n`)
         process.exit(1)
         return
       }

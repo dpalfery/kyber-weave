@@ -18,6 +18,7 @@ import { appliedFixGlyph, formatAppliedFix, type AppliedFix } from './act/types.
 import { isUserStartedSession, userStartedProjects } from './session-population.js'
 import { sessionBillableOutputTokens } from './session-output.js'
 import { aggregateFileChurn, buildCoachingNotes, scanUserCorrections, medianTimeToFirstEditMs, worstOneShotCategory, type ReworkedFile } from './workflow-insights.js'
+import { BRAND, resolveCliName } from './brand-overlay.js'
 
 // ============================================================================
 // Display constants
@@ -316,7 +317,7 @@ export function optimizeTuiPasteHeader(destination: PasteDestination | undefined
 export function optimizeEmptyScanLines(provider?: string): [string, string, string] {
   if (isDefaultClaudeProvider(provider)) {
     return [
-      'CodeBurn optimize scans your Claude Code sessions and config for',
+      `${BRAND.productName} optimize scans your Claude Code sessions and config for`,
       'token waste: junk directory reads, duplicate file reads, unused',
       'agents/skills/MCP servers, bloated CLAUDE.md, and more.',
     ]
@@ -507,7 +508,7 @@ export function classTotals(findings: WasteFinding[], costRate: number): Record<
 /// two never drift apart.
 export function classHeaderLine(cls: FindingClass, totals: ClassTotals, costRate: number): string {
   const cost = costRate > 0 ? ` (~${formatCost(totals.savingsUSD)})` : ''
-  const suffix = cls === 'fix' ? ' — codeburn optimize --apply' : ''
+  const suffix = cls === 'fix' ? ` — ${resolveCliName()} optimize --apply` : ''
   return `${CLASS_HEADERS[cls]} · ~${formatTokens(totals.tokensSaved)} tokens${cost} · ${totals.count} finding${totals.count === 1 ? '' : 's'}${suffix}`
 }
 
@@ -3234,7 +3235,7 @@ export function detectLowWorthSessions(projects: ProjectSummary[], provider?: st
   return {
     id: 'low-worth-sessions',
     title: `${candidates.length} possibly low-worth expensive session${candidates.length === 1 ? '' : 's'}`,
-    explanation: `Sessions with meaningful spend but weak delivery signals: ${list}${extra}. This is a review candidate, not proof of waste: CodeBurn flags missing edit turns, repeated retries, and sessions without git delivery commands so you can decide whether the work was worth its cost before it becomes a habit.`,
+    explanation: `Sessions with meaningful spend but weak delivery signals: ${list}${extra}. This is a review candidate, not proof of waste: ${BRAND.productName} flags missing edit turns, repeated retries, and sessions without git delivery commands so you can decide whether the work was worth its cost before it becomes a habit.`,
     impact,
     tokensSaved,
     fix: {
@@ -3825,7 +3826,7 @@ export function renderOptimize(
   const copy = optimizeRemediationCopy(provider)
   const lines: string[] = []
   lines.push('')
-  lines.push(`  ${chalk.bold.hex(ORANGE)('CodeBurn config health')}${chalk.dim('  ' + periodLabel)}`)
+  lines.push(`  ${chalk.bold.hex(ORANGE)(`${BRAND.productName} config health`)}${chalk.dim('  ' + periodLabel)}`)
   lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
 
   const issueSuffix = findings.length > 0 ? `, ${findings.length} issue${findings.length > 1 ? 's' : ''}` : ''
@@ -3895,7 +3896,7 @@ export function renderOptimize(
       lines.push(`  ${rec.project}: ${chalk.bold(rec.currentModel)} -> ${chalk.bold.hex(GREEN)(rec.candidateModel)}`)
       lines.push(chalk.dim(`  Current:  ${(rec.currentOneShotRate*100).toFixed(1)}% one-shot over ${rec.currentEditTurns} edits, ${formatCost(rec.currentCostPerEdit)}/edit`))
       lines.push(chalk.dim(`  Candidate: ${(rec.candidateOneShotRate*100).toFixed(1)}% one-shot over ${rec.candidateEditTurns} edits, ${formatCost(rec.candidateCostPerEdit)}/edit`))
-      lines.push(`  To apply: ${chalk.hex(CYAN)(`codeburn act apply-model ${rec.project}`)}`)
+      lines.push(`  To apply: ${chalk.hex(CYAN)(`${resolveCliName()} act apply-model ${rec.project}`)}`)
       lines.push('')
     }
   }

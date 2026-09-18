@@ -840,8 +840,8 @@ describe('InteractiveDashboard refresh', () => {
       await vi.advanceTimersByTimeAsync(50)
     }
     const beforeRefresh = frames.filter(frame => frame.trim()).at(-1) ?? ''
-    expect(beforeRefresh).toContain('kyberDash Optimize')
-    expect(beforeRefresh).toContain('kyberDash Optimize')
+    expect(beforeRefresh).toContain('KyberDash Optimize')
+    expect(beforeRefresh).toContain('KyberDash Optimize')
 
     frames.length = 0
     await vi.advanceTimersByTimeAsync(60_000)
@@ -849,8 +849,8 @@ describe('InteractiveDashboard refresh', () => {
 
     const frame = frames.filter(value => value.trim()).at(-1) ?? beforeRefresh
     expect(frame).toBe(beforeRefresh)
-    expect(frame).toContain('kyberDash Optimize')
-    expect(frame).toContain('kyberDash Optimize')
+    expect(frame).toContain('KyberDash Optimize')
+    expect(frame).toContain('KyberDash Optimize')
     expect(frame).toContain('b back')
     expect(frame).not.toContain('Loading Today')
     expect(frame).not.toContain('Scanning Today')

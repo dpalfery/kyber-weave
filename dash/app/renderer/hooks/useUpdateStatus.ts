@@ -27,7 +27,7 @@ export function useUpdateStatus(): UpdateStatus | null {
  *  no single direct asset fits (Linux ships three formats) or the platform is
  *  unknown. https-only, so it passes the openExternal allowlist. */
 export function releasePageUrl(tag: string): string {
-  return `https://github.com/getagentseal/codeburn/releases/tag/${tag}`
+  return `https://github.com/dpalfery/kyber-weave/releases/tag/${tag}`
 }
 
 /** Official signed Windows distribution. The Store handles installation and
@@ -47,12 +47,12 @@ export function directDownloadUrl(tag: string, platform: string | undefined, arc
   let file: string | null = null
   if (platform === 'darwin') {
     if (!arch) return null
-    file = arch === 'arm64' ? `CodeBurn-${version}-arm64.dmg` : `CodeBurn-${version}.dmg`
+    file = arch === 'arm64' ? `KyberDash-${version}-arm64.dmg` : `KyberDash-${version}.dmg`
   } else if (platform === 'win32') {
     return MICROSOFT_STORE_URL
   }
   if (!file) return null
-  return `https://github.com/getagentseal/codeburn/releases/download/${tag}/${file}`
+  return `https://github.com/dpalfery/kyber-weave/releases/download/${tag}/${file}`
 }
 
 /** The Download click target: direct asset when determinable, else the page. */

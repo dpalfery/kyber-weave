@@ -1230,7 +1230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
     /// the budget/quota warning states.
     private static func menubarFlameImage(tint: NSColor?) -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: menubarTitleFontSize, weight: .medium)
-        guard let symbol = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "CodeBurn")?
+        guard let symbol = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "KyberDash")?
             .withSymbolConfiguration(config) else { return nil }
         guard let tint else {
             symbol.isTemplate = true
@@ -1337,9 +1337,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
         button.attributedTitle = composed
         if let shortfall = store.menubarBadgeDeviceShortfall {
-            button.toolTip = "CodeBurn \(menubarPeriod.menubarMetricLabel) · \(shortfall.reachable) of \(shortfall.total) devices reporting"
+            button.toolTip = "KyberDash \(menubarPeriod.menubarMetricLabel) · \(shortfall.reachable) of \(shortfall.total) devices reporting"
         } else {
-            button.toolTip = "CodeBurn \(menubarPeriod.menubarMetricLabel)"
+            button.toolTip = "KyberDash \(menubarPeriod.menubarMetricLabel)"
         }
 
         persistBadgeStatusFile()
@@ -1485,11 +1485,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
         updateItem.target = self
         menu.addItem(updateItem)
 
-        let aboutItem = NSMenuItem(title: "About CodeBurn", action: #selector(openAbout), keyEquivalent: "")
+        let aboutItem = NSMenuItem(title: "About KyberDash", action: #selector(openAbout), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
 
-        let quitItem = NSMenuItem(title: "Quit CodeBurn", action: #selector(quitApp), keyEquivalent: "")
+        let quitItem = NSMenuItem(title: "Quit KyberDash", action: #selector(quitApp), keyEquivalent: "")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -1568,7 +1568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
             backing: .buffered,
             defer: false
         )
-        window.title = "CodeBurn Settings"
+        window.title = "KyberDash Settings"
         window.contentViewController = hosting
         window.center()
         window.isReleasedWhenClosed = false
@@ -1587,7 +1587,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSM
 
     private func codeburnAlertIcon() -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: 32, weight: .medium)
-        guard let symbol = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "CodeBurn")?
+        guard let symbol = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "KyberDash")?
             .withSymbolConfiguration(config) else { return nil }
         let size = NSSize(width: 64, height: 64)
         let img = NSImage(size: size, flipped: false) { rect in

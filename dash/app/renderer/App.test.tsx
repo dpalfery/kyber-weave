@@ -170,7 +170,7 @@ function installDefaultMocks() {
     },
     details: [],
   })
-  mocks.getIdentity.mockResolvedValue({ name: 'CodeBurn Mac', fingerprint: 'AA:BB:CC' })
+  mocks.getIdentity.mockResolvedValue({ name: 'KyberDash Mac', fingerprint: 'AA:BB:CC' })
   mocks.getDevicesScan.mockResolvedValue({ found: [] })
   mocks.getDevices.mockResolvedValue({
     perDevice: [],
@@ -255,7 +255,7 @@ describe('App shortcuts', () => {
 
     render(<App />)
 
-    expect(await screen.findByText('Indexing history · 24/100 files · You can keep using CodeBurn; totals update as indexing completes.')).toBeInTheDocument()
+    expect(await screen.findByText('Indexing history · 24/100 files · You can keep using KyberDash; totals update as indexing completes.')).toBeInTheDocument()
   })
 
   it('never persists the previous period headline under a newly selected period', async () => {

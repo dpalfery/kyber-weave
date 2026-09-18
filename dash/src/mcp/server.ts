@@ -7,6 +7,7 @@ import { buildMenubarPayloadForRange, type PeriodInfo } from '../usage-aggregato
 import type { MenubarPayload } from '../menubar-json.js'
 import { redactProjectNames } from './redact.js'
 import { renderSummaryTable, renderBreakdownTable, renderSavingsTable, type BreakdownBy } from './tables.js'
+import { BRAND, resolveCliName } from '../brand-overlay.js'
 
 const PERIOD = { today: 'today', last_7_days: 'week', last_30_days: '30days', month_to_date: 'month', last_6_months: 'all' } as const
 type McpPeriod = keyof typeof PERIOD
@@ -25,9 +26,9 @@ export type KyberStore = {
 }
 
 const INSTRUCTIONS =
-  'CodeBurn exposes local AI-coding spend data. Use get_usage for spend/usage and breakdowns (fast); ' +
+  `${BRAND.productName} exposes local AI-coding spend data. Use get_usage for spend/usage and breakdowns (fast); ` +
   'use get_savings to find cost reductions (slower — runs a deeper analysis). ' +
-  'KyberDash analyses (context, schema cost, timeline, comparison, quarantine, problems) are exposed as get_context_analysis, get_schema_cost, get_timeline, get_comparison, get_quarantine, get_problems — each returns the same figures as the status contract (menubar JSON) for the same period. ' +
+  `${BRAND.productName} analyses (context, schema cost, timeline, comparison, quarantine, problems) are exposed as get_context_analysis, get_schema_cost, get_timeline, get_comparison, get_quarantine, get_problems — each returns the same figures as the status contract (menubar JSON) for the same period. ` +
   'Project names are pseudonymized unless include_project_names is true. All data is read locally from this machine; last_6_months is the widest ' +
   'window. Numbers reflect the most recent scan and may lag the current session by up to a few minutes.'
 
@@ -54,12 +55,12 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
     return p
   }
 
-  const server = new McpServer({ name: 'codeburn', version: deps.version }, { instructions: INSTRUCTIONS })
+  const server = new McpServer({ name: BRAND.cliName, version: deps.version }, { instructions: INSTRUCTIONS })
 
   server.registerTool(
     'get_usage',
     {
-      title: 'CodeBurn — usage & cost',
+      title: `${BRAND.productName} — usage & cost`,
       description:
         'Show AI coding token spend and usage for a period. Omit `by` for a headline summary; set `by` to break ' +
         'it down by project, model, task, or provider (Claude Code / Cursor / Codex). Fast. Local to this machine.',
@@ -75,7 +76,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         totals: z.object({ costUSD: z.number(), estimatedCostUSD: z.number(), calls: z.number(), sessions: z.number(), cacheHitPercent: z.number(), oneShotRate: z.number().nullable() }),
         breakdown: z.array(z.object({ name: z.string(), costUSD: z.number(), estimatedCostUSD: z.number().optional() })).nullable(),
       },
-      annotations: { title: 'CodeBurn — usage & cost', readOnlyHint: true, openWorldHint: false, idempotentHint: true },
+      annotations: { title: `${BRAND.productName} — usage & cost`, readOnlyHint: true, openWorldHint: false, idempotentHint: true },
     },
     async ({ period, by, limit, include_project_names }) => {
       try {
@@ -96,7 +97,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to read usage — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to read usage — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: { period: 'unknown', empty: true, totals: { costUSD: 0, estimatedCostUSD: 0, calls: 0, sessions: 0, cacheHitPercent: 0, oneShotRate: null }, breakdown: null },
           isError: true,
         }
@@ -107,7 +108,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
   server.registerTool(
     'get_savings',
     {
-      title: 'CodeBurn — savings opportunities',
+      title: `${BRAND.productName} — savings opportunities`,
       description:
         'Find ways to reduce AI coding cost for a period: optimization findings, retry tax (money spent re-doing ' +
         'work), and routing waste (what you would have saved on a cheaper model). Slower than get_usage.',
@@ -118,7 +119,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         retryTaxUSD: z.number(),
         routingWasteUSD: z.number(),
       },
-      annotations: { title: 'CodeBurn — savings opportunities', readOnlyHint: true, openWorldHint: false, idempotentHint: true },
+      annotations: { title: `${BRAND.productName} — savings opportunities`, readOnlyHint: true, openWorldHint: false, idempotentHint: true },
     },
     async ({ period, include_project_names }) => {
       try {
@@ -130,7 +131,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to compute savings — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to compute savings — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: { period: 'unknown', optimize: { findingCount: 0, savingsUSD: 0, topFindings: [] }, retryTaxUSD: 0, routingWasteUSD: 0 },
           isError: true,
         }
@@ -210,7 +211,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to read context — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to read context — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: {
             period: 'unknown',
             totals: { costUSD: 0, estimatedCostUSD: 0, calls: 0, sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheHitPercent: 0, oneShotRate: null },
@@ -274,7 +275,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to read schema cost — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to read schema cost — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: {
             period: 'unknown',
             totals: { costUSD: 0, estimatedCostUSD: 0, calls: 0, sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheHitPercent: 0, oneShotRate: null },
@@ -328,7 +329,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to read timeline — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to read timeline — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: {
             period: 'unknown',
             totals: { costUSD: 0, estimatedCostUSD: 0, calls: 0, sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheHitPercent: 0, oneShotRate: null },
@@ -382,7 +383,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to read comparison — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to read comparison — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: {
             period: 'unknown',
             totals: { costUSD: 0, estimatedCostUSD: 0, calls: 0, sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheHitPercent: 0, oneShotRate: null },
@@ -420,7 +421,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to read quarantine — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to read quarantine — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: { period: 'unknown', quarantine: [] },
           isError: true,
         }
@@ -454,7 +455,7 @@ export function createServer(deps: { version: string; aggregate?: Aggregate; kyb
         }
       } catch (err) {
         return {
-          content: [{ type: 'text' as const, text: `codeburn: failed to read problems — ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: 'text' as const, text: `${resolveCliName()}: failed to read problems — ${err instanceof Error ? err.message : String(err)}` }],
           structuredContent: { period: 'unknown', problems: [] },
           isError: true,
         }

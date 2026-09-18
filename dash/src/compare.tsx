@@ -9,6 +9,7 @@ import { getAllProviders } from './providers/index.js'
 import type { ProjectSummary, DateRange } from './types.js'
 import { patchStdoutForWindows } from './ink-win.js'
 import { recommendModelDefault, type ModelDefaultRecommendation } from './act/model-defaults.js'
+import { resolveCliName } from './brand-overlay.js'
 
 const ORANGE = '#FF8C42'
 const GREEN = '#5BF5A0'
@@ -143,7 +144,7 @@ function ModelSelector({ models, recommendations, onSelect, onBack }: ModelSelec
               </Text>
               <Text color={DIM}>  Current:  {(rec.currentOneShotRate*100).toFixed(1)}% one-shot over {rec.currentEditTurns} edits, {formatCost(rec.currentCostPerEdit)}/edit</Text>
               <Text color={DIM}>  Candidate: {(rec.candidateOneShotRate*100).toFixed(1)}% one-shot over {rec.candidateEditTurns} edits, {formatCost(rec.candidateCostPerEdit)}/edit</Text>
-              <Text>  To apply: <Text color="#00FFFF">codeburn act apply-model {rec.project}</Text></Text>
+              <Text>  To apply: <Text color="#00FFFF">{resolveCliName()} act apply-model {rec.project}</Text></Text>
             </Box>
           ))}
         </Box>
@@ -531,11 +532,11 @@ export async function renderCompare(range: DateRange, provider: string, modelA?:
     const a = findModelStat(models, modelA)
     const b = findModelStat(models, modelB)
     if (!a) {
-      process.stderr.write(`codeburn compare: model not found: "${modelA}".\n`)
+      process.stderr.write(`${resolveCliName()} compare: model not found: "${modelA}".\n`)
       process.exit(1)
     }
     if (!b) {
-      process.stderr.write(`codeburn compare: model not found: "${modelB}".\n`)
+      process.stderr.write(`${resolveCliName()} compare: model not found: "${modelB}".\n`)
       process.exit(1)
     }
     presetModels = [a.model, b.model]

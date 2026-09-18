@@ -16,6 +16,7 @@ import {
 } from './session-cache.js'
 import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from './launcher-homes.js'
+import { BRAND } from './brand-overlay.js'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -459,7 +460,7 @@ export function renderDoctorTable(
   const out: string[] = []
 
   const n = report.providers.length
-  out.push(c.bold('CodeBurn doctor') + c.dim(`   ${n} provider${n === 1 ? '' : 's'}   ${report.generatedAt.slice(0, 19).replace('T', ' ')} UTC`))
+  out.push(c.bold(`${BRAND.productName} doctor`) + c.dim(`   ${n} provider${n === 1 ? '' : 's'}   ${report.generatedAt.slice(0, 19).replace('T', ' ')} UTC`))
   out.push('')
 
   const colorVerdict = (r: DoctorProviderReport): string => {
@@ -549,7 +550,7 @@ export function renderDoctorTable(
     if (r.effectiveDays < CLAUDE_RETENTION_WARN_DAYS) {
       out.push(
         c.yellow(line) + ' ' +
-        `Daily totals survive in CodeBurn's cache, but per-session detail older than that is gone for good. ` +
+        `Daily totals survive in ${BRAND.productName}'s cache, but per-session detail older than that is gone for good. ` +
         `To keep it, set "cleanupPeriodDays": 3650 in ${r.settingsPath}.`,
       )
     } else {

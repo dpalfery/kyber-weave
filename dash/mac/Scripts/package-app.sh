@@ -11,16 +11,12 @@ set -euo pipefail
 VERSION="${1:-dev}"
 ASSET_VERSION="${VERSION#mac-}"
 BUNDLE_VERSION="${ASSET_VERSION#v}"
-BUNDLE_NAME="CodeBurnMenubar.app"
-BUNDLE_ID="org.agentseal.codeburn-menubar"
-EXECUTABLE_NAME="CodeBurnMenubar"
+BUNDLE_NAME="KyberDashMenubar.app"
+BUNDLE_ID="com.kyberweave.kyberdash-menubar"
+EXECUTABLE_NAME="KyberDashMenubar"
 MIN_MACOS="14.0"
 
-repo_root() {
-  git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd)
-}
-
-ROOT=$(repo_root)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 MAC_DIR="${ROOT}/mac"
 DIST_DIR="${MAC_DIR}/.build/dist"
 ICON_SOURCE="${ROOT}/assets/menubar-logo.png"
@@ -81,7 +77,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>CodeBurn Menubar</string>
+    <string>KyberDash Menubar</string>
     <key>CFBundleExecutable</key>
     <string>${EXECUTABLE_NAME}</string>
     <key>CFBundleIconFile</key>
@@ -105,7 +101,7 @@ cat > "${BUNDLE}/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
-    <string>© AgentSeal</string>
+    <string>© KyberWeave</string>
 </dict>
 </plist>
 PLIST
@@ -148,7 +144,7 @@ if otool -L "${BUILT_EXE}" | grep libswift_errno | grep -qv 'weak'; then
 fi
 echo "  minos 14.0 confirmed, no libswift_errno dependency."
 
-ZIP_NAME="CodeBurnMenubar-${ASSET_VERSION}.zip"
+ZIP_NAME="KyberDashMenubar-${ASSET_VERSION}.zip"
 ZIP_PATH="${DIST_DIR}/${ZIP_NAME}"
 echo "▸ Packaging ${ZIP_NAME}..."
 (cd "${DIST_DIR}" && COPYFILE_DISABLE=1 /usr/bin/ditto -c -k --norsrc --keepParent "${BUNDLE_NAME}" "${ZIP_NAME}")

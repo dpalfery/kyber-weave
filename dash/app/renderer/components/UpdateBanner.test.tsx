@@ -39,10 +39,10 @@ describe('UpdateBanner', () => {
     render(<UpdateBanner />)
 
     const banner = await screen.findByRole('status')
-    expect(banner).toHaveTextContent('Update available: CodeBurn 0.9.17')
+    expect(banner).toHaveTextContent('Update available: KyberDash 0.9.17')
 
     fireEvent.click(screen.getByRole('button', { name: 'Download' }))
-    expect(mocks.openExternal).toHaveBeenCalledWith('https://github.com/getagentseal/codeburn/releases/tag/desktop-v0.9.17')
+    expect(mocks.openExternal).toHaveBeenCalledWith('https://github.com/dpalfery/kyber-weave/releases/tag/desktop-v0.9.17')
   })
 
   it('does not render when the running version is current', async () => {
@@ -83,6 +83,6 @@ describe('UpdateBanner', () => {
     render(<UpdateBanner />)
 
     const banner = await screen.findByRole('status')
-    expect(banner).toHaveTextContent('Update available: CodeBurn 0.9.18')
+    expect(banner).toHaveTextContent('Update available: KyberDash 0.9.18')
   })
 })

@@ -161,7 +161,7 @@ export function SharingPane() {
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
             }}>
-              This setup enables automatic sync of your CodeBurn session data with your organization's team dashboard. Your data will be shared according to the cadence you select. By accepting, you agree to automatic sharing.
+              This setup enables automatic sync of your KyberDash session data with your organization's team dashboard. Your data will be shared according to the cadence you select. By accepting, you agree to automatic sharing.
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <button className="btnp" onClick={() => void handleCancel()} disabled={accepting}>

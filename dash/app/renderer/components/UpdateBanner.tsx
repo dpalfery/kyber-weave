@@ -31,7 +31,7 @@ export function UpdateBanner() {
   return (
     <div role="status" className="update-banner">
       <span>
-        Update available: CodeBurn {status.latestVersion} ·{' '}
+        Update available: KyberDash {status.latestVersion} ·{' '}
         <button type="button" className="set-text-button" onClick={() => { void codeburn.openExternal(updateDownloadUrl(tag)) }}>Download</button>
       </span>
       <button type="button" className="set-text-button" onClick={dismiss}>Dismiss</button>

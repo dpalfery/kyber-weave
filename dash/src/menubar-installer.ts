@@ -13,25 +13,26 @@ import {
   buildPersistentCodeburnLookupPath,
   resolvePersistentCodeburnPathFromWhichOutput,
 } from './persistent-codeburn.js'
+import { BRAND } from './brand-overlay.js'
 
 /// Public GitHub repo that hosts macOS release builds. Normal installs use direct
 /// versioned release asset URLs; the API scan is only a fallback for missing assets.
-const RELEASE_API = 'https://api.github.com/repos/getagentseal/codeburn/releases?per_page=20'
-const RELEASE_DOWNLOAD_BASE = 'https://github.com/getagentseal/codeburn/releases/download'
-const APP_BUNDLE_NAME = 'CodeBurnMenubar.app'
-export const EXPECTED_BUNDLE_ID = 'org.agentseal.codeburn-menubar'
-const VERSIONED_ASSET_PATTERN = /^CodeBurnMenubar-v.+\.zip$/
-const APP_PROCESS_NAME = 'CodeBurnMenubar'
+const RELEASE_API = 'https://api.github.com/repos/dpalfery/kyber-weave/releases?per_page=20'
+const RELEASE_DOWNLOAD_BASE = 'https://github.com/dpalfery/kyber-weave/releases/download'
+export const APP_BUNDLE_NAME = 'KyberDashMenubar.app'
+export const EXPECTED_BUNDLE_ID = 'com.kyberweave.kyberdash-menubar'
+const VERSIONED_ASSET_PATTERN = /^(KyberDashMenubar|CodeBurnMenubar)-v.+\.zip$/
+export const APP_PROCESS_NAME = 'KyberDashMenubar'
 const SUPPORTED_OS = 'darwin'
 /// The Windows tray app (windows/) ships as an .msi under its own `windows-v*` tag. GitHub
 /// rewrites the spaces in the bundle name to dots when it stores the asset, so both the asset
-/// name and its download URL carry `CodeBurn.Menubar_...`.
-const WINDOWS_PRODUCT_NAME = 'CodeBurn Menubar'
-const WINDOWS_ASSET_PATTERN = /^CodeBurn\.Menubar_.+_x64_en-US\.msi$/
+/// name and its download URL carry `KyberDash.Menubar_...`.
+const WINDOWS_PRODUCT_NAME = 'KyberDash Menubar'
+const WINDOWS_ASSET_PATTERN = /^(KyberDash|CodeBurn)\.Menubar_.+_x64_en-US\.msi$/
 const MIN_MACOS_MAJOR = 14
 const PERSISTED_CLI_PATH = join(homedir(), 'Library', 'Application Support', 'CodeBurn', 'codeburn-cli-path.v1')
 const PERSISTENT_CLI_REQUIRED_MESSAGE =
-  'The menubar app needs a persistent codeburn command. Install CodeBurn globally first: npm install -g codeburn'
+  `The menubar app needs a persistent ${BRAND.cliName} command. Install ${BRAND.productName} globally first: npm install -g ${BRAND.cliName}`
 
 export type InstallResult = { installedPath: string; launched: boolean }
 
@@ -61,21 +62,21 @@ export type ReleaseSpec = {
 const MAC_RELEASE: ReleaseSpec = {
   tagPrefix: 'mac-v',
   assetPattern: VERSIONED_ASSET_PATTERN,
-  assetName: version => `CodeBurnMenubar-v${version}.zip`,
+  assetName: version => `KyberDashMenubar-v${version}.zip`,
   missingAsset: tag =>
     `No ${APP_BUNDLE_NAME} versioned zip found in release ${tag}. ` +
-    `Check https://github.com/getagentseal/codeburn/releases.`,
-  noRelease: 'No mac-v* release with a CodeBurnMenubar-v*.zip and checksum was found.',
+    `Check https://github.com/dpalfery/kyber-weave/releases.`,
+  noRelease: 'No mac-v* release with a KyberDashMenubar-v*.zip and checksum was found.',
 }
 
 export const WINDOWS_RELEASE: ReleaseSpec = {
   tagPrefix: 'windows-v',
   assetPattern: WINDOWS_ASSET_PATTERN,
-  assetName: version => `CodeBurn.Menubar_${version}_x64_en-US.msi`,
+  assetName: version => `KyberDash.Menubar_${version}_x64_en-US.msi`,
   missingAsset: tag =>
     `No ${WINDOWS_PRODUCT_NAME} .msi found in release ${tag}. ` +
-    `Check https://github.com/getagentseal/codeburn/releases.`,
-  noRelease: 'No windows-v* release with a CodeBurn.Menubar_*.msi and checksum was found.',
+    `Check https://github.com/dpalfery/kyber-weave/releases.`,
+  noRelease: 'No windows-v* release with a KyberDash.Menubar_*.msi and checksum was found.',
 }
 type ProxyEnv = Partial<Record<'HTTPS_PROXY' | 'https_proxy' | 'HTTP_PROXY' | 'http_proxy' | 'NO_PROXY' | 'no_proxy', string>>
 type FetchOptions = Parameters<typeof undiciFetch>[1]
@@ -172,7 +173,7 @@ function normalizeCliVersion(cliVersion: string): string {
 
 export function resolveVersionedMenubarReleaseAssets(cliVersion: string, spec: ReleaseSpec = MAC_RELEASE): ResolvedAssets {
   const version = normalizeCliVersion(cliVersion)
-  if (!version) throw new Error('Cannot resolve CodeBurn Menubar release without a CLI version.')
+  if (!version) throw new Error('Cannot resolve KyberDash Menubar release without a CLI version.')
 
   const tagName = `${spec.tagPrefix}${version}`
   const zipName = spec.assetName(version)
@@ -416,9 +417,14 @@ async function stageMenubarApp(assets: ResolvedAssets, stagingDir: string, hooks
   log('Unpacking...')
   await (hooks.unpack ?? defaultUnpack)(archivePath, stagingDir)
 
-  const unpackedApp = join(stagingDir, APP_BUNDLE_NAME)
+  let unpackedApp = join(stagingDir, APP_BUNDLE_NAME)
   if (!(await exists(unpackedApp))) {
-    throw new Error(`Archive did not contain ${APP_BUNDLE_NAME}.`)
+    const legacyApp = join(stagingDir, 'CodeBurnMenubar.app')
+    if (await exists(legacyApp)) {
+      unpackedApp = legacyApp
+    } else {
+      throw new Error(`Archive did not contain ${APP_BUNDLE_NAME}.`)
+    }
   }
 
   log('Verifying app bundle...')
@@ -499,8 +505,8 @@ async function verifyBundleIdentity(appPath: string, hooks: MacInstallHooks = {}
   const readBundleID = hooks.readBundleIdentifier ?? defaultReadBundleIdentifier
   const verifySignature = hooks.verifySignature ?? defaultVerifySignature
   const bundleID = await readBundleID(appPath)
-  if (bundleID !== EXPECTED_BUNDLE_ID) {
-    throw new Error(`Unexpected menubar bundle id ${bundleID}; expected ${EXPECTED_BUNDLE_ID}.`)
+  if (bundleID !== EXPECTED_BUNDLE_ID && bundleID !== 'org.agentseal.codeburn-menubar') {
+    throw new Error(`Unexpected menubar bundle id "${bundleID}"; expected ${EXPECTED_BUNDLE_ID}.`)
   }
   await verifySignature(appPath)
 }
@@ -521,23 +527,35 @@ async function defaultVerifySignature(appPath: string): Promise<void> {
 }
 
 async function resolvePersistentCodeburnPath(): Promise<string> {
-  let output = ''
-  try {
-    output = await captureCommand('/usr/bin/env', [
-      `PATH=${buildPersistentCodeburnLookupPath()}`,
-      'which',
-      '-a',
-      'codeburn',
-    ])
-  } catch {
-    throw new Error(PERSISTENT_CLI_REQUIRED_MESSAGE)
+  for (const name of [BRAND.cliName, 'codeburn']) {
+    try {
+      const output = await captureCommand('/usr/bin/env', [
+        `PATH=${buildPersistentCodeburnLookupPath()}`,
+        'which',
+        '-a',
+        name,
+      ])
+      if (output.trim()) {
+        try {
+          return resolvePersistentCodeburnPathFromWhichOutput(output, PERSISTENT_CLI_REQUIRED_MESSAGE)
+        } catch {
+          // try next name
+        }
+      }
+    } catch {
+      // try next name
+    }
   }
-
-  return resolvePersistentCodeburnPathFromWhichOutput(output, PERSISTENT_CLI_REQUIRED_MESSAGE)
+  throw new Error(PERSISTENT_CLI_REQUIRED_MESSAGE)
 }
 
 async function persistCodeburnPath(): Promise<void> {
   const cliPath = await resolvePersistentCodeburnPath()
+  const kyberDashDir = join(homedir(), 'Library', 'Application Support', 'KyberDash')
+  await mkdir(kyberDashDir, { recursive: true, mode: 0o700 })
+  const newPath = join(kyberDashDir, 'kyberdash-cli-path.v1')
+  await writeFile(newPath, `${cliPath}\n`, { mode: 0o600 })
+  await chmod(newPath, 0o600)
   await mkdir(join(homedir(), 'Library', 'Application Support', 'CodeBurn'), { recursive: true, mode: 0o700 })
   await writeFile(PERSISTED_CLI_PATH, `${cliPath}\n`, { mode: 0o600 })
   await chmod(PERSISTED_CLI_PATH, 0o600)
@@ -606,13 +624,15 @@ export function parseInstalledWindowsMenubar(regOutput: string): InstalledWindow
       const match = /^\s+(.+?)\s{4}REG_\w+\s{4}(.*)$/.exec(line)
       if (match) values.set(match[1]!.trim(), match[2]!.trim())
     }
-    if (values.get('DisplayName') !== WINDOWS_PRODUCT_NAME) continue
+    const displayName = values.get('DisplayName')
+    if (displayName !== WINDOWS_PRODUCT_NAME && displayName !== 'CodeBurn Menubar') continue
     const location = values.get('InstallLocation')
     // DisplayIcon is `<exe>[,<index>]` and points at the installed binary when there is no
     // InstallLocation to join onto.
     const icon = values.get('DisplayIcon')?.split(',')[0]?.trim()
+    const exeName = displayName === 'CodeBurn Menubar' ? 'CodeBurn Menubar' : WINDOWS_PRODUCT_NAME
     const exePath = location
-      ? `${location.replace(/[\\/]+$/, '')}\\${WINDOWS_PRODUCT_NAME}.exe`
+      ? `${location.replace(/[\\/]+$/, '')}\\${exeName}.exe`
       : icon
     if (!exePath) continue
     return { version: values.get('DisplayVersion') ?? '', exePath }
@@ -669,16 +689,16 @@ async function installWindowsMenubarApp(options: InstallOptions): Promise<Instal
   const installed = parseInstalledWindowsMenubar(await queryRegistry())
   if (installed && !options.force && (!cliVersion || installed.version === cliVersion)) {
     launch(installed.exePath)
-    log('Launched CodeBurn Menubar.')
+    log('Launched KyberDash Menubar.')
     return { installedPath: installed.exePath, launched: true }
   }
 
   let assets: ResolvedAssets
   if (cliVersion) {
-    log(`Resolving CodeBurn Menubar v${cliVersion}...`)
+    log(`Resolving KyberDash Menubar v${cliVersion}...`)
     assets = resolveVersionedMenubarReleaseAssets(cliVersion, WINDOWS_RELEASE)
   } else {
-    log('Looking up the latest CodeBurn Menubar release...')
+    log('Looking up the latest KyberDash Menubar release...')
     assets = await fetchLatestReleaseAssets(WINDOWS_RELEASE, hooks.apiFetch)
   }
 
@@ -692,7 +712,7 @@ async function installWindowsMenubarApp(options: InstallOptions): Promise<Instal
       msiPath = await stageWindowsInstaller(assets, stagingDir, hooks, log)
     } catch (err) {
       if (!cliVersion || !isMissingDirectAssetError(err)) throw err
-      log(`CodeBurn Menubar v${cliVersion} assets were not found. Looking up the latest CodeBurn Menubar release...`)
+      log(`KyberDash Menubar v${cliVersion} assets were not found. Looking up the latest KyberDash Menubar release...`)
       assets = await fetchLatestReleaseAssets(WINDOWS_RELEASE, hooks.apiFetch)
       msiPath = await stageWindowsInstaller(assets, stagingDir, hooks, log)
     }
@@ -711,10 +731,10 @@ async function installWindowsMenubarApp(options: InstallOptions): Promise<Instal
 
     const nowInstalled = parseInstalledWindowsMenubar(await queryRegistry())
     if (!nowInstalled) {
-      throw new Error('CodeBurn Menubar installed, but it was not found in the uninstall registry; start it from the Start menu.')
+      throw new Error('KyberDash Menubar installed, but it was not found in the uninstall registry; start it from the Start menu.')
     }
     launch(nowInstalled.exePath)
-    log('Launched CodeBurn Menubar.')
+    log('Launched KyberDash Menubar.')
     return { installedPath: nowInstalled.exePath, launched: true }
   } finally {
     if (!hooks.stagingDir) await rm(stagingDir, { recursive: true, force: true })
@@ -752,10 +772,10 @@ export async function installMacMenubarApp(options: InstallOptions = {}): Promis
   const cliVersion = options.cliVersion ? normalizeCliVersion(options.cliVersion) : ''
   let assets: ResolvedAssets
   if (cliVersion) {
-    log(`Resolving CodeBurn Menubar v${cliVersion}...`)
+    log(`Resolving KyberDash Menubar v${cliVersion}...`)
     assets = resolveVersionedMenubarReleaseAssets(cliVersion)
   } else {
-    log('Looking up the latest CodeBurn Menubar release...')
+    log('Looking up the latest KyberDash Menubar release...')
     assets = await fetchLatestReleaseAssets(MAC_RELEASE, hooks.apiFetch)
   }
 
@@ -766,7 +786,7 @@ export async function installMacMenubarApp(options: InstallOptions = {}): Promis
       unpackedApp = await stageMenubarApp(assets, stagingDir, hooks)
     } catch (err) {
       if (!cliVersion || !isMissingDirectAssetError(err)) throw err
-      log(`CodeBurn Menubar v${cliVersion} assets were not found. Looking up the latest CodeBurn Menubar release...`)
+      log(`KyberDash Menubar v${cliVersion} assets were not found. Looking up the latest KyberDash Menubar release...`)
       assets = await fetchLatestReleaseAssets(MAC_RELEASE, hooks.apiFetch)
       unpackedApp = await stageMenubarApp(assets, stagingDir, hooks)
     }
@@ -786,7 +806,7 @@ export async function installMacMenubarApp(options: InstallOptions = {}): Promis
     // below this point must NOT reach rename, or R13.4 is violated.
     await rename(unpackedApp, targetPath)
 
-    log('Launching CodeBurn Menubar...')
+    log('Launching KyberDash Menubar...')
     await launch(targetPath)
     return { installedPath: targetPath, launched: true }
   } finally {

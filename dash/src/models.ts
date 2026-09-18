@@ -6,6 +6,7 @@ import { getCodeburnCacheDir } from './cache-dir.js'
 import snapshotData from './data/litellm-snapshot.json' with { type: 'json' }
 import fallbackData from './data/pricing-fallback.json' with { type: 'json' }
 import { fetchWithTimeout } from './fetch-utils.js'
+import { resolveCliName } from './brand-overlay.js'
 
 export type ModelCosts = {
   inputCostPerToken: number
@@ -761,7 +762,7 @@ export function isFlatRateModel(model: string): boolean {
 /// same two hatches.
 export function unpricedModelHint(model = '<model>'): string {
   const safe = model.replace(/[\x00-\x1F\x7F-\x9F]/g, '?').slice(0, 200)
-  return `If a model is billed per token, map it with: codeburn model-alias "${safe}" <known-model>. If $0 is correct (subscription / flat-rate): codeburn model-flat-rate "${safe}".`
+  return `If a model is billed per token, map it with: ${resolveCliName()} model-alias "${safe}" <known-model>. If $0 is correct (subscription / flat-rate): ${resolveCliName()} model-flat-rate "${safe}".`
 }
 
 /// Stable hash of the model-alias map, for the same staleness class as the
@@ -1200,8 +1201,8 @@ export function calculateCost(
       // could embed terminal escape sequences here.
       const safeName = sanitizeModelForDisplay(model)
       process.stderr.write(
-        `codeburn: no pricing data for model "${safeName}" — costs for this model will show $0. ` +
-        `${unpricedModelHint(safeName)} Or track local-model savings with: codeburn model-savings "${safeName}" <baseline-model>, or update with: npx codeburn@latest.\n`,
+        `${resolveCliName()}: no pricing data for model "${safeName}" — costs for this model will show $0. ` +
+        `${unpricedModelHint(safeName)} Or track local-model savings with: ${resolveCliName()} model-savings "${safeName}" <baseline-model>, or update with: npx ${resolveCliName()}@latest.\n`,
       )
     }
     return 0

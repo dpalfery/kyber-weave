@@ -43,7 +43,7 @@ export function AboutModal({ socials, onClose }: { socials: SocialLink[]; onClos
         <div className="about-modal-grid">
           <div className="about-modal-hero">
             <span className="about-modal-logo" aria-hidden="true"><FlameMark size={52} /></span>
-            <div className="about-modal-name" id="about-modal-title">CodeBurn</div>
+            <div className="about-modal-name" id="about-modal-title">KyberDash</div>
             <div className="about-modal-version">v{version}</div>
             <div className="about-modal-build">{BUILD_STAMP}</div>
             <div className="about-modal-tagline">Know where every token goes, across every AI coding tool.</div>
@@ -96,7 +96,7 @@ export function AboutModal({ socials, onClose }: { socials: SocialLink[]; onClos
             </div>
           </div>
         </div>
-        <div className="about-modal-credit">Developed by Resham Joshi · github.com/iamtoruk</div>
+        <div className="about-modal-credit">© 2026 KyberWeave · MIT License</div>
       </div>
     </div>
   )

@@ -9,7 +9,8 @@ describe('KyberDash brand overlay', () => {
   })
 
   it('follows the installed binary basename', () => {
-    expect(resolveCliName('/usr/local/bin/codeburn')).toBe('codeburn')
+    expect(resolveCliName('/usr/local/bin/kyber-weave')).toBe('kyber-weave')
+    expect(resolveCliName('/usr/local/bin/codeburn')).toBe('kyberdash')
   })
 
   it('rewrites upstream HTML chrome without touching the bootstrap marker', () => {

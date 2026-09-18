@@ -1,13 +1,15 @@
 import { constants } from 'fs'
 import { access } from 'fs/promises'
 import { delimiter, join } from 'path'
+import { homedir } from 'os'
+import { BRAND } from './brand-overlay.js'
 
 export const PERSISTENT_CLI_REQUIRED_MESSAGE =
-  'CodeBurn needs a persistent codeburn command. Install CodeBurn globally first: npm install -g codeburn'
+  `${BRAND.productName} needs a persistent ${BRAND.cliName} command. Install ${BRAND.productName} globally first: npm install -g ${BRAND.cliName}`
 
 const DEFAULT_CLI_LOOKUP_PATHS = process.platform === 'win32'
   ? []
-  : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
+  : [join(homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
 
 export function buildPersistentCodeburnLookupPath(existingPath = process.env.PATH ?? ''): string {
   const parts = existingPath.split(delimiter).filter(Boolean)
@@ -22,8 +24,8 @@ export function isTransientNpxPath(path: string): boolean {
 }
 
 function codeburnExecutableNames(): string[] {
-  if (process.platform !== 'win32') return ['codeburn']
-  return ['codeburn.cmd', 'codeburn.exe', 'codeburn.bat', 'codeburn']
+  if (process.platform !== 'win32') return ['kyberdash', 'codeburn']
+  return ['kyberdash.cmd', 'kyberdash.exe', 'kyberdash.bat', 'kyberdash', 'codeburn.cmd', 'codeburn.exe', 'codeburn.bat', 'codeburn']
 }
 
 async function executableExists(path: string): Promise<boolean> {

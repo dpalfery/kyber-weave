@@ -1357,13 +1357,13 @@ describe('unpricedModelHint', () => {
   it('never tells the user to alias unconditionally', () => {
     expect(unpricedModelHint()).toContain('If a model is billed per token')
     expect(unpricedModelHint()).toContain('model-flat-rate')
-    expect(unpricedModelHint()).not.toContain('Fix: codeburn model-alias')
+    expect(unpricedModelHint()).not.toMatch(/Fix: (codeburn|kyberdash) model-alias/)
   })
 
   it('names both hatches for a concrete unknown SKU', () => {
     const hint = unpricedModelHint('zz-new-subscription-pass-sku')
-    expect(hint).toContain('codeburn model-alias "zz-new-subscription-pass-sku"')
-    expect(hint).toContain('codeburn model-flat-rate "zz-new-subscription-pass-sku"')
+    expect(hint).toMatch(/(codeburn|kyberdash) model-alias "zz-new-subscription-pass-sku"/)
+    expect(hint).toMatch(/(codeburn|kyberdash) model-flat-rate "zz-new-subscription-pass-sku"/)
     expect(hint).toContain('If a model is billed per token')
     expect(hint).toContain('If $0 is correct')
   })

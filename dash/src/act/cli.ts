@@ -1,4 +1,5 @@
 import type { Command } from 'commander'
+import { resolveCliName } from '../brand-overlay.js'
 import { renderTable } from '../text-table.js'
 import { defaultActionsDir, readRecords, shortId } from './journal.js'
 import { DriftError, undoAction } from './undo.js'
@@ -11,7 +12,7 @@ function formatWhen(at: string): string {
 export function registerActCommands(program: Command): void {
   const act = program
     .command('act')
-    .description('Review and undo changes codeburn has applied')
+    .description(`Review and undo changes ${resolveCliName()} has applied`)
 
   act
     .command('list')
@@ -95,7 +96,7 @@ export function registerActCommands(program: Command): void {
 
         console.log(`Applied default model ${chalk.green(recommendation.candidateModel)} for ${project}`)
         console.log(chalk.dim(`  Evidence: ${recommendation.candidateEditTurns} turns, ${(recommendation.candidateOneShotRate * 100).toFixed(1)}% one-shot, $${recommendation.candidateCostPerEdit.toFixed(3)}/edit`))
-        console.log(chalk.dim(`  Undo anytime: codeburn act undo ${shortId(record.id)}`))
+        console.log(chalk.dim(`  Undo anytime: ${resolveCliName()} act undo ${shortId(record.id)}`))
         console.log(chalk.dim(`  Per-session override: --model <name>`))
       } catch (err) {
         console.error(err instanceof Error ? err.message : String(err))

@@ -14,6 +14,7 @@ import { getClaudeConfigDirs, getDesktopSessionsDirs } from './providers/claude.
 import { kimicodeLineageForSource } from './providers/kimicode.js'
 import { isSqliteBusyError } from './sqlite.js'
 import { getCodeburnCacheDir } from './cache-dir.js'
+import { resolveCliName } from './brand-overlay.js'
 import {
   isHermesLedgerPublicationError,
   isHermesObservationKey,
@@ -2064,7 +2065,7 @@ async function scanProjectDirs(
   const pendingBytes = changedFiles.reduce((n, f) => f.append ? n : n + f.info.fp.sizeBytes, 0)
   const decision = decideParseWorkers({ files: fullReparsePaths.length, bytes: pendingBytes })
   if (process.env['CODEBURN_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: claude parse workers=${decision.workers} (${decision.reason})\n`)
+    process.stderr.write(`${resolveCliName()}: claude parse workers=${decision.workers} (${decision.reason})\n`)
   }
   // A pool that cannot even start (worker entry missing from an odd packaging,
   // thread limit reached) must degrade to the serial parse, not fail the run.
@@ -2073,7 +2074,7 @@ async function scanProjectDirs(
     try {
       pool = new ParseWorkerPool(decision.workers)
     } catch (err) {
-      process.stderr.write(`codeburn: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
+      process.stderr.write(`${resolveCliName()}: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
     }
   }
   const offThread = pool
@@ -2302,7 +2303,7 @@ async function scanProjectDirs(
     await pool?.close()
   }
   if (pool && process.env['CODEBURN_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: claude parse workers done, ${workerDiscards}/${fullReparsePaths.length} results re-parsed in-process on id overlap\n`)
+    process.stderr.write(`${resolveCliName()}: claude parse workers done, ${workerDiscards}/${fullReparsePaths.length} results re-parsed in-process on id overlap\n`)
   }
   parseProgress.finish()
 
@@ -3086,7 +3087,7 @@ function warnProviderReadFailureOnce(providerName: string, err: unknown): void {
   warnedProviderReadFailures.add(key)
   if (isSqliteBusyError(err)) {
     process.stderr.write(
-      `codeburn: skipped ${providerName} data because its SQLite database is temporarily locked; will retry on the next refresh.\n`
+      `${resolveCliName()}: skipped ${providerName} data because its SQLite database is temporarily locked; will retry on the next refresh.\n`
     )
   }
 }
@@ -3107,7 +3108,7 @@ function warnProviderParseFailure(providerName: string, sourcePath: string, err:
     ? ` (further ${providerName} parse failures this run are suppressed)`
     : ''
   process.stderr.write(
-    `codeburn: skipped ${providerName} session that failed to parse: ${sourcePath} (${msg})${tail}\n`
+    `${resolveCliName()}: skipped ${providerName} session that failed to parse: ${sourcePath} (${msg})${tail}\n`
   )
 }
 
@@ -3219,7 +3220,7 @@ export function createScanProgress(label: string, total: number) {
       const now = Date.now()
       if (done !== total && now - lastWrite < 100) return
       lastWrite = now
-      process.stderr.write(`\rcodeburn: ${label} ${done}/${total}…`)
+      process.stderr.write(`\r${resolveCliName()}: ${label} ${done}/${total}…`)
     },
     finish(): void {
       if (!show) return
@@ -3454,14 +3455,14 @@ export async function parseProviderSources(
     ? decideParseWorkers({ files: workerJobs.length, bytes: pendingBytes })
     : { workers: 0, reason: 'no full parses pending' }
   if (providerName === 'codex' && !readOnly && process.env['CODEBURN_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: codex parse workers=${decision.workers} (${decision.reason})\n`)
+    process.stderr.write(`${resolveCliName()}: codex parse workers=${decision.workers} (${decision.reason})\n`)
   }
   let pool: ParseWorkerPool | null = null
   if (decision.workers > 0) {
     try {
       pool = new ParseWorkerPool(decision.workers)
     } catch (err) {
-      process.stderr.write(`codeburn: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
+      process.stderr.write(`${resolveCliName()}: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
     }
   }
   const offThread = pool ? parseFilesInOrder<CodexFullParse & { keys: string[]; path: string }>(pool, workerJobs) : null
@@ -3635,7 +3636,7 @@ export async function parseProviderSources(
   } finally {
     await pool?.close()
     if (pool && process.env['CODEBURN_VERBOSE'] === '1') {
-      process.stderr.write(`codeburn: codex parse workers done, ${workerDiscards}/${workerJobs.length} results re-parsed in-process on id overlap\n`)
+      process.stderr.write(`${resolveCliName()}: codex parse workers done, ${workerDiscards}/${workerJobs.length} results re-parsed in-process on id overlap\n`)
     }
     if (didParse && providerName === 'codex') await flushCodexCache()
     if (didParse && providerName === 'antigravity') {
@@ -5250,7 +5251,7 @@ async function parseAllSessionsInCacheScope(dateRange?: DateRange, providerFilte
   let diskCache = await loadCache(loadScope)
   await cleanupOrphanedTempFiles()
   if (process.env['CODEBURN_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: startup timing cache-load=${(performance.now() - cacheLoadStarted).toFixed(1)}ms complete=${isCacheComplete(diskCache)}\n`)
+    process.stderr.write(`${resolveCliName()}: startup timing cache-load=${(performance.now() - cacheLoadStarted).toFixed(1)}ms complete=${isCacheComplete(diskCache)}\n`)
   }
 
   // Cold-hydration coordination (advisory, cross-process). Engages whenever the
@@ -5299,7 +5300,7 @@ async function parseAllSessionsInCacheScope(dateRange?: DateRange, providerFilte
     stopProgressKeepalive()
   }
   if (process.env['CODEBURN_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: startup timing refresh-lock=${(performance.now() - refreshWaitStarted).toFixed(1)}ms outcome=${refresh.outcome}\n`)
+    process.stderr.write(`${resolveCliName()}: startup timing refresh-lock=${(performance.now() - refreshWaitStarted).toFixed(1)}ms outcome=${refresh.outcome}\n`)
   }
   if (refresh.outcome === 'timed-out' || refresh.outcome === 'unavailable') {
     return runParse(key, priorSnapshot, dateRange, providerFilter, { readOnly: true, burstSig, parseStartedAt })
@@ -5363,7 +5364,7 @@ async function runParseInner(
   const traceTiming = (stage: string, extra = ''): void => {
     if (process.env['CODEBURN_VERBOSE'] !== '1') return
     const now = performance.now()
-    process.stderr.write(`codeburn: startup timing ${stage}=${(now - timingPrevious).toFixed(1)}ms total=${(now - timingStarted).toFixed(1)}ms${extra}\n`)
+    process.stderr.write(`${resolveCliName()}: startup timing ${stage}=${(now - timingPrevious).toFixed(1)}ms total=${(now - timingStarted).toFixed(1)}ms${extra}\n`)
     timingPrevious = now
   }
   readOnlyServedStale = false
@@ -5433,7 +5434,7 @@ async function runParseInner(
       if (claudeSources.length > 0) emitScanProgress({ kind: 'provider', provider: 'claude', state: 'done', files: claudeSources.length })
     } catch (err) {
       if (!isPermissionError(err)) throw err
-      process.stderr.write(`codeburn: skipped claude data (permission denied; grant Full Disk Access to include it)\n`)
+      process.stderr.write(`${resolveCliName()}: skipped claude data (permission denied; grant Full Disk Access to include it)\n`)
       emitScanProgress({ kind: 'provider', provider: 'claude', state: 'skipped' })
     }
   }
@@ -5450,7 +5451,7 @@ async function runParseInner(
       // A permission-locked provider skips-and-continues; any other error is a
       // real bug and still aborts (per-file/DB-lock cases are handled deeper).
       if (!isPermissionError(err)) throw err
-      process.stderr.write(`codeburn: skipped ${providerName} data (permission denied; grant Full Disk Access to include it)\n`)
+      process.stderr.write(`${resolveCliName()}: skipped ${providerName} data (permission denied; grant Full Disk Access to include it)\n`)
       emitScanProgress({ kind: 'provider', provider: providerName, state: 'skipped' })
     }
     await saveProgress()

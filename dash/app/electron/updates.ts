@@ -13,7 +13,7 @@
 // token — so the request reveals nothing about the user or install. GitHub only
 // requires *some* User-Agent, which the default satisfies. See fetchReleases.
 
-const RELEASES_URL = 'https://api.github.com/repos/getagentseal/codeburn/releases?per_page=15'
+const RELEASES_URL = 'https://api.github.com/repos/dpalfery/kyber-weave/releases?per_page=15'
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 const FETCH_TIMEOUT_MS = 15_000
 // Desktop releases are tagged `desktop-v<major>.<minor>.<patch>` (app/DISTRIBUTION.md).

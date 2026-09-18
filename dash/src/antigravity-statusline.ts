@@ -12,6 +12,7 @@ import {
   buildPersistentCodeburnLookupPath,
   resolvePersistentCodeburnPathFromPath,
 } from './persistent-codeburn.js'
+import { BRAND, resolveCliName } from './brand-overlay.js'
 
 export { buildPersistentCodeburnLookupPath as buildAntigravityHookLookupPath } from './persistent-codeburn.js'
 export { resolvePersistentCodeburnPathFromPath } from './persistent-codeburn.js'
@@ -27,7 +28,7 @@ type Settings = Record<string, unknown> & {
 type StatusLineSettings = NonNullable<Settings['statusLine']>
 
 const PERSISTENT_CLI_REQUIRED_MESSAGE =
-  'The Antigravity hook needs a persistent codeburn command. Install CodeBurn globally first: npm install -g codeburn'
+  `The Antigravity hook needs a persistent ${resolveCliName()} command. Install ${BRAND.productName} globally first: npm install -g ${resolveCliName()}`
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

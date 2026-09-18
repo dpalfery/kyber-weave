@@ -46,7 +46,7 @@ export function Onboarding({ defaultEnabled, onDone }: { defaultEnabled: boolean
   if (typeof document === 'undefined') return null
 
   return createPortal(
-    <div className={motionClass('onboard', 'onboard-in')} role="dialog" aria-label="Welcome to CodeBurn">
+    <div className={motionClass('onboard', 'onboard-in')} role="dialog" aria-label="Welcome to KyberDash">
       <div className="onboard-card">
         <div className="onboard-glyph" aria-hidden>
           {isConsent
@@ -56,7 +56,7 @@ export function Onboarding({ defaultEnabled, onDone }: { defaultEnabled: boolean
 
         {isConsent ? (
           <>
-            <h2 className="onboard-title">Help improve CodeBurn</h2>
+            <h2 className="onboard-title">Help improve KyberDash</h2>
             <p className="onboard-body">
               Share anonymous usage statistics: model and provider mix, task success rates, performance and errors.
               Never your prompts, code, project names or anything that identifies you.

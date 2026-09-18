@@ -90,13 +90,13 @@ describe('resolveMenubarReleaseAssets', () => {
     const resolved = resolveVersionedMenubarReleaseAssets('0.9.15')
 
     expect(resolved.release.tag_name).toBe('mac-v0.9.15')
-    expect(resolved.zip.name).toBe('CodeBurnMenubar-v0.9.15.zip')
+    expect(resolved.zip.name).toBe('KyberDashMenubar-v0.9.15.zip')
     expect(resolved.zip.browser_download_url).toBe(
-      'https://github.com/getagentseal/codeburn/releases/download/mac-v0.9.15/CodeBurnMenubar-v0.9.15.zip'
+      'https://github.com/dpalfery/kyber-weave/releases/download/mac-v0.9.15/KyberDashMenubar-v0.9.15.zip'
     )
-    expect(resolved.checksum.name).toBe('CodeBurnMenubar-v0.9.15.zip.sha256')
+    expect(resolved.checksum.name).toBe('KyberDashMenubar-v0.9.15.zip.sha256')
     expect(resolved.checksum.browser_download_url).toBe(
-      'https://github.com/getagentseal/codeburn/releases/download/mac-v0.9.15/CodeBurnMenubar-v0.9.15.zip.sha256'
+      'https://github.com/dpalfery/kyber-weave/releases/download/mac-v0.9.15/KyberDashMenubar-v0.9.15.zip.sha256'
     )
   })
 
@@ -104,7 +104,7 @@ describe('resolveMenubarReleaseAssets', () => {
     const resolved = resolveVersionedMenubarReleaseAssets('v0.9.15')
 
     expect(resolved.release.tag_name).toBe('mac-v0.9.15')
-    expect(resolved.zip.name).toBe('CodeBurnMenubar-v0.9.15.zip')
+    expect(resolved.zip.name).toBe('KyberDashMenubar-v0.9.15.zip')
   })
 
   it('falls back to the release API only for missing direct assets', () => {
@@ -148,7 +148,7 @@ describe('resolveMenubarReleaseAssets', () => {
   it('shows the install guidance instead of a raw env failure when only npx is available', () => {
     expect(() => resolvePersistentCodeburnPathFromWhichOutput(
       '/Users/me/.npm/_npx/abcd/node_modules/.bin/codeburn'
-    )).toThrow(/Install CodeBurn globally first/)
+    )).toThrow(/Install (CodeBurn|KyberDash) globally first/)
   })
 
   it('uses HTTPS proxy for GitHub HTTPS downloads', () => {

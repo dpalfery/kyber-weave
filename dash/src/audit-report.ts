@@ -4,6 +4,7 @@ import { getProvider } from './providers/index.js'
 import { formatCost, formatTokens } from './format.js'
 import { renderTable, type TableColumn } from './text-table.js'
 import type { ProjectSummary } from './types.js'
+import { BRAND } from './brand-overlay.js'
 
 // One (provider, model) bucket, exposing both the raw token fields as recorded
 // by the provider/transcript and the normalized totals codeburn actually
@@ -214,7 +215,7 @@ export function renderAuditTable(rows: AuditRow[]): string {
   const table = renderTable(columns, body, { boldRows: new Set([body.length - 1]) })
   const legend = [
     '',
-    'Columns are the raw token fields each provider records. codeburn then normalizes for pricing:',
+    `Columns are the raw token fields each provider records. ${BRAND.productName} then normalizes for pricing:`,
     '  - Reason folds into Output (priced output = output + reasoning), except copilot, whose reasoning is already inside its output',
     '  - Cache rd = max(Anthropic cacheReadInput, OpenAI cached), since providers fill one or both',
     '  - Cache wr is priced at 1.25x the input rate, Cache rd at 0.1x, when a model omits explicit cache rates',

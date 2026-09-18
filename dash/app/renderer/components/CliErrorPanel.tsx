@@ -53,12 +53,12 @@ export function CliErrorPanel({ error, subject = 'usage' }: { error: CliError; s
     return (
       <Panel title={display.title}>
         <p style={{ color: 'var(--mut)', margin: '0 0 6px', fontSize: 12.5 }}>
-          CodeBurn Desktop reads {subject} by running the{' '}
-          <code style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>codeburn</code> command, but it isn&apos;t
+          KyberDash Desktop reads {subject} by running the{' '}
+          <code style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>kyberdash</code> command, but it isn&apos;t
           on your PATH yet.
         </p>
         <p style={{ color: colorForTone(display.tone), margin: 0, fontSize: 11.5 }}>
-          Install it with <code style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>npm i -g codeburn</code>,
+          Install it with <code style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>npm i -g kyberdash</code>,
           then reopen this window.
         </p>
       </Panel>

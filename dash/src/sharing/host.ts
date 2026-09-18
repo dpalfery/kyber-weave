@@ -9,6 +9,7 @@ import type { CombinedUsage, DeviceSummary, MenubarPayload } from '../menubar-js
 import { formatCost } from '../currency.js'
 import { renderTable } from '../text-table.js'
 import { Chalk } from 'chalk'
+import { BRAND } from '../brand-overlay.js'
 
 export type { CombinedUsage, DeviceSummary } from '../menubar-json.js'
 
@@ -131,7 +132,7 @@ export async function addRemote(
   const { host, port } = parseHostPort(input, opts.defaultPort)
 
   const h = await hello({ identity, host, port })
-  if (h.status !== 200) throw new Error(`could not reach a CodeBurn device at ${host}:${port}`)
+  if (h.status !== 200) throw new Error(`could not reach a ${BRAND.productName} device at ${host}:${port}`)
   const info = h.json as { fingerprint: string; name: string }
 
   const pr = await pair({ identity, host, port, expectedFingerprint: info.fingerprint }, pin, identity.name)

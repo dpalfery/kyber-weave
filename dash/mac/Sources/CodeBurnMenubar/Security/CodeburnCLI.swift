@@ -19,7 +19,7 @@ enum CodeburnCLI {
         environment: [String: String]
     ) -> [String] {
         let home = homeDirectory
-        var paths: [String] = []
+        var paths: [String] = ["\(home)/.local/bin"]
         for dir in ["\(home)/.volta/bin", "\(home)/.npm-global/bin", "\(home)/.asdf/shims"] {
             paths.append(dir)
         }
@@ -37,7 +37,7 @@ enum CodeburnCLI {
         if let entries = try? FileManager.default.contentsOfDirectory(atPath: versionsDir) {
             for entry in entries.sorted().reversed() {
                 let bin = "\(versionsDir)/\(entry)/bin"
-                if FileManager.default.isExecutableFile(atPath: "\(bin)/kyber-weave") || FileManager.default.isExecutableFile(atPath: "\(bin)/codeburn") {
+                if FileManager.default.isExecutableFile(atPath: "\(bin)/kyberdash") || FileManager.default.isExecutableFile(atPath: "\(bin)/kyber-weave") || FileManager.default.isExecutableFile(atPath: "\(bin)/codeburn") {
                     paths.append(bin)
                     break
                 }
@@ -45,11 +45,14 @@ enum CodeburnCLI {
         }
         return paths
     }
-    private static let persistedPathFilename = "codeburn-cli-path.v1"
+    private static let persistedAppDirName = "KyberDash"
+    private static let persistedPathFilename = "kyberdash-cli-path.v1"
+    private static let legacyPersistedAppDirName = "CodeBurn"
+    private static let legacyPersistedPathFilename = "codeburn-cli-path.v1"
 
     /// Returns the argv that launches the CLI. Dev override via `CODEBURN_BIN` is honoured only
     /// if every whitespace-delimited token passes `safeArgPattern`. Otherwise falls back to the
-    /// plain `codeburn` name (resolved via PATH).
+    /// plain `kyberdash` name (resolved via PATH).
     static func baseArgv() -> [String] {
         if ProcessInfo.processInfo.environment["CODEBURN_ALLOW_DEV_BIN"] == "1",
            let raw = ProcessInfo.processInfo.environment["CODEBURN_BIN"],
@@ -57,7 +60,7 @@ enum CodeburnCLI {
         {
             let parts = raw.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
             guard parts.allSatisfy(isSafe) else {
-                NSLog("CodeBurn: refusing unsafe CODEBURN_BIN; using installed codeburn")
+                NSLog("KyberDash: refusing unsafe CODEBURN_BIN; using installed kyberdash")
                 return installedArgv()
             }
             return parts
@@ -75,31 +78,33 @@ enum CodeburnCLI {
             homeDirectory: FileManager.default.homeDirectoryForCurrentUser.path,
             environment: environment
         )
-        // Binary rename (codeburn → kyber-weave): try canonical name first,
-        // fallback to legacy name so an older global install is still found.
-        // Only the name changes; decode path is unchanged (R11.5).
         for dir in (additionalPathEntries + userPaths) {
-            for name in ["kyber-weave", "codeburn"] {
+            for name in ["kyberdash", "kyber-weave", "codeburn"] {
                 let candidate = "\(dir)/\(name)"
                 if isSafe(candidate), FileManager.default.isExecutableFile(atPath: candidate) {
                     return [candidate]
                 }
             }
         }
-        return ["kyber-weave"]
+        return ["kyberdash"]
     }
 
     private static func persistedCLIPath() -> String? {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        let url = support
-            .appendingPathComponent("CodeBurn", isDirectory: true)
-            .appendingPathComponent(persistedPathFilename)
-        guard let value = try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
-              !value.isEmpty,
-              value.hasPrefix("/")
-        else { return nil }
-        return value
+        let candidates = [
+            support.appendingPathComponent(persistedAppDirName, isDirectory: true).appendingPathComponent(persistedPathFilename),
+            support.appendingPathComponent(legacyPersistedAppDirName, isDirectory: true).appendingPathComponent(legacyPersistedPathFilename),
+        ]
+        for url in candidates {
+            if let value = try? String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty,
+               value.hasPrefix("/")
+            {
+                return value
+            }
+        }
+        return nil
     }
 
     /// Builds a `Process` that runs the CLI with the given subcommand args. Uses `/usr/bin/env`

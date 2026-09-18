@@ -7,6 +7,7 @@ import chalk from 'chalk'
 import { readSessionLines, type SessionLine } from './fs-utils.js'
 import { formatTokens } from './format.js'
 import { estimateTokensFromChars } from './token-estimate.js'
+import { resolveCliName } from './brand-overlay.js'
 
 // Block token counts are chars/4 estimates; the "context (exact)" line comes
 // from the last assistant message's API usage. Transcripts store thinking
@@ -689,7 +690,7 @@ export type TitledSessionRef = SessionRef & { title: string }
 
 function renderSessionList(refs: TitledSessionRef[], provider: 'claude' | 'codex'): string {
   const heading = provider === 'codex' ? 'Recent Codex sessions' : 'Recent Claude Code sessions'
-  const hint = provider === 'codex' ? 'codeburn context <id> --provider codex to inspect one' : 'codeburn context <id> to inspect one'
+  const hint = provider === 'codex' ? `${resolveCliName()} context <id> --provider codex to inspect one` : `${resolveCliName()} context <id> to inspect one`
   const lines = ['', `  ${chalk.bold(heading)}`, '']
   const projectWidth = Math.max(...refs.map((r) => r.project.length))
   for (const ref of refs) {

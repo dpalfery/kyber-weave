@@ -3,6 +3,7 @@ import { readdir, stat, readFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import chalk from 'chalk'
+import { resolveCliName } from '../brand-overlay.js'
 
 type Scope = { global?: boolean; project?: string }
 
@@ -51,7 +52,7 @@ async function doInstall(scope: Scope, statusline: boolean): Promise<void> {
     } catch { /* baseline is optional */ }
     const record = await runAction(built.plan)
     console.log(`  Installed ${chalk.bold(shortId(record.id))}  ${built.plan.description}`)
-    console.log(chalk.dim(`    Undo anytime: codeburn act undo ${shortId(record.id)}`))
+    console.log(chalk.dim(`    Undo anytime: ${resolveCliName()} act undo ${shortId(record.id)}`))
   } else {
     console.log(chalk.dim(`  ${path}: nothing to change.`))
   }
@@ -81,7 +82,7 @@ async function doUninstall(scope: Scope): Promise<void> {
   if (built.plan) {
     const record = await runAction(built.plan)
     console.log(`  Uninstalled ${chalk.bold(shortId(record.id))}  ${built.plan.description}`)
-    console.log(chalk.dim(`    Undo anytime: codeburn act undo ${shortId(record.id)}`))
+    console.log(chalk.dim(`    Undo anytime: ${resolveCliName()} act undo ${shortId(record.id)}`))
   }
 }
 
@@ -91,7 +92,7 @@ async function doStatus(): Promise<void> {
   const { readFlags, flagsAgeMs } = await import('./flags.js')
 
   const config = await readGuardConfig()
-  console.log(chalk.bold('\n  codeburn guard'))
+  console.log(chalk.bold(`\n  ${resolveCliName()} guard`))
   console.log(`    soft cap:   ${usd(config.softUSD)}`)
   console.log(`    hard cap:   ${usd(config.hardUSD)}`)
   console.log(`    checkpoint: ${usd(config.checkpointUSD)}`)
@@ -105,7 +106,7 @@ async function doStatus(): Promise<void> {
     .map(l => ({ ...l, info: inspectInstall(l.path) }))
     .filter(l => l.info.hooks.length > 0 || l.info.statusline)
   if (found.length === 0) {
-    console.log('    installed:  nowhere (run: codeburn guard install)')
+    console.log(`    installed:  nowhere (run: ${resolveCliName()} guard install)`)
   } else {
     for (const l of found) {
       const bits = [...new Set(l.info.hooks)].join(', ')
@@ -115,7 +116,7 @@ async function doStatus(): Promise<void> {
 
   const flags = await readFlags()
   if (!flags) {
-    console.log('    flags:      none (run: codeburn guard refresh)')
+    console.log(`    flags:      none (run: ${resolveCliName()} guard refresh)`)
   } else {
     const ageDays = flagsAgeMs(flags) / 86_400_000
     console.log(`    flags:      ${flags.projects.length} project${flags.projects.length === 1 ? '' : 's'}, ${ageDays.toFixed(1)}d old`)
@@ -144,7 +145,7 @@ async function doAllow(sessionId: string | undefined): Promise<void> {
     id = newest.id
   }
   if (!id) {
-    console.error('  No active guard session found. Pass the session id: codeburn guard allow <session-id>.')
+    console.error(`  No active guard session found. Pass the session id: ${resolveCliName()} guard allow <session-id>.`)
     process.exitCode = 1
     return
   }

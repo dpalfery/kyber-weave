@@ -492,7 +492,7 @@ private struct GeneralSettingsTab: View {
                     }
                 }
                 .pickerStyle(.menu)
-                Text("Where Full Report and Optimize open. If the chosen app isn't installed CodeBurn falls back to Terminal; if that's missing too the command runs in the background. Only terminals that can script a command into a live window are listed.")
+                Text("Where Full Report and Optimize open. If the chosen app isn't installed KyberDash falls back to Terminal; if that's missing too the command runs in the background. Only terminals that can script a command into a live window are listed.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -875,7 +875,7 @@ private struct ClaudeConnectionRow: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("CodeBurn will stop tracking quota and clear its connection state plus any legacy credential cache. Your Claude Code credential is untouched. Claude Code keeps working.")
+                    Text("KyberDash will stop tracking quota and clear its connection state plus any legacy credential cache. Your Claude Code credential is untouched. Claude Code keeps working.")
                 }
         case .terminalFailure, .noCredentials, .failed:
             Button("Reconnect") { Task { await store.bootstrapSubscription() } }
@@ -982,7 +982,7 @@ private struct CodexSettingsTab: View {
                 CodexConnectionRow()
             }
             Section {
-                Text("Codex live-quota tracking follows the authoritative `~/.codex/auth.json` session directly and does not create a second Keychain copy. A legacy CodeBurn Keychain item, when present, is read only as a migration fallback. Only ChatGPT-mode auth (Plus / Pro / Team / Business / Edu / Enterprise) is supported. API-key users are billed per request and have a different reporting surface. Credit-metered workspaces report no rate-limit windows, so their monthly credit allowance is shown instead.")
+                Text("Codex live-quota tracking follows the authoritative `~/.codex/auth.json` session directly and does not create a second Keychain copy. A legacy Keychain item, when present, is read only as a migration fallback. Only ChatGPT-mode auth (Plus / Pro / Team / Business / Edu / Enterprise) is supported. API-key users are billed per request and have a different reporting surface. Credit-metered workspaces report no rate-limit windows, so their monthly credit allowance is shown instead.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             } header: {
@@ -1041,7 +1041,7 @@ private struct CodexConnectionRow: View {
     private var stateTitle: String {
         switch store.codexLoadState {
         case .loaded: return "Connected"
-        case let .terminalFailure(reason): return reason ?? "Reconnect required"
+        case let .terminalFailure(reason): return reason ?? "Login refresh required"
         case .transientFailure: return "Backing off"
         case .bootstrapping: return "Connecting…"
         case .loading: return "Refreshing…"
@@ -1054,24 +1054,18 @@ private struct CodexConnectionRow: View {
     private var stateDetail: String {
         switch store.codexLoadState {
         case .loaded:
-            if let plan = store.codexUsage?.plan.displayName {
+            if let plan = store.codexUsage?.plan {
                 return "Plan: \(plan)"
             }
             return "Live quota tracked from chatgpt.com."
         case .terminalFailure:
-            // Be specific about the cause: the message we already surface in
-            // codexError will say "API-key mode" if that's the situation, so
-            // the generic "run codex login" hint covers both cases.
-            if let err = store.codexError, err.lowercased().contains("api-key") {
-                return "Codex is in API-key mode. Run `codex login` and choose a ChatGPT plan to enable quota tracking."
-            }
-            return "Run `codex login` in your terminal to sign in again, then click Reconnect."
-        case .transientFailure: return store.codexError ?? "ChatGPT rate-limited; auto-retrying."
-        case .bootstrapping: return "Reading ~/.codex/auth.json."
+            return "Run the Codex CLI once to refresh your login, then click Reconnect."
+        case .transientFailure: return store.codexError ?? "OpenAI rate-limited; auto-retrying."
+        case .bootstrapping: return "Reading ~/.codex/auth.json session."
         case .loading: return "Background refresh in progress."
         case .dormant: return "Tap Load Quota to fetch live usage from chatgpt.com."
         case .notBootstrapped, .noCredentials:
-            return "Click Connect to read your Codex CLI credentials. If Connect fails, run `codex login` in your terminal first to create ~/.codex/auth.json."
+            return "Sign in with the Codex CLI first, then click Connect."
         case .failed: return store.codexError ?? ""
         }
     }
@@ -1090,7 +1084,7 @@ private struct CodexConnectionRow: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("CodeBurn will stop tracking quota and clear its connection state plus any legacy credential cache. Your ~/.codex/auth.json is untouched. Codex CLI keeps working.")
+                    Text("KyberDash will stop tracking quota and clear its connection state plus any legacy credential cache. Your ~/.codex/auth.json is untouched. Codex CLI keeps working.")
                 }
         case .terminalFailure, .noCredentials, .failed:
             Button("Reconnect") { Task { await store.bootstrapCodex() } }
@@ -1215,7 +1209,7 @@ private struct KimiConnectionRow: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("CodeBurn will stop tracking Kimi Code quota. Your ~/.kimi-code credentials are untouched. The Kimi CLI keeps working.")
+                    Text("KyberDash will stop tracking Kimi Code quota. Your ~/.kimi-code credentials are untouched. The Kimi CLI keeps working.")
                 }
         case .terminalFailure, .noCredentials, .failed:
             Button("Reconnect") { Task { await store.bootstrapKimi() } }
@@ -1343,7 +1337,7 @@ private struct GeminiConnectionRow: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("CodeBurn will stop tracking Gemini quota. Your ~/.gemini credentials are untouched. The Gemini CLI keeps working.")
+                    Text("KyberDash will stop tracking Gemini quota. Your ~/.gemini credentials are untouched. The Gemini CLI keeps working.")
                 }
         case .terminalFailure, .noCredentials, .failed:
             Button("Reconnect") { Task { await store.bootstrapGemini() } }
@@ -1471,7 +1465,7 @@ private struct CopilotConnectionRow: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("CodeBurn will stop tracking Copilot quota. Your ~/.config/github-copilot credentials are untouched. Your editor's Copilot plugin keeps working.")
+                    Text("KyberDash will stop tracking Copilot quota. Your ~/.config/github-copilot credentials are untouched. Your editor's Copilot plugin keeps working.")
                 }
         case .terminalFailure, .noCredentials, .failed:
             Button("Reconnect") { Task { await store.bootstrapCopilot() } }
@@ -1601,7 +1595,7 @@ private struct AntigravityConnectionRow: View {
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("CodeBurn will stop tracking Antigravity quota. Nothing is read from or written to disk. The Antigravity app keeps working.")
+                    Text("KyberDash will stop tracking Antigravity quota. Nothing is read from or written to disk. The Antigravity app keeps working.")
                 }
         case .terminalFailure, .noCredentials, .failed:
             Button("Reconnect") { Task { await store.bootstrapAntigravity() } }
@@ -1765,8 +1759,8 @@ private struct GenericProviderConnectionSections: View {
                 Text("Connection")
             } footer: {
                 Text(hasLiveAdapter
-                    ? "Automatic connection uses the provider's existing app, CLI, OAuth, browser session, or environment credentials first. CodeBurn does not copy those source credentials into its Keychain."
-                    : "Authentication methods are listed for reference. A native CodeBurn quota adapter is required before this provider can connect to Capacity Dock.")
+                    ? "Automatic connection uses the provider's existing app, CLI, OAuth, browser session, or environment credentials first. KyberDash does not copy those source credentials into its Keychain."
+                    : "Authentication methods are listed for reference. A native KyberDash quota adapter is required before this provider can connect to Capacity Dock.")
                     .font(.system(size: 11))
             }
 
@@ -1823,7 +1817,7 @@ private struct GenericProviderConnectionSections: View {
             } header: {
                 Text("Connection override")
             } footer: {
-                Text("Overrides are optional and are saved only when you press Save & Connect. Secret values use one CodeBurn-owned Keychain item for this provider; background reads suppress authentication UI.")
+                Text("Overrides are optional and are saved only when you press Save & Connect. Secret values use one KyberDash-owned Keychain item for this provider; background reads suppress authentication UI.")
                     .font(.system(size: 11))
             }
             .disabled(credentialIsLoading)
@@ -1850,7 +1844,7 @@ private struct GenericProviderConnectionSections: View {
                 } header: {
                     Text("Saved data")
                 } footer: {
-                    Text("This credential predates a live CodeBurn quota adapter and is not treated as a connection.")
+                    Text("This credential predates a live KyberDash quota adapter and is not treated as a connection.")
                         .font(.system(size: 11))
                 }
             }
@@ -1876,7 +1870,7 @@ private struct GenericProviderConnectionSections: View {
 
     private var connectionDetail: String {
         guard hasLiveAdapter else {
-            return "\(provider.displayName) is catalogued, but CodeBurn cannot fetch its live quota yet."
+            return "\(provider.displayName) is catalogued, but KyberDash cannot fetch its live quota yet."
         }
         if let error = store.capacityDockProviderErrors[provider.id], !error.isEmpty {
             return "\(error) \(ProviderConnectionGuidance.instruction(for: provider))"
@@ -2047,7 +2041,7 @@ private struct DevinSettingsTab: View {
             }
 
             Section {
-                Text("CodeBurn reads Devin ACU usage from local transcripts only after this rate is configured, then multiplies each step by the rate before reporting cost.")
+                Text("KyberDash reads Devin ACU usage from local transcripts only after this rate is configured, then multiplies each step by the rate before reporting cost.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             } header: {
@@ -2067,7 +2061,7 @@ private struct DevinSettingsTab: View {
         guard let rate = parsedRate else { return }
         CLIDevinConfig.persistAcuUsdRate(rate)
         rateText = Self.format(rate)
-        statusText = "Saved. Refresh CodeBurn to recalculate Devin cost."
+        statusText = "Saved. Refresh KyberDash to recalculate Devin cost."
     }
 
     private static func format(_ value: Double) -> String {
@@ -2110,7 +2104,7 @@ private struct AboutSettingsTab: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else if updateChecker.updateAvailable, let latest = updateChecker.latestVersion {
-                    Text("\(AppVersion.display(latest)) is available. Choose Check for Updates in the CodeBurn menu to install it.")
+                    Text("\(AppVersion.display(latest)) is available. Choose Check for Updates in the KyberDash menu to install it.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -2122,19 +2116,19 @@ private struct AboutSettingsTab: View {
                 AboutLinkRow(
                     icon: "chevron.left.slash.chevron.right",
                     title: "GitHub",
-                    url: "https://github.com/getagentseal/codeburn")
+                    url: "https://github.com/dpalfery/kyber-weave")
                 AboutLinkRow(
                     icon: "globe",
-                    title: "Website",
-                    url: "https://codeburn.app")
+                    title: "Repository",
+                    url: "https://github.com/dpalfery/kyber-weave")
                 AboutLinkRow(
                     icon: "exclamationmark.bubble",
                     title: "Issues",
-                    url: "https://github.com/getagentseal/codeburn/issues")
+                    url: "https://github.com/dpalfery/kyber-weave/issues")
             } header: {
                 Text("Links")
             } footer: {
-                Text("© 2026 Resham Joshi (iamtoruk) · AgentSeal. MIT License.")
+                Text("© 2026 KyberWeave. MIT License.")
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
             }
@@ -2158,7 +2152,7 @@ private struct AboutSettingsTab: View {
             }
 
             VStack(spacing: 2) {
-                Text("CodeBurn")
+                Text("KyberDash")
                     .font(.title3).fontWeight(.semibold)
                 Text("Version \(versionString)")
                     .foregroundStyle(.secondary)

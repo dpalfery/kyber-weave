@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-private let releasesAPI = "https://api.github.com/repos/getagentseal/codeburn/releases?per_page=20"
+private let releasesAPI = "https://api.github.com/repos/dpalfery/kyber-weave/releases?per_page=20"
 private let checkIntervalSeconds: TimeInterval = 2 * 24 * 60 * 60
 private let lastCheckKey = "UpdateChecker.lastCheckDate"
 private let cachedVersionKey = "UpdateChecker.latestVersion"
@@ -29,9 +29,9 @@ enum UpdateFailureStage: Equatable {
 
     var summary: String {
         switch self {
-        case .check: "CodeBurn could not check GitHub for updates."
-        case .cliUpdate: "CodeBurn could not update the CLI."
-        case .menubarUpdate: "CodeBurn could not update the menubar app."
+        case .check: "KyberDash could not check GitHub for updates."
+        case .cliUpdate: "KyberDash could not update the CLI."
+        case .menubarUpdate: "KyberDash could not update the menubar app."
         }
     }
 
@@ -108,8 +108,8 @@ final class UpdateChecker {
     var cliUpdateCommand: String {
         let argv = CodeburnCLI.baseArgv()
         let path = argv.first ?? ""
-        if path.contains("/homebrew/") { return "brew upgrade codeburn" }
-        return "npm update -g codeburn"
+        if path.contains("/homebrew/") { return "brew upgrade kyberdash" }
+        return "npm update -g kyberdash"
     }
 
     var currentVersion: String {
@@ -135,7 +135,7 @@ final class UpdateChecker {
         guard let url = URL(string: releasesAPI) else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        request.setValue("codeburn-menubar-updater", forHTTPHeaderField: "User-Agent")
+        request.setValue("kyberdash-menubar-updater", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
         do {
@@ -150,6 +150,7 @@ final class UpdateChecker {
             }
 
             let version = resolved.asset.name
+                .replacingOccurrences(of: "KyberDashMenubar-", with: "")
                 .replacingOccurrences(of: "CodeBurnMenubar-", with: "")
                 .replacingOccurrences(of: ".zip", with: "")
 
@@ -163,7 +164,7 @@ final class UpdateChecker {
         } catch {
             updateFailureStage = .check
             updateError = error.localizedDescription
-            NSLog("CodeBurn: update check failed: \(error)")
+            NSLog("KyberDash: update check failed: \(error)")
         }
     }
 
@@ -194,7 +195,7 @@ final class UpdateChecker {
     nonisolated static func resolveLatestMenubarRelease(in releases: [GitHubRelease]) -> (release: GitHubRelease, asset: GitHubAsset)? {
         for release in releases where release.tag_name.hasPrefix("mac-v") {
             guard let asset = release.assets.first(where: {
-                $0.name.hasPrefix("CodeBurnMenubar-v") && $0.name.hasSuffix(".zip")
+                ($0.name.hasPrefix("KyberDashMenubar-v") || $0.name.hasPrefix("CodeBurnMenubar-v")) && $0.name.hasSuffix(".zip")
             }) else { continue }
             guard release.assets.contains(where: { $0.name == "\(asset.name).sha256" }) else { continue }
             return (release, asset)
@@ -217,14 +218,14 @@ final class UpdateChecker {
         let dir = (cliPath as NSString).deletingLastPathComponent
         if cliPath.contains("/homebrew/") || cliPath.contains("/Cellar/") {
             for brew in ["\(dir)/brew", "/opt/homebrew/bin/brew", "/usr/local/bin/brew"] where fileExists(brew) {
-                return [brew, "upgrade", "codeburn"]
+                return [brew, "upgrade", "kyberdash"]
             }
             return nil
         }
         // npm-managed installs (plain npm -g, nvm, volta, asdf shims) keep npm
         // in the same bin directory as the codeburn launcher.
         for npm in ["\(dir)/npm", "/opt/homebrew/bin/npm", "/usr/local/bin/npm"] where fileExists(npm) {
-            return [npm, "install", "-g", "codeburn@latest", "--force"]
+            return [npm, "install", "-g", "kyberdash@latest", "--force"]
         }
         return nil
     }
@@ -257,7 +258,7 @@ final class UpdateChecker {
                         self.isUpdating = false
                         self.updateFailureStage = .cliUpdate
                         self.updateError = stderr.isEmpty ? "CLI update failed (exit \(status))" : stderr
-                        NSLog("CodeBurn: CLI update failed (exit \(status)): \(stderr)")
+                        NSLog("KyberDash: CLI update failed (exit \(status)): \(stderr)")
                         return
                     }
                     self.installedCliVersion = Self.queryInstalledCliVersion()
@@ -288,7 +289,7 @@ final class UpdateChecker {
         let timeoutTask = Task.detached(priority: .utility) {
             try? await Task.sleep(nanoseconds: updateTimeoutSeconds * 1_000_000_000)
             if process.isRunning {
-                NSLog("CodeBurn: update subprocess timed out after %llus - terminating", updateTimeoutSeconds)
+                NSLog("KyberDash: update subprocess timed out after %llus - terminating", updateTimeoutSeconds)
                 process.terminate()
             }
         }
@@ -311,7 +312,7 @@ final class UpdateChecker {
         installedCliVersion = Self.queryInstalledCliVersion()
         if cliTooOldForUpdate {
             updateFailureStage = .menubarUpdate
-            updateError = "Your codeburn CLI (\(AppVersion.display(installedCliVersion ?? ""))) is too old to update the menubar. Run “\(cliUpdateCommand)” first, then try again."
+            updateError = "Your kyberdash CLI (\(AppVersion.display(installedCliVersion ?? ""))) is too old to update the menubar. Run “\(cliUpdateCommand)” first, then try again."
             return
         }
         isUpdating = true
@@ -332,7 +333,7 @@ final class UpdateChecker {
         let timeoutTask = Task.detached(priority: .utility) {
             try? await Task.sleep(nanoseconds: updateTimeoutSeconds * 1_000_000_000)
             if process.isRunning {
-                NSLog("CodeBurn: update subprocess timed out after %llus - terminating", updateTimeoutSeconds)
+                NSLog("KyberDash: update subprocess timed out after %llus - terminating", updateTimeoutSeconds)
                 process.terminate()
             }
         }
@@ -348,7 +349,7 @@ final class UpdateChecker {
                 if proc.terminationStatus != 0 {
                     self.updateFailureStage = .menubarUpdate
                     self.updateError = stderr.isEmpty ? "Update failed (exit \(proc.terminationStatus))" : stderr
-                    NSLog("CodeBurn: update failed (exit \(proc.terminationStatus)): \(stderr)")
+                    NSLog("KyberDash: update failed (exit \(proc.terminationStatus)): \(stderr)")
                 } else {
                     self.latestVersion = nil
                 }
@@ -361,7 +362,7 @@ final class UpdateChecker {
             isUpdating = false
             updateFailureStage = .menubarUpdate
             updateError = error.localizedDescription
-            NSLog("CodeBurn: update spawn failed: \(error)")
+            NSLog("KyberDash: update spawn failed: \(error)")
         }
     }
 

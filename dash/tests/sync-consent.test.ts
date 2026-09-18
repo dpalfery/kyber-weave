@@ -152,7 +152,7 @@ describe('Disclosure', () => {
     expect(disclosure).toContain('ai.model')
     expect(disclosure).toContain('raw prompts')
     expect(disclosure).toContain('file paths')
-    expect(disclosure).toContain('codeburn sync auto disable')
+    expect(disclosure).toMatch(/(codeburn|kyberdash) sync auto disable/)
   })
 
   it('states hourly cadence correctly', () => {
@@ -533,7 +533,7 @@ describe('Damaged acceptance record', () => {
     expect(exitSpy).toHaveBeenCalledWith(1)
     const stdout = stdoutChunks.join('')
     expect(stdout).toContain('Automatic sync acceptance record is damaged.')
-    expect(stdout).toContain('codeburn sync auto enable --cadence <daily|hourly> --accept')
+    expect(stdout).toMatch(/(codeburn|kyberdash) sync auto enable --cadence <daily\|hourly> --accept/)
     expect(stdout).not.toContain('undefined')
   })
 

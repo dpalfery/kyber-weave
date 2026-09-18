@@ -790,7 +790,7 @@ function IndexingBanner({ payload }: { payload: MenubarPayload | null }) {
   if (!hydration || hydration.complete || hydration.indexedFiles >= hydration.totalFiles) return null
   return (
     <div role="status" className="stale-banner">
-      Indexing history · {Math.min(hydration.indexedFiles, hydration.totalFiles)}/{hydration.totalFiles} files · You can keep using CodeBurn; totals update as indexing completes.
+      Indexing history · {Math.min(hydration.indexedFiles, hydration.totalFiles)}/{hydration.totalFiles} files · You can keep using KyberDash; totals update as indexing completes.
     </div>
   )
 }

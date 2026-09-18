@@ -8,6 +8,7 @@ import { getDateRange } from './cli-date.js'
 import { getConfigFilePath } from './config.js'
 import type { ParseReuseValidation } from './parser.js'
 import { SERVE_HYDRATION_ENV } from './usage-aggregator.js'
+import { resolveCliName } from './brand-overlay.js'
 
 // ---------------------------------------------------------------------------
 // codeburn serve --stdio: a resident query server for the desktop app.
@@ -433,7 +434,7 @@ export async function runStdioServe(buildProgram: () => Command): Promise<void> 
   const outputMemo = new Map<string, OutputMemoEntry>()
   let observedConfigFingerprint: string | null | undefined
   if (process.stdin.isTTY) {
-    process.stderr.write('codeburn serve speaks JSON over stdio and exists for the desktop app to hold warm.\nNothing interactive happens here; press Ctrl+C to exit.\n')
+    process.stderr.write(`${resolveCliName()} serve speaks JSON over stdio and exists for the desktop app to hold warm.\nNothing interactive happens here; press Ctrl+C to exit.\n`)
   }
   // Keep the protocol transport anchored to the real stdout. runCaptured()
   // temporarily replaces process.stdout.write to collect command output; a

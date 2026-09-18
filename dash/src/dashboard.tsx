@@ -2402,7 +2402,7 @@ export async function renderDashboard(period: Period = 'week', provider: string 
   setInteractiveScanUI()
   const startupStarted = performance.now()
   await loadPricing()
-  if (process.env['CODEBURN_VERBOSE'] === '1') process.stderr.write(`codeburn: startup timing pricing=${(performance.now() - startupStarted).toFixed(1)}ms\n`)
+  if (process.env['CODEBURN_VERBOSE'] === '1') process.stderr.write(`${resolveCliName()}: startup timing pricing=${(performance.now() - startupStarted).toFixed(1)}ms\n`)
   const dayRange = initialDay ? getDayRange(initialDay) : null
   const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY)
   const scrollableDailyHistory = isTTY && dayRange == null && customRange == null
@@ -2429,8 +2429,8 @@ export async function renderDashboard(period: Period = 'week', provider: string 
         deferredFiles: 0,
       }
   if (process.env['CODEBURN_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: startup timing pre-ink=${(performance.now() - startupStarted).toFixed(1)}ms\n`)
-    process.stderr.write(`codeburn: progressive startup ${progressive ? 'on' : 'off'}, ${paint.deferredFiles} files deferred to the background index\n`)
+    process.stderr.write(`${resolveCliName()}: startup timing pre-ink=${(performance.now() - startupStarted).toFixed(1)}ms\n`)
+    process.stderr.write(`${resolveCliName()}: progressive startup ${progressive ? 'on' : 'off'}, ${paint.deferredFiles} files deferred to the background index\n`)
   }
   const { period: opened, scannedProjects, filteredProjects, planUsages, initialDurable } = paint.result
   const label = initialDay ? formatDayRangeLabel(initialDay) : customRangeLabel

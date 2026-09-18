@@ -1,5 +1,6 @@
 import type { DateRange } from './types.js'
 import { toDateString } from './daily-cache.js'
+import { resolveCliName } from './brand-overlay.js'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -52,7 +53,7 @@ export function toPeriod(s: string): Period {
     // like `-p mounth` produced a quiet 7-day report and the user thought
     // they were viewing the month.
     process.stderr.write(
-      `codeburn: unknown period "${s}". Valid values: ${VALID_PERIODS.join(', ')}.\n`
+      `${resolveCliName()}: unknown period "${s}". Valid values: ${VALID_PERIODS.join(', ')}.\n`
     )
     process.exit(1)
   }
@@ -192,7 +193,7 @@ export function getDateRange(period: string): { range: DateRange; label: string 
     }
     default: {
       process.stderr.write(
-        `codeburn: unknown period "${period}". Valid values: today, week, 30days, month, all, lifetime.\n`
+        `${resolveCliName()}: unknown period "${period}". Valid values: today, week, 30days, month, all, lifetime.\n`
       )
       process.exit(1)
     }

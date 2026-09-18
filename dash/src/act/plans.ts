@@ -4,6 +4,7 @@ import { isAbsolute, join } from 'path'
 import { homedir } from 'os'
 import type { ActionKind, ActionPlan, PlannedChange } from './types.js'
 import { sha256 } from './backup.js'
+import { resolveCliName } from '../brand-overlay.js'
 import {
   ALWAYSLOAD_MIN_VERSION,
   ALWAYSLOAD_STARTUP_CAP_SECONDS,
@@ -449,7 +450,7 @@ function shellOverrideManualNotes(path: string, homeDir: string, replacement?: s
   const action = replacementLine === undefined
     ? `delete the line \`${line}\` from ${shown}`
     : `in ${shown}, change the line \`${line}\` to \`${replacementLine}\``
-  return [`manual: ${action} yourself — codeburn only appends marker blocks to shell files and never edits user lines`]
+  return [`manual: ${action} yourself — ${resolveCliName()} only appends marker blocks to shell files and never edits user lines`]
 }
 
 // mcp-deferral-off -> defer-enable. Only two causes are auto-appliable:

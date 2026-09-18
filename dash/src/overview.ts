@@ -10,6 +10,7 @@ import { markEstimated } from './format.js'
 import { dateKey } from './day-aggregator.js'
 import type { DailyEntry } from './daily-cache.js'
 import type { BudgetStatus, BudgetTier } from './budget.js'
+import { BRAND } from './brand-overlay.js'
 
 // Display-only helpers. The shared formatters omit thousands separators and
 // abbreviate; here we show full, comma-grouped numbers so the tables read like
@@ -112,7 +113,7 @@ export function renderOverview(
   const out: string[] = []
   const durable = opts.durable
 
-  out.push(c.bold('CodeBurn') + c.dim('  ' + opts.label))
+  out.push(c.bold(BRAND.productName) + c.dim('  ' + opts.label))
   out.push('')
 
   if (projects.length === 0 && !(durable && durable.cost > 0)) {
