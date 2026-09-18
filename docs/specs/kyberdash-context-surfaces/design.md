@@ -102,13 +102,17 @@ uses. Upstream's separate `dash/tests/` directory is folded into that convention
 ### Decisions
 
 **D1 — Prune by reachability, then keep the check as a gate (2.3).** After the deleted
-commands are removed from `cli/main.ts`, an esbuild metafile build of the CLI entry, plus
-the web and tray entries, lists every source file actually bundled. A small script,
-`dash/scripts/unreachable.mjs`, lists any non-test file under `dash/src` missing from that
-set, and those files are deleted. The script stays as the `check:reachable` npm script in
-CI, so dead code cannot build up again. *Rejected:* hand-deleting from the list in 2.1,
-which misses the long tail of helpers that only deleted commands used; and `knip`, which
-adds a dependency to do what the bundler already knows.
+commands are removed from `cli/main.ts`, `dash/scripts/unreachable.mjs` walks the import graph
+from every entry point (CLI, SEA shim, parse worker, operator tools, web app) and lists each
+non-test source file the walk never visits. Those files are deleted. The script stays as the
+`check:reachable` npm script in CI, so dead code cannot build up again. The graph comes from
+TypeScript's `preProcessFile`, which sees static, type-only and dynamic imports.
+*Rejected:*
+- hand-deleting from the list in 2.1, which misses the long tail of helpers that only
+  deleted commands used
+- an esbuild metafile, which erases type-only imports and so reports every types-only
+  module as dead
+- `knip`, which adds a dependency to answer what `typescript` already can
 
 **D2 — One `ContextReport` model (7.5, 11.14).** The report, the API and the tray all read
 one versioned document. *Rejected:* separate tray endpoints such as `/glance`, which would

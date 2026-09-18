@@ -98,7 +98,7 @@ claim is made in the README, and it has to remain true.
 **Do not widen the ontology to make a failure disappear.** If a document fails, fix the
 document.
 
-**KyberDash is first-party code.** `dash/` began as a soft fork of `getagentseal/codeburn`
+**KyberDash is first-party code.** `dash/` began as a soft fork of the CodeBurn project
 and was taken as a one-time fork ([ADR 0020](docs/adr/0020-kyberdash-one-time-fork.md)):
 nothing is merged from upstream any more, so judge an edit to any file under `dash/` on its
 merits, under the same gates as the rest of the repository. AgentSeal's MIT notice stays in

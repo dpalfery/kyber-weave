@@ -515,6 +515,12 @@ jobs:
         working-directory: dash
         run: npm run lint
 
+      # Every non-test source file under dash/ must be reachable from an entry point, so a
+      # deleted command cannot leave its private modules behind (spec task 2.1).
+      - name: Unreachable module check
+        working-directory: dash
+        run: npm run check:reachable
+
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest

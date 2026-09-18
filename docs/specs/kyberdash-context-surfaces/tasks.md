@@ -86,10 +86,11 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 1.3, 1.4, 1.7, 1.8, 1.9, 1.10, 13.3_
 
 - [ ] 2. Prune upstream-only features
-- [ ] 2.1 Add the reachability check
+- [x] 2.1 Add the reachability check
   - Stream A.
-  - Write `dash/scripts/unreachable.mjs`. It builds the CLI entry with an esbuild metafile and
-    lists every non-test source file under `dash/src` and `dash/kyber` that is not bundled.
+  - Write `dash/scripts/unreachable.mjs`. It walks the import graph (TypeScript
+    `preProcessFile`, so type-only and dynamic imports count) from every entry and lists each
+    non-test source file under `dash/src`, `dash/kyber` and `dash/dash/src` it never visits.
   - Test it against a small fixture tree with one reachable and one orphan module.
   - Add the `check:reachable` npm script and run it in the `ts-gates` CI job.
   - _Requirements: 2.3_
