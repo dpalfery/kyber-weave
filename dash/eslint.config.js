@@ -33,12 +33,10 @@ const ignorePaths = [
   'build/**',
   'node_modules/**',
   'dash/**',         // nested Electron subdashboard build/install
-  'assets/**',
   'scripts/**',      // upstream build/release helpers
   'kyber/tools/**/*.mjs',
   'tests/fixtures/**',
   'eslint.config.js',
-  '.release-0.9.21-runbook.md',
 ];
 
 // Downgrade each rule's severity to "warn" so the recommended baseline

@@ -121,7 +121,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Delete `dash/mac/`, `dash/windows/`, `dash/app/` and `dash/gnome/`, and the e2e specs and
     CI steps that referenced them.
   - _Requirements: 2.4, 6.11_
-- [ ] 2.5 Delete the upstream project files
+- [x] 2.5 Delete the upstream project files
   - Stream A.
   - Delete `BRIEF.md`, `SUBMISSION.md`, `RELEASING.md`, `CHANGELOG.md`, `CONTRIBUTING.md`,
     `SECURITY.md` and `codeburn-desktop-wireframes.html` under `dash/`, plus the marketing
