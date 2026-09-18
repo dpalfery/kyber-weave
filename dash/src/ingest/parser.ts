@@ -1011,7 +1011,7 @@ export function compactEntry(raw: JournalEntry): JournalEntry {
   const contentArr = Array.isArray(rawContent) ? rawContent : []
   const toolBlocks = contentArr.filter((b): b is ToolUseBlock => b != null && typeof b === 'object' && b.type === 'tool_use')
   const compactContent: ContentBlock[] = toolBlocks.slice(0, MAX_TOOL_BLOCKS).map(tb => {
-    let input: Record<string, unknown> = {}
+    const input: Record<string, unknown> = {}
     if (tb.name === 'Skill') {
       const ri = (tb.input ?? {}) as Record<string, unknown>
       if (typeof ri['skill'] === 'string') input['skill'] = (ri['skill'] as string).slice(0, 200)
@@ -1845,79 +1845,6 @@ function buildSessionSummary(
   }
 }
 
-async function parseSessionFile(
-  filePath: string,
-  project: string,
-  seenMsgIds: Set<string>,
-  dateRange?: DateRange,
-): Promise<{ session: SessionSummary; canonicalCwd?: string } | null> {
-  // Skip files whose mtime is older than the range start. A session file
-  // can only contain entries up to its last-modified time; if that predates
-  // the requested range, nothing in this file can match.
-  if (dateRange) {
-    try {
-      const s = await stat(filePath)
-      if (s.mtimeMs < dateRange.start.getTime()) return null
-    } catch { /* fall through to normal read; missing stat shouldn't break parsing */ }
-  }
-  const entries: JournalEntry[] = []
-  let hasLines = false
-
-  // When a dateRange is given, skip user/assistant lines whose timestamp
-  // is older than range.start - 24h without calling JSON.parse. Huge lines
-  // that cannot be skipped are yielded as Buffers and compact-parsed without
-  // converting the whole line into a V8 string.
-  const earlySkipThreshold = dateRange
-    ? new Date(dateRange.start.getTime() - 86_400_000).toISOString()
-    : null
-  const skipFn = earlySkipThreshold
-    ? (head: string) => shouldSkipLine(head, earlySkipThreshold)
-    : undefined
-
-  for await (const line of readSessionLines(filePath, skipFn, { largeLineAsBuffer: true })) {
-    hasLines = true
-    const entry = parseJsonlLine(line)
-    if (entry) entries.push(compactEntry(entry))
-  }
-
-  if (!hasLines) return null
-
-  if (entries.length === 0) return null
-
-  const sessionId = basename(filePath, '.jsonl')
-  const dedupedEntries = dedupeStreamingMessageIds(entries)
-  let turns = groupIntoTurns(dedupedEntries, seenMsgIds)
-  if (dateRange) {
-    // Bucket a turn by the timestamp of its first assistant call (when the cost was
-    // actually incurred). Filtering entries directly produced orphan assistant calls
-    // when a user message sat in one day and the response landed in another -- those
-    // got pushed as turns with empty timestamps, which some code paths counted and
-    // others dropped, producing inconsistent Today totals.
-    turns = turns.filter(turn => {
-      if (turn.assistantCalls.length === 0) return false
-      const firstCallTs = turn.assistantCalls[0]!.timestamp
-      if (!firstCallTs) return false
-      const ts = new Date(firstCallTs)
-      return ts >= dateRange.start && ts <= dateRange.end
-    })
-    if (turns.length === 0) return null
-  }
-  const classified = turns.map(classifyTurn)
-
-  // Inventory is extracted from the full entry stream, not just the
-  // turns we kept after date filtering: tool availability is set up
-  // once at the start of a session (with possible mid-session reloads),
-  // and we want to reflect what was loaded even if the user only ran
-  // turns inside a narrow date window.
-  const mcpInventory = extractMcpInventory(entries)
-  const canonicalCwd = extractCanonicalCwd(entries)
-
-  return {
-    session: buildSessionSummary(sessionId, project, classified, mcpInventory),
-    ...(canonicalCwd ? { canonicalCwd } : {}),
-  }
-}
-
 // Recursively collect every `.jsonl` under `dir`. Subagent transcripts live in
 // `subagents/`, and workflow/ultracode runs nest a further level deep
 // (`subagents/workflows/<wf>/agent-*.jsonl`); a flat scan misses those, so their
@@ -2491,47 +2418,6 @@ function summarizeProject(project: string, projectPath: string, sessions: Sessio
 const PR_URL_IN_TEXT_RE = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+/g
 export function extractPrUrlsFromText(text: string): string[] {
   return [...new Set(text.match(PR_URL_IN_TEXT_RE) ?? [])].sort()
-}
-
-function providerCallToTurn(call: ParsedProviderCall): ParsedTurn {
-  const tools = call.tools
-  const usage: TokenUsage = {
-    inputTokens: call.inputTokens,
-    outputTokens: call.outputTokens,
-    cacheCreationInputTokens: call.cacheCreationInputTokens,
-    cacheReadInputTokens: call.cacheReadInputTokens,
-    cachedInputTokens: call.cachedInputTokens,
-    reasoningTokens: call.reasoningTokens,
-    webSearchRequests: call.webSearchRequests,
-  }
-
-  const apiCall: ParsedApiCall = applyLocalModelSavings({
-    provider: call.provider,
-    model: call.model,
-    usage,
-    costUSD: call.costUSD,
-    tools,
-    mcpTools: extractMcpTools(tools),
-    skills: call.skills ?? [],
-    subagentTypes: call.subagentTypes ?? [],
-    hasAgentSpawn: tools.includes('Agent'),
-    hasPlanMode: tools.includes('EnterPlanMode'),
-    speed: call.speed,
-    timestamp: call.timestamp,
-    bashCommands: call.bashCommands,
-    deduplicationKey: call.deduplicationKey,
-    isEstimated: call.costIsEstimated,
-    ...(call.nanoAiu != null ? { nanoAiu: call.nanoAiu } : {}),
-  })
-
-  const prRefs = extractPrUrlsFromText(call.userMessage)
-  return {
-    userMessage: call.userMessage,
-    assistantCalls: [apiCall],
-    timestamp: call.timestamp,
-    sessionId: call.sessionId,
-    ...(prRefs.length ? { prRefs } : {}),
-  }
 }
 
 // ── Cache Conversion ───────────────────────────────────────────────────

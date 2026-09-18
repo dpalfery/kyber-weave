@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { allProviderNames, getAllProviders } from '../src/providers/index.js'
 
-let homes: string[] = []
+const homes: string[] = []
 
 afterEach(async () => {
   while (homes.length > 0) {

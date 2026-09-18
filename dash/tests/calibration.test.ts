@@ -2,22 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import {
-  calculateCalibrationCurve,
-  CALIBRATION_BINS,
-  CALIBRATION_ERROR_THRESHOLD,
-  confidenceToNumeric,
-  formatConfidenceDisplay,
-  MINIMUM_CALIBRATION_PAIRS,
-  numericToConfidenceTier,
-  recordPrediction,
-  scorePrediction,
-  scorePredictionAgainstPair,
-  type CalibrationScore,
-  type PredictionRecord,
-} from '../src/analysis/calibration.js'
+import { calculateCalibrationCurve, CALIBRATION_BINS, CALIBRATION_ERROR_THRESHOLD, confidenceToNumeric, formatConfidenceDisplay, numericToConfidenceTier, recordPrediction, scorePrediction, scorePredictionAgainstPair, type CalibrationScore, type PredictionRecord } from '../src/analysis/calibration.js'
 import type { Finding } from '../src/analysis/findings.js'
 import type { CandidateRun } from '../src/analysis/pairing.js'
 import { CanonStore, SCHEMA_VERSION } from '../src/canon/store.js'
@@ -435,8 +423,6 @@ describe('Task F4: Calibration Curve and Binning (Criterion 3, 4, 5)', () => {
 describe('Task F4: Synthetic Paired Run Outcomes', () => {
   it('simulates a cohort of paired runs, scores predictions, and builds calibration history', () => {
     const store = new CanonStore(':memory:')
-
-    const taskFamily = 'performance-optimization'
     const pairedRuns = [
       { baselineRun: 'run-b1', treatedRun: 'run-t1', predictedWaste: 4000, observedSavings: 3900 },
       { baselineRun: 'run-b2', treatedRun: 'run-t2', predictedWaste: 2500, observedSavings: 2400 },
@@ -633,7 +619,7 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
     // 1. Initial GET should return empty list
     let statusCode = 0
     let responseBody = ''
-    const reqGet = { method: 'GET' } as any
+    const reqGet = { method: 'GET' } as unknown as IncomingMessage
     const resGet = {
       writeHead: (status: number) => {
         statusCode = status
@@ -641,7 +627,7 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
       end: (data: string) => {
         responseBody = data
       },
-    } as any
+    } as unknown as ServerResponse
 
     let handled = handleKyberRequest(
       reqGet,
@@ -667,11 +653,11 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
 
     const reqPost = {
       method: 'POST',
-      on: (event: string, callback: (chunk?: any) => void) => {
+      on: (event: string, callback: (chunk?: string) => void) => {
         if (event === 'data') callback(postPayload)
         if (event === 'end') callback()
       },
-    } as any
+    } as unknown as IncomingMessage
 
     const resPost = {
       writeHead: (status: number) => {
@@ -680,7 +666,7 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
       end: (data: string) => {
         postResponseBody = data
       },
-    } as any
+    } as unknown as ServerResponse
 
     handled = handleKyberRequest(
       reqPost,
@@ -702,7 +688,7 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
       end: (data: string) => {
         responseBody = data
       },
-    } as any
+    } as unknown as ServerResponse
     handleKyberRequest(
       reqGet,
       resGet2,
@@ -742,7 +728,7 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
 
     let statusCode = 0
     let responseBody = ''
-    const req = { method: 'GET' } as any
+    const req = { method: 'GET' } as unknown as IncomingMessage
     const res = {
       writeHead: (status: number) => {
         statusCode = status
@@ -750,7 +736,7 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
       end: (data: string) => {
         responseBody = data
       },
-    } as any
+    } as unknown as ServerResponse
 
     const handled = handleKyberRequest(
       req,
@@ -782,9 +768,9 @@ describe('Task F4: HTTP Endpoints and Bridge Integration', () => {
       end: (data: string) => {
         responseBody = data
       },
-    } as any
+    } as unknown as ServerResponse
 
-    const reqDelete = { method: 'DELETE' } as any
+    const reqDelete = { method: 'DELETE' } as unknown as IncomingMessage
     const handled = handleKyberRequest(
       reqDelete,
       res,

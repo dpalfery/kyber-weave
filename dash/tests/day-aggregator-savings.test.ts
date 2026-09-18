@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { aggregateProjectsIntoDays, buildPeriodDataFromDays } from '../src/metrics/day-aggregator.js'
-import type { ParsedApiCall, ProjectSummary, SessionSummary, Turn } from '../src/types.js'
+import type { ParsedApiCall, ProjectSummary, Turn } from '../src/types.js'
 
 function makeCall(timestamp: string, opts: { costUSD: number; savingsUSD?: number; savingsBaselineModel?: string; model?: string }): ParsedApiCall {
   return {
@@ -42,20 +42,6 @@ function makeTurn(timestamp: string, calls: ParsedApiCall[], category: string = 
     hasEdits: false,
     assistantCalls: calls,
   } as Turn
-}
-
-function makeSession(sessions: SessionSummary[]): ProjectSummary {
-  const totalCostUSD = sessions.reduce((s, sess) => s + sess.totalCostUSD, 0)
-  const totalSavingsUSD = sessions.reduce((s, sess) => s + sess.totalSavingsUSD, 0)
-  const totalApiCalls = sessions.reduce((s, sess) => s + sess.apiCalls, 0)
-  return {
-    project: 'p',
-    projectPath: '/p',
-    sessions,
-    totalCostUSD,
-    totalSavingsUSD,
-    totalApiCalls,
-  }
 }
 
 describe('aggregateProjectsIntoDays: savings totals', () => {

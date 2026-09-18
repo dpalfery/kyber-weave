@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -6,6 +7,23 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import { createDevinProvider } from '../../src/providers/devin.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
+
+/// `node:sqlite` is loaded through `createRequire` rather than a static import so
+/// the suite still loads on a Node build without it; `isSqliteAvailable()` gates
+/// the tests that need it. The cast is the slice of DatabaseSync these tests use.
+const requireForTest = createRequire(import.meta.url)
+type SqliteDb = {
+  exec(sql: string): void
+  prepare(sql: string): { run(...params: unknown[]): void }
+  close(): void
+}
+const openSqlite = (path: string): SqliteDb => {
+  const { DatabaseSync } = requireForTest('node:sqlite') as {
+    DatabaseSync: new (path: string) => SqliteDb
+  }
+  return new DatabaseSync(path)
+}
+
 
 let tmpDir: string
 
@@ -43,8 +61,7 @@ async function parseTranscript(filePath: string, project = 'devin'): Promise<Par
 }
 
 function createSessionsDb(): void {
-  const { DatabaseSync: Database } = require('node:sqlite')
-  const db = new Database(join(tmpDir, 'sessions.db'))
+    const db = openSqlite(join(tmpDir, 'sessions.db'))
   db.exec(`
     CREATE TABLE sessions (
       id TEXT PRIMARY KEY,

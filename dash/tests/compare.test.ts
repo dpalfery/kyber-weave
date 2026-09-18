@@ -12,22 +12,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import {
-  alignByPhase,
-  compareRuns,
-  inferTurnPhase,
-  type PhaseAlignedTurnPair,
-  type RunTurn,
-  type TaskPhase,
-} from '../src/analysis/compare.js'
-import {
-  evaluatePairSufficiency,
-  pairConfidence,
-  proposeRunPairs,
-  type CandidateRun,
-} from '../src/analysis/pairing.js'
+import { alignByPhase, compareRuns, inferTurnPhase, type RunTurn, type TaskPhase } from '../src/analysis/compare.js'
+import { pairConfidence, proposeRunPairs, type CandidateRun } from '../src/analysis/pairing.js'
 import type { OutcomeBlock } from '../src/canon/outcome.js'
-import type { CanonicalRecord, CostBlock, TokenUsage } from '../src/canon/types.js'
+import type { CanonicalRecord, TokenUsage } from '../src/canon/types.js'
 import { notMeasurable } from '../src/canon/types.js'
 
 let spanCounter = 0

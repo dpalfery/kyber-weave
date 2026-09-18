@@ -15,20 +15,21 @@ export function patchStdoutForWindows(): void {
   if (process.platform !== 'win32' || patched) return
   patched = true
 
-  const origWrite = process.stdout.write.bind(process.stdout)
+  type StdoutWrite = (chunk: unknown, ...args: unknown[]) => boolean
+  const origWrite = process.stdout.write.bind(process.stdout) as unknown as StdoutWrite
   process.stdout.write = function (chunk: unknown, ...args: unknown[]): boolean {
     // Non-string chunks pass straight through unchanged; Buffers never carry
     // these escapes in this codebase, so scanning them is not worth the copy.
     if (typeof chunk !== 'string') {
-      return (origWrite as Function)(chunk, ...args)
+      return origWrite(chunk, ...args)
     }
     // Neither escape present: pass straight through.
     if (!chunk.includes(BSU) && !chunk.includes(ESU)) {
-      return (origWrite as Function)(chunk, ...args)
+      return origWrite(chunk, ...args)
     }
     const stripped = stripSyncUpdateEscapes(chunk)
     if (stripped.length > 0) {
-      return (origWrite as Function)(stripped, ...args)
+      return origWrite(stripped, ...args)
     }
     // The chunk was swallowed entirely. The old exact-match filter dropped the
     // callback too, which could wedge a callback-style writer; invoke it

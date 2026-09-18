@@ -22,7 +22,6 @@ const VALUE_WIDTH = 14
 const MODEL_NAME_COL = 24
 const BAR_MAX_WIDTH = 30
 const MIN_WIDE = 90
-const PANEL_CHROME = 4
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const FULL_BLOCK = '\u2588'
 

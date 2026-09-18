@@ -2,32 +2,15 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import {
-  computeRankScore,
-  CONFIDENCE_MULTIPLIERS,
-  detectCompactionHazard,
-  detectDormantToolSchema,
-  detectDuplicateToolCall,
-  detectFindings,
-  detectInactiveSkillReference,
-  detectOversizedToolResult,
-  detectPrefixCacheBreak,
-  detectUnboundedDelegation,
-  lintRecommendationD8,
-  rankFindings,
-  type DetectorId,
-  type Finding,
-  type FindingConfidence,
-  type FindingEvidenceLink,
-} from '../src/analysis/findings.js'
+import { computeRankScore, detectCompactionHazard, detectDormantToolSchema, detectDuplicateToolCall, detectFindings, detectInactiveSkillReference, detectOversizedToolResult, detectPrefixCacheBreak, detectUnboundedDelegation, lintRecommendationD8, rankFindings, type Finding } from '../src/analysis/findings.js'
 import {
   CanonStore,
   SCHEMA_VERSION,
 } from '../src/canon/store.js'
 import type { CanonicalRecord } from '../src/canon/types.js'
-import type { OutcomeBlock } from '../src/canon/outcome.js'
 import { KyberBridge } from '../src/server/bridge.js'
 import { handleKyberRequest } from '../src/server/routes.js'
 
@@ -245,19 +228,6 @@ describe('Detector 2: duplicate-tool-call', () => {
   })
 
   it('normalizes whitespace in JSON arguments when checking for duplicates', () => {
-    const call1 = makeMockRecord({
-      spanId: 'tool-1',
-      op: 'tool.invoke',
-      name: 'grep',
-      raw: { arguments: '{"pattern":  "hello",   "dir": "src"}' },
-    })
-    const call2 = makeMockRecord({
-      spanId: 'tool-2',
-      op: 'tool.invoke',
-      name: 'grep',
-      raw: { arguments: '{"dir": "src", "pattern": "hello"}' },
-    })
-
     const findings = detectDuplicateToolCall({
       calls: [
         { name: 'grep', arguments: { query: 'export default', path: 'src/' }, spanId: 'c1', turnIndex: 0 },
@@ -879,7 +849,7 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     let statusCode = 0
     let responseBody = ''
 
-    const req = { method: 'GET' } as any
+    const req = { method: 'GET' } as unknown as IncomingMessage
     const res = {
       writeHead: (status: number) => {
         statusCode = status
@@ -887,7 +857,7 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
       end: (data: string) => {
         responseBody = data
       },
-    } as any
+    } as unknown as ServerResponse
 
     const handled = handleKyberRequest(
       req,
@@ -912,7 +882,7 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
       end: (data: string) => {
         detailBody = data
       },
-    } as any
+    } as unknown as ServerResponse
 
     const detailHandled = handleKyberRequest(
       req,

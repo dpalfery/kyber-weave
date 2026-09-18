@@ -2997,7 +2997,7 @@ describe('copilot provider - JetBrains parsing', () => {
         files: [file],
       }),
     ])
-    const dbPath = await createJetBrainsDb(tmpDir, 'iu', 'chat-agent-sessions', 'conv-pn', content)
+    await createJetBrainsDb(tmpDir, 'iu', 'chat-agent-sessions', 'conv-pn', content)
     // discoverSessions populates source.projectName; feed the resolved source.
     const provider = createCopilotProvider('/nonexistent/legacy', '/nonexistent/ws', '/nonexistent/global', tmpDir)
     const sessions = await provider.discoverSessions()
@@ -3038,7 +3038,7 @@ describe('copilot provider - JetBrains parsing', () => {
   it('falls back to git-walk then bucket when no projectName is recorded', async () => {
     // No projectName, no file refs → the honest generic bucket (older plugins).
     const content = jbDbContent([jbAssistantBlob('A reply with no project signal at all.')])
-    const dbPath = await createJetBrainsDb(tmpDir, 'iu', 'chat-agent-sessions', 'conv-nopn', content)
+    await createJetBrainsDb(tmpDir, 'iu', 'chat-agent-sessions', 'conv-nopn', content)
     const provider = createCopilotProvider('/nonexistent/legacy', '/nonexistent/ws', '/nonexistent/global', tmpDir)
     const sessions = await provider.discoverSessions()
     const src = sessions.find((s) => (s as { storeId?: string }).storeId === 'conv-nopn')!
@@ -3051,7 +3051,7 @@ describe('copilot provider - JetBrains parsing', () => {
     // A value containing a quote/newline must not truncate: length-prefixed read.
     const tricky = 'weird"name'
     const raw = jbDbContent([jbAssistantBlob('x')]) + jbProjectNameField(tricky)
-    const dbPath = await createJetBrainsDb(tmpDir, 'iu', 'chat-sessions', 'conv-tricky', raw)
+    await createJetBrainsDb(tmpDir, 'iu', 'chat-sessions', 'conv-tricky', raw)
     const provider = createCopilotProvider('/nonexistent/legacy', '/nonexistent/ws', '/nonexistent/global', tmpDir)
     const sessions = await provider.discoverSessions()
     const src = sessions.find((s) => (s as { storeId?: string }).storeId === 'conv-tricky')!
@@ -3063,7 +3063,7 @@ describe('copilot provider - JetBrains parsing', () => {
     // so a repo name with multibyte characters must round-trip intact.
     const name = 'проект-café'
     const raw = jbDbContent([jbAssistantBlob('x')]) + jbProjectNameField(name)
-    const dbPath = await createJetBrainsDb(tmpDir, 'iu', 'chat-sessions', 'conv-utf8name', raw)
+    await createJetBrainsDb(tmpDir, 'iu', 'chat-sessions', 'conv-utf8name', raw)
     const provider = createCopilotProvider('/nonexistent/legacy', '/nonexistent/ws', '/nonexistent/global', tmpDir)
     const sessions = await provider.discoverSessions()
     const src = sessions.find((s) => (s as { storeId?: string }).storeId === 'conv-utf8name')!

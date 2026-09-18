@@ -13,18 +13,9 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  buildReviewPrompt,
-  parseReviewResponse,
-  runContextReview,
-  runReview,
-  SYSTEM_REVIEW_PROMPT,
-  type ReviewOptions,
-  type ReviewRequest,
-  type ReviewResult,
-} from '../src/analysis/review.js'
+import { buildReviewPrompt, parseReviewResponse, runContextReview, runReview, type ReviewRequest, type ReviewResult } from '../src/analysis/review.js'
 import {
   createReviewProvider,
   MockReviewProvider,
@@ -36,8 +27,7 @@ import {
 } from '../src/analysis/review-providers/index.js'
 import { CanonStore } from '../src/canon/store.js'
 import { handleKyberRequest } from '../src/server/routes.js'
-import type { KyberBridge } from '../src/server/bridge.js'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { ServerResponse } from 'node:http'
 import { EventEmitter } from 'node:events'
 
 const tempDirs: string[] = []
@@ -55,6 +45,11 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+/// CanonStore keeps its handle private. These assertions verify the `finding`
+/// table directly, which is the point — that a review writes nothing into it —
+/// so they reach past the public surface deliberately rather than by accident.
+type StoreInternals = { db: { prepare(sql: string): { get(): unknown } } }
 
 describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
   // ---------------------------------------------------------------------------
@@ -213,12 +208,12 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
     it('OpenAIReviewProvider constructs correct endpoint and payload with mock fetch', async () => {
       let capturedUrl = ''
       let capturedHeaders: Record<string, string> = {}
-      let capturedBody: any = null
+      let capturedBody: unknown = null
 
-      const mockFetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
         capturedUrl = url
-        capturedHeaders = init.headers
-        capturedBody = JSON.parse(init.body)
+        capturedHeaders = init.headers as Record<string, string>
+        capturedBody = JSON.parse(String(init.body))
         return {
           ok: true,
           json: async () => ({
@@ -251,12 +246,12 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
     it('AnthropicReviewProvider constructs correct headers and payload with mock fetch', async () => {
       let capturedUrl = ''
       let capturedHeaders: Record<string, string> = {}
-      let capturedBody: any = null
+      let capturedBody: unknown = null
 
-      const mockFetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
         capturedUrl = url
-        capturedHeaders = init.headers
-        capturedBody = JSON.parse(init.body)
+        capturedHeaders = init.headers as Record<string, string>
+        capturedBody = JSON.parse(String(init.body))
         return {
           ok: true,
           json: async () => ({
@@ -288,11 +283,11 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
 
     it('OllamaReviewProvider defaults to local endpoint without requiring API keys', async () => {
       let capturedUrl = ''
-      let capturedBody: any = null
+      let capturedBody: unknown = null
 
-      const mockFetch = vi.fn().mockImplementation(async (url: string, init: any) => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
         capturedUrl = url
-        capturedBody = JSON.parse(init.body)
+        capturedBody = JSON.parse(String(init.body))
         return {
           ok: true,
           json: async () => ({
@@ -392,7 +387,7 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
 
       // Direct SQL verification on the SQLite database
       const rawCountBefore = (
-        store as any
+        store as unknown as StoreInternals
       ).db.prepare('SELECT COUNT(*) as count FROM finding').get() as { count: number }
       expect(rawCountBefore.count).toBe(0)
 
@@ -418,13 +413,13 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
       expect(findingsAfter).toHaveLength(0)
 
       const rawCountAfter = (
-        store as any
+        store as unknown as StoreInternals
       ).db.prepare('SELECT COUNT(*) as count FROM finding').get() as { count: number }
       expect(rawCountAfter.count).toBe(0)
 
       // Verify no tables have been added with 'review' or 'finding' records
       const allFindingRows = (
-        store as any
+        store as unknown as StoreInternals
       ).db.prepare('SELECT * FROM finding').all()
       expect(allFindingRows).toHaveLength(0)
 
@@ -437,9 +432,9 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
 
       expect(res.source).toBe('model_review')
       // Ensure Finding-specific properties (such as detectorId, estimatedWasteTokens) are not in ReviewResult
-      expect((res as any).detectorId).toBeUndefined()
-      expect((res as any).estimatedWasteTokens).toBeUndefined()
-      expect((res as any).rankScore).toBeUndefined()
+      expect((res as unknown as Record<string, unknown>).detectorId).toBeUndefined()
+      expect((res as unknown as Record<string, unknown>).estimatedWasteTokens).toBeUndefined()
+      expect((res as unknown as Record<string, unknown>).rankScore).toBeUndefined()
     })
   })
 
@@ -470,12 +465,19 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
   // 7. Server Route Handling
   // ---------------------------------------------------------------------------
   describe('HTTP Route Handling (/api/kyber/review)', () => {
-    function makeMockRes(): ServerResponse & {
+    /// The slice of ServerResponse the router touches, plus the three fields the
+    /// assertions read back. Narrow on purpose: widening it to the real interface
+    /// would mean stubbing dozens of methods no route calls.
+    type MockRes = {
       statusCode: number
       headers: Record<string, string>
       body: string
-    } {
-      const res: any = {
+      writeHead(status: number, headers: Record<string, string>): void
+      end(data?: string): void
+    }
+
+    function makeMockRes(): MockRes {
+      const res: MockRes = {
         statusCode: 200,
         headers: {},
         body: '',
@@ -491,12 +493,12 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
     }
 
     it('serves GET /api/kyber/review/status with provider configuration info', () => {
-      const req: any = { method: 'GET' }
+      const req = { method: 'GET' } as unknown as IncomingMessage
       const res = makeMockRes()
       const url = new URL('http://localhost:3000/api/kyber/review/status')
-      const bridge: any = {}
+      const bridge = {} as unknown as KyberBridge
 
-      const handled = handleKyberRequest(req, res, url, bridge)
+      const handled = handleKyberRequest(req, res as unknown as ServerResponse, url, bridge)
       expect(handled).toBe(true)
       expect(res.statusCode).toBe(200)
 
@@ -506,12 +508,12 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
     })
 
     it('rejects GET /api/kyber/review with 405 Method Not Allowed', () => {
-      const req: any = { method: 'GET' }
+      const req = { method: 'GET' } as unknown as IncomingMessage
       const res = makeMockRes()
       const url = new URL('http://localhost:3000/api/kyber/review')
-      const bridge: any = {}
+      const bridge = {} as unknown as KyberBridge
 
-      const handled = handleKyberRequest(req, res, url, bridge)
+      const handled = handleKyberRequest(req, res as unknown as ServerResponse, url, bridge)
       expect(handled).toBe(true)
       expect(res.statusCode).toBe(405)
       const data = JSON.parse(res.body)
@@ -519,13 +521,13 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
     })
 
     it('handles POST /api/kyber/review and returns ReviewResult', async () => {
-      const req: any = new EventEmitter()
+      const req = new EventEmitter() as unknown as IncomingMessage
       req.method = 'POST'
       const res = makeMockRes()
       const url = new URL('http://localhost:3000/api/kyber/review')
-      const bridge: any = {}
+      const bridge = {} as unknown as KyberBridge
 
-      const handled = handleKyberRequest(req, res, url, bridge)
+      const handled = handleKyberRequest(req, res as unknown as ServerResponse, url, bridge)
       expect(handled).toBe(true)
 
       const payload = {

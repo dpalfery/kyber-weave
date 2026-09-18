@@ -71,6 +71,9 @@ export default [
     rules: {
       ...(cfg.rules ?? {}),
       'no-undef': 'off',
+      // A `let` read inside a closure before its single assignment cannot be
+      // `const`; without this the rule reports code that would not compile.
+      'prefer-const': ['error', { ignoreReadBeforeAssign: true }],
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },

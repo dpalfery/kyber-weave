@@ -283,7 +283,7 @@ describe('collectDoctorReport - isolation and edge cases', () => {
       name: 'flaky',
       discoverSessions: async () => [src],
       createSessionParser: () => ({
-        // eslint-disable-next-line require-yield
+         
         async *parse() { throw new Error('bad json') },
       }),
     })
@@ -371,7 +371,7 @@ describe('doctor rendering', () => {
       expect(out).toContain('/nonexistent/projects')
       expect(out).toContain('missing')
       // no-color mode emits no ANSI escapes
-      // eslint-disable-next-line no-control-regex
+       
       expect(out).not.toMatch(/\[/)
     } finally {
       if (prev === undefined) delete process.env['CLAUDE_CONFIG_DIR']

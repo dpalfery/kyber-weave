@@ -15,7 +15,7 @@ import { afterEach, expect, it } from 'vitest'
 // reads the env set below before the dynamic import.
 
 const CWD = '/Users/test/codexonlyproxied'
-let tmpDirs: string[] = []
+const tmpDirs: string[] = []
 
 afterEach(async () => {
   while (tmpDirs.length > 0) {

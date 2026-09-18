@@ -492,7 +492,7 @@ function ensureReplayParent(root: object, path: ChatJournalPathSegment[]): objec
   for (let i = 0; i < path.length - 1; i++) {
     const segment = path[i]!
     const nextSegment = path[i + 1]!
-    let child = getReplayValue(current, segment)
+    const child = getReplayValue(current, segment)
     if (!isReplayContainer(child)) {
       const created = createContainerForNext(nextSegment)
       setReplayValue(current, segment, created)
@@ -528,7 +528,7 @@ function applyChatJournalAppend(root: unknown, path: ChatJournalPathSegment[], i
   if (!parent) return workingRoot
 
   const last = path[path.length - 1]!
-  let target = getReplayValue(parent, last)
+  const target = getReplayValue(parent, last)
   const targetArray: unknown[] = Array.isArray(target) ? target : []
   if (target !== targetArray) {
     setReplayValue(parent, last, targetArray)
@@ -1299,7 +1299,7 @@ function extractJetBrainsProjectName(raw: string): string | undefined {
     // UTF-8 (repo names can contain non-ASCII). Reject only if the decoded value
     // holds control chars — a sign we matched a non-value occurrence, not a name.
     const val = Buffer.from(raw.slice(start, start + len), 'latin1').toString('utf8')
-    // eslint-disable-next-line no-control-regex
+     
     if (val.length > 0 && !/[\x00-\x1f]/.test(val)) return val
   }
   return undefined

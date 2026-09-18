@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { rm, writeFile, mkdir } from 'fs/promises'
+import { rm, mkdir } from 'fs/promises'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'

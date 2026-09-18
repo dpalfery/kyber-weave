@@ -7,7 +7,6 @@ import { assembleDashboardData, renderDashboard } from '../src/tui/dashboard.js'
 import { clearSessionCache } from '../src/ingest/parser.js'
 import { clearLoadCacheMemo } from '../src/ingest/session-cache.js'
 
-const DAY_MS = 24 * 60 * 60 * 1000
 
 let tmpDir: string
 

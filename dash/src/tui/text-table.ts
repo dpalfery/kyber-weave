@@ -4,7 +4,7 @@ export type TableColumn = { header: string; right?: boolean }
 
 // Visible width, ignoring ANSI color codes, so padding stays aligned.
 function vlen(s: string): number {
-  // eslint-disable-next-line no-control-regex
+   
   return s.replace(/\[[0-9;]*m/g, '').length
 }
 

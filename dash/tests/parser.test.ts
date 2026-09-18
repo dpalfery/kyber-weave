@@ -18,7 +18,7 @@ import { calculateCost } from '../src/pricing/models.js'
 import { aggregateProjectsIntoDays } from '../src/metrics/day-aggregator.js'
 import { DAILY_CACHE_VERSION, currentTzKey, ensureCacheHydrated, saveDailyCache } from '../src/ingest/daily-cache.js'
 import { clearSessionCache, isSessionHydrationComplete, parseAllSessions, setParseReuseValidator } from '../src/ingest/parser.js'
-import { CACHE_VERSION, clearLoadCacheMemo, computeEnvFingerprint, loadCache, PROVIDER_PARSE_VERSIONS, saveCache } from '../src/ingest/session-cache.js'
+import { CACHE_VERSION, clearLoadCacheMemo, computeEnvFingerprint, loadCache } from '../src/ingest/session-cache.js'
 import { cacheDirSnapshot, readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
 import type { SessionSource, SessionParser, ParsedProviderCall } from '../src/providers/types.js'
 
@@ -325,7 +325,6 @@ describe('(d) non-durable provider evicts deleted sources', () => {
     await writeFile(fileB, 'placeholder-b')
 
     const dedupA = 'synth-dedup-evict-a'
-    const dedupB = 'synth-dedup-evict-b'
 
     const makeCall = (deduplicationKey: string): ParsedProviderCall => ({
       provider: 'test-synthetic', model: 'gpt-4o',

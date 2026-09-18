@@ -4,14 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import {
-  SURVEYED_HARNESSES,
-  cacheAvailability,
-  normalizeHarnessName,
-  prefixAvailability,
-  type CacheAvailability,
-  type PrefixAvailability,
-} from '../src/canon/measurability.js'
+import { SURVEYED_HARNESSES, cacheAvailability, normalizeHarnessName, prefixAvailability } from '../src/canon/measurability.js'
 import {
   auditCachePrefixCoverage,
   auditCorpusCachePrefix,

@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
@@ -9,6 +10,23 @@ import { createCursorAgentProvider } from '../../src/providers/cursor-agent.js'
 import { estimateTokensFromChars } from '../../src/pricing/token-estimate.js'
 import type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
 import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
+
+/// `node:sqlite` is loaded through `createRequire` rather than a static import so
+/// the suite still loads on a Node build without it; `isSqliteAvailable()` gates
+/// the tests that need it. The cast is the slice of DatabaseSync these tests use.
+const requireForTest = createRequire(import.meta.url)
+type SqliteDb = {
+  exec(sql: string): void
+  prepare(sql: string): { run(...params: unknown[]): void }
+  close(): void
+}
+const openSqlite = (path: string): SqliteDb => {
+  const { DatabaseSync } = requireForTest('node:sqlite') as {
+    DatabaseSync: new (path: string) => SqliteDb
+  }
+  return new DatabaseSync(path)
+}
+
 
 const CURSOR_AGENT_DEFAULT_MODEL = 'cursor-agent-auto'
 const FIXED_UUID = '123e4567-e89b-12d3-a456-426614174000'
@@ -46,8 +64,7 @@ async function collectCalls(provider: Provider, source: SessionSource): Promise<
 }
 
 function withTestDb(dbPath: string, fn: (db: TestDb) => void): void {
-  const { DatabaseSync: Database } = require('node:sqlite')
-  const db = new Database(dbPath)
+    const db = openSqlite(dbPath)
   fn(db)
   db.close()
 }

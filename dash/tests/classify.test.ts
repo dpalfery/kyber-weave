@@ -1,19 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  classifyContextItem,
-  classifySessionContext,
-  classifyTurnContext,
-  EVIDENCE_OF_USE_LEVELS,
-  extractFilePaths,
-  extractSymbols,
-  extractToolNames,
-  extractVocabulary,
-  type ClassificationRule,
-  type ClassifiedContextItem,
-  type ContextItem,
-  type EvidenceOfUse,
-} from '../src/analysis/classify.js'
+import { classifyContextItem, classifySessionContext, classifyTurnContext, EVIDENCE_OF_USE_LEVELS, extractFilePaths, extractSymbols, extractToolNames, extractVocabulary, type ContextItem } from '../src/analysis/classify.js'
 import {
   analyzeContext,
   type ContextPart,

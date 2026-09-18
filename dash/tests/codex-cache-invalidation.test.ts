@@ -53,6 +53,17 @@ function allMcpServers(projects: Awaited<ReturnType<typeof parseAllSessions>>): 
   return servers
 }
 
+/// The slice of the on-disk cache this test rewrites, as a pre-fix release would
+/// have written it. Declared structurally rather than imported: the point is to
+/// produce a shape the current `SessionCache` no longer describes, so borrowing
+/// that type would defeat the fixture.
+type LegacyCall = { tools: string[]; toolSequence?: { tool: string }[][] }
+type LegacyTurn = { calls: LegacyCall[] }
+type LegacyFile = { turns: LegacyTurn[] }
+type LegacyProviderCache = { envFingerprint: string; files: Record<string, LegacyFile> }
+type LegacyCache = { providers: Record<string, LegacyProviderCache> }
+type LegacyCodexCache = { version: number; files: Record<string, { calls?: { tools?: string[] }[] }> }
+
 describe('codex parser change invalidates stale session-cache (#478/#513)', () => {
   it('re-parses unchanged codex files after a parser attribution change', async () => {
     const sessionDir = join(CODEX_HOME, 'sessions', '2026', '04', '14')
@@ -75,24 +86,24 @@ describe('codex parser change invalidates stale session-cache (#478/#513)', () =
     // release: pre-fix envFingerprint, unchanged file fingerprint, cached
     // turns lack the mcp__ tool. Also reset codex-results.json to v4 so the
     // provider (if it runs at all) must genuinely re-parse.
-    const cache = await readCacheOnDisk() as any
+    const cache = await readCacheOnDisk() as unknown as LegacyCache
     cache.providers.codex.envFingerprint = preFixFingerprint()
-    for (const f of Object.values(cache.providers.codex.files) as any[]) {
+    for (const f of Object.values(cache.providers['codex']!.files)) {
       for (const turn of f.turns) {
         for (const call of turn.calls) {
           call.tools = call.tools.filter((t: string) => !t.startsWith('mcp__'))
           if (call.toolSequence) {
-            call.toolSequence = call.toolSequence.filter((step: any[]) => !step.some(c => c.tool.startsWith('mcp__')))
+            call.toolSequence = call.toolSequence.filter(step => !step.some(c => c.tool.startsWith('mcp__')))
           }
         }
       }
     }
-    await writeCacheOnDisk(cache)
+    await writeCacheOnDisk(cache as unknown as Parameters<typeof writeCacheOnDisk>[0])
     const { codexCacheFileName } = await import('../src/ingest/codex-cache.js')
     const codexCachePath = join(CACHE_DIR, codexCacheFileName())
-    const codexCache = JSON.parse(await readFile(codexCachePath, 'utf8'))
+    const codexCache = JSON.parse(await readFile(codexCachePath, 'utf8')) as LegacyCodexCache
     codexCache.version = 4
-    for (const f of Object.values(codexCache.files) as any[]) {
+    for (const f of Object.values(codexCache.files)) {
       for (const call of f.calls ?? []) {
         call.tools = (call.tools ?? []).filter((t: string) => !t.startsWith('mcp__'))
       }

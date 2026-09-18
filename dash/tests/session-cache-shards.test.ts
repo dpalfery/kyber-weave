@@ -5,7 +5,7 @@
 // the months that changed (including when the load was scoped to a subset of
 // them), and that one unreadable shard costs exactly one month.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'fs/promises'
+import { mkdir, readFile, readdir, rm, utimes, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'

@@ -1107,7 +1107,7 @@ export function mergeDayEntries(
       if (subtract) {
         const subForDate = subtract.get(day.date)
         if (subForDate) {
-          for (const [provider, slice] of Object.entries(copy.providers)) {
+          for (const provider of Object.keys(copy.providers)) {
             const subSlice = subForDate.get(provider)
             if (!subSlice) continue
             subtractSliceFromDay(copy, provider, subSlice)

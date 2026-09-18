@@ -19,7 +19,7 @@ function makeRange(): DateRange {
   return { start: RANGE_START, end: RANGE_END }
 }
 
-let tmpDirs: string[] = []
+const tmpDirs: string[] = []
 
 beforeAll(async () => {
   await loadPricing()

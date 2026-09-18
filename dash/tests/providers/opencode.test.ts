@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
@@ -7,6 +8,23 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import { createOpenCodeProvider } from '../../src/providers/opencode.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
+
+/// `node:sqlite` is loaded through `createRequire` rather than a static import so
+/// the suite still loads on a Node build without it; `isSqliteAvailable()` gates
+/// the tests that need it. The cast is the slice of DatabaseSync these tests use.
+const requireForTest = createRequire(import.meta.url)
+type SqliteDb = {
+  exec(sql: string): void
+  prepare(sql: string): { run(...params: unknown[]): void }
+  close(): void
+}
+const openSqlite = (path: string): SqliteDb => {
+  const { DatabaseSync } = requireForTest('node:sqlite') as {
+    DatabaseSync: new (path: string) => SqliteDb
+  }
+  return new DatabaseSync(path)
+}
+
 
 type TestDb = {
   exec(sql: string): void
@@ -29,8 +47,7 @@ function createTestDb(dir: string): string {
   mkdirSync(ocDir, { recursive: true })
   const dbPath = join(ocDir, 'opencode.db')
 
-  const { DatabaseSync: Database } = require('node:sqlite')
-  const db = new Database(dbPath)
+    const db = openSqlite(dbPath)
   db.exec(`
     CREATE TABLE session (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT,
@@ -57,8 +74,7 @@ function createTestDb(dir: string): string {
 }
 
 function withTestDb(dbPath: string, fn: (db: TestDb) => void): void {
-  const { DatabaseSync: Database } = require('node:sqlite')
-  const db = new Database(dbPath)
+    const db = openSqlite(dbPath)
   fn(db)
   db.close()
 }
@@ -90,7 +106,10 @@ type PartFixture = {
   type: string
   text?: string
   tool?: string
-  state?: { status: string; input: { command?: string } }
+  /// `input` is whatever the tool took, so it is open: a bash part carries
+  /// `command`, an edit part carries a file and a patch, and a reasoning part
+  /// has no state at all.
+  state?: { status: string; input: Record<string, unknown> }
 }
 
 function insertMessage(db: TestDb, id: string, sessionId: string, timeCreated: number, data: MessageFixture): void {
@@ -221,10 +240,9 @@ skipUnlessSqlite('opencode provider - session discovery', () => {
     const ocDir = join(tmpDir, 'opencode')
     await mkdir(ocDir, { recursive: true })
 
-    const { DatabaseSync: Database } = require('node:sqlite')
     for (const file of ['opencode.db', 'opencode-dev.db']) {
       const dbPath = join(ocDir, file)
-      const db = new Database(dbPath)
+      const db = openSqlite(dbPath)
       db.exec(`
         CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT,
           slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL,
@@ -856,7 +874,7 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
       insertMessage(db, 'msg-1', 'sess-1', 1700000001000, {
         role: 'model', modelID: 'gemini-2.5-pro', cost: 0.03,
         tokens: { input: 100, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
-      } as any)
+      })
     })
 
     const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
@@ -874,11 +892,11 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
       insertPart(db, 'part-1', 'msg-1', 'sess-1', {
         type: 'tool-call', tool: 'bash',
         state: { status: 'completed', input: { command: 'ls' } },
-      } as any)
+      })
       insertPart(db, 'part-2', 'msg-1', 'sess-1', {
         type: 'tool_call', tool: 'edit',
         state: { status: 'completed', input: {} },
-      } as any)
+      })
     })
 
     const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
@@ -895,7 +913,7 @@ skipUnlessSqlite('opencode provider - session parsing', () => {
       })
       insertPart(db, 'part-1', 'msg-1', 'sess-1', {
         type: 'reasoning',
-      } as any)
+      })
     })
 
     const calls = await collectCalls(createOpenCodeProvider(tmpDir), dbPath, 'sess-1')
@@ -910,8 +928,7 @@ skipUnlessSqlite('opencode provider - env override discovery', () => {
   // (NOT under an 'opencode' subdir), mirroring a real fork like MiMoCode writing
   // ~/.local/share/mimicode/mimicode.db with the same Drizzle schema.
   function createForkDb(dbPath: string, sessionId: string): void {
-    const { DatabaseSync: Database } = require('node:sqlite')
-    const db = new Database(dbPath)
+        const db = openSqlite(dbPath)
     db.exec(`
       CREATE TABLE session (
         id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT,

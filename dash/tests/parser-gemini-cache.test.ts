@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -118,8 +118,11 @@ describe('Gemini session cache migration', () => {
       'gemini:gemini-session-1:g2',
     ])
 
-    const savedCache = await readCacheOnDisk() as any
-    const savedKeys = savedCache.providers.gemini.files[sessionPath].turns.flatMap((turn: { calls: Array<{ deduplicationKey: string }> }) =>
+    /// The shard layout the assertion walks; `SessionCache` models the provider
+    /// map generically, so this names the one path being read.
+    type CachedTurns = { providers: Record<string, { files: Record<string, { turns: { calls: { deduplicationKey: string }[] }[] }> }> }
+    const savedCache = await readCacheOnDisk() as unknown as CachedTurns
+    const savedKeys = savedCache.providers['gemini']!.files[sessionPath]!.turns.flatMap(turn =>
       turn.calls.map(call => call.deduplicationKey),
     )
     expect(savedKeys).toEqual(keys)

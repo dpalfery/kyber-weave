@@ -1,5 +1,5 @@
 import { readdir, stat } from 'fs/promises'
-import { basename, join } from 'path'
+import { join } from 'path'
 import { homedir } from 'os'
 
 import { readSessionFile } from '../ingest/fs-utils.js'

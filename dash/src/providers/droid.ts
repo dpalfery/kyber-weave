@@ -131,7 +131,7 @@ function createParser(
 
       const lines = content.split('\n').filter(l => l.trim())
       let sessionId = ''
-      let sessionModelDisplay = settings.model ? stripModelPrefix(settings.model) : 'unknown'
+      const sessionModelDisplay = settings.model ? stripModelPrefix(settings.model) : 'unknown'
       let currentUserMessage = ''
 
       // Collect all assistant messages with their tools

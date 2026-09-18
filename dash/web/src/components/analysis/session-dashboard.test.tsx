@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AgentSessionRow, ContextExplorer } from '../ContextExplorer.js'
 import type { KyberSessionSummary } from '../../lib/kyberApi.js'
 
-let hookStates: unknown[] = []
+const hookStates: unknown[] = []
 let hookIndex = 0
 
 const reactInternals = (

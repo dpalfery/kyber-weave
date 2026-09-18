@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 // sanitize/unsanitize path round-trips to the same merge key as Claude.
 
 const MERGE_CWD = '/Users/test/proxiedmerge'
-let tmpDirs: string[] = []
+const tmpDirs: string[] = []
 
 afterEach(async () => {
   while (tmpDirs.length > 0) {

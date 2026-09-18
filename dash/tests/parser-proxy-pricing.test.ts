@@ -131,7 +131,7 @@ const makeRange = (): DateRange => ({ start: RANGE_START, end: RANGE_END })
 // .git ancestor and returns it unchanged, so projectPath is predictable.
 const FIXTURE_CWD = '/private/var/eywa-proxy-fixture/acme'
 
-let tmpDirs: string[] = []
+const tmpDirs: string[] = []
 
 beforeAll(async () => {
   await loadPricing()

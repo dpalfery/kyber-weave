@@ -267,7 +267,7 @@ function getRawPayloadFieldWindow(source: Buffer, field: string, windowBytes = 4
   const payloadKey = Buffer.from('"payload"')
   const payloadIndex = source.indexOf(payloadKey)
   if (payloadIndex < 0) return undefined
-  let payloadStart = source.indexOf(0x7b, payloadIndex + payloadKey.length) // {
+  const payloadStart = source.indexOf(0x7b, payloadIndex + payloadKey.length) // {
   if (payloadStart < 0) return undefined
 
   let depth = 0

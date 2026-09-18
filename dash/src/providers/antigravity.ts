@@ -807,7 +807,7 @@ function buildCallFromSqliteGenMetadataRow(cascadeId: string, row: AntigravityGe
     || protoFieldPositiveInteger(firstProtoField(usageFields, 1))
   const totalOutputTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 3))
   let responseTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 9))
-  let thinkingTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 10))
+  const thinkingTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 10))
 
   if (responseTokens === 0 && thinkingTokens === 0) {
     responseTokens = totalOutputTokens

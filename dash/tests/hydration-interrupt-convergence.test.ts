@@ -24,7 +24,7 @@ const FIXTURE_DAYS = [12, 9, 6, 4].map(daysAgo)
 const RANGE: DateRange = { start: daysAgo(30), end: now }
 const PERIOD = { range: RANGE, label: '30-day window' }
 
-let tmpDirs: string[] = []
+const tmpDirs: string[] = []
 
 beforeAll(async () => {
   await loadPricing()

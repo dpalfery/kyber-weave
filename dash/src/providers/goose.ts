@@ -24,13 +24,6 @@ type ModelConfig = {
   reasoning?: boolean
 }
 
-type MessageRow = {
-  message_id: string
-  role: string
-  content_json: Uint8Array | string
-  created_timestamp: number
-}
-
 type ContentItem = {
   type: string
   toolCall?: { value?: { name?: string; arguments?: Record<string, unknown> } }

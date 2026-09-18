@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseAllSessions, clearSessionCache } from '../src/ingest/parser.js'
 import { clearLoadCacheMemo } from '../src/ingest/session-cache.js'
 import { loadPricing } from '../src/pricing/models.js'
-import { emptyCache, loadCache, saveCache } from '../src/ingest/session-cache.js'
 import type { ProjectSummary, SessionLineage } from '../src/types.js'
 
 // CB-1, slice 1: SessionLineage capture. Provider-recorded only - the
