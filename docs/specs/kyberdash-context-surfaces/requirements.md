@@ -116,7 +116,8 @@ troubleshooting deleted, so that the code I now own is only the code the product
 `identity`, `overview`, `budget`, `today`, `month`, `currency`, `plan`, `model-alias`,
 `price-override`, `model-savings`, `model-flat-rate`, `proxy-path`, `codex-tps`, `compare`,
 `yield`, `spend`, `antigravity-hook`, `agy-statusline-hook`, `optimize`, `serve`, `status`,
-`context`, `mcp`, `audit`, `sessions`, `models`, `export`.
+`context`, `mcp`, `audit`, `sessions`, `models`, `export`, `act`, `guard`, `sync`, `plugin`,
+and SHALL NOT load third-party plugin commands at run time.
 
 2.2. WHEN the `kyberdash` CLI is built THEN it SHALL register `report` (Requirement 11),
 `web` (Requirement 5), `menubar` (Requirement 12), `doctor`, and the existing KyberDash

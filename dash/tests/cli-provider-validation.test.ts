@@ -59,14 +59,14 @@ describe('codeburn --provider validation', () => {
 
   it('accepts a valid provider', async () => {
     const home = await makeHome()
-    const res = runCli(['status', '--provider', 'claude', '--format', 'json'], home)
+    const res = runCli(['report', '--provider', 'claude', '--format', 'json', '-p', 'today'], home)
     expect(res.status).toBe(0)
     expect(res.stderr).not.toContain('unknown provider')
   })
 
   it('accepts the "all" sentinel', async () => {
     const home = await makeHome()
-    const res = runCli(['status', '--provider', 'all', '--format', 'json'], home)
+    const res = runCli(['report', '--provider', 'all', '--format', 'json', '-p', 'today'], home)
     expect(res.status).toBe(0)
   })
 })

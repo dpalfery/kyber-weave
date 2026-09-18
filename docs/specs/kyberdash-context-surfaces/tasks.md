@@ -94,13 +94,16 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Test it against a small fixture tree with one reachable and one orphan module.
   - Add the `check:reachable` npm script and run it in the `ts-gates` CI job.
   - _Requirements: 2.3_
-- [ ] 2.2 Remove the deleted commands
+- [x] 2.2 Remove the deleted commands
   - Stream A.
   - First write a test asserting that the registered top-level commands of the CLI program
     are exactly `report`, `web`, `menubar`, `doctor`, `kyber`, `dash`, `otel` and
     `cursor-hook`.
-  - Then remove every command in the Requirement 2.1 list from `dash/src/main.ts`. `report`
-    keeps its Ink implementation until task 6.2 replaces it.
+  - Split `dash/src/main.ts` into `program.ts` (exports `buildProgram`) and a thin runner,
+    so the test can build the command tree without running it.
+  - Then remove every command in the Requirement 2.1 list, the `act`, `guard`, `sync` and
+    `plugin` registrations and the run-time plugin loader, with the tests of those commands.
+    `report` keeps its Ink implementation until task 6.2 replaces it.
   - _Requirements: 2.1, 2.2_
 - [ ] 2.3 Remove the Usage tab and Share chrome from the web dashboard
   - Stream A.
@@ -265,6 +268,10 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Implement `src/cli/report.ts`.
   - Delete the Ink dashboard, `context-tui` and the Ink and yoga dependencies, and confirm
     `check:reachable` and the SEA build still pass.
+  - `tests/parse-workers.test.ts` and `tests/cli-provider-validation.test.ts` drive the parse
+    path through `report --format json`, which stops parsing here. Move the parse-worker
+    equivalence cases to `dash refresh` (the retained caller of `parseAllSessions`), and
+    rewrite provider validation against `--harness`.
   - _Requirements: 11.1, 11.4, 11.5, 11.10, 11.11, 11.12, 11.13_
 - [ ] 6.3 Prove report and API parity
   - Stream C.

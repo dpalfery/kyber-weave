@@ -286,7 +286,7 @@ describe('parallel cold parse', () => {
   async function bothWays(extraParallelEnv: Record<string, string> = {}) {
     const serialCache = join(home, 'cache-serial')
     const parallelCache = join(home, 'cache-parallel')
-    const args = ['status', '--format', 'menubar-json']
+    const args = ['report', '--format', 'json', '-p', 'all']
     const serial = runCli(args, home, { CODEBURN_PARSE_WORKERS: '0', CODEBURN_CACHE_DIR: serialCache })
     const parallel = runCli(args, home, { CODEBURN_PARSE_WORKERS: '3', CODEBURN_CACHE_DIR: parallelCache, ...extraParallelEnv })
 
@@ -359,7 +359,7 @@ describe('parallel cold parse', () => {
     const codex = join(home, '.codex')
     const path = await writeCodexRollout(codex, '04', 'grow', codexRollout('grow', '/tmp/cxg', [1, 2, 3].map(n => ({ n, at: `2026-05-04T09:${n}0:00.000Z` }))))
     const cache = join(home, 'cache-inc')
-    const args = ['status', '--format', 'menubar-json']
+    const args = ['report', '--format', 'json', '-p', 'all']
 
     const cold = runCli(args, home, { CODEBURN_PARSE_WORKERS: '3', CODEBURN_CACHE_DIR: cache, CODEBURN_VERBOSE: '1' })
     expect(cold.status, cold.stderr).toBe(0)
