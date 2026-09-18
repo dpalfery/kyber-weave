@@ -1,8 +1,8 @@
 ---
-id: adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver
+id: archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver
 title: KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver
 doc-type: adr
-status: current
+status: superseded
 owner: dpalfery
 last-reviewed: 2026-08-29
 ---
@@ -11,7 +11,7 @@ last-reviewed: 2026-08-29
 
 ## Status
 
-Accepted
+Superseded on 2026-09-18 by [ADR 0020](../../adr/0020-kyberdash-one-time-fork.md), which restates decisions 2–4 and replaces decision 1 with a one-time fork. Kept for history; not current guidance.
 
 ## Context
 
@@ -28,7 +28,7 @@ The correctness work is not optional polish. Each of its requirements is backed 
 failure in the Python pipeline — negative fresh input on 293 of 307 spans from the pi/Copilot
 convention inversion, a 5.8× cost understatement from rate-table scoping, 25 of 1,009 spans
 losing a parent to Aspire's ring buffer, 2.9 GB for 37,623 uncompressed spans — all recorded
-in [KyberDash measurable rationale](../reference/kyberdash-rationale.md).
+in [KyberDash measurable rationale](../../reference/kyberdash-rationale.md).
 
 Two foundational questions had to be settled before any implementation, and both had
 plausible-looking answers that were wrong.
@@ -113,12 +113,12 @@ one analysis layer serves both ingest paths.
   ring-buffer eviction class is eliminated rather than worked around.
 - The Python pipeline is retired once the content-free parity gate of Requirement 15
   authorizes it, and its measured rationale has been migrated to
-  [KyberDash measurable rationale](../reference/kyberdash-rationale.md) so the retirement loses
+  [KyberDash measurable rationale](../../reference/kyberdash-rationale.md) so the retirement loses
   nothing.
 
 ## Related
 
-- [KyberDash architecture](../dash/architecture.md)
-- [KyberDash measurable rationale](../reference/kyberdash-rationale.md)
-- [KyberDash product story](../dash/README.md)
-- [Merge-zone rule — `dash/kyber/README.md`](../../dash/kyber/README.md)
+- [KyberDash architecture](../../dash/architecture.md)
+- [KyberDash measurable rationale](../../reference/kyberdash-rationale.md)
+- [KyberDash product story](../../dash/README.md)
+- [Merge-zone rule — `dash/kyber/README.md`](../../../dash/kyber/README.md)

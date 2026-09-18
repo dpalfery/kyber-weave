@@ -6,8 +6,9 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-18
 decided-by:
+  - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
   - adr/0010-keywords-prefix-coverage-and-oov-idf
@@ -55,20 +56,21 @@ they cost, what filled their context windows, and whether a change to either act
 It reads the session files that 41 agent tools already write to disk **and** receives
 OpenTelemetry spans directly, then runs the same normalization and analysis over both.
 
-It is a **soft fork** of [`getagentseal/codeburn`](https://github.com/getagentseal/codeburn)
-(MIT, TypeScript), vendored into this repository with `git subtree` under `dash/`. The
-session-file breadth and the terminal/menu-bar/desktop surfaces come from upstream; the span
-analysis depth — disjoint token accounting, basis-carrying cost, context composition, tool and
-schema cost, quarantine — comes from the retired Python pipeline
-(`agent-session-analysis-dashboard`), ported into the subtree's merge zone.
+It began as a soft fork of the MIT-licensed CodeBurn project and is now a **one-time fork**:
+first-party code under `dash/`, with no upstream relationship
+([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)). The session-file breadth came from
+CodeBurn; the span analysis depth — disjoint token accounting, basis-carrying cost, context
+composition, tool and schema cost, quarantine — came from the retired Python pipeline
+(`agent-session-analysis-dashboard`).
 
 The measured failures that shape several requirements — a 5.8× cost understatement, negative
 fresh input on 293 of 307 spans, 25 of 1,009 spans losing a parent, 2.9 GB for 37,623 stored
 spans — are recorded in [KyberDash measurable rationale](../reference/kyberdash-rationale.md).
 They are correctness constraints, not style choices: they document failures that already
 occurred in the Python pipeline, and a reimplementation that drops a requirement reproduces the
-failure. The foundational architecture decisions — the TypeScript soft fork, the merge zone,
-the embedded receiver — are recorded in [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md).
+failure. The foundational architecture decisions — the one-time fork, the embedded receiver,
+the span-shaped canonical model, SEA distribution and the engine language — are recorded in
+[ADR 0020](../adr/0020-kyberdash-one-time-fork.md).
 
 ## High-level architecture
 
@@ -124,38 +126,17 @@ synthesizers**, converting a parsed provider call into canonical records exactly
 payload is decoded and normalized. No analysis knows or asks which path its data arrived by,
 which is how Requirement 11.1 — one data path, not two parallel ones — is satisfied.
 
-## Repository layout and the merge zone
+## Repository layout
 
-Requirement 14 makes mergeability a design constraint, and mergeability is a function of which
-files are touched. The tree is partitioned by ownership; the complete rule set lives in
-[`dash/kyber/README.md`](../../dash/kyber/README.md):
+`dash/` is first-party code ([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)): any file is
+edited on its merits, under the repository's gates.
 
-| Path | Ownership | Merge behaviour |
-|---|---|---|
-| `dash/src/**` | Upstream | The conflict surface. Read-only. |
-| `dash/kyber/**` | KyberDash only | Never conflicts — upstream has no such path. The merge zone. |
-| `dash/dash/**` | Upstream React dashboard | Extended at the boundary; conflicts possible and expected. |
-| `dash/app/**` | Upstream Electron application | Extended at the boundary; conflicts possible. |
-| `dash/mac/**` | Upstream Swift menu-bar application | Extended at the boundary; conflicts possible. |
-| `dash/windows/**`, `dash/gnome/**` | Upstream | Unmodified and unbuilt (R14.4). |
-
-KyberDash code lives only under `dash/kyber/**` and consumes upstream's *output* — the parsed
-call array its parser already produces and the deduplication set behind it — rather than
-reaching into its internals (R14.2). The `tests/KyberWeave.Tests/MergeBoundaryTests.cs` suite
-pins the boundary: no KyberDash source under upstream read-only roots, the unshipped surfaces
-present and unmodified, and the upstream remote registered.
-
-### Deliberate merge-zone edits
-
-Four files inside upstream's directories are changed on purpose, and each is recorded with its
-reason so a future merge conflict arrives with rationale attached (R14.3):
-
-| File | Reason |
+| Path | Contents |
 |---|---|
-| `dash/src/menubar-json.ts` | The status contract (R11.4): optional `kyber` field carrying the new analyses — context buckets and pressure (R7), schema ranking (R8), timeline (R9), comparison (R10), `quarantineCount` and `problems` (R6). Optional so old payloads still decode; extending it carries a new analysis into native clients without modifying them (R11.5). |
-| `dash/src/usage-aggregator.ts` | Wiring of the contract extension: `buildMenubarPayloadForRange` forwards the optional `kyber` payload; no analysis logic in the payload builder. |
-| `dash/app/electron/cli.ts` | Binary lookup falls back from `kyber-weave` to `codeburn` so the Electron app spawns the renamed CLI. |
-| `dash/mac/Sources/CodeBurnMenubar/Security/CodeburnCLI.swift` | Same binary-name fallback for the Swift menu bar; search order `kyber-weave` → `codeburn` keeps the decode path unchanged. |
+| `dash/src/**` | The CLI engine and the provider session parsers |
+| `dash/kyber/**` | KyberDash's ingest, canonical store, analyses and server |
+| `dash/dash/**` | The React web dashboard |
+| `dash/app/**`, `dash/mac/**`, `dash/windows/**`, `dash/gnome/**` | Inherited native surfaces, unbuilt and unshipped |
 
 ## Ingest layer
 
@@ -178,8 +159,7 @@ unmatched telemetry is quarantined with an auditable reason instead of becoming 
 Session files also enter the store through `kyber-weave dash refresh` (`registerKyberCommands`
 in `dash/kyber/cli/register.ts`, `refreshHarnessSources` in `dash/kyber/refresh/orchestrator.ts`).
 That path is the production local-history ingest; OTLP remains a separate receiver. The
-scheduler, source reader, writer queue, and registry live under `dash/kyber/refresh/**`, an
-ADR 0006 adapter seam already allowlisted in `dash/kyber/tools/boundary.ts`.
+scheduler, source reader, writer queue, and registry live under `dash/kyber/refresh/**`.
 
 The command opens `~/.kyberdash/canon.db` (or `--db`), audits the harness-source registry
 against `getAllProviders()`, and runs **one logical job per harness source type**. Native
@@ -557,8 +537,8 @@ project; the measured rationale the retirement would otherwise take with it is p
 - [KyberDash runbook](runbook.md) — local development, execution runners, demo bridge, and test suites across all 4 surfaces.
 - [KyberDash measurable rationale](../reference/kyberdash-rationale.md) — the measured
   failures behind Requirements 4, 5, 6 and the other quantified constraints.
-- [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — the
-  foundational decisions and their rejected alternatives.
+- [ADR 0020](../adr/0020-kyberdash-one-time-fork.md) — the one-time fork and the foundational
+  decisions it restates from the archived ADR 0006, with their rejected alternatives.
 - [ADR 0007](../adr/0007-kyberdash-agent-session-analysis-integration.md) — Agent Session Analysis
   integration and navigation topology; its dual-database decision is superseded by
   [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md), and its dual Context

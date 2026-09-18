@@ -16,8 +16,8 @@ code-refs:
 # KyberDash runbook — Local development, execution, and testing
 
 KyberDash provides multi-surface observability and context tuning for agentic coding workflows.
-Vendored as a soft fork of [`getagentseal/codeburn`](https://github.com/getagentseal/codeburn)
-under the `dash/` subtree, it delivers metrics, span analyses, and token breakdowns across
+First-party code under `dash/` since a one-time fork of CodeBurn
+([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)), it delivers metrics, span analyses, and token breakdowns across
 **four local execution surfaces**:
 
 1. [Electron Desktop App (`dash/app/`)](#surface-1-electron-desktop-app-dashapp) — Full-featured native window fed by CLI child processes.
@@ -73,8 +73,9 @@ flowchart TD
 - **CLI Distribution (`dash/dist/cli.js`)**: The Electron app, Tauri tray app, and HTTP web server
   interact with KyberDash by executing the compiled CLI binary. Building this file is a mandatory
   prerequisite for surfaces 1, 2, and 3.
-- **Merge Zone Isolation (`dash/kyber/`)**: Custom Kyber-Weave telemetry analyzers and OTLP receivers
-  reside in the merge zone, keeping upstream code cleanly separated.
+- **No upstream remote**: `dash/` no longer tracks CodeBurn. A clone made while it did may
+  still carry the `codeburn` git remote; nothing uses it, so remove it with
+  `git remote remove codeburn`.
 
 ---
 
@@ -505,7 +506,7 @@ This suite verifies:
 
 ## Related Documentation
 
-- [KyberDash Architecture](architecture.md) — Telemetry ingest pipeline, canonical store, and merge zone boundaries.
+- [KyberDash Architecture](architecture.md) — Telemetry ingest pipeline, canonical store, analyses, and surfaces.
 - [KyberDash Overview](README.md) — Product vision, motivation, and capabilities.
 - [Feature Local Run and Test Standard](../rules/feature-runbooks.md) — Standards governing local execution runbooks across all features.
 - [Component Catalog](../catalog.md) — Canonical inventory of components and owners.

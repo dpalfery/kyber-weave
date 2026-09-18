@@ -71,7 +71,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     first-party code under the same gates.
   - `dotnet test` and `npm --prefix dash run test` pass with the rules gone.
   - _Requirements: 1.1, 1.2, 1.4, 4.3_
-- [ ] 1.2 Record the one-time fork and archive ADR 0006
+- [x] 1.2 Record the one-time fork and archive ADR 0006
   - Stream A.
   - Write `docs/adr/0020-…md`. It records the fork commit, restates ADR 0006's receiver,
     canonical-model and SEA-distribution decisions, and re-decides the engine language on

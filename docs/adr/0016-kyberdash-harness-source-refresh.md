@@ -53,7 +53,7 @@ The [refresh pipeline plan](../archive/plans/2026-09-06-kyberdash-refresh-pipeli
 ## Related
 
 - [KyberDash architecture](../dash/architecture.md)
-- [ADR 0006](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — `dash/kyber/refresh/**` adapter seam
+- [ADR 0006](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — `dash/kyber/refresh/**` adapter seam
 - [ADR 0008](0008-kyberdash-single-canonical-store.md)
 - [ADR 0009](0009-multi-signal-ingestion-span-shaped-record.md)
 - [ADR 0018](0018-kyberdash-content-retention-purge.md) — 14-day content purge after refresh
