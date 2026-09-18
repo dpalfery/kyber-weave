@@ -20,7 +20,7 @@
     "build:dash": "cd dash && npm install --no-audit --no-fund --silent && npm run build",
     "dev": "NODE_OPTIONS=--no-deprecation tsx src/cli.ts",
     "test": "vitest run tests kyber dash/src --exclude \"tests/cache-refresh-lock*\"",
-    "test:boundary": "vitest run kyber/tools/boundary.test.ts",
+    "test:cost-isolation": "vitest run kyber/tools/cost-isolation.test.ts",
     "test:locks": "vitest run tests/cache-refresh-lock.test.ts tests/cache-refresh-lock-corrupt-body.test.ts tests/cache-refresh-lock-process.test.ts tests/cache-refresh-lock-status-snapshot.test.ts --poolOptions.forks.singleFork=true",
     "test:watch": "vitest tests dash/src --exclude \"tests/cache-refresh-lock*\"",
     "typecheck": "tsc --noEmit",

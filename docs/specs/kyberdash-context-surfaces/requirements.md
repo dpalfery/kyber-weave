@@ -85,8 +85,10 @@ longer carry the merge-zone ownership table or the deliberate merge-zone edits t
 copyright and permission notice SHALL be retained in `dash/LICENSE` and in the third-party
 notices shipped with the `kyberdash` binary and the tray.
 
-1.6. WHEN a repository file other than the attribution files named in 1.5 contains
-`getagentseal`, `agentseal.org` or `codeburn.app` THEN a test SHALL fail and name the file.
+1.6. WHEN a tracked file outside `docs/`, other than the attribution files named in 1.5,
+contains `getagentseal`, `agentseal.org` or `codeburn.app` THEN a test SHALL fail and name
+the file. `docs/` is exempt because the decision records and specifications that document
+the fork have to name its origin.
 
 1.7. WHEN the fork is recorded THEN existing git history SHALL be preserved without rewrite,
 and the KyberDash runbook SHALL tell existing clones to remove their local `codeburn` remote.

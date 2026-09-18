@@ -1,21 +1,15 @@
-// Static AST boundary and cost isolation enforcement for KyberDash
-// (ADR 0006: Soft Fork Merge Zone & Embedded Receiver;
-// Decision D9: Cost is a secondary derived column; Decision D12: CodeBurn contact stays behind merge zone;
-// Task H1: Enforce CodeBurn Merge Zone Mechanically).
+// Static AST cost-isolation enforcement for KyberDash (Decision D9: cost is a secondary
+// derived column; docs/rules/secondary-cost-display.md).
 //
 // Rules enforced:
-// 1. Merge-zone boundary (ADR 0006, D12):
-//    - KyberDash ships code under `dash/kyber/**`. Vendored CodeBurn internals live under `dash/src/**`.
-//    - Non-adapter modules (modules outside `canon/adapters/**`, `adapter/**`,
-//      `synth/**`, or `refresh/**`) must NEVER import vendored CodeBurn internals
-//      (`dash/src/**` or root `src/**`).
-//    - Only `dash/src/brand-overlay.ts` is exempted as it is KyberDash's own brand overlay.
-// 2. Cost isolation & diagnostic contract integrity (D9, D5, D6, D16):
-//    - Diagnostic and context contracts (Run, AgentExecution, Finding, Scorecard / HarnessRollup,
-//      SignalMeasured, ContextTurn, etc.) must NEVER carry cost-shaped types (CostBlock, CostBasis,
-//      CostStatus, RateTable) or pricing/spend properties.
-//    - Diagnostic modules (findings, signals, runs, outcome, context composition) must NOT import
-//      from `canon/cost.ts` or external pricing engines.
+// - Diagnostic and context contracts (Run, AgentExecution, Finding, Scorecard / HarnessRollup,
+//   SignalMeasured, ContextTurn, etc.) must NEVER carry cost-shaped types (CostBlock, CostBasis,
+//   CostStatus, RateTable) or pricing/spend properties.
+// - Diagnostic modules (findings, signals, runs, outcome, context composition) must NOT import
+//   from `canon/cost.ts` or external pricing engines.
+//
+// This file once also enforced the ADR 0006 merge-zone import boundary. That rule was retired
+// with the one-time fork (ADR 0020); cost isolation is independent of it and stays.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -31,15 +25,6 @@ export type ImportLocation = {
   character: number
   isDynamic: boolean
   isTypeOnly: boolean
-}
-
-export type BoundaryViolation = {
-  file: string
-  specifier: string
-  resolvedTarget: string
-  line: number
-  character: number
-  reason: string
 }
 
 export type CostPollutionViolation = {
@@ -165,128 +150,6 @@ export function extractImportsFromAst(sourceFile: ts.SourceFile): ImportLocation
 
   visit(sourceFile)
   return imports
-}
-
-// ---------------------------------------------------------------------------
-// Boundary Rule Checking (ADR 0006 / Decision D12)
-// ---------------------------------------------------------------------------
-
-/**
- * Determine whether a module path is permitted to import vendored CodeBurn internals.
- * Permitted contact zones per ADR 0006 & Plan Task H1:
- * - Adapters (`dash/kyber/canon/adapters/**` or `dash/kyber/adapter/**`)
- * - Synthesizers (`dash/kyber/synth/**`)
- * - Refresh adapters (`dash/kyber/refresh/**`)
- */
-export function isAllowedUpstreamImporter(filePath: string): boolean {
-  const normalized = filePath.replace(/\\/g, '/')
-  return (
-    normalized.includes('/kyber/synth/') ||
-    normalized.includes('/kyber/canon/adapters/') ||
-    normalized.includes('/kyber/adapter/') ||
-    normalized.includes('/kyber/refresh/')
-  )
-}
-
-/**
- * Determine whether an imported target represents vendored CodeBurn internals (`dash/src/**`).
- * Note: `dash/src/brand-overlay.ts` is KyberDash's overlay (owned by KyberDash, not vendored CodeBurn).
- */
-export function isVendoredCodeBurnInternal(resolvedTarget: string): boolean {
-  const normalized = resolvedTarget.replace(/\\/g, '/')
-
-  // Brand overlay is KyberDash's own overlay file in src/, not vendored upstream codeburn
-  if (
-    normalized.endsWith('/src/brand-overlay.ts') ||
-    normalized.endsWith('/src/brand-overlay.js') ||
-    normalized.endsWith('/src/brand-overlay')
-  ) {
-    return false
-  }
-
-  // Matches dash/src/** or /src/** under dash tree
-  return (
-    normalized.includes('/dash/src/') ||
-    normalized.startsWith('src/') ||
-    normalized.includes('/src/')
-  )
-}
-
-/**
- * Check an import from a specific file for merge-zone boundary violations.
- */
-export function checkImportBoundary(
-  importerFilePath: string,
-  importLoc: ImportLocation,
-  dashRoot: string
-): BoundaryViolation | null {
-  const specifier = importLoc.specifier
-
-  // If importer is an allowed contact surface (adapter or synth), upstream imports are legal
-  if (isAllowedUpstreamImporter(importerFilePath)) {
-    return null
-  }
-
-  let resolvedTarget = ''
-  if (specifier.startsWith('.')) {
-    resolvedTarget = path.resolve(path.dirname(importerFilePath), specifier)
-  } else if (specifier.startsWith('src/') || specifier === 'src') {
-    resolvedTarget = path.resolve(dashRoot, specifier)
-  } else {
-    // Non-relative import that doesn't start with src/ (e.g. standard packages, 'vitest', etc.)
-    return null
-  }
-
-  const normalizedTarget = resolvedTarget.replace(/\\/g, '/')
-  const normalizedDashSrc = path.resolve(dashRoot, 'src').replace(/\\/g, '/')
-
-  // Check if target resolves inside dash/src
-  if (normalizedTarget.startsWith(normalizedDashSrc + '/') || normalizedTarget === normalizedDashSrc) {
-    if (isVendoredCodeBurnInternal(normalizedTarget)) {
-      return {
-        file: importerFilePath,
-        specifier: importLoc.specifier,
-        resolvedTarget,
-        line: importLoc.line,
-        character: importLoc.character,
-        reason:
-          `ADR 0006 / D12 boundary violation: non-adapter module '${path.relative(dashRoot, importerFilePath)}' ` +
-          `imports vendored CodeBurn internal '${path.relative(dashRoot, resolvedTarget)}'. ` +
-          `Only modules in 'canon/adapters/**', 'synth/**', or 'refresh/**' may contact vendored upstream internals.`,
-      }
-    }
-  }
-
-  return null
-}
-
-/**
- * Scan all files in the merge zone and UI dashboard for boundary violations.
- */
-export function scanMergeZoneBoundaries(dashRoot: string): BoundaryViolation[] {
-  const violations: BoundaryViolation[] = []
-  const kyberDir = path.resolve(dashRoot, 'kyber')
-  const dashSrcDir = path.resolve(dashRoot, 'dash/src')
-
-  const filesToScan = [
-    ...walkSourceFiles(kyberDir),
-    ...walkSourceFiles(dashSrcDir),
-  ]
-
-  for (const file of filesToScan) {
-    const content = fs.readFileSync(file, 'utf8')
-    const sf = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true)
-    const imports = extractImportsFromAst(sf)
-
-    for (const imp of imports) {
-      const violation = checkImportBoundary(file, imp, dashRoot)
-      if (violation) {
-        violations.push(violation)
-      }
-    }
-  }
-
-  return violations
 }
 
 // ---------------------------------------------------------------------------

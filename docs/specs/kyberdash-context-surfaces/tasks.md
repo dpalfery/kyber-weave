@@ -59,10 +59,12 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
 ## Tasks
 
 - [ ] 1. Remove the soft-fork machinery
-- [ ] 1.1 Retire the merge-boundary rules and vendored-path exclusions
+- [x] 1.1 Retire the merge-boundary rules and vendored-path exclusions
   - Stream A.
-  - Delete `tests/KyberWeave.Tests/MergeBoundaryTests.cs`, `dash/kyber/tools/boundary.ts`, its
-    test, and the `test:boundary` npm script.
+  - Delete `tests/KyberWeave.Tests/MergeBoundaryTests.cs`. Remove the merge-zone import rule
+    from `dash/kyber/tools/boundary.ts`, keeping its cost-isolation rule (Decision D9), which
+    is independent of the fork; the file becomes `cost-isolation.ts` and `test:boundary`
+    becomes `test:cost-isolation`.
   - Remove the vendored-path exclusions for `dash/**` from the semgrep and trivy steps of
     `.github/workflows/ci.yml` and from `.github/codeql/codeql-config.yml`.
   - Replace the merge-zone non-negotiable in `AGENTS.md` with a statement that `dash/` is
@@ -163,8 +165,9 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
 - [ ] 4.2 Guard the severance and keep the attribution
   - Stream A.
   - Add `tests/KyberWeave.Tests/UpstreamSeveranceTests.cs`. It fails, naming the file, when
-    any tracked file other than `dash/LICENSE` and `dash/THIRD_PARTY_NOTICES.md` contains
-    `getagentseal`, `agentseal.org` or `codeburn.app`.
+    any tracked file outside `docs/`, other than `dash/LICENSE` and
+    `dash/THIRD_PARTY_NOTICES.md`, contains `getagentseal`, `agentseal.org` or
+    `codeburn.app`.
   - Add a `build-kyberdash` step, and a test over the packaging script, that puts
     `THIRD_PARTY_NOTICES.md` in every `kyberdash` archive.
   - _Requirements: 1.5, 1.6_

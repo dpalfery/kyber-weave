@@ -343,9 +343,8 @@ jobs:
       - name: Install Semgrep Community Edition
         run: python -m pip install --disable-pip-version-check "setuptools<82" semgrep==1.136.0
 
-      # The dash/ exclusions mirror .github/codeql/codeql-config.yml: everything
-      # under the vendored codeburn subtree except the dash/kyber/** merge zone,
-      # which ADR 0006 forbids editing. That config carries the full rationale.
+      # dash/ is first-party code since the one-time fork (ADR 0020), so it is
+      # scanned like everything else.
       - name: Scan repository with Semgrep
         run: |
           set -euo pipefail
@@ -358,19 +357,6 @@ jobs:
             --exclude 'artifacts/**' \
             --exclude '**/bin/**' \
             --exclude '**/obj/**' \
-            --exclude 'dash/.github/**' \
-            --exclude 'dash/app/**' \
-            --exclude 'dash/assets/**' \
-            --exclude 'dash/dash/**' \
-            --exclude 'dash/docs/**' \
-            --exclude 'dash/e2e/**' \
-            --exclude 'dash/gnome/**' \
-            --exclude 'dash/mac/**' \
-            --exclude 'dash/scripts/**' \
-            --exclude 'dash/src/**' \
-            --exclude 'dash/test-results/**' \
-            --exclude 'dash/tests/**' \
-            --exclude 'dash/windows/**' \
             --sarif-output semgrep.sarif
 
       # Intentional github/codeql-action v4 pin
