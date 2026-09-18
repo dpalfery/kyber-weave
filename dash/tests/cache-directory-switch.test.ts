@@ -12,7 +12,7 @@ import {
   flushCodexCache,
   readCachedCodexResults,
   writeCachedCodexResults,
-} from '../src/codex-cache.js'
+} from '../src/ingest/codex-cache.js'
 import {
   antigravityCacheFileName,
   clearAntigravityCacheStates,
@@ -189,7 +189,7 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     process.env['HOME'] = home
     process.env['CODEX_HOME'] = codexHome
     process.env['CODEBURN_CACHE_DIR'] = cacheA
-    const { clearSessionCache, parseAllSessions } = await import('../src/parser.js')
+    const { clearSessionCache, parseAllSessions } = await import('../src/ingest/parser.js')
     clearSessionCache()
 
     // parseAllSessions reaches its first await before any Codex cache access.

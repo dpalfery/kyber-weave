@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.setConfig({ testTimeout: 30_000 })
 
 function runCli(args: string[], home: string) {
-  return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
+  return spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,

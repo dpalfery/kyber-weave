@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { journalPath } from '../src/act/journal.js'
+import { journalPath } from '../src/tui/act/journal.js'
 import {
   autoRevertNoEffect,
   buildActReportJson,
@@ -12,11 +12,11 @@ import {
   captureBaselinesForPlans,
   computeActReport,
   renderActReport,
-} from '../src/act/report.js'
-import { formatAppliedFix, REPORT_MIN_AGE_DAYS } from '../src/act/types.js'
-import type { ActionRecord } from '../src/act/types.js'
-import type { FindingPlan } from '../src/act/plans.js'
-import type { WasteFinding } from '../src/optimize.js'
+} from '../src/tui/act/report.js'
+import { formatAppliedFix, REPORT_MIN_AGE_DAYS } from '../src/tui/act/types.js'
+import type { ActionRecord } from '../src/tui/act/types.js'
+import type { FindingPlan } from '../src/tui/act/plans.js'
+import type { WasteFinding } from '../src/metrics/optimize.js'
 import type { ClassifiedTurn, ProjectSummary } from '../src/types.js'
 
 type Session = ProjectSummary['sessions'][number]

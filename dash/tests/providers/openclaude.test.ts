@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 
 import { openclaude, createOpenClaudeProvider, getOpenClaudeProjectsDir } from '../../src/providers/openclaude.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
-import { calculateCost, loadPricing } from '../../src/models.js'
+import { calculateCost, loadPricing } from '../../src/pricing/models.js'
 
 let tmpDir: string
 let uuidSeq: number

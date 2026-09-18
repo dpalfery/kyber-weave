@@ -89,7 +89,7 @@ async function startHydratingDashboard(): Promise<RunningDashboard> {
   const child = spawn(process.execPath, [
     '--import', 'tsx',
     '--import', ttyPreload,
-    join(process.cwd(), 'src', 'cli.ts'),
+    join(process.cwd(), 'src', 'launcher.ts'),
     'report', '--period', 'today', '--refresh', '0',
   ], {
     cwd: process.cwd(),

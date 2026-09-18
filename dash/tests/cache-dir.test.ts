@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { join } from 'path'
 import { homedir } from 'os'
-import { getCodeburnCacheDir } from '../src/cache-dir.js'
+import { getCodeburnCacheDir } from '../src/ingest/cache-dir.js'
 
 describe('getCodeburnCacheDir', () => {
   const original = process.env['CODEBURN_CACHE_DIR']

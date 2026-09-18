@@ -17,7 +17,7 @@ vi.mock('../src/providers/index.js', async (importOriginal) => {
   }
 })
 
-import { parseAllSessions, clearSessionCache, withSinglePassParse } from '../src/parser.js'
+import { parseAllSessions, clearSessionCache, withSinglePassParse } from '../src/ingest/parser.js'
 import type { DateRange, ProjectSummary } from '../src/types.js'
 
 const CWD = '/tmp/single-pass-proj'

@@ -24,7 +24,7 @@ import {
   type ReviewOptions,
   type ReviewRequest,
   type ReviewResult,
-} from '../kyber/analysis/review.js'
+} from '../src/analysis/review.js'
 import {
   createReviewProvider,
   MockReviewProvider,
@@ -33,10 +33,10 @@ import {
   AnthropicReviewProvider,
   OllamaReviewProvider,
   DEFAULT_MOCK_REVIEW_TEXT,
-} from '../kyber/analysis/review-providers/index.js'
-import { CanonStore } from '../kyber/canon/store.js'
-import { handleKyberRequest } from '../kyber/server/routes.js'
-import type { KyberBridge } from '../kyber/server/bridge.js'
+} from '../src/analysis/review-providers/index.js'
+import { CanonStore } from '../src/canon/store.js'
+import { handleKyberRequest } from '../src/server/routes.js'
+import type { KyberBridge } from '../src/server/bridge.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { EventEmitter } from 'node:events'
 

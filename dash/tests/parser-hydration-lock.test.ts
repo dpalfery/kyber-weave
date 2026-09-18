@@ -10,8 +10,8 @@ import { mkdir, mkdtemp, rm, unlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
-import { sessionCacheDir } from '../src/session-cache.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
+import { sessionCacheDir } from '../src/ingest/session-cache.js'
 import { readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
 
 let tmpHome: string

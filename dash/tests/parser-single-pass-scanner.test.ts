@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 
-import { parseAllSessions, clearSessionCache, parseJsonlLine } from '../src/parser.js'
+import { parseAllSessions, clearSessionCache, parseJsonlLine } from '../src/ingest/parser.js'
 import type { DateRange } from '../src/types.js'
 
 // Every case here is padded past LARGE_JSONL_LINE_BYTES (32 KiB) so it exercises

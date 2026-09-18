@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import fallback from '../src/data/pricing-fallback.json' assert { type: 'json' }
+import fallback from '../src/pricing/data/pricing-fallback.json' assert { type: 'json' }
 
 // The gap-fill fallback is generated from models.dev / OpenRouter. These assert
 // the bundler's hygiene guarantees on the committed artifact, so a future

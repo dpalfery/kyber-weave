@@ -3,8 +3,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 
-import { parseApiCall, parseAdvisorCalls, compactEntry, parseAllSessions, clearSessionCache } from '../src/parser.js'
-import { calculateCost, loadPricing } from '../src/models.js'
+import { parseApiCall, parseAdvisorCalls, compactEntry, parseAllSessions, clearSessionCache } from '../src/ingest/parser.js'
+import { calculateCost, loadPricing } from '../src/pricing/models.js'
 import type { JournalEntry } from '../src/types.js'
 
 const MAIN_MODEL = 'claude-sonnet-4-20250514'

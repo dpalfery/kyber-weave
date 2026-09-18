@@ -2,8 +2,8 @@ import { existsSync } from 'fs'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { acquireCacheRefreshLock } from '../../src/cache-refresh-lock.js'
-import { exitAfterCacheCleanup, loadCache, markCacheDirty, saveCache } from '../../src/session-cache.js'
+import { acquireCacheRefreshLock } from '../../src/ingest/cache-refresh-lock.js'
+import { exitAfterCacheCleanup, loadCache, markCacheDirty, saveCache } from '../../src/ingest/session-cache.js'
 
 const [cacheDir, barrierDir, id, sourcePath, bypass = 'false', exitViaCleanup = 'false'] = process.argv.slice(2)
 if (!cacheDir || !barrierDir || !id || !sourcePath) throw new Error('missing worker argument')

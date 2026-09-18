@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calculateCost, getModelCosts, getShortModelName } from '../src/models.js'
+import { calculateCost, getModelCosts, getShortModelName } from '../src/pricing/models.js'
 
 // Lock down the post-hoist refactor: every model name a real user has
 // emitted in the last year should resolve to the same display name and

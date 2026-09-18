@@ -104,19 +104,19 @@ export async function findUnreachable({ root, entries, scanRoots, aliases = {} }
  * Entry points, with the reason each one is loaded other than by import.
  */
 export const ENTRIES = [
-  'src/cli.ts', //              the installed launcher
-  'src/main.ts', //             tsup and SEA entry
-  'src/parse-worker.ts', //     loaded by URL from parse-workers.ts as a worker thread
+  'src/launcher.ts', //         the installed launcher
+  'src/cli/main.ts', //         tsup and SEA entry
+  'src/ingest/parse-worker.ts', // loaded by URL from parse-workers.ts as a worker thread
   'src/sea-shim.cjs', //        SEA entry that evaluates the bundled app
   'src/sea-devtools-stub.js', // aliased in by tsup.sea.config.ts
-  'kyber/tools/parity.ts', //   operator tools, run with tsx
-  'kyber/tools/reingest.ts',
-  'kyber/tools/capture-content-fixture.mjs',
-  'kyber/tools/cost-isolation.ts', // run by its test as a repository-wide check
-  'dash/src/main.tsx', //       the web dashboard's Vite entry
+  'src/tools/parity.ts', //     operator tools, run with tsx
+  'src/tools/reingest.ts',
+  'src/tools/capture-content-fixture.mjs',
+  'src/tools/cost-isolation.ts', // run by its test as a repository-wide check
+  'web/src/main.tsx', //        the web dashboard's Vite entry
 ]
-export const SCAN_ROOTS = ['src', 'kyber', 'dash/src']
-export const ALIASES = { '@': 'dash/src' }
+export const SCAN_ROOTS = ['src', 'web/src']
+export const ALIASES = { '@': 'web/src' }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isMain) {

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { isSqliteAvailable, openDatabase } from '../../src/sqlite.js'
+import { isSqliteAvailable, openDatabase } from '../../src/ingest/sqlite.js'
 import { getAllProviders } from '../../src/providers/index.js'
 import type { Provider, ParsedProviderCall } from '../../src/providers/types.js'
 

@@ -3,9 +3,9 @@ import { existsSync, readFileSync, statSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost, getShortModelName } from '../models.js'
-import { isUserHomeRoot } from '../path-privacy.js'
-import { isSqliteAvailable, getSqliteLoadError, openDatabase, isSqliteBusyError, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { isUserHomeRoot } from '../ingest/path-privacy.js'
+import { isSqliteAvailable, getSqliteLoadError, openDatabase, isSqliteBusyError, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 import type { ToolCall } from '../types.js'
 import {
@@ -21,7 +21,7 @@ import {
   type HermesCostBasis,
   type HermesObservation,
   type HermesTokenTotals,
-} from '../hermes-session-ledger.js'
+} from '../ingest/hermes-session-ledger.js'
 
 type HermesSessionRow = {
   id: string

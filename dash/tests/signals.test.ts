@@ -20,13 +20,13 @@ import {
   cachePrefixStability,
   skillUtilisation,
   toolYield,
-} from '../kyber/analysis/signals.js'
+} from '../src/analysis/signals.js'
 import {
   CanonStore,
   DETECTOR_VERSION,
   SCHEMA_VERSION,
-} from '../kyber/canon/store.js'
-import { notMeasurable, type CanonicalRecord, type Measurability } from '../kyber/canon/types.js'
+} from '../src/canon/store.js'
+import { notMeasurable, type CanonicalRecord, type Measurability } from '../src/canon/types.js'
 
 const tempDirs: string[] = []
 

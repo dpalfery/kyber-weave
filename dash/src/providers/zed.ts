@@ -3,8 +3,8 @@ import { join } from 'path'
 import { homedir } from 'os'
 import zlib from 'zlib'
 
-import { calculateCost } from '../models.js'
-import { getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost } from '../pricing/models.js'
+import { getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
 
 // Zed's built-in agent stores one row per thread in a single SQLite database;

@@ -4,7 +4,7 @@ import { join } from 'path'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import {
   antigravityAppDataDirFromSourcePath,
   antigravityCascadeIdFromPath,

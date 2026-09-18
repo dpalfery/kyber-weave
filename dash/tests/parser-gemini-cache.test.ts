@@ -4,8 +4,8 @@ import { join } from 'path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
-import { CACHE_VERSION, computeEnvFingerprint, type SessionCache } from '../src/session-cache.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
+import { CACHE_VERSION, computeEnvFingerprint, type SessionCache } from '../src/ingest/session-cache.js'
 import { readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
 import type { DateRange } from '../src/types.js'
 

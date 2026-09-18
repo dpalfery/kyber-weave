@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 
 import { createPiProvider, createOmpProvider } from '../../src/providers/pi.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
-import { classifyTurn } from '../../src/classifier.js'
+import { classifyTurn } from '../../src/metrics/classifier.js'
 import type { ParsedApiCall, ParsedTurn } from '../../src/types.js'
 
 // Mirrors src/parser.ts providerCallToTurn so we can assert that a Pi call's

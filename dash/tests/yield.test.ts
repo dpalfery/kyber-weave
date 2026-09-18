@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildYieldJsonReport, type YieldSummary } from '../src/yield.js'
+import { buildYieldJsonReport, type YieldSummary } from '../src/metrics/yield.js'
 
 describe('buildYieldJsonReport', () => {
   it('serializes yield buckets, ratios, and session details', () => {

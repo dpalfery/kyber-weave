@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import { createOpenCodeProvider } from '../../src/providers/opencode.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 

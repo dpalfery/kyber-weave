@@ -2,9 +2,9 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
-import { readSessionFile } from '../fs-utils.js'
-import { calculateCost } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
+import { readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 const toolNameMap: Record<string, string> = {

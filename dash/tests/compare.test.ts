@@ -19,16 +19,16 @@ import {
   type PhaseAlignedTurnPair,
   type RunTurn,
   type TaskPhase,
-} from '../kyber/analysis/compare.js'
+} from '../src/analysis/compare.js'
 import {
   evaluatePairSufficiency,
   pairConfidence,
   proposeRunPairs,
   type CandidateRun,
-} from '../kyber/analysis/pairing.js'
-import type { OutcomeBlock } from '../kyber/canon/outcome.js'
-import type { CanonicalRecord, CostBlock, TokenUsage } from '../kyber/canon/types.js'
-import { notMeasurable } from '../kyber/canon/types.js'
+} from '../src/analysis/pairing.js'
+import type { OutcomeBlock } from '../src/canon/outcome.js'
+import type { CanonicalRecord, CostBlock, TokenUsage } from '../src/canon/types.js'
+import { notMeasurable } from '../src/canon/types.js'
 
 let spanCounter = 0
 

@@ -10,7 +10,7 @@
 // `'HERMES_HOME'` as isolation (false-green). Runtime membership cannot.
 import { describe, expect, it } from 'vitest'
 
-import { PROVIDER_ENV_VARS } from '../src/session-cache.js'
+import { PROVIDER_ENV_VARS } from '../src/ingest/session-cache.js'
 import { CLEARED, REDIRECTED } from './setup/env-isolation-vars.js'
 
 describe('env-isolation covers PROVIDER_ENV_VARS', () => {

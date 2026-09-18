@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 import { createRequire } from 'node:module'
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import { createCrushProvider } from '../../src/providers/crush.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 

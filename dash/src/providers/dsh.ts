@@ -3,9 +3,9 @@ import { join } from 'path'
 import { homedir } from 'os'
 import zlib from 'zlib'
 
-import { MAX_SESSION_FILE_BYTES, readSessionFile } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
+import { MAX_SESSION_FILE_BYTES, readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 // DeepSeek Harness (dsh) stores one session per directory:

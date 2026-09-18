@@ -13,13 +13,13 @@ import {
   type ClassifiedContextItem,
   type ContextItem,
   type EvidenceOfUse,
-} from '../kyber/analysis/classify.js'
+} from '../src/analysis/classify.js'
 import {
   analyzeContext,
   type ContextPart,
   type ContextTurn,
-} from '../kyber/analysis/context.js'
-import { notMeasurable, type CanonicalContentKey } from '../kyber/canon/types.js'
+} from '../src/analysis/context.js'
+import { notMeasurable, type CanonicalContentKey } from '../src/canon/types.js'
 
 function makeItem(
   part: CanonicalContentKey | 'residual',

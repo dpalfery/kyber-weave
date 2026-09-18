@@ -4,8 +4,8 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 import { createCodexProvider } from '../../src/providers/codex.js'
-import { clearCodexMemCaches, CODEX_CACHE_VERSION, codexCacheFileName } from '../../src/codex-cache.js'
-import { calculateCost } from '../../src/models.js'
+import { clearCodexMemCaches, CODEX_CACHE_VERSION, codexCacheFileName } from '../../src/ingest/codex-cache.js'
+import { calculateCost } from '../../src/pricing/models.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
 let tmpDir: string

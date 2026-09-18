@@ -10,7 +10,7 @@ import {
   parsedTurnsToCachedTurns,
   buildSpawnPrSets,
   type ToolResultMeta,
-} from '../src/parser.js'
+} from '../src/ingest/parser.js'
 import type { JournalEntry } from '../src/types.js'
 
 // ── structuredPatch LOC counting ───────────────────────────────────────

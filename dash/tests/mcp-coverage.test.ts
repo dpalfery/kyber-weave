@@ -9,7 +9,7 @@ import {
   detectMcpToolCoverage,
   estimateMcpSchemaCost,
   runOptimize,
-} from '../src/optimize.js'
+} from '../src/metrics/optimize.js'
 import type {
   ClassifiedTurn,
   ParsedApiCall,

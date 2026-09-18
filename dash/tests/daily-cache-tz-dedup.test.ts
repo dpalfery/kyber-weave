@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 import type { DateRange, ProjectSummary } from '../src/types.js'
-import { aggregateProjectsIntoDays, dateKey, dateKeyInTz } from '../src/day-aggregator.js'
+import { aggregateProjectsIntoDays, dateKey, dateKeyInTz } from '../src/metrics/day-aggregator.js'
 
 import {
   DAILY_CACHE_VERSION,
@@ -17,7 +17,7 @@ import {
   mergeDayEntries,
   saveDailyCache,
   toDateString,
-} from '../src/daily-cache.js'
+} from '../src/ingest/daily-cache.js'
 
 const TMP_CACHE_ROOT = join(tmpdir(), `codeburn-tz-dedup-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
 

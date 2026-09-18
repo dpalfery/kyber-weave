@@ -16,9 +16,9 @@ import { readdir } from 'fs/promises'
 import { homedir } from 'os'
 import { basename, join } from 'path'
 
-import { extractBashCommands } from '../bash-utils.js'
-import { readSessionFile } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
 import type { ToolCall } from '../types.js'
 import type { ParsedProviderCall, ProbeRoot, Provider, SessionParser, SessionSource } from './types.js'
 

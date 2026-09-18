@@ -50,7 +50,7 @@ it('prices a codex call the same on a cold parse and a cache-rehydrated read', a
     JSON.stringify({ type: 'event_msg', timestamp: '2026-08-16T10:01:00Z', payload: { type: 'token_count', info: { model: 'gpt-5.5', last_token_usage: usage, total_token_usage: usage } } }),
   ].join('\n') + '\n')
 
-  const { clearSessionCache, parseAllSessions } = await import('../src/parser.js')
+  const { clearSessionCache, parseAllSessions } = await import('../src/ingest/parser.js')
 
   clearSessionCache()
   const cold = await parseAllSessions(undefined, 'codex')

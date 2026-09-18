@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { aggregateModelEfficiency } from '../src/model-efficiency.js'
+import { aggregateModelEfficiency } from '../src/metrics/model-efficiency.js'
 import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary } from '../src/types.js'
 
 function call(model: string, costUSD = 1): ParsedApiCall {

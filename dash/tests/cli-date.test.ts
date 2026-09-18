@@ -7,7 +7,7 @@ import {
   periodInfoFromQuery,
   toPeriod,
   type Period,
-} from '../src/cli-date.js'
+} from '../src/cli/cli-date.js'
 
 afterEach(() => {
   vi.useRealTimers()

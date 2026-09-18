@@ -7,7 +7,7 @@ import {
   getLocalSavingsBaseline,
   loadPricing,
   setLocalModelSavings,
-} from '../src/models.js'
+} from '../src/pricing/models.js'
 
 afterEach(() => setLocalModelSavings({}))
 

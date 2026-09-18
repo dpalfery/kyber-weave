@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm, utimes } from 'fs/promises'
 import { join, relative } from 'path'
 import { tmpdir } from 'os'
 
-import { parseAllSessions } from '../src/parser.js'
+import { parseAllSessions } from '../src/ingest/parser.js'
 import type { DateRange } from '../src/types.js'
 
 let tmpDir: string

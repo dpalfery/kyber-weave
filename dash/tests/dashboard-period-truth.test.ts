@@ -5,9 +5,9 @@ import { render } from 'ink'
 import stripAnsi from 'strip-ansi'
 import { describe, expect, it, onTestFinished } from 'vitest'
 
-import { InteractiveDashboard, selectDashboardHistoryIndex, type DashboardHistoryIndex } from '../src/dashboard.js'
-import type { DailyCache } from '../src/daily-cache.js'
-import { aggregateProjectsIntoDays } from '../src/day-aggregator.js'
+import { InteractiveDashboard, selectDashboardHistoryIndex, type DashboardHistoryIndex } from '../src/tui/dashboard.js'
+import type { DailyCache } from '../src/ingest/daily-cache.js'
+import { aggregateProjectsIntoDays } from '../src/metrics/day-aggregator.js'
 import type { ProjectSummary, SessionSummary } from '../src/types.js'
 
 const EMPTY_BREAKDOWN = {

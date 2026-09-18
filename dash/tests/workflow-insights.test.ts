@@ -9,8 +9,8 @@ import {
   worstOneShotCategory,
   buildCoachingNotes,
   USER_CORRECTION_PATTERNS,
-} from '../src/workflow-insights.js'
-import { isExpectedFreeModel } from '../src/models.js'
+} from '../src/metrics/workflow-insights.js'
+import { isExpectedFreeModel } from '../src/pricing/models.js'
 import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary, TaskCategory, ToolCall } from '../src/types.js'
 
 function call(opts: { tools?: string[]; timestamp?: string; toolSequence?: ToolCall[][]; model?: string; costUSD?: number } = {}): ParsedApiCall {

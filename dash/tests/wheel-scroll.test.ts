@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { wheelDelta } from '../src/dashboard.js'
+import { wheelDelta } from '../src/tui/dashboard.js'
 
 describe('wheelDelta', () => {
   it('scrolls down three lines per wheel-down tick (button 65)', () => {

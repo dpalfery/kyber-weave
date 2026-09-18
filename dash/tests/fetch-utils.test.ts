@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { createServer, type Server } from 'node:http'
 import { type AddressInfo } from 'node:net'
 
-import { fetchWithTimeout } from '../src/fetch-utils.js'
+import { fetchWithTimeout } from '../src/pricing/fetch-utils.js'
 
 let server: Server
 

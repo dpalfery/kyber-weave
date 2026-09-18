@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { blobToText, isSqliteBusyError } from '../src/sqlite.js'
+import { blobToText, isSqliteBusyError } from '../src/ingest/sqlite.js'
 
 describe('blobToText', () => {
   it('returns empty string for null', () => {

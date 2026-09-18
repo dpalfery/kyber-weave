@@ -2,7 +2,7 @@ import { appendFile, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { CodexThroughputReader, readCodexThroughput, renderCodexThroughput } from '../src/codex-throughput.js'
+import { CodexThroughputReader, readCodexThroughput, renderCodexThroughput } from '../src/ingest/codex-throughput.js'
 
 describe('Codex throughput prototype', () => {
   it('estimates generated tokens/sec between token_count checkpoints', async () => {

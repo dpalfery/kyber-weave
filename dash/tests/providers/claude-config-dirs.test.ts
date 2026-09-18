@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'os'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
 import { claude, getDesktopSessionsDirs } from '../../src/providers/claude.js'
-import { clearSessionCache, filterProjectsByClaudeConfigSource, parseAllSessions } from '../../src/parser.js'
+import { clearSessionCache, filterProjectsByClaudeConfigSource, parseAllSessions } from '../../src/ingest/parser.js'
 
 let tmpRoot: string
 const savedEnv = {

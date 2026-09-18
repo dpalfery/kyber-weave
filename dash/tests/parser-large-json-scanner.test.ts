@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseJsonlLine } from '../src/parser.js'
+import { parseJsonlLine } from '../src/ingest/parser.js'
 
 function largeUserLine(): string {
   return JSON.stringify({

@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { calculateCost, getShortModelName } from '../../src/models.js'
+import { calculateCost, getShortModelName } from '../../src/pricing/models.js'
 import { providers } from '../../src/providers/index.js'
 import { quickdesk } from '../../src/providers/quickdesk.js'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import type { ParsedProviderCall, SessionSource } from '../../src/providers/types.js'
 
 const requireForTest = createRequire(import.meta.url)

@@ -21,15 +21,15 @@ import {
   type Finding,
   type FindingConfidence,
   type FindingEvidenceLink,
-} from '../kyber/analysis/findings.js'
+} from '../src/analysis/findings.js'
 import {
   CanonStore,
   SCHEMA_VERSION,
-} from '../kyber/canon/store.js'
-import type { CanonicalRecord } from '../canon/types.js'
-import type { OutcomeBlock } from '../canon/outcome.js'
-import { KyberBridge } from '../kyber/server/bridge.js'
-import { handleKyberRequest } from '../kyber/server/routes.js'
+} from '../src/canon/store.js'
+import type { CanonicalRecord } from '../src/canon/types.js'
+import type { OutcomeBlock } from '../src/canon/outcome.js'
+import { KyberBridge } from '../src/server/bridge.js'
+import { handleKyberRequest } from '../src/server/routes.js'
 
 const tempDirs: string[] = []
 

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 
-import { parseAllSessions, clearSessionCache } from '../src/parser.js'
+import { parseAllSessions, clearSessionCache } from '../src/ingest/parser.js'
 import type { DateRange } from '../src/types.js'
 
 let home: string

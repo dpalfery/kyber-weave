@@ -18,7 +18,7 @@ import {
   loadDailyCache,
   saveDailyCache,
   withDailyCacheLock,
-} from '../src/daily-cache.js'
+} from '../src/ingest/daily-cache.js'
 
 function emptyDay(date: string, cost = 0, calls = 0): DailyEntry {
   return {

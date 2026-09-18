@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { extractMcpInventory } from '../src/parser.js'
+import { extractMcpInventory } from '../src/ingest/parser.js'
 import type { JournalEntry } from '../src/types.js'
 
 function entry(overrides: Partial<JournalEntry> & Record<string, unknown>): JournalEntry {

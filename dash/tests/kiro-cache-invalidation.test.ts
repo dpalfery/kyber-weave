@@ -20,13 +20,13 @@ import { mkdir, rm, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
 import { join } from 'path'
 
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
 import {
   CACHE_VERSION,
   computeEnvFingerprint,
   fingerprintFile,
   type SessionCache,
-} from '../src/session-cache.js'
+} from '../src/ingest/session-cache.js'
 import { writeCacheOnDisk } from './fixtures/session-cache-io.js'
 
 // The kiro provider singleton captures homedir() when its module is first

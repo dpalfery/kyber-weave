@@ -4,10 +4,10 @@ import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry } from '../src/daily-cache.js'
-import { getDateRange } from '../src/cli-date.js'
-import { loadPricing } from '../src/models.js'
-import { buildDurablePeriod, getDailyCacheConfigHash } from '../src/usage-aggregator.js'
+import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry } from '../src/ingest/daily-cache.js'
+import { getDateRange } from '../src/cli/cli-date.js'
+import { loadPricing } from '../src/pricing/models.js'
+import { buildDurablePeriod, getDailyCacheConfigHash } from '../src/metrics/usage-aggregator.js'
 
 // The adversarial-review blocker on the carry-forward PR: the daily cache held
 // carried history, history.daily showed it, but the HEADLINE current.cost /

@@ -6,9 +6,9 @@ import { tmpdir } from 'os'
 
 import { getAllProviders } from '../../src/providers/index.js'
 import { createCursorAgentProvider } from '../../src/providers/cursor-agent.js'
-import { estimateTokensFromChars } from '../../src/token-estimate.js'
+import { estimateTokensFromChars } from '../../src/pricing/token-estimate.js'
 import type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 
 const CURSOR_AGENT_DEFAULT_MODEL = 'cursor-agent-auto'
 const FIXED_UUID = '123e4567-e89b-12d3-a456-426614174000'

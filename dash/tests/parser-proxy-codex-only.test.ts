@@ -55,8 +55,8 @@ it('flags a Codex-only project under a proxy path (leading-slash agnostic match)
   process.env['CLAUDE_CONFIG_DIR'] = claudeEmpty
 
   // Import AFTER env is set so the codex provider reads CODEX_HOME.
-  const { parseAllSessions, clearSessionCache } = await import('../src/parser.js')
-  const { setProxyPaths, loadPricing } = await import('../src/models.js')
+  const { parseAllSessions, clearSessionCache } = await import('../src/ingest/parser.js')
+  const { setProxyPaths, loadPricing } = await import('../src/pricing/models.js')
   await loadPricing()
   setProxyPaths([CWD])
   clearSessionCache()

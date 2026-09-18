@@ -16,7 +16,7 @@ import { readdirSync, readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 
-import { PROVIDER_ENV_VARS } from '../src/session-cache.js'
+import { PROVIDER_ENV_VARS } from '../src/ingest/session-cache.js'
 import { getAllProviders } from '../src/providers/index.js'
 
 // ── src/providers/<file> → provider registry name(s) ────────────────────

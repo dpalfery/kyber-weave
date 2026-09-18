@@ -3,8 +3,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { loadPricing } from '../src/models.js'
-import { parseAllSessions, clearSessionCache } from '../src/parser.js'
+import { loadPricing } from '../src/pricing/models.js'
+import { parseAllSessions, clearSessionCache } from '../src/ingest/parser.js'
 import type { DateRange, ProjectSummary } from '../src/types.js'
 
 // End-to-end proof for issue #639: a provider that sets `costIsEstimated` on its
@@ -143,7 +143,7 @@ describe('cross-provider project merge (#639 regression)', () => {
   }
 
   it('keeps merged-in estimated dollars when two providers share a repo', async () => {
-    const { mergeProjectsByCrossProviderKey } = await import('../src/parser.js')
+    const { mergeProjectsByCrossProviderKey } = await import('../src/ingest/parser.js')
     const merged = mergeProjectsByCrossProviderKey([
       summaryFor('/repos/shared', { cost: 10 }),                     // measured provider, no estimate
       summaryFor('/repos/shared', { cost: 5, estimated: 5 }),        // estimated provider
@@ -155,7 +155,7 @@ describe('cross-provider project merge (#639 regression)', () => {
   })
 
   it('sums estimated dollars when both merged sides carry them', async () => {
-    const { mergeProjectsByCrossProviderKey } = await import('../src/parser.js')
+    const { mergeProjectsByCrossProviderKey } = await import('../src/ingest/parser.js')
     const merged = mergeProjectsByCrossProviderKey([
       summaryFor('/repos/shared', { cost: 3, estimated: 3 }),
       summaryFor('/repos/shared', { cost: 4, estimated: 4 }),

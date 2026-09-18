@@ -5,10 +5,10 @@ import { createRequire } from 'node:module'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDateRange } from '../src/cli-date.js'
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
+import { getDateRange } from '../src/cli/cli-date.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
 import { readCacheOnDisk } from './fixtures/session-cache-io.js'
-import { isSqliteAvailable } from '../src/sqlite.js'
+import { isSqliteAvailable } from '../src/ingest/sqlite.js'
 import type { DateRange } from '../src/types.js'
 
 const requireForTest = createRequire(import.meta.url)

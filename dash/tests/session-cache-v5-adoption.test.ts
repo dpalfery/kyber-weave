@@ -3,9 +3,9 @@ import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { parseAllSessions, clearSessionCache } from '../src/parser.js'
-import { aggregateByPr } from '../src/sessions-report.js'
-import { loadPricing } from '../src/models.js'
+import { parseAllSessions, clearSessionCache } from '../src/ingest/parser.js'
+import { aggregateByPr } from '../src/metrics/sessions-report.js'
+import { loadPricing } from '../src/pricing/models.js'
 
 // Finding 1: the 5 -> 6 session-cache bump must not make PR-linked sessions whose
 // transcript has since expired VANISH. loadCache adopts such expired-source

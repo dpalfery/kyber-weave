@@ -9,8 +9,8 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 const readLineCalls: Array<{ filePath: string; startByteOffset?: number }> = []
-vi.mock('../../src/fs-utils.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/fs-utils.js')>()
+vi.mock('../../src/ingest/fs-utils.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/ingest/fs-utils.js')>()
   return {
     ...actual,
     readSessionLines: (filePath: string, skip?: unknown, options?: { startByteOffset?: number }) => {
@@ -21,7 +21,7 @@ vi.mock('../../src/fs-utils.js', async (importOriginal) => {
   }
 })
 
-import { clearCodexMemCaches, flushCodexCache, withCodexCacheDirectory } from '../../src/codex-cache.js'
+import { clearCodexMemCaches, flushCodexCache, withCodexCacheDirectory } from '../../src/ingest/codex-cache.js'
 import { createCodexProvider } from '../../src/providers/codex.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
@@ -183,13 +183,13 @@ describe('codex incremental resume', () => {
     sessionPath = await writeRollout([meta(), ...tasks(1, 2)])
     await parse(cacheDir)
 
-    const { codexCacheFileName } = await import('../../src/codex-cache.js')
+    const { codexCacheFileName } = await import('../../src/ingest/codex-cache.js')
     const cachePath = join(cacheDir, codexCacheFileName())
     const { readFile } = await import('fs/promises')
     const raw = JSON.parse(await readFile(cachePath, 'utf-8'))
     raw.files[sessionPath].resumeState = { garbage: true }
     await writeFile(cachePath, JSON.stringify(raw))
-    const { clearCodexMemCaches } = await import('../../src/codex-cache.js')
+    const { clearCodexMemCaches } = await import('../../src/ingest/codex-cache.js')
     clearCodexMemCaches()
 
     await appendFile(sessionPath, tasks(3, 3).join('\n') + '\n')

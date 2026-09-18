@@ -5,8 +5,8 @@ import {
   buildSubagentIndex,
   prLinkedTotals,
   resolveSubagentAttribution,
-} from '../src/sessions-report.js'
-import { filterProjectsByDateRange, filterProjectsByDays } from '../src/parser.js'
+} from '../src/metrics/sessions-report.js'
+import { filterProjectsByDateRange, filterProjectsByDays } from '../src/ingest/parser.js'
 import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary, TokenUsage } from '../src/types.js'
 
 const A = 'https://github.com/o/r/pull/1'

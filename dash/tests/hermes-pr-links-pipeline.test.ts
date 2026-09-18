@@ -3,8 +3,8 @@ import { mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { createRequire } from 'node:module'
 
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
-import { isSqliteAvailable } from '../src/sqlite.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
+import { isSqliteAvailable } from '../src/ingest/sqlite.js'
 
 // The exported Hermes provider resolves HERMES_HOME when its singleton is
 // created, at import time. Point it at the fixture during module hoisting so the

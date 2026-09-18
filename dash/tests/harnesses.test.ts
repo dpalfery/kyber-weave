@@ -10,13 +10,13 @@ import {
   computeP95,
   coverageFor,
   COVERAGE_DIMENSIONS,
-} from '../kyber/canon/harnesses.js'
+} from '../src/canon/harnesses.js'
 import {
   harnessDimensionAvailability,
-} from '../kyber/canon/measurability.js'
-import { CanonStore, SCHEMA_VERSION } from '../kyber/canon/store.js'
-import { isNotMeasurable } from '../kyber/canon/types.js'
-import type { SessionRow, ExecutionRow, RunRow } from '../kyber/canon/types.js'
+} from '../src/canon/measurability.js'
+import { CanonStore, SCHEMA_VERSION } from '../src/canon/store.js'
+import { isNotMeasurable } from '../src/canon/types.js'
+import type { SessionRow, ExecutionRow, RunRow } from '../src/canon/types.js'
 
 const tempDirs: string[] = []
 

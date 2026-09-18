@@ -10,7 +10,7 @@ import {
   findDeferralEnvSetting,
   type ApiCallMeta,
   type ToolCall,
-} from '../src/optimize.js'
+} from '../src/metrics/optimize.js'
 import type {
   ClassifiedTurn,
   ParsedApiCall,

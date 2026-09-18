@@ -8,7 +8,7 @@ import {
   ensureCacheHydrated,
   toDateString,
   type DailyEntry,
-} from '../src/daily-cache.js'
+} from '../src/ingest/daily-cache.js'
 
 // One below the current version, so this pins the ADJACENT-version case: v20
 // is the SHIPPED predecessor (#1040, codex model attribution), and its days

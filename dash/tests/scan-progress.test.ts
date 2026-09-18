@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { createScanProgress, setInteractiveScanUI } from '../src/parser.js'
+import { createScanProgress, setInteractiveScanUI } from '../src/ingest/parser.js'
 
 // The scan-progress line must be silent while an interactive Ink UI (dashboard,
 // compare) is live, because it renders to the same terminal. The end-to-end

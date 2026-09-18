@@ -5,10 +5,10 @@ import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { runWebDashboard } from '../src/web-dashboard.js'
-import { KyberBridge } from '../kyber/server/bridge.js'
-import { CanonStore } from '../kyber/canon/store.js'
-import type { CanonicalRecord } from '../kyber/canon/types.js'
+import { runWebDashboard } from '../src/cli/web.js'
+import { KyberBridge } from '../src/server/bridge.js'
+import { CanonStore } from '../src/canon/store.js'
+import type { CanonicalRecord } from '../src/canon/types.js'
 
 // Timeline nodes used to carry each span's attribute map inline, which made the
 // derived session payload a second, uncompressed copy of the whole corpus —

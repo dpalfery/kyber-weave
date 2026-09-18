@@ -84,7 +84,7 @@ export const CLEARED = [
   'OLLAMA_BASE_URL',
   // Read by detectBashBloat - a dev's real shell limit must not bleed in
   'BASH_MAX_OUTPUT_LENGTH',
-  // Color forcing. CLI tests spawn src/cli.ts with `...process.env` and assert
+  // Color forcing. CLI tests spawn src/launcher.ts with `...process.env` and assert
   // on plain stdout; chalk writing to a pipe emits no escapes UNLESS one of
   // these overrides supports-color's tty check. A dev shell (or a test-runner
   // extension) that exports FORCE_COLOR turns every such assertion red - most

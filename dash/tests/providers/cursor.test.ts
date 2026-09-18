@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { getAllProviders } from '../../src/providers/index.js'
 import { getCursorTimeFloor, createCursorProvider, clearCursorWorkspaceMapCache } from '../../src/providers/cursor.js'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import type { Provider } from '../../src/providers/types.js'
 
 describe('cursor provider', () => {
@@ -68,13 +68,13 @@ describe('cursor provider', () => {
 
 describe('cursor sqlite adapter', () => {
   it('reports availability', async () => {
-    const { isSqliteAvailable } = await import('../../src/sqlite.js')
+    const { isSqliteAvailable } = await import('../../src/ingest/sqlite.js')
     const available = isSqliteAvailable()
     expect(typeof available).toBe('boolean')
   })
 
   it('provides error message when not available', async () => {
-    const { getSqliteLoadError } = await import('../../src/sqlite.js')
+    const { getSqliteLoadError } = await import('../../src/ingest/sqlite.js')
     const error = getSqliteLoadError()
     expect(typeof error).toBe('string')
     expect(error.length).toBeGreaterThan(0)
@@ -83,7 +83,7 @@ describe('cursor sqlite adapter', () => {
 
 describe('cursor cache', () => {
   it('returns null when no cache exists', async () => {
-    const { readCachedResults } = await import('../../src/cursor-cache.js')
+    const { readCachedResults } = await import('../../src/ingest/cursor-cache.js')
     const result = await readCachedResults('/nonexistent/path.db', new Date(0).toISOString())
     expect(result).toBeNull()
   })
@@ -99,14 +99,14 @@ describe('cursor cache', () => {
     await writeFile(dbPath, 'cursor-db-fixture')
 
     try {
-      const { writeCachedResults } = await import('../../src/cursor-cache.js')
+      const { writeCachedResults } = await import('../../src/ingest/cursor-cache.js')
       process.env['CODEBURN_CACHE_DIR'] = firstCacheDir
       await writeCachedResults(dbPath, [], firstFloor)
 
       process.env['CODEBURN_CACHE_DIR'] = secondCacheDir
       await writeCachedResults(dbPath, [], secondFloor)
 
-      const { cursorCacheFileName } = await import('../../src/cursor-cache.js')
+      const { cursorCacheFileName } = await import('../../src/ingest/cursor-cache.js')
       const firstPath = join(firstCacheDir, cursorCacheFileName())
       const secondPath = join(secondCacheDir, cursorCacheFileName())
       const first = JSON.parse(await readFile(firstPath, 'utf-8')) as { lookbackFloor: string }

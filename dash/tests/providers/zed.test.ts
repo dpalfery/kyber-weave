@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import zlib from 'zlib'
 
 import { createZedProvider } from '../../src/providers/zed.js'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
 const requireForTest = createRequire(import.meta.url)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseJsonlLine, shouldSkipLine } from '../src/parser.js'
+import { parseJsonlLine, shouldSkipLine } from '../src/ingest/parser.js'
 
 const LARGE_PADDING = 'x'.repeat(40_000)
 

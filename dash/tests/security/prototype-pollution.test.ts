@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, cp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { parseAllSessions } from '../../src/parser.js'
+import { parseAllSessions } from '../../src/ingest/parser.js'
 import type { DateRange } from '../../src/types.js'
 
 // Fixtures carry timestamp 2026-04-16T00:00:00Z. The range below must stay

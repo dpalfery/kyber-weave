@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CHARS_PER_TOKEN, estimateTokensFromChars } from '../src/token-estimate.js'
+import { CHARS_PER_TOKEN, estimateTokensFromChars } from '../src/pricing/token-estimate.js'
 
 describe('estimateTokensFromChars', () => {
   it('uses four characters per token', () => {

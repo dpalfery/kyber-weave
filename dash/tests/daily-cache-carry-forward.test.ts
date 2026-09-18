@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 
 import type { ProjectSummary } from '../src/types.js'
-import { buildPeriodDataFromDays } from '../src/day-aggregator.js'
+import { buildPeriodDataFromDays } from '../src/metrics/day-aggregator.js'
 
 import {
   DAILY_CACHE_VERSION,
@@ -18,7 +18,7 @@ import {
   loadDailyCache,
   mergeDayEntries,
   saveDailyCache,
-} from '../src/daily-cache.js'
+} from '../src/ingest/daily-cache.js'
 
 const TMP_CACHE_ROOT = join(tmpdir(), `codeburn-carry-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
 

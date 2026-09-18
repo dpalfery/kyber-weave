@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { calculateCost } from '../../src/models.js'
+import { calculateCost } from '../../src/pricing/models.js'
 import { createKimicodeProvider, kimicode } from '../../src/providers/kimicode.js'
 import type { ParsedProviderCall, Provider, SessionSource } from '../../src/providers/types.js'
 

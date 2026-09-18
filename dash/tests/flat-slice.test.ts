@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from 'vitest'
 
-import { flatSlice, flatString } from '../src/content-utils.js'
+import { flatSlice, flatString } from '../src/ingest/content-utils.js'
 
 describe('flatSlice', () => {
   it('returns the prefix for strings over the bound', () => {

@@ -23,7 +23,7 @@ async function makeHome(): Promise<string> {
 }
 
 function runCli(args: string[], home: string) {
-  return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
+  return spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', ...args], {
     cwd: process.cwd(),
     env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), TZ: 'UTC' },
     encoding: 'utf-8',

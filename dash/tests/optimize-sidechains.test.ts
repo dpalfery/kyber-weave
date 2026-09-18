@@ -22,7 +22,7 @@ import {
   runOptimize,
   scanAndDetect,
   type OptimizeResult,
-} from '../src/optimize.js'
+} from '../src/metrics/optimize.js'
 import type { ClassifiedTurn, ProjectSummary, SessionSummary } from '../src/types.js'
 
 function behavioralTurn(

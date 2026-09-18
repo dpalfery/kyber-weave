@@ -16,7 +16,7 @@ import {
   loadDailyCache,
   saveDailyCache,
   toDateString,
-} from '../src/daily-cache.js'
+} from '../src/ingest/daily-cache.js'
 
 const TMP_CACHE_ROOT = join(tmpdir(), `codeburn-degraded-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
 

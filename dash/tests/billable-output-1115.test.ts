@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { aggregateModelStats, computeComparison } from '../src/compare-stats.js'
-import { aggregateProjectsIntoDays } from '../src/day-aggregator.js'
-import { billableOutputTokens, getShortModelName } from '../src/models.js'
-import { findContextBloatCandidates } from '../src/optimize.js'
-import { callBillableOutputTokens, sessionBillableOutputTokens, sessionModelBillableOutputTokens } from '../src/session-output.js'
-import { aggregateSessions } from '../src/sessions-report.js'
-import { buildPeriodData } from '../src/usage-aggregator.js'
+import { aggregateModelStats, computeComparison } from '../src/metrics/compare-stats.js'
+import { aggregateProjectsIntoDays } from '../src/metrics/day-aggregator.js'
+import { billableOutputTokens, getShortModelName } from '../src/pricing/models.js'
+import { findContextBloatCandidates } from '../src/metrics/optimize.js'
+import { callBillableOutputTokens, sessionBillableOutputTokens, sessionModelBillableOutputTokens } from '../src/metrics/session-output.js'
+import { aggregateSessions } from '../src/metrics/sessions-report.js'
+import { buildPeriodData } from '../src/metrics/usage-aggregator.js'
 import type { ProjectSummary, SessionSummary } from '../src/types.js'
 
 function makeCall(provider: string, outputTokens: number, reasoningTokens: number) {

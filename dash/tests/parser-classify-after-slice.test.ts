@@ -3,8 +3,8 @@ import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { parseAllSessions, filterProjectsByDateRange, clearSessionCache } from '../src/parser.js'
-import { loadPricing } from '../src/models.js'
+import { parseAllSessions, filterProjectsByDateRange, clearSessionCache } from '../src/ingest/parser.js'
+import { loadPricing } from '../src/pricing/models.js'
 import type { ClassifiedTurn, DateRange } from '../src/types.js'
 
 // scanProjectDirs decides the date slice on the RAW cached turn and classifies

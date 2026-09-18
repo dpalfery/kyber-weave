@@ -9,13 +9,13 @@ import type { ProjectSummary, SessionSummary } from '../src/types.js'
 
 const { parseAllSessionsMock } = vi.hoisted(() => ({
   parseAllSessionsMock: vi.fn<
-    Parameters<typeof import('../src/parser.js').parseAllSessions>,
-    ReturnType<typeof import('../src/parser.js').parseAllSessions>
+    Parameters<typeof import('../src/ingest/parser.js').parseAllSessions>,
+    ReturnType<typeof import('../src/ingest/parser.js').parseAllSessions>
   >(),
 }))
 
-vi.mock('../src/parser.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/parser.js')>()
+vi.mock('../src/ingest/parser.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/ingest/parser.js')>()
   return { ...actual, parseAllSessions: parseAllSessionsMock }
 })
 
@@ -32,8 +32,8 @@ vi.mock('../src/providers/index.js', async (importOriginal) => {
   return { ...actual, getAllProviders: async () => [provider('beta'), provider('gamma')] }
 })
 
-vi.mock('../src/usage-aggregator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/usage-aggregator.js')>()
+vi.mock('../src/metrics/usage-aggregator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/metrics/usage-aggregator.js')>()
   return {
     ...actual,
     buildDurablePeriod: vi.fn(async () => ({
@@ -41,11 +41,6 @@ vi.mock('../src/usage-aggregator.js', async (importOriginal) => {
       carriedCostUSD: 0,
     })),
   }
-})
-
-vi.mock('../src/plan-usage.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/plan-usage.js')>()
-  return { ...actual, getPlanUsages: vi.fn(async () => []) }
 })
 
 const BREAKDOWN = {
@@ -95,7 +90,7 @@ function tui() {
 
 describe('InteractiveDashboard custom-range provider switching', () => {
   it('finishes the provider reload instead of stranding a loading skeleton', async () => {
-    const { InteractiveDashboard } = await import('../src/dashboard.js')
+    const { InteractiveDashboard } = await import('../src/tui/dashboard.js')
     const beta = project('beta-visible', 'beta', 7)
     const gamma = project('gamma-visible', 'gamma', 3)
     parseAllSessionsMock.mockResolvedValue([beta])

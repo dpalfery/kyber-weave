@@ -1,7 +1,7 @@
 import { readdir } from 'fs/promises'
 import { join } from 'path'
 
-import { calculateCost } from '../models.js'
+import { calculateCost } from '../pricing/models.js'
 import {
   isSqliteAvailable,
   getSqliteLoadError,
@@ -11,7 +11,7 @@ import {
   isSqliteReadonlyError,
   warnSqliteReadonlyOnce,
   type SqliteDatabase,
-} from '../sqlite.js'
+} from '../ingest/sqlite.js'
 import { buildAssistantCall, parseTimestamp, sanitize, type MessageData, type PartData } from './session-message.js'
 import type {
   SessionSource,

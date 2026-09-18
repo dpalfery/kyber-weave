@@ -8,7 +8,7 @@ import {
   MAX_STREAM_SESSION_FILE_BYTES,
   readSessionFile,
   readSessionLines,
-} from '../src/fs-utils.js'
+} from '../src/ingest/fs-utils.js'
 
 describe('readSessionFile', () => {
   const tmpDirs: string[] = []

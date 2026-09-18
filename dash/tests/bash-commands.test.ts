@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { basename } from 'path'
 import stripAnsi from 'strip-ansi'
-import { extractBashCommands, isReadShapedBashCommand } from '../src/bash-utils.js'
-import { BASH_TOOLS } from '../src/classifier.js'
+import { extractBashCommands, isReadShapedBashCommand } from '../src/ingest/bash-utils.js'
+import { BASH_TOOLS } from '../src/metrics/classifier.js'
 
 describe('extractBashCommands', () => {
   it('extracts single command', () => {

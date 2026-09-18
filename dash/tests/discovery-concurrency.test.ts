@@ -9,8 +9,8 @@ import { basename, join } from 'path'
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
-import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../src/fs-utils.js'
-import { collectJsonlFiles } from '../src/parser.js'
+import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../src/ingest/fs-utils.js'
+import { collectJsonlFiles } from '../src/ingest/parser.js'
 import { discoverAllSessions } from '../src/providers/index.js'
 import type { Provider, SessionSource } from '../src/providers/types.js'
 

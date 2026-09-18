@@ -7,13 +7,13 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectSummary, SessionSummary } from '../src/types.js'
-import { computeYield } from '../src/yield.js'
+import { computeYield } from '../src/metrics/yield.js'
 
 const { parseAllSessionsMock } = vi.hoisted(() => ({
   parseAllSessionsMock: vi.fn(),
 }))
 
-vi.mock('../src/parser.js', () => ({
+vi.mock('../src/ingest/parser.js', () => ({
   parseAllSessions: parseAllSessionsMock,
 }))
 

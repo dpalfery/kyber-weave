@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BSU, ESU, stripSyncUpdateEscapes, patchStdoutForWindows } from '../src/ink-win.js'
+import { BSU, ESU, stripSyncUpdateEscapes, patchStdoutForWindows } from '../src/tui/ink-win.js'
 
 describe('stripSyncUpdateEscapes', () => {
   it('strips an exact BSU chunk to empty', () => {

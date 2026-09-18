@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { formatDateRangeLabel, formatDayRangeLabel, parseDateRangeFlags, parseDayFlag, shiftDay } from '../src/cli-date.js'
+import { formatDateRangeLabel, formatDayRangeLabel, parseDateRangeFlags, parseDayFlag, shiftDay } from '../src/cli/cli-date.js'
 
 afterEach(() => {
   vi.useRealTimers()

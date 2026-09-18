@@ -4,8 +4,8 @@ import React, { useEffect } from 'react'
 import { Text } from 'ink'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { RESIZE_DEBOUNCE_MS, createDebouncedResizeStream, renderDebouncedInteractive } from '../src/dashboard.js'
-import { BSU, ESU, stripSyncUpdateEscapes } from '../src/ink-win.js'
+import { RESIZE_DEBOUNCE_MS, createDebouncedResizeStream, renderDebouncedInteractive } from '../src/tui/dashboard.js'
+import { BSU, ESU, stripSyncUpdateEscapes } from '../src/tui/ink-win.js'
 
 function makeTerminal(columns = 100, rows = 24): PassThrough & NodeJS.WriteStream {
   const terminal = new PassThrough() as PassThrough & NodeJS.WriteStream

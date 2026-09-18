@@ -7,8 +7,8 @@ import { tmpdir } from 'os'
 // only the appended-parse path passes a non-zero `startByteOffset`. The real
 // implementation is preserved; we merely record the offset each call receives.
 const readLineCalls: Array<{ filePath: string; startByteOffset?: number }> = []
-vi.mock('../src/fs-utils.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/fs-utils.js')>()
+vi.mock('../src/ingest/fs-utils.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/ingest/fs-utils.js')>()
   return {
     ...actual,
     readSessionLines: (filePath: string, skip?: unknown, options?: { startByteOffset?: number }) => {
@@ -19,7 +19,7 @@ vi.mock('../src/fs-utils.js', async (importOriginal) => {
   }
 })
 
-import { parseAllSessions, clearSessionCache } from '../src/parser.js'
+import { parseAllSessions, clearSessionCache } from '../src/ingest/parser.js'
 import { readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
 import type { ProjectSummary } from '../src/types.js'
 

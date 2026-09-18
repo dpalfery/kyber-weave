@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { buildWorkflowRows, hasWorkflowData, selectRotatingNote, type WorkflowPanelData } from '../src/dashboard.js'
+import { buildWorkflowRows, hasWorkflowData, selectRotatingNote, type WorkflowPanelData } from '../src/tui/dashboard.js'
 
 function data(overrides: Partial<WorkflowPanelData> = {}): WorkflowPanelData {
   return {

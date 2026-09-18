@@ -4,7 +4,7 @@ import { join, basename } from 'path'
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 
-import { collectJsonlFiles, readAgentType } from '../src/parser.js'
+import { collectJsonlFiles, readAgentType } from '../src/ingest/parser.js'
 
 let root: string
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), 'codeburn-collect-')) })

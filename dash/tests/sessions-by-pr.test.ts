@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { aggregateByPr, allocateEven, attributeSessionPrSpend, prLinkedTotals, shortenPrUrl } from '../src/sessions-report.js'
+import { aggregateByPr, allocateEven, attributeSessionPrSpend, prLinkedTotals, shortenPrUrl } from '../src/metrics/sessions-report.js'
 import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary, TokenUsage } from '../src/types.js'
 
 const A = 'https://github.com/o/r/pull/1'

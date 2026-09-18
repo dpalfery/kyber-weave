@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { aggregateByBranch } from '../src/sessions-report.js'
+import { aggregateByBranch } from '../src/metrics/sessions-report.js'
 import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary, TokenUsage } from '../src/types.js'
 
 const ZERO_USAGE: TokenUsage = {

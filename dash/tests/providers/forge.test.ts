@@ -4,7 +4,7 @@ import { tmpdir } from 'os'
 import { createRequire } from 'node:module'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import { createForgeProvider } from '../../src/providers/forge.js'
 import { getProvider } from '../../src/providers/index.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'

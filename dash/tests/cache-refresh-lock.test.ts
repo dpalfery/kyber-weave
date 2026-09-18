@@ -7,9 +7,9 @@ import { join } from 'path'
 import {
   acquireCacheRefreshLock,
   type RefreshLockClock,
-} from '../src/cache-refresh-lock.js'
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
-import { emptyCache, loadCache, saveCache, sessionCacheDir } from '../src/session-cache.js'
+} from '../src/ingest/cache-refresh-lock.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
+import { emptyCache, loadCache, saveCache, sessionCacheDir } from '../src/ingest/session-cache.js'
 
 const dirs: string[] = []
 

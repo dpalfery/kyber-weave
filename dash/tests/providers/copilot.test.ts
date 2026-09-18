@@ -7,8 +7,8 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { copilot, createCopilotProvider, getVSCodeGlobalStorageDirs, getVSCodeWorkspaceStorageDirs } from '../../src/providers/copilot.js'
-import { isSqliteAvailable, isSqliteBusyError } from '../../src/sqlite.js'
-import { calculateCost } from '../../src/models.js'
+import { isSqliteAvailable, isSqliteBusyError } from '../../src/ingest/sqlite.js'
+import { calculateCost } from '../../src/pricing/models.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
 let tmpDir: string
@@ -3258,7 +3258,7 @@ describe('copilot deduplication key prefixes (durable-union contract)', () => {
     // the variable names, and compare the whole set: a new key shape fails
     // this just as loudly as a changed one.
     const shapes = new Set<string>()
-    for (const src of [await read('src/providers/copilot.ts'), await read('src/parser.ts')]) {
+    for (const src of [await read('src/providers/copilot.ts'), await read('src/ingest/parser.ts')]) {
       for (const m of src.matchAll(/`(copilot[^`]*)`/g)) {
         const raw = m[1]!
         if (!raw.includes('${')) continue

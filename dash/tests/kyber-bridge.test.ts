@@ -7,9 +7,9 @@ import { join } from 'node:path'
 import {
   KyberBridge,
   _clip,
-} from '../kyber/server/bridge.js'
-import { CanonStore } from '../kyber/canon/store.js'
-import type { CanonicalRecord } from '../kyber/canon/types.js'
+} from '../src/server/bridge.js'
+import { CanonStore } from '../src/canon/store.js'
+import type { CanonicalRecord } from '../src/canon/types.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {

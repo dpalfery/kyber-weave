@@ -9,13 +9,13 @@ import {
   detectUserCorrection,
   outcomeAvailability,
   USER_CORRECTION_RULES,
-} from '../kyber/canon/outcome.js'
-import { buildRuns, deriveRunIdentity } from '../kyber/canon/runs.js'
-import { CanonStore } from '../kyber/canon/store.js'
-import type { CanonicalRecord, TokenUsage } from '../kyber/canon/types.js'
-import { ClaudeContentReader } from '../kyber/synth/readers/claude.js'
-import { codexReader } from '../kyber/synth/readers/codex.js'
-import { piReader } from '../kyber/synth/readers/pi.js'
+} from '../src/canon/outcome.js'
+import { buildRuns, deriveRunIdentity } from '../src/canon/runs.js'
+import { CanonStore } from '../src/canon/store.js'
+import type { CanonicalRecord, TokenUsage } from '../src/canon/types.js'
+import { ClaudeContentReader } from '../src/synth/readers/claude.js'
+import { codexReader } from '../src/synth/readers/codex.js'
+import { piReader } from '../src/synth/readers/pi.js'
 
 const tempDirs: string[] = []
 

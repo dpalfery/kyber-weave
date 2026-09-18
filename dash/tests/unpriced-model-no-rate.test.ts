@@ -9,9 +9,9 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { calculateCost, getModelCosts, loadPricing } from '../src/models.js'
-import { costBlockFor } from '../kyber/synth/synth.js'
-import type { ParsedProviderCall } from '../kyber/synth/provider.js'
+import { calculateCost, getModelCosts, loadPricing } from '../src/pricing/models.js'
+import { costBlockFor } from '../src/synth/synth.js'
+import type { ParsedProviderCall } from '../src/synth/provider.js'
 
 /** A model id no publisher will ever ship, so the table cannot price it. */
 const ABSENT_MODEL = 'no-such-vendor/no-such-model-v0'

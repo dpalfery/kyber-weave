@@ -3,10 +3,10 @@ import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { setModelAliases, setPriceOverrides } from '../../src/models.js'
-import { filterProjectsByDateRange } from '../../src/parser.js'
+import { setModelAliases, setPriceOverrides } from '../../src/pricing/models.js'
+import { filterProjectsByDateRange } from '../../src/ingest/parser.js'
 import { createOmpProvider } from '../../src/providers/pi.js'
-import { aggregateSessions } from '../../src/sessions-report.js'
+import { aggregateSessions } from '../../src/metrics/sessions-report.js'
 import type { ParsedApiCall, ProjectSummary } from '../../src/types.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 

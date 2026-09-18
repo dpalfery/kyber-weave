@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { shouldSkipLine } from '../src/parser.js'
+import { shouldSkipLine } from '../src/ingest/parser.js'
 
 const threshold = '2026-04-01T00:00:00.000Z'
 

@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'os'
 import zlib from 'zlib'
 
 import { createDshProvider, readZstdLines } from '../../src/providers/dsh.js'
-import { calculateCost } from '../../src/models.js'
+import { calculateCost } from '../../src/pricing/models.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
 // DSH session logs are concatenations of INDEPENDENT zstd frames (one per

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { aggregateSessions, renderJson, renderTable, renderWorkUnitJson, renderWorkUnitTable } from '../src/sessions-report.js'
-import { inferSessionProvider } from '../src/session-output.js'
+import { aggregateSessions, renderJson, renderTable, renderWorkUnitJson, renderWorkUnitTable } from '../src/metrics/sessions-report.js'
+import { inferSessionProvider } from '../src/metrics/session-output.js'
 import { createHash } from 'node:crypto'
 
 /// Mirrors `deriveWorkUnitId` in work-units.ts. Asserting the derivation rather
@@ -10,8 +10,8 @@ import { createHash } from 'node:crypto'
 function expectedWorkUnitId(sessionId: string): string {
   return createHash('sha256').update(sessionId).digest('hex').slice(0, 32)
 }
-import { resolveWorkUnits, workUnitSessionKey } from '../src/work-units.js'
-import type { WorkUnitResolution, WorkUnitSession } from '../src/work-units.js'
+import { resolveWorkUnits, workUnitSessionKey } from '../src/metrics/work-units.js'
+import type { WorkUnitResolution, WorkUnitSession } from '../src/metrics/work-units.js'
 import type { ClassifiedTurn, ProjectSummary, SessionLineage, SessionSummary } from '../src/types.js'
 
 const recorded = (role: 'root' | 'child', parentSessionId?: string): SessionLineage => ({

@@ -1,8 +1,8 @@
 import { join } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost } from '../models.js'
-import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost } from '../pricing/models.js'
+import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 /// ZCode (CLI v0.14.x) records usage in a single SQLite database at

@@ -7,8 +7,8 @@ import {
   setLocalModelSavings,
   setModelAliases,
   loadPricing,
-} from '../src/models.js'
-import { parseAllSessions, clearSessionCache } from '../src/parser.js'
+} from '../src/pricing/models.js'
+import { parseAllSessions, clearSessionCache } from '../src/ingest/parser.js'
 import type { DateRange } from '../src/types.js'
 
 const FIXTURE_DAY = Date.UTC(2026, 3, 16)

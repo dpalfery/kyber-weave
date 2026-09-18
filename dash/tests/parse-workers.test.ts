@@ -6,8 +6,8 @@ import { createHash } from 'node:crypto'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { decideParseWorkers, ParseWorkerPool, parseFilesInOrder, type ClaudeWorkerParse } from '../src/parse-workers.js'
-import { clearSessionCache, parseAllSessions, parseClaudeFileFull } from '../src/parser.js'
+import { decideParseWorkers, ParseWorkerPool, parseFilesInOrder, type ClaudeWorkerParse } from '../src/ingest/parse-workers.js'
+import { clearSessionCache, parseAllSessions, parseClaudeFileFull } from '../src/ingest/parser.js'
 import { parseCodexFileFull, type CodexFullParse } from '../src/providers/codex.js'
 import type { SessionSource } from '../src/providers/types.js'
 
@@ -236,12 +236,12 @@ async function shardBodies(cacheDir: string): Promise<Record<string, string>> {
 /// The Codex incremental cache is a single JSON file; both runs read the same
 /// rollouts, so it must come out identical byte for byte.
 async function codexResults(cacheDir: string): Promise<string | null> {
-  const { codexCacheFileName } = await import('../src/codex-cache.js')
+  const { codexCacheFileName } = await import('../src/ingest/codex-cache.js')
   return readFile(join(cacheDir, codexCacheFileName()), 'utf-8').catch(() => null)
 }
 
 function runCli(args: string[], home: string, extraEnv: Record<string, string>) {
-  return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
+  return spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,

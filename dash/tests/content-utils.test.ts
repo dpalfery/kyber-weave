@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeContentBlocks } from '../src/content-utils.js'
+import { normalizeContentBlocks } from '../src/ingest/content-utils.js'
 
 describe('normalizeContentBlocks', () => {
   it('passes an array of blocks through unchanged', () => {

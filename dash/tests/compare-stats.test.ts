@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { aggregateModelStats, buildCompareJson, computeComparison, computeCategoryComparison, computeWorkingStyle, findModelStat, renderCompareJson, scanSelfCorrections, type ModelStats } from '../src/compare-stats.js'
+import { aggregateModelStats, buildCompareJson, computeComparison, computeCategoryComparison, computeWorkingStyle, findModelStat, renderCompareJson, scanSelfCorrections, type ModelStats } from '../src/metrics/compare-stats.js'
 import type { ProjectSummary, SessionSummary, ClassifiedTurn } from '../src/types.js'
 
 function makeTurn(model: string, cost: number, opts: { hasEdits?: boolean; retries?: number; outputTokens?: number; inputTokens?: number; cacheRead?: number; cacheWrite?: number; timestamp?: string; category?: string; hasAgentSpawn?: boolean; hasPlanMode?: boolean; speed?: 'standard' | 'fast'; tools?: string[] } = {}): ClassifiedTurn {

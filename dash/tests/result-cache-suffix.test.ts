@@ -14,14 +14,14 @@ import {
   flushCodexCache,
   readCachedCodexResults,
   writeCachedCodexResults,
-} from '../src/codex-cache.js'
+} from '../src/ingest/codex-cache.js'
 import {
   CURSOR_CACHE_VERSION,
   CURSOR_LEGACY_CACHE_FILE,
   cursorCacheFileName,
   readCachedResults,
   writeCachedResults,
-} from '../src/cursor-cache.js'
+} from '../src/ingest/cursor-cache.js'
 import {
   ANTIGRAVITY_CACHE_VERSION,
   ANTIGRAVITY_LEGACY_CACHE_FILE,

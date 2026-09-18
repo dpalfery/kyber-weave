@@ -24,9 +24,9 @@ import {
   getFlatRateModelsConfigHash,
   parseLiteLLMEntry,
   unpricedModelHint,
-} from '../src/models.js'
-import { getDailyCacheConfigHash } from '../src/usage-aggregator.js'
-import snapshotData from '../src/data/litellm-snapshot.json' with { type: 'json' }
+} from '../src/pricing/models.js'
+import { getDailyCacheConfigHash } from '../src/metrics/usage-aggregator.js'
+import snapshotData from '../src/pricing/data/litellm-snapshot.json' with { type: 'json' }
 
 beforeAll(async () => {
   await loadPricing()
@@ -1329,7 +1329,7 @@ describe('getFlatRateModelsConfigHash', () => {
 
 describe('pricing snapshot carries flat-rate marks', () => {
   it('restorePricingState reapplies user flat-rate marks', async () => {
-    const { snapshotPricingState, restorePricingState } = await import('../src/models.js')
+    const { snapshotPricingState, restorePricingState } = await import('../src/pricing/models.js')
     setFlatRateModels(['zz-snapshot-flat'])
     const snap = snapshotPricingState()
     expect(snap.flatRateModels).toEqual(['zz-snapshot-flat'])
@@ -1341,7 +1341,7 @@ describe('pricing snapshot carries flat-rate marks', () => {
   })
 
   it('restorePricingState reapplies built-in opt-outs', async () => {
-    const { snapshotPricingState, restorePricingState } = await import('../src/models.js')
+    const { snapshotPricingState, restorePricingState } = await import('../src/pricing/models.js')
     setFlatRateRemoved(['auto-genius'])
     const snap = snapshotPricingState()
     expect(snap.flatRateModelsRemoved).toEqual(['auto-genius'])

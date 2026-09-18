@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
-import { walkSourceFiles } from '../kyber/tools/cost-isolation.js'
+import { walkSourceFiles } from '../src/tools/cost-isolation.js'
 
 const DASH_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 

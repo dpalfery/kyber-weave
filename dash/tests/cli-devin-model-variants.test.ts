@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
 function runCli(args: string[], home: string) {
-  return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
+  return spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,

@@ -4,15 +4,15 @@ import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry } from '../src/daily-cache.js'
-import { getDateRange } from '../src/cli-date.js'
-import { loadPricing } from '../src/models.js'
+import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry } from '../src/ingest/daily-cache.js'
+import { getDateRange } from '../src/cli/cli-date.js'
+import { loadPricing } from '../src/pricing/models.js'
 import {
   buildDurablePeriod,
   buildPeriodData,
   getDailyCacheConfigHash,
-} from '../src/usage-aggregator.js'
-import { parseAllSessions, filterProjectsByName, filterProjectsByDateRange, filterProjectsByDays, clearSessionCache } from '../src/parser.js'
+} from '../src/metrics/usage-aggregator.js'
+import { parseAllSessions, filterProjectsByName, filterProjectsByDateRange, filterProjectsByDays, clearSessionCache } from '../src/ingest/parser.js'
 import { carriedCostNote } from '../src/format.js'
 import type { DateRange } from '../src/types.js'
 

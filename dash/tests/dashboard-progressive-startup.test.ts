@@ -16,11 +16,11 @@ import {
   InteractiveDashboard,
   selectDashboardHistoryIndex,
   shouldAutoFallbackToWeek,
-} from '../src/dashboard.js'
-import { getDateRange, type Period } from '../src/cli-date.js'
-import { clearSessionCache, filesParsedFromSourceCount, isCompleteSessionSnapshotAvailable, parseAllSessions, sessionMemoPublicationCount } from '../src/parser.js'
-import { clearLoadCacheMemo, fingerprintFileCount, isColdCacheOnDisk } from '../src/session-cache.js'
-import { buildDurablePeriod } from '../src/usage-aggregator.js'
+} from '../src/tui/dashboard.js'
+import { getDateRange, type Period } from '../src/cli/cli-date.js'
+import { clearSessionCache, filesParsedFromSourceCount, isCompleteSessionSnapshotAvailable, parseAllSessions, sessionMemoPublicationCount } from '../src/ingest/parser.js'
+import { clearLoadCacheMemo, fingerprintFileCount, isColdCacheOnDisk } from '../src/ingest/session-cache.js'
+import { buildDurablePeriod } from '../src/metrics/usage-aggregator.js'
 import type { ProjectSummary } from '../src/types.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000

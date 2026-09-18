@@ -1,7 +1,7 @@
-import { getShortModelName } from '../models.js'
+import { getShortModelName } from '../pricing/models.js'
 import type { DateRange } from '../types.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
-import { fetchWithTimeout } from '../fetch-utils.js'
+import { fetchWithTimeout } from '../pricing/fetch-utils.js'
 
 const REPORT_URL = 'https://ai-gateway.vercel.sh/v1/report'
 

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
-import { buildProgram } from '../src/program.js'
+import { buildProgram } from '../src/cli/program.js'
 
 // Requirements 2.1 and 2.2 of the KyberDash context surfaces specification: the CLI registers
 // the context-troubleshooting commands and nothing inherited from the spend product. Hidden
@@ -35,7 +35,7 @@ describe('registered top-level commands', () => {
 
 describe('menubar', () => {
   it('refuses rather than install the upstream CodeBurn app', () => {
-    const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', 'menubar'], {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', 'menubar'], {
       cwd: new URL('..', import.meta.url),
       encoding: 'utf8',
       timeout: 60_000,

@@ -3,9 +3,9 @@ import { mkdtemp, mkdir, writeFile, rm, utimes } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { assembleDashboardData, renderDashboard } from '../src/dashboard.js'
-import { clearSessionCache } from '../src/parser.js'
-import { clearLoadCacheMemo } from '../src/session-cache.js'
+import { assembleDashboardData, renderDashboard } from '../src/tui/dashboard.js'
+import { clearSessionCache } from '../src/ingest/parser.js'
+import { clearLoadCacheMemo } from '../src/ingest/session-cache.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 

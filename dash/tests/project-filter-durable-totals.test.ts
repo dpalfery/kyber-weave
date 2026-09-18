@@ -4,10 +4,10 @@ import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry, type ProjectDayStats, type ProviderDaySlice } from '../src/daily-cache.js'
-import { loadPricing } from '../src/models.js'
-import { buildDurablePeriod, buildPeriodData, getDailyCacheConfigHash } from '../src/usage-aggregator.js'
-import { parseAllSessions, filterProjectsByName, clearSessionCache } from '../src/parser.js'
+import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry, type ProjectDayStats, type ProviderDaySlice } from '../src/ingest/daily-cache.js'
+import { loadPricing } from '../src/pricing/models.js'
+import { buildDurablePeriod, buildPeriodData, getDailyCacheConfigHash } from '../src/metrics/usage-aggregator.js'
+import { parseAllSessions, filterProjectsByName, clearSessionCache } from '../src/ingest/parser.js'
 import type { DateRange } from '../src/types.js'
 
 // The durable headline (overview / report Overview panel / menubar current) is

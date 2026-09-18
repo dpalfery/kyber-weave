@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { aggregateProjectsIntoDays, buildPeriodDataFromDays, dateKey } from '../src/day-aggregator.js'
-import { isTurnResidueOnly } from '../src/daily-cache.js'
+import { aggregateProjectsIntoDays, buildPeriodDataFromDays, dateKey } from '../src/metrics/day-aggregator.js'
+import { isTurnResidueOnly } from '../src/ingest/daily-cache.js'
 import type { ProjectSummary } from '../src/types.js'
 
 function makeProject(overrides: Partial<ProjectSummary> & { sessions: ProjectSummary['sessions'] }): ProjectSummary {

@@ -39,9 +39,9 @@ import {
   type ApiCallMeta,
   type WasteFinding,
   type OptimizeResult,
-} from '../src/optimize.js'
+} from '../src/metrics/optimize.js'
 import type { ProjectSummary } from '../src/types.js'
-import type { AppliedFix } from '../src/act/types.js'
+import type { AppliedFix } from '../src/tui/act/types.js'
 
 function call(name: string, input: Record<string, unknown>, sessionId = 's1', project = 'p1'): ToolCall {
   return { name, input, sessionId, project }

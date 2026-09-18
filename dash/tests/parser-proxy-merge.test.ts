@@ -74,8 +74,8 @@ describe('proxy pricing: cross-provider merge', () => {
     await writeCodexFixture(MERGE_CWD)
 
     // Import AFTER env is set so the codex provider reads CODEX_HOME.
-    const { parseAllSessions, clearSessionCache } = await import('../src/parser.js')
-    const { setProxyPaths, loadPricing } = await import('../src/models.js')
+    const { parseAllSessions, clearSessionCache } = await import('../src/ingest/parser.js')
+    const { setProxyPaths, loadPricing } = await import('../src/pricing/models.js')
     await loadPricing()
     setProxyPaths([MERGE_CWD])
     clearSessionCache()

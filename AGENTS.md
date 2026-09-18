@@ -48,6 +48,7 @@ above reach it. Changes there run its own:
 npm --prefix dash run typecheck
 npm --prefix dash run lint
 npm --prefix dash run test
+npm --prefix dash run check:reachable
 ```
 
 The loop does not build `kyberdash` either, so the install and update path for that binary

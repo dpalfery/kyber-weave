@@ -10,7 +10,7 @@ import {
   isSqliteReadonlyError,
   openDatabase,
   sqliteSupportsUriFilenames,
-} from '../src/sqlite.js'
+} from '../src/ingest/sqlite.js'
 import {
   discoverSqliteSessions,
   type SqliteProviderConfig,

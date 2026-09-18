@@ -37,7 +37,7 @@ function dayRange(): DateRange {
 
 async function loadParser() {
   vi.resetModules()
-  const parser = await import('../src/parser.js')
+  const parser = await import('../src/ingest/parser.js')
   clearParserCache = parser.clearSessionCache
   return parser.parseAllSessions
 }

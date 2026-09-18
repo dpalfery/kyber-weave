@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-vi.mock('../src/cache-refresh-lock.js', () => ({
+vi.mock('../src/ingest/cache-refresh-lock.js', () => ({
   acquireCacheRefreshLock: async () => ({ outcome: 'timed-out' as const }),
 }))
 
-import { clearSessionCache, isSessionHydrationComplete, parseAllSessions } from '../src/parser.js'
+import { clearSessionCache, isSessionHydrationComplete, parseAllSessions } from '../src/ingest/parser.js'
 import { cacheDirSnapshot } from './fixtures/session-cache-io.js'
 
 let root: string

@@ -12,7 +12,7 @@ import { mkdir, rm, readFile, writeFile } from 'fs/promises'
 import { createHash } from 'crypto'
 import { join } from 'path'
 
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
 import { readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
 
 const testRoot = vi.hoisted(() => {
@@ -88,7 +88,7 @@ describe('codex parser change invalidates stale session-cache (#478/#513)', () =
       }
     }
     await writeCacheOnDisk(cache)
-    const { codexCacheFileName } = await import('../src/codex-cache.js')
+    const { codexCacheFileName } = await import('../src/ingest/codex-cache.js')
     const codexCachePath = join(CACHE_DIR, codexCacheFileName())
     const codexCache = JSON.parse(await readFile(codexCachePath, 'utf8'))
     codexCache.version = 4

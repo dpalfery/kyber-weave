@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { aggregateModelTotals } from '../src/model-breakdown.js'
+import { aggregateModelTotals } from '../src/metrics/model-breakdown.js'
 import type { ProjectSummary, TokenUsage } from '../src/types.js'
 
 function tokens(input: number, cacheRead: number, cacheWrite: number): TokenUsage {

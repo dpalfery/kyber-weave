@@ -3,14 +3,8 @@ import { basename } from 'path'
 /**
  * KyberDash user-facing brand overlay.
  *
- * Lives under `dash/src/` (not `dash/kyber/`) because tsup and `tsconfig`
- * `rootDir` are `dash/src` — the CLI bundle cannot import outside that tree.
- * This file is ours: upstream codeburn has no counterpart, so a subtree pull
- * keeps it as an extra path rather than a content conflict.
- *
- * Do not rename `dash/package.json` (`name`/`bin.codeburn`), `CODEBURN_*`
- * env vars, cache paths, or `dash/dash/public/codeburn-logo.png`. Those are
- * the upstream identity; renaming them fights every `git subtree pull`.
+ * One place for the product's name, CLI name and marks, so a surface renders
+ * them without hard-coding a string it might later disagree with.
  */
 export const BRAND = {
   productName: 'kyberDash',

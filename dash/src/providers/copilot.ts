@@ -63,10 +63,10 @@ import { homedir, platform } from 'os'
 import { join, basename, dirname, posix, win32 } from 'path'
 import { existsSync } from 'fs'
 import { createHash } from 'crypto'
-import { readSessionFile } from '../fs-utils.js'
-import { calculateCost } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
-import { estimateTokens } from '../context-tree.js'
+import { readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { estimateTokens } from '../metrics/context-tree.js'
 import type {
   Provider,
   ProbeRoot,
@@ -385,7 +385,7 @@ function parseCwd(yaml: string): string | null {
  * are stored as separate key-value rows rather than a JSON blob.
  */
 function loadSpanAttributesFromTable(
-  db: ReturnType<typeof import('../sqlite.js')['openDatabase']>,
+  db: ReturnType<typeof import('../ingest/sqlite.js')['openDatabase']>,
   spanId: string
 ): SpanAttributes {
   try {
@@ -1753,7 +1753,7 @@ function createOtelParser(
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       // Lazy-load the SQLite module (same pattern as Cursor/OpenCode providers)
-      const { openDatabase } = await import('../sqlite.js')
+      const { openDatabase } = await import('../ingest/sqlite.js')
 
       // One DB open handles ALL conversations — avoids N opens for N conversations.
       const db = openDatabase(source.path)
@@ -2098,7 +2098,7 @@ function createSessionStoreParser(
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       // Lazy-load the SQLite module (same pattern as the OTel source)
-      const { openDatabase, isSqliteBusyError } = await import('../sqlite.js')
+      const { openDatabase, isSqliteBusyError } = await import('../ingest/sqlite.js')
 
       // The open sits inside the same classify-and-defer boundary as the
       // query: discovery validated this store moments ago, so a failure HERE
@@ -2475,7 +2475,7 @@ async function discoverSessionStoreSource(
     const code = (err as NodeJS.ErrnoException).code
     return code === 'ENOENT' || code === 'ENOTDIR' ? null : source
   }
-  const { openDatabase, isSqliteAvailable } = await import('../sqlite.js')
+  const { openDatabase, isSqliteAvailable } = await import('../ingest/sqlite.js')
   if (!isSqliteAvailable()) return null
   try {
     const db = openDatabase(dbPath)

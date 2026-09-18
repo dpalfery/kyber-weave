@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { aggregateProjectsIntoDays, buildPeriodDataFromDays } from '../src/day-aggregator.js'
+import { aggregateProjectsIntoDays, buildPeriodDataFromDays } from '../src/metrics/day-aggregator.js'
 import type { ParsedApiCall, ProjectSummary, SessionSummary, Turn } from '../src/types.js'
 
 function makeCall(timestamp: string, opts: { costUSD: number; savingsUSD?: number; savingsBaselineModel?: string; model?: string }): ParsedApiCall {

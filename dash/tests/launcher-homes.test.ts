@@ -3,10 +3,10 @@ import { mkdtemp, mkdir, writeFile, rm, symlink } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { collectLauncherNotes, isNestedLauncherCodexHome } from '../src/launcher-homes.js'
-import { collectDoctorReport, renderDoctorTable } from '../src/doctor.js'
+import { collectLauncherNotes, isNestedLauncherCodexHome } from '../src/ingest/launcher-homes.js'
+import { collectDoctorReport, renderDoctorTable } from '../src/cli/doctor.js'
 import { createCodexProvider } from '../src/providers/codex.js'
-import { emptyCache } from '../src/session-cache.js'
+import { emptyCache } from '../src/ingest/session-cache.js'
 
 function sessionMeta(sessionId: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({

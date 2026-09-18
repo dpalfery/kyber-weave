@@ -24,7 +24,7 @@ import {
   sessionCacheDir,
   type CachedFile,
   type SessionCache,
-} from '../src/session-cache.js'
+} from '../src/ingest/session-cache.js'
 
 let TMP_DIR: string
 

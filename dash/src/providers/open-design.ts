@@ -2,8 +2,8 @@ import { readdir, stat } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { homedir, platform } from 'os'
 
-import { readSessionLines } from '../fs-utils.js'
-import { calculateCost } from '../models.js'
+import { readSessionLines } from '../ingest/fs-utils.js'
+import { calculateCost } from '../pricing/models.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 const PROVIDER_NAME = 'open-design'

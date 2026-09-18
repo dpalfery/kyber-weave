@@ -11,14 +11,14 @@ import {
   prefixAvailability,
   type CacheAvailability,
   type PrefixAvailability,
-} from '../kyber/canon/measurability.js'
+} from '../src/canon/measurability.js'
 import {
   auditCachePrefixCoverage,
   auditCorpusCachePrefix,
   type CachePrefixCoverageReport,
   type CorpusCachePrefixAudit,
-} from '../kyber/tools/parity.js'
-import type { CanonicalRecord } from '../kyber/canon/types.js'
+} from '../src/tools/parity.js'
+import type { CanonicalRecord } from '../src/canon/types.js'
 
 function stubRecord(overrides: Partial<CanonicalRecord> = {}): CanonicalRecord {
   return {

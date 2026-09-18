@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 import { createGrokProvider } from '../../src/providers/grok.js'
-import { calculateCost } from '../../src/models.js'
+import { calculateCost } from '../../src/pricing/models.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
 // `chooseAuthoritativeModel` branches on whether a modelUsage id resolves to a
@@ -12,8 +12,8 @@ import type { ParsedProviderCall } from '../../src/providers/types.js'
 // letting the bundled LiteLLM snapshot decide it: xAI pricing landing upstream
 // would otherwise silently flip these assertions. Only this lookup is stubbed,
 // so `calculateCost` still prices off the real tables.
-vi.mock('../../src/models.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/models.js')>()
+vi.mock('../../src/pricing/models.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/pricing/models.js')>()
   return {
     ...actual,
     getModelCosts: (model: string) => (model === 'grok-4.6-build' ? null : actual.getModelCosts(model)),

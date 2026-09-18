@@ -5,7 +5,7 @@ import { render } from 'ink'
 import stripAnsi from 'strip-ansi'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 
-import { InteractiveDashboard, type DashboardHistoryIndex } from '../src/dashboard.js'
+import { InteractiveDashboard, type DashboardHistoryIndex } from '../src/tui/dashboard.js'
 
 // #1143: the quit-confirmation path runs only while a cold-start fill is
 // active, so the parser mock below holds the fill in flight (parseAllSessions
@@ -17,7 +17,7 @@ import { InteractiveDashboard, type DashboardHistoryIndex } from '../src/dashboa
 const { parseAllSessionsMock, filesParsedFromSourceCountMock, resolveNextParse } = vi.hoisted(() => {
   const pending: Array<(projects: unknown[]) => void> = []
   return {
-  parseAllSessionsMock: vi.fn<Parameters<typeof import('../src/parser.js').parseAllSessions>, ReturnType<typeof import('../src/parser.js').parseAllSessions>>(
+  parseAllSessionsMock: vi.fn<Parameters<typeof import('../src/ingest/parser.js').parseAllSessions>, ReturnType<typeof import('../src/ingest/parser.js').parseAllSessions>>(
     () => new Promise(resolve => pending.push(resolve as (projects: unknown[]) => void)),
   ),
   filesParsedFromSourceCountMock: vi.fn(() => 0),
@@ -25,8 +25,8 @@ const { parseAllSessionsMock, filesParsedFromSourceCountMock, resolveNextParse }
   }
 })
 
-vi.mock('../src/parser.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/parser.js')>()
+vi.mock('../src/ingest/parser.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/ingest/parser.js')>()
   return {
     ...actual,
     parseAllSessions: parseAllSessionsMock,
@@ -34,8 +34,8 @@ vi.mock('../src/parser.js', async (importOriginal) => {
   }
 })
 
-vi.mock('../src/usage-aggregator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/usage-aggregator.js')>()
+vi.mock('../src/metrics/usage-aggregator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/metrics/usage-aggregator.js')>()
   return {
     ...actual,
     buildDurablePeriod: vi.fn(async () => ({
@@ -43,11 +43,6 @@ vi.mock('../src/usage-aggregator.js', async (importOriginal) => {
       carriedCostUSD: 0,
     })),
   }
-})
-
-vi.mock('../src/plan-usage.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/plan-usage.js')>()
-  return { ...actual, getPlanUsages: vi.fn(async () => []) }
 })
 
 const EMPTY_CATEGORY_BREAKDOWN = {

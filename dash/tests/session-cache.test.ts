@@ -23,7 +23,7 @@ import {
   saveCache,
   sessionCacheDir,
   sourcePathStatCandidates,
-} from '../src/session-cache.js'
+} from '../src/ingest/session-cache.js'
 import { readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
 
 // Version-suffixed directory (e.g. session-cache.v8) the cache now writes to.

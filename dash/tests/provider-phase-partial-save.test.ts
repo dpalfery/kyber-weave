@@ -14,9 +14,9 @@ import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest'
 import { mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { parseProviderSources } from '../src/parser.js'
+import { parseProviderSources } from '../src/ingest/parser.js'
 import { getProvider } from '../src/providers/index.js'
-import { CACHE_VERSION, type SessionCache } from '../src/session-cache.js'
+import { CACHE_VERSION, type SessionCache } from '../src/ingest/session-cache.js'
 
 // The kiro provider singleton captures homedir() when its module is first
 // imported, so HOME must point at the test root before ../src/parser.js is

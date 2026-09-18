@@ -4,9 +4,9 @@ import { rmSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { isNotMeasurable, type MetricAvailability } from '../kyber/canon/types.js'
-import { KyberBridge } from '../kyber/server/bridge.js'
-import { handleKyberRequest } from '../kyber/server/routes.js'
+import { isNotMeasurable, type MetricAvailability } from '../src/canon/types.js'
+import { KyberBridge } from '../src/server/bridge.js'
+import { handleKyberRequest } from '../src/server/routes.js'
 import {
   POPULATED_HARNESSES,
   USER_CANON,

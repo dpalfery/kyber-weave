@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 
-import { PROGRESS_LINE_PREFIX, startProgressKeepalive, stopProgressKeepalive } from '../src/parser.js'
+import { PROGRESS_LINE_PREFIX, startProgressKeepalive, stopProgressKeepalive } from '../src/ingest/parser.js'
 
 // A cold parse goes genuinely silent between providers (a measured 31.6s on a
 // large corpus, in the inter-provider cache save), and the desktop app reads

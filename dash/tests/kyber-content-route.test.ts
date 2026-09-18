@@ -5,16 +5,16 @@ import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { runWebDashboard } from '../src/web-dashboard.js'
+import { runWebDashboard } from '../src/cli/web.js'
 import {
   CONTENT_RESPONSE_BUDGET,
   KyberBridge,
   MAX_STRING_LENGTH,
   type SessionContentResult,
   type TurnContentResult,
-} from '../kyber/server/bridge.js'
-import { CanonStore } from '../kyber/canon/store.js'
-import type { CanonicalRecord, ContentPart } from '../kyber/canon/types.js'
+} from '../src/server/bridge.js'
+import { CanonStore } from '../src/canon/store.js'
+import type { CanonicalRecord, ContentPart } from '../src/canon/types.js'
 
 describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
   let server: Server

@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import type { ProjectSummary } from './types.js'
-import { behavioralCallCount } from './behavioral-weight.js'
+import { behavioralCallCount } from './metrics/behavioral-weight.js'
 
 /// Format a USD cost.
 ///

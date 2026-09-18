@@ -8,7 +8,7 @@ import { defineConfig } from 'tsup'
 // SEA main as CommonJS regardless, so src/sea-shim.cjs is the actual entry and
 // evaluates this bundle from a data: URL. See that file.
 export default defineConfig({
-  entry: ['src/main.ts'],
+  entry: ['src/cli/main.ts'],
   format: ['esm'],
   target: 'node22',
   outDir: 'dist-sea',

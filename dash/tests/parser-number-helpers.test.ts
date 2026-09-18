@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isPositiveNumber, safeNumber } from '../src/parser.js'
+import { isPositiveNumber, safeNumber } from '../src/ingest/parser.js'
 
 describe('safeNumber', () => {
   it('returns positive finite numbers unchanged', () => {

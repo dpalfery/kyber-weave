@@ -7,9 +7,9 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { createRequire } from 'node:module'
 
-import { isSqliteAvailable } from '../src/sqlite.js'
-import { CACHE_VERSION, clearLoadCacheMemo } from '../src/session-cache.js'
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
+import { isSqliteAvailable } from '../src/ingest/sqlite.js'
+import { CACHE_VERSION, clearLoadCacheMemo } from '../src/ingest/session-cache.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
 
 const requireForTest = createRequire(import.meta.url)
 type TestDb = {

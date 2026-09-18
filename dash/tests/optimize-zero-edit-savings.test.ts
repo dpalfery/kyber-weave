@@ -14,7 +14,7 @@ vi.mock('../src/providers/index.js', async (importOriginal) => {
 import {
   detectLowWorthSessions,
   findLowWorthCandidates,
-} from '../src/optimize.js'
+} from '../src/metrics/optimize.js'
 import type { ProjectSummary } from '../src/types.js'
 
 type TestSession = ProjectSummary['sessions'][number]

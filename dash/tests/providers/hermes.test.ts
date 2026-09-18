@@ -4,9 +4,9 @@ import { tmpdir, homedir } from 'os'
 import { createRequire } from 'node:module'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { calculateCost } from '../../src/models.js'
+import { calculateCost } from '../../src/pricing/models.js'
 import { createHermesProvider } from '../../src/providers/hermes.js'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 import type { DateRange } from '../../src/types.js'
 
@@ -30,7 +30,7 @@ beforeEach(async () => {
   originalCodeburnCacheDir = process.env['CODEBURN_CACHE_DIR']
   process.env['HERMES_HOME'] = tmpDir
   process.env['CODEBURN_CACHE_DIR'] = cacheDir
-  const { resetHermesSessionLedgerForTests } = await import('../../src/hermes-session-ledger.js')
+  const { resetHermesSessionLedgerForTests } = await import('../../src/ingest/hermes-session-ledger.js')
   resetHermesSessionLedgerForTests()
 })
 
@@ -189,7 +189,7 @@ async function loadParserWithHermesHome(hermesHome: string, codeburnCacheDir: st
   process.env['HERMES_HOME'] = hermesHome
   process.env['CODEBURN_CACHE_DIR'] = codeburnCacheDir
   vi.resetModules()
-  const parser = await import('../../src/parser.js')
+  const parser = await import('../../src/ingest/parser.js')
   return parser
 }
 

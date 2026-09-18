@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { classifyTurn } from '../src/classifier.js'
+import { classifyTurn } from '../src/metrics/classifier.js'
 import type { ParsedApiCall, ParsedTurn } from '../src/types.js'
 
 function makeCall(opts: Partial<ParsedApiCall> & { tools?: string[]; skills?: string[] }): ParsedApiCall {

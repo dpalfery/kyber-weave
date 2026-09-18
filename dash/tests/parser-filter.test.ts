@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { filterProjectsByName } from '../src/parser.js'
+import { filterProjectsByName } from '../src/ingest/parser.js'
 import type { ProjectSummary } from '../src/types.js'
 
 function makeProject(project: string, projectPath = project): ProjectSummary {

@@ -5,15 +5,15 @@ import { createRequire } from 'node:module'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHermesProvider } from '../../src/providers/hermes.js'
-import { isSqliteAvailable } from '../../src/sqlite.js'
-import { aggregateProjectsIntoDays, dateKey } from '../../src/day-aggregator.js'
-import { behavioralTurnCount } from '../../src/behavioral-weight.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
+import { aggregateProjectsIntoDays, dateKey } from '../../src/metrics/day-aggregator.js'
+import { behavioralTurnCount } from '../../src/metrics/behavioral-weight.js'
 import {
   getHermesCursor,
   hermesSessionLedgerPath,
   loadHermesSessionLedger,
   resetHermesSessionLedgerForTests,
-} from '../../src/hermes-session-ledger.js'
+} from '../../src/ingest/hermes-session-ledger.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
 const requireForTest = createRequire(import.meta.url)
@@ -164,7 +164,7 @@ async function loadParser() {
   process.env['CODEBURN_CACHE_DIR'] = cacheDir
   vi.resetModules()
   resetHermesSessionLedgerForTests()
-  return import('../../src/parser.js')
+  return import('../../src/ingest/parser.js')
 }
 
 async function parseDiscovered(): Promise<{ sources: { path: string }[]; calls: ParsedProviderCall[] }> {
@@ -195,7 +195,7 @@ skipUnlessSqlite('hermes post-finalization ledger proofs', () => {
     const parser = await loadParser()
     parser.clearSessionCache()
     const firstProjects = await parser.parseAllSessions(undefined, 'hermes')
-    const { ensureCacheHydrated, loadDailyCache } = await import('../../src/daily-cache.js')
+    const { ensureCacheHydrated, loadDailyCache } = await import('../../src/ingest/daily-cache.js')
     await ensureCacheHydrated(
       (range) => parser.parseAllSessions(range, 'hermes'),
       aggregateProjectsIntoDays,
@@ -334,7 +334,7 @@ skipUnlessSqlite('hermes post-finalization ledger proofs', () => {
     })
 
     const parser = await loadParser()
-    const ledgerMod = await import('../../src/hermes-session-ledger.js')
+    const ledgerMod = await import('../../src/ingest/hermes-session-ledger.js')
     parser.clearSessionCache()
     await parser.parseAllSessions(undefined, 'hermes')
 
@@ -364,7 +364,7 @@ skipUnlessSqlite('hermes post-finalization ledger proofs', () => {
     await parser.parseAllSessions(undefined, 'hermes')
     expect(parser.isSessionHydrationComplete()).toBe(false)
 
-    const { ensureCacheHydrated, loadDailyCache } = await import('../../src/daily-cache.js')
+    const { ensureCacheHydrated, loadDailyCache } = await import('../../src/ingest/daily-cache.js')
     await ensureCacheHydrated(
       (range) => parser.parseAllSessions(range, 'hermes'),
       aggregateProjectsIntoDays,

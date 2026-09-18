@@ -19,13 +19,13 @@ import { join } from 'node:path'
 
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest'
 
-import { clearSessionCache, parseAllSessions } from '../src/parser.js'
+import { clearSessionCache, parseAllSessions } from '../src/ingest/parser.js'
 import {
   CACHE_VERSION,
   computeEnvFingerprint,
   fingerprintFile,
   type SessionCache,
-} from '../src/session-cache.js'
+} from '../src/ingest/session-cache.js'
 import { writeCacheOnDisk } from './fixtures/session-cache-io.js'
 
 // The kiro provider reads homedir()/env at call time in discovery; HOME must

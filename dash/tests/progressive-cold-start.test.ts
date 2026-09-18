@@ -11,8 +11,8 @@ import {
   filesParsedFromSourceCount,
   isSessionHydrationComplete,
   FIRST_PAINT_MTIME_MARGIN_MS,
-} from '../src/parser.js'
-import { clearLoadCacheMemo, isColdCacheOnDisk } from '../src/session-cache.js'
+} from '../src/ingest/parser.js'
+import { clearLoadCacheMemo, isColdCacheOnDisk } from '../src/ingest/session-cache.js'
 import { readCacheOnDisk } from './fixtures/session-cache-io.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000

@@ -3,10 +3,10 @@ import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { collectDoctorReport, renderDoctorTable, renderDoctorJson } from '../src/doctor.js'
+import { collectDoctorReport, renderDoctorTable, renderDoctorJson } from '../src/cli/doctor.js'
 import { createCodexProvider } from '../src/providers/codex.js'
 import { createOpenCodeProvider } from '../src/providers/opencode.js'
-import { emptyCache, type SessionCache } from '../src/session-cache.js'
+import { emptyCache, type SessionCache } from '../src/ingest/session-cache.js'
 import type { Provider, ProbeRoot, SessionSource } from '../src/providers/types.js'
 
 // ── Helpers ──────────────────────────────────────────────────────────────

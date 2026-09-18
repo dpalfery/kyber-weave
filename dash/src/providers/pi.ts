@@ -3,10 +3,10 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
-import { readSessionFile, readSessionLines } from '../fs-utils.js'
-import { calculateCost } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
-import { normalizeContentBlocks } from '../content-utils.js'
+import { readSessionFile, readSessionLines } from '../ingest/fs-utils.js'
+import { calculateCost } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { normalizeContentBlocks } from '../ingest/content-utils.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 const modelDisplayNames: Record<string, string> = {

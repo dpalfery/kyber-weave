@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { correlateCrossProviderPrSessions, extractPrUrlsFromText } from '../src/parser.js'
+import { correlateCrossProviderPrSessions, extractPrUrlsFromText } from '../src/ingest/parser.js'
 import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary } from '../src/types.js'
 
 const A = 'https://github.com/getagentseal/codeburn/pull/790'

@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { acquireCacheRefreshLock } from '../src/cache-refresh-lock.js'
+import { acquireCacheRefreshLock } from '../src/ingest/cache-refresh-lock.js'
 
 // Recovering a corrupt session-refresh.lock must never cost the two design
 // commitments the lock exists for: it may not fail open into mutation, and it

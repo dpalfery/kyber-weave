@@ -14,7 +14,7 @@ vi.mock('os', async () => {
 
 const HOME = process.env['CB_CTXBUDGET_FAKE_HOME']!
 
-import { estimateContextBudget } from '../src/context-budget.js'
+import { estimateContextBudget } from '../src/metrics/context-budget.js'
 
 describe('context budget: no double-count when the project IS the home dir', () => {
   beforeEach(() => {

@@ -18,8 +18,8 @@ import {
   seedHermesCursorsFromProviderSection,
   setHermesLedgerNow,
   type HermesSnapshot,
-} from '../src/hermes-session-ledger.js'
-import type { CachedCall, ProviderSection } from '../src/session-cache.js'
+} from '../src/ingest/hermes-session-ledger.js'
+import type { CachedCall, ProviderSection } from '../src/ingest/session-cache.js'
 
 let cacheDir: string
 let originalCacheDir: string | undefined

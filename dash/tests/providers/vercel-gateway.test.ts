@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { fetchVercelGatewayReport, vercelGateway } from '../../src/providers/vercel-gateway.js'
-import { parseAllSessions, clearSessionCache } from '../../src/parser.js'
-import { getDashboardScanRange } from '../../src/dashboard.js'
+import { parseAllSessions, clearSessionCache } from '../../src/ingest/parser.js'
+import { getDashboardScanRange } from '../../src/tui/dashboard.js'
 
 describe('vercel-gateway provider', () => {
   const originalFetch = globalThis.fetch

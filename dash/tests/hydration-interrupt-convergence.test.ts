@@ -3,11 +3,11 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { loadPricing, setLocalModelSavings, setModelAliases } from '../src/models.js'
-import { buildDurablePeriod } from '../src/usage-aggregator.js'
-import { clearSessionCache } from '../src/parser.js'
+import { loadPricing, setLocalModelSavings, setModelAliases } from '../src/pricing/models.js'
+import { buildDurablePeriod } from '../src/metrics/usage-aggregator.js'
+import { clearSessionCache } from '../src/ingest/parser.js'
 import { readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
-import { dailyCachePath } from '../src/daily-cache.js'
+import { dailyCachePath } from '../src/ingest/daily-cache.js'
 import type { DateRange } from '../src/types.js'
 
 // Several DISTINCT historical days (all strictly before yesterday, so each lands

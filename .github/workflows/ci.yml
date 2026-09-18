@@ -450,7 +450,7 @@ jobs:
       # Local/PR authors still run: docs drift . (see AGENTS.md).
 
   ts-gates:
-    name: TypeScript gates (dash subtree)
+    name: TypeScript gates (KyberDash)
     runs-on: ubuntu-latest
     needs: build-test
     # Mirrors the same three gates declared in .kyber-weave/kyber-weave.yml as
@@ -478,7 +478,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             dash/package-lock.json
-            dash/dash/package-lock.json
+            dash/web/package-lock.json
 
       # npm ci (not `npm install`): package-lock.json is committed so a CI
       # run reproduces the same devDependency graph a contributor's local
@@ -488,14 +488,14 @@ jobs:
         working-directory: dash
         run: npm ci --no-audit --no-fund
 
-      # dash/dash is a second package (codeburn-dash, the React web dashboard)
-      # with its own lockfile, and dash/vitest.config.ts includes its component
-      # tests via the `dash/src/**` pattern. Without this install those 15
-      # suites cannot resolve react-dom/server, clsx, or @tanstack/react-query,
-      # which is exactly how the ts-test gate was failing while passing on any
-      # machine that had run an install there.
+      # dash/web is a second package with its own lockfile, and
+      # dash/vitest.config.ts includes its component tests via the
+      # `web/src/**` pattern. Without this install those suites cannot resolve
+      # react-dom/server, clsx, or @tanstack/react-query, which is exactly how
+      # the ts-test gate was failing while passing on any machine that had run
+      # an install there.
       - name: Install web dashboard dependencies
-        working-directory: dash/dash
+        working-directory: dash/web
         run: npm ci --no-audit --no-fund
 
       - name: TypeScript type check (ts-typecheck gate)
@@ -543,7 +543,7 @@ jobs:
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
-          echo "| TypeScript gates (dash subtree) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
           echo "" >> results.md
           echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} (advisory) |" >> results.md
           echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} (advisory) |" >> results.md

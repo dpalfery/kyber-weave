@@ -6,13 +6,13 @@ import { join } from 'path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { runWebDashboard } from '../src/web-dashboard.js'
-import { CanonStore } from '../kyber/canon/store.js'
-import type { CanonicalRecord } from '../kyber/canon/types.js'
-import { KyberBridge } from '../kyber/server/bridge.js'
+import { runWebDashboard } from '../src/cli/web.js'
+import { CanonStore } from '../src/canon/store.js'
+import type { CanonicalRecord } from '../src/canon/types.js'
+import { KyberBridge } from '../src/server/bridge.js'
 
 const asadShape = JSON.parse(
-  readFileSync(new URL('../kyber/canon/fixtures/asad-session-shape.json', import.meta.url), 'utf8')
+  readFileSync(new URL('../src/canon/fixtures/asad-session-shape.json', import.meta.url), 'utf8')
 ) as Record<string, unknown>
 
 describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {

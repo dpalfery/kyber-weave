@@ -11,8 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const readSpy = vi.hoisted(() => vi.fn())
 
-vi.mock('../src/cache-dir.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/cache-dir.js')>()
+vi.mock('../src/ingest/cache-dir.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/ingest/cache-dir.js')>()
   return {
     ...actual,
     readExistingTextFile: (path: string) => {
@@ -23,7 +23,7 @@ vi.mock('../src/cache-dir.js', async (importOriginal) => {
 })
 
 const { CODEX_CACHE_VERSION, clearCodexMemCaches, codexCacheFileName, getCachedCodexProject, withCodexCacheDirectory } =
-  await import('../src/codex-cache.js')
+  await import('../src/ingest/codex-cache.js')
 
 let cacheDir: string
 let sessionDir: string

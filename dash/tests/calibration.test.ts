@@ -17,12 +17,12 @@ import {
   scorePredictionAgainstPair,
   type CalibrationScore,
   type PredictionRecord,
-} from '../kyber/analysis/calibration.js'
-import type { Finding } from '../kyber/analysis/findings.js'
-import type { CandidateRun } from '../kyber/analysis/pairing.js'
-import { CanonStore, SCHEMA_VERSION } from '../kyber/canon/store.js'
-import { KyberBridge } from '../kyber/server/bridge.js'
-import { handleKyberRequest } from '../kyber/server/routes.js'
+} from '../src/analysis/calibration.js'
+import type { Finding } from '../src/analysis/findings.js'
+import type { CandidateRun } from '../src/analysis/pairing.js'
+import { CanonStore, SCHEMA_VERSION } from '../src/canon/store.js'
+import { KyberBridge } from '../src/server/bridge.js'
+import { handleKyberRequest } from '../src/server/routes.js'
 
 const tempDirs: string[] = []
 

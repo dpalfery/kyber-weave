@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, open, readFile, rm, utimes, writeFile } from 'fs/promis
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { clearSessionCache, parseAllSessions } from '../../src/parser.js'
+import { clearSessionCache, parseAllSessions } from '../../src/ingest/parser.js'
 import { readCacheOnDisk } from '../fixtures/session-cache-io.js'
-import { MAX_SESSION_FILE_BYTES } from '../../src/fs-utils.js'
+import { MAX_SESSION_FILE_BYTES } from '../../src/ingest/fs-utils.js'
 import { codewhale, createCodeWhaleProvider } from '../../src/providers/codewhale.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 

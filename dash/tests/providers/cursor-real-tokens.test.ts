@@ -8,7 +8,7 @@ import {
   createCursorProvider,
   clearCursorWorkspaceMapCache,
 } from '../../src/providers/cursor.js'
-import { isSqliteAvailable } from '../../src/sqlite.js'
+import { isSqliteAvailable } from '../../src/ingest/sqlite.js'
 import type { ParsedProviderCall } from '../../src/providers/types.js'
 
 const requireForTest = createRequire(import.meta.url)

@@ -12,7 +12,7 @@ import {
   emptyCache,
   loadCache,
   saveCache,
-} from '../src/session-cache.js'
+} from '../src/ingest/session-cache.js'
 import { writeCacheOnDisk } from './fixtures/session-cache-io.js'
 
 const TMP_DIR = join(tmpdir(), `codeburn-rich-cache-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)

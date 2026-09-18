@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { getModelCosts, getShortModelName } from '../src/models.js'
+import { getModelCosts, getShortModelName } from '../src/pricing/models.js'
 
 // Verifies MiniMax pricing loaded from FALLBACK_PRICING (no network call).
 // pricingCache stays null until loadPricing() runs, so getModelCosts falls

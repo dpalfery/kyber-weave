@@ -3,8 +3,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { setProxyPaths, isProxiedPath, getProxyPathsConfigHash, setLocalModelSavings, setModelAliases, loadPricing } from '../src/models.js'
-import { parseAllSessions, clearSessionCache, filterProjectsByDateRange } from '../src/parser.js'
+import { setProxyPaths, isProxiedPath, getProxyPathsConfigHash, setLocalModelSavings, setModelAliases, loadPricing } from '../src/pricing/models.js'
+import { parseAllSessions, clearSessionCache, filterProjectsByDateRange } from '../src/ingest/parser.js'
 import type { DateRange, ProjectSummary } from '../src/types.js'
 
 // ── Part A: isProxiedPath matching rule (pure) ─────────────────────────────

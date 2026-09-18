@@ -3,10 +3,10 @@ import { mkdtemp, mkdir, writeFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
-import { parseAllSessions, filterProjectsByDays, clearSessionCache } from '../src/parser.js'
-import { clearLoadCacheMemo } from '../src/session-cache.js'
-import { loadPricing } from '../src/models.js'
-import { aggregateByPr, prLinkedTotals } from '../src/sessions-report.js'
+import { parseAllSessions, filterProjectsByDays, clearSessionCache } from '../src/ingest/parser.js'
+import { clearLoadCacheMemo } from '../src/ingest/session-cache.js'
+import { loadPricing } from '../src/pricing/models.js'
+import { aggregateByPr, prLinkedTotals } from '../src/metrics/sessions-report.js'
 
 // A parent that spawned an async subagent whose work landed inside the report
 // range, while the parent's OWN turns fall just before it. The parent must be kept

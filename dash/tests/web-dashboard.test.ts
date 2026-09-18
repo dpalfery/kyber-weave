@@ -8,8 +8,8 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { runWebDashboard } from '../src/web-dashboard.js'
-import { KyberBridge } from '../kyber/server/bridge.js'
+import { runWebDashboard } from '../src/cli/web.js'
+import { KyberBridge } from '../src/server/bridge.js'
 
 describe('web dashboard server: serving and the loopback guard', () => {
   let server: Server
