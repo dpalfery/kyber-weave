@@ -60,10 +60,6 @@ describe('GET /api/kyber/span/:spanId/attributes', () => {
     store.upsertMany([record('span-attrs', ATTRIBUTES), record('span-bare', null)])
 
     server = await runWebDashboard({
-      period: 'today',
-      provider: 'all',
-      project: [],
-      exclude: [],
       port: 0,
       open: false,
       kyberBridge: new KyberBridge({

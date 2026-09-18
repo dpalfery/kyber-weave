@@ -94,114 +94,6 @@ export type DeviceUsage = {
   error?: string
 }
 
-declare global {
-  interface Window {
-    __CODEBURN_BOOTSTRAP__?: { devices: DeviceUsage[] }
-  }
-}
-
-// A device may run a different CodeBurn version and send a payload missing
-// fields we treat as required. Fill safe defaults at the boundary so the UI
-// can iterate them without crashing (the alternative is a white screen for an
-// innocent local user because a peer sent an old shape).
-function normalizePayload(p?: Payload): Payload | undefined {
-  if (!p) return p
-  const c = (p.current ?? {}) as Partial<Current>
-  const rawTimeline = p.history?.timeline
-  const timeline = rawTimeline ? {
-    bucketMinutes: rawTimeline.bucketMinutes ?? 1440,
-    modelSeries: rawTimeline.modelSeries ?? [],
-    sessionSeries: rawTimeline.sessionSeries ?? [],
-    points: (rawTimeline.points ?? []).map((point) => ({
-      timestamp: point.timestamp,
-      cost: point.cost ?? 0,
-      tokens: point.tokens ?? 0,
-      models: (point.models ?? []).map((value) => ({
-        seriesId: value.seriesId,
-        cost: value.cost ?? 0,
-        tokens: value.tokens ?? 0,
-      })),
-      sessions: (point.sessions ?? []).map((value) => ({
-        seriesId: value.seriesId,
-        cost: value.cost ?? 0,
-        tokens: value.tokens ?? 0,
-      })),
-    })),
-  } : undefined
-  return {
-    generated: p.generated,
-    ...(p.hydration ? { hydration: p.hydration } : {}),
-    current: {
-      label: c.label ?? '',
-      cost: c.cost ?? 0,
-      calls: c.calls ?? 0,
-      sessions: c.sessions ?? 0,
-      oneShotRate: c.oneShotRate ?? null,
-      inputTokens: c.inputTokens ?? 0,
-      outputTokens: c.outputTokens ?? 0,
-      cacheReadTokens: c.cacheReadTokens ?? 0,
-      cacheWriteTokens: c.cacheWriteTokens ?? 0,
-      cacheHitPercent: c.cacheHitPercent ?? 0,
-      codexCredits: c.codexCredits ?? 0,
-      topActivities: c.topActivities ?? [],
-      topModels: c.topModels ?? [],
-      providers: c.providers ?? {},
-      providerDetails: c.providerDetails ?? [],
-      topProjects: c.topProjects ?? [],
-      tools: c.tools ?? [],
-      subagents: c.subagents ?? [],
-      skills: c.skills ?? [],
-      mcpServers: c.mcpServers ?? [],
-      modelEfficiency: c.modelEfficiency ?? [],
-      workflow: c.workflow
-        ? {
-            corrections: c.workflow.corrections ?? 0,
-            correctionRate: c.workflow.correctionRate ?? null,
-            medianTimeToFirstEditMs: c.workflow.medianTimeToFirstEditMs ?? null,
-          }
-        : undefined,
-      topReworkedFiles: (c.topReworkedFiles ?? []).map((f) => ({
-        path: f.path,
-        sessions: f.sessions ?? 0,
-        edits: f.edits ?? 0,
-      })),
-      pricingCoverage: c.pricingCoverage ?? null,
-      localModelSavings: c.localModelSavings ?? { totalUSD: 0 },
-      retryTax: c.retryTax ?? { totalUSD: 0, retries: 0 },
-      routingWaste: c.routingWaste ?? { totalSavingsUSD: 0 },
-    },
-    history: {
-      daily: (p.history?.daily ?? []).map((d) => ({
-        date: d.date,
-        cost: d.cost ?? 0,
-        calls: d.calls ?? 0,
-        inputTokens: d.inputTokens ?? 0,
-        outputTokens: d.outputTokens ?? 0,
-        cacheReadTokens: d.cacheReadTokens ?? 0,
-        cacheWriteTokens: d.cacheWriteTokens ?? 0,
-        topModels: (d.topModels ?? []).map((m) => ({
-          name: m.name,
-          cost: m.cost ?? 0,
-          calls: m.calls ?? 0,
-          inputTokens: m.inputTokens ?? 0,
-          outputTokens: m.outputTokens ?? 0,
-        })),
-      })),
-      ...(timeline ? { timeline } : {}),
-    },
-  }
-}
-
-export async function fetchDevices(period: Period, provider: string): Promise<{ devices: DeviceUsage[] }> {
-  const res = await fetch(`/api/devices?period=${encodeURIComponent(period)}&provider=${encodeURIComponent(provider)}`)
-  if (!res.ok) throw new Error(`Request failed (${res.status})`)
-  const data = (await res.json()) as { devices: DeviceUsage[] }
-  return { devices: (data.devices ?? []).map((d) => ({ ...d, payload: normalizePayload(d.payload) })) }
-}
-
-// Keys map 1:1 to the CLI's --period values (src/cli-date.ts). Period windows
-// are computed server-side by the CLI; the dashboard only forwards the key, so
-// these can never drift from the CLI's totals.
 export const PERIODS: Array<{ key: Period; label: string }> = [
   { key: 'today', label: 'Today' },
   { key: 'week', label: '7 days' },
@@ -210,31 +102,6 @@ export const PERIODS: Array<{ key: Period; label: string }> = [
   { key: 'all', label: '6 months' },
   { key: 'lifetime', label: 'Lifetime' },
 ]
-
-export type DiscoveredDevice = {
-  name: string
-  host: string
-  port: number
-  fingerprint: string
-  code: string
-  paired: boolean
-}
-
-export async function scanDevices(): Promise<DiscoveredDevice[]> {
-  const res = await fetch('/api/devices/scan')
-  if (!res.ok) throw new Error(`Scan failed (${res.status})`)
-  const json = (await res.json()) as { found: DiscoveredDevice[] }
-  return json.found
-}
-
-export async function pairDevice(d: DiscoveredDevice): Promise<{ ok: boolean; name?: string; error?: string }> {
-  const res = await fetch('/api/devices/pair', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: d.name, host: d.host, port: d.port, fingerprint: d.fingerprint }),
-  })
-  return res.json() as Promise<{ ok: boolean; name?: string; error?: string }>
-}
 
 export type ContextProvider =
   | 'agent-all'
@@ -249,31 +116,3 @@ export type ContextProvider =
   | 'opencode'
   | 'kilo-code'
   | 'cursor'
-
-export type PendingPairing = { id: string; name: string; code: string }
-export type ShareStatus = {
-  sharing: boolean
-  name: string
-  port: number
-  always: boolean
-  peers: number
-  pending: PendingPairing[]
-}
-
-const postJson = (path: string, body: unknown) =>
-  fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-
-export async function shareStatus(): Promise<ShareStatus> {
-  const res = await fetch('/api/share/status')
-  if (!res.ok) throw new Error(`share status failed (${res.status})`)
-  return res.json() as Promise<ShareStatus>
-}
-export async function startShare(always: boolean): Promise<ShareStatus> {
-  return (await postJson('/api/share/start', { always })).json() as Promise<ShareStatus>
-}
-export async function stopShare(): Promise<ShareStatus> {
-  return (await postJson('/api/share/stop', {})).json() as Promise<ShareStatus>
-}
-export async function approvePairing(id: string, approve: boolean): Promise<{ ok: boolean }> {
-  return (await postJson('/api/share/approve', { id, approve })).json() as Promise<{ ok: boolean }>
-}

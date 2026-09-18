@@ -105,7 +105,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     `plugin` registrations and the run-time plugin loader, with the tests of those commands.
     `report` keeps its Ink implementation until task 6.2 replaces it.
   - _Requirements: 2.1, 2.2_
-- [ ] 2.3 Remove the Usage tab and Share chrome from the web dashboard
+- [x] 2.3 Remove the Usage tab and Share chrome from the web dashboard
   - Stream A.
   - Update the `NAV_TABS` test first: the tabs are Context Doctor, Quarantine and Problems.
   - Delete the Usage and Share UI in `dash/dash/src`, and the usage, share and devices

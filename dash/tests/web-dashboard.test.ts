@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { request as httpRequest } from 'http'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type { AddressInfo } from 'net'
@@ -7,96 +8,75 @@ import { DatabaseSync } from 'node:sqlite'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { injectDashboardBootstrap, runWebDashboard } from '../src/web-dashboard.js'
+import { runWebDashboard } from '../src/web-dashboard.js'
 import { KyberBridge } from '../kyber/server/bridge.js'
 
-describe('web dashboard bootstrap injection', () => {
-  it('keeps replacement syntax in a payload value literal', () => {
-    const payloadValue = "$`|$'|$&|$1"
-    const payload = { devices: [{ name: payloadValue }] }
-    const html = '<!doctype html><script type="module" src="/app.js"></script>'
-
-    const injected = injectDashboardBootstrap(html, payload)
-
-    expect(injected).toContain(`window.__CODEBURN_BOOTSTRAP__=${JSON.stringify(payload)}</script>`)
-    expect(injected).toContain(`"name":"${payloadValue}"`)
-  })
-
-  it('escapes script-closing payload values and preserves the served bootstrap payload', () => {
-    const hostileName = '</script><script>globalThis.bootstrapPwned = true</script>'
-    const payload = {
-      devices: [{
-        id: 'local',
-        name: hostileName,
-        payload: { current: { topProjects: [{ name: hostileName }] } },
-      }],
-    }
-    const html = '<!doctype html><script type="module" src="/app.js"></script>'
-
-    const servedHtml = injectDashboardBootstrap(html, payload)
-    const marker = 'window.__CODEBURN_BOOTSTRAP__='
-    const start = servedHtml.indexOf(marker) + marker.length
-    const end = servedHtml.indexOf('</script>', start)
-    const serialized = servedHtml.slice(start, end)
-
-    expect(serialized).not.toContain('</script')
-    expect(serialized).toContain('\\u003c/script>')
-    expect(JSON.parse(serialized)).toEqual(payload)
-  })
-})
-
-// Regression guard for the original bug: a bad `period` query used to hit
-// process.exit(1) and kill the long-running dashboard server. The handlers must
-// now answer 400 and keep serving.
-describe('web dashboard server: invalid query returns 400 without exiting', () => {
+describe('web dashboard server: serving and the loopback guard', () => {
   let server: Server
   let base: string
-  let homeDir: string
-  let cacheDir: string
-  const prevHome = process.env['HOME']
-  const prevCache = process.env['CODEBURN_CACHE_DIR']
+  let port: number
+  let dashDir: string
+  const prevDashDir = process.env['CODEBURN_DASH_DIR']
 
   beforeAll(async () => {
-    homeDir = await mkdtemp(join(tmpdir(), 'codeburn-web-home-'))
-    cacheDir = await mkdtemp(join(tmpdir(), 'codeburn-web-cache-'))
-    process.env['HOME'] = homeDir
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
-    server = await runWebDashboard({
-      period: 'today', provider: 'all', project: [], exclude: [], port: 0, open: false,
-    })
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+    dashDir = await mkdtemp(join(tmpdir(), 'kyberdash-web-ui-'))
+    await writeFile(join(dashDir, 'index.html'), '<!doctype html><title>CodeBurn</title><script type="module" src="/app.js"></script>')
+    process.env['CODEBURN_DASH_DIR'] = dashDir
+    server = await runWebDashboard({ port: 0, open: false })
+    port = (server.address() as AddressInfo).port
+    base = `http://127.0.0.1:${port}`
   })
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (prevHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = prevHome
-    if (prevCache === undefined) delete process.env['CODEBURN_CACHE_DIR']
-    else process.env['CODEBURN_CACHE_DIR'] = prevCache
-    await rm(homeDir, { recursive: true, force: true })
-    await rm(cacheDir, { recursive: true, force: true })
+    if (prevDashDir === undefined) delete process.env['CODEBURN_DASH_DIR']
+    else process.env['CODEBURN_DASH_DIR'] = prevDashDir
+    await rm(dashDir, { recursive: true, force: true })
   })
 
-  it('answers 400 for an invalid /api/usage period and keeps serving', async () => {
-    const bad = await fetch(`${base}/api/usage?period=garbage`)
-    expect(bad.status).toBe(400)
-    expect((await bad.json() as { error: string }).error).toMatch(/Unknown period "garbage"/)
-
-    // The bug was process.exit; if it regressed, this test process would die.
-    // A successful follow-up request proves the server survived the bad one.
-    const ok = await fetch(`${base}/api/usage?period=today`)
-    expect(ok.status).toBe(200)
-    const payload = await ok.json() as { history: { timeline?: { bucketMinutes: number; points: unknown[] } } }
-    expect(payload.history.timeline?.bucketMinutes).toBe(15)
-    expect(Array.isArray(payload.history.timeline?.points)).toBe(true)
+  it('serves the branded index with no inlined usage bootstrap', async () => {
+    const res = await fetch(`${base}/`)
+    expect(res.status).toBe(200)
+    const html = await res.text()
+    expect(html).not.toContain('__CODEBURN_BOOTSTRAP__')
+    expect(html).not.toContain('<title>CodeBurn</title>')
   })
 
-  it('answers 400 for an invalid /api/devices period', async () => {
-    const bad = await fetch(`${base}/api/devices?period=garbage`)
-    expect(bad.status).toBe(400)
-    expect((await bad.json() as { error: string }).error).toMatch(/Unknown period "garbage"/)
+  it('serves index.html for an unknown non-API path so the client router can take it', async () => {
+    const res = await fetch(`${base}/finding/abc123`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('text/html')
+  })
+
+  it('no longer serves the usage, device, share or context endpoints', async () => {
+    for (const path of ['/api/usage', '/api/devices', '/api/identity', '/api/share/status', '/api/context/sessions']) {
+      const res = await fetch(`${base}${path}`)
+      expect(res.headers.get('content-type') ?? '', path).not.toContain('application/json')
+    }
+  })
+
+  it('rejects a request whose Host is not loopback (requirement 5.5)', async () => {
+    const res = await rawGet(port, '/api/kyber/meta', { host: 'evil.example' })
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects a cross-origin request (requirement 5.5)', async () => {
+    const res = await rawGet(port, '/api/kyber/meta', { host: '127.0.0.1', origin: 'https://evil.example' })
+    expect(res.status).toBe(403)
   })
 })
+
+// fetch() will not let a test forge the Host header, so the guard is exercised with node:http.
+function rawGet(port: number, path: string, headers: Record<string, string>): Promise<{ status: number }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port, path, method: 'GET', headers }, (res) => {
+      res.resume()
+      res.on('end', () => resolve({ status: res.statusCode ?? 0 }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
 
 describe('web dashboard server: /api/kyber/* routes', () => {
   let server: Server
@@ -256,15 +236,7 @@ describe('web dashboard server: /api/kyber/* routes', () => {
       ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
     })
 
-    server = await runWebDashboard({
-      period: 'today',
-      provider: 'all',
-      project: [],
-      exclude: [],
-      port: 0,
-      open: false,
-      kyberBridge: testBridge,
-    })
+    server = await runWebDashboard({ port: 0, open: false, kyberBridge: testBridge })
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 

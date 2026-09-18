@@ -462,27 +462,11 @@ program
 
 program
   .command('web')
-  .description('Open the local web dashboard in your browser')
-  .option('-p, --period <period>', 'Initial period: today, week, 30days, month, all, lifetime', 'today')
-  .option('--from <date>', 'Start date (YYYY-MM-DD)')
-  .option('--to <date>', 'End date (YYYY-MM-DD)')
-  .option('--provider <provider>', 'Filter by provider (e.g. claude, codex, copilot)', 'all')
-  .option('--project <name>', 'Show only projects matching name (repeatable)', collect, [])
-  .option('--exclude <name>', 'Exclude projects matching name (repeatable)', collect, [])
+  .description('Open the local KyberDash web dashboard in your browser')
   .option('--port <number>', 'Port to listen on (falls back to a free port if taken)', parseInteger, 4747)
   .option('--no-open', 'Do not open the browser automatically')
   .action(async (opts) => {
-    assertProvider(opts.provider, 'web')
-    await runWebDashboard({
-      period: opts.period,
-      provider: opts.provider,
-      from: opts.from,
-      to: opts.to,
-      project: opts.project,
-      exclude: opts.exclude,
-      port: opts.port,
-      open: opts.open,
-    })
+    await runWebDashboard({ port: opts.port, open: opts.open })
   })
 
 program

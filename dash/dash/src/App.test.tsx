@@ -102,24 +102,24 @@ describe('App: Top Navigation Refactoring', () => {
     clearHooks()
   })
 
-  it('exports exactly the 4 header navigation tabs in NAV_TABS', () => {
-    expect(NAV_TABS).toHaveLength(4)
+  it('exports exactly the 3 header navigation tabs in NAV_TABS (requirement 2.9)', () => {
+    expect(NAV_TABS).toHaveLength(3)
     const keys = NAV_TABS.map((t) => t.key)
-    expect(keys).toEqual(['context-doctor', 'usage', 'quarantine', 'problems'])
+    expect(keys).toEqual(['context-doctor', 'quarantine', 'problems'])
     const labels = NAV_TABS.map((t) => t.label)
-    expect(labels).toEqual(['Context Doctor', 'Usage', 'Quarantine', 'Problems'])
+    expect(labels).toEqual(['Context Doctor', 'Quarantine', 'Problems'])
   })
 
-  it('renders exactly the 4 header tabs and spine rail destinations, excluding Compare as a peer tab', () => {
+  it('renders exactly the 3 header tabs and spine rail destinations, excluding Compare as a peer tab', () => {
     const qc = createTestQueryClient()
     const html = renderHtml(
       <QueryClientProvider client={qc}>
-        <App initialPage="usage" />
+        <App initialPage="context-doctor" />
       </QueryClientProvider>
     )
 
     expect(html).toContain('data-testid="nav-tab-context-doctor"')
-    expect(html).toContain('data-testid="nav-tab-usage"')
+    expect(html).not.toContain('data-testid="nav-tab-usage"')
     expect(html).toContain('data-testid="nav-tab-quarantine"')
     expect(html).toContain('data-testid="nav-tab-problems"')
     expect(html).not.toContain('data-testid="nav-tab-compare"')
@@ -130,7 +130,7 @@ describe('App: Top Navigation Refactoring', () => {
     expect(html).not.toContain('data-testid="nav-tab-kyber-context"')
 
     const navTabsMatch = html.match(/data-testid="nav-tab-[^"]+"/g)
-    expect(navTabsMatch).toHaveLength(4)
+    expect(navTabsMatch).toHaveLength(3)
 
     expect(html).toContain('data-testid="nav-rail-context-doctor"')
     expect(html).toContain('data-testid="nav-rail-sessions"')
@@ -142,19 +142,6 @@ describe('App: Top Navigation Refactoring', () => {
     const qc = createTestQueryClient()
 
     clearHooks()
-    const usageHtml = renderHtml(
-      <QueryClientProvider client={qc}>
-        <App initialPage="usage" />
-      </QueryClientProvider>
-    )
-    expect(usageHtml).toContain('data-testid="nav-tab-usage"')
-    const usageBtn = usageHtml.match(/<button[^>]*data-testid="nav-tab-usage"[^>]*>/)?.[0]
-    expect(usageBtn).toContain('bg-active-primary')
-    const quarantineBtnFromUsage = usageHtml.match(/<button[^>]*data-testid="nav-tab-quarantine"[^>]*>/)?.[0]
-    expect(quarantineBtnFromUsage).toContain('text-tertiary-foreground')
-    expect(quarantineBtnFromUsage).not.toContain('bg-active-primary')
-
-    clearHooks()
     const quarantineHtml = renderHtml(
       <QueryClientProvider client={qc}>
         <App initialPage="quarantine" />
@@ -162,9 +149,9 @@ describe('App: Top Navigation Refactoring', () => {
     )
     const quarantineBtn = quarantineHtml.match(/<button[^>]*data-testid="nav-tab-quarantine"[^>]*>/)?.[0]
     expect(quarantineBtn).toContain('bg-active-primary')
-    const usageBtnFromQuarantine = quarantineHtml.match(/<button[^>]*data-testid="nav-tab-usage"[^>]*>/)?.[0]
-    expect(usageBtnFromQuarantine).toContain('text-tertiary-foreground')
-    expect(usageBtnFromQuarantine).not.toContain('bg-active-primary')
+    const doctorBtnFromQuarantine = quarantineHtml.match(/<button[^>]*data-testid="nav-tab-context-doctor"[^>]*>/)?.[0]
+    expect(doctorBtnFromQuarantine).toContain('text-tertiary-foreground')
+    expect(doctorBtnFromQuarantine).not.toContain('bg-active-primary')
   })
 
   it('updates active page styling for Context Doctor, quarantine, and problems tabs', () => {
@@ -272,25 +259,19 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(sessionsRail).toContain('bg-interactive-secondary')
   })
 
-  it('shows Share controls on Usage and not on Context Doctor', () => {
+  it('shows no Share or device controls on any page (requirement 2.9)', () => {
     const qc = createTestQueryClient()
-
-    clearHooks()
-    const usageHtml = renderHtml(
-      <QueryClientProvider client={qc}>
-        <App initialPage="usage" />
-      </QueryClientProvider>
-    )
-    expect(usageHtml).toContain('Share this device')
-
-    clearHooks()
-    const contextDoctorHtml = renderHtml(
-      <QueryClientProvider client={qc}>
-        <App initialPage="context-doctor" />
-      </QueryClientProvider>
-    )
-    expect(contextDoctorHtml).not.toContain('Share this device')
-    expect(contextDoctorHtml).not.toMatch(/\bD20\b|\bD21\b/)
+    for (const page of ['context-doctor', 'sessions', 'compare', 'quarantine', 'problems'] as KyberPage[]) {
+      clearHooks()
+      const html = renderHtml(
+        <QueryClientProvider client={qc}>
+          <App initialPage={page} />
+        </QueryClientProvider>
+      )
+      expect(html).not.toContain('Share this device')
+      expect(html).not.toContain('Search local devices')
+      expect(html).not.toMatch(/\bD20\b|\bD21\b/)
+    }
   })
 
   it('renders page title "Quarantine" and QuarantineView when on quarantine page', () => {
