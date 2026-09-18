@@ -9,10 +9,10 @@ import { join } from 'node:path'
 import type { ParsedProviderCall, Provider, SessionSource } from '../synth/provider.js'
 import { PROVIDER_PARSE_ERROR } from '../synth/provider.js'
 import { CanonStore } from '../canon/store.js'
-import { descriptorFor } from '../refresh/registry.js'
-import type { NativeUnit } from '../refresh/source-reader.js'
-import { refreshHarnessSources } from '../refresh/orchestrator.js'
-import { formatRefreshReport } from '../refresh/report.js'
+import { descriptorFor } from './registry.js'
+import type { NativeUnit } from './source-reader.js'
+import { refreshHarnessSources } from './orchestrator.js'
+import { formatRefreshReport } from './report.js'
 
 const temporaryRoots: string[] = []
 

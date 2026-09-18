@@ -1,5 +1,5 @@
 import type { DailyEntry, ProjectDayStats, ProviderDaySlice } from './daily-cache.js'
-import type { PeriodData } from './menubar-json.js'
+import type { PeriodData } from './period.js'
 import { CATEGORY_LABELS, type ProjectSummary, type TaskCategory } from './types.js'
 import { isBehavioralCall, isBehavioralTurn } from './behavioral-weight.js'
 import { billableOutputTokens } from './models.js'

@@ -7,8 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createGooseProvider } from '../../src/providers/goose.js'
 import { isSqliteAvailable } from '../../src/sqlite.js'
-import { buildOtlpPayload, deriveSpanId } from '../../src/sync/otlp.js'
-import type { ParsedApiCall } from '../../src/types.js'
 
 const requireForTest = createRequire(import.meta.url)
 
@@ -34,8 +32,8 @@ afterEach(async () => {
 
 const sqliteDescribe = isSqliteAvailable() ? describe : describe.skip
 
-sqliteDescribe('Goose sync project provenance', () => {
-  it('carries the exact working_dir and emits only its basename', async () => {
+sqliteDescribe('Goose project provenance', () => {
+  it('carries the exact working_dir through the parser', async () => {
     const dbPath = join(root, 'data', 'sessions', 'sessions.db')
     await mkdir(dirname(dbPath), { recursive: true })
     const { DatabaseSync: Database } = requireForTest('node:sqlite') as {
@@ -106,46 +104,5 @@ sqliteDescribe('Goose sync project provenance', () => {
     expect(trusted.workingDirectory).toBe('/Users/alice/company/private-widget')
     expect(container.workingDirectory).toBe('/sessions/synthetic-customer-secret')
 
-    const toParsed = (raw: typeof trusted): ParsedApiCall => ({
-      provider: raw.provider,
-      model: raw.model,
-      usage: {
-        inputTokens: raw.inputTokens,
-        outputTokens: raw.outputTokens,
-        cacheCreationInputTokens: raw.cacheCreationInputTokens,
-        cacheReadInputTokens: raw.cacheReadInputTokens,
-        cachedInputTokens: raw.cachedInputTokens,
-        reasoningTokens: raw.reasoningTokens,
-        webSearchRequests: raw.webSearchRequests,
-      },
-      costUSD: raw.costUSD,
-      tools: raw.tools,
-      mcpTools: [],
-      skills: [],
-      subagentTypes: [],
-      hasAgentSpawn: false,
-      hasPlanMode: false,
-      speed: raw.speed,
-      timestamp: raw.timestamp,
-      bashCommands: raw.bashCommands,
-      deduplicationKey: raw.deduplicationKey,
-    })
-    const payload = buildOtlpPayload(calls.map(raw => ({
-      call: toParsed(raw),
-      sessionId: raw.sessionId,
-      workingDirectory: raw.workingDirectory,
-    })))
-    const spans = payload.resourceSpans[0]!.scopeSpans[0]!.spans
-    const trustedSpan = spans.find(span => span.spanId === deriveSpanId(trusted.deduplicationKey))!
-    const containerSpan = spans.find(span => span.spanId === deriveSpanId(container.deduplicationKey))!
-    const trustedAttributes = Object.fromEntries(trustedSpan.attributes.map(attribute => [attribute.key, attribute.value]))
-    const containerAttributes = Object.fromEntries(containerSpan.attributes.map(attribute => [attribute.key, attribute.value]))
-
-    expect(trustedAttributes['ai.project']).toEqual({ stringValue: 'private-widget' })
-    expect(containerAttributes['ai.project']).toBeUndefined()
-    expect(JSON.stringify(payload)).not.toContain('/Users/alice')
-    expect(JSON.stringify(payload)).not.toContain('synthetic-customer-secret')
-    expect(JSON.stringify(payload)).not.toContain('LLM-authored session title')
-    expect(JSON.stringify(payload)).not.toContain('Container session title must stay local')
   })
 })

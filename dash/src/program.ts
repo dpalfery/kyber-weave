@@ -11,10 +11,8 @@ import { runWebDashboard } from './web-dashboard.js'
 import { resolveCliName } from './brand-overlay.js'
 import { formatDateRangeLabel, parseDateRangeFlags, parseDayFlag, getDateRange, toPeriod, type Period } from './cli-date.js'
 import { registerKyberCommands } from '../kyber/cli/register.js'
-import { readConfig, type PlanId, type PlanProvider } from './config.js'
-import { getPlanUsages, type PlanUsage } from './plan-usage.js'
+import { readConfig } from './config.js'
 import { createRequire } from 'node:module'
-import { convertCost, getCurrency, loadCurrency } from './currency.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json')
@@ -26,71 +24,6 @@ function collect(val: string, acc: string[]): string[] {
 
 function parseInteger(value: string): number {
   return parseInt(value, 10)
-}
-
-type JsonPlanSummary = {
-  id: PlanId
-  provider: PlanProvider
-  budget: number
-  spent: number
-  percentUsed: number
-  status: 'under' | 'near' | 'over'
-  projectedMonthEnd: number
-  daysUntilReset: number
-  periodStart: string
-  periodEnd: string
-  monthlyCredits?: number
-  spentCredits?: number
-  budgetCredits?: number
-  creditsIncomplete?: boolean
-  monthlyUsd?: number
-  spentApiEquivalentUsd?: number
-}
-
-function toJsonPlanSummary(planUsage: PlanUsage): JsonPlanSummary {
-  const summary: JsonPlanSummary = {
-    id: planUsage.plan.id,
-    provider: planUsage.plan.provider,
-    budget: convertCost(planUsage.budgetUsd),
-    spent: convertCost(planUsage.spentApiEquivalentUsd),
-    percentUsed: Math.round(planUsage.percentUsed * 10) / 10,
-    status: planUsage.status,
-    projectedMonthEnd: convertCost(planUsage.projectedMonthUsd),
-    daysUntilReset: planUsage.daysUntilReset,
-    periodStart: planUsage.periodStart.toISOString(),
-    periodEnd: planUsage.periodEnd.toISOString(),
-  }
-  if (planUsage.plan.provider === 'copilot') {
-    summary.monthlyCredits = planUsage.plan.monthlyCredits
-    summary.spentCredits = planUsage.spentCredits
-    summary.budgetCredits = planUsage.budgetCredits
-    summary.creditsIncomplete = planUsage.creditsIncomplete
-    summary.monthlyUsd = planUsage.plan.monthlyUsd
-    summary.spentApiEquivalentUsd = planUsage.spentApiEquivalentUsd
-  }
-  return summary
-}
-
-type JsonPlanSummaryMap = Partial<Record<PlanProvider, JsonPlanSummary>>
-
-function toJsonPlanSummaryMap(planUsages: PlanUsage[]): JsonPlanSummaryMap {
-  const summaries: JsonPlanSummaryMap = {}
-  for (const usage of planUsages) {
-    summaries[usage.plan.provider] = toJsonPlanSummary(usage)
-  }
-  return summaries
-}
-
-async function attachPlanSummaries<T extends object>(payload: T): Promise<T & { plan?: JsonPlanSummary; plans?: JsonPlanSummaryMap }> {
-  const planUsages = await getPlanUsages()
-  if (planUsages.length > 0) {
-    return {
-      ...payload,
-      plan: toJsonPlanSummary(planUsages[0]!),
-      plans: toJsonPlanSummaryMap(planUsages),
-    }
-  }
-  return payload
 }
 
 function assertFormat(value: string, allowed: readonly string[], command: string): void {
@@ -121,7 +54,7 @@ async function runJsonReport(period: Period, provider: string, project: string[]
   await loadPricing()
   const { range, label } = getDateRange(period)
   const durable = await buildDurablePeriod({ range, label }, { provider, project, exclude })
-  const report: ReturnType<typeof buildJsonReport> & { plan?: JsonPlanSummary; plans?: JsonPlanSummaryMap } = await attachPlanSummaries(buildJsonReport(durable.liveProjects, label, period, durable))
+  const report = buildJsonReport(durable.liveProjects, label, period, durable)
   console.log(JSON.stringify(report, null, 2))
 }
 
@@ -155,12 +88,10 @@ program.hook('preAction', async (thisCommand) => {
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
     process.env['CODEBURN_VERBOSE'] = '1'
   }
-  await loadCurrency()
 })
 
 function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: string, durable: DurablePeriod) {
   const sessions = projects.flatMap(p => p.sessions)
-  const { code } = getCurrency()
 
   // Headline totals come from the durable daily cache (carry-forward days whose
   // session files have expired still count), matching the menubar exactly. The
@@ -179,8 +110,9 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
   const totalOutput = durable.data.outputTokens
   const totalCacheRead = durable.data.cacheReadTokens
   const totalCacheWrite = durable.data.cacheWriteTokens
-  // Match src/menubar-json.ts:cacheHitPercent: reads over reads+fresh-input. cache_write
-  // counts tokens being stored, not served, so it doesn't belong in the denominator.
+  // Reads over reads + fresh input. cache_write counts tokens being stored, not
+  // served, so it doesn't belong in the denominator. compare-stats.ts computes the
+  // same ratio the same way; they have to stay in step.
   const cacheHitDenom = totalInput + totalCacheRead
   const cacheHitPercent = cacheHitDenom > 0 ? Math.round((totalCacheRead / cacheHitDenom) * 1000) / 10 : 0
 
@@ -191,8 +123,8 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
         const turns = Object.values(d.categories).reduce((s, c) => s + c.turns, 0)
         return {
           date: d.date,
-          cost: convertCost(d.cost),
-          savings: convertCost(d.savingsUSD),
+          cost: (d.cost),
+          savings: (d.savingsUSD),
           calls: d.calls,
           turns,
           editTurns: d.editTurns,
@@ -206,10 +138,10 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
   const projectList = projects.map(p => ({
     name: p.project,
     path: p.projectPath,
-    cost: convertCost(p.totalCostUSD),
-    savings: convertCost(p.totalSavingsUSD),
+    cost: (p.totalCostUSD),
+    savings: (p.totalSavingsUSD),
     avgCostPerSession: p.sessions.length > 0
-      ? convertCost(p.totalCostUSD / p.sessions.length)
+      ? (p.totalCostUSD / p.sessions.length)
       : null,
     calls: p.totalApiCalls,
     sessions: p.sessions.length,
@@ -265,16 +197,16 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
       return {
         name,
         ...rest,
-        cost: convertCost(cost),
-        savings: convertCost(savings),
-        estimatedCost: convertCost(estimatedCost),
+        cost: (cost),
+        savings: (savings),
+        estimatedCost: (estimatedCost),
         savingsBaselineModel: baselineModel,
         editTurns: efficiency?.editTurns ?? 0,
         oneShotTurns: efficiency?.oneShotTurns ?? 0,
         oneShotRate: efficiency?.oneShotRate ?? null,
         retriesPerEdit: efficiency?.retriesPerEdit ?? null,
         costPerEdit: efficiency?.costPerEditUSD !== null && efficiency?.costPerEditUSD !== undefined
-          ? convertCost(efficiency.costPerEditUSD)
+          ? (efficiency.costPerEditUSD)
           : null,
       }
     })
@@ -294,8 +226,8 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     .sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings))
     .map(([cat, d]) => ({
       category: CATEGORY_LABELS[cat as TaskCategory] ?? cat,
-      cost: convertCost(d.cost),
-      savings: convertCost(d.savings),
+      cost: (d.cost),
+      savings: (d.savings),
       turns: d.turns,
       editTurns: d.editTurns,
       oneShotTurns: d.oneShotTurns,
@@ -349,8 +281,8 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
       project: p.project,
       sessionId: s.sessionId,
       date: s.firstTimestamp ? dateKey(s.firstTimestamp) : null,
-      cost: convertCost(s.totalCostUSD),
-      savings: convertCost(s.totalSavingsUSD),
+      cost: (s.totalCostUSD),
+      savings: (s.totalSavingsUSD),
       calls: s.apiCalls,
     })))
     .sort((a, b) => (b.cost + b.savings) - (a.cost + a.savings))
@@ -358,21 +290,21 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
 
   return {
     generated: new Date().toISOString(),
-    currency: code,
+    currency: 'USD',
     period,
     periodKey,
     overview: {
-      cost: convertCost(totalCostUSD),
+      cost: (totalCostUSD),
       // Subscription-covered spend (config `proxyPaths`) and net out-of-pocket.
       // `cost` is the full API-rate figure; `proxiedCost` is the part billed to
       // a subscription; `netCost` = cost - proxiedCost. Both 0 with no proxy
       // paths configured, so existing consumers are unaffected.
-      proxiedCost: convertCost(totalProxiedUSD),
-      netCost: convertCost(netCostUSD),
-      savings: convertCost(totalSavingsUSD),
+      proxiedCost: (totalProxiedUSD),
+      netCost: (netCostUSD),
+      savings: (totalSavingsUSD),
       // Portion of `cost` priced from estimated tokens (issue #639). Display/
       // metadata only; never subtracted from `cost`. 0 when nothing is estimated.
-      estimatedCost: convertCost(totalEstimatedUSD),
+      estimatedCost: (totalEstimatedUSD),
       calls: totalCalls,
       sessions: totalSessions,
       cacheHitPercent,
@@ -400,9 +332,9 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     tools: sortedMap(toolMap),
     mcpServers: sortedMap(mcpMap),
     shellCommands: sortedMap(bashMap),
-    skills: Object.entries(skillMap).sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings)).map(([name, d]) => ({ name, turns: d.turns, cost: convertCost(d.cost), savings: convertCost(d.savings) })),
-    subagents: Object.entries(subagentMap).sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings)).map(([name, d]) => ({ name, calls: d.calls, cost: convertCost(d.cost), savings: convertCost(d.savings) })),
-    claudeAgentTypes: Object.entries(agentTypeMap).sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings)).map(([name, d]) => ({ name, calls: d.calls, cost: convertCost(d.cost), savings: convertCost(d.savings) })),
+    skills: Object.entries(skillMap).sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings)).map(([name, d]) => ({ name, turns: d.turns, cost: (d.cost), savings: (d.savings) })),
+    subagents: Object.entries(subagentMap).sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings)).map(([name, d]) => ({ name, calls: d.calls, cost: (d.cost), savings: (d.savings) })),
+    claudeAgentTypes: Object.entries(agentTypeMap).sort(([, a], [, b]) => (b.cost + b.savings) - (a.cost + a.savings)).map(([name, d]) => ({ name, calls: d.calls, cost: (d.cost), savings: (d.savings) })),
     topSessions,
   }
 }
@@ -444,7 +376,7 @@ program
         const label = daySelection?.label ?? formatDateRangeLabel(opts.from, opts.to)
         const periodKey = daySelection ? 'day' : 'custom'
         const durable = await buildDurablePeriod({ range, label }, { provider: opts.provider, project: opts.project, exclude: opts.exclude })
-        console.log(JSON.stringify(await attachPlanSummaries(buildJsonReport(durable.liveProjects, label, periodKey, durable)), null, 2))
+        console.log(JSON.stringify(buildJsonReport(durable.liveProjects, label, periodKey, durable), null, 2))
       } else {
         await runJsonReport(period, opts.provider, opts.project, opts.exclude)
       }

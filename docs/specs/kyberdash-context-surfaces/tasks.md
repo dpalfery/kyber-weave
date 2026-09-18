@@ -129,7 +129,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     `THIRD_PARTY_NOTICES.md`.
   - Replace `dash/README.md` with a short pointer to `docs/dash/`.
   - _Requirements: 2.5_
-- [ ] 2.6 Delete unreachable code and the credential, quota and currency paths
+- [x] 2.6 Delete unreachable code and the credential, quota and currency paths
   - Stream A.
   - Run `check:reachable`, delete every module it lists together with that module's tests,
     and repeat until it is empty.

@@ -4,7 +4,7 @@ import { join } from 'path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { loadPricing, setLocalModelSavings, setModelAliases } from '../src/models.js'
-import { buildMenubarPayloadForRange } from '../src/usage-aggregator.js'
+import { buildDurablePeriod } from '../src/usage-aggregator.js'
 import { clearSessionCache } from '../src/parser.js'
 import { readCacheOnDisk, writeCacheOnDisk } from './fixtures/session-cache-io.js'
 import { dailyCachePath } from '../src/daily-cache.js'
@@ -67,8 +67,8 @@ async function seed(): Promise<void> {
 }
 
 /** The (date, cost) shape of the daily chart — the thing that froze empty. */
-function dailyShape(payload: Awaited<ReturnType<typeof buildMenubarPayloadForRange>>): Array<[string, number]> {
-  return payload.history.daily.map(d => [d.date, Math.round(d.cost * 1e6) / 1e6] as [string, number])
+function dailyShape(durable: Awaited<ReturnType<typeof buildDurablePeriod>>): Array<[string, number]> {
+  return durable.days.map(d => [d.date, Math.round(d.cost * 1e6) / 1e6] as [string, number])
 }
 
 describe('interrupted hydration converges to the uninterrupted result', () => {
@@ -76,10 +76,10 @@ describe('interrupted hydration converges to the uninterrupted result', () => {
     // ── Reference: a clean, never-interrupted hydration. ──
     await seed()
     clearSessionCache()
-    const reference = await buildMenubarPayloadForRange(PERIOD, { provider: 'all', optimize: false, timeline: false })
+    const reference = await buildDurablePeriod(PERIOD, { provider: 'all', optimize: false, timeline: false })
     const refDaily = dailyShape(reference)
     // Sanity: the fixture really produced a multi-day, non-zero chart.
-    expect(reference.current.cost).toBeGreaterThan(0)
+    expect(reference.data.cost).toBeGreaterThan(0)
     expect(refDaily.length).toBeGreaterThanOrEqual(FIXTURE_DAYS.length)
 
     // ── Simulate an interrupted / raced hydration by poisoning the on-disk caches
@@ -87,7 +87,7 @@ describe('interrupted hydration converges to the uninterrupted result', () => {
     await seed()
     clearSessionCache()
     // Prime real caches, then corrupt them into the "partial" state.
-    await buildMenubarPayloadForRange(PERIOD, { provider: 'all', optimize: false, timeline: false })
+    await buildDurablePeriod(PERIOD, { provider: 'all', optimize: false, timeline: false })
 
     // (a) Session cache: present but NOT marked complete — an interrupted cold
     //     start's throttled partial save.
@@ -109,13 +109,13 @@ describe('interrupted hydration converges to the uninterrupted result', () => {
     // ── Relaunch: the parse must detect both caches as incomplete, finish the
     //    backfill, and converge to the reference. ──
     clearSessionCache()
-    const healed = await buildMenubarPayloadForRange(PERIOD, { provider: 'all', optimize: false, timeline: false })
+    const healed = await buildDurablePeriod(PERIOD, { provider: 'all', optimize: false, timeline: false })
 
     // The frozen chart is fully restored, day-for-day and cost-for-cost.
     expect(dailyShape(healed)).toEqual(refDaily)
     // Headline totals converge exactly.
-    expect(healed.current.cost).toBe(reference.current.cost)
-    expect(healed.current.calls).toBe(reference.current.calls)
+    expect(healed.data.cost).toBe(reference.data.cost)
+    expect(healed.data.calls).toBe(reference.data.calls)
 
     // And the on-disk markers are now durably complete, so the next launch is warm.
     expect((await readCacheOnDisk()).complete).toBe(true)

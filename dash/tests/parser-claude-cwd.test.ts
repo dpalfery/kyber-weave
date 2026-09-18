@@ -1,11 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm, utimes } from 'fs/promises'
 import { join, relative } from 'path'
-import { tmpdir, homedir } from 'os'
+import { tmpdir } from 'os'
 
 import { parseAllSessions } from '../src/parser.js'
-import { collectUnsentCalls } from '../src/sync/push.js'
-import { buildOtlpPayload } from '../src/sync/otlp.js'
 import type { DateRange } from '../src/types.js'
 
 let tmpDir: string
@@ -222,9 +220,6 @@ describe('Claude cwd project paths', () => {
 
     expect(projects).toHaveLength(1)
     expect(projects[0]!.sessions[0]!.workingDirectory).toBeUndefined()
-    const wire = JSON.stringify(buildOtlpPayload(collectUnsentCalls(projects).allCalls))
-    expect(wire).not.toContain('synthetic-cowork-secret')
-    expect(wire).not.toContain('ai.project')
   })
 
   it('does not group sibling projects under a parent directory that merely contains .git', async () => {

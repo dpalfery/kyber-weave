@@ -23,20 +23,11 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { aggregateAudit } from '../src/audit-report.js'
-import { aggregateModels } from '../src/models-report.js'
+import { billableOutputTokens } from '../src/models.js'
 import { clearCodexMemCaches, readCachedCodexResults } from '../src/codex-cache.js'
 import { currentTzKey, ensureCacheHydrated, toDateString, type DailyEntry } from '../src/daily-cache.js'
 import { createCodexProvider } from '../src/providers/codex.js'
 import type { ParsedProviderCall } from '../src/providers/types.js'
-import type {
-  ClassifiedTurn,
-  ParsedApiCall,
-  ProjectSummary,
-  SessionSummary,
-  TaskCategory,
-  TokenUsage,
-} from '../src/types.js'
 
 // Snapshot ground truth (src/data/litellm-snapshot.json), USD per token:
 //   gpt-5.6-terra  input 2e-6   output 12e-6  cacheWrite 2.5e-6 (EXPLICIT)  cacheRead 2e-7
@@ -108,22 +99,17 @@ describe('#1075 A - reasoning is not billed on top of output', () => {
     expect(call.reasoningTokens).toBe(400)
   })
 
-  it('does not double-count reasoning in the displayed output tokens', async () => {
-    const codex = makeApiCall('codex', 'gpt-5.5', { outputTokens: 1000, reasoningTokens: 400 })
+  it('does not double-count reasoning in the displayed output tokens', () => {
     // A provider that really does report reasoning as a separate bucket keeps
     // the additive behaviour, so this is a codex carve-out and not a blanket
     // change to every display sum. Gemini documents "thoughts" as genuinely
     // separate from output (src/providers/gemini.ts), unlike codex/claude.
-    const additive = makeApiCall('gemini', 'gemini-2.5-pro', { outputTokens: 1000, reasoningTokens: 400 })
-    const projects = [makeProject([codex, additive])]
-
-    const auditRows = await aggregateAudit(projects)
-    expect(auditRows.find(r => r.provider === 'codex')!.displayed.outputTokens).toBe(1000)
-    expect(auditRows.find(r => r.provider === 'gemini')!.displayed.outputTokens).toBe(1400)
-
-    const modelRows = await aggregateModels(projects)
-    expect(modelRows.find(r => r.provider === 'codex')!.outputTokens).toBe(1000)
-    expect(modelRows.find(r => r.provider === 'gemini')!.outputTokens).toBe(1400)
+    //
+    // This used to assert through `aggregateModels`, which went with the deleted
+    // `models` report. The rule it was checking lives in `billableOutputTokens`,
+    // which is what every surviving surface sums, so that is where it is pinned.
+    expect(billableOutputTokens('codex', 1000, 400)).toBe(1000)
+    expect(billableOutputTokens('gemini', 1000, 400)).toBe(1400)
   })
 })
 
@@ -276,64 +262,6 @@ describe('#1075 cache invalidation', () => {
 
 // ── fixtures ──────────────────────────────────────────────────────────────
 
-function makeApiCall(provider: string, model: string, usage: Partial<TokenUsage>): ParsedApiCall {
-  return {
-    provider,
-    model,
-    usage: {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationInputTokens: 0,
-      cacheReadInputTokens: 0,
-      cachedInputTokens: 0,
-      reasoningTokens: 0,
-      webSearchRequests: 0,
-      ...usage,
-    },
-    costUSD: 0,
-    tools: [],
-    mcpTools: [],
-    skills: [],
-    hasAgentSpawn: false,
-    hasPlanMode: false,
-    speed: 'standard',
-    timestamp: '2026-08-16T00:00:00.000Z',
-    bashCommands: [],
-    deduplicationKey: `${provider}-${model}`,
-  }
-}
-
-function makeProject(calls: ParsedApiCall[]): ProjectSummary {
-  const turn: ClassifiedTurn = {
-    userMessage: 't',
-    assistantCalls: calls,
-    timestamp: '2026-08-16T00:00:00.000Z',
-    sessionId: 's1',
-    category: 'feature' as TaskCategory,
-    retries: 0,
-    hasEdits: false,
-  }
-  const session: SessionSummary = {
-    sessionId: 's1',
-    project: 'p',
-    firstTimestamp: '2026-08-16T00:00:00.000Z',
-    lastTimestamp: '2026-08-16T00:00:00.000Z',
-    totalCostUSD: 0,
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-    totalCacheReadTokens: 0,
-    totalCacheWriteTokens: 0,
-    apiCalls: 0,
-    turns: [turn],
-    modelBreakdown: {},
-    toolBreakdown: {},
-    mcpBreakdown: {},
-    bashBreakdown: {},
-    categoryBreakdown: {} as SessionSummary['categoryBreakdown'],
-    skillBreakdown: {},
-  }
-  return { project: 'p', projectPath: 'p', sessions: [session], totalCostUSD: 0, totalApiCalls: 0 }
-}
 
 function codexDay(date: string, cost: number): DailyEntry {
   const tokens = { inputTokens: 100, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 0 }

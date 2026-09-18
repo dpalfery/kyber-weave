@@ -25,7 +25,7 @@ import { defaultActionsDir, readRecords, shortId } from './journal.js'
 import { undoAction } from './undo.js'
 import { renderTable } from '../text-table.js'
 import { formatTokens } from '../format.js'
-import { formatCost } from '../currency.js'
+import { formatCost } from '../format.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const WINDOW_CAP_DAYS = 30

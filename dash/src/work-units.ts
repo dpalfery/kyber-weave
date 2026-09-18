@@ -20,8 +20,18 @@
  * No wire/sync changes and no daily-cache changes live here.
  */
 
-import { deriveTraceId } from './sync/otlp.js'
+import { createHash } from 'node:crypto'
 import type { SessionLineage } from './types.js'
+
+/// Work-unit identity: the first 32 hex digits of the session id's SHA-256.
+///
+/// This derivation came from the deleted `sync/otlp.ts`, where it minted OTLP
+/// trace ids. The wire is gone, but the shape is still the right one — a
+/// stable, collision-resistant id computed from the session id alone, so the
+/// same session always resolves to the same work unit without a lookup table.
+function deriveWorkUnitId(sessionId: string): string {
+  return createHash('sha256').update(sessionId).digest('hex').slice(0, 32)
+}
 
 export type WorkUnitRole = 'root' | 'child' | 'unknown'
 
@@ -34,8 +44,7 @@ export type WorkUnitSession = {
 }
 
 export type WorkUnit = {
-  /// deriveTraceId(rootSessionId): the exact trace-id derivation sync uses, so
-  /// a work unit's identity matches the root trace identity already on the wire.
+  /// `deriveWorkUnitId(rootSessionId)` — see the note on that function.
   workUnitId: string
   rootSessionId: string
   /// Sorted member children (transitive descendants fold under the top root).
@@ -136,7 +145,7 @@ export function resolveWorkUnits(sessions: WorkUnitSession[]): WorkUnitResolutio
     const roles: Record<string, WorkUnitRole> = { [session.sessionId]: role }
     for (const childId of children) roles[childId] = 'child'
     const unit: WorkUnit = {
-      workUnitId: deriveTraceId(session.sessionId),
+      workUnitId: deriveWorkUnitId(session.sessionId),
       rootSessionId: session.sessionId,
       childSessionIds: children,
       roles,

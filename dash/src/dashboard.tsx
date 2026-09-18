@@ -20,8 +20,6 @@ import { estimateContextBudget, type ContextBudget } from './context-budget.js'
 import { dateKey } from './day-aggregator.js'
 import { behavioralCallCount } from './behavioral-weight.js'
 import { CompareView } from './compare.js'
-import { getPlanUsages, type PlanUsage } from './plan-usage.js'
-import { planDisplayName } from './plans.js'
 import { formatDayRangeLabel, getDateRange, parseDayFlag, PERIODS, PERIOD_LABELS, shiftDay, type Period } from './cli-date.js'
 import { BSU, patchStdoutForWindows } from './ink-win.js'
 import { BRAND, resolveCliName } from './brand-overlay.js'
@@ -271,7 +269,6 @@ const MAX_DASHBOARD_WIDTH = 256
 const ORANGE = '#FF8C42'
 const DIM = '#555555'
 const GOLD = '#FFD700'
-const PLAN_BAR_WIDTH = 10
 const HEAVY_PERIODS = new Set<Period>(['30days', 'month', 'all', 'lifetime'])
 
 const LANG_DISPLAY_NAMES: Record<string, string> = {
@@ -523,63 +520,7 @@ function DataRow({ panelWidth, barWidth: requestedBarWidth, label, metrics, metr
   )
 }
 
-function renderPlanBar(percentUsed: number, width: number): string {
-  if (percentUsed <= 100) {
-    const capped = Math.max(0, percentUsed)
-    const filled = Math.round((capped / 100) * width)
-    return `${'▓'.repeat(filled)}${'░'.repeat(Math.max(0, width - filled))}`
-  }
-  const factor = percentUsed / 100
-  const chevrons = Math.min(4, Math.max(1, Math.floor(Math.log10(factor)) + 1))
-  return `${'▓'.repeat(width)}${'▶'.repeat(chevrons)}`
-}
-
-function planLabel(planUsage: PlanUsage): string {
-  const name = planDisplayName(planUsage.plan.id)
-  return planUsage.plan.id === 'custom' ? `${name} (${planUsage.plan.provider})` : name
-}
-
-function planColor(planUsage: PlanUsage): string {
-  return planUsage.status === 'over'
-    ? '#F55B5B'
-    : planUsage.status === 'near'
-      ? ORANGE
-      : '#5BF58C'
-}
-
-// Headline and status share one line's worth of terminal each, both truncated
-// end-first, so the headline stays short enough to keep the percentage visible
-// at 80 columns and the status leads with the disclaimer, not the arithmetic.
-export function planBudgetHeadline(planUsage: PlanUsage): string {
-  if (planUsage.plan.provider === 'copilot') {
-    const spent = planUsage.spentCredits ?? 0
-    const budget = planUsage.budgetCredits ?? planUsage.plan.monthlyCredits ?? 0
-    return `${planLabel(planUsage)}: ${formatCredits(spent)} / ${formatCredits(budget)} AI Credits`
-  }
-  return `${planLabel(planUsage)}: ${formatCost(planUsage.spentApiEquivalentUsd)} API-equivalent / ${formatCost(planUsage.budgetUsd)} budget`
-}
-
-function formatCredits(n: number): string {
-  if (Number.isInteger(n)) return String(n)
-  const rounded = Math.round(n * 1e6) / 1e6
-  return String(rounded)
-}
-
-export function planStatusText(planUsage: PlanUsage): string {
-  // The period is anniversary-based (plan.resetDay, 1-28, settable per plan via
-  // `codeburn plan set --reset-day`), so this is a monthly budget window, not a
-  // calendar month. The headline already says "budget"; do not repeat it here.
-  const detail = `Not a live provider window. Projected: ${formatCost(planUsage.projectedMonthUsd)}. Next budget reset in ${planUsage.daysUntilReset} days.`
-  if (planUsage.status === 'under') {
-    return `Well within budget. ${detail}`
-  }
-  if (planUsage.status === 'near') {
-    return `Approaching budget. ${detail}`
-  }
-  return `${(planUsage.spentApiEquivalentUsd / Math.max(planUsage.budgetUsd, 1)).toFixed(1)}x the sticker price. ${detail}`
-}
-
-function Overview({ projects, label, width, planUsages, durable }: { projects: ProjectSummary[]; label: string; width: number; planUsages?: PlanUsage[]; durable?: DurableOverview }) {
+function Overview({ projects, label, width, durable }: { projects: ProjectSummary[]; label: string; width: number; durable?: DurableOverview }) {
   // Headline totals prefer the durable daily cache (carried, expired-source days
   // included) so they match the menubar and report; the live parse is the
   // fallback until the durable figures land / for panels below.
@@ -595,7 +536,6 @@ function Overview({ projects, label, width, planUsages, durable }: { projects: P
   const allInputTokens = totalInput + totalCacheRead + totalCacheWrite
   const cacheHit = allInputTokens > 0
     ? (totalCacheRead / allInputTokens) * 100 : 0
-  const activePlanUsages = planUsages ?? []
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={PANEL_COLORS.overview} paddingX={1} width={width}>
@@ -624,25 +564,6 @@ function Overview({ projects, label, width, planUsages, durable }: { projects: P
       )}
       {durable && carriedCostNote(durable.carriedCostUSD) && (
         <Text dimColor wrap="truncate-end">  {carriedCostNote(durable.carriedCostUSD)}</Text>
-      )}
-      {activePlanUsages.length > 0 && (
-        <>
-          {activePlanUsages.map(planUsage => {
-            const color = planColor(planUsage)
-            return (
-              <React.Fragment key={planUsage.plan.provider}>
-                <Text wrap="truncate-end">
-                  <Text color={color}>{planBudgetHeadline(planUsage)}</Text>
-                  <Text>  </Text>
-                  <Text color={color}>{renderPlanBar(planUsage.percentUsed, PLAN_BAR_WIDTH)}</Text>
-                  <Text> </Text>
-                  <Text bold color={color}>{planUsage.percentUsed.toFixed(1)}%</Text>
-                </Text>
-                <Text dimColor wrap="truncate-end">{planStatusText(planUsage)}</Text>
-              </React.Fragment>
-            )
-          })}
-        </>
       )}
     </Box>
   )
@@ -1436,21 +1357,16 @@ function StatusBar({ width, showProvider, view, findingCount, optimizeAvailable,
   )
 }
 
-function DashboardContent({ projects, period, columns, maxContentWidth, activeProvider, budgets, planUsages, label, dayMode, dailyHistoryProjects, dailyHistoryPageSize, scrollableDailyHistory = false, dailyHistoryCursor = 0, dailyHistoryLoading = false, durable }: { projects: ProjectSummary[]; period: Period; columns?: number; maxContentWidth: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; planUsages?: PlanUsage[]; label?: string; dayMode?: boolean; dailyHistoryProjects?: ProjectSummary[]; dailyHistoryPageSize?: number; scrollableDailyHistory?: boolean; dailyHistoryCursor?: number; dailyHistoryLoading?: boolean; durable?: DurableOverview }) {
+function DashboardContent({ projects, period, columns, maxContentWidth, activeProvider, budgets, label, dayMode, dailyHistoryProjects, dailyHistoryPageSize, scrollableDailyHistory = false, dailyHistoryCursor = 0, dailyHistoryLoading = false, durable }: { projects: ProjectSummary[]; period: Period; columns?: number; maxContentWidth: number; activeProvider?: string; budgets?: Map<string, ContextBudget>; label?: string; dayMode?: boolean; dailyHistoryProjects?: ProjectSummary[]; dailyHistoryPageSize?: number; scrollableDailyHistory?: boolean; dailyHistoryCursor?: number; dailyHistoryLoading?: boolean; durable?: DurableOverview }) {
   const { dashWidth, columnCount, panelWidth, barWidth } = getLayout(columns, maxContentWidth)
   const isCursor = activeProvider === 'cursor'
   const activeLabel = label ?? PERIOD_LABELS[period]
   if (showEmptyState(projects.length, scrollableDailyHistory, (dailyHistoryProjects ?? []).length, dailyHistoryLoading)) return <Panel title={BRAND.productName} color={ORANGE} width={dashWidth}><Text dimColor>No usage data found for {activeLabel}.</Text></Panel>
   const projectRows = Math.min(projects.length, getProjectBreakdownRowLimit(period, dayMode))
   const days = dailyHistoryPageSize ?? getDailyActivityPageSize(columnCount, projectRows, getActivityBreakdownRowCount(projects), dayMode)
-  // A provider-scoped plan (e.g. SuperGrok) only makes sense on its own
-  // provider tab, where the shown cost matches the plan's spend. Hide it on
-  // every other tab, including All, so its budget isn't compared to spend it
-  // doesn't cover.
-  const visiblePlanUsages = (planUsages ?? []).filter(p => p.plan.provider === (activeProvider ?? 'all'))
   return (
     <Box flexDirection="column" width={dashWidth}>
-      <Overview projects={projects} label={activeLabel} width={dashWidth} planUsages={visiblePlanUsages} durable={durable} />
+      <Overview projects={projects} label={activeLabel} width={dashWidth} durable={durable} />
       <Box flexWrap="wrap" width={dashWidth}>
         <DailyActivity projects={scrollableDailyHistory ? (dailyHistoryProjects ?? []) : projects} days={days} pw={panelWidth} bw={barWidth} scrollable={scrollableDailyHistory} cursor={dailyHistoryCursor} loading={dailyHistoryLoading} />
         <ProjectBreakdown projects={projects} pw={panelWidth} bw={barWidth} budgets={budgets} rows={getProjectBreakdownRowLimit(period, dayMode)} />
@@ -1541,12 +1457,11 @@ function ScrollableViewport({ children, width, lineScroll = true }: { children: 
   )
 }
 
-export function InteractiveDashboard({ initialProjects, initialDailyHistoryProjects, initialPeriod, initialProvider, initialPlanUsages, initialDurable, refreshSeconds, projectFilter, excludeFilter, customRange, customRangeLabel, initialDay, windowColumns, initialIndexPendingFiles, initialHistoryIndexing = false, initialCacheWasCold = false, initialHistoryIndex, autoFallbackFromEmptyToday = false, terminateProcess }: {
+export function InteractiveDashboard({ initialProjects, initialDailyHistoryProjects, initialPeriod, initialProvider, initialDurable, refreshSeconds, projectFilter, excludeFilter, customRange, customRangeLabel, initialDay, windowColumns, initialIndexPendingFiles, initialHistoryIndexing = false, initialCacheWasCold = false, initialHistoryIndex, autoFallbackFromEmptyToday = false, terminateProcess }: {
   initialProjects: ProjectSummary[]
   initialDailyHistoryProjects?: ProjectSummary[]
   initialPeriod: Period
   initialProvider: string
-  initialPlanUsages?: PlanUsage[]
   initialDurable?: DurableOverview
   refreshSeconds?: number
   projectFilter?: string[]
@@ -1578,7 +1493,6 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
   const [appliedFixes, setAppliedFixes] = useState<AppliedFix[]>([])
   const [optimizeLoading, setOptimizeLoading] = useState(false)
   const [projectBudgets, setProjectBudgets] = useState<Map<string, ContextBudget>>(new Map())
-  const [planUsages, setPlanUsages] = useState<PlanUsage[]>(initialPlanUsages ?? [])
   const [dayDate, setDayDate] = useState<string | null>(initialDay ?? null)
   const [dailyHistoryProjects, setDailyHistoryProjects] = useState<ProjectSummary[]>(initialDailyHistoryProjects ?? initialProjects)
   const [dailyHistoryCursor, setDailyHistoryCursor] = useState(0)
@@ -1720,14 +1634,11 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
       // menubar/report.
       const durableTotals = await computeDurableOverview(p, prov, projectFilter, excludeFilter, customRange, day)
       if (reloadGenerationRef.current !== generation) return
-      const usage = await getPlanUsages()
-      if (reloadGenerationRef.current !== generation) return
       if (background && viewRef.current !== 'dashboard') return
 
       if (shouldLoadHistory) setDailyHistoryProjects(filteredProjects)
       setProjects(selectedProjects)
       setDurable(durableTotals)
-      setPlanUsages(usage)
       if (background) setOptimizeResult(null)
     } catch (error) {
       console.error(error)
@@ -1806,7 +1717,6 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
         setDurable(selected.durable)
         setLoading(false)
       }
-      if (index.planUsages.length > 0) setPlanUsages(index.planUsages)
       await nextTick()
     }
 
@@ -1871,7 +1781,6 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
           setDailyHistoryProjects(filterProjectsByName(refreshed.normalizedProjects, projectFilter, excludeFilter))
           setProjects(selected.projects)
           setDurable(selected.durable)
-          setPlanUsages(refreshed.planUsages)
           setOptimizeResult(null)
         }).catch(console.error)
         return
@@ -2096,7 +2005,7 @@ export function InteractiveDashboard({ initialProjects, initialDailyHistoryProje
           ? <CompareView projects={projects} onBack={() => setView('dashboard')} />
           : view === 'optimize' && optimizeResult
             ? <OptimizeView findings={optimizeResult.findings} costRate={optimizeResult.costRate} projects={projects} label={headerLabel} width={dashWidth} healthScore={optimizeResult.healthScore} healthGrade={optimizeResult.healthGrade} cursor={findingsCursor} appliedFixes={appliedFixes} />
-            : <DashboardContent projects={projects} period={period} columns={columns} maxContentWidth={maxContentWidth} activeProvider={activeProvider} budgets={projectBudgets} planUsages={planUsages} label={headerLabel} dayMode={isDayMode} dailyHistoryProjects={dailyHistoryProjects} dailyHistoryPageSize={dailyHistoryPageSize} scrollableDailyHistory={scrollableDailyHistory} dailyHistoryCursor={Math.min(dailyHistoryCursor, dailyHistoryMaxCursor)} durable={durable} />}
+            : <DashboardContent projects={projects} period={period} columns={columns} maxContentWidth={maxContentWidth} activeProvider={activeProvider} budgets={projectBudgets} label={headerLabel} dayMode={isDayMode} dailyHistoryProjects={dailyHistoryProjects} dailyHistoryPageSize={dailyHistoryPageSize} scrollableDailyHistory={scrollableDailyHistory} dailyHistoryCursor={Math.min(dailyHistoryCursor, dailyHistoryMaxCursor)} durable={durable} />}
         {coachingNote && (
           <Box width={dashWidth} paddingX={1}>
             <Text wrap="truncate-end"><Text color={ORANGE} bold>tip </Text><Text dimColor>{coachingNote}</Text></Text>
@@ -2181,14 +2090,14 @@ function CustomRangeBanner({ label, width }: { label: string; width: number }) {
   )
 }
 
-function StaticDashboard({ projects, period, activeProvider, planUsages, label, dayMode, durable }: { projects: ProjectSummary[]; period: Period; activeProvider?: string; planUsages?: PlanUsage[]; label?: string; dayMode?: boolean; durable?: DurableOverview }) {
+function StaticDashboard({ projects, period, activeProvider, label, dayMode, durable }: { projects: ProjectSummary[]; period: Period; activeProvider?: string; label?: string; dayMode?: boolean; durable?: DurableOverview }) {
   const { columns } = useWindowSize()
   const maxContentWidth = getDashboardMaxWidth(projects, undefined, activeProvider)
   const { dashWidth } = getLayout(columns, maxContentWidth)
   return (
     <Box flexDirection="column" width={dashWidth}>
       {dayMode ? <DayBanner label={label ?? PERIOD_LABELS[period]} width={dashWidth} /> : <PeriodTabs active={period} />}
-      <DashboardContent projects={projects} period={period} columns={columns} maxContentWidth={maxContentWidth} activeProvider={activeProvider} planUsages={planUsages} label={label} dayMode={dayMode} durable={durable} />
+      <DashboardContent projects={projects} period={period} columns={columns} maxContentWidth={maxContentWidth} activeProvider={activeProvider} label={label} dayMode={dayMode} durable={durable} />
     </Box>
   )
 }
@@ -2211,8 +2120,7 @@ export async function assembleDashboardData(
   initialDay: string | null,
   scrollableDailyHistory: boolean,
   autoFallback = false,
-  includePlanUsages = true,
-): Promise<{ period: Period; scannedProjects: ProjectSummary[]; filteredProjects: ProjectSummary[]; planUsages: PlanUsage[]; initialDurable: DurableOverview }> {
+): Promise<{ period: Period; scannedProjects: ProjectSummary[]; filteredProjects: ProjectSummary[]; initialDurable: DurableOverview }> {
   const range = getDashboardScanRange(period, customRange, initialDay, scrollableDailyHistory)
   // With the fallback armed the scope must cover the period it can land on too,
   // so declare the wider of the two durable ranges.
@@ -2232,14 +2140,11 @@ export async function assembleDashboardData(
       ? AUTO_FALLBACK_PERIOD
       : period
     const filteredProjects = selectDashboardPeriodProjects(scannedProjects, opened, scrollableDailyHistory)
-    // A Today-scoped progressive pass cannot truthfully compute a monthly plan
-    // window. Keep that panel absent until the lifetime background index lands.
-    const planUsages = includePlanUsages ? await getPlanUsages() : []
     // Durable headline totals for the initial paint (carry-forward cache + today),
     // matching the menubar/report. The interactive tree recomputes this on every
     // period/provider/refresh change; the static one-shot render uses just this.
     const initialDurable = await computeDurableOverview(opened, provider, projectFilter, excludeFilter, customRange, initialDay)
-    return { period: opened, scannedProjects, filteredProjects, planUsages, initialDurable }
+    return { period: opened, scannedProjects, filteredProjects, initialDurable }
   })
 }
 
@@ -2247,7 +2152,6 @@ export type DashboardHistoryIndex = {
   provider: string
   normalizedProjects: ProjectSummary[]
   cache: DailyCache
-  planUsages: PlanUsage[]
   readyThrough?: Period
   projectFilter?: string[]
   excludeFilter?: string[]
@@ -2329,8 +2233,7 @@ export async function buildDashboardHistoryIndex(
   const cache = provider === 'all'
     ? await hydrateDailyCacheFromNormalizedProjects(normalizedProjects, readyThrough === 'lifetime')
     : await loadDailyCache()
-  const planUsages = readyThrough === 'lifetime' && !options.preferCompleteSnapshot ? await getPlanUsages() : []
-  return { provider, normalizedProjects, cache, planUsages, readyThrough, projectFilter, excludeFilter }
+  return { provider, normalizedProjects, cache, readyThrough, projectFilter, excludeFilter }
 }
 
 /** Pure period projection: no discovery, transcript reads, or parser calls. */
@@ -2381,7 +2284,6 @@ export async function assembleDashboardFirstPaint(
       initialDay,
       false,
       fallback,
-      false,
     ),
     true,
     true,
@@ -2432,7 +2334,7 @@ export async function renderDashboard(period: Period = 'week', provider: string 
     process.stderr.write(`codeburn: startup timing pre-ink=${(performance.now() - startupStarted).toFixed(1)}ms\n`)
     process.stderr.write(`codeburn: progressive startup ${progressive ? 'on' : 'off'}, ${paint.deferredFiles} files deferred to the background index\n`)
   }
-  const { period: opened, scannedProjects, filteredProjects, planUsages, initialDurable } = paint.result
+  const { period: opened, scannedProjects, filteredProjects, initialDurable } = paint.result
   const label = initialDay ? formatDayRangeLabel(initialDay) : customRangeLabel
   patchStdoutForWindows()
   if (isTTY) {
@@ -2449,7 +2351,7 @@ export async function renderDashboard(period: Period = 'week', provider: string 
     }
     process.stdin.on('data', hardQuitGuard)
     const app = renderDebouncedInteractive(process.stdout, ({ columns }) => (
-      <InteractiveDashboard initialProjects={filteredProjects} initialDailyHistoryProjects={scrollableDailyHistory ? scannedProjects : undefined} initialPeriod={opened} initialProvider={provider} initialPlanUsages={planUsages} initialDurable={initialDurable} refreshSeconds={refreshSeconds} projectFilter={projectFilter} excludeFilter={excludeFilter} customRange={customRange} customRangeLabel={customRangeLabel} initialDay={initialDay} windowColumns={columns} initialIndexPendingFiles={paint.deferredFiles} initialHistoryIndexing={progressive} initialCacheWasCold={cacheWasCold} autoFallbackFromEmptyToday={auto} terminateProcess={exitCode => { setImmediate(() => exitAfterCacheCleanup(exitCode)) }} />
+      <InteractiveDashboard initialProjects={filteredProjects} initialDailyHistoryProjects={scrollableDailyHistory ? scannedProjects : undefined} initialPeriod={opened} initialProvider={provider} initialDurable={initialDurable} refreshSeconds={refreshSeconds} projectFilter={projectFilter} excludeFilter={excludeFilter} customRange={customRange} customRangeLabel={customRangeLabel} initialDay={initialDay} windowColumns={columns} initialIndexPendingFiles={paint.deferredFiles} initialHistoryIndexing={progressive} initialCacheWasCold={cacheWasCold} autoFallbackFromEmptyToday={auto} terminateProcess={exitCode => { setImmediate(() => exitAfterCacheCleanup(exitCode)) }} />
     ))
     try {
       await app.waitUntilExit()
@@ -2458,7 +2360,7 @@ export async function renderDashboard(period: Period = 'week', provider: string 
       app.dispose()
     }
   } else {
-    const { unmount } = render(<StaticDashboard projects={filteredProjects} period={opened} activeProvider={provider} planUsages={planUsages} label={label} dayMode={initialDay != null} durable={initialDurable} />, { patchConsole: false })
+    const { unmount } = render(<StaticDashboard projects={filteredProjects} period={opened} activeProvider={provider} label={label} dayMode={initialDay != null} durable={initialDurable} />, { patchConsole: false })
     // Non-interactive one-shot output: ink schedules the frame through a
     // throttled render, so yield a tick to let it flush to stdout before
     // unmounting. Unmounting synchronously can race the flush and drop output.

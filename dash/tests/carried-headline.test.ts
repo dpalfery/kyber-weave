@@ -7,7 +7,7 @@ import { join } from 'path'
 import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry } from '../src/daily-cache.js'
 import { getDateRange } from '../src/cli-date.js'
 import { loadPricing } from '../src/models.js'
-import { buildMenubarPayloadForRange, getDailyCacheConfigHash } from '../src/usage-aggregator.js'
+import { buildDurablePeriod, getDailyCacheConfigHash } from '../src/usage-aggregator.js'
 
 // The adversarial-review blocker on the carry-forward PR: the daily cache held
 // carried history, history.daily showed it, but the HEADLINE current.cost /
@@ -88,30 +88,30 @@ describe('carried history reaches the user-visible headline', () => {
     }
     await writeFile(join(ROOT, 'cache', `daily-cache.v${DAILY_CACHE_VERSION}.json`), JSON.stringify(cache), 'utf-8')
 
-    const payload = await buildMenubarPayloadForRange(getDateRange('all'), { provider: 'all', optimize: false, timeline: false })
+    const durable = await buildDurablePeriod(getDateRange('all'), { provider: 'all', optimize: false, timeline: false })
 
     // The history strip always showed the day; the regression was everything below.
-    expect(payload.history.daily.some(d => d.date === day && d.cost === 100)).toBe(true)
+    expect(durable.days.some(d => d.date === day && d.cost === 100)).toBe(true)
 
     // Headline totals must reflect the carried day, not the (empty) live parse.
-    expect(payload.current.cost).toBe(100)
-    expect(payload.current.calls).toBe(40)
-    expect(payload.current.sessions).toBe(3)
+    expect(durable.data.cost).toBe(100)
+    expect(durable.data.calls).toBe(40)
+    expect(durable.data.sessions).toBe(3)
 
     // Model and project views must surface it too, with the friendly name
     // derived from the stored project path.
-    expect(payload.current.topModels.some(m => m.name === 'Opus 4.8' && m.cost === 100)).toBe(true)
-    const projects = payload.current.topProjects
-    expect(projects.some(p => p.name === 'proj-x' && p.cost === 100 && p.sessions === 3)).toBe(true)
+    expect(durable.data.models.some(m => m.name === 'Opus 4.8' && m.cost === 100)).toBe(true)
+    const projects = durable.days.flatMap(d => Object.entries(d.projects ?? {}))
+    expect(projects.some(([name, p]) => name === 'proj-x' && p.cost === 100 && p.sessions === 3)).toBe(true)
 
     // Scan-derived workflow-intelligence fields must be PROPAGATED onto the
     // cache-authoritative headline, not silently dropped by the selective
     // merge (the regression that made them dead on the default path). With no
     // surviving sessions they are the empty-scan values, but they must exist.
-    expect(payload.current.workflow).toBeDefined()
-    expect(payload.current.workflow?.corrections).toBe(0)
-    expect(Array.isArray(payload.current.topReworkedFiles)).toBe(true)
-    expect(typeof payload.current.pricingCoverage).toBe('number')
+    expect(durable.data.workflow).toBeDefined()
+    expect(durable.data.workflow?.corrections).toBe(0)
+    expect(Array.isArray(durable.data.topReworkedFiles)).toBe(true)
+    expect(typeof durable.data.pricingCoverage).toBe('number')
   })
 
   it('merges live today data on top of carried history without double counting', async () => {
@@ -128,8 +128,8 @@ describe('carried history reaches the user-visible headline', () => {
     }
     await writeFile(join(ROOT, 'cache', `daily-cache.v${DAILY_CACHE_VERSION}.json`), JSON.stringify(cache), 'utf-8')
 
-    const payload = await buildMenubarPayloadForRange(getDateRange('all'), { provider: 'all', optimize: false, timeline: false })
-    expect(payload.current.cost).toBe(100)
-    expect(payload.current.topProjects).toHaveLength(1)
+    const durable = await buildDurablePeriod(getDateRange('all'), { provider: 'all', optimize: false, timeline: false })
+    expect(durable.data.cost).toBe(100)
+    expect(durable.days.flatMap(d => Object.keys(d.projects ?? {}))).toEqual(['proj-x'])
   })
 })

@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { aggregateSessions, renderJson, renderTable, renderWorkUnitJson, renderWorkUnitTable } from '../src/sessions-report.js'
 import { inferSessionProvider } from '../src/session-output.js'
-import { deriveTraceId } from '../src/sync/otlp.js'
+import { createHash } from 'node:crypto'
+
+/// Mirrors `deriveWorkUnitId` in work-units.ts. Asserting the derivation rather
+/// than importing it keeps the test honest about the id's shape: a change to the
+/// production hash has to be made here too, deliberately.
+function expectedWorkUnitId(sessionId: string): string {
+  return createHash('sha256').update(sessionId).digest('hex').slice(0, 32)
+}
 import { resolveWorkUnits, workUnitSessionKey } from '../src/work-units.js'
 import type { WorkUnitResolution, WorkUnitSession } from '../src/work-units.js'
 import type { ClassifiedTurn, ProjectSummary, SessionLineage, SessionSummary } from '../src/types.js'
@@ -37,7 +44,7 @@ describe('resolveWorkUnits', () => {
 
     expect(units).toHaveLength(2)
     const family = units.find(unit => unit.rootSessionId === 'root')!
-    expect(family.workUnitId).toBe(deriveTraceId('root'))
+    expect(family.workUnitId).toBe(expectedWorkUnitId('root'))
     expect(family.childSessionIds).toEqual(['child-1', 'child-2'])
     expect(family.roles).toEqual({ root: 'root', 'child-1': 'child', 'child-2': 'child' })
     const solo = units.find(unit => unit.rootSessionId === 'solo')!
@@ -58,7 +65,7 @@ describe('resolveWorkUnits', () => {
   it('leaves a child ungrouped when its parent is out of window (fail closed)', () => {
     const { units } = resolveWorkUnits([s('child', recorded('child', 'missing'))])
     expect(units).toEqual([{
-      workUnitId: deriveTraceId('child'),
+      workUnitId: expectedWorkUnitId('child'),
       rootSessionId: 'child',
       childSessionIds: [],
       roles: { child: 'unknown' },
@@ -297,7 +304,7 @@ describe('sessions --by-work-unit presentation', () => {
 
     expect(parsed.workUnits).toHaveLength(2)
     const family = parsed.workUnits.find((unit: { rootSessionId: string }) => unit.rootSessionId === 'root')
-    expect(family.workUnitId).toBe(deriveTraceId('root'))
+    expect(family.workUnitId).toBe(expectedWorkUnitId('root'))
     expect(family.childSessionIds).toEqual(['child-1', 'child-2'])
     expect(family.roles).toEqual({ root: 'root', 'child-1': 'child', 'child-2': 'child' })
     const solo = parsed.workUnits.find((unit: { rootSessionId: string }) => unit.rootSessionId === 'solo')

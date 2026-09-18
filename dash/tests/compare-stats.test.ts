@@ -231,7 +231,7 @@ describe('computeComparison', () => {
 
     const cacheRow = rows.find(r => r.label === 'Cache hit rate')!
     // Cache writes are excluded from the denominator (reads / reads + fresh
-    // input), matching src/menubar-json.ts and the desktop app.
+    // input), matching the ratio program.ts computes for the report.
     const totalA = 5000 + 30000
     const totalB = 10000 + 10000
     expect(cacheRow.valueA).toBeCloseTo(30000 / totalA * 100)

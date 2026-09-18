@@ -2,11 +2,19 @@ import chalk from 'chalk'
 import type { ProjectSummary } from './types.js'
 import { behavioralCallCount } from './behavioral-weight.js'
 
-// Re-exported from currency.ts so existing imports from './format.js' keep working.
-// The currency-aware version applies exchange rate and symbol automatically.
-// Imported locally too since renderStatusBar below uses it directly.
-import { formatCost } from './currency.js'
-export { formatCost }
+/// Format a USD cost.
+///
+/// Costs are always USD: the bundled pricing table and its cached refresh are the
+/// only pricing source (R2.8), and the Frankfurter FX conversion that used to sit
+/// in `currency.ts` was a third-party exchange call this product no longer makes
+/// (R2.7). Precision widens as the figure shrinks so a sub-cent cost still reads
+/// as a number rather than as `$0.00`.
+export function formatCost(costUSD: number): string {
+  if (costUSD >= 1) return `$${costUSD.toFixed(2)}`
+  if (costUSD >= 0.01) return `$${costUSD.toFixed(3)}`
+  if (costUSD >= 0.0001) return `$${costUSD.toFixed(4)}`
+  return `$${costUSD.toFixed(2)}`
+}
 
 /// Prefix a formatted cost with the estimated marker (`~`) when the figure is
 /// priced from estimated tokens rather than metered. Keeps the marker identical

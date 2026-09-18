@@ -22,7 +22,7 @@
     "test": "vitest run tests kyber dash/src --exclude \"tests/cache-refresh-lock*\"",
     "test:cost-isolation": "vitest run kyber/tools/cost-isolation.test.ts",
     "check:reachable": "node scripts/unreachable.mjs",
-    "test:locks": "vitest run tests/cache-refresh-lock.test.ts tests/cache-refresh-lock-corrupt-body.test.ts tests/cache-refresh-lock-process.test.ts tests/cache-refresh-lock-status-snapshot.test.ts --poolOptions.forks.singleFork=true",
+    "test:locks": "vitest run tests/cache-refresh-lock.test.ts tests/cache-refresh-lock-corrupt-body.test.ts tests/cache-refresh-lock-process.test.ts --poolOptions.forks.singleFork=true",
     "test:watch": "vitest tests dash/src --exclude \"tests/cache-refresh-lock*\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

@@ -8,13 +8,12 @@ import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry } f
 import { getDateRange } from '../src/cli-date.js'
 import { loadPricing } from '../src/models.js'
 import {
-  buildMenubarPayloadForRange,
   buildDurablePeriod,
   buildPeriodData,
   getDailyCacheConfigHash,
 } from '../src/usage-aggregator.js'
 import { parseAllSessions, filterProjectsByName, filterProjectsByDateRange, filterProjectsByDays, clearSessionCache } from '../src/parser.js'
-import { renderOverview } from '../src/overview.js'
+import { carriedCostNote } from '../src/format.js'
 import type { DateRange } from '../src/types.js'
 
 // The point of #755: Claude deletes transcripts after ~30 days, so a day that
@@ -156,36 +155,27 @@ afterEach(async () => {
   if (existsSync(ROOT)) await rm(ROOT, { recursive: true, force: true })
 })
 
-/** The full report-vs-menubar equality for one resolved range + provider. */
-async function assertParity(range: DateRange, provider: string): Promise<{ menubarCost: number; carried: number }> {
-  clearSessionCache()
-  const menubar = await buildMenubarPayloadForRange({ range, label: 'p' }, { provider, optimize: false, timeline: false })
+/** Durable headline totals for one resolved range + provider. */
+async function durableTotals(range: DateRange, provider: string): Promise<{ cost: number; carried: number }> {
   clearSessionCache()
   const durable = await buildDurablePeriod({ range, label: 'p' }, { provider })
-  // The report / overview / TUI headline IS durable.data; the menubar payload's
-  // current IS the same builder. They must agree bit-for-bit.
-  expect(menubar.current.cost).toBe(durable.data.cost)
-  expect(menubar.current.calls).toBe(durable.data.calls)
-  expect(menubar.current.sessions).toBe(durable.data.sessions)
-  expect(menubar.current.inputTokens).toBe(durable.data.inputTokens)
-  expect(menubar.current.outputTokens).toBe(durable.data.outputTokens)
-  return { menubarCost: menubar.current.cost, carried: durable.carriedCostUSD }
+  return { cost: durable.data.cost, carried: durable.carriedCostUSD }
 }
 
-describe('CLI totals ↔ menubar parity through the durable daily cache', () => {
+describe('CLI totals through the durable daily cache', () => {
   it('counts the carried day equally on both paths for all-provider, custom-range, and lifetime', async () => {
     await seedCarriedCache()
     await seedLiveTodaySession()
 
     const custom: DateRange = { start: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000), end: new Date() }
     for (const range of [getDateRange('all').range, getDateRange('lifetime').range, custom]) {
-      const { menubarCost, carried } = await assertParity(range, 'all')
+      const { cost: durableCost, carried } = await durableTotals(range, 'all')
       // The carried day is genuinely in the total: it equals the surviving-file
       // parse PLUS the $100 carried day, and strictly exceeds the live-only view.
       const live = await liveOnly(range)
       expect(carried).toBeCloseTo(CARRIED_COST, 6)
-      expect(menubarCost).toBeGreaterThan(live.cost)
-      expect(menubarCost).toBeCloseTo(live.cost + CARRIED_COST, 6)
+      expect(durableCost).toBeGreaterThan(live.cost)
+      expect(durableCost).toBeCloseTo(live.cost + CARRIED_COST, 6)
     }
   })
 
@@ -195,18 +185,15 @@ describe('CLI totals ↔ menubar parity through the durable daily cache', () => 
     const range = getDateRange('all').range
 
     // The corpus is entirely Claude, so the claude slice equals the all total.
-    const claude = await assertParity(range, 'claude')
+    const claude = await durableTotals(range, 'claude')
     clearSessionCache()
     const all = await buildDurablePeriod({ range, label: 'p' }, { provider: 'all' })
-    expect(claude.menubarCost).toBeCloseTo(all.data.cost, 6)
+    expect(claude.cost).toBeCloseTo(all.data.cost, 6)
     expect(claude.carried).toBeCloseTo(CARRIED_COST, 6)
 
-    // A provider with no data is zero on both paths (no carried leak).
-    clearSessionCache()
-    const codexMenubar = await buildMenubarPayloadForRange({ range, label: 'p' }, { provider: 'codex', optimize: false, timeline: false })
+    // A provider with no data is zero, with no carried leak.
     clearSessionCache()
     const codexDurable = await buildDurablePeriod({ range, label: 'p' }, { provider: 'codex' })
-    expect(codexMenubar.current.cost).toBe(codexDurable.data.cost)
     expect(codexDurable.data.cost).toBe(0)
     expect(codexDurable.carriedCostUSD).toBe(0)
   })
@@ -216,15 +203,15 @@ describe('CLI totals ↔ menubar parity through the durable daily cache', () => 
     await seedLiveTodaySession()
     const range = getDateRange('all').range
 
-    const { menubarCost, carried } = await assertParity(range, 'all')
+    const { cost: durableCost, carried } = await durableTotals(range, 'all')
     const live = await liveOnly(range)
     expect(carried).toBe(0)
-    expect(menubarCost).toBeGreaterThan(0)
-    expect(menubarCost).toBeCloseTo(live.cost, 6)
+    expect(durableCost).toBeGreaterThan(0)
+    expect(durableCost).toBeCloseTo(live.cost, 6)
   })
 })
 
-describe('terminal overview carried-day footnote', () => {
+describe('carried-day footnote', () => {
   it('appends the preserved-cost footnote exactly when carried > 0', async () => {
     await seedCarriedCache()
     await seedLiveTodaySession()
@@ -233,23 +220,7 @@ describe('terminal overview carried-day footnote', () => {
     clearSessionCache()
     const durable = await buildDurablePeriod({ range, label: 'Last 6 months' }, { provider: 'all' })
     expect(durable.carriedCostUSD).toBeGreaterThan(0)
-    const withCarried = renderOverview(durable.liveProjects, {
-      label: 'Last 6 months',
-      color: false,
-      durable: {
-        cost: durable.data.cost,
-        savingsUSD: durable.data.savingsUSD,
-        calls: durable.data.calls,
-        sessions: durable.data.sessions,
-        inputTokens: durable.data.inputTokens,
-        outputTokens: durable.data.outputTokens,
-        cacheReadTokens: durable.data.cacheReadTokens,
-        cacheWriteTokens: durable.data.cacheWriteTokens,
-        days: durable.days,
-        carriedCostUSD: durable.carriedCostUSD,
-      },
-    })
-    expect(withCarried).toContain('preserved from expired session logs')
+    expect(carriedCostNote(durable.carriedCostUSD)).toContain('preserved from expired session logs')
   })
 
   it('omits the footnote when nothing was carried', async () => {
@@ -259,23 +230,7 @@ describe('terminal overview carried-day footnote', () => {
     clearSessionCache()
     const durable = await buildDurablePeriod({ range, label: 'Last 6 months' }, { provider: 'all' })
     expect(durable.carriedCostUSD).toBe(0)
-    const noCarried = renderOverview(durable.liveProjects, {
-      label: 'Last 6 months',
-      color: false,
-      durable: {
-        cost: durable.data.cost,
-        savingsUSD: durable.data.savingsUSD,
-        calls: durable.data.calls,
-        sessions: durable.data.sessions,
-        inputTokens: durable.data.inputTokens,
-        outputTokens: durable.data.outputTokens,
-        cacheReadTokens: durable.data.cacheReadTokens,
-        cacheWriteTokens: durable.data.cacheWriteTokens,
-        days: durable.days,
-        carriedCostUSD: durable.carriedCostUSD,
-      },
-    })
-    expect(noCarried).not.toContain('preserved from expired session logs')
+    expect(carriedCostNote(durable.carriedCostUSD)).toBeNull()
   })
 })
 

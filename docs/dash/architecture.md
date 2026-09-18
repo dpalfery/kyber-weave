@@ -41,7 +41,6 @@ code-refs:
   - Measurability
   - analyzeContext
   - ParityDigest
-  - DashboardData
   - refreshHarnessSources
   - registerKyberCommands
   - commitSourceUnit
@@ -454,8 +453,10 @@ an on-demand second opinion:
 
 ## Surface Layer
 
-`dash/kyber/dashboard/data.ts` (`getDashboardData`) turns the canonical store into the single
-payload delivery surfaces consume (R11.1).
+The terminal dashboard's `getDashboardData` shim was deleted with the surfaces that read it
+(context-surfaces spec, task 2.6). The single payload delivery surfaces consume is being
+rebuilt as the versioned `ContextReport`, which the REST API, the tray and `kyberdash report`
+all read; until that lands, each surface derives its own figures from `CanonStore`.
 
 ### Web Dashboard (dash/dash/)
 

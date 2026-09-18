@@ -6,9 +6,8 @@ import { join } from 'path'
 
 import { DAILY_CACHE_VERSION, currentTzKey, type DailyCache, type DailyEntry, type ProjectDayStats, type ProviderDaySlice } from '../src/daily-cache.js'
 import { loadPricing } from '../src/models.js'
-import { buildDurablePeriod, buildMenubarPayloadForRange, buildPeriodData, getDailyCacheConfigHash } from '../src/usage-aggregator.js'
+import { buildDurablePeriod, buildPeriodData, getDailyCacheConfigHash } from '../src/usage-aggregator.js'
 import { parseAllSessions, filterProjectsByName, clearSessionCache } from '../src/parser.js'
-import { renderOverview } from '../src/overview.js'
 import type { DateRange } from '../src/types.js'
 
 // The durable headline (overview / report Overview panel / menubar current) is
@@ -190,6 +189,19 @@ const coveringRange = (): DateRange => ({
   end: new Date(),
 })
 
+/// Per-provider cost off the durable day slices — what the deleted menubar
+/// payload used to precompute, derived here from the days the headline is built
+/// from, so a slice that disagrees with the headline shows up as a mismatch.
+function providerCosts(days: Array<{ providers: Record<string, { cost: number }> }>): Record<string, number> {
+  const totals: Record<string, number> = {}
+  for (const day of days) {
+    for (const [provider, slice] of Object.entries(day.providers)) {
+      totals[provider] = (totals[provider] ?? 0) + slice.cost
+    }
+  }
+  return totals
+}
+
 describe('durable headline honours --project / --exclude on carried days', () => {
   it('drops an excluded project from the headline so it reconciles with the By Project panel', async () => {
     await seedCache(carriedDayWithProjects(daysAgoStr(10)))
@@ -288,37 +300,20 @@ describe('durable headline honours --project / --exclude on carried days', () =>
     expect(unfiltered.data.calls - filtered.data.calls).toBe(DROP.calls)
   })
 
-  it('keeps the menubar payload in step with the report under a project filter', async () => {
-    await seedCache(carriedDayWithProjects(daysAgoStr(10)))
-    await seedLiveTodaySession()
-    const range = coveringRange()
-
-    clearSessionCache()
-    const menubar = await buildMenubarPayloadForRange({ range, label: 'p' }, { provider: 'all', exclude: ['drop-me'], optimize: false, timeline: false })
-    clearSessionCache()
-    const durable = await buildDurablePeriod({ range, label: 'p' }, { provider: 'all', exclude: ['drop-me'] })
-
-    // Both surfaces route the headline through the one shared builder, so a
-    // project filter must land on them identically.
-    expect(menubar.current.cost).toBe(durable.data.cost)
-    expect(menubar.current.calls).toBe(durable.data.calls)
-    expect(menubar.current.inputTokens).toBe(durable.data.inputTokens)
-  })
-
   it('slices the provider list by the project filter so it reconciles with the headline', async () => {
     await seedCache(carriedDayTwoProviders(daysAgoStr(10)))
     const range = coveringRange()
 
     clearSessionCache()
-    const menubar = await buildMenubarPayloadForRange({ range, label: 'p' }, { provider: 'all', exclude: ['drop-me'], optimize: false, timeline: false })
+    const durable = await buildDurablePeriod({ range, label: 'p' }, { provider: 'all', exclude: ['drop-me'] })
 
-    const providers = menubar.current.providers
+    const providers = providerCosts(durable.days)
     const providerSum = Object.values(providers).reduce((a, b) => a + b, 0)
 
-    // The headline already honours the filter; the provider list used to be built
-    // from unfiltered cache days, so it kept reporting codex's excluded spend.
-    expect(menubar.current.cost).toBeCloseTo(KEEP.cost, 6)
-    expect(providerSum).toBeCloseTo(menubar.current.cost, 6)
+    // The headline already honours the filter; the provider slices used to be built
+    // from unfiltered cache days, so they kept reporting codex's excluded spend.
+    expect(durable.data.cost).toBeCloseTo(KEEP.cost, 6)
+    expect(providerSum).toBeCloseTo(durable.data.cost, 6)
     expect(providers['claude']).toBeCloseTo(KEEP.cost, 6)
     expect(providers['codex'] ?? 0).toBeCloseTo(0, 6)
   })
@@ -328,11 +323,12 @@ describe('durable headline honours --project / --exclude on carried days', () =>
     const range = coveringRange()
 
     clearSessionCache()
-    const menubar = await buildMenubarPayloadForRange({ range, label: 'p' }, { provider: 'all', optimize: false, timeline: false })
+    const durable = await buildDurablePeriod({ range, label: 'p' }, { provider: 'all' })
 
-    expect(menubar.current.providers['claude']).toBeCloseTo(KEEP.cost, 6)
-    expect(menubar.current.providers['codex']).toBeCloseTo(DROP.cost, 6)
-    expect(menubar.current.cost).toBeCloseTo(DAY_COST, 6)
+    const providers = providerCosts(durable.days)
+    expect(providers['claude']).toBeCloseTo(KEEP.cost, 6)
+    expect(providers['codex']).toBeCloseTo(DROP.cost, 6)
+    expect(durable.data.cost).toBeCloseTo(DAY_COST, 6)
   })
 
   it('leaves the unfiltered headline exactly as it was', async () => {
@@ -383,11 +379,9 @@ describe('carried days with no per-project split (pre-v15)', () => {
     expect(durable.carriedCostUSD).toBe(0)
   })
 
-  it('says so in the overview instead of just showing a short total', async () => {
-    // Two cached days: one that cannot be attributed (the footnote's subject) and
-    // one that can. The attributable day keeps the headline non-zero from the
-    // CACHE alone, so the assertion tests the footnote rather than depending on
-    // the live parse to keep renderOverview off its "No usage found" path.
+  it('reports the set-aside cost so a short total can explain itself', async () => {
+    // Two cached days: one that cannot be attributed (the figure's subject) and
+    // one that can, so the headline stays non-zero from the CACHE alone.
     await seedCache(carriedDayWithoutProjects(daysAgoStr(10)), carriedDayWithProjects(daysAgoStr(5)))
     await seedLiveTodaySession()
     const range = coveringRange()
@@ -397,24 +391,6 @@ describe('carried days with no per-project split (pre-v15)', () => {
     expect(durable.unattributedCostUSD).toBeGreaterThan(0)
     expect(durable.data.cost).toBeGreaterThan(0)
 
-    const rendered = renderOverview(durable.liveProjects, {
-      label: 'This month',
-      color: false,
-      durable: {
-        cost: durable.data.cost,
-        savingsUSD: durable.data.savingsUSD,
-        calls: durable.data.calls,
-        sessions: durable.data.sessions,
-        inputTokens: durable.data.inputTokens,
-        outputTokens: durable.data.outputTokens,
-        cacheReadTokens: durable.data.cacheReadTokens,
-        cacheWriteTokens: durable.data.cacheWriteTokens,
-        days: durable.days,
-        carriedCostUSD: durable.carriedCostUSD,
-        unattributedCostUSD: durable.unattributedCostUSD,
-      },
-    })
-    expect(rendered).toContain('no per-project history')
   })
 
   it('still counts the day in full when no project filter is active', async () => {

@@ -176,7 +176,7 @@ describe('interactive dashboard progressive startup', () => {
 
   it('falls back from an all-zero Today on cold and warm indexes, but keeps real usage on Today', () => {
     const cache = { version: 29, savingsConfigHash: '', lastComputedDate: null, days: [], complete: true } as const
-    const coldWeek = { provider: 'all', normalizedProjects: [], cache, planUsages: [], readyThrough: 'week' as const }
+    const coldWeek = { provider: 'all', normalizedProjects: [], cache, readyThrough: 'week' as const }
     const warmLifetime = { ...coldWeek, readyThrough: 'lifetime' as const }
     const zeroSessionProject = {
       project: 'zero', projectPath: '/tmp/zero', sessions: [{
@@ -246,7 +246,6 @@ describe('interactive dashboard progressive startup', () => {
 
     expect(paint.result.period).toBe('today')
     expect(paint.result.filteredProjects.flatMap(project => project.sessions).map(session => session.sessionId)).toEqual(['today'])
-    expect(paint.result.planUsages).toEqual([])
     expect(paint.deferredFiles).toBe(0)
     expect(filesParsedFromSourceCount() - parsedBefore).toBe(0)
     expect(fingerprintFileCount() - fingerprintsBefore).toBe(0)
