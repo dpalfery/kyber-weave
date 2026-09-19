@@ -4,7 +4,6 @@ import { join } from 'path'
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
 
 import { findUnpricedModels, getModelCosts, getShortModelName, resolveCanonicalModelId, calculateCost, CACHE_SCHEMA_VERSION, loadPricing, setModelAliases, setPriceOverrides, setLocalModelSavings, setFlatRateModels, setFlatRateRemoved, isExpectedFreeModel, isFlatRateModel, getPriceOverridesConfigHash, getModelAliasesConfigHash, getFlatRateModelsConfigHash, parseLiteLLMEntry, unpricedModelHint } from './models.js'
-import { getDailyCacheConfigHash } from '../metrics/usage-aggregator.js'
 import snapshotData from './data/litellm-snapshot.json' with { type: 'json' }
 
 beforeAll(async () => {
@@ -589,28 +588,6 @@ describe('user price overrides', () => {
     const builtinOnly = getPriceOverridesConfigHash()
     expect(builtinOnly).toContain('builtin:')
     expect(getPriceOverridesConfigHash()).toBe(builtinOnly)
-    const baseline = getDailyCacheConfigHash()
-
-    setPriceOverrides({ 'price-hash-model': { input: 1, output: 2 } })
-    const firstCombined = getDailyCacheConfigHash()
-
-    setPriceOverrides({ 'price-hash-model': { input: 3, output: 2 } })
-    const secondCombined = getDailyCacheConfigHash()
-
-    expect(firstCombined).not.toBe(baseline)
-    expect(secondCombined).not.toBe(baseline)
-    expect(secondCombined).not.toBe(firstCombined)
-  })
-
-  it('includes flat-rate marks in the daily cache config hash', () => {
-    setLocalModelSavings({})
-    setPriceOverrides({})
-    setFlatRateModels([])
-    const baseline = getDailyCacheConfigHash()
-    setFlatRateModels(['zz-flat-hash'])
-    expect(getDailyCacheConfigHash()).not.toBe(baseline)
-    setFlatRateModels([])
-    expect(getDailyCacheConfigHash()).toBe(baseline)
   })
 })
 

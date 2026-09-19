@@ -1,10 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { CanonStore } from '../canon/store.js'
 import { allProviderNames, getAllProviders } from '../providers/index.js'
 
 const homes: string[] = []
@@ -48,25 +50,24 @@ describe('allProviderNames', () => {
   })
 })
 
-describe('codeburn --provider validation', () => {
-  it('rejects an unknown provider with a clear error and exit 1', async () => {
+describe('kyberdash report --harness validation', () => {
+  it('rejects an unknown harness with a nearest-match hint and exit 2, before the store opens', async () => {
     const home = await makeHome()
-    const res = runCli(['report', '--provider', 'claud', '-p', 'today'], home)
-    expect(res.status).toBe(1)
-    expect(res.stderr).toContain('unknown provider "claud"')
-    expect(res.stderr).toContain('Valid values: all,')
+    const db = join(home, 'must-not-be-created', 'canon.db')
+    const res = runCli(['report', '--harness', 'claud', '--db', db], home)
+    expect(res.status).toBe(2)
+    expect(res.stderr).toContain('unknown harness "claud"')
+    expect(res.stderr).toMatch(/Did you mean "claude-/)
+    expect(existsSync(join(home, 'must-not-be-created'))).toBe(false)
   })
 
-  it('accepts a valid provider', async () => {
+  it('accepts a valid harness', async () => {
     const home = await makeHome()
-    const res = runCli(['report', '--provider', 'claude', '--format', 'json', '-p', 'today'], home)
-    expect(res.status).toBe(0)
-    expect(res.stderr).not.toContain('unknown provider')
-  })
-
-  it('accepts the "all" sentinel', async () => {
-    const home = await makeHome()
-    const res = runCli(['report', '--provider', 'all', '--format', 'json', '-p', 'today'], home)
-    expect(res.status).toBe(0)
+    const db = join(home, 'canon.db')
+    const store = new CanonStore(db)
+    store.close()
+    const res = runCli(['report', '--harness', 'claude-cli', '--format', 'json', '--db', db], home)
+    expect(res.status, res.stderr).toBe(0)
+    expect(res.stderr).not.toContain('unknown harness')
   })
 })

@@ -255,7 +255,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - text is coloured only for a TTY with `NO_COLOR` unset
   - Implement the renderers.
   - _Requirements: 11.8, 11.9, 14.1, 14.2, 14.3, 14.4_
-- [ ] 6.2 Replace `report` with the context report
+- [x] 6.2 Replace `report` with the context report
   - Stream C.
   - Write command tests first:
     - It is the default command.

@@ -5,7 +5,6 @@ import { createRequire } from 'node:module'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDateRange } from '../cli/cli-date.js'
 import { clearSessionCache, parseAllSessions } from './parser.js'
 import { readCacheOnDisk } from '../../tests/fixtures/session-cache-io.js'
 import { isSqliteAvailable } from './sqlite.js'
@@ -139,7 +138,11 @@ describe('Antigravity timestamp stability across .db rewrites', () => {
     // `today` must NOT include the call: first-seen is January, not "now",
     // even though the file mtime was rewritten to June (and wall-clock is later).
     clearSessionCache()
-    const { range: todayRange } = getDateRange('today')
+    const now = new Date()
+    const todayRange = {
+      start: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+      end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999),
+    }
     const todayProjects = await parseAllSessions(todayRange, 'antigravity')
     const todayKeys = todayProjects.flatMap(project =>
       project.sessions.flatMap(session =>
