@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from 'fs/promise
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { emptyCache, loadCache, saveCache } from './session-cache.js'
+import { emptyCache, loadCache, saveCache } from '../ingest/session-cache.js'
 
 const roots: string[] = []
 

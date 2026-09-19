@@ -35,6 +35,12 @@ import {
   type SourceCheckpoint,
   type SourceCheckpointRow,
 } from './source-state.js'
+import {
+  REFRESH_RUN_SQL,
+  type RefreshRunRow,
+  type RefreshRunStatus,
+  type RefreshTrigger,
+} from './refresh-run.js'
 import { contentFromParts } from './types.js'
 import type {
   CanonicalRecord,
@@ -70,7 +76,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 11
+export const SCHEMA_VERSION = 12
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -271,7 +277,7 @@ CREATE TABLE IF NOT EXISTS prediction (
 CREATE INDEX IF NOT EXISTS prediction_by_finding ON prediction (finding_id);
 CREATE INDEX IF NOT EXISTS prediction_by_run ON prediction (run_id);
 CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
-` + SOURCE_STATE_SQL
+` + SOURCE_STATE_SQL + REFRESH_RUN_SQL
 
 /**
  * In-place upgrades, keyed by the version they upgrade FROM. Each runs inside
@@ -279,6 +285,19 @@ CREATE INDEX IF NOT EXISTS prediction_by_created_at ON prediction (created_at);
  * this work: every statement in it is `IF NOT EXISTS`, so an existing table
  * never gains a column.
  */
+/** Map a `refresh_run` row out of SQLite's column names. */
+function toRefreshRunRow(row: Record<string, unknown>): RefreshRunRow {
+  return {
+    id: String(row['id']),
+    startedAt: String(row['started_at']),
+    completedAt: row['completed_at'] === null ? null : String(row['completed_at']),
+    status: String(row['status']) as RefreshRunStatus,
+    pid: Number(row['pid']),
+    trigger: String(row['trigger']) as RefreshTrigger,
+    summary: row['summary'] === null ? null : String(row['summary']),
+  }
+}
+
 export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // v1 -> v2: structured content parts. v1 stored content as a flat string
   // per bucket, which has nowhere to put the ground-truth MCP server a tool
@@ -428,6 +447,14 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   // only — existing records.raw and derived history are left untouched.
   10: (db) => {
     db.exec(SOURCE_STATE_SQL)
+  },
+  // v11 -> v12: the refresh run log. Before it, the only record of a refresh was whether
+  // the store had changed, which cannot distinguish "not refreshed lately" from
+  // "refreshed and failed" — and R10.5 needs the last success to stay visible while a
+  // later run is failing. Existing stores gain an empty table; the first refresh after
+  // the upgrade writes the first row.
+  11: (db) => {
+    db.exec(REFRESH_RUN_SQL)
   },
 }
 
@@ -1042,6 +1069,57 @@ export class CanonStore {
       this.db.exec('ROLLBACK')
       throw err
     }
+  }
+
+  /**
+   * Open a refresh run, returning its id. Written before any work so a run that crashes
+   * still leaves a row — an interrupted refresh is a fact the footer has to be able to
+   * report, and a row only written on success could never describe one.
+   */
+  startRefreshRun(input: {
+    id: string
+    startedAt: string
+    pid: number
+    trigger: RefreshTrigger
+  }): string {
+    this.db
+      .prepare(
+        `INSERT INTO refresh_run (id, started_at, completed_at, status, pid, trigger, summary)
+         VALUES (?, ?, NULL, 'running', ?, ?, NULL)`,
+      )
+      .run(input.id, input.startedAt, input.pid, input.trigger)
+    return input.id
+  }
+
+  /** Close a refresh run. `summary` is one line: what it did, or why it failed (R10.5). */
+  completeRefreshRun(
+    id: string,
+    status: Exclude<RefreshRunStatus, 'running'>,
+    completedAt: string,
+    summary: string | null,
+  ): void {
+    this.db
+      .prepare('UPDATE refresh_run SET completed_at = ?, status = ?, summary = ? WHERE id = ?')
+      .run(completedAt, status, summary, id)
+  }
+
+  /**
+   * The most recent run with the given status. The footer asks three separate "most
+   * recent" questions — last success, last failure, one in progress — and they are
+   * deliberately independent: a failure must not hide the last success (R10.5).
+   */
+  latestRefreshRun(status: RefreshRunStatus): RefreshRunRow | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1')
+      .get(status) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : toRefreshRunRow(row)
+  }
+
+  listRefreshRuns(limit = 20): RefreshRunRow[] {
+    const rows = this.db
+      .prepare('SELECT * FROM refresh_run ORDER BY started_at DESC LIMIT ?')
+      .all(limit) as Record<string, unknown>[]
+    return rows.map(toRefreshRunRow)
   }
 
   getSourceCheckpoint(harnessId: string, sourceKey: string): SourceCheckpoint | undefined {

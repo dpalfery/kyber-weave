@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +8,7 @@ import { purgeExpiredContent } from '../canon/retention.js'
 import { buildSessions } from '../canon/sessions.js'
 import type { CoverageInterval, RecordProvenance, SourceCheckpoint } from '../canon/source-state.js'
 import { checkpointIsReusable, uncoveredIntervals } from '../canon/source-state.js'
+import type { RefreshTrigger } from '../canon/refresh-run.js'
 import type { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { deduplicate, deduplicationKeyFor } from '../synth/dedup.js'
@@ -58,7 +60,7 @@ const productionDependencies: RefreshDependencies = {
 export async function refreshHarnessSources(
   store: CanonStore,
   dependencies: RefreshDependencies = productionDependencies,
-  options: { historyWeeks?: number } = {},
+  options: { historyWeeks?: number; trigger?: RefreshTrigger } = {},
 ): Promise<RefreshReport> {
   const historyWeeks = options.historyWeeks ?? DEFAULT_HISTORY_WEEKS
   const commandStartedAt = dependencies.commandStartedAt ?? new Date()
@@ -66,6 +68,14 @@ export async function refreshHarnessSources(
   const coveredFromUtc = dateRange.start.toISOString()
   const coveredThroughUtc = dateRange.end.toISOString()
   const importedAtUtc = commandStartedAt.toISOString()
+  const runId = store.startRefreshRun({
+    // Random, not derived: two runs can legitimately start in the same millisecond from
+    // the same process (a test harness does exactly that), and a derived id would collide.
+    id: randomUUID(),
+    startedAt: importedAtUtc,
+    pid: process.pid,
+    trigger: options.trigger ?? 'cli',
+  })
   const descriptors = [...(dependencies.descriptors ?? HARNESS_DESCRIPTORS)]
   const iterate = dependencies.iterateNativeUnits ?? productionIterateNativeUnits
   const ingest = dependencies.ingestProviders ?? productionIngestProviders
@@ -124,6 +134,20 @@ export async function refreshHarnessSources(
 
   const failedJobs = rows.filter((row) => row.status === 'failed').length
   const exitCode: 0 | 1 = derivationFailed || failedJobs > 0 ? 1 : 0
+
+  // Close the run the same way whether it worked or not: the footer needs the failure as
+  // much as the success, and a run row left open would later read as one still going.
+  const summary =
+    exitCode === 0
+      ? `${rows.length} source job(s), ${store.sessionCount()} session(s)`
+      : `${failedJobs} of ${rows.length} source job(s) failed${derivationFailed ? '; derivation failed' : ''}`
+  store.completeRefreshRun(
+    runId,
+    exitCode === 0 ? 'success' : 'failure',
+    new Date().toISOString(),
+    summary,
+  )
+
   return {
     historyWeeks,
     commandStartedAt: importedAtUtc,
@@ -498,8 +522,8 @@ async function warmClaudeSpecialPath(
   mkdirSync(cacheDir, { recursive: true })
   const previous = process.env['KYBERDASH_CACHE_DIR']
   process.env['KYBERDASH_CACHE_DIR'] = cacheDir
-  const { acquireCacheRefreshLock } = await import('../ingest/cache-refresh-lock.js')
-  const lock = await acquireCacheRefreshLock({ cacheDir })
+  const { acquireCacheRefreshLock } = await import('./lock.js')
+  const lock = await acquireCacheRefreshLock({ directory: cacheDir })
   try {
     const { parseAllSessions } = await import('../ingest/parser.js')
     await parseAllSessions(dateRange, providerFilter)

@@ -7,9 +7,9 @@ import { join } from 'path'
 import {
   acquireCacheRefreshLock,
   type RefreshLockClock,
-} from './cache-refresh-lock.js'
-import { clearSessionCache, parseAllSessions } from './parser.js'
-import { emptyCache, loadCache, saveCache, sessionCacheDir } from './session-cache.js'
+} from './lock.js'
+import { clearSessionCache, parseAllSessions } from '../ingest/parser.js'
+import { emptyCache, loadCache, saveCache, sessionCacheDir } from '../ingest/session-cache.js'
 
 const dirs: string[] = []
 
@@ -50,7 +50,7 @@ afterEach(async () => {
 describe('warm session-cache refresh lock', () => {
   it('returns acquired and releases its own token', async () => {
     const dir = await tempDir()
-    const result = await acquireCacheRefreshLock({ cacheDir: dir })
+    const result = await acquireCacheRefreshLock({ directory: dir })
     expect(result.outcome).toBe('acquired')
     if (result.outcome !== 'acquired') return
 
@@ -67,7 +67,7 @@ describe('warm session-cache refresh lock', () => {
     await writeFile(path, JSON.stringify({ pid: 1, token: 'holder', at: Date.now() }))
     let polls = 0
     const result = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       waitMs: 100,
       pollMs: 1,
       sleep: async () => {
@@ -86,7 +86,7 @@ describe('warm session-cache refresh lock', () => {
     await utimes(path, now, now)
 
     const result = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       clock,
       waitMs: 30,
       staleMs: 90,
@@ -101,17 +101,17 @@ describe('warm session-cache refresh lock', () => {
     const dir = await tempDir()
     const notDirectory = join(dir, 'file')
     await writeFile(notDirectory, 'x')
-    expect(await acquireCacheRefreshLock({ cacheDir: notDirectory })).toEqual({ outcome: 'unavailable' })
+    expect(await acquireCacheRefreshLock({ directory: notDirectory })).toEqual({ outcome: 'unavailable' })
   })
 
   it('serializes same-process acquisitions before touching the filesystem lock', async () => {
     const dir = await tempDir()
-    const first = await acquireCacheRefreshLock({ cacheDir: dir })
+    const first = await acquireCacheRefreshLock({ directory: dir })
     expect(first.outcome).toBe('acquired')
     if (first.outcome !== 'acquired') return
 
     let settled = false
-    const secondPromise = acquireCacheRefreshLock({ cacheDir: dir }).then(result => {
+    const secondPromise = acquireCacheRefreshLock({ directory: dir }).then(result => {
       settled = true
       return result
     })
@@ -129,11 +129,11 @@ describe('warm session-cache refresh lock', () => {
 
   it('allows independent custom lock names to proceed concurrently', async () => {
     const dir = await tempDir()
-    const first = await acquireCacheRefreshLock({ cacheDir: dir, lockFile: 'status-snapshot.aaaa.write.lock' })
+    const first = await acquireCacheRefreshLock({ directory: dir, lockFile: 'status-snapshot.aaaa.write.lock' })
     expect(first.outcome).toBe('acquired')
     if (first.outcome !== 'acquired') return
 
-    const second = await acquireCacheRefreshLock({ cacheDir: dir, lockFile: 'status-snapshot.bbbb.write.lock' })
+    const second = await acquireCacheRefreshLock({ directory: dir, lockFile: 'status-snapshot.bbbb.write.lock' })
     expect(second.outcome).toBe('acquired')
     if (second.outcome === 'acquired') await second.handle.release()
     await first.handle.release()
@@ -142,7 +142,7 @@ describe('warm session-cache refresh lock', () => {
   it('rejects custom lock paths that could escape the cache directory', async () => {
     const dir = await tempDir()
     for (const lockFile of ['../outside.lock', '/tmp/outside.lock', 'nested/lock', 'x.takeover']) {
-      expect(await acquireCacheRefreshLock({ cacheDir: dir, lockFile })).toEqual({ outcome: 'unavailable' })
+      expect(await acquireCacheRefreshLock({ directory: dir, lockFile })).toEqual({ outcome: 'unavailable' })
     }
   })
 
@@ -155,7 +155,7 @@ describe('warm session-cache refresh lock', () => {
       void utimes(path, now, now)
     }, 5)
     try {
-      const result = await acquireCacheRefreshLock({ cacheDir: dir, staleMs: 20, waitMs: 60, pollMs: 5 })
+      const result = await acquireCacheRefreshLock({ directory: dir, staleMs: 20, waitMs: 60, pollMs: 5 })
       expect(result).toEqual({ outcome: 'timed-out' })
       expect(JSON.parse(await readFile(path, 'utf-8')).token).toBe('holder')
     } finally {
@@ -178,7 +178,7 @@ describe('warm session-cache refresh lock', () => {
     await beat()
 
     const result = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       clock,
       staleMs: 500,
       waitMs: 5_000,
@@ -206,7 +206,7 @@ describe('warm session-cache refresh lock', () => {
     await utimes(path, now, now)
 
     const result = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       clock,
       waitMs: 5_000,
       pollMs: 1,
@@ -227,7 +227,7 @@ describe('warm session-cache refresh lock', () => {
     const clock = fakeClock(1_000_000)
 
     const result = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       clock,
       staleMs: 90_000,
       waitMs: 5_000,
@@ -251,7 +251,7 @@ describe('warm session-cache refresh lock', () => {
     // stale mid-wait is still recovered by THIS waiter rather than timing out
     // and leaving the leftover for the next process to trip over (#1117).
     const result = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       clock,
       staleMs: 90_000,
       pollMs: 1,
@@ -265,7 +265,7 @@ describe('warm session-cache refresh lock', () => {
   it('heartbeats its own lock body and mtime with the injected clock', async () => {
     const dir = await tempDir()
     const clock = fakeClock(10_000)
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, clock, heartbeatMs: 5 })
+    const result = await acquireCacheRefreshLock({ directory: dir, clock, heartbeatMs: 5 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome !== 'acquired') return
     try {
@@ -288,7 +288,7 @@ describe('warm session-cache refresh lock', () => {
     const old = new Date(1)
     await utimes(path, old, old)
 
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, clock, staleMs: 90, waitMs: 100 })
+    const result = await acquireCacheRefreshLock({ directory: dir, clock, staleMs: 90, waitMs: 100 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome !== 'acquired') return
     expect(JSON.parse(await readFile(path, 'utf-8')).token).toBe(result.handle.token)
@@ -305,7 +305,7 @@ describe('warm session-cache refresh lock', () => {
     await utimes(lockPath(dir), old, old)
     await utimes(join(dir, 'session-refresh.lock.takeover'), old, old)
 
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, clock, staleMs: 90, waitMs: 100 })
+    const result = await acquireCacheRefreshLock({ directory: dir, clock, staleMs: 90, waitMs: 100 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome === 'acquired') await result.handle.release()
   })
@@ -317,7 +317,7 @@ describe('warm session-cache refresh lock', () => {
     original.complete = true
     await saveCache(original)
 
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, heartbeatMs: 60_000 })
+    const result = await acquireCacheRefreshLock({ directory: dir, heartbeatMs: 60_000 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome !== 'acquired') return
 
@@ -343,7 +343,7 @@ describe('warm session-cache refresh lock', () => {
     // its own heartbeat's guard file and abort a legitimate publication.
     // At a 1ms heartbeat this raced ~6% of the time before the fix.
     const dir = await mkdtemp(join(tmpdir(), 'refresh-lock-'))
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, heartbeatMs: 1 })
+    const result = await acquireCacheRefreshLock({ directory: dir, heartbeatMs: 1 })
     if (result.outcome !== 'acquired') throw new Error(`expected acquired, got ${result.outcome}`)
     for (let i = 0; i < 120; i++) {
       expect(await result.handle.verifyStillOwner()).toBe(true)
@@ -369,7 +369,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     const old = new Date(1)
     await utimes(path, old, old)
 
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, clock, staleMs: 90, waitMs: 100, pollMs: 1 })
+    const result = await acquireCacheRefreshLock({ directory: dir, clock, staleMs: 90, waitMs: 100, pollMs: 1 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome !== 'acquired') return
     expect(JSON.parse(await readFile(path, 'utf-8')).token).toBe(result.handle.token)
@@ -385,7 +385,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     const old = new Date(1)
     await utimes(path, old, old)
 
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, clock, staleMs: 90, waitMs: 100, pollMs: 1 })
+    const result = await acquireCacheRefreshLock({ directory: dir, clock, staleMs: 90, waitMs: 100, pollMs: 1 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome !== 'acquired') return
     expect(JSON.parse(await readFile(path, 'utf-8')).token).toBe(result.handle.token)
@@ -400,7 +400,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     const old = new Date(1)
     await utimes(path, old, old)
 
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, clock, staleMs: 90, waitMs: 100, pollMs: 1 })
+    const result = await acquireCacheRefreshLock({ directory: dir, clock, staleMs: 90, waitMs: 100, pollMs: 1 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome === 'acquired') await result.handle.release()
   })
@@ -419,7 +419,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
 
     let polls = 0
     const fresh = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       clock,
       staleMs: 90_000,
       waitMs: 50,
@@ -433,7 +433,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     // Nothing rewrote the body, so its mtime is still frozen. One stale window
     // later the very next run recovers it through the unmodified age gate.
     clock.advance(90_001)
-    const later = await acquireCacheRefreshLock({ cacheDir: dir, clock, staleMs: 90_000, waitMs: 50, pollMs: 10 })
+    const later = await acquireCacheRefreshLock({ directory: dir, clock, staleMs: 90_000, waitMs: 50, pollMs: 10 })
     expect(later.outcome).toBe('acquired')
     if (later.outcome !== 'acquired') return
     expect(JSON.parse(await readFile(path, 'utf-8')).token).toBe(later.handle.token)
@@ -450,7 +450,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
 
     let polls = 0
     const result = await acquireCacheRefreshLock({
-      cacheDir: dir,
+      directory: dir,
       clock,
       staleMs: 90_000,
       waitMs: 50,
@@ -485,7 +485,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     }, 1)
     let result
     try {
-      result = await acquireCacheRefreshLock({ cacheDir: dir, staleMs: 30, waitMs: 120, pollMs: 5 })
+      result = await acquireCacheRefreshLock({ directory: dir, staleMs: 30, waitMs: 120, pollMs: 5 })
     } finally {
       clearInterval(heartbeat)
     }
@@ -508,7 +508,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     await utimes(path, old, old)
     await utimes(sidecar, old, old)
 
-    const result = await acquireCacheRefreshLock({ cacheDir: dir, staleMs: 90, waitMs: 200, pollMs: 5 })
+    const result = await acquireCacheRefreshLock({ directory: dir, staleMs: 90, waitMs: 200, pollMs: 5 })
     expect(result.outcome).toBe('acquired')
     if (result.outcome !== 'acquired') return
     expect(JSON.parse(await readFile(path, 'utf-8')).token).toBe(result.handle.token)
@@ -525,7 +525,7 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     const old = new Date(1)
     await utimes(path, old, old)
     try {
-      const result = await acquireCacheRefreshLock({ cacheDir: dir, staleMs: 1, waitMs: 50, pollMs: 5 })
+      const result = await acquireCacheRefreshLock({ directory: dir, staleMs: 1, waitMs: 50, pollMs: 5 })
       expect(result).toEqual({ outcome: 'unavailable' })
     } finally {
       await chmod(path, 0o600)

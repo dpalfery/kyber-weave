@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'crypto'
 import { join } from 'path'
 
 import { getCacheDir } from './cache-dir.js'
-import { releaseOwnedRefreshLocksForExit } from './cache-refresh-lock.js'
+import { releaseOwnedRefreshLocksForExit } from '../refresh/lock.js'
 import type { ToolCall } from '../types.js'
 
 // ── Types ──────────────────────────────────────────────────────────────

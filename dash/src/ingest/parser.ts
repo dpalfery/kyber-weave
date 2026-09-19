@@ -39,7 +39,7 @@ import {
   saveCache,
   sourcePathStatCandidates,
 } from './session-cache.js'
-import { acquireCacheRefreshLock, type RefreshLockHandle, type RefreshLockOutcome } from './cache-refresh-lock.js'
+import { acquireCacheRefreshLock, type RefreshLockHandle, type RefreshLockOutcome } from '../refresh/lock.js'
 import { decideParseWorkers, parseFilesInOrder, ParseWorkerPool, type ClaudeWorkerParse, type ParseJob } from './parse-workers.js'
 import type { CodexFullParse } from '../providers/codex.js'
 import { dateKey } from '../metrics/day-aggregator.js'

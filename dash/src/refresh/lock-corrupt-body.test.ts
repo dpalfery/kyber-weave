@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { acquireCacheRefreshLock } from './cache-refresh-lock.js'
+import { acquireCacheRefreshLock } from './lock.js'
 
 // Recovering a corrupt session-refresh.lock must never cost the two design
 // commitments the lock exists for: it may not fail open into mutation, and it
@@ -64,7 +64,7 @@ describe('warm refresh lock: a corrupt body never displaces a live owner', () =>
       }
       expect(sawZeroByteLock, 'never caught the owner mid-createExclusive').toBe(true)
 
-      const contender = await acquireCacheRefreshLock({ cacheDir, waitMs: 40, pollMs: 5, staleMs: 90_000 })
+      const contender = await acquireCacheRefreshLock({ directory: cacheDir, waitMs: 40, pollMs: 5, staleMs: 90_000 })
       if (contender.outcome === 'acquired') await contender.handle.release()
       expect(contender.outcome).toBe('timed-out')
     } finally {
@@ -89,7 +89,7 @@ describe('warm refresh lock: a corrupt body never displaces a live owner', () =>
       // This wait is shorter than one heartbeat period, so the body is still
       // truncated throughout: the contender has nothing but the fresh mtime to
       // go on, and that alone must keep it out.
-      const early = await acquireCacheRefreshLock({ cacheDir, waitMs: 80, pollMs: 5, staleMs: 90_000 })
+      const early = await acquireCacheRefreshLock({ directory: cacheDir, waitMs: 80, pollMs: 5, staleMs: 90_000 })
       if (early.outcome === 'acquired') await early.handle.release()
       expect(early.outcome).toBe('timed-out')
 
@@ -102,7 +102,7 @@ describe('warm refresh lock: a corrupt body never displaces a live owner', () =>
       // legitimately-replaced writers and let release() delete a live
       // successor's lock.
       await writeFile(lockPath, '')
-      const late = await acquireCacheRefreshLock({ cacheDir, waitMs: 2_400, pollMs: 10, staleMs: 400 })
+      const late = await acquireCacheRefreshLock({ directory: cacheDir, waitMs: 2_400, pollMs: 10, staleMs: 400 })
       expect(late.outcome).toBe('acquired')
       if (late.outcome === 'acquired') {
         // The successor owns it outright: the body carries its token, not the

@@ -1,11 +1,13 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Command, CommanderError } from 'commander'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { registerKyberCommands } from './register.js'
+import { CanonStore } from '../canon/store.js'
+import { STORE_LOCK_FILE, readLockHolder } from '../refresh/lock.js'
+import { REFRESH_BUSY_EXIT_CODE, registerKyberCommands } from './register.js'
 
 const temporaryRoots: string[] = []
 
@@ -118,5 +120,93 @@ describe('dash refresh option validation', () => {
       'node', 'codeburn', 'dash', 'refresh', '--db', join(root, 'canon.db'),
     ])).rejects.toThrow('refresh boom')
     expect(closed).toBe(1)
+  })
+})
+
+describe('dash refresh: one refresh at a time (R10.3, R10.4)', () => {
+  /** Run `dash refresh` with the lock reporting the given outcome, capturing its output. */
+  async function refreshWith(
+    outcome: 'acquired' | 'timed-out',
+  ): Promise<{ exitCode: number | undefined; stderr: string[]; refreshed: boolean }> {
+    const stderr: string[] = []
+    let refreshed = false
+    let released = false
+    const program = new Command()
+    program.exitOverride()
+    registerKyberCommands(program, {
+      write: () => {},
+      writeError: (line) => stderr.push(line),
+      createStore: () => new CanonStore(':memory:'),
+      acquireStoreRefreshLock: async () =>
+        outcome === 'acquired'
+          ? {
+              outcome: 'acquired',
+              handle: {
+                token: 't',
+                release: async () => { released = true },
+                verifyStillOwner: async () => true,
+              },
+            }
+          : { outcome: 'timed-out' },
+      refreshHarnessSources: async () => {
+        refreshed = true
+        return {
+          historyWeeks: 2,
+          commandStartedAt: new Date().toISOString(),
+          rows: [],
+          derived: { sessions: 0, runs: 0, executions: 0, rollups: 0 },
+          failedJobs: 0,
+          derivationFailed: false,
+          exitCode: 0,
+        }
+      },
+    })
+
+    const previous = process.exitCode
+    process.exitCode = undefined
+    await program.parseAsync(['node', 'kyberdash', 'dash', 'refresh'])
+    const exitCode = process.exitCode
+    process.exitCode = previous
+    if (outcome === 'acquired') expect(released).toBe(true)
+    return { exitCode: exitCode as number | undefined, stderr, refreshed }
+  }
+
+  it('refreshes and releases the lock when it is free', async () => {
+    const result = await refreshWith('acquired')
+    expect(result.refreshed).toBe(true)
+    expect(result.exitCode ?? 0).toBe(0)
+  })
+
+  it('exits 3 without writing when another refresh holds the lock', async () => {
+    const result = await refreshWith('timed-out')
+    // The distinct code is the contract: a caller must be able to tell "already running"
+    // from "the refresh ran and failed" (1) without reading the message.
+    expect(result.exitCode).toBe(REFRESH_BUSY_EXIT_CODE)
+    expect(REFRESH_BUSY_EXIT_CODE).toBe(3)
+    expect(result.refreshed).toBe(false)
+  })
+
+  it('names the holding process so the operator knows what to wait for', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-refresh-lock-'))
+    temporaryRoots.push(directory)
+    writeFileSync(
+      join(directory, STORE_LOCK_FILE),
+      JSON.stringify({ pid: 4242, token: 'tok', at: Date.parse('2026-09-19T08:00:00.000Z') }),
+    )
+    const holder = readLockHolder(directory)
+    expect(holder).toEqual({ pid: 4242, since: '2026-09-19T08:00:00.000Z' })
+  })
+
+  it('reads no holder from a corrupt lock body, rather than inventing one', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-refresh-lock-'))
+    temporaryRoots.push(directory)
+    writeFileSync(join(directory, STORE_LOCK_FILE), 'not json')
+    expect(readLockHolder(directory)).toBeNull()
+  })
+
+  it('reads no holder when there is no lock file at all', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-refresh-lock-'))
+    temporaryRoots.push(directory)
+    expect(readLockHolder(directory)).toBeNull()
   })
 })

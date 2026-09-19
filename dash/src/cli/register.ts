@@ -5,10 +5,19 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Command } from 'commander'
-import { CommanderError, InvalidArgumentError } from 'commander'
+import { CommanderError, InvalidArgumentError, Option } from 'commander'
 import { CanonStore } from '../canon/store.js'
 import type { CursorHookStdinOptions } from '../otel/cursor-hook.js'
 import { DEFAULT_HISTORY_WEEKS, refreshHarnessSources } from '../refresh/orchestrator.js'
+import { REFRESH_TRIGGERS, type RefreshTrigger } from '../canon/refresh-run.js'
+import { acquireStoreRefreshLock, readLockHolder, stateDir } from '../refresh/lock.js'
+
+/**
+ * `dash refresh` found another refresh holding the lock (R10.4). Distinct from 1 (the
+ * refresh ran and something failed) and 2 (bad arguments), so a caller — the tray above
+ * all — can tell "already running" from "broken" without parsing the message.
+ */
+export const REFRESH_BUSY_EXIT_CODE = 3
 import { formatRefreshDiagnostics, formatRefreshReport } from '../refresh/report.js'
 
 export type KyberCommandDependencies = {
@@ -18,6 +27,7 @@ export type KyberCommandDependencies = {
   postCursorHookOtlp?: CursorHookStdinOptions['post']
   createStore?: (path: string) => CanonStore
   refreshHarnessSources?: typeof refreshHarnessSources
+  acquireStoreRefreshLock?: typeof acquireStoreRefreshLock
 }
 
 function createHistoryWeeksParser(): (value: string) => number {
@@ -164,21 +174,44 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       createHistoryWeeksParser(),
       DEFAULT_HISTORY_WEEKS,
     )
+    // Hidden: how the run was started, recorded in the run log so a failing cadence is
+    // distinguishable from a failing person. Not a knob a user needs, and the tray sets it.
+    .addOption(
+      new Option('--trigger <source>', 'how this refresh was started')
+        .choices([...REFRESH_TRIGGERS])
+        .default('cli')
+        .hideHelp(),
+    )
   refresh.exitOverride((error) => {
     if (error.code === 'commander.invalidArgument') {
       throw new CommanderError(2, error.code, error.message)
     }
     throw error
   })
-  refresh.action(async (opts: { db?: string; historyWeeks?: number }) => {
+  refresh.action(async (opts: { db?: string; historyWeeks?: number; trigger?: RefreshTrigger }) => {
     const createStore = dependencies.createStore ?? ((path: string) => new CanonStore(path))
     const refreshSources = dependencies.refreshHarnessSources ?? refreshHarnessSources
     const write = dependencies.write ?? ((line: string) => process.stdout.write(`${line}\n`))
     const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
+    const acquireLock = dependencies.acquireStoreRefreshLock ?? acquireStoreRefreshLock
+
+    // One refresh at a time, and the loser reports rather than queues (R10.3, R10.4). The
+    // tray refreshes on a cadence; without this, a slow run and the next tick would write
+    // the same store concurrently.
+    const lock = await acquireLock()
+    if (lock.outcome !== 'acquired') {
+      const holder = readLockHolder(stateDir())
+      const who = holder === null ? 'another process' : `pid ${holder.pid} (since ${holder.since})`
+      writeError(`kyberdash: a refresh is already running — held by ${who}; nothing was written`)
+      process.exitCode = REFRESH_BUSY_EXIT_CODE
+      return
+    }
+
     const store = createStore(resolveDbPath(opts.db))
     try {
       const report = await refreshSources(store, undefined, {
         historyWeeks: opts.historyWeeks ?? DEFAULT_HISTORY_WEEKS,
+        trigger: opts.trigger ?? 'cli',
       })
       write(formatRefreshReport(report).trimEnd())
       const diagnostics = formatRefreshDiagnostics(report.rows)
@@ -186,6 +219,7 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       process.exitCode = report.exitCode
     } finally {
       store.close()
+      await lock.handle.release()
     }
   })
 

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-vi.mock('./cache-refresh-lock.js', () => ({
+vi.mock('../refresh/lock.js', () => ({
   acquireCacheRefreshLock: async () => ({ outcome: 'timed-out' as const }),
 }))
 

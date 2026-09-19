@@ -466,3 +466,44 @@ describe('schema migration v10 -> current (source checkpoint / provenance)', () 
   })
 })
 
+describe('schema migration v11 -> current (refresh run log)', () => {
+  it('bumps past live schema 11 through a dedicated step', () => {
+    expect(SCHEMA_VERSION).toBeGreaterThan(11)
+    expect(MIGRATIONS[11]).toBeTypeOf('function')
+  })
+
+  it('adds refresh_run to a v11 store without disturbing its records', () => {
+    // A v11 store is a v10 store the current code has already opened once, which is the
+    // state every installed copy is in before this upgrade.
+    const path = v10StoreAt()
+    new CanonStore(path).close()
+    const before = Buffer.from(rawBlob(path, 'span-v10'))
+
+    const store = new CanonStore(path)
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    expect(store.count()).toBe(1)
+    store.close()
+
+    expect(Buffer.from(rawBlob(path, 'span-v10'))).toEqual(before)
+    expect(tableNames(path)).toContain('refresh_run')
+  })
+
+  it('leaves the new table empty, so an upgrade never invents a refresh that did not happen', () => {
+    const path = v10StoreAt()
+    new CanonStore(path).close()
+    const db = new DatabaseSync(path)
+    const rows = db.prepare('SELECT COUNT(*) AS n FROM refresh_run').get() as { n: number }
+    db.close()
+    expect(rows.n).toBe(0)
+  })
+
+  it('is idempotent: reopening does not re-run the step or drop the table', () => {
+    const path = v10StoreAt()
+    new CanonStore(path).close()
+    new CanonStore(path).close()
+    const store = new CanonStore(path)
+    expect(store.getMetadata('schema_version')).toBe(String(SCHEMA_VERSION))
+    store.close()
+    expect(tableNames(path)).toContain('refresh_run')
+  })
+})

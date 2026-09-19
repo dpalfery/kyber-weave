@@ -1,7 +1,7 @@
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { acquireCacheRefreshLock } from '../../src/ingest/cache-refresh-lock.js'
+import { acquireCacheRefreshLock } from '../../src/refresh/lock.js'
 
 // A plain owner in its own process. It records its outcome, its token, and the
 // result of the publication fence into the barrier directory so the parent can
@@ -9,7 +9,7 @@ import { acquireCacheRefreshLock } from '../../src/ingest/cache-refresh-lock.js'
 const [cacheDir, barrierDir, holdMs, heartbeatMs = '200'] = process.argv.slice(2)
 if (!cacheDir || !barrierDir || !holdMs) throw new Error('missing owner argument')
 
-const refresh = await acquireCacheRefreshLock({ cacheDir, heartbeatMs: Number(heartbeatMs) })
+const refresh = await acquireCacheRefreshLock({ directory: cacheDir, heartbeatMs: Number(heartbeatMs) })
 if (refresh.outcome !== 'acquired') {
   await writeFile(join(barrierDir, `owner.${refresh.outcome}`), '')
   process.exit(0)

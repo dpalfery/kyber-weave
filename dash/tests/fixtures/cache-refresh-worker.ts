@@ -2,7 +2,7 @@ import { existsSync } from 'fs'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { acquireCacheRefreshLock } from '../../src/ingest/cache-refresh-lock.js'
+import { acquireCacheRefreshLock } from '../../src/refresh/lock.js'
 import { exitAfterCacheCleanup, loadCache, markCacheDirty, saveCache } from '../../src/ingest/session-cache.js'
 
 const [cacheDir, barrierDir, id, sourcePath, bypass = 'false', exitViaCleanup = 'false'] = process.argv.slice(2)
@@ -16,7 +16,7 @@ async function waitFor(name: string): Promise<void> {
 process.env['KYBERDASH_CACHE_DIR'] = cacheDir
 await mkdir(barrierDir, { recursive: true })
 
-const refresh = bypass === 'true' ? null : await acquireCacheRefreshLock({ cacheDir, waitMs: 2_000, pollMs: 5 })
+const refresh = bypass === 'true' ? null : await acquireCacheRefreshLock({ directory: cacheDir, waitMs: 2_000, pollMs: 5 })
 if (refresh && refresh.outcome !== 'acquired') {
   await writeFile(join(barrierDir, `${id}.${refresh.outcome}`), '')
   process.exit(0)

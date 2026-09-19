@@ -3,7 +3,9 @@ import { existsSync, readFileSync, unlinkSync } from 'fs'
 import { mkdir, open, readFile, stat, unlink, utimes, writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { getCacheDir } from './cache-dir.js'
+import { homedir } from 'os'
+
+import { getCacheDir } from '../ingest/cache-dir.js'
 
 const LOCK_FILE = 'session-refresh.lock'
 const DEFAULT_HEARTBEAT_MS = 10_000
@@ -26,7 +28,12 @@ export type RefreshLockClock = {
 }
 
 export type RefreshLockOptions = {
-  cacheDir?: string
+  /**
+   * Where the lock file lives. Two different locks share this protocol: the session
+   * cache's, under the cache directory, and the store's, under `~/.kyberdash`. Naming the
+   * directory at the call site is what keeps them from serialising each other.
+   */
+  directory?: string
   /** Basename only. Lets independent cache transactions reuse this lock
    *  protocol without unnecessarily serializing each other. */
   lockFile?: string
@@ -248,11 +255,60 @@ async function enterSingleFlight(lockPath: string): Promise<() => void> {
 }
 
 /**
+ * Who holds a lock right now, or `null` when nothing does.
+ *
+ * The acquire outcomes deliberately say only whether *we* got it; R10.4 needs the losing
+ * run to name the process that won, so the record is read back here. A lock whose body is
+ * missing or unparseable reads as unheld: a corrupt file is not evidence of an owner, and
+ * the acquire path already handles taking it over.
+ */
+export function readLockHolder(
+  directory: string,
+  lockFile: string = STORE_LOCK_FILE,
+): { pid: number; since: string } | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(directory, lockFile), 'utf-8')) as Partial<LockRecord>
+    if (typeof parsed?.pid !== 'number' || !Number.isFinite(parsed.pid)) return null
+    const at = typeof parsed.at === 'number' && Number.isFinite(parsed.at) ? parsed.at : Date.now()
+    return { pid: parsed.pid, since: new Date(at).toISOString() }
+  } catch {
+    return null
+  }
+}
+
+/** KyberDash's state root, `~/.kyberdash` (R3.5) — the store and its lock sit here. */
+export function stateDir(): string {
+  return join(homedir(), '.kyberdash')
+}
+
+/** The store refresh lock's file name, under `stateDir()`. */
+export const STORE_LOCK_FILE = 'refresh.lock'
+
+/**
+ * Gate for `dash refresh`, which rebuilds the canonical store (R10.3, R10.4).
+ *
+ * Deliberately a different lock from the session cache's: they guard different files, and
+ * a refresh of one has no reason to wait on the other. `waitMs: 0` because a second
+ * refresh must report the holder and exit rather than queue behind it — a person running
+ * it twice wants to be told, and the tray's cadence must not stack up runs.
+ */
+export async function acquireStoreRefreshLock(
+  options: RefreshLockOptions = {},
+): Promise<RefreshLockOutcome> {
+  return acquireCacheRefreshLock({
+    directory: stateDir(),
+    lockFile: STORE_LOCK_FILE,
+    waitMs: 0,
+    ...options,
+  })
+}
+
+/**
  * Strict gate for the warm session-cache read/reconcile/parse/save transaction.
  * Lock ordering, when the daily-cache follow-up lands, is daily → session.
  */
 export async function acquireCacheRefreshLock(options: RefreshLockOptions = {}): Promise<RefreshLockOutcome> {
-  const cacheDir = options.cacheDir ?? getCacheDir()
+  const cacheDir = options.directory ?? getCacheDir()
   const lockFile = options.lockFile ?? LOCK_FILE
   // Never allow a caller-controlled path to escape cacheDir or collide with
   // the takeover suffix. All current callers use fixed names or a hex digest.

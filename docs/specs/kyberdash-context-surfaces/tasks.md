@@ -191,7 +191,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     instead of deriving it.
   - Add a test that no scorecard output has a key combining dimensions.
   - _Requirements: 11.6, 11.14, 14.3_
-- [ ] 5.3 Refresh lock and run log
+- [x] 5.3 Refresh lock and run log
   - Stream B.
   - Extend `migration.test.ts` for schema 11 → 12 and the `refresh_run` table, then implement
     the migration.
