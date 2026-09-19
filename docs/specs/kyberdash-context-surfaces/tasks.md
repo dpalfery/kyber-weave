@@ -243,7 +243,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 5.6, 5.7_
 
 - [ ] 6. CLI context report
-- [ ] 6.1 Text and Markdown renderers
+- [x] 6.1 Text and Markdown renderers
   - Stream C.
   - Write snapshot tests over every fixture for `render-text.ts` and `render-markdown.ts`.
   - Add display-rule assertions:
