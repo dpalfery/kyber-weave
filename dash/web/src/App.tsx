@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { QuarantineView, type QuarantineEntry } from '@/components/analysis/QuarantineView'
 import { ProblemsView, type ProblemEntry } from '@/components/analysis/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
+import { NotFoundPanel } from '@/components/analysis/NotFoundPanel'
 import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
 import {
   applySpineAction,
@@ -239,13 +240,15 @@ export interface AppProps {
   initialPage?: KyberPage
   /** Path to parse on first paint; defaults to `window.location` so a deep link lands. */
   initialPath?: string
+  /** A missing-id deep link that already 404'd, used by tests that cannot run effects. */
+  initialNotFoundId?: string
 }
 
 /**
  * Renders the KyberDash shell and coordinates its top-level navigation and
  * diagnostic spine.
  */
-export function App({ initialPage = 'context-doctor', initialPath }: AppProps = {}) {
+export function App({ initialPage = 'context-doctor', initialPath, initialNotFoundId }: AppProps = {}) {
   const [section, setSection] = useState<KyberPage>(() =>
     initialPage === 'sessions' ? 'sessions' : pageFor(viewFromProps(initialPage, initialPath)),
   )
@@ -257,6 +260,7 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
   // Mobile only: the sidebar collapses to an off-canvas drawer below md.
   // On desktop this flag is inert (the max-md: transform classes don't apply).
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [notFoundId, setNotFoundId] = useState<string | null>(initialNotFoundId ?? null)
 
   // Follow the OS theme live while the user has no explicit preference, so
   // flipping the system theme updates the dashboard without a reload.
@@ -295,7 +299,12 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
     }
     void createAncestryApi().then((api) =>
       resolveAncestry(loc, api).then((result) => {
-        if (cancelled || result.status !== 'ok') return
+        if (cancelled) return
+        if (result.status === 'not-found') {
+          setNotFoundId(result.id)
+          return
+        }
+        setNotFoundId(null)
         dispatchSpine({ type: 'reset', stack: result.stack })
         setSection(pageFor(result.stack.at(-1)!))
         const path = pathFromLocation(result.stack.at(-1)!)
@@ -312,13 +321,18 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
     const onPop = (event: PopStateEvent) => {
       const restored = restoreFromPopState(event.state, hrefFromWindow())
       if (Array.isArray(restored)) {
+        setNotFoundId(null)
         dispatchSpine({ type: 'reset', stack: restored })
         setSection(pageFor(restored.at(-1) ?? { level: 'context-doctor' }))
         return
       }
       void createAncestryApi().then((api) =>
         resolveAncestry(restored.needsAncestry, api).then((result) => {
-          if (result.status !== 'ok') return
+          if (result.status === 'not-found') {
+            setNotFoundId(result.id)
+            return
+          }
+          setNotFoundId(null)
           dispatchSpine({ type: 'reset', stack: result.stack })
           setSection(pageFor(result.stack.at(-1)!))
         }),
@@ -331,6 +345,7 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
   const showSpine = section === 'context-doctor' || section === 'compare'
   /** Opens a diagnostic spine location, records it in history, and makes Context Doctor active. */
   const openSpine = (next: SpineLocation, action: 'push' | 'replace' | 'goTo' = 'push') => {
+    setNotFoundId(null)
     setSection(pageFor(next))
     const nextStack = applySpineAction(spine, { type: action, location: next })
     dispatchSpine({ type: action, location: next })
@@ -339,6 +354,7 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
   }
 
   const goHeader = (next: SpineLocation) => {
+    setNotFoundId(null)
     setSection(pageFor(next))
     dispatchSpine({ type: 'reset', stack: [next] })
     const path = pathFromLocation(next)
@@ -471,6 +487,7 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
                 testId="nav-rail-sessions"
                 active={section === 'sessions'}
                 onClick={() => {
+                  setNotFoundId(null)
                   setSection('sessions')
                   setSidebarOpen(false)
                 }}
@@ -481,6 +498,7 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
                 testId="nav-rail-compare"
                 active={section === 'compare'}
                 onClick={() => {
+                  setNotFoundId(null)
                   setSection('compare')
                   dispatchSpine({ type: 'reset', stack: [{ level: 'compare' }] })
                   setSidebarOpen(false)
@@ -506,7 +524,9 @@ export function App({ initialPage = 'context-doctor', initialPath }: AppProps = 
               </h1>
             </div>
 
-            {showSpine ? (
+            {notFoundId ? (
+              <NotFoundPanel id={notFoundId} onHome={() => goHeader({ level: 'context-doctor' })} />
+            ) : showSpine ? (
               location.level === 'context-doctor' ? (
                 <ContextDoctor
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId })}

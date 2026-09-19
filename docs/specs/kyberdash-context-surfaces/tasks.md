@@ -292,7 +292,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     the same ancestry navigation would.
   - Implement `resolveAncestry` and wire the router into `App`.
   - _Requirements: 5.2, 5.3_
-- [ ] 7.3 Not-found state
+- [x] 7.3 Not-found state
   - Stream D.
   - Test that a URL naming an id the API returns 404 for renders `NotFoundPanel` inside the
     shell, naming the id and linking to `/`. Then implement it.
