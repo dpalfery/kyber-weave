@@ -201,7 +201,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Make the orchestrator write and complete `refresh_run` rows, and add the hidden
     `--trigger` flag.
   - _Requirements: 10.3, 10.4, 10.5_
-- [ ] 5.4 Build the report
+- [x] 5.4 Build the report
   - Stream B.
   - Write seeded-store tests for `buildContextReport` covering:
     - scope by harness, session, run and days
@@ -217,7 +217,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     (full, empty, stale, unmeasurable pressure, no findings, mixed-basis cost), and commit
     the fixtures.
   - _Requirements: 8.2, 8.3, 8.4, 8.5, 8.9, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.11, 11.15, 14.2, 14.4_
-- [ ] 5.5 Serve the report over REST
+- [x] 5.5 Serve the report over REST
   - Stream B.
   - Write route tests first:
     - `GET /api/kyber/report` returns the builder's output for the query scope.

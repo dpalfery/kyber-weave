@@ -4,6 +4,71 @@ import { runContextReview, type ReviewRequest } from '../analysis/review.js'
 import { createReviewProvider } from '../analysis/review-providers/index.js'
 import { recordPrediction } from '../analysis/calibration.js'
 import { buildScorecard } from '../analysis/scorecard.js'
+import { buildContextReport } from '../analysis/report/build.js'
+import {
+  DEFAULT_FINDING_LIMIT,
+  DEFAULT_SECTIONS,
+  DEFAULT_WINDOW_DAYS,
+  REPORT_SCHEMA_VERSION,
+  type ReportScope,
+  type ReportSection,
+} from '../analysis/report/types.js'
+import { createRequire } from 'node:module'
+
+/** The build this server is, carried on `/meta` so a client can check it (R6.7). */
+const KYBERDASH_VERSION = String(
+  (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
+)
+
+const VALID_SECTIONS: readonly ReportSection[] = [
+  'coverage',
+  'detection',
+  'findings',
+  'harnesses',
+  'latestSession',
+  'cost',
+]
+
+/**
+ * Read the report scope off the query string, or return the message explaining why it is
+ * unusable. A bad `days` is rejected rather than silently defaulted: a caller asking for
+ * `days=-1` has a bug, and answering with a 7-day window would hide it.
+ */
+function parseReportScope(url: URL): ReportScope | string {
+  const raw = url.searchParams.get('days')
+  let days = DEFAULT_WINDOW_DAYS
+  if (raw !== null && raw.trim() !== '') {
+    const parsed = Number(raw)
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      return `days must be a positive integer (got ${JSON.stringify(raw)})`
+    }
+    days = parsed
+  }
+  const scope: ReportScope = { days }
+  const harness = url.searchParams.get('harness')?.trim()
+  const sessionId = url.searchParams.get('session')?.trim()
+  const runId = url.searchParams.get('run')?.trim()
+  if (harness) scope.harness = harness
+  if (sessionId) scope.sessionId = sessionId
+  if (runId) scope.runId = runId
+  return scope
+}
+
+/**
+ * `sections` is a comma list; absent means every section except `detection`, which walks
+ * the filesystem and so is opt-in (design C1). An unknown name is an error rather than
+ * ignored, so a typo does not silently return a report missing what was asked for.
+ */
+function parseSections(url: URL): readonly ReportSection[] | string {
+  const raw = url.searchParams.get('sections')
+  if (raw === null || raw.trim() === '') return DEFAULT_SECTIONS
+  const asked = raw.split(',').map((part) => part.trim()).filter(Boolean)
+  const unknown = asked.filter((name) => !VALID_SECTIONS.includes(name as ReportSection))
+  if (unknown.length > 0) {
+    return `unknown section(s): ${unknown.join(', ')}; valid: ${VALID_SECTIONS.join(', ')}`
+  }
+  return asked as ReportSection[]
+}
 
 /**
  * `/api/kyber/session/:id/content` — everything between the prefix and the
@@ -271,8 +336,43 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const meta = bridge.getMeta()
-    sendKyberJson(res, 200, meta)
+    // `apiVersion` is the REST contract's own version, distinct from the store's schema
+    // and from the build: the tray checks it to decide whether it understands this server
+    // before it renders anything (R6.7).
+    sendKyberJson(res, 200, {
+      ...bridge.getMeta(),
+      version: KYBERDASH_VERSION,
+      apiVersion: REPORT_SCHEMA_VERSION,
+    })
+    return true
+  }
+
+  // The one report every surface reads (Decision D2, R7.1, R7.5).
+  if (url.pathname === '/api/kyber/report') {
+    if (req.method !== 'GET') {
+      sendKyberJson(res, 405, { error: 'Method Not Allowed' })
+      return true
+    }
+    const scope = parseReportScope(url)
+    if (typeof scope === 'string') {
+      sendKyberJson(res, 400, { error: scope })
+      return true
+    }
+    const sections = parseSections(url)
+    if (typeof sections === 'string') {
+      sendKyberJson(res, 400, { error: sections })
+      return true
+    }
+    const limit = Number.parseInt(url.searchParams.get('limit') ?? '', 10)
+    sendKyberJson(
+      res,
+      200,
+      buildContextReport(bridge, scope, {
+        sections,
+        findingLimit: Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_FINDING_LIMIT,
+        kyberdashVersion: KYBERDASH_VERSION,
+      }),
+    )
     return true
   }
 

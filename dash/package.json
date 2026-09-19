@@ -26,7 +26,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "report:fixtures": "tsx src/tools/report-fixtures.ts"
   },
   "keywords": [
     "claude-code",

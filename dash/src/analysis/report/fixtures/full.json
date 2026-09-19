@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-19T12:00:00.000Z",
+  "kyberdashVersion": "1.0.0",
+  "scope": {
+    "days": 7
+  },
+  "coverage": {
+    "storePath": "canon.db",
+    "refresh": {
+      "lastSuccessAt": "2026-09-19T11:00:00.000Z",
+      "lastFailure": null,
+      "inProgress": null
+    },
+    "harnesses": [
+      {
+        "harness": "claude-code",
+        "name": "claude-code",
+        "sessionsInWindow": 1,
+        "measurability": {}
+      },
+      {
+        "harness": "codex",
+        "name": "codex",
+        "sessionsInWindow": 0,
+        "measurability": {}
+      }
+    ],
+    "quarantineCount": 0,
+    "problemCount": 0,
+    "hints": []
+  },
+  "detection": [
+    {
+      "harness": "claude-code",
+      "detected": true,
+      "probedPaths": [
+        "~/.claude/projects"
+      ]
+    },
+    {
+      "harness": "codex",
+      "detected": false,
+      "probedPaths": [
+        "~/.codex/sessions"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "id": "finding-tool-schema-residency",
+      "title": "Tool definitions hold 9,000 tokens across every turn",
+      "measurementClass": "deterministic",
+      "confidence": "high",
+      "confidenceBasis": "resident in 14 of 14 turns, called in 0",
+      "mechanism": "Four MCP servers publish their full schemas into every request, whether or not a tool from them is called.",
+      "evidenceIds": [
+        "span-0d41",
+        "span-0d52"
+      ],
+      "recommendation": "Move the github and filesystem server schemas behind an on-demand skill so they load only when a tool from them is called.",
+      "recoverableTokens": {
+        "value": 6400,
+        "unit": "tokens"
+      },
+      "errorBar": {
+        "low": 5200,
+        "high": 7600
+      },
+      "outcomeRiskCaveat": "Relocating schemas adds a load step the first time a tool is used in a session.",
+      "rankScore": 87.5,
+      "sessionId": "sess-alpha",
+      "runId": "run-2026-09-19",
+      "harness": null,
+      "view": "finding/finding-tool-schema-residency"
+    },
+    {
+      "id": "finding-duplicate-grep",
+      "title": "The same search ran four times",
+      "measurementClass": "deterministic",
+      "confidence": "high",
+      "confidenceBasis": "resident in 14 of 14 turns, called in 0",
+      "mechanism": "Four MCP servers publish their full schemas into every request, whether or not a tool from them is called.",
+      "evidenceIds": [
+        "span-0d41",
+        "span-0d52"
+      ],
+      "recommendation": "Move the github and filesystem server schemas behind an on-demand skill so they load only when a tool from them is called.",
+      "recoverableTokens": {
+        "value": 900,
+        "unit": "tokens"
+      },
+      "errorBar": {
+        "low": 700,
+        "high": 1200
+      },
+      "outcomeRiskCaveat": "Relocating schemas adds a load step the first time a tool is used in a session.",
+      "rankScore": 41.2,
+      "sessionId": "sess-alpha",
+      "runId": "run-2026-09-19",
+      "harness": null,
+      "view": "finding/finding-duplicate-grep"
+    }
+  ],
+  "harnesses": [
+    {
+      "harness": "claude-code",
+      "name": "claude-code",
+      "dimensions": {
+        "contextHygiene": {
+          "value": 0.63,
+          "display": "63%"
+        },
+        "cacheEfficiency": {
+          "value": 0.81,
+          "display": "81%"
+        },
+        "toolYield": {
+          "value": 2.4,
+          "display": "2.4x"
+        },
+        "skillUtilisation": {
+          "value": null,
+          "reason": "Telemetry missing: skill activation unobserved on this harness"
+        },
+        "delegationOverhead": {
+          "value": 0.07,
+          "display": "7%"
+        },
+        "continuity": {
+          "value": null,
+          "reason": "Telemetry missing: turn outcome or correction telemetry unobserved"
+        }
+      }
+    },
+    {
+      "harness": "codex",
+      "name": "codex",
+      "dimensions": {
+        "contextHygiene": {
+          "value": 0.21,
+          "display": "21%"
+        },
+        "cacheEfficiency": {
+          "value": null,
+          "reason": "Telemetry missing: harness does not export cache read/creation counters"
+        },
+        "toolYield": {
+          "value": null,
+          "reason": "Telemetry missing: tool call residency and schema tokens unobserved"
+        },
+        "skillUtilisation": {
+          "value": null,
+          "reason": "Telemetry missing: skill activation unobserved on this harness"
+        },
+        "delegationOverhead": {
+          "value": null,
+          "reason": "Telemetry missing: no delegation events recorded or single-agent run"
+        },
+        "continuity": {
+          "value": null,
+          "reason": "Telemetry missing: turn outcome or correction telemetry unobserved"
+        }
+      }
+    }
+  ],
+  "latestSession": {
+    "sessionId": "sess-alpha",
+    "harness": "claude-code",
+    "project": "kyber-weave",
+    "lastActivityAt": "2026-09-19T10:00:00.000Z",
+    "turnCount": 14,
+    "view": "session/sess-alpha",
+    "latestTurn": {
+      "index": 14,
+      "pressure": {
+        "value": 0.63
+      },
+      "contextWindow": {
+        "value": 200000,
+        "unit": "tokens"
+      },
+      "buckets": {
+        "system_prompt": {
+          "value": 1200,
+          "unit": "tokens"
+        },
+        "tool_definitions": {
+          "value": 9000,
+          "unit": "tokens"
+        },
+        "instruction_context": {
+          "value": 3400,
+          "unit": "tokens"
+        },
+        "conversation_history": {
+          "value": 81000,
+          "unit": "tokens"
+        },
+        "tool_result_content": {
+          "value": 31600,
+          "unit": "tokens"
+        }
+      },
+      "residual": {
+        "value": 512,
+        "unit": "tokens"
+      },
+      "cacheInvalidation": false
+    },
+    "toolDefinitionSources": [
+      {
+        "source": "mcp-github",
+        "tokens": {
+          "value": 5100,
+          "unit": "tokens"
+        }
+      },
+      {
+        "source": "mcp-filesystem",
+        "tokens": {
+          "value": 2600,
+          "unit": "tokens"
+        }
+      },
+      {
+        "source": "mcp-fetch",
+        "tokens": {
+          "value": 1300,
+          "unit": "tokens"
+        }
+      }
+    ],
+    "cacheInvalidationTurns": [
+      9
+    ]
+  },
+  "cost": [
+    {
+      "basis": "harness",
+      "amountUsd": {
+        "value": 4.12,
+        "unit": "USD"
+      }
+    }
+  ]
+}
