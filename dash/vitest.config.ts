@@ -9,10 +9,11 @@ export default defineConfig({
     ],
   },
   test: {
-    // Include backend tests and UI component tests
+    // Include backend tests, operator-tool tests, and UI component tests
     include: [
       'src/**/*.{test,spec}.?(c|m)[jt]s?(x)',
       'tests/**/*.{test,spec}.?(c|m)[jt]s?(x)',
+      'scripts/**/*.{test,spec}.?(c|m)[jt]s?(x)',
       'web/src/**/*.{test,spec}.?(c|m)[jt]s?(x)',
     ],
     // A worktree under .claude/ carries its own tests/ copy. They are stale by
