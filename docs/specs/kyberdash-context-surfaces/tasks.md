@@ -280,7 +280,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 11.14_
 
 - [ ] 7. Web deep links
-- [ ] 7.1 URL router
+- [x] 7.1 URL router
   - Stream D.
   - Write round-trip tests (spine location → path → location) for every pattern in
     `view-paths.json`, then implement `dash/web/src/lib/router.ts`.
