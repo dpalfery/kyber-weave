@@ -2,9 +2,9 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
-import { readCachedResults, writeCachedResults } from '../cursor-cache.js'
+import { calculateCost } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { readCachedResults, writeCachedResults } from '../ingest/cursor-cache.js'
 import {
   isSqliteAvailable,
   isSqliteBusyError,
@@ -14,8 +14,8 @@ import {
   isSqliteReadonlyError,
   warnSqliteReadonlyOnce,
   type SqliteDatabase,
-} from '../sqlite.js'
-import { estimateTokensFromChars } from '../token-estimate.js'
+} from '../ingest/sqlite.js'
+import { estimateTokensFromChars } from '../pricing/token-estimate.js'
 import type { DateRange } from '../types.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
@@ -698,8 +698,8 @@ function parseBubbles(
   // comfortably. Instead, for large DBs we page the requested window
   // (ROWID-descending, stopping past the window floor) and only fall back to a
   // hard budget — warning — when the in-range scan genuinely exceeds it.
-  // Override the budget in tests via CODEBURN_CURSOR_MAX_BUBBLES.
-  const MAX_BUBBLES = Number(process.env['CODEBURN_CURSOR_MAX_BUBBLES']) || 250_000
+  // Override the budget in tests via KYBERDASH_CURSOR_MAX_BUBBLES.
+  const MAX_BUBBLES = Number(process.env['KYBERDASH_CURSOR_MAX_BUBBLES']) || 250_000
 
   let total = 0
   try {
@@ -718,7 +718,7 @@ function parseBubbles(
       rows = scan.rows
       if (scan.truncated) {
         process.stderr.write(
-          `codeburn: Cursor database has ${total.toLocaleString()} bubbles and the ` +
+          `kyberdash: Cursor database has ${total.toLocaleString()} bubbles and the ` +
           `requested range exceeds the ${MAX_BUBBLES.toLocaleString()}-bubble scan budget; ` +
           `the oldest sessions in range may be missing from this report.\n`
         )
@@ -1005,7 +1005,7 @@ function createParser(
         }
         try {
           if (!validateSchema(db)) {
-            process.stderr.write('codeburn: Cursor storage format not recognized. You may need to update CodeBurn.\n')
+            process.stderr.write('kyberdash: Cursor storage format not recognized. You may need to update KyberDash.\n')
             return
           }
           // Use a fresh local Set for intra-parse dedup so the global

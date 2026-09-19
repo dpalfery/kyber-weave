@@ -2,8 +2,8 @@ import { existsSync } from 'fs'
 import { mkdir, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { acquireCacheRefreshLock } from '../../src/cache-refresh-lock.js'
-import { exitAfterCacheCleanup, loadCache, markCacheDirty, saveCache } from '../../src/session-cache.js'
+import { acquireCacheRefreshLock } from '../../src/ingest/cache-refresh-lock.js'
+import { exitAfterCacheCleanup, loadCache, markCacheDirty, saveCache } from '../../src/ingest/session-cache.js'
 
 const [cacheDir, barrierDir, id, sourcePath, bypass = 'false', exitViaCleanup = 'false'] = process.argv.slice(2)
 if (!cacheDir || !barrierDir || !id || !sourcePath) throw new Error('missing worker argument')
@@ -13,7 +13,7 @@ async function waitFor(name: string): Promise<void> {
   while (!existsSync(path)) await new Promise(resolve => { setTimeout(resolve, 5) })
 }
 
-process.env['CODEBURN_CACHE_DIR'] = cacheDir
+process.env['KYBERDASH_CACHE_DIR'] = cacheDir
 await mkdir(barrierDir, { recursive: true })
 
 const refresh = bypass === 'true' ? null : await acquireCacheRefreshLock({ cacheDir, waitMs: 2_000, pollMs: 5 })

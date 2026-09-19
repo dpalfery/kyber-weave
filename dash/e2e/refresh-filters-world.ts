@@ -4,9 +4,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { CanonStore } from '../kyber/canon/store.js'
-import { refreshHarnessSources } from '../kyber/refresh/orchestrator.js'
-import { descriptorFor } from '../kyber/refresh/registry.js'
+import { CanonStore } from '../src/canon/store.js'
+import { refreshHarnessSources } from '../src/refresh/orchestrator.js'
+import { descriptorFor } from '../src/refresh/registry.js'
 import {
   COMMAND_STARTED_AT,
   copyFixture,
@@ -14,7 +14,7 @@ import {
   jsonlLoader,
   sqliteLoader,
   writeCursorVirtualDb,
-} from '../kyber/refresh/fixtures/integration-harness.js'
+} from '../src/refresh/fixtures/integration-harness.js'
 import type { Provider, SessionSource } from '../src/providers/types.js'
 
 export const USER_CANON = join(homedir(), '.kyberdash', 'canon.db')

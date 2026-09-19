@@ -4,25 +4,24 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   resolve: {
     alias: [
-      { find: /^@\/(.*)/, replacement: resolve(__dirname, './dash/src/$1') },
-      { find: '@', replacement: resolve(__dirname, './dash/src') },
+      { find: /^@\/(.*)/, replacement: resolve(__dirname, './web/src/$1') },
+      { find: '@', replacement: resolve(__dirname, './web/src') },
     ],
   },
   test: {
-    // Include backend tests and UI component tests
+    // Include backend tests, operator-tool tests, and UI component tests
     include: [
+      'src/**/*.{test,spec}.?(c|m)[jt]s?(x)',
       'tests/**/*.{test,spec}.?(c|m)[jt]s?(x)',
-      'dash/src/**/*.{test,spec}.?(c|m)[jt]s?(x)',
-      'kyber/**/*.{test,spec}.?(c|m)[jt]s?(x)',
+      'scripts/**/*.{test,spec}.?(c|m)[jt]s?(x)',
+      'web/src/**/*.{test,spec}.?(c|m)[jt]s?(x)',
     ],
     // A worktree under .claude/ carries its own tests/ copy. They are stale by
     // definition (another branch's checkout) and are not this run's subject.
-    // app/ has its own separate desktop package and test suite.
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
       '**/.claude/worktrees/**',
-      'app/**',
     ],
     // Runs once per worker before any test. Scrubs the developer's shell so
     // session-discovery env vars (CLAUDE_CONFIG_DIRS, HOME, XDG_*, every

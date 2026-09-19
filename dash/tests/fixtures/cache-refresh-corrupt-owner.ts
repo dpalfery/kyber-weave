@@ -1,7 +1,7 @@
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { acquireCacheRefreshLock } from '../../src/cache-refresh-lock.js'
+import { acquireCacheRefreshLock } from '../../src/ingest/cache-refresh-lock.js'
 
 // A plain owner in its own process. It records its outcome, its token, and the
 // result of the publication fence into the barrier directory so the parent can

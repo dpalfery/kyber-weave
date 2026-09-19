@@ -15,7 +15,7 @@ Accepted
 
 ## Context
 
-KyberDash was established in [ADR 0006](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) as a TypeScript soft fork of `getagentseal/codeburn` (vendored under `dash/`) hosting OpenTelemetry span analysis from the retired Python pipeline (`agent-session-analysis-dashboard`). While `dash/kyber/canon/store.ts` provided raw span persistence into `~/.kyberdash/canon.db`, the Web Dashboard and Context Explorer suffered from four key defects:
+KyberDash was established in [ADR 0006](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) as a TypeScript soft fork of `getagentseal/codeburn` (vendored under `dash/`) hosting OpenTelemetry span analysis from the retired Python pipeline (`agent-session-analysis-dashboard`). While `dash/kyber/canon/store.ts` provided raw span persistence into `~/.kyberdash/canon.db`, the Web Dashboard and Context Explorer suffered from four key defects:
 
 1. **Disconnected Navigation Routes and Blank Screens**: Top navigation originally included standalone buttons (`[Buckets]`, `[Schema]`, `[Timeline]`, `[Compare]`, `[Quarantine]`, `[Problems]`). In the Python pipeline, Context Composition, Tool/Schema Cost, Turn Spend, and Timeline are facets of a specific session, not global views. Navigating to them globally caused blank screens or permanent loading skeletons because the backend routes were missing.
 2. **Missing `/api/kyber/*` REST Endpoints**: The web dashboard server (`dash/src/web-dashboard.ts`) had no handlers for `/api/kyber/*` routes, falling through to the SPA catch-all and returning HTML to JSON API callers.
@@ -75,7 +75,7 @@ Four cohesive architectural decisions (D1–D4) govern the integrated KyberDash 
 
 ## Related
 
-- [ADR 0006: KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)
+- [ADR 0006: KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)
 - [KyberDash architecture](../dash/architecture.md)
 - [KyberDash runbook](../dash/runbook.md)
 - [KyberDash product index](../dash/README.md)

@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-18
 ---
 
 # Todos
@@ -48,11 +48,16 @@ last-reviewed: YYYY-MM-DD
 | [factory.md](factory.md) | KyberSquad | superseded | Add a native Factory (factory-droids) renderer to Kyber-Squad (superseded by [plan](../archive/plans/2026-09-14-factory-native-renderer.md)). |
 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | draft | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
 | [kyberdash-local-release-loop.md](kyberdash-local-release-loop.md) | Distribution | draft | The local release loop builds no `kyberdash`, so the KyberDash install and update path is unverifiable offline. |
+| [macos-developer-id-signing.md](macos-developer-id-signing.md) | Distribution | draft | Every macOS binary ships ad-hoc signed; set up team `J2UNNQ466J` Developer ID and notarization credentials (needed first by the KyberDash tray) and sign the CLI binaries. |
 | [mistyped-release-tag.md](mistyped-release-tag.md) | Distribution | draft | The mistyped `v1.0.6-rc.6` tag outranks every real release in version-sorted resolution. |
 | [kilo.md](kilo.md) | KyberSquad | superseded | Add a native Kilo renderer to Kyber-Squad (completed via [plan](../plans/2026-09-14-kilo-native-renderer.md)). |
 | [opencode.md](opencode.md) | KyberSquad | superseded | Add a native OpenCode renderer to Kyber-Squad (superseded by [plan](../plans/2026-09-14-opencode-native-renderer.md)). |
 | [claude-renderer-ask-narrowing.md](claude-renderer-ask-narrowing.md) | KyberSquad | draft | Claude and Pi both narrow `ask` to deny, so the rendered `architect` and `product-owner` cannot save their plans and specs on those harnesses. |
 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | draft | Add a `--version` flag to squad install and squad update. |
 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | draft | squad commands' positional path argument can silently target the wrong directory. |
+| [squad-global-multi-target-receipt-collision.md](squad-global-multi-target-receipt-collision.md) | KyberSquad | draft | A global install of `cursor,antigravity` fails at receipt write because the receipt keys files by relative path alone; the dry run does not predict it. |
+| [squad-global-receipt-bound-to-cwd.md](squad-global-receipt-bound-to-cwd.md) | KyberSquad | draft | A global receipt is bound to the `[path]` argument (default: current directory), so a deployment made from a worktree is orphaned when the worktree goes. |
+| [squad-global-status-and-uninstall-roots.md](squad-global-status-and-uninstall-roots.md) | KyberSquad | draft | `status -g` reports installed files missing and `uninstall -g --dry-run` reports nothing to remove; directories are left behind. |
+| [antigravity-native-agents.md](antigravity-native-agents.md) | KyberSquad | draft | `agy` 1.2.2 has native agents (`~/.gemini/config/agents/<name>/agent.md`), but the Antigravity renderer still lowers every role to a skill. |
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |

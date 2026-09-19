@@ -1,7 +1,7 @@
 import { readdir } from 'fs/promises'
 import { join } from 'path'
 
-import { calculateCost } from '../models.js'
+import { calculateCost } from '../pricing/models.js'
 import {
   isSqliteAvailable,
   getSqliteLoadError,
@@ -11,7 +11,7 @@ import {
   isSqliteReadonlyError,
   warnSqliteReadonlyOnce,
   type SqliteDatabase,
-} from '../sqlite.js'
+} from '../ingest/sqlite.js'
 import { buildAssistantCall, parseTimestamp, sanitize, type MessageData, type PartData } from './session-message.js'
 import type {
   SessionSource,
@@ -115,7 +115,7 @@ function warnUnrecognizedSchemaOnce(providerLabel: string, missing: string[]): v
   warnedSchemas.set(providerLabel, providerSet)
   process.stderr.write(
     `codeburn: ${providerLabel} database is missing expected tables (${missing.join(', ')}). ` +
-    `Run ${providerLabel} once to apply migrations, or report at https://github.com/getagentseal/codeburn/issues if this persists.\n`
+    `Run ${providerLabel} once to apply migrations, or report at https://github.com/dpalfery/kyber-weave/issues if this persists.\n`
   )
 }
 
@@ -282,7 +282,7 @@ export function createSqliteSessionParser(
             }
           }
 
-          if (yieldCount === 0 && process.env['CODEBURN_VERBOSE'] === '1') {
+          if (yieldCount === 0 && process.env['KYBERDASH_VERBOSE'] === '1') {
             process.stderr.write(
               `codeburn: ${config.displayName} session ${sessionId} has ${messages.length} messages ` +
               `(${parseFailCount} unparseable, ${roleSkipCount} non-user/assistant roles) ` +

@@ -74,7 +74,7 @@ function cliEnv(cacheDir, extra = {}) {
   }
   return {
     ...passthrough,
-    HOME, USERPROFILE: HOME, TZ: 'UTC', CODEBURN_CACHE_DIR: cacheDir,
+    HOME, USERPROFILE: HOME, TZ: 'UTC', KYBERDASH_CACHE_DIR: cacheDir,
     APPDATA: join(HOME, 'AppData', 'Roaming'), LOCALAPPDATA: join(HOME, 'AppData', 'Local'),
     ...extra,
   }
@@ -272,7 +272,7 @@ async function serveSmoke() {
 
 // ── 6. worker determinism ────────────────────────────────────────────────────
 
-step('parse-worker determinism (CODEBURN_PARSE_WORKERS 0 vs 3)')
+step('parse-worker determinism (KYBERDASH_PARSE_WORKERS 0 vs 3)')
 const serialCache = join(CACHES, 'workers-0')
 const parallelCache = join(CACHES, 'workers-3')
 for (const dir of [serialCache, parallelCache]) {
@@ -282,8 +282,8 @@ for (const dir of [serialCache, parallelCache]) {
   const priced = join(upgradeCache, 'litellm-pricing.json')
   if (existsSync(priced)) copyFileSync(priced, join(dir, 'litellm-pricing.json'))
 }
-const serialOut = capture(newBin, serialCache, join(PAYLOADS, 'workers-0'), { CODEBURN_PARSE_WORKERS: '0', CODEBURN_VERBOSE: '1' })
-const parallelOut = capture(newBin, parallelCache, join(PAYLOADS, 'workers-3'), { CODEBURN_PARSE_WORKERS: '3', CODEBURN_VERBOSE: '1' })
+const serialOut = capture(newBin, serialCache, join(PAYLOADS, 'workers-0'), { KYBERDASH_PARSE_WORKERS: '0', KYBERDASH_VERBOSE: '1' })
+const parallelOut = capture(newBin, parallelCache, join(PAYLOADS, 'workers-3'), { KYBERDASH_PARSE_WORKERS: '3', KYBERDASH_VERBOSE: '1' })
 check(JSON.stringify(stripGenerated(serialOut.menubar)) === JSON.stringify(stripGenerated(parallelOut.menubar)),
   'menubar-json payload identical with and without workers')
 const readExport = dir => stripGenerated(JSON.parse(readFileSync(join(PAYLOADS, dir, 'export.json'), 'utf8')))
@@ -294,7 +294,7 @@ check(JSON.stringify(shardSnapshot(serialCache)) === JSON.stringify(shardSnapsho
 
 // A forced pool that never actually spawned would make the check above vacuous.
 const verbose = run(newBin.cmd, [...newBin.args, 'status', '--format', 'json', '--period', 'all'], {
-  env: cliEnv(join(CACHES, 'workers-probe'), { CODEBURN_PARSE_WORKERS: '3', CODEBURN_VERBOSE: '1' }), cwd: WORK,
+  env: cliEnv(join(CACHES, 'workers-probe'), { KYBERDASH_PARSE_WORKERS: '3', KYBERDASH_VERBOSE: '1' }), cwd: WORK,
 })
 const decision = (verbose.stderr || '').split('\n').filter(l => l.includes('parse workers='))
 if (decision.length === 0) skip('no "parse workers=" line on stderr; cannot confirm the pool was forced')
@@ -311,7 +311,7 @@ const warm = capture(newBin, upgradeCache, join(PAYLOADS, 'warm'))
 // re-parses are pending. On an unchanged corpus that must be zero for the two
 // providers big enough to be gated.
 const warmVerbose = run(newBin.cmd, [...newBin.args, 'status', '--format', 'menubar-json', '--period', 'all', '--no-optimize', '--no-timeline'], {
-  env: cliEnv(upgradeCache, { CODEBURN_VERBOSE: '1' }), cwd: WORK,
+  env: cliEnv(upgradeCache, { KYBERDASH_VERBOSE: '1' }), cwd: WORK,
 })
 const pending = (warmVerbose.stderr || '').split('\n').filter(l => l.includes('parse workers='))
 if (pending.length === 0) skip('no "parse workers=" line on a warm run; cannot confirm nothing re-parsed')

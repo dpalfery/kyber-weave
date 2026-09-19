@@ -2,8 +2,8 @@ import { readFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { homedir, platform } from 'os'
 
-import { calculateCost } from '../models.js'
-import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost } from '../pricing/models.js'
+import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 /// Crush stores per-project SQLite databases discovered through a JSON registry.

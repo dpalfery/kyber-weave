@@ -2,7 +2,7 @@ import { pbkdf2 } from 'crypto'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { acquireCacheRefreshLock } from '../../src/cache-refresh-lock.js'
+import { acquireCacheRefreshLock } from '../../src/ingest/cache-refresh-lock.js'
 
 // Saturate the (size-1) libuv threadpool so every fs operation inside
 // createExclusive queues behind a pbkdf2 round. No test hook and no patched

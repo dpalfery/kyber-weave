@@ -3,7 +3,7 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { runWebDashboard } from '../src/web-dashboard.js'
+import { runWebDashboard } from '../src/cli/web.js'
 import { refreshTempCanon, USER_CANON } from './refresh-filters-world.js'
 
 const dashDist = join(dirname(fileURLToPath(import.meta.url)), '..', 'dash', 'dist')
