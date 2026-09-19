@@ -31,7 +31,7 @@ function session(opts: { id: string; provider: string; timestamp: string; messag
     sessionId: opts.id, project: 'codeburn', firstTimestamp: opts.timestamp, lastTimestamp: opts.timestamp,
     totalCostUSD: 1, totalSavingsUSD: 0, totalInputTokens: 1, totalOutputTokens: 1,
     totalReasoningTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0, apiCalls: 1, turns,
-    modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {}, categoryBreakdown: {}, skillBreakdown: {}, subagentBreakdown: {},
+    modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {}, categoryBreakdown: {} as SessionSummary['categoryBreakdown'], skillBreakdown: {}, subagentBreakdown: {},
     ...(opts.refs ? { prLinks: opts.refs, prAttributionSource: 'transcript' as const } : {}),
     ...(opts.cwd ? { workingDirectory: opts.cwd } : {}),
     ...(opts.parentId ? { parentSessionId: opts.parentId } : {}),

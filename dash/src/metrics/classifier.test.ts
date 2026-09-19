@@ -21,6 +21,7 @@ function makeCall(opts: Partial<ParsedApiCall> & { tools?: string[]; skills?: st
     tools,
     mcpTools: tools.filter(t => t.startsWith('mcp__')),
     skills: opts.skills ?? [],
+    subagentTypes: opts.subagentTypes ?? [],
     hasAgentSpawn: tools.includes('Agent'),
     hasPlanMode: tools.includes('EnterPlanMode'),
     speed: 'standard',

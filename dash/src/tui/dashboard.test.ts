@@ -13,19 +13,19 @@ import { resolveCliName } from '../brand-overlay.js'
 import type { ProjectSummary, SessionSummary } from '../types.js'
 
 const EMPTY_CATEGORY_BREAKDOWN = {
-  coding: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  debugging: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  feature: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  refactoring: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  testing: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  exploration: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  planning: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  delegation: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  git: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  'build/deploy': { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  conversation: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  brainstorming: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  general: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  coding: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  debugging: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  feature: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  refactoring: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  testing: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  exploration: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  planning: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  delegation: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  git: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  'build/deploy': { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  conversation: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  brainstorming: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  general: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
 } satisfies SessionSummary['categoryBreakdown']
 
 function makeSession(id: string, cost: number, timestamp = '2026-04-14T10:00:00Z'): SessionSummary {
@@ -38,6 +38,7 @@ function makeSession(id: string, cost: number, timestamp = '2026-04-14T10:00:00Z
     totalSavingsUSD: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     apiCalls: 1,
@@ -58,6 +59,8 @@ function makeProject(name: string, sessions: SessionSummary[]): ProjectSummary {
     projectPath: name,
     sessions,
     totalCostUSD: sessions.reduce((s, x) => s + x.totalCostUSD, 0),
+    totalSavingsUSD: 0,
+    totalProxiedCostUSD: 0,
     totalApiCalls: sessions.reduce((s, x) => s + x.apiCalls, 0),
   }
 }
@@ -795,7 +798,7 @@ describe('InteractiveDashboard refresh', () => {
     stdout.on('data', chunk => frames.push(stripAnsi(String(chunk))))
     const session = makeSession('s1', 1)
     session.turns = Array.from({ length: 11 }, (_, index) => makeTurn(`2026-07-${String(index + 1).padStart(2, '0')}T10:00:00Z`, [1]))
-    session.categoryBreakdown.coding = { turns: 12, costUSD: 1, retries: 0, editTurns: 10, oneShotTurns: 5 }
+    session.categoryBreakdown.coding = { turns: 12, costUSD: 1, savingsUSD: 0, retries: 0, editTurns: 10, oneShotTurns: 5 }
 
     const app = render(React.createElement(InteractiveDashboard, {
       initialProjects: [makeProject('proj', [session])],

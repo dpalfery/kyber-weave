@@ -16,7 +16,6 @@ import type {
   ParsedApiCall,
   ProjectSummary,
   SessionSummary,
-  TaskCategory,
   TokenUsage,
 } from '../types.js'
 
@@ -44,6 +43,7 @@ function makeCall(opts: { tools?: string[]; provider?: string } = {}): ParsedApi
     tools,
     mcpTools: tools.filter(t => t.startsWith('mcp__')),
     skills: [],
+    subagentTypes: [],
     hasAgentSpawn: false,
     hasPlanMode: false,
     speed: 'standard',
@@ -67,21 +67,23 @@ function makeTurn(calls: ParsedApiCall[]): ClassifiedTurn {
 
 function makeSession(opts: {
   sessionId?: string
-  inventory?: string[]
   turns?: ClassifiedTurn[]
   mcpBreakdown?: Record<string, { calls: number }>
-}): SessionSummary {
+  inventory?: string[]
+} = {}): SessionSummary {
   const turns = opts.turns ?? []
   const apiCalls = turns.reduce((s, t) => s + t.assistantCalls.length, 0)
-  const emptyCategoryBreakdown = {} as Record<TaskCategory, { turns: number; costUSD: number; retries: number; editTurns: number; oneShotTurns: number }>
+  const emptyCategoryBreakdown = {} as SessionSummary['categoryBreakdown']
   return {
     sessionId: opts.sessionId ?? 's1',
     project: 'p',
     firstTimestamp: '2026-05-04T00:00:00Z',
     lastTimestamp: '2026-05-04T00:00:00Z',
     totalCostUSD: 0,
+    totalSavingsUSD: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     apiCalls,
@@ -92,6 +94,7 @@ function makeSession(opts: {
     bashBreakdown: {},
     categoryBreakdown: emptyCategoryBreakdown,
     skillBreakdown: {},
+    subagentBreakdown: {},
     ...(opts.inventory ? { mcpInventory: opts.inventory } : {}),
   }
 }
@@ -102,7 +105,9 @@ function project(sessions: SessionSummary[]): ProjectSummary {
     projectPath: '/tmp/p',
     sessions,
     totalCostUSD: 0,
+    totalSavingsUSD: 0,
     totalApiCalls: sessions.reduce((s, ses) => s + ses.apiCalls, 0),
+    totalProxiedCostUSD: 0,
   }
 }
 

@@ -11,19 +11,19 @@ import { aggregateProjectsIntoDays } from '../metrics/day-aggregator.js'
 import type { ProjectSummary, SessionSummary } from '../types.js'
 
 const EMPTY_BREAKDOWN = {
-  coding: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  debugging: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  feature: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  refactoring: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  testing: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  exploration: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  planning: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  delegation: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  git: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  'build/deploy': { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  conversation: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  brainstorming: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  general: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  coding: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  debugging: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  feature: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  refactoring: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  testing: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  exploration: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  planning: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  delegation: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  git: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  'build/deploy': { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  conversation: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  brainstorming: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  general: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
 } as const
 
 function project(): ProjectSummary {
@@ -31,11 +31,12 @@ function project(): ProjectSummary {
   const session: SessionSummary = {
     sessionId: 'today', project: 'p', firstTimestamp: timestamp, lastTimestamp: timestamp,
     totalCostUSD: 1, totalSavingsUSD: 0, totalInputTokens: 0, totalOutputTokens: 0,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0, totalCacheWriteTokens: 0, apiCalls: 1,
     turns: [], modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
     categoryBreakdown: { ...EMPTY_BREAKDOWN }, skillBreakdown: {}, subagentBreakdown: {},
   }
-  return { project: 'p', projectPath: '/tmp/p', sessions: [session], totalCostUSD: 1, totalApiCalls: 1 }
+  return { project: 'p', projectPath: '/tmp/p', sessions: [session], totalCostUSD: 1, totalSavingsUSD: 0, totalProxiedCostUSD: 0, totalApiCalls: 1 }
 }
 
 function emptyDailyCache(): DailyCache {
@@ -55,22 +56,22 @@ function historicalProviderProject(
     hasPlanMode: false, speed: 'standard' as const, bashCommands: [], deduplicationKey: id,
   }
   return {
-    project: 'p', projectPath: '/tmp/p', totalCostUSD: cost, totalApiCalls: 1,
+    project: 'p', projectPath: '/tmp/p', totalCostUSD: cost, totalSavingsUSD: 0, totalProxiedCostUSD: 0, totalApiCalls: 1,
     sessions: [{
       sessionId: id, project: 'p', firstTimestamp: timestamp, lastTimestamp: timestamp,
-      totalCostUSD: cost, totalSavingsUSD: 0, totalInputTokens: 10, totalOutputTokens: 5,
+      totalCostUSD: cost, totalSavingsUSD: 0, totalReasoningTokens: 0, totalInputTokens: 10, totalOutputTokens: 5,
       totalCacheReadTokens: 0, totalCacheWriteTokens: 0, apiCalls: 1,
       turns: [{ userMessage: 'hi', timestamp, sessionId: id, category: 'coding', retries: 0, hasEdits: false, assistantCalls: [call] }],
       modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
       categoryBreakdown: { ...EMPTY_BREAKDOWN }, skillBreakdown: {}, subagentBreakdown: {},
     }],
-  } as ProjectSummary
+  } as unknown as ProjectSummary
 }
 
 describe('interactive period truth', () => {
   it('keeps provider-filtered historical money when the durable day cache is empty', () => {
     const history: DashboardHistoryIndex = {
-      provider: 'claude', normalizedProjects: [historicalProviderProject()], cache: emptyDailyCache(), planUsages: [], readyThrough: 'lifetime',
+      provider: 'claude', normalizedProjects: [historicalProviderProject()], cache: emptyDailyCache(), readyThrough: 'lifetime',
     }
 
     expect(selectDashboardHistoryIndex(history, 'lifetime').durable).toMatchObject({
@@ -90,7 +91,7 @@ describe('interactive period truth', () => {
     }
 
     expect(selectDashboardHistoryIndex({
-      provider: 'codex', normalizedProjects: [codex], cache: sharedCache, planUsages: [], readyThrough: 'lifetime',
+      provider: 'codex', normalizedProjects: [codex], cache: sharedCache, readyThrough: 'lifetime',
     }, 'lifetime').durable).toMatchObject({ cost: 7, calls: 1, sessions: 1 })
 
     const cachedCodex = historicalProviderProject('codex', 4, timestamp)
@@ -99,10 +100,10 @@ describe('interactive period truth', () => {
       days: aggregateProjectsIntoDays([claude, cachedCodex]),
     }
     expect(selectDashboardHistoryIndex({
-      provider: 'codex', normalizedProjects: [codex], cache: cacheWithCodex, planUsages: [], readyThrough: 'lifetime',
+      provider: 'codex', normalizedProjects: [codex], cache: cacheWithCodex, readyThrough: 'lifetime',
     }, 'lifetime').durable).toMatchObject({ cost: 4, calls: 1, sessions: 1 })
     expect(selectDashboardHistoryIndex({
-      provider: 'codex', normalizedProjects: [], cache: cacheWithCodex, planUsages: [], readyThrough: 'lifetime',
+      provider: 'codex', normalizedProjects: [], cache: cacheWithCodex, readyThrough: 'lifetime',
     }, 'lifetime').durable).toMatchObject({ cost: 4, calls: 1, sessions: 1 })
   })
 
@@ -173,7 +174,7 @@ describe('interactive period truth', () => {
     stdout.rows = 50
     const frames: string[] = []
     stdout.on('data', chunk => frames.push(stripAnsi(String(chunk))))
-    const history: DashboardHistoryIndex = { provider: 'all', normalizedProjects: [project()], cache: emptyDailyCache(), planUsages: [] }
+    const history: DashboardHistoryIndex = { provider: 'all', normalizedProjects: [project()], cache: emptyDailyCache() }
 
     const app = render(React.createElement(InteractiveDashboard, {
       initialProjects: [project()], initialPeriod: 'today', initialProvider: 'all',
@@ -207,7 +208,7 @@ describe('interactive period truth', () => {
     const frames: string[] = []
     stdout.on('data', chunk => frames.push(stripAnsi(String(chunk))))
     const history: DashboardHistoryIndex = {
-      provider: 'all', normalizedProjects: [project()], cache: emptyDailyCache(), planUsages: [], readyThrough: 'week',
+      provider: 'all', normalizedProjects: [project()], cache: emptyDailyCache(), readyThrough: 'week',
     }
 
     const app = render(React.createElement(InteractiveDashboard, {

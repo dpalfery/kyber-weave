@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { aggregateProjectsIntoDays, buildPeriodDataFromDays } from './day-aggregator.js'
-import type { ParsedApiCall, ProjectSummary, Turn } from '../types.js'
+import type { DailyEntry } from '../ingest/daily-cache.js'
+import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary } from '../types.js'
 
 function makeCall(timestamp: string, opts: { costUSD: number; savingsUSD?: number; savingsBaselineModel?: string; model?: string }): ParsedApiCall {
   return {
@@ -32,16 +33,16 @@ function makeCall(timestamp: string, opts: { costUSD: number; savingsUSD?: numbe
   }
 }
 
-function makeTurn(timestamp: string, calls: ParsedApiCall[], category: string = 'coding'): Turn {
+function makeTurn(timestamp: string, calls: ParsedApiCall[], category: string = 'coding'): ClassifiedTurn {
   return {
     userMessage: 'u',
     timestamp,
     sessionId: 's',
-    category: category as Turn['category'],
+    category: category as ClassifiedTurn['category'],
     retries: 0,
     hasEdits: false,
     assistantCalls: calls,
-  } as Turn
+  }
 }
 
 describe('aggregateProjectsIntoDays: savings totals', () => {
@@ -64,18 +65,20 @@ describe('aggregateProjectsIntoDays: savings totals', () => {
         totalSavingsUSD: 5,
         totalInputTokens: 200,
         totalOutputTokens: 400,
+        totalReasoningTokens: 0,
         totalCacheReadTokens: 100,
         totalCacheWriteTokens: 0,
         apiCalls: 2,
         turns: [turn, turn2],
         modelBreakdown: { 'Local Model': { calls: 1, costUSD: 0, savingsUSD: 5, tokens: { inputTokens: 100, outputTokens: 200, cacheCreationInputTokens: 0, cacheReadInputTokens: 50, cachedInputTokens: 0, reasoningTokens: 0, webSearchRequests: 0 } }, 'gpt-4o': { calls: 1, costUSD: 2, savingsUSD: 0, tokens: { inputTokens: 100, outputTokens: 200, cacheCreationInputTokens: 0, cacheReadInputTokens: 50, cachedInputTokens: 0, reasoningTokens: 0, webSearchRequests: 0 } } },
         toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
-        categoryBreakdown: { coding: { turns: 1, costUSD: 2, savingsUSD: 5, retries: 0, editTurns: 0, oneShotTurns: 0 } },
+        categoryBreakdown: { coding: { turns: 1, costUSD: 2, savingsUSD: 5, retries: 0, editTurns: 0, oneShotTurns: 0 } } as unknown as SessionSummary['categoryBreakdown'],
         skillBreakdown: {}, subagentBreakdown: {},
       }],
       totalCostUSD: 2,
       totalSavingsUSD: 5,
       totalApiCalls: 2,
+      totalProxiedCostUSD: 0,
     }
     const days = aggregateProjectsIntoDays([project])
     expect(days).toHaveLength(1)
@@ -91,7 +94,7 @@ describe('aggregateProjectsIntoDays: savings totals', () => {
 
 describe('buildPeriodDataFromDays: savings totals', () => {
   it('threads savings through to model and category rollups', () => {
-    const days = [
+    const days: DailyEntry[] = [
       {
         date: '2026-04-09',
         cost: 2,

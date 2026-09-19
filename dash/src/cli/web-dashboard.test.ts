@@ -232,7 +232,6 @@ describe('web dashboard server: /api/kyber/* routes', () => {
 
     testBridge = new KyberBridge({
       canonDb,
-      sessionsDb,
       ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
     })
 

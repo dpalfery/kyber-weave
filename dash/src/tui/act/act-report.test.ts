@@ -632,7 +632,7 @@ describe('defer realized delta', () => {
   it('reports "not yet in effect" with zero savings when no post-apply session shows deferral', async () => {
     const actionsDir = await writeJournal([deferRecord()])
     // sessions with MCP activity but NO inventory = deferral still off
-    const off = sessionsAt(4, daysAgo(5), { mcpBreakdown: { everything: { calls: 2, savingsUSD: 0, costUSD: 0 } } })
+    const off = sessionsAt(4, daysAgo(5), { mcpBreakdown: { everything: { calls: 2 } } })
     const report = await computeActReport({ actionsDir, now: NOW, loadProjects: load([projectOf(off)]) })
 
     const row = report.rows[0]!
@@ -727,7 +727,7 @@ describe('defer realized delta', () => {
 
   it('surfaces the pending status to --json consumers instead of asserting a revert', async () => {
     const actionsDir = await writeJournal([deferRecord()])
-    const off = sessionsAt(4, daysAgo(5), { mcpBreakdown: { everything: { calls: 2, savingsUSD: 0, costUSD: 0 } } })
+    const off = sessionsAt(4, daysAgo(5), { mcpBreakdown: { everything: { calls: 2 } } })
     const json = buildActReportJson(await computeActReport({ actionsDir, now: NOW, loadProjects: load([projectOf(off)]) })) as { actions: Array<{ status: string; realizedTokens: number | null; note: string }> }
     expect(json.actions[0]!.status).toBe('pending')
     expect(json.actions[0]!.realizedTokens).toBeNull()
@@ -745,7 +745,7 @@ describe('defer baseline capture', () => {
   const ctx = (projects: ProjectSummary[]) => ({ projects, coverage: [], windowDays: 14, now: NOW })
 
   it('derives servers from observed MCP usage for defer-enable', () => {
-    const projects = [projectOf(sessionsAt(3, daysAgo(5), { mcpBreakdown: { everything: { calls: 2, savingsUSD: 0, costUSD: 0 }, 'fs-tools': { calls: 1, savingsUSD: 0, costUSD: 0 } } }))]
+    const projects = [projectOf(sessionsAt(3, daysAgo(5), { mcpBreakdown: { everything: { calls: 2 }, 'fs-tools': { calls: 1 } } }))]
     const b = captureBaseline(finding({ kind: 'defer-enable', cause: 'env-false', settingPath: '/x', settingScope: 'project settings', value: 'false' }), 'defer-enable', ctx(projects))
     expect(b).toBeDefined()
     // no coverage -> 5 tools x 400 fallback per server

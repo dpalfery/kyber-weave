@@ -48,8 +48,9 @@ describe('KyberBridge: _clip helper', () => {
     expect(clipped.longLeaf).toContain('... [truncated, 2100 chars]')
     expect(clipped.items[0]).toBe('normal')
     expect(clipped.items[1]).toContain('... [truncated, 2050 chars]')
-    expect(clipped.items[2].nested).toContain('... [truncated, 2010 chars]')
-    expect(clipped.items[2].count).toBe(42)
+    const nestedItem = clipped.items[2] as { nested: string; count: number }
+    expect(nestedItem.nested).toContain('... [truncated, 2010 chars]')
+    expect(nestedItem.count).toBe(42)
   })
 
   it('stops recursion beyond depth 8', () => {

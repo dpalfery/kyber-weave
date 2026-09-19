@@ -57,7 +57,7 @@ describe('renderStatusBar supplementary accounting', () => {
           },
         ],
       }],
-    }] as ProjectSummary[]
+    }] as unknown as ProjectSummary[]
 
     const out = stripAnsi(renderStatusBar(projects))
     expect(out).toContain(`Today  ${formatCost(1.75)}  1 calls`)

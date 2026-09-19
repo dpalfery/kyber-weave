@@ -1,20 +1,22 @@
 import { describe, expect, it } from 'vitest'
 
 import { aggregateProjectsIntoDays, buildPeriodDataFromDays, dateKey } from './day-aggregator.js'
-import { isTurnResidueOnly } from '../ingest/daily-cache.js'
-import type { ProjectSummary } from '../types.js'
+import { isTurnResidueOnly, type DailyEntry } from '../ingest/daily-cache.js'
+import type { ProjectSummary, ParsedApiCall } from '../types.js'
 
 function makeProject(overrides: Partial<ProjectSummary> & { sessions: ProjectSummary['sessions'] }): ProjectSummary {
   return {
     project: 'p',
     projectPath: '/p',
     totalCostUSD: overrides.sessions.reduce((s, sess) => s + sess.totalCostUSD, 0),
+    totalSavingsUSD: 0,
+    totalProxiedCostUSD: 0,
     totalApiCalls: overrides.sessions.reduce((s, sess) => s + sess.apiCalls, 0),
     ...overrides,
   }
 }
 
-function makeCall(timestamp: string, costUSD: number, model = 'Opus 4.7', provider = 'claude') {
+function makeCall(timestamp: string, costUSD: number, model = 'Opus 4.7', provider = 'claude'): ParsedApiCall {
   return {
     provider,
     model,
@@ -31,6 +33,7 @@ function makeCall(timestamp: string, costUSD: number, model = 'Opus 4.7', provid
     tools: [],
     mcpTools: [],
     skills: [],
+    subagentTypes: [],
     hasAgentSpawn: false,
     hasPlanMode: false,
     speed: 'standard' as const,
@@ -53,8 +56,10 @@ function makeSingleTurnProject(
       firstTimestamp: timestamp,
       lastTimestamp: assistantCalls.at(-1)!.timestamp,
       totalCostUSD,
+      totalSavingsUSD: 0,
       totalInputTokens: assistantCalls.reduce((sum, call) => sum + call.usage.inputTokens, 0),
       totalOutputTokens: assistantCalls.reduce((sum, call) => sum + call.usage.outputTokens, 0),
+      totalReasoningTokens: 0,
       totalCacheReadTokens: assistantCalls.reduce((sum, call) => sum + call.usage.cacheReadInputTokens, 0),
       totalCacheWriteTokens: assistantCalls.reduce((sum, call) => sum + call.usage.cacheCreationInputTokens, 0),
       apiCalls: assistantCalls.length,
@@ -70,6 +75,7 @@ function makeSingleTurnProject(
       modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
       categoryBreakdown: {} as never,
       skillBreakdown: {} as never,
+      subagentBreakdown: {},
     }],
   })
 }
@@ -89,8 +95,10 @@ describe('aggregateProjectsIntoDays', () => {
           firstTimestamp: '2026-04-09T10:00:00',
           lastTimestamp: '2026-04-10T08:00:00',
           totalCostUSD: 10,
+          totalSavingsUSD: 0,
           totalInputTokens: 0,
           totalOutputTokens: 0,
+          totalReasoningTokens: 0,
           totalCacheReadTokens: 0,
           totalCacheWriteTokens: 0,
           apiCalls: 2,
@@ -114,6 +122,7 @@ describe('aggregateProjectsIntoDays', () => {
           bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]
@@ -141,8 +150,10 @@ describe('aggregateProjectsIntoDays', () => {
           firstTimestamp: '2026-04-09T10:00:00',
           lastTimestamp: '2026-04-09T10:05:00',
           totalCostUSD: 3,
+          totalSavingsUSD: 0,
           totalInputTokens: 0,
           totalOutputTokens: 0,
+          totalReasoningTokens: 0,
           totalCacheReadTokens: 0,
           totalCacheWriteTokens: 0,
           apiCalls: 1,
@@ -163,6 +174,7 @@ describe('aggregateProjectsIntoDays', () => {
           bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]
@@ -188,8 +200,10 @@ describe('aggregateProjectsIntoDays', () => {
           firstTimestamp: '2026-04-09T10:00:00',
           lastTimestamp: '2026-04-09T10:00:00',
           totalCostUSD: 0,
+          totalSavingsUSD: 0,
           totalInputTokens: 0,
           totalOutputTokens: 0,
+          totalReasoningTokens: 0,
           totalCacheReadTokens: 0,
           totalCacheWriteTokens: 0,
           apiCalls: 0,
@@ -208,6 +222,7 @@ describe('aggregateProjectsIntoDays', () => {
           bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]
@@ -245,7 +260,8 @@ describe('aggregateProjectsIntoDays', () => {
           firstTimestamp: callTs,
           lastTimestamp: callTs,
           totalCostUSD: 6,
-          totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
+          totalSavingsUSD: 0,
+          totalInputTokens: 0, totalOutputTokens: 0, totalReasoningTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
           apiCalls: 1,
           turns: [
             {
@@ -257,6 +273,7 @@ describe('aggregateProjectsIntoDays', () => {
           modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]
@@ -289,12 +306,14 @@ describe('aggregateProjectsIntoDays', () => {
           firstTimestamp: '2026-04-09T23:59:00',
           lastTimestamp: '2026-04-10T00:10:00',
           totalCostUSD: 1,
-          totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
+          totalSavingsUSD: 0,
+          totalInputTokens: 0, totalOutputTokens: 0, totalReasoningTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
           apiCalls: 0,
           turns: [],
           modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]
@@ -313,7 +332,8 @@ describe('aggregateProjectsIntoDays', () => {
           firstTimestamp: '2026-04-10T10:00:00',
           lastTimestamp: '2026-04-10T10:00:00',
           totalCostUSD: 10,
-          totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
+          totalSavingsUSD: 0,
+          totalInputTokens: 0, totalOutputTokens: 0, totalReasoningTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
           apiCalls: 2,
           turns: [
             {
@@ -328,6 +348,7 @@ describe('aggregateProjectsIntoDays', () => {
           modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]
@@ -415,10 +436,11 @@ describe('aggregateProjectsIntoDays', () => {
 })
 
 describe('buildPeriodDataFromDays', () => {
-  function makeDay(date: string, cost: number) {
+  function makeDay(date: string, cost: number): DailyEntry {
     return {
       date,
       cost,
+      savingsUSD: 0,
       calls: 10,
       sessions: 2,
       inputTokens: 100,
@@ -496,7 +518,8 @@ describe('buildPeriodDataFromDays', () => {
           firstTimestamp: userTs,
           lastTimestamp: assistantTs,
           totalCostUSD: 5,
-          totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
+          totalSavingsUSD: 0,
+          totalInputTokens: 0, totalOutputTokens: 0, totalReasoningTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
           apiCalls: 1,
           turns: [{
             userMessage: 'ask',
@@ -510,6 +533,7 @@ describe('buildPeriodDataFromDays', () => {
           modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]
@@ -574,7 +598,8 @@ describe('daily-cache ↔ report daily-bucket parity', () => {
           firstTimestamp: turnTs,
           lastTimestamp: turn2Ts,
           totalCostUSD: 12,
-          totalInputTokens: 0, totalOutputTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
+          totalSavingsUSD: 0,
+          totalInputTokens: 0, totalOutputTokens: 0, totalReasoningTokens: 0, totalCacheReadTokens: 0, totalCacheWriteTokens: 0,
           apiCalls: 3,
           turns: [
             {
@@ -591,6 +616,7 @@ describe('daily-cache ↔ report daily-bucket parity', () => {
           modelBreakdown: {}, toolBreakdown: {}, mcpBreakdown: {}, bashBreakdown: {},
           categoryBreakdown: {} as never,
           skillBreakdown: {} as never,
+          subagentBreakdown: {},
         }],
       }),
     ]

@@ -8,6 +8,7 @@ import type { ProjectSummary, SessionSummary, ClassifiedTurn } from '../types.js
 function makeTurn(model: string, cost: number, opts: { hasEdits?: boolean; retries?: number; outputTokens?: number; inputTokens?: number; cacheRead?: number; cacheWrite?: number; timestamp?: string; category?: string; hasAgentSpawn?: boolean; hasPlanMode?: boolean; speed?: 'standard' | 'fast'; tools?: string[] } = {}): ClassifiedTurn {
   const defaultTools = opts.tools ?? (opts.hasEdits ? ['Edit'] : ['Read'])
   return {
+    sessionId: 'test-session',
     timestamp: opts.timestamp ?? '2026-04-15T10:00:00Z',
     category: (opts.category ?? 'coding') as ClassifiedTurn['category'],
     retries: opts.retries ?? 0,
@@ -29,6 +30,7 @@ function makeTurn(model: string, cost: number, opts: { hasEdits?: boolean; retri
       tools: defaultTools,
       mcpTools: [],
       skills: [],
+      subagentTypes: [],
       hasAgentSpawn: opts.hasAgentSpawn ?? false,
       hasPlanMode: opts.hasPlanMode ?? false,
       speed: opts.speed ?? 'standard' as const,
@@ -46,8 +48,10 @@ function makeProject(turns: ClassifiedTurn[]): ProjectSummary {
     firstTimestamp: turns[0]?.timestamp ?? '',
     lastTimestamp: turns[turns.length - 1]?.timestamp ?? '',
     totalCostUSD: turns.reduce((s, t) => s + t.assistantCalls.reduce((s2, c) => s2 + c.costUSD, 0), 0),
+    totalSavingsUSD: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     apiCalls: turns.reduce((s, t) => s + t.assistantCalls.length, 0),
@@ -58,13 +62,16 @@ function makeProject(turns: ClassifiedTurn[]): ProjectSummary {
     bashBreakdown: {},
     categoryBreakdown: {} as SessionSummary['categoryBreakdown'],
     skillBreakdown: {} as SessionSummary['skillBreakdown'],
+    subagentBreakdown: {},
   }
   return {
     project: 'test-project',
     projectPath: '/test',
     sessions: [session],
     totalCostUSD: session.totalCostUSD,
+    totalSavingsUSD: 0,
     totalApiCalls: session.apiCalls,
+    totalProxiedCostUSD: 0,
   }
 }
 

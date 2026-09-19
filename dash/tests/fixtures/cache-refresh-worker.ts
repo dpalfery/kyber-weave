@@ -27,7 +27,7 @@ try {
   // Parsing is deliberately tiny; the files and barrier make the transaction
   // interleaving deterministic rather than relying on parser runtime variance.
   const parsed = JSON.parse(await readFile(sourcePath, 'utf-8')) as { output: number }
-  cache.providers['regression'] ??= { parseVersion: 'test', envFingerprint: 'test', files: {} }
+  cache.providers['regression'] ??= { envFingerprint: 'test', files: {} }
   cache.providers['regression'].files[sourcePath] = {
     fingerprint: { dev: 1, ino: parsed.output, mtimeMs: parsed.output, sizeBytes: parsed.output },
     mcpInventory: [],

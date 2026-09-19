@@ -6,6 +6,7 @@ import stripAnsi from 'strip-ansi'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import { InteractiveDashboard, type DashboardHistoryIndex } from './dashboard.js'
+import type { SessionSummary, ProjectSummary } from '../types.js'
 
 // #1143: the quit-confirmation path runs only while a cold-start fill is
 // active, so the parser mock below holds the fill in flight (parseAllSessions
@@ -17,7 +18,7 @@ import { InteractiveDashboard, type DashboardHistoryIndex } from './dashboard.js
 const { parseAllSessionsMock, filesParsedFromSourceCountMock, resolveNextParse } = vi.hoisted(() => {
   const pending: Array<(projects: unknown[]) => void> = []
   return {
-  parseAllSessionsMock: vi.fn<Parameters<typeof import('../ingest/parser.js').parseAllSessions>, ReturnType<typeof import('../ingest/parser.js').parseAllSessions>>(
+  parseAllSessionsMock: vi.fn<typeof import('../ingest/parser.js').parseAllSessions>(
     () => new Promise(resolve => pending.push(resolve as (projects: unknown[]) => void)),
   ),
   filesParsedFromSourceCountMock: vi.fn(() => 0),
@@ -46,22 +47,22 @@ vi.mock('../metrics/usage-aggregator.js', async (importOriginal) => {
 })
 
 const EMPTY_CATEGORY_BREAKDOWN = {
-  coding: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  debugging: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  feature: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  refactoring: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  testing: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  exploration: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  planning: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  delegation: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  git: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  'build/deploy': { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  conversation: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  brainstorming: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
-  general: { turns: 0, costUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  coding: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  debugging: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  feature: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  refactoring: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  testing: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  exploration: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  planning: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  delegation: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  git: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  'build/deploy': { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  conversation: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  brainstorming: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
+  general: { turns: 0, costUSD: 0, savingsUSD: 0, retries: 0, editTurns: 0, oneShotTurns: 0 },
 } as const
 
-function makeSession(id: string) {
+function makeSession(id: string): SessionSummary {
   return {
     sessionId: id,
     project: 'p',
@@ -71,6 +72,7 @@ function makeSession(id: string) {
     totalSavingsUSD: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     apiCalls: 1,
@@ -85,7 +87,7 @@ function makeSession(id: string) {
   }
 }
 
-function makeSessionWithCall(id: string, timestamp: string, cost: number) {
+function makeSessionWithCall(id: string, timestamp: string, cost: number): SessionSummary {
   const call = {
     provider: 'claude', model: 'claude-test',
     usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, webSearchRequests: 0 },
@@ -99,12 +101,14 @@ function makeSessionWithCall(id: string, timestamp: string, cost: number) {
   }
 }
 
-function makeProject(name: string, sessions: ReturnType<typeof makeSession>[]) {
+function makeProject(name: string, sessions: SessionSummary[]): ProjectSummary {
   return {
     project: name,
     projectPath: name,
     sessions,
     totalCostUSD: sessions.reduce((s, x) => s + x.totalCostUSD, 0),
+    totalSavingsUSD: 0,
+    totalProxiedCostUSD: 0,
     totalApiCalls: sessions.reduce((s, x) => s + x.apiCalls, 0),
   }
 }
@@ -170,7 +174,7 @@ describe('InteractiveDashboard indexed-period reload races', () => {
     const history: DashboardHistoryIndex = {
       provider: 'all', normalizedProjects: [indexed],
       cache: { version: 29, savingsConfigHash: '', lastComputedDate: null, days: [], complete: true },
-      planUsages: [], readyThrough: 'lifetime',
+      readyThrough: 'lifetime',
     }
     const app = render(React.createElement(InteractiveDashboard, {
       initialProjects: [indexed], initialPeriod: 'today', initialProvider: 'all',
