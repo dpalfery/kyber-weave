@@ -52,7 +52,24 @@ function renderHtml(element: React.ReactElement | null | undefined, qc = createT
   )
 }
 
-function findNodeByTestId(node: unknown, testId: string): React.ReactElement | null {
+/**
+ * The props these assertions reach for on a rendered node.
+ *
+ * React 19 types `ReactElement['props']` as `unknown`, so a node found by test id has
+ * nothing callable on it. Naming the handful of props the suite actually touches keeps
+ * the walker typed without casting each call site past the checker.
+ */
+type TestNodeProps = {
+  'data-testid'?: string
+  children?: React.ReactNode
+  onClick?: (event?: unknown) => unknown
+  title?: string
+  [key: string]: unknown
+}
+
+type TestNode = React.ReactElement<TestNodeProps>
+
+function findNodeByTestId(node: unknown, testId: string): TestNode | null {
   if (node == null) return null
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -64,7 +81,7 @@ function findNodeByTestId(node: unknown, testId: string): React.ReactElement | n
   if (React.isValidElement(node)) {
     const props = node.props as Record<string, unknown>
     if (props && props['data-testid'] === testId) {
-      return node
+      return node as TestNode
     }
     if (props && props.children) {
       const found = findNodeByTestId(props.children, testId)
@@ -492,7 +509,7 @@ describe('CopyButton Component', () => {
       expect(button).not.toBeNull()
 
       const fakeEvent = { stopPropagation: vi.fn() } as unknown as React.MouseEvent
-      await button!.props.onClick(fakeEvent)
+      await button!.props.onClick!(fakeEvent)
 
       expect(fakeEvent.stopPropagation).toHaveBeenCalled()
       expect(writeTextMock).toHaveBeenCalledWith('Text to copy')
@@ -563,12 +580,12 @@ describe('BlockRail Component', () => {
     const toolDefButton = findNodeByTestId(tree, 'block-item-tool_definitions')
     expect(toolDefButton).not.toBeNull()
 
-    toolDefButton!.props.onClick()
+    toolDefButton!.props.onClick!()
     expect(onSelectBlock).toHaveBeenCalledWith('tool_definitions')
 
     const allButton = findNodeByTestId(tree, 'block-item-all')
     expect(allButton).not.toBeNull()
-    allButton!.props.onClick()
+    allButton!.props.onClick!()
     expect(onSelectBlock).toHaveBeenCalledWith('all')
   })
 })
@@ -647,7 +664,7 @@ describe('PartTabs Component', () => {
     const userMsgTab = findNodeByTestId(tree, 'part-tab-user_messages')
     expect(userMsgTab).not.toBeNull()
 
-    userMsgTab!.props.onClick()
+    userMsgTab!.props.onClick!()
     expect(onSelectPart).toHaveBeenCalledWith('user-turn-1')
   })
 })

@@ -64,7 +64,24 @@ function renderHtml(element: React.ReactElement | null | undefined, qc = createT
   )
 }
 
-function findNodeByTestId(node: unknown, testId: string): React.ReactElement | null {
+/**
+ * The props these assertions reach for on a rendered node.
+ *
+ * React 19 types `ReactElement['props']` as `unknown`, so a node found by test id has
+ * nothing callable on it. Naming the handful of props the suite actually touches keeps
+ * the walker typed without casting each call site past the checker.
+ */
+type TestNodeProps = {
+  'data-testid'?: string
+  children?: React.ReactNode
+  onClick?: (event?: unknown) => unknown
+  title?: string
+  [key: string]: unknown
+}
+
+type TestNode = React.ReactElement<TestNodeProps>
+
+function findNodeByTestId(node: unknown, testId: string): TestNode | null {
   if (node == null) return null
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -76,7 +93,7 @@ function findNodeByTestId(node: unknown, testId: string): React.ReactElement | n
   if (React.isValidElement(node)) {
     const props = node.props as Record<string, unknown>
     if (props && props['data-testid'] === testId) {
-      return node
+      return node as TestNode
     }
     const type = node.type as unknown
     if (typeof type === 'function') {
@@ -311,7 +328,7 @@ describe('FindingDetail Screen (Task G3 Compliance)', () => {
 
     const inspectBtn = findNodeByTestId(tree, 'inspect-evidence-1')
     expect(inspectBtn).not.toBeNull()
-    inspectBtn!.props.onClick()
+    inspectBtn!.props.onClick!()
     expect(onSelectTurn).toHaveBeenCalledWith(3, 'exec-root-1', 'run-auth-001')
   })
 
@@ -464,7 +481,7 @@ describe('EvidenceTable Component Isolation', () => {
     const inspectBtn = findNodeByTestId(tree, 'inspect-evidence-0')
     expect(inspectBtn).not.toBeNull()
 
-    inspectBtn!.props.onClick()
+    inspectBtn!.props.onClick!()
     expect(onSelectEvidence).toHaveBeenCalledWith(sampleDeterministicFinding.evidenceLinks[0])
     expect(onSelectTurn).toHaveBeenCalledWith(2, 'exec-root-1', 'span-read-001')
     expect(onSelectSpan).toHaveBeenCalledWith('span-read-001')

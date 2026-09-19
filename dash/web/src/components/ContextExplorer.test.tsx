@@ -68,6 +68,23 @@ const sampleSession: KyberSessionSummary = {
   cost_usd: 0.185,
 }
 
+/**
+ * The props these assertions reach for on a rendered node.
+ *
+ * React 19 types `ReactElement['props']` as `unknown`, so a node found by test id has
+ * nothing callable on it. Naming the handful of props the suite actually touches keeps
+ * the walker typed without casting each call site past the checker.
+ */
+type TestNodeProps = {
+  'data-testid'?: string
+  children?: React.ReactNode
+  onClick?: (event?: unknown) => unknown
+  title?: string
+  [key: string]: unknown
+}
+
+type TestNode = React.ReactElement<TestNodeProps>
+
 describe('ContextExplorer: canonical session-list contract', () => {
   const source = readFileSync(fileURLToPath(new URL('./ContextExplorer.tsx', import.meta.url)), 'utf8')
 
@@ -152,21 +169,26 @@ describe('ContextExplorer: canonical session-list contract', () => {
       onSelectSession,
     })
 
-    let parentLink: React.ReactElement | null = null
+    let found: TestNode | null = null
     const walk = (node: unknown): void => {
-      if (!React.isValidElement(node) || parentLink) return
-      const props = node.props as Record<string, unknown> | undefined
+      if (!React.isValidElement(node) || found) return
+      const props = node.props as TestNodeProps | undefined
       if (props?.['data-testid'] === 'parent-session-link') {
-        parentLink = node
+        found = node as TestNode
         return
       }
-      React.Children.forEach(node.props?.children, walk)
+      React.Children.forEach(props?.children, walk)
     }
     walk(tree)
 
-    expect(parentLink?.props.title).toContain('Parent session: sess-parent-001')
+    // Read through a fresh binding: the assignment above happens inside a callback, which
+    // control-flow analysis cannot follow, so `found` stays narrowed to `null` at its own
+    // declaration.
+    const parentLink: TestNode | null = found
+    expect(parentLink).not.toBeNull()
+    expect(parentLink!.props.title).toContain('Parent session: sess-parent-001')
     const stopPropagation = vi.fn()
-    parentLink.props.onClick({ stopPropagation })
+    parentLink!.props.onClick!({ stopPropagation })
     expect(stopPropagation).toHaveBeenCalledOnce()
     expect(onSelectSession).toHaveBeenCalledWith('sess-parent-001')
   })

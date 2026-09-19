@@ -23,7 +23,7 @@
     "check:reachable": "node scripts/unreachable.mjs",
     "test:locks": "vitest run src/ingest/cache-refresh-lock.test.ts src/ingest/cache-refresh-lock-corrupt-body.test.ts src/ingest/cache-refresh-lock-process.test.ts --pool=forks --no-file-parallelism",
     "test:watch": "vitest src tests scripts web/src --exclude \"src/ingest/cache-refresh-lock*\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
     "lint": "eslint .",
     "verify:upgrade": "node scripts/upgrade-path/run.mjs",
     "prepublishOnly": "npm run build"
