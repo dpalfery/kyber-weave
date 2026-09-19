@@ -37,6 +37,27 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * How long to wait before calling the child hung. Generous on purpose: this bound exists
+ * to stop a wedged process blocking the suite forever, not to measure speed.
+ */
+const EXIT_TIMEOUT_MS = 15_000
+
+/**
+ * The bound that says the exit did not stall on the refresh lock.
+ *
+ * A quit that fails to release its own hydration lock does not hang — it waits out the
+ * lock's 90-second staleness window, which is the regression this assertion catches. So
+ * the bound only has to sit comfortably below that, and anything tighter measures the
+ * machine rather than the code.
+ *
+ * These were one 1,000 ms number, which conflated the two: a spawned child booting,
+ * hydrating, taking a keypress and exiting inside one wall-clock second is a fair
+ * expectation on an idle machine and a coin-flip under a full parallel suite. It failed
+ * roughly one run in four.
+ */
+const PROMPT_EXIT_MS = 10_000
+
 async function waitForExit(child: ChildProcess, timeoutMs: number, readOutput: () => string): Promise<{
   code: number | null
   signal: NodeJS.Signals | null
@@ -156,9 +177,9 @@ describe('interactive dashboard process exit during cold hydration', () => {
     )
     expect(await pathExists(hydrationLock)).toBe(true)
     child.stdin?.write('q')
-    const exited = await waitForExit(child, 1_000, readOutput)
+    const exited = await waitForExit(child, EXIT_TIMEOUT_MS, readOutput)
 
-    expect(exited.elapsedMs).toBeLessThan(1_000)
+    expect(exited.elapsedMs).toBeLessThan(PROMPT_EXIT_MS)
     expect({ code: exited.code, signal: exited.signal }).toEqual({ code: 0, signal: null })
     expect(await pathExists(hydrationLock)).toBe(false)
     expectTerminalTeardown(readOutput())
@@ -168,9 +189,9 @@ describe('interactive dashboard process exit during cold hydration', () => {
     const { child, hydrationLock, readOutput } = await startHydratingDashboard()
 
     child.stdin?.write('\x03')
-    const exited = await waitForExit(child, 1_000, readOutput)
+    const exited = await waitForExit(child, EXIT_TIMEOUT_MS, readOutput)
 
-    expect(exited.elapsedMs).toBeLessThan(1_000)
+    expect(exited.elapsedMs).toBeLessThan(PROMPT_EXIT_MS)
     expect({ code: exited.code, signal: exited.signal }).toEqual({ code: 130, signal: null })
     expect(await pathExists(hydrationLock)).toBe(false)
     expectTerminalTeardown(readOutput())
