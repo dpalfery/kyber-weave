@@ -58,6 +58,7 @@ function makeCall(overrides: Partial<CachedCall> = {}): CachedCall {
     tools: ['Read', 'Edit'],
     bashCommands: [],
     skills: [],
+    subagentTypes: [],
     deduplicationKey: 'msg-abc123',
     ...overrides,
   }

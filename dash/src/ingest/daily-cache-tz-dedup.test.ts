@@ -77,6 +77,7 @@ function makeCall(timestamp: string, costUSD: number, provider = 'codex') {
     tools: [],
     mcpTools: [],
     skills: [],
+    subagentTypes: [],
     hasAgentSpawn: false,
     hasPlanMode: false,
     speed: 'standard' as const,
@@ -93,6 +94,8 @@ function makeProject(calls: ReturnType<typeof makeCall>[]): ProjectSummary {
     project: 'p',
     projectPath: '/p',
     totalCostUSD,
+    totalSavingsUSD: 0,
+    totalProxiedCostUSD: 0,
     totalApiCalls: calls.length,
     sessions: [{
       sessionId: 's1',
@@ -100,6 +103,8 @@ function makeProject(calls: ReturnType<typeof makeCall>[]): ProjectSummary {
       firstTimestamp: timestamp,
       lastTimestamp: calls.at(-1)!.timestamp,
       totalCostUSD,
+      totalSavingsUSD: 0,
+      totalReasoningTokens: 0,
       totalInputTokens: calls.reduce((s, c) => s + c.usage.inputTokens, 0),
       totalOutputTokens: calls.reduce((s, c) => s + c.usage.outputTokens, 0),
       totalCacheReadTokens: calls.reduce((s, c) => s + c.usage.cacheReadInputTokens, 0),
@@ -120,6 +125,7 @@ function makeProject(calls: ReturnType<typeof makeCall>[]): ProjectSummary {
       bashBreakdown: {},
       categoryBreakdown: {} as never,
       skillBreakdown: {} as never,
+      subagentBreakdown: {},
     }],
   }
 }
@@ -436,7 +442,7 @@ describe('fix round 1', () => {
     const fresh = day('2026-06-13', { codex: slice(0, 0, { sessions: 1 }) }, { sessions: 1 })
     const baseline = day('2026-06-13', { codex: slice(0, 0, { sessions: 2 }) }, { sessions: 2 })
     const subtract = new Map<string, Map<string, ProviderDaySlice>>([
-      ['2026-06-13', new Map([['codex', { sessions: 1, cost: 0, calls: 0 }]])],
+      ['2026-06-13', new Map([['codex', slice(0, 0, { sessions: 1 })]])],
     ])
     const merged = mergeDayEntries([fresh], [baseline], true, subtract)
     const m = merged[0]!

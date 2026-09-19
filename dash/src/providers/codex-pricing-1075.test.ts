@@ -189,6 +189,8 @@ describe('#1075 cache invalidation', () => {
     const { statSync } = await import('fs')
     const s = statSync(sessionFile)
     const stale: ParsedProviderCall = {
+      sessionId: 'sess-stale',
+      userMessage: 'stale message',
       provider: 'codex',
       model: 'gpt-5.5',
       inputTokens: 800,

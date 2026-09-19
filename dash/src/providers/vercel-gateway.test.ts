@@ -47,7 +47,7 @@ describe('vercel-gateway provider', () => {
           request_count: 3,
         }],
       }),
-    })) as typeof fetch
+    })) as unknown as typeof fetch
 
     const range = {
       start: new Date('2026-06-01T00:00:00.000Z'),
@@ -111,7 +111,7 @@ describe('vercel-gateway end-to-end (parseAllSessions network path)', () => {
           { day: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), model: 'openai/gpt-4o', total_cost: 12.34, input_tokens: 1000, output_tokens: 500, request_count: 3 },
         ],
       }),
-    })) as typeof fetch
+    })) as unknown as typeof fetch
 
     const range = getDashboardScanRange('week', null, null)
     const projects = await parseAllSessions(range, 'vercel-gateway')

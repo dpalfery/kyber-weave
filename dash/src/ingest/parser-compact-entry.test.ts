@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { compactEntry } from './parser.js'
-import type { JournalEntry } from '../types.js'
+import type { ApiUsage, AssistantMessageContent, JournalEntry } from '../types.js'
 
 function entry(overrides: Partial<JournalEntry> & Record<string, unknown>): JournalEntry {
   return { type: 'user', ...overrides } as JournalEntry
@@ -195,7 +195,7 @@ describe('compactEntry', () => {
           output_tokens: 100,
           cache_read_input_tokens: 25,
           extraGarbage: 'should not survive',
-        },
+        } as unknown as ApiUsage,
         content: [],
       },
     })
@@ -357,7 +357,7 @@ describe('compactEntry', () => {
         role: 'assistant' as const,
         model: 'claude-opus-4-6',
         content: [{ type: 'text', text: 'response' }],
-      },
+      } as unknown as AssistantMessageContent,
     })
     const c = compactEntry(raw)
     expect(c.message).toBeUndefined()

@@ -60,7 +60,14 @@ function createMockCandidateRun(overrides: Partial<CandidateRun> = {}): Candidat
     repo: overrides.repo ?? 'org/project',
     started: overrides.started ?? '2026-09-06T12:00:00.000Z',
     ended: overrides.ended ?? '2026-09-06T12:05:00.000Z',
-    outcome: overrides.outcome ?? { status: 'success' },
+    outcome: overrides.outcome ?? {
+      status: 'success',
+      termination: { availability: 'measured' },
+      errors: { count: 0, signals: [], availability: 'measured' },
+      userCorrections: { count: 0, turns: [], availability: 'measured' },
+      testDeltas: { availability: 'measured' },
+      availability: 'measured',
+    },
     executionCount: overrides.executionCount ?? 1,
     turnCount: overrides.turnCount ?? 5,
   }

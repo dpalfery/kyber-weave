@@ -98,7 +98,7 @@ describe('Gemini session cache migration', () => {
           },
         },
       },
-    } as SessionCache)
+    } as unknown as SessionCache)
 
     const range: DateRange = {
       start: new Date('2026-05-16T00:00:00.000Z'),

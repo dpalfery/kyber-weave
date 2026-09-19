@@ -20,6 +20,7 @@ function call(model: string, costUSD = 1): ParsedApiCall {
     tools: ['Edit'],
     mcpTools: [],
     skills: [],
+    subagentTypes: [],
     hasAgentSpawn: false,
     hasPlanMode: false,
     speed: 'standard',
@@ -60,8 +61,10 @@ function project(turns: ClassifiedTurn[]): ProjectSummary {
     firstTimestamp: '2026-05-05T00:00:00Z',
     lastTimestamp: '2026-05-05T00:00:00Z',
     totalCostUSD: turns.reduce((sum, t) => sum + t.assistantCalls.reduce((s, c) => s + c.costUSD, 0), 0),
+    totalSavingsUSD: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     apiCalls: turns.reduce((sum, t) => sum + t.assistantCalls.length, 0),
@@ -72,13 +75,16 @@ function project(turns: ClassifiedTurn[]): ProjectSummary {
     bashBreakdown: {},
     categoryBreakdown: {} as SessionSummary['categoryBreakdown'],
     skillBreakdown: {},
+    subagentBreakdown: {},
   }
   return {
     project: 'app',
     projectPath: '/app',
     sessions: [session],
     totalCostUSD: session.totalCostUSD,
+    totalSavingsUSD: 0,
     totalApiCalls: session.apiCalls,
+    totalProxiedCostUSD: 0,
   }
 }
 

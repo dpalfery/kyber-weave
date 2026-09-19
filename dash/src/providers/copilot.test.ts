@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { copilot, createCopilotProvider, getVSCodeGlobalStorageDirs, getVSCodeWorkspaceStorageDirs } from './copilot.js'
 import { isSqliteAvailable, isSqliteBusyError } from '../ingest/sqlite.js'
 import { calculateCost } from '../pricing/models.js'
-import type { ParsedProviderCall } from './types.js'
+import type { ParsedProviderCall, SessionSource } from './types.js'
 
 let tmpDir: string
 
@@ -133,9 +133,9 @@ async function createChatSessionFile(filePath: string, entries: unknown[]) {
   await writeFile(filePath, entries.map(entry => JSON.stringify(entry)).join('\n') + '\n')
 }
 
-async function collectCalls(source: { path: string; project: string; provider: string; sourceType?: string }, seenKeys = new Set<string>()) {
+async function collectCalls(source: { path: string; project: string; provider: string; sourceType?: string } | SessionSource, seenKeys = new Set<string>()) {
   const calls: ParsedProviderCall[] = []
-  for await (const call of copilot.createSessionParser(source, seenKeys).parse()) calls.push(call)
+  for await (const call of copilot.createSessionParser(source as unknown as SessionSource, seenKeys).parse()) calls.push(call)
   return calls
 }
 
@@ -487,7 +487,7 @@ describe('copilot provider - JSONL parsing', () => {
       }),
     ])
 
-    const source = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
+    const source: SessionSource = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
     const calls: ParsedProviderCall[] = []
     for await (const call of copilot.createSessionParser(source, new Set()).parse()) calls.push(call)
 
@@ -510,7 +510,7 @@ describe('copilot provider - JSONL parsing', () => {
       }),
     ])
 
-    const source = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
+    const source: SessionSource = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
     const calls: ParsedProviderCall[] = []
     for await (const call of copilot.createSessionParser(source, new Set()).parse()) calls.push(call)
 
@@ -539,7 +539,7 @@ describe('copilot provider - JSONL parsing', () => {
       }),
     ])
 
-    const source = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
+    const source: SessionSource = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
     const calls: ParsedProviderCall[] = []
     for await (const call of copilot.createSessionParser(source, new Set()).parse()) calls.push(call)
 
@@ -586,7 +586,7 @@ describe('copilot provider - JSONL parsing', () => {
       }),
     ])
 
-    const source = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
+    const source: SessionSource = { path: eventsPath, project: 'test', provider: 'copilot', sourceType: 'transcript' }
     const calls: ParsedProviderCall[] = []
     for await (const call of copilot.createSessionParser(source, new Set()).parse()) calls.push(call)
 

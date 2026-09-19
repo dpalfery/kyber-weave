@@ -20,7 +20,6 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
   let server: Server
   let base: string
   let canonDb: DatabaseSync
-  let sessionsDb: DatabaseSync
   let store: CanonStore
   let testBridge: KyberBridge
 
@@ -95,12 +94,10 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
     })
 
     canonDb = new DatabaseSync(':memory:')
-    sessionsDb = new DatabaseSync(':memory:')
 
     testBridge = new KyberBridge({
       store,
       canonDb,
-      sessionsDb,
       ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
     })
 

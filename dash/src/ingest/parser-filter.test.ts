@@ -9,7 +9,9 @@ function makeProject(project: string, projectPath = project): ProjectSummary {
     projectPath,
     sessions: [],
     totalCostUSD: 0,
+    totalSavingsUSD: 0,
     totalApiCalls: 0,
+    totalProxiedCostUSD: 0,
   }
 }
 

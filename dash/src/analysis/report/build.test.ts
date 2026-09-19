@@ -16,7 +16,7 @@ import type { KyberBridge, SessionSummary } from '../../server/bridge.js'
 import type { Finding } from '../findings.js'
 import type { HarnessRollupRow } from '../../canon/types.js'
 import { buildContextReport, costByBasis, latestOf, rankFindings, sessionsInScope } from './build.js'
-import { isUnmeasurable } from './types.js'
+import { isUnmeasurable, type ReportScope } from './types.js'
 
 const NOW = new Date('2026-09-19T12:00:00.000Z')
 const hoursAgo = (n: number): string => new Date(NOW.getTime() - n * 3600_000).toISOString()
@@ -90,7 +90,7 @@ function bridgeOf(parts: {
   return stub as unknown as KyberBridge
 }
 
-const build = (bridge: KyberBridge, scope = { days: 7 }, options = {}) =>
+const build = (bridge: KyberBridge, scope: ReportScope = { days: 7 }, options = {}) =>
   buildContextReport(bridge, scope, { now: NOW, ...options })
 
 describe('scope (R11.11)', () => {

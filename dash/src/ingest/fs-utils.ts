@@ -89,6 +89,7 @@ type ReadSessionLinesOptions = {
 export function readSessionLines(
   filePath: string,
   shouldSkipHead?: (head: string) => boolean,
+  options?: ReadSessionLinesOptions & { largeLineAsBuffer?: false },
 ): AsyncGenerator<string>
 export function readSessionLines(
   filePath: string,

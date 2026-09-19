@@ -8,10 +8,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { ProjectSummary, SessionSummary } from '../types.js'
 
 const { parseAllSessionsMock } = vi.hoisted(() => ({
-  parseAllSessionsMock: vi.fn<
-    Parameters<typeof import('../ingest/parser.js').parseAllSessions>,
-    ReturnType<typeof import('../ingest/parser.js').parseAllSessions>
-  >(),
+  parseAllSessionsMock: vi.fn<typeof import('../ingest/parser.js').parseAllSessions>(),
 }))
 
 vi.mock('../ingest/parser.js', async (importOriginal) => {

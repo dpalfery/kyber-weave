@@ -41,8 +41,10 @@ function lowWorthSession(cost: number, i: number, overrides: Partial<TestSession
     firstTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
     lastTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:30:00Z`,
     totalCostUSD: cost,
+    totalSavingsUSD: 0,
     totalInputTokens: tokens,
     totalOutputTokens: tokens,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     apiCalls: 1,
@@ -53,6 +55,7 @@ function lowWorthSession(cost: number, i: number, overrides: Partial<TestSession
     bashBreakdown: {},
     categoryBreakdown: {} as TestSession['categoryBreakdown'],
     skillBreakdown: {},
+    subagentBreakdown: {},
     ...overrides,
   }
 }
@@ -63,7 +66,9 @@ function projectWithLowWorthSessions(sessions: TestSession[], project = 'app'): 
     projectPath: `/tmp/${project}`,
     sessions,
     totalCostUSD: sessions.reduce((sum, s) => sum + s.totalCostUSD, 0),
+    totalSavingsUSD: 0,
     totalApiCalls: sessions.reduce((sum, s) => sum + s.apiCalls, 0),
+    totalProxiedCostUSD: 0,
   }
 }
 

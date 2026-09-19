@@ -27,8 +27,15 @@ import {
 } from './review-providers/index.js'
 import { CanonStore } from '../canon/store.js'
 import { handleKyberRequest } from '../server/routes.js'
-import type { ServerResponse } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { KyberBridge } from '../server/bridge.js'
 import { EventEmitter } from 'node:events'
+
+type CapturedRequestBody = {
+  model?: string
+  system?: string
+  messages?: Array<{ role?: string; content?: unknown }>
+}
 
 const tempDirs: string[] = []
 
@@ -49,7 +56,7 @@ afterEach(() => {
 /// CanonStore keeps its handle private. These assertions verify the `finding`
 /// table directly, which is the point — that a review writes nothing into it —
 /// so they reach past the public surface deliberately rather than by accident.
-type StoreInternals = { db: { prepare(sql: string): { get(): unknown } } }
+type StoreInternals = { db: { prepare(sql: string): { get(): unknown; all(): unknown[] } } }
 
 describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
   // ---------------------------------------------------------------------------
@@ -208,12 +215,12 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
     it('OpenAIReviewProvider constructs correct endpoint and payload with mock fetch', async () => {
       let capturedUrl = ''
       let capturedHeaders: Record<string, string> = {}
-      let capturedBody: unknown = null
+      let capturedBody: CapturedRequestBody = {}
 
       const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
         capturedUrl = url
         capturedHeaders = init.headers as Record<string, string>
-        capturedBody = JSON.parse(String(init.body))
+        capturedBody = JSON.parse(String(init.body)) as CapturedRequestBody
         return {
           ok: true,
           json: async () => ({
@@ -237,8 +244,8 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
       expect(capturedHeaders['authorization']).toBe('Bearer sk-test-key')
       expect(capturedBody.model).toBe('gpt-4o')
       expect(capturedBody.messages).toHaveLength(2)
-      expect(capturedBody.messages[0].role).toBe('system')
-      expect(capturedBody.messages[1].role).toBe('user')
+      expect(capturedBody.messages![0]!.role).toBe('system')
+      expect(capturedBody.messages![1]!.role).toBe('user')
       expect(res.rawText).toBe('OpenAI review result')
       expect(res.tokensUsed?.totalTokens).toBe(40)
     })
@@ -246,12 +253,12 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
     it('AnthropicReviewProvider constructs correct headers and payload with mock fetch', async () => {
       let capturedUrl = ''
       let capturedHeaders: Record<string, string> = {}
-      let capturedBody: unknown = null
+      let capturedBody: CapturedRequestBody = {}
 
       const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
         capturedUrl = url
         capturedHeaders = init.headers as Record<string, string>
-        capturedBody = JSON.parse(String(init.body))
+        capturedBody = JSON.parse(String(init.body)) as CapturedRequestBody
         return {
           ok: true,
           json: async () => ({
@@ -276,18 +283,18 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
       expect(capturedHeaders['anthropic-version']).toBe('2023-06-01')
       expect(capturedBody.system).toBe(prompt.systemPrompt)
       expect(capturedBody.messages).toHaveLength(1)
-      expect(capturedBody.messages[0].content).toBe(prompt.userPrompt)
+      expect(capturedBody.messages![0]!.content).toBe(prompt.userPrompt)
       expect(res.rawText).toBe('Anthropic review result')
       expect(res.tokensUsed?.totalTokens).toBe(50)
     })
 
     it('OllamaReviewProvider defaults to local endpoint without requiring API keys', async () => {
       let capturedUrl = ''
-      let capturedBody: unknown = null
+      let capturedBody: CapturedRequestBody = {}
 
       const mockFetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
         capturedUrl = url
-        capturedBody = JSON.parse(String(init.body))
+        capturedBody = JSON.parse(String(init.body)) as CapturedRequestBody
         return {
           ok: true,
           json: async () => ({
@@ -382,7 +389,7 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
       const store = new CanonStore(dbPath)
 
       // Verify finding table exists and inspect initial row count
-      const initialFindingCount = store.listFindings({}).length
+      const initialFindingCount = store.listFindings().length
       expect(initialFindingCount).toBe(0)
 
       // Direct SQL verification on the SQLite database
@@ -409,7 +416,7 @@ describe('LLM Context Review Seam (Task G5 / Decision D10 & D8)', () => {
       expect(review2.status).toBe('unconfigured')
 
       // Assert finding table remains completely empty
-      const findingsAfter = store.listFindings({})
+      const findingsAfter = store.listFindings()
       expect(findingsAfter).toHaveLength(0)
 
       const rawCountAfter = (

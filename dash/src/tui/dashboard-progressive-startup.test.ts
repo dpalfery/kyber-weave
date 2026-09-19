@@ -16,10 +16,12 @@ import {
   InteractiveDashboard,
   selectDashboardHistoryIndex,
   shouldAutoFallbackToWeek,
+  type DashboardHistoryIndex,
 } from './dashboard.js'
 import { getDateRange, type Period } from '../cli/cli-date.js'
 import { clearSessionCache, filesParsedFromSourceCount, isCompleteSessionSnapshotAvailable, parseAllSessions, sessionMemoPublicationCount } from '../ingest/parser.js'
 import { clearLoadCacheMemo, fingerprintFileCount, isColdCacheOnDisk } from '../ingest/session-cache.js'
+import { type DailyCache } from '../ingest/daily-cache.js'
 import { buildDurablePeriod } from '../metrics/usage-aggregator.js'
 import type { ProjectSummary } from '../types.js'
 
@@ -175,9 +177,9 @@ describe('interactive dashboard progressive startup', () => {
   })
 
   it('falls back from an all-zero Today on cold and warm indexes, but keeps real usage on Today', () => {
-    const cache = { version: 29, savingsConfigHash: '', lastComputedDate: null, days: [], complete: true } as const
-    const coldWeek = { provider: 'all', normalizedProjects: [], cache, readyThrough: 'week' as const }
-    const warmLifetime = { ...coldWeek, readyThrough: 'lifetime' as const }
+    const cache: DailyCache = { version: 29, savingsConfigHash: '', lastComputedDate: null, days: [], complete: true }
+    const coldWeek: DashboardHistoryIndex = { provider: 'all', normalizedProjects: [], cache, readyThrough: 'week' }
+    const warmLifetime: DashboardHistoryIndex = { ...coldWeek, readyThrough: 'lifetime' }
     const zeroSessionProject = {
       project: 'zero', projectPath: '/tmp/zero', sessions: [{
         sessionId: 'zero', project: 'zero', firstTimestamp: '', lastTimestamp: '', totalCostUSD: 0,
@@ -185,7 +187,7 @@ describe('interactive dashboard progressive startup', () => {
         totalCacheWriteTokens: 0, apiCalls: 0, turns: [], modelBreakdown: {}, toolBreakdown: {},
         mcpBreakdown: {}, bashBreakdown: {}, categoryBreakdown: {}, skillBreakdown: {}, subagentBreakdown: {},
       }], totalCostUSD: 0, totalSavingsUSD: 0, totalApiCalls: 0,
-    } as ProjectSummary
+    } as unknown as ProjectSummary
     const realUsage = { ...zeroSessionProject, totalApiCalls: 1 }
 
     expect(shouldAutoFallbackToWeek(true, false, 'today', coldWeek, [])).toBe(true)

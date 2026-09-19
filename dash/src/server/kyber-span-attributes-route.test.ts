@@ -65,7 +65,6 @@ describe('GET /api/kyber/span/:spanId/attributes', () => {
       kyberBridge: new KyberBridge({
         store,
         canonDb: new DatabaseSync(':memory:'),
-        sessionsDb: new DatabaseSync(':memory:'),
         ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
       }),
     })

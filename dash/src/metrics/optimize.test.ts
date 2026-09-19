@@ -60,6 +60,7 @@ function projectWithSessions(costs: number[], project = 'app'): ProjectSummary {
       firstTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
       lastTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:30:00Z`,
       totalCostUSD: cost,
+      totalSavingsUSD: 0,
       totalInputTokens: tokens,
       totalOutputTokens: tokens,
       totalReasoningTokens: 0,
@@ -73,6 +74,7 @@ function projectWithSessions(costs: number[], project = 'app'): ProjectSummary {
       bashBreakdown: {},
       categoryBreakdown: {} as ProjectSummary['sessions'][number]['categoryBreakdown'],
       skillBreakdown: {},
+      subagentBreakdown: {},
     }
   })
 
@@ -81,7 +83,9 @@ function projectWithSessions(costs: number[], project = 'app'): ProjectSummary {
     projectPath: `/tmp/${project}`,
     sessions,
     totalCostUSD: costs.reduce((sum, cost) => sum + cost, 0),
+    totalSavingsUSD: 0,
     totalApiCalls: sessions.length,
+    totalProxiedCostUSD: 0,
   }
 }
 
@@ -114,6 +118,7 @@ function contextSession(
     firstTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
     lastTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:30:00Z`,
     totalCostUSD: 1,
+    totalSavingsUSD: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalReasoningTokens: 0,
@@ -127,6 +132,7 @@ function contextSession(
     bashBreakdown: {},
     categoryBreakdown: {} as TestSession['categoryBreakdown'],
     skillBreakdown: {},
+    subagentBreakdown: {},
     ...overrides,
   }
 }
@@ -137,7 +143,9 @@ function projectWithContextSessions(sessions: TestSession[], project = 'app'): P
     projectPath: `/tmp/${project}`,
     sessions,
     totalCostUSD: sessions.reduce((sum, session) => sum + session.totalCostUSD, 0),
+    totalSavingsUSD: 0,
     totalApiCalls: sessions.reduce((sum, session) => sum + session.apiCalls, 0),
+    totalProxiedCostUSD: 0,
   }
 }
 
@@ -627,8 +635,10 @@ function lowWorthSession(cost: number, i: number, overrides: Partial<TestSession
     firstTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`,
     lastTimestamp: `2026-05-${String(i + 1).padStart(2, '0')}T10:30:00Z`,
     totalCostUSD: cost,
+    totalSavingsUSD: 0,
     totalInputTokens: tokens,
     totalOutputTokens: tokens,
+    totalReasoningTokens: 0,
     totalCacheReadTokens: 0,
     totalCacheWriteTokens: 0,
     apiCalls: 1,
@@ -639,6 +649,7 @@ function lowWorthSession(cost: number, i: number, overrides: Partial<TestSession
     bashBreakdown: {},
     categoryBreakdown: {} as TestSession['categoryBreakdown'],
     skillBreakdown: {},
+    subagentBreakdown: {},
     ...overrides,
   }
 }
@@ -649,7 +660,9 @@ function projectWithLowWorthSessions(sessions: TestSession[], project = 'app'): 
     projectPath: `/tmp/${project}`,
     sessions,
     totalCostUSD: sessions.reduce((sum, s) => sum + s.totalCostUSD, 0),
+    totalSavingsUSD: 0,
     totalApiCalls: sessions.reduce((sum, s) => sum + s.apiCalls, 0),
+    totalProxiedCostUSD: 0,
   }
 }
 
@@ -875,6 +888,7 @@ function reliabilityCall(overrides: Partial<ReliabilityCall> = {}): ReliabilityC
     tools: ['Edit'],
     mcpTools: [],
     skills: [],
+    subagentTypes: [],
     hasAgentSpawn: false,
     hasPlanMode: false,
     speed: 'standard',
@@ -1150,6 +1164,7 @@ describe('computeHealth', () => {
 
   function mockFinding(impact: 'high' | 'medium' | 'low'): WasteFinding {
     return {
+      id: 'read-edit-ratio',
       title: 't', explanation: 'e', impact, tokensSaved: 1000,
       fix: { type: 'paste', label: 'l', text: 't' },
     }

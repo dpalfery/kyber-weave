@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { buildRuns, deriveRunIdentity, linkExecutions } from './runs.js'
+import { buildRuns, deriveRunIdentity, linkExecutions, type ExecutionCandidate } from './runs.js'
 import { CanonStore, SCHEMA_VERSION } from './store.js'
-import type { CanonicalRecord, ExecutionCandidate, TokenUsage } from './types.js'
+import type { CanonicalRecord, TokenUsage } from './types.js'
 
 const tempDirs: string[] = []
 

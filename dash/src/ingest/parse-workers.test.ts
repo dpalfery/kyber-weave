@@ -449,7 +449,7 @@ describe('ParseWorkerPool', () => {
   it('decodes a codex rollout off-thread exactly as the serial path does', async () => {
     const before = liveWorkers()
     const pool = new ParseWorkerPool(1)
-    const fromWorker = await pool.submit<CodexFullParse & { keys: string[] }>({ kind: 'codex', source: codexSource })
+    const fromWorker = await pool.submit<CodexFullParse & { keys: string[]; path: string }>({ kind: 'codex', source: codexSource })
     await pool.close()
     expect(liveWorkers()).toBe(before)
 
