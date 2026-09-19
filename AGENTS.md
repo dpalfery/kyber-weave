@@ -51,7 +51,17 @@ npm --prefix dash run test
 npm --prefix dash run check:reachable
 ```
 
-The loop does not build `kyberdash` either, so the install and update path for that binary
+The tray (`dash/tray/`) is a Tauri 2 crate plus a React UI. After
+`npm --prefix dash/tray/ui ci`, its gates are:
+
+```bash
+npm --prefix dash/tray/ui run typecheck
+npm --prefix dash/tray/ui run test
+cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+```
+
+`npm --prefix dash run lint` already covers `dash/tray/ui`. The loop does not build
+`kyberdash` either, so the install and update path for that binary
 cannot be verified offline today — see
 [the todo](docs/todo/kyberdash-local-release-loop.md) before assuming a green loop covered it.
 

@@ -479,6 +479,7 @@ jobs:
           cache-dependency-path: |
             dash/package-lock.json
             dash/web/package-lock.json
+            dash/tray/ui/package-lock.json
 
       # npm ci (not `npm install`): package-lock.json is committed so a CI
       # run reproduces the same devDependency graph a contributor's local
@@ -496,6 +497,10 @@ jobs:
       # an install there.
       - name: Install web dashboard dependencies
         working-directory: dash/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Install tray UI dependencies
+        working-directory: dash/tray/ui
         run: npm ci --no-audit --no-fund
 
       - name: TypeScript type check (ts-typecheck gate)
@@ -519,6 +524,53 @@ jobs:
         working-directory: dash
         run: npm run check:reachable
 
+      - name: Tray UI typecheck
+        working-directory: dash/tray/ui
+        run: npm run typecheck
+
+      - name: Tray UI test
+        working-directory: dash/tray/ui
+        run: npm test
+
+  tray-rust:
+    name: Tray Rust gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Pin is the v1 tag (an ancestor of master). The toolchain is the input,
+      # not the action rev — dtolnay/rust-toolchain treats @rev as a rustc
+      # version unless toolchain is set explicitly.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: dash/tray/src-tauri
+
+      - name: cargo fmt --check
+        working-directory: dash/tray/src-tauri
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        working-directory: dash/tray/src-tauri
+        run: cargo clippy -- -D warnings
+
+      - name: cargo test
+        working-directory: dash/tray/src-tauri
+        run: cargo test
+
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
@@ -529,6 +581,7 @@ jobs:
       - codeql
       - skill-docs-gate
       - ts-gates
+      - tray-rust
     if: always()
     steps:
       - name: Evaluate gate results
@@ -544,6 +597,7 @@ jobs:
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
           echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| Tray Rust gates | ${{ needs.tray-rust.result }} |" >> results.md
           echo "" >> results.md
           echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} (advisory) |" >> results.md
           echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} (advisory) |" >> results.md
@@ -557,7 +611,8 @@ jobs:
             "${{ needs.update-loop.result }}" \
             "${{ needs.codeql.result }}" \
             "${{ needs.skill-docs-gate.result }}" \
-            "${{ needs.ts-gates.result }}"; do
+            "${{ needs.ts-gates.result }}" \
+            "${{ needs.tray-rust.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               FAILED=true
               break

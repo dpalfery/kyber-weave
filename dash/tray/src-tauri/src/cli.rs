@@ -10,9 +10,9 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
-/// Hard bounds mirror the macOS CodeburnCLI / DataClient design. A malicious or stuck CLI
+/// Hard bounds mirror the macOS CLI / DataClient design. A malicious or stuck CLI
 /// cannot pin the Tauri process: stdout is capped, stderr is bounded, total wall time is
-/// 60s. A hostile CODEBURN_BIN is rejected before any shell-resembling path is taken.
+/// 60s. A hostile KYBERDASH_BIN is rejected before any shell-resembling path is taken.
 const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 const FETCH_TIMEOUT_SECS: u64 = 60;
@@ -26,7 +26,7 @@ const VERSION_TIMEOUT_SECS: u64 = 20;
 pub const MIN_CLI_VERSION: (u32, u32, u32) = (0, 9, 9);
 
 #[cfg(windows)]
-const WINDOWS_CLI_NAMES: [&str; 2] = ["codeburn.cmd", "codeburn.exe"];
+const WINDOWS_CLI_NAMES: [&str; 2] = ["kyberdash.cmd", "kyberdash.exe"];
 
 #[cfg(windows)]
 const CLAUDE_NAMES: [&str; 2] = ["claude.cmd", "claude.exe"];
@@ -34,7 +34,7 @@ const CLAUDE_NAMES: [&str; 2] = ["claude.cmd", "claude.exe"];
 const CLAUDE_NAMES: [&str; 1] = ["claude"];
 
 /// Alphanumerics plus `._/-` and space, with `\`, `:`, `(`, `)` also allowed on Windows
-/// so a user-supplied `CODEBURN_BIN` path like `C:\Users\...\codeburn.cmd` is accepted.
+/// so a user-supplied `KYBERDASH_BIN` path like `C:\Users\...\kyberdash.cmd` is accepted.
 /// None of these are shell metacharacters in a direct-argv spawn (we never invoke `sh -c`).
 fn is_safe_arg(value: &str) -> bool {
     !value.is_empty()
@@ -46,7 +46,7 @@ fn is_safe_arg(value: &str) -> bool {
 }
 
 #[derive(Clone, Debug)]
-pub struct CodeburnCli {
+pub struct KyberdashCli {
     program: String,
     extra_args: Vec<String>,
 }
@@ -62,18 +62,18 @@ pub struct CliStatus {
     pub error: Option<String>,
 }
 
-impl CodeburnCli {
-    /// Honours `CODEBURN_BIN` only when every whitespace-delimited token passes the
-    /// allowlist. Otherwise resolves `codeburn` from PATH and the usual npm locations.
+impl KyberdashCli {
+    /// Honours `KYBERDASH_BIN` only when every whitespace-delimited token passes the
+    /// allowlist. Otherwise resolves `kyberdash` from PATH and the usual install locations.
     pub fn resolve() -> Self {
-        let raw = env::var("CODEBURN_BIN").unwrap_or_default();
+        let raw = env::var("KYBERDASH_BIN").unwrap_or_default();
         if raw.is_empty() {
             return Self::default_program();
         }
         // A bare path (which may contain spaces, e.g. under Program Files) is used whole;
         // only otherwise is the value split into program + leading arguments.
         if is_safe_arg(&raw) && std::path::Path::new(&raw).is_file() {
-            return CodeburnCli {
+            return KyberdashCli {
                 program: raw,
                 extra_args: vec![],
             };
@@ -81,18 +81,18 @@ impl CodeburnCli {
         let parts: Vec<String> = raw.split_whitespace().map(String::from).collect();
         if parts.iter().all(|p| is_safe_arg(p)) {
             if let Some((first, rest)) = parts.split_first() {
-                return CodeburnCli {
+                return KyberdashCli {
                     program: first.clone(),
                     extra_args: rest.to_vec(),
                 };
             }
         }
-        eprintln!("codeburn-menubar: refusing unsafe CODEBURN_BIN; falling back to `codeburn`");
+        eprintln!("kyberdash-tray: refusing unsafe KYBERDASH_BIN; falling back to `kyberdash`");
         Self::default_program()
     }
 
     fn default_program() -> Self {
-        CodeburnCli {
+        KyberdashCli {
             program: locate_cli().unwrap_or_else(default_program_name),
             extra_args: vec![],
         }
@@ -102,7 +102,7 @@ impl CodeburnCli {
         &self.program
     }
 
-    /// Runs `codeburn --version` and reports whether the CLI is present and new enough.
+    /// Runs `kyberdash --version` and reports whether the CLI is present and new enough.
     pub async fn status(&self) -> CliStatus {
         let min_version = format!(
             "{}.{}.{}",
@@ -132,7 +132,7 @@ impl CodeburnCli {
         status
     }
 
-    /// Spawns `codeburn status --format menubar-json --period X --provider Y` and decodes the
+    /// Spawns `kyberdash status --format menubar-json --period X --provider Y` and decodes the
     /// output. Pipes are drained concurrently so a chatty stderr cannot deadlock stdout.
     pub async fn fetch_menubar_payload(
         &self,
@@ -180,7 +180,7 @@ impl CodeburnCli {
         }
         let mut child = cmd.spawn().map_err(|err| {
             anyhow!(
-                "CodeBurn CLI not found ({}). Install it with `npm install -g codeburn`.",
+                "KyberDash CLI not found ({}). Install it with the kyber-weave installer.",
                 spawn_error_summary(&self.program, &err)
             )
         })?;
@@ -203,14 +203,14 @@ impl CodeburnCli {
 
         let status = timeout(Duration::from_secs(timeout_secs), child.wait())
             .await
-            .map_err(|_| anyhow!("codeburn CLI timed out after {}s", timeout_secs))??;
+            .map_err(|_| anyhow!("kyberdash CLI timed out after {}s", timeout_secs))??;
 
         let stdout_bytes = stdout_task.await.unwrap_or_default();
         let stderr_bytes = stderr_task.await.unwrap_or_default();
 
         if !status.success() {
             let msg = String::from_utf8_lossy(&stderr_bytes);
-            bail!("codeburn CLI exited {}: {}", status, msg.trim());
+            bail!("kyberdash CLI exited {}: {}", status, msg.trim());
         }
         Ok(String::from_utf8_lossy(&stdout_bytes).into_owned())
     }
@@ -226,19 +226,22 @@ fn spawn_error_summary(program: &str, err: &std::io::Error) -> String {
 fn default_program_name() -> String {
     #[cfg(windows)]
     {
-        "codeburn.cmd".to_string()
+        "kyberdash.cmd".to_string()
     }
     #[cfg(not(windows))]
     {
-        "codeburn".to_string()
+        "kyberdash".to_string()
     }
 }
 
-/// Parses "0.7.3" or "codeburn 0.7.3" into a comparable tuple.
+/// Parses "0.7.3" or "kyberdash 0.7.3" into a comparable tuple.
 pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
-    let token = text
-        .split_whitespace()
-        .find(|t| t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))?;
+    let token = text.split_whitespace().find(|t| {
+        t.chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+    })?;
     let mut parts = token.split('.').map(|p| {
         p.chars()
             .take_while(|c| c.is_ascii_digit())
@@ -246,11 +249,15 @@ pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
             .parse::<u32>()
             .ok()
     });
-    Some((parts.next()??, parts.next()??, parts.next().flatten().unwrap_or(0)))
+    Some((
+        parts.next()??,
+        parts.next()??,
+        parts.next().flatten().unwrap_or(0),
+    ))
 }
 
 /// Locates the CLI without relying on the inherited PATH being fresh. A tray app is often
-/// launched from Explorer or at login, before (or long after) `npm install -g codeburn`
+/// launched from Explorer or at login, before (or long after) installing kyberdash
 /// changed the user's PATH, so we also read the live PATH from the registry on Windows and
 /// probe the standard npm / node install prefixes.
 fn locate_cli() -> Option<String> {
@@ -274,7 +281,7 @@ fn find_in_search_dirs(names: &[&str]) -> Option<String> {
 
 /// The absolute-only filter is the security boundary, so it lives here where every search
 /// goes through it. `env::split_paths` yields an empty `PathBuf` for `;;` or a trailing `;`,
-/// and the registry PATH can hold relative entries too; `PathBuf::from("").join("codeburn.cmd")`
+/// and the registry PATH can hold relative entries too; `PathBuf::from("").join("kyberdash.cmd")`
 /// resolves against the current directory, which for a tray app launched at login is
 /// whatever Explorer handed it. A binary planted there must never win.
 fn find_in_dirs(dirs: &[PathBuf], names: &[&str]) -> Option<String> {
@@ -296,14 +303,19 @@ fn candidate_names() -> Vec<&'static str> {
     }
     #[cfg(not(windows))]
     {
-        vec!["codeburn"]
+        vec!["kyberdash"]
     }
 }
 
 #[cfg(windows)]
 fn extra_search_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for var in ["APPDATA", "LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"] {
+    for var in [
+        "APPDATA",
+        "LOCALAPPDATA",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+    ] {
         if let Some(base) = env::var_os(var).map(PathBuf::from) {
             match var {
                 "APPDATA" => out.push(base.join("npm")),
@@ -382,9 +394,13 @@ fn registry_path_dirs() -> Vec<PathBuf> {
             if !trimmed.starts_with("Path") {
                 continue;
             }
-            let Some(idx) = trimmed.find("REG_") else { continue };
+            let Some(idx) = trimmed.find("REG_") else {
+                continue;
+            };
             let rest = &trimmed[idx..];
-            let Some(space) = rest.find(char::is_whitespace) else { continue };
+            let Some(space) = rest.find(char::is_whitespace) else {
+                continue;
+            };
             let value = rest[space..].trim();
             for part in value.split(';') {
                 let expanded = expand_env(part.trim());
@@ -427,30 +443,34 @@ fn expand_env(value: &str) -> String {
     result
 }
 
-/// Runs a codeburn subcommand in the user's terminal emulator so they can see the output.
+/// Runs a kyberdash subcommand in the user's terminal emulator so they can see the output.
 /// Linux: tries `x-terminal-emulator`, `gnome-terminal`, `konsole`, then falls back to a
 /// detached headless spawn. Windows: opens a console via `cmd /C start`. Never
 /// interpolates through a shell -- argv throughout.
 pub fn spawn_in_terminal(app: &AppHandle, subcommand: &[&str]) -> Result<()> {
-    let cli = CodeburnCli::resolve();
+    let cli = KyberdashCli::resolve();
     spawn_program_in_terminal(app, &cli, subcommand)
 }
 
-/// The Plan view's "Connect Claude" runs Claude Code's own login flow, not codeburn. The
+/// The Plan view's "Connect Claude" runs Claude Code's own login flow, not kyberdash. The
 /// binary is located up front rather than handed to the console shell as a bare name, so
-/// the same absolute-directory rule that protects the codeburn lookup applies here too.
+/// the same absolute-directory rule that protects the kyberdash lookup applies here too.
 pub fn spawn_claude_login(app: &AppHandle) -> Result<()> {
     let program = locate_claude().ok_or_else(|| {
         anyhow!("Claude Code was not found on this machine. Install it, then try again.")
     })?;
-    let cli = CodeburnCli {
+    let cli = KyberdashCli {
         program,
         extra_args: vec![],
     };
     spawn_program_in_terminal(app, &cli, &["login"])
 }
 
-fn spawn_program_in_terminal(_app: &AppHandle, cli: &CodeburnCli, subcommand: &[&str]) -> Result<()> {
+fn spawn_program_in_terminal(
+    _app: &AppHandle,
+    cli: &KyberdashCli,
+    subcommand: &[&str],
+) -> Result<()> {
     if !subcommand.iter().all(|s| is_safe_arg(s)) {
         bail!("unsafe subcommand argument");
     }
@@ -462,7 +482,7 @@ fn spawn_program_in_terminal(_app: &AppHandle, cli: &CodeburnCli, subcommand: &[
         command_parts.extend(subcommand.iter().map(|s| s.to_string()));
         // Terminal emulators take the command as one string that a shell then parses
         // (gnome-terminal explicitly hands it to `bash -lc`). `cli.program` reaches here
-        // from PATH resolution, not only from the allowlisted CODEBURN_BIN, so re-check
+        // from PATH resolution, not only from the allowlisted KYBERDASH_BIN, so re-check
         // every part before joining; anything a shell could reinterpret skips the terminal
         // and goes through the argv-only detached spawn below.
         if command_parts.iter().all(|p| is_safe_arg(p)) {
@@ -480,7 +500,8 @@ fn spawn_program_in_terminal(_app: &AppHandle, cli: &CodeburnCli, subcommand: &[
                     let mut cmd = std::process::Command::new(program);
                     cmd.args(extras);
                     cmd.arg(&composite);
-                    cmd.spawn().with_context(|| format!("failed to launch {}", program))?;
+                    cmd.spawn()
+                        .with_context(|| format!("failed to launch {}", program))?;
                     return Ok(());
                 }
             }
@@ -503,7 +524,7 @@ fn spawn_program_in_terminal(_app: &AppHandle, cli: &CodeburnCli, subcommand: &[
         // (export) so the user can read where the file went; the TUI (report/optimize)
         // owns the window until the user quits it either way.
         // Only the unresolved default name is worth a second lookup; anything else is
-        // either already absolute or a CODEBURN_BIN the user chose.
+        // either already absolute or a KYBERDASH_BIN the user chose.
         let program = if cli.program == default_program_name() {
             locate_cli().unwrap_or_else(|| cli.program.clone())
         } else {
@@ -511,7 +532,12 @@ fn spawn_program_in_terminal(_app: &AppHandle, cli: &CodeburnCli, subcommand: &[
         };
         let cmd_exe = system32_path("cmd.exe");
         let mut cmd = system_command("cmd.exe");
-        cmd.arg("/C").arg("start").arg("").arg(&cmd_exe).arg("/K").arg(&program);
+        cmd.arg("/C")
+            .arg("start")
+            .arg("")
+            .arg(&cmd_exe)
+            .arg("/K")
+            .arg(&program);
         for a in &cli.extra_args {
             cmd.arg(a);
         }
@@ -523,7 +549,7 @@ fn spawn_program_in_terminal(_app: &AppHandle, cli: &CodeburnCli, subcommand: &[
 
     #[cfg(target_os = "macos")]
     {
-        // macOS isn't our target for this app (Swift handles Mac), but keep dev-on-Mac working.
+        // The tray is an accessory app, so there is no console to attach; spawn the CLI directly.
         std::process::Command::new(&cli.program)
             .args(&cli.extra_args)
             .args(subcommand)
@@ -545,7 +571,9 @@ mod which {
     pub fn which(program: &str) -> Result<PathBuf, ()> {
         let path = env::var_os("PATH").ok_or(())?;
         let dirs: Vec<PathBuf> = env::split_paths(&path).collect();
-        super::find_in_dirs(&dirs, &[program]).map(PathBuf::from).ok_or(())
+        super::find_in_dirs(&dirs, &[program])
+            .map(PathBuf::from)
+            .ok_or(())
     }
 }
 
@@ -558,7 +586,7 @@ mod tests {
     #[test]
     fn find_in_dirs_skips_empty_and_relative_entries() {
         let dir = std::env::temp_dir();
-        let name = "codeburn-menubar-locate-probe";
+        let name = "kyberdash-tray-locate-probe";
         let planted = dir.join(name);
         std::fs::write(&planted, b"probe").unwrap();
 
@@ -568,7 +596,8 @@ mod tests {
         assert_eq!(find_in_dirs(&unsafe_dirs, &[name]), None);
 
         // The same name behind an absolute entry is found.
-        let found = find_in_dirs(std::slice::from_ref(&dir), &[name]).expect("absolute entry should match");
+        let found =
+            find_in_dirs(std::slice::from_ref(&dir), &[name]).expect("absolute entry should match");
         assert!(PathBuf::from(&found).is_absolute());
         assert!(found.ends_with(name));
 
@@ -582,7 +611,7 @@ mod tests {
     #[test]
     fn parse_version_reads_bare_and_prefixed_output() {
         assert_eq!(parse_version("0.9.9"), Some((0, 9, 9)));
-        assert_eq!(parse_version("codeburn 0.9.20\n"), Some((0, 9, 20)));
+        assert_eq!(parse_version("kyberdash 0.9.20\n"), Some((0, 9, 20)));
         assert_eq!(parse_version("1.0"), Some((1, 0, 0)));
         assert_eq!(parse_version("0.10.0-beta.1"), Some((0, 10, 0)));
         assert_eq!(parse_version("no version here"), None);
