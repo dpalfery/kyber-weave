@@ -17,7 +17,7 @@ const testRoot = vi.hoisted(() => {
 
 const HERMES_HOME = join(testRoot, 'hermes')
 const CACHE_DIR = join(testRoot, 'cache')
-const PR_URL = 'https://github.com/getagentseal/codeburn/pull/1039'
+const PR_URL = 'https://github.com/dpalfery/kyber-weave/pull/1039'
 const requireForTest = createRequire(import.meta.url)
 
 function seedDb(repoRoot: string): void {
@@ -73,7 +73,7 @@ skipUnlessSqlite('hermes PR links through the parse pipeline', () => {
     await mkdir(join(repoRoot, '.git'), { recursive: true })
     await writeFile(
       join(repoRoot, '.git', 'config'),
-      '[remote "origin"]\n\turl = https://github.com/getagentseal/codeburn.git\n',
+      '[remote "origin"]\n\turl = https://github.com/dpalfery/kyber-weave.git\n',
     )
     seedDb(repoRoot)
 

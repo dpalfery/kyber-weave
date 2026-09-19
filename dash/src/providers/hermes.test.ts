@@ -521,7 +521,7 @@ skipUnlessSqlite('hermes provider', () => {
         startedAt: 1779549200,
       })
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
-        .run('pr-session', 'assistant', 'Opened https://github.com/getagentseal/codeburn/pull/1037 for review', 1779549201)
+        .run('pr-session', 'assistant', 'Opened https://github.com/dpalfery/kyber-weave/pull/1037 for review', 1779549201)
     })
 
     const calls = await collectCalls(tmpDir, `${dbPath}#hermes-session=pr-session`)
@@ -532,7 +532,7 @@ skipUnlessSqlite('hermes provider', () => {
   it('captures GitHub pull URLs that are wrapped in prose punctuation', async () => {
     const repo = join(tmpDir, 'punct-repo')
     await mkdir(join(repo, '.git'), { recursive: true })
-    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/getagentseal/codeburn.git\n')
+    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/dpalfery/kyber-weave.git\n')
     const dbPath = createHermesDb(tmpDir)
     withTestDb(dbPath, (db) => {
       insertSession(db, {
@@ -546,11 +546,11 @@ skipUnlessSqlite('hermes provider', () => {
         startedAt: 1779549200,
       })
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
-        .run('pr-punct', 'assistant', 'See (https://github.com/getagentseal/codeburn/pull/1037).', 1779549201)
+        .run('pr-punct', 'assistant', 'See (https://github.com/dpalfery/kyber-weave/pull/1037).', 1779549201)
     })
 
     const calls = await collectCalls(tmpDir, `${dbPath}#hermes-session=pr-punct`)
-    expect(calls[0]?.prLinks).toEqual(['https://github.com/getagentseal/codeburn/pull/1037'])
+    expect(calls[0]?.prLinks).toEqual(['https://github.com/dpalfery/kyber-weave/pull/1037'])
   })
 
   it('ignores GitHub pull URLs that only appear in tool dumps', async () => {
@@ -566,7 +566,7 @@ skipUnlessSqlite('hermes provider', () => {
         startedAt: 1779549200,
       })
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
-        .run('tool-pr-noise', 'tool', 'https://github.com/getagentseal/codeburn/pull/677 https://github.com/getagentseal/codeburn/pull/691', 1779549201)
+        .run('tool-pr-noise', 'tool', 'https://github.com/dpalfery/kyber-weave/pull/677 https://github.com/dpalfery/kyber-weave/pull/691', 1779549201)
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
         .run('tool-pr-noise', 'assistant', 'Closed the stale draft. Next is Keychain.', 1779549202)
     })
@@ -649,7 +649,7 @@ skipUnlessSqlite('hermes provider', () => {
   it('ignores fenced and unrelated-repo pull URLs when a git root is known', async () => {
     const repo = join(tmpDir, 'codeburn-src')
     await mkdir(join(repo, '.git'), { recursive: true })
-    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/getagentseal/codeburn.git\n')
+    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/dpalfery/kyber-weave.git\n')
     const dbPath = createHermesDb(tmpDir)
     withTestDb(dbPath, (db) => {
       insertSession(db, {
@@ -667,13 +667,13 @@ skipUnlessSqlite('hermes provider', () => {
           'pr-filter',
           'assistant',
           [
-            'Opened https://github.com/getagentseal/codeburn/pull/1037',
+            'Opened https://github.com/dpalfery/kyber-weave/pull/1037',
             'Also see https://github.com/evil/codeburn/pull/2',
             '```',
-            'https://github.com/getagentseal/codeburn/pull/677',
+            'https://github.com/dpalfery/kyber-weave/pull/677',
             '```',
             '~~~',
-            'https://github.com/getagentseal/codeburn/pull/4',
+            'https://github.com/dpalfery/kyber-weave/pull/4',
             '~~~',
           ].join('\n'),
           1779549201,
@@ -681,7 +681,7 @@ skipUnlessSqlite('hermes provider', () => {
     })
 
     const calls = await collectCalls(tmpDir, `${dbPath}#hermes-session=pr-filter`)
-    expect(calls[0]?.prLinks).toEqual(['https://github.com/getagentseal/codeburn/pull/1037'])
+    expect(calls[0]?.prLinks).toEqual(['https://github.com/dpalfery/kyber-weave/pull/1037'])
     expect(calls[0]?.project).toBe('codeburn-src')
   })
 
@@ -694,7 +694,7 @@ skipUnlessSqlite('hermes provider', () => {
         '[remote "evil"]',
         '\turl = https://github.com/evil/codeburn.git',
         '[remote "origin"]',
-        '\turl = https://github.com/getagentseal/codeburn.git',
+        '\turl = https://github.com/dpalfery/kyber-weave.git',
         '',
       ].join('\n'),
     )
@@ -714,19 +714,19 @@ skipUnlessSqlite('hermes provider', () => {
         .run(
           'origin-wins',
           'assistant',
-          'https://github.com/evil/codeburn/pull/3 https://github.com/getagentseal/codeburn/pull/4',
+          'https://github.com/evil/codeburn/pull/3 https://github.com/dpalfery/kyber-weave/pull/4',
           1779549201,
         )
     })
 
     const calls = await collectCalls(tmpDir, `${dbPath}#hermes-session=origin-wins`)
-    expect(calls[0]?.prLinks).toEqual(['https://github.com/getagentseal/codeburn/pull/4'])
+    expect(calls[0]?.prLinks).toEqual(['https://github.com/dpalfery/kyber-weave/pull/4'])
   })
 
   it('emits no pull links when only upstream exists', async () => {
     const repo = join(tmpDir, 'upstream-only')
     await mkdir(join(repo, '.git'), { recursive: true })
-    await writeFile(join(repo, '.git', 'config'), '[remote "upstream"]\n\turl = https://github.com/getagentseal/codeburn.git\n')
+    await writeFile(join(repo, '.git', 'config'), '[remote "upstream"]\n\turl = https://github.com/dpalfery/kyber-weave.git\n')
     const dbPath = createHermesDb(tmpDir)
     withTestDb(dbPath, (db) => {
       insertSession(db, {
@@ -740,7 +740,7 @@ skipUnlessSqlite('hermes provider', () => {
         startedAt: 1779549200,
       })
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
-        .run('upstream-only', 'assistant', 'https://github.com/getagentseal/codeburn/pull/2', 1779549201)
+        .run('upstream-only', 'assistant', 'https://github.com/dpalfery/kyber-weave/pull/2', 1779549201)
     })
 
     const calls = await collectCalls(tmpDir, `${dbPath}#hermes-session=upstream-only`)
@@ -750,7 +750,7 @@ skipUnlessSqlite('hermes provider', () => {
   it('ignores unclosed fenced pull URLs', async () => {
     const repo = join(tmpDir, 'unclosed-fence')
     await mkdir(join(repo, '.git'), { recursive: true })
-    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/getagentseal/codeburn.git\n')
+    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/dpalfery/kyber-weave.git\n')
     const dbPath = createHermesDb(tmpDir)
     withTestDb(dbPath, (db) => {
       insertSession(db, {
@@ -767,22 +767,22 @@ skipUnlessSqlite('hermes provider', () => {
         .run(
           'unclosed',
           'assistant',
-          'Opened https://github.com/getagentseal/codeburn/pull/8\n~~~\nhttps://github.com/getagentseal/codeburn/pull/6',
+          'Opened https://github.com/dpalfery/kyber-weave/pull/8\n~~~\nhttps://github.com/dpalfery/kyber-weave/pull/6',
           1779549201,
         )
     })
 
     const calls = await collectCalls(tmpDir, `${dbPath}#hermes-session=unclosed`)
-    expect(calls[0]?.prLinks).toEqual(['https://github.com/getagentseal/codeburn/pull/8'])
+    expect(calls[0]?.prLinks).toEqual(['https://github.com/dpalfery/kyber-weave/pull/8'])
   })
 
   it('ignores unclosed backtick fences and non-GitHub origin', async () => {
     const repo = join(tmpDir, 'unclosed-tick')
     await mkdir(join(repo, '.git'), { recursive: true })
-    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/getagentseal/codeburn.git\n')
+    await writeFile(join(repo, '.git', 'config'), '[remote "origin"]\n\turl = https://github.com/dpalfery/kyber-weave.git\n')
     const other = join(tmpDir, 'gitlab-origin')
     await mkdir(join(other, '.git'), { recursive: true })
-    await writeFile(join(other, '.git', 'config'), '[remote "origin"]\n\turl = git@gitlab.com:getagentseal/codeburn.git\n')
+    await writeFile(join(other, '.git', 'config'), '[remote "origin"]\n\turl = git@gitlab.com:dpalfery/kyber-weave.git\n')
     const dbPath = createHermesDb(tmpDir)
     withTestDb(dbPath, (db) => {
       insertSession(db, {
@@ -798,13 +798,13 @@ skipUnlessSqlite('hermes provider', () => {
         startedAt: 1779549300,
       })
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
-        .run('unclosed-tick', 'assistant', 'Opened https://github.com/getagentseal/codeburn/pull/10\n```\nhttps://github.com/getagentseal/codeburn/pull/11', 1779549201)
+        .run('unclosed-tick', 'assistant', 'Opened https://github.com/dpalfery/kyber-weave/pull/10\n```\nhttps://github.com/dpalfery/kyber-weave/pull/11', 1779549201)
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
-        .run('gitlab-origin', 'assistant', 'https://github.com/getagentseal/codeburn/pull/12', 1779549301)
+        .run('gitlab-origin', 'assistant', 'https://github.com/dpalfery/kyber-weave/pull/12', 1779549301)
     })
 
     const tick = await collectCalls(tmpDir, `${dbPath}#hermes-session=unclosed-tick`)
-    expect(tick[0]?.prLinks).toEqual(['https://github.com/getagentseal/codeburn/pull/10'])
+    expect(tick[0]?.prLinks).toEqual(['https://github.com/dpalfery/kyber-weave/pull/10'])
     const gitlab = await collectCalls(tmpDir, `${dbPath}#hermes-session=gitlab-origin`)
     expect(gitlab[0]?.prLinks).toBeUndefined()
   })
@@ -817,7 +817,7 @@ skipUnlessSqlite('hermes provider', () => {
     await mkdir(repo, { recursive: true })
     await writeFile(join(repo, '.git'), `gitdir: ${worktreeGit}\n`)
     await writeFile(join(worktreeGit, 'commondir'), `${common}\n`)
-    await writeFile(join(common, 'config'), '[remote "origin"]\n\turl = git@github.com:getagentseal/codeburn.git\n')
+    await writeFile(join(common, 'config'), '[remote "origin"]\n\turl = git@github.com:dpalfery/kyber-weave.git\n')
     const dbPath = createHermesDb(tmpDir)
     withTestDb(dbPath, (db) => {
       insertSession(db, {
@@ -831,11 +831,11 @@ skipUnlessSqlite('hermes provider', () => {
         startedAt: 1779549200,
       })
       db.prepare('INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)')
-        .run('wt-origin', 'assistant', 'https://github.com/getagentseal/codeburn/pull/9', 1779549201)
+        .run('wt-origin', 'assistant', 'https://github.com/dpalfery/kyber-weave/pull/9', 1779549201)
     })
 
     const calls = await collectCalls(tmpDir, `${dbPath}#hermes-session=wt-origin`)
-    expect(calls[0]?.prLinks).toEqual(['https://github.com/getagentseal/codeburn/pull/9'])
+    expect(calls[0]?.prLinks).toEqual(['https://github.com/dpalfery/kyber-weave/pull/9'])
   })
 
   it('rejects a slash-UNC path as a workspace on POSIX', async () => {

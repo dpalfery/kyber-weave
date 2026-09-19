@@ -115,7 +115,7 @@ function warnUnrecognizedSchemaOnce(providerLabel: string, missing: string[]): v
   warnedSchemas.set(providerLabel, providerSet)
   process.stderr.write(
     `codeburn: ${providerLabel} database is missing expected tables (${missing.join(', ')}). ` +
-    `Run ${providerLabel} once to apply migrations, or report at https://github.com/getagentseal/codeburn/issues if this persists.\n`
+    `Run ${providerLabel} once to apply migrations, or report at https://github.com/dpalfery/kyber-weave/issues if this persists.\n`
   )
 }
 

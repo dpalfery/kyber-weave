@@ -156,7 +156,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 3.1, 3.2, 4.1, 4.4, 4.5_
 
 - [ ] 4. Adopt the KyberDash identity
-- [ ] 4.1 Rename the package, variables, directories and strings
+- [x] 4.1 Rename the package, variables, directories and strings
   - Stream A.
   - Write the tests first:
     - `package.json` has name `kyberdash`, a single bin `kyberdash`, and dpalfery metadata.
@@ -166,7 +166,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Then rename every `CODEBURN_*` variable to `KYBERDASH_*` and `getCodeburnCacheDir` to
     `getCacheDir`, and update the user-visible strings.
   - _Requirements: 3.3, 3.4, 3.5, 3.7_
-- [ ] 4.2 Guard the severance and keep the attribution
+- [x] 4.2 Guard the severance and keep the attribution
   - Stream A.
   - Add `tests/KyberWeave.Tests/UpstreamSeveranceTests.cs`. It fails, naming the file, when
     any tracked file outside `docs/`, other than `dash/LICENSE` and

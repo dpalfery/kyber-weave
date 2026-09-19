@@ -1,20 +1,15 @@
 # User-facing brand overlay
 
-KyberDash is a `git subtree` of `getagentseal/codeburn`. The **npm package,
-bin entry `codeburn`, `CODEBURN_*` environment variables, and upstream file
-names** stay as Codeburn ships them. That is what keeps three-way merges
-cheap.
+KyberDash is first-party code (ADR 0020): the package, the binary and the
+surfaces all carry the KyberDash identity directly. This directory holds the
+one place a surface reads the brand from, so no renderer hard-codes a string
+it might later disagree with.
 
-What the user sees is overlaid:
-
-| Surface | Overlay |
+| Surface | Source |
 | --- | --- |
 | Installed binary | `scripts/install.sh` and the SEA job name it `kyberdash` |
 | CLI help (`Usage:`) | `dash/src/brand-overlay.ts` → `program.name(resolveCliName())` |
 | Web title / favicon | `index.html` plus `applyHtmlBrand` when the CLI serves `index.html` |
-| Web chrome logo | `LightsaberLogo` / `kyberdash-logo.*` (keep `codeburn-logo.png` on disk) |
+| Web chrome logo | `LightsaberLogo` / `kyberdash-logo.*` |
 
 `KYBERDASH_CLI_NAME` overrides the display command if a wrapper needs it.
-
-Do not rename `dash/`, `dash/package.json` `"name"`, or delete unshipped
-upstream trees (`dash/windows`, `dash/gnome`).

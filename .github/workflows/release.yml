@@ -363,11 +363,16 @@ jobs:
               xattr -c "${FINAL_BIN}" || true
           fi
 
+          # Ship the third-party notices with the binary (R1.5): the archive is
+          # what install.sh downloads and unpacks, so the attribution travels
+          # wherever the binary goes.
+          cp THIRD_PARTY_NOTICES.md "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
+
           # Archive the artifact under the RID-keyed name the installer expects.
           if [ "${RID}" = "win-x64" ]; then
-              zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}"
+              zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}" "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
           else
-              tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}"
+              tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}" THIRD_PARTY_NOTICES.md
           fi
 
           # Verify the binary still reports --version (catches a corrupt blob or

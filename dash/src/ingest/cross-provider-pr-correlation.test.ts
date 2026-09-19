@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { correlateCrossProviderPrSessions, extractPrUrlsFromText } from './parser.js'
 import type { ClassifiedTurn, ParsedApiCall, ProjectSummary, SessionSummary } from '../types.js'
 
-const A = 'https://github.com/getagentseal/codeburn/pull/790'
-const B = 'https://github.com/getagentseal/codeburn/pull/791'
+const A = 'https://github.com/dpalfery/kyber-weave/pull/790'
+const B = 'https://github.com/dpalfery/kyber-weave/pull/791'
 
 function call(provider: string, timestamp: string, command?: string): ParsedApiCall {
   return {

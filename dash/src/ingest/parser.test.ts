@@ -857,7 +857,7 @@ describe('(h) provider filter excludes claude from the orphan pass', () => {
       }),
       JSON.stringify({
         type: 'pr-link', sessionId: 'claude-leak-1', timestamp: '2026-07-18T12:00:20.000Z',
-        prUrl: 'https://github.com/getagentseal/codeburn/pull/1',
+        prUrl: 'https://github.com/dpalfery/kyber-weave/pull/1',
       }),
     ].join('\n') + '\n')
     return filePath
