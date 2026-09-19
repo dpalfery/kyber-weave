@@ -177,13 +177,13 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 1.5, 1.6_
 
 - [ ] 5. Engine contracts
-- [ ] 5.1 Define the `ContextReport` contract
+- [x] 5.1 Define the `ContextReport` contract
   - Stream B.
   - Create `dash/src/analysis/report/types.ts` with `ContextReport`, `Measured<T>`,
     `ReportScope` and `ReportSection`, exactly as in the design's data models.
   - Add a `formatMeasured` helper whose tests prove that null never renders as `0`.
   - _Requirements: 7.5, 11.10, 14.1_
-- [ ] 5.2 Move the six-dimension scorecard into the engine
+- [x] 5.2 Move the six-dimension scorecard into the engine
   - Stream B.
   - Port the `ScorecardMatrix` derivation cases into `dash/src/analysis/scorecard.test.ts`
     first, then implement `scorecard.ts`.

@@ -3,6 +3,7 @@ import type { KyberBridge } from './bridge.js'
 import { runContextReview, type ReviewRequest } from '../analysis/review.js'
 import { createReviewProvider } from '../analysis/review-providers/index.js'
 import { recordPrediction } from '../analysis/calibration.js'
+import { buildScorecard } from '../analysis/scorecard.js'
 
 /**
  * `/api/kyber/session/:id/content` — everything between the prefix and the
@@ -389,7 +390,12 @@ export function handleKyberRequest(
       sendKyberJson(res, 405, { error: 'Method Not Allowed' })
       return true
     }
-    const harnesses = bridge.listHarnessRollups()
+    // `scorecard` is served rather than left for each client to derive: the report and
+    // this endpoint must agree on dimensions (R11.14), which one derivation guarantees.
+    const harnesses = bridge.listHarnessRollups().map((row) => ({
+      ...row,
+      scorecard: buildScorecard(row),
+    }))
     sendKyberJson(res, 200, { harnesses })
     return true
   }
@@ -416,7 +422,7 @@ export function handleKyberRequest(
       sendKyberJson(res, 404, { error: 'Harness not found' })
       return true
     }
-    sendKyberJson(res, 200, rollup)
+    sendKyberJson(res, 200, { ...rollup, scorecard: buildScorecard(rollup) })
     return true
   }
 

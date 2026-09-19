@@ -389,6 +389,21 @@ export interface KyberFinding {
   payload?: Record<string, unknown>
 }
 
+/**
+ * One dimension as `src/analysis/scorecard.ts` serves it. The engine derives all six so
+ * the dashboard and the CLI report cannot disagree (R11.14); the browser only renders.
+ */
+export interface ServedScorecardDimension {
+  value: number | null
+  unit?: string
+  reason?: string
+  display?: string
+}
+
+export type ServedHarnessScorecard = Partial<
+  Record<ScorecardDimensionKey, ServedScorecardDimension>
+>
+
 export interface KyberHarnessSummary {
   harness: string
   name?: string
@@ -403,7 +418,7 @@ export interface KyberHarnessSummary {
   costUsd?: number | null
   runCount?: number
   findingCount?: number
-  scorecard?: ScorecardData
+  scorecard?: ServedHarnessScorecard
   payload?: Record<string, unknown>
 }
 

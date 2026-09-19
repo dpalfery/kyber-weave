@@ -2,9 +2,9 @@ import { cn } from '../../lib/utils.js'
 import { Card } from '../ui/card.js'
 import { Skeleton } from '../ui/skeleton.js'
 import type {
-  ScorecardData,
   ScorecardDimensionKey,
   ScorecardDimensionValue,
+  ServedHarnessScorecard,
 } from '../../lib/kyberApi.js'
 import {
   DIMENSION_METADATA,
@@ -16,11 +16,7 @@ export interface ScorecardMatrixRow {
   harness: string
   name?: string
   sampleCount?: number
-  contextPressureMedian?: number | null
-  cacheHitRate?: number | null
-  toolYield?: number | null
-  delegationOverhead?: number | null
-  scorecard?: ScorecardData
+  scorecard?: ServedHarnessScorecard
 }
 
 export interface ScorecardMatrixProps {
@@ -30,88 +26,42 @@ export interface ScorecardMatrixProps {
   className?: string
 }
 
-const NO_ROLLUP_REASON =
+/** Shown when the row carries no scorecard at all, so the server said nothing about it. */
+const NO_SCORECARD_REASON =
   'No live rollup: harness observed on runs but not yet aggregated'
 
-function hasRollupMetrics(row: ScorecardMatrixRow): boolean {
-  return typeof row.sampleCount === 'number' || row.scorecard !== undefined
-}
-
-function measuredDimension(
-  key: ScorecardDimensionKey,
-  value: number | null | undefined,
-  formatted: string | undefined,
-  measuredReason: string,
-  unmeasuredReason: string,
-): ScorecardDimensionValue {
-  const measured = typeof value === 'number'
-  return {
-    key,
-    name: DIMENSION_METADATA[key].name,
-    value: measured ? value : null,
-    formatted: measured ? formatted : undefined,
-    status: measured ? 'measured' : 'not_measurable',
-    reason: measured ? measuredReason : unmeasuredReason,
-  }
-}
-
+/**
+ * Adapt one served dimension to the shape this table renders.
+ *
+ * This used to derive the dimension from the row's raw metrics. It no longer does: the
+ * engine derives all six (R11.14), so the browser cannot disagree with the CLI report
+ * about what a harness scored. What is left here is presentation — picking the display
+ * name and mapping absence to the `not_measurable` status the meter renders as a dash.
+ */
 function dimensionForRow(
   row: ScorecardMatrixRow,
   key: ScorecardDimensionKey,
 ): ScorecardDimensionValue {
-  const fromScorecard = row.scorecard?.dimensions?.[key]
-  if (fromScorecard) return fromScorecard
-
   const meta = DIMENSION_METADATA[key]
-  const unmeasured = hasRollupMetrics(row) ? meta.defaultUnmeasuredReason : NO_ROLLUP_REASON
+  const served = row.scorecard?.[key]
 
-  switch (key) {
-    case 'contextHygiene':
-      return measuredDimension(
-        key,
-        row.contextPressureMedian,
-        typeof row.contextPressureMedian === 'number'
-          ? `${Math.round(row.contextPressureMedian * 100)}%`
-          : undefined,
-        'Measured across runs',
-        unmeasured,
-      )
-    case 'cacheEfficiency':
-      return measuredDimension(
-        key,
-        row.cacheHitRate,
-        typeof row.cacheHitRate === 'number'
-          ? `${Math.round(row.cacheHitRate * 100)}%`
-          : undefined,
-        'Measured prompt cache read ratio',
-        unmeasured,
-      )
-    case 'toolYield':
-      return measuredDimension(
-        key,
-        row.toolYield,
-        typeof row.toolYield === 'number' ? `${row.toolYield.toFixed(1)}x` : undefined,
-        'Active calls per resident schema token',
-        unmeasured,
-      )
-    case 'delegationOverhead':
-      return measuredDimension(
-        key,
-        row.delegationOverhead,
-        typeof row.delegationOverhead === 'number'
-          ? `${Math.round(row.delegationOverhead * 100)}%`
-          : undefined,
-        'Observed delegation handoff ratio',
-        unmeasured,
-      )
-    case 'skillUtilisation':
-    case 'continuity':
-      return {
-        key,
-        name: meta.name,
-        status: 'not_measurable',
-        reason: unmeasured,
-      }
+  if (!served || served.value === null) {
+    return {
+      key,
+      name: meta.name,
+      value: null,
+      status: 'not_measurable',
+      reason: served?.reason ?? NO_SCORECARD_REASON,
+    }
+  }
+
+  return {
+    key,
+    name: meta.name,
+    value: served.value,
+    formatted: served.display,
+    status: 'measured',
+    reason: meta.description,
   }
 }
 
