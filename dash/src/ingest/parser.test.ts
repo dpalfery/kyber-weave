@@ -32,7 +32,7 @@ let _synthParseCalls = 0
 let _synthOnParse: ((source: SessionSource) => void | Promise<void>) | null = null
 
 vi.mock('../providers/index.js', async (importOriginal) => {
-  type Mod = typeof import('../src/providers/index.js')
+  type Mod = typeof import('../providers/index.js')
   const actual = await importOriginal<Mod>()
   return {
     ...actual,

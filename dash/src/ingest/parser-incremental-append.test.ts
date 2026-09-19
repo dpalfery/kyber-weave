@@ -8,7 +8,7 @@ import { tmpdir } from 'os'
 // implementation is preserved; we merely record the offset each call receives.
 const readLineCalls: Array<{ filePath: string; startByteOffset?: number }> = []
 vi.mock('./fs-utils.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/ingest/fs-utils.js')>()
+  const actual = await importOriginal<typeof import('./fs-utils.js')>()
   return {
     ...actual,
     readSessionLines: (filePath: string, skip?: unknown, options?: { startByteOffset?: number }) => {

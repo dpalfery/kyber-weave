@@ -17,7 +17,7 @@ import { InteractiveDashboard, type DashboardHistoryIndex } from './dashboard.js
 const { parseAllSessionsMock, filesParsedFromSourceCountMock, resolveNextParse } = vi.hoisted(() => {
   const pending: Array<(projects: unknown[]) => void> = []
   return {
-  parseAllSessionsMock: vi.fn<Parameters<typeof import('../src/ingest/parser.js').parseAllSessions>, ReturnType<typeof import('../src/ingest/parser.js').parseAllSessions>>(
+  parseAllSessionsMock: vi.fn<Parameters<typeof import('../ingest/parser.js').parseAllSessions>, ReturnType<typeof import('../ingest/parser.js').parseAllSessions>>(
     () => new Promise(resolve => pending.push(resolve as (projects: unknown[]) => void)),
   ),
   filesParsedFromSourceCountMock: vi.fn(() => 0),
@@ -26,7 +26,7 @@ const { parseAllSessionsMock, filesParsedFromSourceCountMock, resolveNextParse }
 })
 
 vi.mock('../ingest/parser.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/ingest/parser.js')>()
+  const actual = await importOriginal<typeof import('../ingest/parser.js')>()
   return {
     ...actual,
     parseAllSessions: parseAllSessionsMock,
@@ -35,7 +35,7 @@ vi.mock('../ingest/parser.js', async (importOriginal) => {
 })
 
 vi.mock('../metrics/usage-aggregator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/metrics/usage-aggregator.js')>()
+  const actual = await importOriginal<typeof import('../metrics/usage-aggregator.js')>()
   return {
     ...actual,
     buildDurablePeriod: vi.fn(async () => ({

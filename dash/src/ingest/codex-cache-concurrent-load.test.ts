@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 const readSpy = vi.hoisted(() => vi.fn())
 
 vi.mock('./cache-dir.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/ingest/cache-dir.js')>()
+  const actual = await importOriginal<typeof import('./cache-dir.js')>()
   return {
     ...actual,
     readExistingTextFile: (path: string) => {

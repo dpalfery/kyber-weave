@@ -11,7 +11,7 @@ import { clearSessionCache, parseAllSessions } from '../ingest/parser.js'
 // would otherwise silently flip these assertions. Only this lookup is stubbed,
 // so `calculateCost` still prices off the real tables.
 vi.mock('../pricing/models.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/pricing/models.js')>()
+  const actual = await importOriginal<typeof import('../pricing/models.js')>()
   return {
     ...actual,
     getModelCosts: (model: string) => (model === 'grok-4.6-build' ? null : actual.getModelCosts(model)),

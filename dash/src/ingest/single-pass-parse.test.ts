@@ -7,7 +7,7 @@ import { tmpdir } from 'os'
 // serve from an earlier run rather than starting another one.
 let discoveries = 0
 vi.mock('../providers/index.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/providers/index.js')>()
+  const actual = await importOriginal<typeof import('../providers/index.js')>()
   return {
     ...actual,
     discoverAllSessions: (...args: Parameters<typeof actual.discoverAllSessions>) => {

@@ -9,18 +9,18 @@ import type { ProjectSummary, SessionSummary } from '../types.js'
 
 const { parseAllSessionsMock } = vi.hoisted(() => ({
   parseAllSessionsMock: vi.fn<
-    Parameters<typeof import('../src/ingest/parser.js').parseAllSessions>,
-    ReturnType<typeof import('../src/ingest/parser.js').parseAllSessions>
+    Parameters<typeof import('../ingest/parser.js').parseAllSessions>,
+    ReturnType<typeof import('../ingest/parser.js').parseAllSessions>
   >(),
 }))
 
 vi.mock('../ingest/parser.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/ingest/parser.js')>()
+  const actual = await importOriginal<typeof import('../ingest/parser.js')>()
   return { ...actual, parseAllSessions: parseAllSessionsMock }
 })
 
 vi.mock('../providers/index.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/providers/index.js')>()
+  const actual = await importOriginal<typeof import('../providers/index.js')>()
   const provider = (name: string) => ({
     name,
     displayName: name,
@@ -33,7 +33,7 @@ vi.mock('../providers/index.js', async (importOriginal) => {
 })
 
 vi.mock('../metrics/usage-aggregator.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/metrics/usage-aggregator.js')>()
+  const actual = await importOriginal<typeof import('../metrics/usage-aggregator.js')>()
   return {
     ...actual,
     buildDurablePeriod: vi.fn(async () => ({

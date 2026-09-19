@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('../providers/index.js', async (importOriginal) => {
-  type ProvidersModule = typeof import('../src/providers/index.js')
+  type ProvidersModule = typeof import('../providers/index.js')
   const actual = await importOriginal<ProvidersModule>()
   return {
     ...actual,
