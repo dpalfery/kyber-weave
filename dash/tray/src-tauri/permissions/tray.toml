@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-quit"
+description = "Quit the running tray instance."
+commands.allow = ["quit"]
+
+[[permission]]
+identifier = "allow-hide-popover"
+description = "Hide the popover window (Escape / 6.4)."
+commands.allow = ["hide_popover"]

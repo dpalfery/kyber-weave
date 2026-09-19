@@ -2,12 +2,12 @@
 //! executable. Linux: an XDG autostart .desktop file. No extra crates; both are a few
 //! lines of `reg` / plain file IO.
 
-use anyhow::{anyhow, Result};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use anyhow::Context;
+use anyhow::{anyhow, Result};
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-const APP_NAME: &str = "CodeBurn";
+const APP_NAME: &str = "KyberDash";
 
 #[cfg(target_os = "windows")]
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
@@ -33,15 +33,21 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
     if enabled {
         let exe = std::env::current_exe().with_context(|| "cannot resolve current exe")?;
         let value = format!("\"{}\"", exe.display());
-        let out = reg(&["add", RUN_KEY, "/v", APP_NAME, "/t", "REG_SZ", "/d", &value, "/f"])?;
+        let out = reg(&[
+            "add", RUN_KEY, "/v", APP_NAME, "/t", "REG_SZ", "/d", &value, "/f",
+        ])?;
         if !out.status.success() {
-            return Err(anyhow!(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+            return Err(anyhow!(String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .to_string()));
         }
     } else {
         let out = reg(&["delete", RUN_KEY, "/v", APP_NAME, "/f"])?;
         // Deleting a value that does not exist is the state we want anyway.
         if !out.status.success() && is_enabled() {
-            return Err(anyhow!(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+            return Err(anyhow!(String::from_utf8_lossy(&out.stderr)
+                .trim()
+                .to_string()));
         }
     }
     Ok(())
@@ -49,7 +55,10 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn desktop_file() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("autostart").join("codeburn-menubar.desktop"))
+    dirs::config_dir().map(|d| {
+        d.join("autostart")
+            .join("io.github.dpalfery.kyberdash.desktop")
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -85,5 +94,7 @@ pub fn is_enabled() -> bool {
 
 #[cfg(target_os = "macos")]
 pub fn set_enabled(_enabled: bool) -> Result<()> {
-    Err(anyhow!("launch at login is handled by the native macOS app"))
+    // Requirement 6.8's macOS LaunchAgent is new code (task 8.9); this stub
+    // keeps the salvaged module compiling until that lands.
+    Err(anyhow!("macOS launch at login is not implemented yet"))
 }

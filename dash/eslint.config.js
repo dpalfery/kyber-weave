@@ -20,6 +20,9 @@ const ignorePaths = [
   'node_modules/**',
   'web/dist/**',
   'web/node_modules/**',
+  'tray/ui/dist/**',
+  'tray/ui/node_modules/**',
+  'tray/src-tauri/**',
   'scripts/upgrade-path/**', // release-verification helpers, run by node directly
   'src/tools/**/*.mjs',
   'tests/fixtures/**',

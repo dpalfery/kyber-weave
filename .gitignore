@@ -47,6 +47,7 @@ dash/build/
 dash/.tsbuildinfo
 dash/**/*.tsbuildinfo
 dash/**/*.tgz
+dash/tray/src-tauri/target/
 
 # The root `**/bin/` rule targets .NET project output. Vendored upstream has
 # no `bin/` directory currently, so the rule does not swallow an upstream

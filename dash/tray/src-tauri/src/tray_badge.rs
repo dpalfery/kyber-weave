@@ -1,4 +1,4 @@
-//! Renders today's spend into the tray icon. Windows and most Linux panels cannot place a
+//! Renders badge text into the tray icon. Windows and most Linux panels cannot place a
 //! title next to a tray icon the way the macOS menubar does, so the number becomes the icon:
 //! a 4x7 pixel font drawn at the panel's native small-icon size, so it stays crisp instead
 //! of being a scaled-down bitmap.
@@ -50,7 +50,11 @@ fn text_width(text: &str) -> usize {
 /// text (far more legible at 16px than 1px pixel strokes); falls back to the pixel font
 /// when no usable font file is present.
 pub fn render(text: &str, size: u32, dark_taskbar: bool) -> Image<'static> {
-    let color = if dark_taskbar { ACCENT_DARK_TASKBAR } else { ACCENT_LIGHT_TASKBAR };
+    let color = if dark_taskbar {
+        ACCENT_DARK_TASKBAR
+    } else {
+        ACCENT_LIGHT_TASKBAR
+    };
     if let Some(image) = render_with_font(text, size, color) {
         return image;
     }
@@ -112,7 +116,11 @@ fn layout(font: &fontdue::Font, text: &str, px: f32) -> (Vec<Raster>, f32, i32, 
         })
         .collect();
     let width: f32 = glyphs.iter().map(|g| g.metrics.advance_width).sum();
-    let top = glyphs.iter().map(|g| g.metrics.height as i32 + g.metrics.ymin).max().unwrap_or(0);
+    let top = glyphs
+        .iter()
+        .map(|g| g.metrics.height as i32 + g.metrics.ymin)
+        .max()
+        .unwrap_or(0);
     let bottom = glyphs.iter().map(|g| g.metrics.ymin).min().unwrap_or(0);
     (glyphs, width, top, bottom)
 }
@@ -170,7 +178,11 @@ fn render_pixel_font(text: &str, size: u32, dark_taskbar: bool) -> Image<'static
     let size = size.max(BASE_ICON_SIZE);
     let scale = (size / BASE_ICON_SIZE).max(1) as usize;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let color = if dark_taskbar { ACCENT_DARK_TASKBAR } else { ACCENT_LIGHT_TASKBAR };
+    let color = if dark_taskbar {
+        ACCENT_DARK_TASKBAR
+    } else {
+        ACCENT_LIGHT_TASKBAR
+    };
 
     let width = text_width(text) * scale;
     let height = GLYPH_HEIGHT * scale;
@@ -214,7 +226,11 @@ fn fits(text: &str) -> bool {
 pub fn small_icon_size() -> u32 {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON};
     let px = unsafe { GetSystemMetrics(SM_CXSMICON) };
-    if px > 0 { px as u32 } else { BASE_ICON_SIZE }
+    if px > 0 {
+        px as u32
+    } else {
+        BASE_ICON_SIZE
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -240,7 +256,8 @@ pub fn taskbar_is_dark() -> bool {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
             // "0x0" means the system (taskbar) uses the dark theme.
-            text.lines().any(|l| l.contains("SystemUsesLightTheme") && l.trim_end().ends_with("0x0"))
+            text.lines()
+                .any(|l| l.contains("SystemUsesLightTheme") && l.trim_end().ends_with("0x0"))
         }
         Err(_) => true,
     }

@@ -37,6 +37,8 @@ npm-debug.log*
 
 # Build artifacts
 *.tsbuildinfo
+tray/src-tauri/target/
+tray/ui/dist/
 
 # SEA bundle output (tsup.sea.config.ts)
 dist-sea/
