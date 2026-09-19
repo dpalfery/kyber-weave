@@ -13,7 +13,7 @@ beforeEach(async () => {
   process.env['CLAUDE_CONFIG_DIR'] = tmpDir
   // Point desktop sessions at an empty subdir by default so real sessions
   // on the developer's machine do not bleed into the unit tests.
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
 })
 
 afterEach(async () => {
@@ -187,7 +187,7 @@ describe('Claude cwd project paths', () => {
   })
 
   it('does not promote a Claude Cowork container cwd into trusted session provenance', async () => {
-    const desktopBase = process.env['CODEBURN_DESKTOP_SESSIONS_DIR']!
+    const desktopBase = process.env['KYBERDASH_DESKTOP_SESSIONS_DIR']!
     const projectDir = join(
       desktopBase,
       'app-1',

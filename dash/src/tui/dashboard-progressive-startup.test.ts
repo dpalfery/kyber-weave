@@ -34,16 +34,16 @@ beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'dashboard-progressive-'))
   process.env['HOME'] = tmpDir
   process.env['CLAUDE_CONFIG_DIR'] = tmpDir
-  process.env['CODEBURN_CACHE_DIR'] = join(tmpDir, 'cache')
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
+  process.env['KYBERDASH_CACHE_DIR'] = join(tmpDir, 'cache')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
 })
 
 afterEach(async () => {
   clearSessionCache()
   clearLoadCacheMemo()
   delete process.env['CLAUDE_CONFIG_DIR']
-  delete process.env['CODEBURN_CACHE_DIR']
-  delete process.env['CODEBURN_DESKTOP_SESSIONS_DIR']
+  delete process.env['KYBERDASH_CACHE_DIR']
+  delete process.env['KYBERDASH_DESKTOP_SESSIONS_DIR']
   if (originalHome == null) delete process.env['HOME']
   else process.env['HOME'] = originalHome
   await rm(tmpDir, { recursive: true, force: true })
@@ -226,7 +226,7 @@ describe('interactive dashboard progressive startup', () => {
   it('paints Today first even when the normalized session cache is already complete', async () => {
     await writeSession('today', 0)
     await writeSession('old', 90)
-    const configDir = join(tmpDir, '.config', 'codeburn')
+    const configDir = join(tmpDir, '.kyberdash')
     await mkdir(configDir, { recursive: true })
     await writeFile(join(configDir, 'config.json'), JSON.stringify({
       plans: { claude: { id: 'claude-max', monthlyUsd: 200, resetDay: 1 } },

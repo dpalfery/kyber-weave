@@ -17,7 +17,7 @@ import { buildDurablePeriod, getDailyCacheConfigHash } from '../metrics/usage-ag
 // and asserts the headline reflects it.
 
 const ROOT = join(tmpdir(), `codeburn-carried-headline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-const ENV_KEYS = ['HOME', 'CODEBURN_CACHE_DIR', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIRS', 'CODEX_HOME'] as const
+const ENV_KEYS = ['HOME', 'KYBERDASH_CACHE_DIR', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIRS', 'CODEX_HOME'] as const
 let savedEnv: Record<string, string | undefined>
 
 function daysAgoStr(n: number): string {
@@ -61,7 +61,7 @@ beforeEach(async () => {
   await mkdir(join(ROOT, 'home'), { recursive: true })
   await mkdir(join(ROOT, 'cache'), { recursive: true })
   process.env['HOME'] = join(ROOT, 'home')
-  process.env['CODEBURN_CACHE_DIR'] = join(ROOT, 'cache')
+  process.env['KYBERDASH_CACHE_DIR'] = join(ROOT, 'cache')
   delete process.env['CLAUDE_CONFIG_DIR']
   delete process.env['CLAUDE_CONFIG_DIRS']
   delete process.env['CODEX_HOME']

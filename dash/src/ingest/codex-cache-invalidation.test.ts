@@ -36,7 +36,7 @@ beforeEach(() => {
   process.env['HOME'] = join(testRoot, 'home')
   process.env['USERPROFILE'] = join(testRoot, 'home')
   process.env['CODEX_HOME'] = CODEX_HOME
-  process.env['CODEBURN_CACHE_DIR'] = CACHE_DIR
+  process.env['KYBERDASH_CACHE_DIR'] = CACHE_DIR
 })
 
 afterAll(async () => {

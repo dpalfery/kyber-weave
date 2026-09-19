@@ -60,22 +60,22 @@ describe('decideParseWorkers', () => {
     expect(decideParseWorkers({ files: 150, bytes: 4 * 1024 ** 3 }, BIG_SYSTEM, NO_ENV).workers).toBe(8)
   })
 
-  it('honours CODEBURN_PARSE_WORKERS, which also bypasses the auto gates', () => {
-    expect(decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { CODEBURN_PARSE_WORKERS: '0' }).workers).toBe(0)
-    expect(decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { CODEBURN_PARSE_WORKERS: '4' }).workers).toBe(4)
+  it('honours KYBERDASH_PARSE_WORKERS, which also bypasses the auto gates', () => {
+    expect(decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { KYBERDASH_PARSE_WORKERS: '0' }).workers).toBe(0)
+    expect(decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { KYBERDASH_PARSE_WORKERS: '4' }).workers).toBe(4)
     // Capped by the core count
-    expect(decideParseWorkers(BIG_PENDING, { cores: 4, availableBytes: 32 * 1024 ** 3 }, { CODEBURN_PARSE_WORKERS: '32' }).workers).toBe(4)
+    expect(decideParseWorkers(BIG_PENDING, { cores: 4, availableBytes: 32 * 1024 ** 3 }, { KYBERDASH_PARSE_WORKERS: '32' }).workers).toBe(4)
     // A tiny fixture corpus still gets threads when forced — that is what makes
     // the determinism test below able to exercise them at all.
-    expect(decideParseWorkers({ files: 3, bytes: 1000 }, BIG_SYSTEM, { CODEBURN_PARSE_WORKERS: '3' }).workers).toBe(3)
-    expect(decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { CODEBURN_PARSE_WORKERS: 'nonsense' }).workers).toBe(0)
+    expect(decideParseWorkers({ files: 3, bytes: 1000 }, BIG_SYSTEM, { KYBERDASH_PARSE_WORKERS: '3' }).workers).toBe(3)
+    expect(decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { KYBERDASH_PARSE_WORKERS: 'nonsense' }).workers).toBe(0)
   })
 
   it('reports the decision inputs in every reason, gate or not', () => {
     for (const d of [
       decideParseWorkers(BIG_PENDING, BIG_SYSTEM, NO_ENV),
       decideParseWorkers({ files: 12, bytes: 1000 }, BIG_SYSTEM, NO_ENV),
-      decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { CODEBURN_PARSE_WORKERS: '2' }),
+      decideParseWorkers(BIG_PENDING, BIG_SYSTEM, { KYBERDASH_PARSE_WORKERS: '2' }),
     ]) {
       expect(d.reason).toContain('16 cores')
       expect(d.reason).toContain('GB available')
@@ -247,7 +247,7 @@ function runCli(args: string[], home: string, extraEnv: Record<string, string>) 
       ...process.env,
       CLAUDE_CONFIG_DIR: join(home, '.claude'),
       CODEX_HOME: join(home, '.codex'),
-      CODEBURN_CACHE_DIR: join(home, '.cache', 'codeburn'),
+      KYBERDASH_CACHE_DIR: join(home, '.cache', 'kyberdash'),
       HOME: home,
       TZ: 'UTC',
       ...extraEnv,
@@ -287,8 +287,8 @@ describe('parallel cold parse', () => {
     const serialCache = join(home, 'cache-serial')
     const parallelCache = join(home, 'cache-parallel')
     const args = ['report', '--format', 'json', '-p', 'all']
-    const serial = runCli(args, home, { CODEBURN_PARSE_WORKERS: '0', CODEBURN_CACHE_DIR: serialCache })
-    const parallel = runCli(args, home, { CODEBURN_PARSE_WORKERS: '3', CODEBURN_CACHE_DIR: parallelCache, ...extraParallelEnv })
+    const serial = runCli(args, home, { KYBERDASH_PARSE_WORKERS: '0', KYBERDASH_CACHE_DIR: serialCache })
+    const parallel = runCli(args, home, { KYBERDASH_PARSE_WORKERS: '3', KYBERDASH_CACHE_DIR: parallelCache, ...extraParallelEnv })
 
     expect(serial.status, serial.stderr).toBe(0)
     expect(parallel.status, parallel.stderr).toBe(0)
@@ -319,7 +319,7 @@ describe('parallel cold parse', () => {
     await writeResumedPair(claude, 'fwd', '00000000-aaaa-bbbb-cccc-000000000000', '99999999-aaaa-bbbb-cccc-000000000000')
     await writeResumedPair(claude, 'rev', '99999999-dddd-bbbb-cccc-000000000000', '00000000-dddd-bbbb-cccc-000000000000')
 
-    const parallel = await bothWays({ CODEBURN_VERBOSE: '1' })
+    const parallel = await bothWays({ KYBERDASH_VERBOSE: '1' })
 
     // Pin that the discard path actually ran rather than passing by luck.
     const overlaps = [...parallel.stderr.matchAll(/(\d+)\/\d+ results re-parsed in-process on id overlap/g)]
@@ -341,9 +341,9 @@ describe('parallel cold parse', () => {
       await writeCodexRollout(codex, '06', `plain-${n}`, codexRollout(`plain-${n}`, `/tmp/cx${n}`, [1, 2].map(t => ({ n: t, at: `2026-05-06T0${n}:${t}0:00.000Z` }))))
     }
 
-    const parallel = await bothWays({ CODEBURN_VERBOSE: '1' })
+    const parallel = await bothWays({ KYBERDASH_VERBOSE: '1' })
 
-    expect(parallel.stderr).toContain('codeburn: codex parse workers=3')
+    expect(parallel.stderr).toContain('kyberdash: codex parse workers=3')
     // Pin that the codex-cache comparison in bothWays was not vacuous.
     expect(await codexResults(join(home, 'cache-parallel'))).toContain('rollout-')
     // Pin that the codex discard path actually ran rather than passing by luck.
@@ -361,14 +361,14 @@ describe('parallel cold parse', () => {
     const cache = join(home, 'cache-inc')
     const args = ['report', '--format', 'json', '-p', 'all']
 
-    const cold = runCli(args, home, { CODEBURN_PARSE_WORKERS: '3', CODEBURN_CACHE_DIR: cache, CODEBURN_VERBOSE: '1' })
+    const cold = runCli(args, home, { KYBERDASH_PARSE_WORKERS: '3', KYBERDASH_CACHE_DIR: cache, KYBERDASH_VERBOSE: '1' })
     expect(cold.status, cold.stderr).toBe(0)
-    expect(cold.stderr).toContain('codeburn: codex parse workers=3')
+    expect(cold.stderr).toContain('kyberdash: codex parse workers=3')
 
     await appendFile(path, codexTaskLines([{ n: 4, at: '2026-05-04T09:40:00.000Z' }]).join('\n') + '\n')
-    const warm = runCli(args, home, { CODEBURN_PARSE_WORKERS: '3', CODEBURN_CACHE_DIR: cache, CODEBURN_VERBOSE: '1' })
+    const warm = runCli(args, home, { KYBERDASH_PARSE_WORKERS: '3', KYBERDASH_CACHE_DIR: cache, KYBERDASH_VERBOSE: '1' })
     expect(warm.status, warm.stderr).toBe(0)
-    expect(warm.stderr).toContain('codeburn: codex parse workers=0 (no full parses pending)')
+    expect(warm.stderr).toContain('kyberdash: codex parse workers=0 (no full parses pending)')
   })
 })
 
@@ -391,12 +391,12 @@ describe('ParseWorkerPool', () => {
     // Isolated so a parse in this process can never walk the developer's own
     // ~/.codex, and so the pool the Codex path opens is covered by the leak check.
     process.env['CODEX_HOME'] = join(home, '.codex')
-    process.env['CODEBURN_CACHE_DIR'] = join(home, '.cache', 'codeburn')
+    process.env['KYBERDASH_CACHE_DIR'] = join(home, '.cache', 'kyberdash')
   })
 
   afterEach(async () => {
     clearSessionCache()
-    delete process.env['CODEBURN_PARSE_WORKERS']
+    delete process.env['KYBERDASH_PARSE_WORKERS']
     delete process.env['CODEX_HOME']
     await rm(home, { recursive: true, force: true })
   })
@@ -466,14 +466,14 @@ describe('ParseWorkerPool', () => {
     expect(path).toBe(codexPath)
     expect(worker).toEqual(JSON.parse(JSON.stringify(serial)))
     // The decode itself must never have touched the codex cache file.
-    expect(await codexResults(join(home, '.cache', 'codeburn'))).toBeNull()
+    expect(await codexResults(join(home, '.cache', 'kyberdash'))).toBeNull()
   })
 
   // The resident `serve` child parses over and over in one process; a thread
   // that outlives its parse would accumulate across requests.
   it('leaves no live worker behind after back-to-back parses', async () => {
     const before = liveWorkers()
-    process.env['CODEBURN_PARSE_WORKERS'] = '2'
+    process.env['KYBERDASH_PARSE_WORKERS'] = '2'
 
     await parseAllSessions()
     expect(liveWorkers()).toBe(before)

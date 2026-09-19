@@ -14,7 +14,7 @@ export const BRAND = {
   faviconPngHref: '/kyberdash-logo.png',
 } as const
 
-const LAUNCHER_STEMS = new Set(['cli', 'main', 'launch'])
+const LAUNCHER_STEMS = new Set(['cli', 'main', 'launch', 'launcher'])
 
 export function resolveCliName(argv1 = process.argv[1]): string {
   const fromEnv = process.env['KYBERDASH_CLI_NAME']?.trim()

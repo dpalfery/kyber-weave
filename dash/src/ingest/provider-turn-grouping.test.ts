@@ -15,7 +15,7 @@ beforeEach(async () => {
   cacheDir = await mkdtemp(join(tmpdir(), 'codeburn-turn-group-cache-'))
   vibeHome = await mkdtemp(join(tmpdir(), 'codeburn-turn-group-vibe-'))
   process.env['HOME'] = home
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   process.env['VIBE_HOME'] = vibeHome
 })
 

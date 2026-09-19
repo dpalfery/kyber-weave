@@ -193,7 +193,7 @@ beforeEach(async () => {
   tmpCache = await mkdtemp(join(tmpdir(), 'cb-parser-test-cache-'))
 
   process.env['HOME']               = tmpHome
-  process.env['CODEBURN_CACHE_DIR'] = tmpCache
+  process.env['KYBERDASH_CACHE_DIR'] = tmpCache
 
   // Reset synthetic provider state
   _synthSources = []
@@ -223,9 +223,9 @@ describe('(a) copilot JSONL file-purge monotonic', () => {
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
 
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
 
     const eventsPath = await createJsonlSession(sessionStateDir, 'sess-del', 200)
 
@@ -254,10 +254,10 @@ describe.skipIf(!isSqliteAvailable())(
   () => {
     it('preserves total after one conversation is pruned from the OTel DB', async () => {
       const dbPath = join(tmpHome, 'agent-traces.db')
-      vi.stubEnv('CODEBURN_COPILOT_OTEL_DB', dbPath)
-      vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '')
-      vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', join(tmpHome, 'no-jsonl'))
-      vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR',   join(tmpHome, 'no-ws'))
+      vi.stubEnv('KYBERDASH_COPILOT_OTEL_DB', dbPath)
+      vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '')
+      vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', join(tmpHome, 'no-jsonl'))
+      vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR',   join(tmpHome, 'no-ws'))
 
       // DB with two conversations
       createOtelDb(dbPath)
@@ -293,10 +293,10 @@ describe.skipIf(!isSqliteAvailable())(
   () => {
     it('second parse of unchanged DB yields same total, not double', async () => {
       const dbPath = join(tmpHome, 'agent-traces.db')
-      vi.stubEnv('CODEBURN_COPILOT_OTEL_DB', dbPath)
-      vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '')
-      vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', join(tmpHome, 'no-jsonl'))
-      vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR',   join(tmpHome, 'no-ws'))
+      vi.stubEnv('KYBERDASH_COPILOT_OTEL_DB', dbPath)
+      vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '')
+      vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', join(tmpHome, 'no-jsonl'))
+      vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR',   join(tmpHome, 'no-ws'))
 
       createOtelDb(dbPath)
       insertOtelConv(dbPath, { spanId: 'dedup-s1', traceId: 'dedup-t1', convId: 'dedup-c1', model: 'gpt-4.1', input: 300, output: 30 })
@@ -538,12 +538,12 @@ describe('reasoning-only copilot session emission', () => {
   it('emits a session whose sole rollup carries only reasoning tokens', async () => {
     const sessionStateDir = join(tmpHome, 'session-state-reason-only')
     await mkdir(sessionStateDir, { recursive: true })
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', join(tmpHome, 'no-store.db'))
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', join(tmpHome, 'no-store.db'))
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     const ts = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
     const dir = join(sessionStateDir, 'sess-reason')
@@ -586,9 +586,9 @@ describe('(f) durable orphans survive a parse-version bump', () => {
   it('keeps counting a pruned-source orphan after the provider fingerprint changes', async () => {
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
 
     // Parse once so the session is cached, then prune the source: the cache
     // entry becomes a durable orphan (its only record).
@@ -627,10 +627,10 @@ describe('(f) durable orphans survive a parse-version bump', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe.skipIf(!isSqliteAvailable())('(f2) durable history survives a bump on an extant, pruned DB', () => {
   const stubOtelOnly = (dbPath: string): void => {
-    vi.stubEnv('CODEBURN_COPILOT_OTEL_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', join(tmpHome, 'no-jsonl'))
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_OTEL_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '')
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', join(tmpHome, 'no-jsonl'))
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
   }
 
   // Take the same code path a real PROVIDER_PARSE_VERSIONS bump takes: any
@@ -927,11 +927,11 @@ describe('(f) growing resumed CLI session durable merge', () => {
   it('totals equal the final cumulative rollup after the file grows a leg', async () => {
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     const base = Date.now() - 5 * 24 * 60 * 60 * 1000
     const at = (offsetSec: number): string => new Date(base + offsetSec * 1000).toISOString()
@@ -993,9 +993,9 @@ describe('(f) growing resumed CLI session durable merge', () => {
 // (q) Burst reuse: a through-now range re-anchored seconds later reuses the
 //     previous parse instead of re-running discovery (serve fast-path)
 // ═══════════════════════════════════════════════════════════════════════════
-describe('(q) parse burst reuse (CODEBURN_PARSE_BURST_MS)', () => {
+describe('(q) parse burst reuse (KYBERDASH_PARSE_BURST_MS)', () => {
   it('serves a re-anchored range from the previous parse inside the window, never outside it', async () => {
-    vi.stubEnv('CODEBURN_PARSE_BURST_MS', '10000')
+    vi.stubEnv('KYBERDASH_PARSE_BURST_MS', '10000')
     clearSessionCache()
     const start = new Date(Date.now() - 60 * 60 * 1000)
     const ts = new Date(Date.now() - 10 * 60 * 1000).toISOString()
@@ -1025,7 +1025,7 @@ describe('(q) parse burst reuse (CODEBURN_PARSE_BURST_MS)', () => {
     // the new call: proof the reuse was the burst path, not staleness. The
     // source file must actually change, or the fingerprint-keyed disk cache
     // (correctly) serves the old turns.
-    vi.stubEnv('CODEBURN_PARSE_BURST_MS', '0')
+    vi.stubEnv('KYBERDASH_PARSE_BURST_MS', '0')
     await writeFile(synthFile, 'placeholder v2 with a second call')
     clearSessionCache()
     const third = await parseAllSessions({ start, end: new Date(Date.now() + 2000) }, 'test-synthetic')
@@ -1038,7 +1038,7 @@ describe('(q) parse burst reuse (CODEBURN_PARSE_BURST_MS)', () => {
 
 describe('(r) validated parse reuse (setParseReuseValidator)', () => {
   it('falls back to the exact TTL when watcher coverage is unknown, but rejects dirty', async () => {
-    vi.stubEnv('CODEBURN_PARSE_BURST_MS', '0')
+    vi.stubEnv('KYBERDASH_PARSE_BURST_MS', '0')
     clearSessionCache()
     const start = new Date(Date.now() - 60 * 60 * 1000)
     const end = new Date()
@@ -1071,7 +1071,7 @@ describe('(r) validated parse reuse (setParseReuseValidator)', () => {
   })
 
   it('falls back to the short burst when watcher coverage is unknown, but dirty wins inside it', async () => {
-    vi.stubEnv('CODEBURN_PARSE_BURST_MS', '10000')
+    vi.stubEnv('KYBERDASH_PARSE_BURST_MS', '10000')
     clearSessionCache()
     const start = new Date(Date.now() - 60 * 60 * 1000)
     const firstEnd = new Date()
@@ -1107,7 +1107,7 @@ describe('(r) validated parse reuse (setParseReuseValidator)', () => {
   })
 
   it('reuses past the burst window while the validator reports quiet, never when dirty', async () => {
-    vi.stubEnv('CODEBURN_PARSE_BURST_MS', '1')
+    vi.stubEnv('KYBERDASH_PARSE_BURST_MS', '1')
     clearSessionCache()
     const start = new Date(Date.now() - 60 * 60 * 1000)
     const ts = new Date(Date.now() - 10 * 60 * 1000).toISOString()
@@ -1181,7 +1181,7 @@ describe('(r) validated parse reuse (setParseReuseValidator)', () => {
   })
 
   it('does not bless a root event that arrived while the cached parse was running', async () => {
-    vi.stubEnv('CODEBURN_PARSE_BURST_MS', '1')
+    vi.stubEnv('KYBERDASH_PARSE_BURST_MS', '1')
     clearSessionCache()
     const start = new Date(Date.now() - 60 * 60 * 1000)
     const firstEnd = new Date()
@@ -1283,12 +1283,12 @@ describe.skipIf(!isSqliteAvailable())('(i) growing session-store DB durable merg
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, 'session-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     const base = Date.now() - 5 * 24 * 60 * 60 * 1000
     const at = (offsetSec: number): string => new Date(base + offsetSec * 1000).toISOString()
@@ -1380,12 +1380,12 @@ describe.skipIf(!isSqliteAvailable())('(k) serve-time precedence over stale cach
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, 'session-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     const base = Date.now() - 5 * 24 * 60 * 60 * 1000
     const at = (offsetSec: number): string => new Date(base + offsetSec * 1000).toISOString()
@@ -1459,12 +1459,12 @@ describe.skipIf(!isSqliteAvailable())('(l) age-out exempts still-discovered stor
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, 'session-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     const base = Date.now() - 91 * 24 * 60 * 60 * 1000
     const at = (offsetSec: number): string => new Date(base + offsetSec * 1000).toISOString()
@@ -1527,12 +1527,12 @@ async function setupCopilotStoreEnv(): Promise<{
   const sessionStateDir = join(tmpHome, 'session-state')
   await mkdir(sessionStateDir, { recursive: true })
   const dbPath = join(tmpHome, 'session-store.db')
-  vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-  vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-  vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-  vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-  vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-  vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+  vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+  vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+  vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+  vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+  vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+  vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
   const base = Date.now() - 5 * 24 * 60 * 60 * 1000
   const at = (offsetSec: number): string => new Date(base + offsetSec * 1000).toISOString()
@@ -1758,12 +1758,12 @@ describe.skipIf(!isSqliteAvailable())('(c5) compaction-initiated store rows', ()
     const sessionStateDir = join(tmpHome, `cmpinit-state-${name}`)
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, `cmpinit-store-${name}.db`)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
     const base = Date.now() - 3 * 24 * 3600 * 1000
     const at = (sec: number): string => new Date(base + sec * 1000).toISOString()
     createStoreDbWithInitiator(dbPath)
@@ -1968,12 +1968,12 @@ describe.skipIf(!isSqliteAvailable())('(c6) a migrated cache reconciles like a v
     const sessionStateDir = join(tmpHome, 'c6-state')
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, 'c6-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
     const base = Date.now() - 4 * 24 * 3600 * 1000
     const at = (sec: number): string => new Date(base + sec * 1000).toISOString()
     createStore(dbPath)
@@ -2092,12 +2092,12 @@ describe.skipIf(!isSqliteAvailable())('(c3) cumulative shutdown counters across 
     const sessionStateDir = join(tmpHome, `cum-state-${name}`)
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, `cum-store-${name}.db`)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
     const base = Date.now() - 4 * 24 * 3600 * 1000
     const at = (sec: number): string => new Date(base + sec * 1000).toISOString()
     createStoreDb(dbPath)
@@ -2203,12 +2203,12 @@ describe.skipIf(!isSqliteAvailable())('(c2) residual keys are derived from the l
     const sessionStateDir = join(tmpHome, 'reskey-state')
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, 'reskey-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     // Two legs, one partially-covering row: both legs mint a residual.
     const dir = join(sessionStateDir, 'sess-reskey')
@@ -2322,12 +2322,12 @@ describe.skipIf(!isSqliteAvailable())('(c1) compaction-anchored residual interva
     const sessionStateDir = join(tmpHome, `cmp-state-${name}`)
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, `cmp-store-${name}.db`)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
     const base = Date.now() - 5 * 24 * 60 * 60 * 1000
     const at = (offsetSec: number): string => new Date(base + offsetSec * 1000).toISOString()
     createStoreDb(dbPath)
@@ -2817,12 +2817,12 @@ describe.skipIf(!isSqliteAvailable())('(x) multi-leg residual day attribution', 
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, 'session-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     // A resumed session: leg 1 shuts down on day 1 (cumulative input 500,
     // cache-free for arithmetic clarity), leg 2 the next day (cumulative 800
@@ -3120,12 +3120,12 @@ describe.skipIf(!isSqliteAvailable())('(z) hydration verdict integrity', () => {
     const storeDir = join(tmpHome, 'store-dir')
     await mkdir(storeDir, { recursive: true })
     const dbPath = join(storeDir, 'session-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
     const base = Date.now() - 5 * 24 * 60 * 60 * 1000
     const at = (offsetSec: number): string => new Date(base + offsetSec * 1000).toISOString()
 
@@ -3172,12 +3172,12 @@ describe.skipIf(!isSqliteAvailable())('(j) rollup-day reattribution to request d
     const sessionStateDir = join(tmpHome, 'session-state')
     await mkdir(sessionStateDir, { recursive: true })
     const dbPath = join(tmpHome, 'session-store.db')
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
 
     // "Day N" = 5 days ago; the shutdown lands ~19h later ("next morning").
     const dayN = Date.now() - 5 * 24 * 60 * 60 * 1000
@@ -3249,12 +3249,12 @@ describe.skipIf(!isSqliteAvailable())('(j) rollup-day reattribution to request d
 // the guarded line makes each one fail).
 describe.skipIf(!isSqliteAvailable())('(sc) month-sharded cache integration for copilot', () => {
   function stubCopilotEnv(sessionStateDir: string, dbPath: string): void {
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', sessionStateDir)
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', sessionStateDir)
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpHome, 'no-ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpHome, 'no-global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpHome, 'no-jb'))
   }
 
   const copilotCalls = (projects: Awaited<ReturnType<typeof parseAllSessions>>) =>

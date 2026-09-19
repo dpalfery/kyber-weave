@@ -23,7 +23,7 @@ import type { DateRange } from '../types.js'
 // the historical days CAN be sliced — that is what these tests pin down.
 
 const ROOT = join(tmpdir(), `codeburn-project-filter-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-const ENV_KEYS = ['HOME', 'CODEBURN_CACHE_DIR', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIRS', 'CODEX_HOME'] as const
+const ENV_KEYS = ['HOME', 'KYBERDASH_CACHE_DIR', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIRS', 'CODEX_HOME'] as const
 let savedEnv: Record<string, string | undefined>
 
 // One carried day, split across two projects. The day totals are the sum, so a
@@ -164,7 +164,7 @@ beforeEach(async () => {
   await mkdir(join(ROOT, 'home', '.claude'), { recursive: true })
   await mkdir(join(ROOT, 'cache'), { recursive: true })
   process.env['HOME'] = join(ROOT, 'home')
-  process.env['CODEBURN_CACHE_DIR'] = join(ROOT, 'cache')
+  process.env['KYBERDASH_CACHE_DIR'] = join(ROOT, 'cache')
   process.env['CLAUDE_CONFIG_DIR'] = join(ROOT, 'home', '.claude')
   delete process.env['CLAUDE_CONFIG_DIRS']
   delete process.env['CODEX_HOME']

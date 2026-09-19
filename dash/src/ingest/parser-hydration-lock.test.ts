@@ -53,8 +53,8 @@ beforeEach(async () => {
   tmpHome = await mkdtemp(join(tmpdir(), 'cb-hydlock-home-'))
   cacheDir = await mkdtemp(join(tmpdir(), 'cb-hydlock-cache-'))
   process.env['CLAUDE_CONFIG_DIR'] = tmpHome
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(tmpHome, 'desktop-sessions')
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(tmpHome, 'desktop-sessions')
 })
 
 afterEach(async () => {

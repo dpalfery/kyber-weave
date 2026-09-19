@@ -27,10 +27,10 @@ const DISPLAY_NAME = 'OpenClaude'
 const MIN_REASONABLE_TIMESTAMP_MS = 1_000_000_000_000
 
 // Mirrors the CLI's own resolution chain, each level individually overridable:
-//   root     := CODEBURN_OPENCLAUDE_DIR ?? ~/.openclaude
+//   root     := KYBERDASH_OPENCLAUDE_DIR ?? ~/.openclaude
 //   projects := <root>/projects
 function openClaudeRootDir(): string {
-  return process.env['CODEBURN_OPENCLAUDE_DIR']?.trim() || join(homedir(), '.openclaude')
+  return process.env['KYBERDASH_OPENCLAUDE_DIR']?.trim() || join(homedir(), '.openclaude')
 }
 
 export function getOpenClaudeProjectsDir(): string {

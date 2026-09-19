@@ -22,7 +22,7 @@ import {
 const TMP_CACHE_ROOT = join(tmpdir(), `codeburn-tz-dedup-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
 
 beforeEach(() => {
-  process.env['CODEBURN_CACHE_DIR'] = TMP_CACHE_ROOT
+  process.env['KYBERDASH_CACHE_DIR'] = TMP_CACHE_ROOT
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-06-15T12:00:00.000Z'))
 })

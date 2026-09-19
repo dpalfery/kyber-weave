@@ -24,8 +24,8 @@ beforeEach(async () => {
   clearLoadCacheMemo()
   tmpDir = await mkdtemp(join(tmpdir(), 'progressive-cold-'))
   process.env['CLAUDE_CONFIG_DIR'] = tmpDir
-  process.env['CODEBURN_CACHE_DIR'] = join(tmpDir, 'cache')
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
+  process.env['KYBERDASH_CACHE_DIR'] = join(tmpDir, 'cache')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
 })
 
 afterEach(async () => {
@@ -134,7 +134,7 @@ describe('progressive cold start', () => {
     const progressive = await readCacheOnDisk()
 
     // Same corpus, a plain full cold parse, in a cache dir of its own.
-    process.env['CODEBURN_CACHE_DIR'] = join(tmpDir, 'cache-baseline')
+    process.env['KYBERDASH_CACHE_DIR'] = join(tmpDir, 'cache-baseline')
     clearSessionCache()
     clearLoadCacheMemo()
     await parseAllSessions()

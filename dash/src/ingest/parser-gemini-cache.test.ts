@@ -16,7 +16,7 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'codeburn-gemini-home-'))
   cacheDir = await mkdtemp(join(tmpdir(), 'codeburn-gemini-cache-'))
   process.env['HOME'] = home
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
 })
 
 afterEach(async () => {

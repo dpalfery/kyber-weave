@@ -33,25 +33,25 @@ async function fixtureSource(runId: string): Promise<SessionSource> {
 
 describe('open-design provider', () => {
   beforeEach(async () => {
-    previousOverride = process.env['CODEBURN_OPEN_DESIGN_DIR']
-    previousCacheDir = process.env['CODEBURN_CACHE_DIR']
+    previousOverride = process.env['KYBERDASH_OPEN_DESIGN_DIR']
+    previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
     cacheDir = await mkdtemp(join(tmpdir(), 'codeburn-open-design-cache-'))
-    process.env['CODEBURN_OPEN_DESIGN_DIR'] = dataDir
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
+    process.env['KYBERDASH_OPEN_DESIGN_DIR'] = dataDir
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
     clearSessionCache()
   })
 
   afterEach(async () => {
     clearSessionCache()
     if (previousOverride === undefined) {
-      delete process.env['CODEBURN_OPEN_DESIGN_DIR']
+      delete process.env['KYBERDASH_OPEN_DESIGN_DIR']
     } else {
-      process.env['CODEBURN_OPEN_DESIGN_DIR'] = previousOverride
+      process.env['KYBERDASH_OPEN_DESIGN_DIR'] = previousOverride
     }
     if (previousCacheDir === undefined) {
-      delete process.env['CODEBURN_CACHE_DIR']
+      delete process.env['KYBERDASH_CACHE_DIR']
     } else {
-      process.env['CODEBURN_CACHE_DIR'] = previousCacheDir
+      process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
     }
     if (cacheDir) await rm(cacheDir, { recursive: true, force: true })
     cacheDir = undefined

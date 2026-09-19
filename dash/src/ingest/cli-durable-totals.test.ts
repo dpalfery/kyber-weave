@@ -27,7 +27,7 @@ import type { DateRange } from '../types.js'
 // queries, and in the plain live regime with no carried days at all.
 
 const ROOT = join(tmpdir(), `codeburn-durable-totals-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-const ENV_KEYS = ['HOME', 'CODEBURN_CACHE_DIR', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIRS', 'CODEX_HOME', 'USERPROFILE', 'KIMI_CODE_HOME', 'CODEBURN_DESKTOP_SESSIONS_DIR'] as const
+const ENV_KEYS = ['HOME', 'KYBERDASH_CACHE_DIR', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIRS', 'CODEX_HOME', 'USERPROFILE', 'KIMI_CODE_HOME', 'KYBERDASH_DESKTOP_SESSIONS_DIR'] as const
 let savedEnv: Record<string, string | undefined>
 
 const CARRIED_COST = 100
@@ -130,7 +130,7 @@ beforeEach(async () => {
   await mkdir(join(ROOT, 'no-desktop-sessions'), { recursive: true })
   await mkdir(join(ROOT, 'no-kimi-home'), { recursive: true })
   process.env['HOME'] = join(ROOT, 'home')
-  process.env['CODEBURN_CACHE_DIR'] = join(ROOT, 'cache')
+  process.env['KYBERDASH_CACHE_DIR'] = join(ROOT, 'cache')
   process.env['CLAUDE_CONFIG_DIR'] = join(ROOT, 'home', '.claude')
   delete process.env['CLAUDE_CONFIG_DIRS']
   delete process.env['CODEX_HOME']
@@ -142,7 +142,7 @@ beforeEach(async () => {
   // it is redirected separately in vi.hoisted below.)
   process.env['USERPROFILE'] = join(ROOT, 'home')
   process.env['KIMI_CODE_HOME'] = join(ROOT, 'no-kimi-home')
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(ROOT, 'no-desktop-sessions')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(ROOT, 'no-desktop-sessions')
   clearSessionCache()
 })
 

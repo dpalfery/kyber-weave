@@ -63,7 +63,7 @@ async function seed(): Promise<void> {
   }
 
   process.env['CLAUDE_CONFIG_DIR'] = base
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
 }
 
 /** The (date, cost) shape of the daily chart — the thing that froze empty. */

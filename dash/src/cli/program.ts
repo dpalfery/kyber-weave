@@ -59,16 +59,15 @@ async function runJsonReport(period: Period, provider: string, project: string[]
 }
 
 const program = new Command()
-  // Display name follows the installed binary (kyberdash). Keep package.json
-  // `"bin": { "codeburn": ... }` as the upstream identity for subtree merges.
+  // Display name follows the installed binary (kyberdash).
   .name(resolveCliName())
-  .description('See where your AI coding tokens go - by task, tool, model, and project')
+  .description('Context health reports and dashboards for AI coding sessions')
   .version(version)
   .option('--verbose', 'print warnings to stderr on read failures and skipped files')
   .option('--timezone <zone>', 'IANA timezone for date grouping (e.g. Asia/Tokyo, America/New_York)')
 
 program.hook('preAction', async (thisCommand) => {
-  const tz = thisCommand.opts<{ timezone?: string }>().timezone ?? process.env['CODEBURN_TZ']
+  const tz = thisCommand.opts<{ timezone?: string }>().timezone ?? process.env['KYBERDASH_TZ']
   if (tz) {
     try {
       Intl.DateTimeFormat(undefined, { timeZone: tz })
@@ -86,7 +85,7 @@ program.hook('preAction', async (thisCommand) => {
   setFlatRateRemoved(config.flatRateModelsRemoved ?? [])
   setProxyPaths(config.proxyPaths ?? [])
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
-    process.env['CODEBURN_VERBOSE'] = '1'
+    process.env['KYBERDASH_VERBOSE'] = '1'
   }
 })
 

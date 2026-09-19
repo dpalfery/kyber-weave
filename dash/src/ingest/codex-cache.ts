@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto'
 import { join, resolve } from 'path'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
-import { getCodeburnCacheDir, readExistingTextFile } from './cache-dir.js'
+import { getCacheDir, readExistingTextFile } from './cache-dir.js'
 import type { ParsedProviderCall } from '../providers/types.js'
 
 // v4: attribute MCP calls emitted as event_msg/mcp_tool_call_end (issue #478).
@@ -81,13 +81,13 @@ type ResultCache = {
 const cacheDirContext = new AsyncLocalStorage<string>()
 
 function currentCacheDir(): string {
-  return cacheDirContext.getStore() ?? resolve(getCodeburnCacheDir())
+  return cacheDirContext.getStore() ?? resolve(getCacheDir())
 }
 
 // A parse can cross many async boundaries before the Codex provider publishes
 // its incremental cache. Embedded hosts are allowed to change the process env
 // between calls, so pin the call-time directory for the whole transaction
-// instead of re-reading CODEBURN_CACHE_DIR at each cache operation.
+// instead of re-reading KYBERDASH_CACHE_DIR at each cache operation.
 export function withCodexCacheDirectory<T>(cacheDir: string, operation: () => T): T {
   return cacheDirContext.run(resolve(cacheDir), operation)
 }
@@ -104,7 +104,7 @@ function isCurrentCache(cache: ResultCache): boolean {
   return cache.version === CODEX_CACHE_VERSION && !!cache.files && typeof cache.files === 'object'
 }
 
-// Embedded consumers can change CODEBURN_CACHE_DIR without reloading this
+// Embedded consumers can change KYBERDASH_CACHE_DIR without reloading this
 // module. Keep each directory's in-memory state separate so a warm cache (or an
 // unflushed update) from A can never be read from or written into B.
 const memCaches = new Map<string, ResultCache>()

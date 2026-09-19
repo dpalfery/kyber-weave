@@ -30,7 +30,7 @@ let TMP_DIR: string
 
 beforeEach(async () => {
   TMP_DIR = join(tmpdir(), `codeburn-shard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
-  process.env['CODEBURN_CACHE_DIR'] = TMP_DIR
+  process.env['KYBERDASH_CACHE_DIR'] = TMP_DIR
   await mkdir(TMP_DIR, { recursive: true })
   clearLoadCacheMemo()
 })
@@ -538,21 +538,21 @@ describe('scoped load', () => {
       .toEqual(['/live/apr.jsonl', '/live/jun.jsonl', '/live/mar.jsonl'])
   })
 
-  it('CODEBURN_CACHE_SCOPE=all reads every month and memoizes as unscoped', async () => {
+  it('KYBERDASH_CACHE_SCOPE=all reads every month and memoizes as unscoped', async () => {
     await seedThreeMonths()
     clearLoadCacheMemo()
     const unscoped = await loadCache()
 
     clearLoadCacheMemo()
-    process.env['CODEBURN_CACHE_SCOPE'] = 'all'
+    process.env['KYBERDASH_CACHE_SCOPE'] = 'all'
     try {
       const forced = await loadCache(juneScope)
       expect(forced).toEqual(unscoped)
       // Memoized as a full load, so a resident serve reuses it for any range.
-      delete process.env['CODEBURN_CACHE_SCOPE']
+      delete process.env['KYBERDASH_CACHE_SCOPE']
       expect(await loadCache(juneScope)).toBe(forced)
     } finally {
-      delete process.env['CODEBURN_CACHE_SCOPE']
+      delete process.env['KYBERDASH_CACHE_SCOPE']
     }
   })
 

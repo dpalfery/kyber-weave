@@ -225,7 +225,7 @@ describe('collectDoctorReport - env override', () => {
     })
   }
 
-  // CODEBURN_CURSOR_MAX_BUBBLES caps how many bubbles Cursor parses
+  // KYBERDASH_CURSOR_MAX_BUBBLES caps how many bubbles Cursor parses
   // (src/providers/cursor.ts:692) and KIMI_MODEL_NAME renames the model
   // attributed to Kimi sessions (src/providers/kimi.ts:155): both are
   // fingerprinted but cannot explain why nothing was discovered, so the
@@ -233,7 +233,7 @@ describe('collectDoctorReport - env override', () => {
   // ARE overrides in force. Each is asserted through the provider that
   // declares it.
   for (const [varName, providerName, displayName, value] of [
-    ['CODEBURN_CURSOR_MAX_BUBBLES', 'cursor', 'Cursor', '5000'],
+    ['KYBERDASH_CURSOR_MAX_BUBBLES', 'cursor', 'Cursor', '5000'],
     ['KIMI_MODEL_NAME', 'kimi', 'Kimi', 'kimi-latest-920'],
   ] as const) {
     it(`does not blame ${varName} for an empty ${displayName} (not a discovery path)`, async () => {
@@ -365,7 +365,7 @@ describe('doctor rendering', () => {
     try {
       const report = await collectDoctorReport('all', { providers: [provider], cache: emptyCache() })
       const out = renderDoctorTable(report, { color: false })
-      expect(out).toContain('CodeBurn doctor')
+      expect(out).toContain('kyberDash doctor')
       expect(out).toContain('NOTHING FOUND')
       expect(out).toContain('CLAUDE_CONFIG_DIR=/nonexistent')
       expect(out).toContain('/nonexistent/projects')
@@ -398,14 +398,14 @@ describe('doctor is inert', () => {
       discoverSessions: async () => [{ path: '/tmp/x', project: 'p', provider: 'spy' }],
       createSessionParser: () => ({
         async *parse() {
-          flagDuringParse = process.env['CODEBURN_SUPPRESS_CACHE_WRITES']
+          flagDuringParse = process.env['KYBERDASH_SUPPRESS_CACHE_WRITES']
         },
       }),
     })
-    delete process.env['CODEBURN_SUPPRESS_CACHE_WRITES']
+    delete process.env['KYBERDASH_SUPPRESS_CACHE_WRITES']
     await collectDoctorReport('spy', { providers: [spy], cache: emptyCache() })
     expect(flagDuringParse).toBe('1')
-    expect(process.env['CODEBURN_SUPPRESS_CACHE_WRITES']).toBeUndefined()
+    expect(process.env['KYBERDASH_SUPPRESS_CACHE_WRITES']).toBeUndefined()
   })
 
   it('never sample-parses a provider whose parse spawns processes (antigravity)', async () => {
@@ -427,17 +427,17 @@ describe('doctor is inert', () => {
     expect(row.candidatesFound).toBe(1)
   })
 
-  it('does not blame CODEBURN_CACHE_DIR for an empty provider', async () => {
-    const prev = process.env['CODEBURN_CACHE_DIR']
-    process.env['CODEBURN_CACHE_DIR'] = '/tmp/some-cache'
+  it('does not blame KYBERDASH_CACHE_DIR for an empty provider', async () => {
+    const prev = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = '/tmp/some-cache'
     try {
       const empty = fakeProvider({ name: 'antigravity' })
       const report = await collectDoctorReport('antigravity', { providers: [empty], cache: emptyCache() })
       const row = only(report, 'antigravity')
-      expect(row.verdict).not.toContain('CODEBURN_CACHE_DIR')
+      expect(row.verdict).not.toContain('KYBERDASH_CACHE_DIR')
     } finally {
-      if (prev === undefined) delete process.env['CODEBURN_CACHE_DIR']
-      else process.env['CODEBURN_CACHE_DIR'] = prev
+      if (prev === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = prev
     }
   })
 })

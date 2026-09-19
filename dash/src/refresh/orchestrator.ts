@@ -496,8 +496,8 @@ async function warmClaudeSpecialPath(
   cacheDir = join(homedir(), '.kyberdash', 'parser-cache'),
 ): Promise<void> {
   mkdirSync(cacheDir, { recursive: true })
-  const previous = process.env['CODEBURN_CACHE_DIR']
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  const previous = process.env['KYBERDASH_CACHE_DIR']
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   const { acquireCacheRefreshLock } = await import('../ingest/cache-refresh-lock.js')
   const lock = await acquireCacheRefreshLock({ cacheDir })
   try {
@@ -505,8 +505,8 @@ async function warmClaudeSpecialPath(
     await parseAllSessions(dateRange, providerFilter)
   } finally {
     if (lock.outcome === 'acquired') await lock.handle.release()
-    if (previous === undefined) delete process.env['CODEBURN_CACHE_DIR']
-    else process.env['CODEBURN_CACHE_DIR'] = previous
+    if (previous === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+    else process.env['KYBERDASH_CACHE_DIR'] = previous
   }
 }
 

@@ -32,7 +32,7 @@ const CACHE_DIR = () => basename(sessionCacheDir())
 const TMP_DIR = join(tmpdir(), `codeburn-scache-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
 
 beforeEach(() => {
-  process.env['CODEBURN_CACHE_DIR'] = TMP_DIR
+  process.env['KYBERDASH_CACHE_DIR'] = TMP_DIR
 })
 
 afterEach(async () => {
@@ -363,7 +363,7 @@ describe('provider env overrides invalidate the fingerprint (#920)', () => {
   // ({ path: dbPath }, src/providers/copilot.ts:1935), and the durable
   // carry-forward in getOrCreateProviderSection (src/parser.ts:2650) drops
   // every cached entry whose source still exists on a fingerprint change — so
-  // declaring any CODEBURN_COPILOT_* var would force a re-parse that destroys
+  // declaring any KYBERDASH_COPILOT_* var would force a re-parse that destroys
   // conversations Copilot has since pruned from the DB, which only the cache
   // still holds. The fingerprint must therefore NOT move when one is set.
   // This reads as intent, not as an oversight — and the assertions below pin
@@ -379,12 +379,12 @@ describe('provider env overrides invalidate the fingerprint (#920)', () => {
     // is allowlisted in tests/provider-env-declarations.test.ts): setting any
     // of them must leave the copilot fingerprint untouched.
     const DEFERRED_COPILOT_VARS = [
-      'CODEBURN_COPILOT_SESSION_STATE_DIR',
-      'CODEBURN_COPILOT_OTEL_DB',
-      'CODEBURN_COPILOT_JETBRAINS_DIR',
-      'CODEBURN_COPILOT_WS_STORAGE_DIR',
-      'CODEBURN_COPILOT_GLOBAL_STORAGE_DIR',
-      'CODEBURN_COPILOT_DISABLE_OTEL',
+      'KYBERDASH_COPILOT_SESSION_STATE_DIR',
+      'KYBERDASH_COPILOT_OTEL_DB',
+      'KYBERDASH_COPILOT_JETBRAINS_DIR',
+      'KYBERDASH_COPILOT_WS_STORAGE_DIR',
+      'KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR',
+      'KYBERDASH_COPILOT_DISABLE_OTEL',
       'APPDATA',
       'LOCALAPPDATA',
       'XDG_CONFIG_HOME',
@@ -883,7 +883,7 @@ describe('cleanupOrphanedTempFiles', () => {
   })
 
   it('does not fail when cache dir does not exist', async () => {
-    process.env['CODEBURN_CACHE_DIR'] = '/no/such/dir'
+    process.env['KYBERDASH_CACHE_DIR'] = '/no/such/dir'
     await cleanupOrphanedTempFiles()
   })
 })

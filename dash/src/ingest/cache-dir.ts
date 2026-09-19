@@ -3,14 +3,19 @@ import { homedir } from 'os'
 import { join } from 'path'
 
 /**
- * Resolve CodeBurn's shared cache directory at call time.
+ * Resolve KyberDash's shared cache directory at call time.
  *
  * Reading the environment on every call matters for embedded consumers and
- * tests that change CODEBURN_CACHE_DIR after importing the CLI modules.
+ * tests that change KYBERDASH_CACHE_DIR after importing the CLI modules.
+ *
+ * The default moved from upstream's ~/.cache/codeburn to ~/.kyberdash/cache
+ * when the fork took the KyberDash identity (R3.5): the old directory is
+ * neither read nor removed, so an existing CodeBurn install keeps its cache
+ * and KyberDash warms its own.
  */
-export function getCodeburnCacheDir(): string {
-  const override = process.env['CODEBURN_CACHE_DIR']
-  return override?.trim() ? override : join(homedir(), '.cache', 'codeburn')
+export function getCacheDir(): string {
+  const override = process.env['KYBERDASH_CACHE_DIR']
+  return override?.trim() ? override : join(homedir(), '.kyberdash', 'cache')
 }
 
 /** A versioned cache file is the only source when it exists. Legacy adoption is ENOENT-only. */

@@ -15,8 +15,8 @@ beforeEach(async () => {
   clearLoadCacheMemo()
   tmpDir = await mkdtemp(join(tmpdir(), 'default-today-'))
   process.env['CLAUDE_CONFIG_DIR'] = tmpDir
-  process.env['CODEBURN_CACHE_DIR'] = join(tmpDir, 'cache')
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
+  process.env['KYBERDASH_CACHE_DIR'] = join(tmpDir, 'cache')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
 })
 
 afterEach(async () => {

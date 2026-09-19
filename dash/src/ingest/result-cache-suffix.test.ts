@@ -31,7 +31,7 @@ import {
 } from '../providers/antigravity.js'
 import type { ParsedProviderCall } from '../providers/types.js'
 
-const originalCacheDir = process.env['CODEBURN_CACHE_DIR']
+const originalCacheDir = process.env['KYBERDASH_CACHE_DIR']
 let root: string
 
 function call(provider: string, marker: string): ParsedProviderCall {
@@ -68,14 +68,14 @@ async function readAntigravityModel(sourcePath: string): Promise<string | undefi
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'codeburn-result-suffix-'))
-  process.env['CODEBURN_CACHE_DIR'] = root
+  process.env['KYBERDASH_CACHE_DIR'] = root
   clearCodexMemCaches()
   clearAntigravityCacheStates()
 })
 
 afterEach(async () => {
-  if (originalCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = originalCacheDir
+  if (originalCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = originalCacheDir
   clearCodexMemCaches()
   clearAntigravityCacheStates()
   await rm(root, { recursive: true, force: true })

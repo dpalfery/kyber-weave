@@ -38,9 +38,9 @@ beforeEach(async () => {
   cacheDir = await mkdtemp(join(CLEANHOME_ROOT, 'cache-'))
   expect(resolve(hermesHome)).not.toBe(REAL_HERMES_HOME)
   originalHermesHome = process.env['HERMES_HOME']
-  originalCodeburnCacheDir = process.env['CODEBURN_CACHE_DIR']
+  originalCodeburnCacheDir = process.env['KYBERDASH_CACHE_DIR']
   process.env['HERMES_HOME'] = hermesHome
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   resetHermesSessionLedgerForTests()
 })
 
@@ -48,8 +48,8 @@ afterEach(async () => {
   resetHermesSessionLedgerForTests()
   if (originalHermesHome === undefined) delete process.env['HERMES_HOME']
   else process.env['HERMES_HOME'] = originalHermesHome
-  if (originalCodeburnCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = originalCodeburnCacheDir
+  if (originalCodeburnCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = originalCodeburnCacheDir
   await rm(hermesHome, { recursive: true, force: true })
   await rm(cacheDir, { recursive: true, force: true })
 })
@@ -161,7 +161,7 @@ function localDay(offsetDays: number, hour = 10): { date: Date; unixSec: number;
 
 async function loadParser() {
   process.env['HERMES_HOME'] = hermesHome
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   vi.resetModules()
   resetHermesSessionLedgerForTests()
   return import('../ingest/parser.js')

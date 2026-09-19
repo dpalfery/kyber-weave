@@ -76,12 +76,12 @@ describe('vercel-gateway provider', () => {
 describe('vercel-gateway end-to-end (parseAllSessions network path)', () => {
   const originalFetch = globalThis.fetch
   const originalKey = process.env.AI_GATEWAY_API_KEY
-  const originalCacheDir = process.env.CODEBURN_CACHE_DIR
+  const originalCacheDir = process.env.KYBERDASH_CACHE_DIR
   let cacheDir: string
 
   beforeEach(async () => {
     cacheDir = await mkdtemp(join(tmpdir(), 'cb-vercel-cache-'))
-    process.env.CODEBURN_CACHE_DIR = cacheDir
+    process.env.KYBERDASH_CACHE_DIR = cacheDir
     process.env.AI_GATEWAY_API_KEY = 'test-key'
     clearSessionCache()
   })
@@ -90,8 +90,8 @@ describe('vercel-gateway end-to-end (parseAllSessions network path)', () => {
     globalThis.fetch = originalFetch
     if (originalKey === undefined) delete process.env.AI_GATEWAY_API_KEY
     else process.env.AI_GATEWAY_API_KEY = originalKey
-    if (originalCacheDir === undefined) delete process.env.CODEBURN_CACHE_DIR
-    else process.env.CODEBURN_CACHE_DIR = originalCacheDir
+    if (originalCacheDir === undefined) delete process.env.KYBERDASH_CACHE_DIR
+    else process.env.KYBERDASH_CACHE_DIR = originalCacheDir
     clearSessionCache()
     vi.restoreAllMocks()
     await rm(cacheDir, { recursive: true, force: true })

@@ -7,7 +7,7 @@ import { PROGRESS_LINE_PREFIX, startProgressKeepalive, stopProgressKeepalive } f
 // silence as a dead child. These pin the heartbeat that makes silence mean
 // stopped rather than slow.
 describe('scan-progress keepalive', () => {
-  const original = process.env['CODEBURN_PROGRESS']
+  const original = process.env['KYBERDASH_PROGRESS']
 
   /** Collects the progress lines written to stderr while `fn` drives the clock. */
   function captureKeepalives(fn: () => void): string[] {
@@ -24,12 +24,12 @@ describe('scan-progress keepalive', () => {
     stopProgressKeepalive()
     stopProgressKeepalive()
     vi.useRealTimers()
-    if (original === undefined) delete process.env['CODEBURN_PROGRESS']
-    else process.env['CODEBURN_PROGRESS'] = original
+    if (original === undefined) delete process.env['KYBERDASH_PROGRESS']
+    else process.env['KYBERDASH_PROGRESS'] = original
   })
 
   it('beats through a silent stretch far longer than the app watchdog window', () => {
-    process.env['CODEBURN_PROGRESS'] = '1'
+    process.env['KYBERDASH_PROGRESS'] = '1'
     vi.useFakeTimers()
     // 90s of a parse doing nothing observable — three times the measured save
     // stall, and twice the app's 45s silence window.
@@ -43,7 +43,7 @@ describe('scan-progress keepalive', () => {
   })
 
   it('stops when the parse ends, so an idle process never chatters', () => {
-    process.env['CODEBURN_PROGRESS'] = '1'
+    process.env['KYBERDASH_PROGRESS'] = '1'
     vi.useFakeTimers()
     const afterStop = captureKeepalives(() => {
       startProgressKeepalive()
@@ -55,7 +55,7 @@ describe('scan-progress keepalive', () => {
   })
 
   it('keeps beating until the outermost parse finishes', () => {
-    process.env['CODEBURN_PROGRESS'] = '1'
+    process.env['KYBERDASH_PROGRESS'] = '1'
     vi.useFakeTimers()
     startProgressKeepalive()
     startProgressKeepalive()
@@ -65,8 +65,8 @@ describe('scan-progress keepalive', () => {
     expect(captureKeepalives(() => vi.advanceTimersByTime(30_000))).toEqual([])
   })
 
-  it('emits nothing for a plain CLI run (no CODEBURN_PROGRESS)', () => {
-    delete process.env['CODEBURN_PROGRESS']
+  it('emits nothing for a plain CLI run (no KYBERDASH_PROGRESS)', () => {
+    delete process.env['KYBERDASH_PROGRESS']
     vi.useFakeTimers()
     expect(captureKeepalives(() => {
       startProgressKeepalive()

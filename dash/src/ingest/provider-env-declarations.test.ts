@@ -37,9 +37,9 @@ const FILE_PROVIDERS: Record<string, string[]> = {
   'dsh.ts': ['dsh'],
   'hermes.ts': ['hermes'],
   'lingtai-tui.ts': ['lingtai-tui'],
-  // Its only literal read is CODEBURN_CURSOR_MAX_BUBBLES (cursor.ts:692).
+  // Its only literal read is KYBERDASH_CURSOR_MAX_BUBBLES (cursor.ts:692).
   'cursor.ts': ['cursor'],
-  // The ENV_DIR const (open-design.ts:10) resolves to CODEBURN_OPEN_DESIGN_DIR.
+  // The ENV_DIR const (open-design.ts:10) resolves to KYBERDASH_OPEN_DESIGN_DIR.
   'open-design.ts': ['open-design'],
   'openclaude.ts': ['openclaude'],
   'opencode.ts': ['opencode'],
@@ -59,7 +59,7 @@ const FILE_PROVIDERS: Record<string, string[]> = {
   'kimicode.ts': ['kimicode'],
   'zerostack.ts': ['zerostack'],
   // Shared sqlite parser; its only importers in src/ are kilo-code.ts and
-  // opencode.ts. Its single read (CODEBURN_VERBOSE) is allowlisted, so this
+  // opencode.ts. Its single read (KYBERDASH_VERBOSE) is allowlisted, so this
   // entry is informational — but required, because the file has reads.
   'sqlite-session-parser.ts': ['kilo-code', 'opencode'],
   // Registered (lazy) network provider; its credential reads are declared in
@@ -96,14 +96,14 @@ const COPILOT_DEFERRED = 'deferred (Ruling 1): declaring it would force the dura
 // it would buy nothing and cost the #927 durable-history loss.
 const COPILOT_STORE_DEFERRED = 'deferred (#927): repointing serves no stale data — serve-time reconciliation reads the cached serve set, so a new store path parses on sight and the old path stays a durable orphan'
 const ALLOWLIST: Record<string, string> = {
-  'sqlite-session-parser.ts:CODEBURN_VERBOSE': 'sqlite-session-parser.ts:276 — logging verbosity only; changes no discovered path and no parsed value',
-  'copilot.ts:CODEBURN_COPILOT_SESSION_STATE_DIR': COPILOT_DEFERRED,
-  'copilot.ts:CODEBURN_COPILOT_OTEL_DB': COPILOT_DEFERRED,
-  'copilot.ts:CODEBURN_COPILOT_JETBRAINS_DIR': COPILOT_DEFERRED,
-  'copilot.ts:CODEBURN_COPILOT_WS_STORAGE_DIR': COPILOT_DEFERRED,
-  'copilot.ts:CODEBURN_COPILOT_GLOBAL_STORAGE_DIR': COPILOT_DEFERRED,
-  'copilot.ts:CODEBURN_COPILOT_DISABLE_OTEL': COPILOT_DEFERRED,
-  'copilot.ts:CODEBURN_COPILOT_SESSION_STORE_DB': COPILOT_STORE_DEFERRED,
+  'sqlite-session-parser.ts:KYBERDASH_VERBOSE': 'sqlite-session-parser.ts:276 — logging verbosity only; changes no discovered path and no parsed value',
+  'copilot.ts:KYBERDASH_COPILOT_SESSION_STATE_DIR': COPILOT_DEFERRED,
+  'copilot.ts:KYBERDASH_COPILOT_OTEL_DB': COPILOT_DEFERRED,
+  'copilot.ts:KYBERDASH_COPILOT_JETBRAINS_DIR': COPILOT_DEFERRED,
+  'copilot.ts:KYBERDASH_COPILOT_WS_STORAGE_DIR': COPILOT_DEFERRED,
+  'copilot.ts:KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR': COPILOT_DEFERRED,
+  'copilot.ts:KYBERDASH_COPILOT_DISABLE_OTEL': COPILOT_DEFERRED,
+  'copilot.ts:KYBERDASH_COPILOT_SESSION_STORE_DB': COPILOT_STORE_DEFERRED,
   'copilot.ts:APPDATA': COPILOT_DEFERRED,
   'copilot.ts:XDG_CONFIG_HOME': COPILOT_DEFERRED,
   'copilot.ts:LOCALAPPDATA': COPILOT_DEFERRED,

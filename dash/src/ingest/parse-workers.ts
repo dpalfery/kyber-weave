@@ -51,12 +51,12 @@ export function decideParseWorkers(
   // itself without a second run.
   const inputs = `${sys.cores} cores, ${Math.round(sys.availableBytes / 1e9 * 10) / 10} GB available, ${pending.files} pending files / ${Math.round(pending.bytes / 1e6)} MB`
 
-  const override = env['CODEBURN_PARSE_WORKERS']
+  const override = env['KYBERDASH_PARSE_WORKERS']
   if (override !== undefined && override !== '') {
     const n = Number(override)
-    if (!Number.isFinite(n) || n < 0) return { workers: 0, reason: `invalid CODEBURN_PARSE_WORKERS=${override}` }
+    if (!Number.isFinite(n) || n < 0) return { workers: 0, reason: `invalid KYBERDASH_PARSE_WORKERS=${override}` }
     const capped = Math.min(Math.floor(n), sys.cores)
-    return { workers: capped, reason: `${capped === 0 ? 'forced serial' : 'forced'} by CODEBURN_PARSE_WORKERS=${override}; ${inputs}` }
+    return { workers: capped, reason: `${capped === 0 ? 'forced serial' : 'forced'} by KYBERDASH_PARSE_WORKERS=${override}; ${inputs}` }
   }
 
   // Workload gates first, so a warm run's log line says "warm", not whatever the

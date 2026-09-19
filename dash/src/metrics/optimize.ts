@@ -316,7 +316,7 @@ export function optimizeTuiPasteHeader(destination: PasteDestination | undefined
 export function optimizeEmptyScanLines(provider?: string): [string, string, string] {
   if (isDefaultClaudeProvider(provider)) {
     return [
-      'CodeBurn optimize scans your Claude Code sessions and config for',
+      'KyberDash optimize scans your Claude Code sessions and config for',
       'token waste: junk directory reads, duplicate file reads, unused',
       'agents/skills/MCP servers, bloated CLAUDE.md, and more.',
     ]
@@ -3234,7 +3234,7 @@ export function detectLowWorthSessions(projects: ProjectSummary[], provider?: st
   return {
     id: 'low-worth-sessions',
     title: `${candidates.length} possibly low-worth expensive session${candidates.length === 1 ? '' : 's'}`,
-    explanation: `Sessions with meaningful spend but weak delivery signals: ${list}${extra}. This is a review candidate, not proof of waste: CodeBurn flags missing edit turns, repeated retries, and sessions without git delivery commands so you can decide whether the work was worth its cost before it becomes a habit.`,
+    explanation: `Sessions with meaningful spend but weak delivery signals: ${list}${extra}. This is a review candidate, not proof of waste: KyberDash flags missing edit turns, repeated retries, and sessions without git delivery commands so you can decide whether the work was worth its cost before it becomes a habit.`,
     impact,
     tokensSaved,
     fix: {
@@ -3825,7 +3825,7 @@ export function renderOptimize(
   const copy = optimizeRemediationCopy(provider)
   const lines: string[] = []
   lines.push('')
-  lines.push(`  ${chalk.bold.hex(ORANGE)('CodeBurn config health')}${chalk.dim('  ' + periodLabel)}`)
+  lines.push(`  ${chalk.bold.hex(ORANGE)('KyberDash config health')}${chalk.dim('  ' + periodLabel)}`)
   lines.push(chalk.hex(DIM)('  ' + SEP.repeat(PANEL_WIDTH)))
 
   const issueSuffix = findings.length > 0 ? `, ${findings.length} issue${findings.length > 1 ? 's' : ''}` : ''

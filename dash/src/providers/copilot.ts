@@ -35,12 +35,12 @@
 //     ~/Library/Application Support/Code/User/globalStorage/github.copilot-chat/agent-traces.db
 //
 // ENVIRONMENT VARIABLES:
-//   CODEBURN_COPILOT_OTEL_DB    — Override the agent-traces.db path
-//   CODEBURN_COPILOT_DISABLE_OTEL=1 — Skip OTel entirely, use only JSONL
-//   CODEBURN_COPILOT_WS_STORAGE_DIR — Override VS Code workspaceStorage
-//   CODEBURN_COPILOT_GLOBAL_STORAGE_DIR — Override VS Code globalStorage
-//   CODEBURN_COPILOT_JETBRAINS_DIR — Override the JetBrains github-copilot root
-//   CODEBURN_COPILOT_SESSION_STORE_DB — Override the ~/.copilot/session-store.db path
+//   KYBERDASH_COPILOT_OTEL_DB    — Override the agent-traces.db path
+//   KYBERDASH_COPILOT_DISABLE_OTEL=1 — Skip OTel entirely, use only JSONL
+//   KYBERDASH_COPILOT_WS_STORAGE_DIR — Override VS Code workspaceStorage
+//   KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR — Override VS Code globalStorage
+//   KYBERDASH_COPILOT_JETBRAINS_DIR — Override the JetBrains github-copilot root
+//   KYBERDASH_COPILOT_SESSION_STORE_DB — Override the ~/.copilot/session-store.db path
 //
 // ARCHITECTURE:
 //   discoverSessions() returns OTel sessions and legacy JSONL sessions. When
@@ -274,24 +274,24 @@ interface SpanAttributes {
 // ---------------------------------------------------------------------------
 
 function getCopilotSessionStateDir(override?: string): string {
-  return override ?? process.env['CODEBURN_COPILOT_SESSION_STATE_DIR'] ?? join(homedir(), '.copilot', 'session-state')
+  return override ?? process.env['KYBERDASH_COPILOT_SESSION_STATE_DIR'] ?? join(homedir(), '.copilot', 'session-state')
 }
 
 function getSessionStoreDbPath(override?: string): string {
-  return override ?? process.env['CODEBURN_COPILOT_SESSION_STORE_DB'] ?? join(homedir(), '.copilot', 'session-store.db')
+  return override ?? process.env['KYBERDASH_COPILOT_SESSION_STORE_DB'] ?? join(homedir(), '.copilot', 'session-store.db')
 }
 
 /**
  * Locate the agent-traces.db file.
  *
  * Priority:
- *   1. CODEBURN_COPILOT_OTEL_DB env var
+ *   1. KYBERDASH_COPILOT_OTEL_DB env var
  *   2. Platform-specific default VS Code global storage path
  *   3. VSCodium variant paths
  */
 function getAgentTracesDbPath(): string | null {
   // Allow explicit override
-  const envOverride = process.env['CODEBURN_COPILOT_OTEL_DB']
+  const envOverride = process.env['KYBERDASH_COPILOT_OTEL_DB']
   if (envOverride) {
     return existsSync(envOverride) ? envOverride : null
   }
@@ -348,7 +348,7 @@ function getAgentTracesDbPath(): string | null {
  * chat-agent-sessions/, chat-sessions/, and chat-edit-sessions/.
  */
 function getJetBrainsCopilotRoot(override?: string): string {
-  const envOverride = override ?? process.env['CODEBURN_COPILOT_JETBRAINS_DIR']
+  const envOverride = override ?? process.env['KYBERDASH_COPILOT_JETBRAINS_DIR']
   if (envOverride) return envOverride
 
   const xdg = process.env['XDG_CONFIG_HOME']
@@ -2853,20 +2853,20 @@ export function createCopilotProvider(
   /**
    * Returns the workspaceStorage directories to scan for transcript sessions.
    * When workspaceStorageDir is explicitly provided (e.g. in tests), that single
-   * directory is used. The CODEBURN_COPILOT_WS_STORAGE_DIR env var provides a
+   * directory is used. The KYBERDASH_COPILOT_WS_STORAGE_DIR env var provides a
    * single-dir override (useful for tests). Otherwise all platform-default VS
    * Code variant paths are returned.
    */
   function getWsDirs(): string[] {
     if (workspaceStorageDir !== undefined) return [workspaceStorageDir]
-    const envDir = process.env['CODEBURN_COPILOT_WS_STORAGE_DIR']
+    const envDir = process.env['KYBERDASH_COPILOT_WS_STORAGE_DIR']
     if (envDir) return [envDir]
     return getVSCodeWorkspaceStorageDirs(homedir(), platform())
   }
 
   function getGlobalDirs(): string[] {
     if (globalStorageDir !== undefined) return [globalStorageDir]
-    const envDir = process.env['CODEBURN_COPILOT_GLOBAL_STORAGE_DIR']
+    const envDir = process.env['KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR']
     if (envDir) return [envDir]
     return getVSCodeGlobalStorageDirs(homedir(), platform())
   }
@@ -2914,7 +2914,7 @@ export function createCopilotProvider(
       let discoveredOtel = false
 
       // 1. Discover OTel sessions (preferred — full token data)
-      const disableOtel = process.env['CODEBURN_COPILOT_DISABLE_OTEL'] === '1'
+      const disableOtel = process.env['KYBERDASH_COPILOT_DISABLE_OTEL'] === '1'
       if (!disableOtel) {
         const dbPath = getAgentTracesDbPath()
         if (dbPath) {

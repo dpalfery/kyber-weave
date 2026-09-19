@@ -38,8 +38,8 @@ const openWriters: NativeDatabase[] = []
 beforeEach(async () => {
   sourceRoot = await mkdtemp(join(tmpdir(), 'codeburn-sqlite-source-'))
   cacheRoot = await mkdtemp(join(tmpdir(), 'codeburn-sqlite-cache-'))
-  previousCacheDir = process.env['CODEBURN_CACHE_DIR']
-  process.env['CODEBURN_CACHE_DIR'] = cacheRoot
+  previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+  process.env['KYBERDASH_CACHE_DIR'] = cacheRoot
 })
 
 afterEach(async () => {
@@ -48,8 +48,8 @@ afterEach(async () => {
   for (const writer of openWriters.splice(0)) writer.close()
   await rm(sourceRoot, { recursive: true, force: true })
   await rm(cacheRoot, { recursive: true, force: true })
-  if (previousCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = previousCacheDir
+  if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
 })
 
 function createClosedWalDatabase(dbPath: string): void {

@@ -135,7 +135,7 @@ beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'openclaude-test-'))
   uuidSeq = 0
   msgSeq = 0
-  delete process.env['CODEBURN_OPENCLAUDE_DIR']
+  delete process.env['KYBERDASH_OPENCLAUDE_DIR']
 })
 
 afterEach(async () => {
@@ -164,8 +164,8 @@ describe('openclaude provider - projects dir resolution', () => {
     expect(getOpenClaudeProjectsDir()).toBe(join(process.env['HOME'] ?? '', '.openclaude', 'projects'))
   })
 
-  it('honors the CODEBURN_OPENCLAUDE_DIR override', () => {
-    process.env['CODEBURN_OPENCLAUDE_DIR'] = '/tmp/oc-projects'
+  it('honors the KYBERDASH_OPENCLAUDE_DIR override', () => {
+    process.env['KYBERDASH_OPENCLAUDE_DIR'] = '/tmp/oc-projects'
     expect(getOpenClaudeProjectsDir()).toBe(join('/tmp/oc-projects', 'projects'))
   })
 })

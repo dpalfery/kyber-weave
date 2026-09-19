@@ -113,7 +113,7 @@ function cacheDesktopSessionsDirs(key: string, candidates: string[]): string[] {
 }
 
 export function getDesktopSessionsDirs(): string[] {
-  const override = process.env['CODEBURN_DESKTOP_SESSIONS_DIR']
+  const override = process.env['KYBERDASH_DESKTOP_SESSIONS_DIR']
   const appDataInput = process.env['APPDATA']
   const localAppDataInput = process.env['LOCALAPPDATA']
   const platform = process.platform

@@ -81,7 +81,7 @@ async function startHydratingDashboard(): Promise<RunningDashboard> {
     define(process.stdout, 'columns', 120);
     define(process.stdout, 'rows', 50);
     if (typeof process.stdin.setRawMode !== 'function') define(process.stdin, 'setRawMode', enabled => {
-      process.stderr.write('CODEBURN_RAW_MODE ' + String(enabled) + '\\n');
+      process.stderr.write('KYBERDASH_RAW_MODE ' + String(enabled) + '\\n');
       return process.stdin;
     });
   `
@@ -98,12 +98,12 @@ async function startHydratingDashboard(): Promise<RunningDashboard> {
       ...process.env,
       HOME: home,
       CLAUDE_CONFIG_DIR: join(home, '.claude'),
-      CODEBURN_CACHE_DIR: cacheDir,
-      CODEBURN_DESKTOP_SESSIONS_DIR: join(home, 'desktop-sessions'),
-      CODEBURN_PARSE_WORKERS: '0',
-      CODEBURN_PRICING_SNAPSHOT_ONLY: '1',
-      CODEBURN_FX_NO_FETCH: '1',
-      CODEBURN_VERBOSE: '1',
+      KYBERDASH_CACHE_DIR: cacheDir,
+      KYBERDASH_DESKTOP_SESSIONS_DIR: join(home, 'desktop-sessions'),
+      KYBERDASH_PARSE_WORKERS: '0',
+      KYBERDASH_PRICING_SNAPSHOT_ONLY: '1',
+      KYBERDASH_FX_NO_FETCH: '1',
+      KYBERDASH_VERBOSE: '1',
       FORCE_COLOR: '0',
       TZ: 'UTC',
     },
@@ -138,8 +138,8 @@ afterEach(async () => {
 
 describe('interactive dashboard process exit during cold hydration', () => {
   function expectTerminalTeardown(output: string): void {
-    expect(output).toContain('CODEBURN_RAW_MODE true')
-    expect(output).toContain('CODEBURN_RAW_MODE false')
+    expect(output).toContain('KYBERDASH_RAW_MODE true')
+    expect(output).toContain('KYBERDASH_RAW_MODE false')
     expect(output).toContain('\x1b[?1006l\x1b[?1000l')
     expect(output).toContain('\x1b[?1049l')
     expect(output).toContain('\x1b[?25h')

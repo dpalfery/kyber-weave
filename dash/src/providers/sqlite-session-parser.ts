@@ -282,7 +282,7 @@ export function createSqliteSessionParser(
             }
           }
 
-          if (yieldCount === 0 && process.env['CODEBURN_VERBOSE'] === '1') {
+          if (yieldCount === 0 && process.env['KYBERDASH_VERBOSE'] === '1') {
             process.stderr.write(
               `codeburn: ${config.displayName} session ${sessionId} has ${messages.length} messages ` +
               `(${parseFailCount} unparseable, ${roleSkipCount} non-user/assistant roles) ` +

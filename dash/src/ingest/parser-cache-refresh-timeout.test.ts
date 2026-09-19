@@ -39,8 +39,8 @@ beforeEach(async () => {
   await mkdir(project, { recursive: true })
   sessionPath = join(project, 'sess.jsonl')
   process.env['CLAUDE_CONFIG_DIR'] = home
-  process.env['CODEBURN_CACHE_DIR'] = join(root, 'cache')
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(home, 'desktop-sessions')
+  process.env['KYBERDASH_CACHE_DIR'] = join(root, 'cache')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(home, 'desktop-sessions')
 })
 
 afterEach(async () => {

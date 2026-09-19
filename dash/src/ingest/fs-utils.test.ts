@@ -14,7 +14,7 @@ describe('readSessionFile', () => {
   const tmpDirs: string[] = []
 
   afterEach(async () => {
-    delete process.env.CODEBURN_VERBOSE
+    delete process.env.KYBERDASH_VERBOSE
     while (tmpDirs.length > 0) {
       const d = tmpDirs.pop()
       if (d) await rm(d, { recursive: true, force: true })
@@ -47,8 +47,8 @@ describe('readSessionFile', () => {
     expect(await readSessionFile(p)).toBeNull()
   })
 
-  it('emits stderr warning under CODEBURN_VERBOSE=1 for skipped file', async () => {
-    process.env.CODEBURN_VERBOSE = '1'
+  it('emits stderr warning under KYBERDASH_VERBOSE=1 for skipped file', async () => {
+    process.env.KYBERDASH_VERBOSE = '1'
     const p = await tmpPath(Buffer.alloc(MAX_SESSION_FILE_BYTES + 1, 'c'))
     const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     await readSessionFile(p)
@@ -178,7 +178,7 @@ describe('readSessionLines', () => {
     expect(lines).toEqual(['a', 'b', 'c'])
   })
 
-  it('skips files over the stream cap and surfaces a notice without CODEBURN_VERBOSE', async () => {
+  it('skips files over the stream cap and surfaces a notice without KYBERDASH_VERBOSE', async () => {
     const p = await tmpPath('a\nb\nc\n')
     const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
     const lines: string[] = []

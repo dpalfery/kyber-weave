@@ -6,7 +6,7 @@ import { homedir } from 'os'
 import { fileURLToPath } from 'url'
 import https from 'https'
 
-import { getCodeburnCacheDir, readExistingTextFile } from '../ingest/cache-dir.js'
+import { getCacheDir, readExistingTextFile } from '../ingest/cache-dir.js'
 import { calculateCost } from '../pricing/models.js'
 import { isSqliteAvailable, isSqliteBusyError, openDatabase } from '../ingest/sqlite.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
@@ -191,7 +191,7 @@ function getAgent(): https.Agent {
 }
 
 function currentCacheDir(): string {
-  return resolve(getCodeburnCacheDir())
+  return resolve(getCacheDir())
 }
 
 function getCachePath(cacheDir: string): string {
@@ -207,7 +207,7 @@ function isCurrentCache(cache: AntigravityCache): boolean {
 }
 
 export function getAntigravityStatusLineEventsPath(): string {
-  return join(getCodeburnCacheDir(), 'antigravity-statusline.jsonl')
+  return join(getCacheDir(), 'antigravity-statusline.jsonl')
 }
 
 function execFileText(command: string, args: string[], timeout = 3000): Promise<string> {
@@ -1065,7 +1065,7 @@ export async function recordAntigravityStatusLinePayload(input: unknown): Promis
   if (!event) return false
 
   const path = getAntigravityStatusLineEventsPath()
-  await mkdir(getCodeburnCacheDir(), { recursive: true, mode: 0o700 })
+  await mkdir(getCacheDir(), { recursive: true, mode: 0o700 })
   const fd = await open(path, 'a', 0o600)
   try {
     await fd.appendFile(`${JSON.stringify(event)}\n`, { encoding: 'utf-8' })

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, unlinkSync } from 'fs'
 import { createHash, randomBytes } from 'crypto'
 import { join } from 'path'
 
-import { getCodeburnCacheDir } from './cache-dir.js'
+import { getCacheDir } from './cache-dir.js'
 import { releaseOwnedRefreshLocksForExit } from './cache-refresh-lock.js'
 import type { ToolCall } from '../types.js'
 
@@ -221,11 +221,11 @@ const UNREFERENCED_SHARD_MAX_AGE_MS = 60 * 60 * 1000
 // computeEnvFingerprint hashes exactly these to decide when a provider's cache
 // section is stale; a var read by the provider but missing here means changing
 // it serves the old section silently, reporting nothing from the new root.
-// One read in src/providers/ is deliberately absent: CODEBURN_VERBOSE
+// One read in src/providers/ is deliberately absent: KYBERDASH_VERBOSE
 // (sqlite-session-parser.ts:276) only changes logging verbosity, never parsed
 // output.
 //
-// Copilot is deliberately NOT declared here. Declaring any CODEBURN_COPILOT_*
+// Copilot is deliberately NOT declared here. Declaring any KYBERDASH_COPILOT_*
 // var would change its fingerprint, and on a fingerprint change
 // getOrCreateProviderSection (src/parser.ts:2650) keeps only the cached
 // entries whose source path no longer exists — but copilot's OTel discovery
@@ -236,7 +236,7 @@ const UNREFERENCED_SHARD_MAX_AGE_MS = 60 * 60 * 1000
 // "complete" the map for copilot until the durable carry-forward learns to
 // merge instead of drop.
 //
-// CODEBURN_COPILOT_SESSION_STORE_DB is covered by that ruling too, and needs
+// KYBERDASH_COPILOT_SESSION_STORE_DB is covered by that ruling too, and needs
 // no exception: repointing it cannot serve stale data. Copilot's
 // rollup-vs-store reconciliation runs at SERVE time over the cached serve set
 // (parseProviderSources), never against a discovery-time snapshot, so a
@@ -245,7 +245,7 @@ const UNREFERENCED_SHARD_MAX_AGE_MS = 60 * 60 * 1000
 // always did. There is no cross-file dependency for the fingerprint to catch,
 // so declaring it would buy nothing and cost the durable-history loss above.
 export const PROVIDER_ENV_VARS: Record<string, string[]> = {
-  claude: ['CLAUDE_CONFIG_DIRS', 'CLAUDE_CONFIG_DIR', 'CODEBURN_DESKTOP_SESSIONS_DIR', 'APPDATA', 'LOCALAPPDATA'],
+  claude: ['CLAUDE_CONFIG_DIRS', 'CLAUDE_CONFIG_DIR', 'KYBERDASH_DESKTOP_SESSIONS_DIR', 'APPDATA', 'LOCALAPPDATA'],
   'cline-cli': ['CLINE_SESSION_DATA_DIR', 'CLINE_DATA_DIR', 'CLINE_DIR'],
   codebuff: ['CODEBUFF_DATA_DIR'],
   codewhale: ['CODEWHALE_HOME'],
@@ -254,23 +254,23 @@ export const PROVIDER_ENV_VARS: Record<string, string[]> = {
   'lingtai-tui': ['LINGTAI_HOME', 'LINGTAI_TUI_HOME', 'LINGTAI_TUI_GLOBAL_DIR'],
   droid: ['FACTORY_DIR'],
   dsh: ['DSH_HOME'],
-  cursor: ['CODEBURN_CURSOR_MAX_BUBBLES'],
+  cursor: ['KYBERDASH_CURSOR_MAX_BUBBLES'],
   // XDG_DATA_HOME is stale here (cursor-agent never reads it) but deliberately
   // kept: removing it would force a re-parse to fix nothing.
   'cursor-agent': ['XDG_DATA_HOME'],
-  'open-design': ['CODEBURN_OPEN_DESIGN_DIR', 'APPDATA'],
-  openclaude: ['CODEBURN_OPENCLAUDE_DIR'],
+  'open-design': ['KYBERDASH_OPEN_DESIGN_DIR', 'APPDATA'],
+  openclaude: ['KYBERDASH_OPENCLAUDE_DIR'],
   opencode: ['XDG_DATA_HOME', 'OPENCODE_DATA_DIR', 'OPENCODE_DB_PREFIX'],
   goose: ['XDG_DATA_HOME', 'GOOSE_PATH_ROOT'],
   grok: ['GROK_HOME'],
   crush: ['XDG_DATA_HOME', 'CRUSH_GLOBAL_DATA', 'LOCALAPPDATA'],
   warp: ['WARP_DB_PATH'],
-  antigravity: ['CODEBURN_CACHE_DIR'],
+  antigravity: ['KYBERDASH_CACHE_DIR'],
   'kilo-code': ['XDG_DATA_HOME'],
   kimi: ['KIMI_SHARE_DIR', 'KIMI_MODEL_NAME'],
   kiro: ['KIRO_HOME'],
   'mistral-vibe': ['VIBE_HOME'],
-  mux: ['MUX_ROOT', 'CODEBURN_MUX_DIR'],
+  mux: ['MUX_ROOT', 'KYBERDASH_MUX_DIR'],
   qwen: ['QWEN_DATA_DIR'],
   'ibm-bob': ['XDG_CONFIG_HOME', 'APPDATA'],
   quickdesk: ['QUICKWORK_HOME'],
@@ -404,12 +404,12 @@ export const PROVIDER_PARSE_VERSIONS: Record<string, string> = {
 }
 
 function getLegacyCachePath(): string {
-  return join(getCodeburnCacheDir(), LEGACY_CACHE_FILE)
+  return join(getCacheDir(), LEGACY_CACHE_FILE)
 }
 
 /** Absolute path of the active (version-suffixed) session cache directory. */
 export function sessionCacheDir(): string {
-  return join(getCodeburnCacheDir(), CACHE_DIR_NAME)
+  return join(getCacheDir(), CACHE_DIR_NAME)
 }
 
 // `until` is the UTC month of the newest turn any file in the shard holds. The
@@ -773,7 +773,7 @@ function isCacheEnvelope(raw: unknown, version: number): raw is { version: numbe
 // sources. The daily cache (durable cost history) is not touched.
 async function adoptPriorCache(version: number): Promise<SessionCache | null> {
   try {
-    const raw = await readFile(join(getCodeburnCacheDir(), priorCacheFile(version)), 'utf-8')
+    const raw = await readFile(join(getCacheDir(), priorCacheFile(version)), 'utf-8')
     const parsed = JSON.parse(raw)
     if (!isCacheEnvelope(parsed, version)) return null
     const migrated: SessionCache = { version: CACHE_VERSION, providers: {}, complete: false }
@@ -919,14 +919,14 @@ async function loadShard(path: string): Promise<Record<string, CachedFile> | nul
  * usage, the second because a fingerprint change discards the whole section and
  * must see every entry it is discarding.
  *
- * `CODEBURN_CACHE_SCOPE=all` is the escape hatch: it drops the scope here, at
+ * `KYBERDASH_CACHE_SCOPE=all` is the escape hatch: it drops the scope here, at
  * the one place every caller routes through, so a suspect scoped read can be
  * compared against a full one without a rebuild. It is a READ policy and
  * deliberately not part of any env fingerprint (PROVIDER_ENV_VARS) — setting or
  * unsetting it must never invalidate a cache, only change how much of it is read.
  */
 export async function loadCache(scope?: CacheLoadScope): Promise<SessionCache> {
-  if (process.env['CODEBURN_CACHE_SCOPE'] === 'all') scope = undefined
+  if (process.env['KYBERDASH_CACHE_SCOPE'] === 'all') scope = undefined
   const dir = sessionCacheDir()
   const envelope = await readEnvelope(dir)
   if (!envelope) return afterMissingShardCache()
@@ -1016,7 +1016,7 @@ async function afterMissingShardCache(): Promise<SessionCache> {
 // re-bucketed by month in memory) and nothing re-parses. The v8 directory is
 // removed only once the v9 save has published.
 async function migrateProviderShardCache(): Promise<SessionCache | null> {
-  const dir = join(getCodeburnCacheDir(), PRIOR_SHARD_DIR_NAME)
+  const dir = join(getCacheDir(), PRIOR_SHARD_DIR_NAME)
   let envelope: { complete?: boolean; shards: Record<string, string> }
   try {
     const parsed = JSON.parse(await readFile(join(dir, ENVELOPE_FILE), 'utf-8')) as Record<string, unknown>
@@ -1039,7 +1039,7 @@ async function migrateProviderShardCache(): Promise<SessionCache | null> {
 // shard directory, so it is migrated straight to v9 without minting a v8 in
 // between.
 async function migrateSingleFileCache(): Promise<SessionCache | null> {
-  const v7Path = join(getCodeburnCacheDir(), priorCacheFile(7))
+  const v7Path = join(getCacheDir(), priorCacheFile(7))
   let parsed: unknown
   try {
     parsed = JSON.parse(await readFile(v7Path, 'utf-8'))
@@ -1577,7 +1577,7 @@ async function unlinkIfOlderThan(path: string, maxAgeMs: number, now: number): P
 // leftover temps in the parent directory, which nothing writes anymore.
 export async function cleanupOrphanedTempFiles(): Promise<void> {
   const now = Date.now()
-  const parent = getCodeburnCacheDir()
+  const parent = getCacheDir()
 
   // `session-cache.v<n>.json.<nonce>.tmp` from a pre-v8 binary interrupted
   // mid-write. Age-guarded, so an old binary's in-flight write is left alone.
@@ -1608,8 +1608,8 @@ export async function cleanupOrphanedTempFiles(): Promise<void> {
     // the old layout is a separate, unsynchronised step, so a crash in between
     // leaves 100MB+ of superseded cache behind forever. Age-guarded for the
     // same reason the shard sweep is: an OLD binary may still be writing there.
-    await unlinkIfOlderThan(join(getCodeburnCacheDir(), priorCacheFile(7)), UNREFERENCED_SHARD_MAX_AGE_MS, now)
-    const v8Dir = join(getCodeburnCacheDir(), PRIOR_SHARD_DIR_NAME)
+    await unlinkIfOlderThan(join(getCacheDir(), priorCacheFile(7)), UNREFERENCED_SHARD_MAX_AGE_MS, now)
+    const v8Dir = join(getCacheDir(), PRIOR_SHARD_DIR_NAME)
     try {
       const s = await stat(join(v8Dir, ENVELOPE_FILE))
       if (now - s.mtimeMs > UNREFERENCED_SHARD_MAX_AGE_MS) await rm(v8Dir, { recursive: true, force: true })
@@ -1649,7 +1649,7 @@ export type HydrationHandle = { waited: boolean; release: () => Promise<void> }
 const NOOP_HANDLE: HydrationHandle = { waited: false, release: async () => {} }
 
 function lockPath(): string {
-  return join(getCodeburnCacheDir(), HYDRATION_LOCK_FILE)
+  return join(getCacheDir(), HYDRATION_LOCK_FILE)
 }
 
 // Our own pid never counts as a foreign holder: a same-process lock is either
@@ -1672,7 +1672,7 @@ async function readLockRecord(): Promise<LockRecord | null> {
 
 async function writeOurLock(): Promise<boolean> {
   try {
-    const dir = getCodeburnCacheDir()
+    const dir = getCacheDir()
     if (!existsSync(dir)) await mkdir(dir, { recursive: true })
     const handle = await open(lockPath(), 'wx', 0o600)
     try { await handle.writeFile(JSON.stringify({ pid: process.pid, at: Date.now() }), { encoding: 'utf-8' }) }

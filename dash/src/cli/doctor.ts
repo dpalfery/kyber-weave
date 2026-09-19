@@ -16,6 +16,7 @@ import {
 } from '../ingest/session-cache.js'
 import { renderTable } from '../tui/text-table.js'
 import { collectLauncherNotes, type LauncherNote } from '../ingest/launcher-homes.js'
+import { BRAND } from '../brand-overlay.js'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -130,15 +131,15 @@ const PARSE_SPAWNS = new Set(['antigravity'])
 // Vars listed in PROVIDER_ENV_VARS for cache fingerprinting that are NOT
 // discovery paths: a change to them can never explain "nothing was
 // discovered", so they must never be blamed in a NOTHING FOUND hint.
-//   - CODEBURN_CACHE_DIR: CodeBurn's own cache location — where the cache
+//   - KYBERDASH_CACHE_DIR: CodeBurn's own cache location — where the cache
 //     file lives, not where sessions are discovered.
-//   - CODEBURN_CURSOR_MAX_BUBBLES: caps how many bubbles Cursor parses
+//   - KYBERDASH_CURSOR_MAX_BUBBLES: caps how many bubbles Cursor parses
 //     (src/providers/cursor.ts:692) — a parse budget, not a discovery root.
 //   - KIMI_MODEL_NAME: renames the model attributed to Kimi sessions
 //     (src/providers/kimi.ts:155) — attribution, not discovery.
 // All three still appear in the Details block; only the verdict's blame line
 // is cleared of them.
-const NON_DISCOVERY_ENV_VARS = new Set(['CODEBURN_CACHE_DIR', 'CODEBURN_CURSOR_MAX_BUBBLES', 'KIMI_MODEL_NAME'])
+const NON_DISCOVERY_ENV_VARS = new Set(['KYBERDASH_CACHE_DIR', 'KYBERDASH_CURSOR_MAX_BUBBLES', 'KIMI_MODEL_NAME'])
 
 // Ambient platform paths (set by the OS or desktop session for everyone), not
 // deliberate user overrides: Windows sets APPDATA and LOCALAPPDATA for every
@@ -348,8 +349,8 @@ export async function collectDoctorReport(
   // first yield. The flag tells cache writers to stand down for this process
   // while doctor collects; restored afterwards so long-lived embedders (tests,
   // MCP) keep normal behavior.
-  const prevSuppress = process.env['CODEBURN_SUPPRESS_CACHE_WRITES']
-  process.env['CODEBURN_SUPPRESS_CACHE_WRITES'] = '1'
+  const prevSuppress = process.env['KYBERDASH_SUPPRESS_CACHE_WRITES']
+  process.env['KYBERDASH_SUPPRESS_CACHE_WRITES'] = '1'
   try {
     const providers: DoctorProviderReport[] = []
     for (const provider of filtered) {
@@ -371,8 +372,8 @@ export async function collectDoctorReport(
     }
     return report
   } finally {
-    if (prevSuppress === undefined) delete process.env['CODEBURN_SUPPRESS_CACHE_WRITES']
-    else process.env['CODEBURN_SUPPRESS_CACHE_WRITES'] = prevSuppress
+    if (prevSuppress === undefined) delete process.env['KYBERDASH_SUPPRESS_CACHE_WRITES']
+    else process.env['KYBERDASH_SUPPRESS_CACHE_WRITES'] = prevSuppress
   }
 }
 
@@ -459,7 +460,7 @@ export function renderDoctorTable(
   const out: string[] = []
 
   const n = report.providers.length
-  out.push(c.bold('CodeBurn doctor') + c.dim(`   ${n} provider${n === 1 ? '' : 's'}   ${report.generatedAt.slice(0, 19).replace('T', ' ')} UTC`))
+  out.push(c.bold(`${BRAND.productName} doctor`) + c.dim(`   ${n} provider${n === 1 ? '' : 's'}   ${report.generatedAt.slice(0, 19).replace('T', ' ')} UTC`))
   out.push('')
 
   const colorVerdict = (r: DoctorProviderReport): string => {
@@ -549,7 +550,7 @@ export function renderDoctorTable(
     if (r.effectiveDays < CLAUDE_RETENTION_WARN_DAYS) {
       out.push(
         c.yellow(line) + ' ' +
-        `Daily totals survive in CodeBurn's cache, but per-session detail older than that is gone for good. ` +
+        `Daily totals survive in ${BRAND.productName}'s cache, but per-session detail older than that is gone for good. ` +
         `To keep it, set "cleanupPeriodDays": 3650 in ${r.settingsPath}.`,
       )
     } else {

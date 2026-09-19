@@ -21,7 +21,7 @@ import {
 } from '../providers/antigravity.js'
 import type { ParsedProviderCall } from '../providers/types.js'
 
-const originalCacheDir = process.env['CODEBURN_CACHE_DIR']
+const originalCacheDir = process.env['KYBERDASH_CACHE_DIR']
 const originalHome = process.env['HOME']
 const originalCodexHome = process.env['CODEX_HOME']
 let root: string
@@ -82,8 +82,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  if (originalCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = originalCacheDir
+  if (originalCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = originalCacheDir
   if (originalHome === undefined) delete process.env['HOME']
   else process.env['HOME'] = originalHome
   if (originalCodexHome === undefined) delete process.env['CODEX_HOME']
@@ -91,7 +91,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-describe('call-time CODEBURN_CACHE_DIR isolation', () => {
+describe('call-time KYBERDASH_CACHE_DIR isolation', () => {
   it('keeps Codex reads and writes keyed by the active cache directory', async () => {
     const sourcePath = join(root, 'rollout.jsonl')
     const cacheA = join(root, 'cache-a')
@@ -100,11 +100,11 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     const fingerprint = await fingerprintFile(sourcePath)
     expect(fingerprint).not.toBeNull()
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheA
+    process.env['KYBERDASH_CACHE_DIR'] = cacheA
     await writeCachedCodexResults(sourcePath, 'project-a', [call('codex', 'from-a')], fingerprint!)
     await flushCodexCache()
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheB
+    process.env['KYBERDASH_CACHE_DIR'] = cacheB
     expect(await readCachedCodexResults(sourcePath)).toBeNull()
     await writeCachedCodexResults(sourcePath, 'project-b', [call('codex', 'from-b')], fingerprint!)
     await flushCodexCache()
@@ -112,7 +112,7 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     const diskB = JSON.parse(await readFile(join(cacheB, codexCacheFileName()), 'utf8'))
     expect(diskB.files[sourcePath].calls.map((entry: ParsedProviderCall) => entry.model)).toEqual(['from-b'])
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheA
+    process.env['KYBERDASH_CACHE_DIR'] = cacheA
     expect((await readCachedCodexResults(sourcePath))?.calls.map(entry => entry.model)).toEqual(['from-a'])
   })
 
@@ -124,17 +124,17 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     await writeFile(sourceA, 'a\n')
     await writeFile(sourceB, 'b\n')
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheA
+    process.env['KYBERDASH_CACHE_DIR'] = cacheA
     await writeCachedCodexResults(sourceA, 'project-a', [call('codex', 'dirty-a')], (await fingerprintFile(sourceA))!)
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheB
+    process.env['KYBERDASH_CACHE_DIR'] = cacheB
     await writeCachedCodexResults(sourceB, 'project-b', [call('codex', 'dirty-b')], (await fingerprintFile(sourceB))!)
     await flushCodexCache()
 
     const diskB = JSON.parse(await readFile(join(cacheB, codexCacheFileName()), 'utf8'))
     expect(Object.keys(diskB.files)).toEqual([sourceB])
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheA
+    process.env['KYBERDASH_CACHE_DIR'] = cacheA
     await flushCodexCache()
     const diskA = JSON.parse(await readFile(join(cacheA, codexCacheFileName()), 'utf8'))
     expect(Object.keys(diskA.files)).toEqual([sourceA])
@@ -188,7 +188,7 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
 
     process.env['HOME'] = home
     process.env['CODEX_HOME'] = codexHome
-    process.env['CODEBURN_CACHE_DIR'] = cacheA
+    process.env['KYBERDASH_CACHE_DIR'] = cacheA
     const { clearSessionCache, parseAllSessions } = await import('./parser.js')
     clearSessionCache()
 
@@ -196,7 +196,7 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     // Switching the host env immediately after invocation deterministically
     // exercises every later read/write/flush under the captured A transaction.
     const parsing = parseAllSessions(undefined, 'codex')
-    process.env['CODEBURN_CACHE_DIR'] = cacheB
+    process.env['KYBERDASH_CACHE_DIR'] = cacheB
     const projects = await parsing
 
     expect(projects.some(project => project.sessions.some(session =>
@@ -217,10 +217,10 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     await seedAntigravityCache(cacheA, sourcePath, 'from-a')
     await seedAntigravityCache(cacheB, sourcePath, 'from-b')
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheA
+    process.env['KYBERDASH_CACHE_DIR'] = cacheA
     expect(await readAntigravityModel(sourcePath)).toBe('from-a')
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheB
+    process.env['KYBERDASH_CACHE_DIR'] = cacheB
     expect(await readAntigravityModel(sourcePath)).toBe('from-b')
   })
 
@@ -232,12 +232,12 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     await seedAntigravityCache(cacheA, sourcePath, 'from-a')
     await seedAntigravityCache(cacheB, sourcePath, 'from-b')
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheA
+    process.env['KYBERDASH_CACHE_DIR'] = cacheA
     expect(await readAntigravityModel(sourcePath)).toBe('from-a')
 
     // The provider parse transaction captures A. Even if the host changes its
     // call-time env before the deferred flush, eviction/publication stays on A.
-    process.env['CODEBURN_CACHE_DIR'] = cacheB
+    process.env['KYBERDASH_CACHE_DIR'] = cacheB
     await flushAntigravityCache(new Set(), cacheA)
 
     expect(existsSync(join(cacheB, antigravityCacheFileName()))).toBe(true)
@@ -255,7 +255,7 @@ describe('call-time CODEBURN_CACHE_DIR isolation', () => {
     await writeFile(antigravitySource, 'fixture')
     await seedAntigravityCache(cacheDir, antigravitySource, 'before')
 
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
     await writeCachedCodexResults(codexSource, 'project', [call('codex', 'before')], (await fingerprintFile(codexSource))!)
     await flushCodexCache()
     expect(await readAntigravityModel(antigravitySource)).toBe('before')

@@ -313,7 +313,7 @@ describe('antigravity provider helpers', () => {
 
   it('captures exact Antigravity CLI statusLine usage as fallback calls', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-statusline-'))
-    process.env['CODEBURN_CACHE_DIR'] = dir
+    process.env['KYBERDASH_CACHE_DIR'] = dir
 
     try {
       const payload = {
@@ -372,7 +372,7 @@ describe('antigravity provider helpers', () => {
 
   it('skips statusLine fallback calls when RPC cache already covered the conversation', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-statusline-rpc-dedup-'))
-    process.env['CODEBURN_CACHE_DIR'] = dir
+    process.env['KYBERDASH_CACHE_DIR'] = dir
 
     try {
       expect(await recordAntigravityStatusLinePayload({
@@ -406,7 +406,7 @@ describe('antigravity provider helpers', () => {
 
   it('skips singleton statusLine snapshots and deltas monotonic usage', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-statusline-runs-'))
-    process.env['CODEBURN_CACHE_DIR'] = dir
+    process.env['KYBERDASH_CACHE_DIR'] = dir
 
     const basePayload = {
       conversation_id: 'statusline-runs',
@@ -458,7 +458,7 @@ describe('antigravity provider helpers', () => {
 
   it('treats non-monotonic statusLine usage as a new request snapshot', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-statusline-reset-'))
-    process.env['CODEBURN_CACHE_DIR'] = dir
+    process.env['KYBERDASH_CACHE_DIR'] = dir
 
     const payload = (
       input_tokens: number,
@@ -515,8 +515,8 @@ describe('antigravity provider helpers', () => {
 
     const tempHome = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-current-cli-'))
     const cacheDir = join(tempHome, 'cache')
-    const previousCacheDir = process.env['CODEBURN_CACHE_DIR']
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
 
     try {
       const fixture = JSON.parse(await readFile(
@@ -572,8 +572,8 @@ describe('antigravity provider helpers', () => {
       expect(calls[0]!.projectPath).toBeUndefined()
       expect(calls[0]!.costUSD).toBeGreaterThan(0)
     } finally {
-      if (previousCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-      else process.env['CODEBURN_CACHE_DIR'] = previousCacheDir
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
       await rm(tempHome, { recursive: true, force: true })
     }
   })
@@ -583,8 +583,8 @@ describe('antigravity provider helpers', () => {
 
     const tempHome = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-current-cli-dedup-'))
     const cacheDir = join(tempHome, 'cache')
-    const previousCacheDir = process.env['CODEBURN_CACHE_DIR']
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
 
     try {
       const fixture = JSON.parse(await readFile(
@@ -608,21 +608,21 @@ describe('antigravity provider helpers', () => {
 
       expect(calls).toEqual([])
     } finally {
-      if (previousCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-      else process.env['CODEBURN_CACHE_DIR'] = previousCacheDir
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
       await rm(tempHome, { recursive: true, force: true })
     }
   })
 
   async function withTempAntigravityHome(prefix: string, fn: (tempHome: string) => Promise<void>): Promise<void> {
     const tempHome = await mkdtemp(join(tmpdir(), prefix))
-    const previousCacheDir = process.env['CODEBURN_CACHE_DIR']
-    process.env['CODEBURN_CACHE_DIR'] = join(tempHome, 'cache')
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = join(tempHome, 'cache')
     try {
       await fn(tempHome)
     } finally {
-      if (previousCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-      else process.env['CODEBURN_CACHE_DIR'] = previousCacheDir
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
       await rm(tempHome, { recursive: true, force: true })
     }
   }

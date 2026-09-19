@@ -11,7 +11,7 @@ let tmpRoot: string
 const savedEnv = {
   CLAUDE_CONFIG_DIR: process.env['CLAUDE_CONFIG_DIR'],
   CLAUDE_CONFIG_DIRS: process.env['CLAUDE_CONFIG_DIRS'],
-  CODEBURN_DESKTOP_SESSIONS_DIR: process.env['CODEBURN_DESKTOP_SESSIONS_DIR'],
+  KYBERDASH_DESKTOP_SESSIONS_DIR: process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'],
   APPDATA: process.env['APPDATA'],
   LOCALAPPDATA: process.env['LOCALAPPDATA'],
   HOME: process.env['HOME'],
@@ -38,7 +38,7 @@ beforeEach(async () => {
   await mkdir(process.env['HOME'], { recursive: true })
   delete process.env['CLAUDE_CONFIG_DIR']
   delete process.env['CLAUDE_CONFIG_DIRS']
-  delete process.env['CODEBURN_DESKTOP_SESSIONS_DIR']
+  delete process.env['KYBERDASH_DESKTOP_SESSIONS_DIR']
   delete process.env['APPDATA']
   delete process.env['LOCALAPPDATA']
 })
@@ -307,7 +307,7 @@ describe('claude provider — Desktop sessions dir', () => {
     const override = join(tmpRoot, 'desktop-override')
     const localAppData = join(tmpRoot, 'local-profile')
     await makeMsixSessionsDir(localAppData, 'Claude_shouldnotappear5n8d')
-    process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = override
+    process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = override
     process.env['APPDATA'] = join(tmpRoot, 'roaming-profile')
     process.env['LOCALAPPDATA'] = localAppData
 
@@ -318,7 +318,7 @@ describe('claude provider — Desktop sessions dir', () => {
 
   it('resolves an override containing a parent segment and trailing separator', () => {
     const override = join(tmpRoot, 'desktop-parent', 'nested') + `${sep}..${sep}sessions${sep}`
-    process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = override
+    process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = override
 
     withPlatform('win32', () => {
       expect(getDesktopSessionsDirs()).toEqual([resolve(override)])
@@ -374,7 +374,7 @@ describe('claude provider — Desktop sessions dir', () => {
 
 describe('claude provider — config.json claudeConfigDirs (menubar-driven)', () => {
   async function writeConfigJson(value: unknown): Promise<void> {
-    const dir = join(process.env['HOME']!, '.config', 'codeburn')
+    const dir = join(process.env['HOME']!, '.kyberdash')
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, 'config.json'), JSON.stringify({ claudeConfigDirs: value }))
   }

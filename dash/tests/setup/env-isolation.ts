@@ -52,10 +52,10 @@ function applyIsolation(): void {
   // Price off the bundled LiteLLM snapshot only. Without this, loadPricing()
   // fetches the live upstream table, so a mid-week reprice by a provider turns
   // pricing assertions red with no local change.
-  process.env['CODEBURN_PRICING_SNAPSHOT_ONLY'] = '1'
+  process.env['KYBERDASH_PRICING_SNAPSHOT_ONLY'] = '1'
   // Same for FX: skip the live Frankfurter fetch and fall back to the
   // USD-equivalent rate unless a test seeds its own exchange-rate.json cache.
-  process.env['CODEBURN_FX_NO_FETCH'] = '1'
+  process.env['KYBERDASH_FX_NO_FETCH'] = '1'
   // Pin the timezone so date grouping is deterministic regardless of the dev's
   // shell TZ. Clearing it is not enough (Node falls back to the OS zone); a
   // non-UTC TZ would otherwise shift day buckets versus a clean CI runner. A

@@ -36,12 +36,12 @@ beforeEach(async () => {
   await mkdir(projectDir, { recursive: true })
   sessionPath = join(projectDir, 'sess-1.jsonl')
   process.env['CLAUDE_CONFIG_DIR'] = tmpDir
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
 })
 
 afterEach(async () => {
   clearSessionCache()
-  delete process.env['CODEBURN_CACHE_DIR']
+  delete process.env['KYBERDASH_CACHE_DIR']
   await rm(tmpDir, { recursive: true, force: true })
 })
 
@@ -100,7 +100,7 @@ function baseLines(): string[] {
 
 async function parseWith(cacheDir: string): Promise<ProjectSummary[]> {
   clearSessionCache()
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   return parseAllSessions()
 }
 

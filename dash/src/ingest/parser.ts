@@ -13,7 +13,7 @@ import { antigravityCascadeIdFromPath, flushAntigravityCache, shouldReparseAntig
 import { getClaudeConfigDirs, getDesktopSessionsDirs } from '../providers/claude.js'
 import { kimicodeLineageForSource } from '../providers/kimicode.js'
 import { isSqliteBusyError } from './sqlite.js'
-import { getCodeburnCacheDir } from './cache-dir.js'
+import { getCacheDir } from './cache-dir.js'
 import {
   isHermesLedgerPublicationError,
   isHermesObservationKey,
@@ -1990,7 +1990,7 @@ async function scanProjectDirs(
   const fullReparsePaths = changedFiles.filter(f => !f.append).map(f => f.filePath)
   const pendingBytes = changedFiles.reduce((n, f) => f.append ? n : n + f.info.fp.sizeBytes, 0)
   const decision = decideParseWorkers({ files: fullReparsePaths.length, bytes: pendingBytes })
-  if (process.env['CODEBURN_VERBOSE'] === '1') {
+  if (process.env['KYBERDASH_VERBOSE'] === '1') {
     process.stderr.write(`codeburn: claude parse workers=${decision.workers} (${decision.reason})\n`)
   }
   // A pool that cannot even start (worker entry missing from an odd packaging,
@@ -2000,7 +2000,7 @@ async function scanProjectDirs(
     try {
       pool = new ParseWorkerPool(decision.workers)
     } catch (err) {
-      process.stderr.write(`codeburn: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
+      process.stderr.write(`kyberdash: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
     }
   }
   const offThread = pool
@@ -2228,7 +2228,7 @@ async function scanProjectDirs(
   } finally {
     await pool?.close()
   }
-  if (pool && process.env['CODEBURN_VERBOSE'] === '1') {
+  if (pool && process.env['KYBERDASH_VERBOSE'] === '1') {
     process.stderr.write(`codeburn: claude parse workers done, ${workerDiscards}/${fullReparsePaths.length} results re-parsed in-process on id overlap\n`)
   }
   parseProgress.finish()
@@ -3041,12 +3041,12 @@ export function setInteractiveScanUI(active = true): void {
 }
 
 // Machine-readable scan progress for the desktop app's first-run splash. Plain
-// CLI/terminal usage is untouched: emission is gated on CODEBURN_PROGRESS=1,
+// CLI/terminal usage is untouched: emission is gated on KYBERDASH_PROGRESS=1,
 // which only the app's cold-start warmup spawn sets. Each event is one
 // newline-delimited JSON object behind a sentinel prefix so the reader can pick
 // it out of stderr that may also carry provider warnings. This is orthogonal to
 // createScanProgress's `\r` TTY line (that one never fires under a piped spawn).
-export const PROGRESS_LINE_PREFIX = 'CODEBURN_PROGRESS '
+export const PROGRESS_LINE_PREFIX = 'KYBERDASH_PROGRESS '
 export type ScanProgressEvent =
   // `cold` is true only for a genuine full hydration (the on-disk cache was
   // empty). A warm launch's incremental re-parse of a handful of changed files
@@ -3060,7 +3060,7 @@ export type ScanProgressEvent =
   | { kind: 'keepalive' }
 
 export function emitScanProgress(event: ScanProgressEvent): void {
-  if (process.env['CODEBURN_PROGRESS'] !== '1') return
+  if (process.env['KYBERDASH_PROGRESS'] !== '1') return
   try { process.stderr.write(`${PROGRESS_LINE_PREFIX}${JSON.stringify(event)}\n`) } catch { /* stderr closed */ }
 }
 
@@ -3074,7 +3074,7 @@ let keepaliveDepth = 0
 
 export function startProgressKeepalive(): void {
   keepaliveDepth += 1
-  if (keepaliveTimer || process.env['CODEBURN_PROGRESS'] !== '1') return
+  if (keepaliveTimer || process.env['KYBERDASH_PROGRESS'] !== '1') return
   keepaliveTimer = setInterval(() => emitScanProgress({ kind: 'keepalive' }), PROGRESS_KEEPALIVE_MS)
   keepaliveTimer.unref?.()
 }
@@ -3185,9 +3185,9 @@ export async function parseProviderSources(
   const provider = await getProvider(providerName)
   if (!provider) return []
   // The environment is a call-time input. Capture Antigravity's cache target
-  // for this whole parse transaction so a host changing CODEBURN_CACHE_DIR
+  // for this whole parse transaction so a host changing KYBERDASH_CACHE_DIR
   // before the final flush cannot redirect A's dirty state into (or past) B.
-  const antigravityCacheDir = providerName === 'antigravity' ? getCodeburnCacheDir() : undefined
+  const antigravityCacheDir = providerName === 'antigravity' ? getCacheDir() : undefined
 
   const section = getOrCreateProviderSection(diskCache, providerName)
   if (providerName === 'hermes' && !readOnly) {
@@ -3339,15 +3339,15 @@ export async function parseProviderSources(
   const decision = workerJobs.length > 0
     ? decideParseWorkers({ files: workerJobs.length, bytes: pendingBytes })
     : { workers: 0, reason: 'no full parses pending' }
-  if (providerName === 'codex' && !readOnly && process.env['CODEBURN_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: codex parse workers=${decision.workers} (${decision.reason})\n`)
+  if (providerName === 'codex' && !readOnly && process.env['KYBERDASH_VERBOSE'] === '1') {
+    process.stderr.write(`kyberdash: codex parse workers=${decision.workers} (${decision.reason})\n`)
   }
   let pool: ParseWorkerPool | null = null
   if (decision.workers > 0) {
     try {
       pool = new ParseWorkerPool(decision.workers)
     } catch (err) {
-      process.stderr.write(`codeburn: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
+      process.stderr.write(`kyberdash: parse workers unavailable, parsing serially (${err instanceof Error ? err.message : String(err)})\n`)
     }
   }
   const offThread = pool ? parseFilesInOrder<CodexFullParse & { keys: string[]; path: string }>(pool, workerJobs) : null
@@ -3520,8 +3520,8 @@ export async function parseProviderSources(
     }
   } finally {
     await pool?.close()
-    if (pool && process.env['CODEBURN_VERBOSE'] === '1') {
-      process.stderr.write(`codeburn: codex parse workers done, ${workerDiscards}/${workerJobs.length} results re-parsed in-process on id overlap\n`)
+    if (pool && process.env['KYBERDASH_VERBOSE'] === '1') {
+      process.stderr.write(`kyberdash: codex parse workers done, ${workerDiscards}/${workerJobs.length} results re-parsed in-process on id overlap\n`)
     }
     if (didParse && providerName === 'codex') await flushCodexCache()
     if (didParse && providerName === 'antigravity') {
@@ -4165,7 +4165,7 @@ const sessionCache = new Map<string, SessionCacheEntry>()
 // parse instead. Staleness is bounded by the window; 0 (the default outside
 // serve) disables it, so one-shot CLI runs are byte-exact as ever.
 function parseBurstWindowMs(): number {
-  const raw = Number(process.env['CODEBURN_PARSE_BURST_MS'] ?? '0')
+  const raw = Number(process.env['KYBERDASH_PARSE_BURST_MS'] ?? '0')
   return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 60_000) : 0
 }
 
@@ -4834,7 +4834,7 @@ export async function computeCorpusFingerprint(providerFilter?: string): Promise
     if (!providerByName.has(name)) providerByName.set(name, await getProvider(name))
     return providerByName.get(name)
   }
-  // Non-discovery provider env vars (e.g. CODEBURN_CURSOR_MAX_BUBBLES,
+  // Non-discovery provider env vars (e.g. KYBERDASH_CURSOR_MAX_BUBBLES,
   // KIMI_MODEL_NAME — src/doctor.ts's NON_DISCOVERY_ENV_VARS) and a
   // provider's parse-version change PARSED OUTPUT without touching any
   // source's path/mtime/size, so the stat-only loop below would otherwise
@@ -4944,7 +4944,7 @@ function singlePassParse(dateRange: DateRange | undefined, providerFilter: strin
   const key = providerFilter ?? 'all'
   let parsed = scope.parses.get(key)
   if (!parsed) {
-    const codexCacheDir = getCodeburnCacheDir()
+    const codexCacheDir = getCacheDir()
     parsed = withCodexCacheDirectory(codexCacheDir, () => parseAllSessionsInCacheScope(scope.range, providerFilter))
     scope.parses.set(key, parsed)
   }
@@ -5069,7 +5069,7 @@ export function parseAllSessions(dateRange?: DateRange, providerFilter?: string)
   // Capture synchronously, before the first await. AsyncLocalStorage keeps all
   // Codex cache reads, dirty writes, and the final flush on this call-time
   // directory even if an embedding host changes the process env mid-parse.
-  const codexCacheDir = getCodeburnCacheDir()
+  const codexCacheDir = getCacheDir()
   return withCodexCacheDirectory(codexCacheDir, () => parseAllSessionsInCacheScope(dateRange, providerFilter))
 }
 
@@ -5135,7 +5135,7 @@ async function parseAllSessionsInCacheScope(dateRange?: DateRange, providerFilte
   const cacheLoadStarted = performance.now()
   let diskCache = await loadCache(loadScope)
   await cleanupOrphanedTempFiles()
-  if (process.env['CODEBURN_VERBOSE'] === '1') {
+  if (process.env['KYBERDASH_VERBOSE'] === '1') {
     process.stderr.write(`codeburn: startup timing cache-load=${(performance.now() - cacheLoadStarted).toFixed(1)}ms complete=${isCacheComplete(diskCache)}\n`)
   }
 
@@ -5184,7 +5184,7 @@ async function parseAllSessionsInCacheScope(dateRange?: DateRange, providerFilte
   } finally {
     stopProgressKeepalive()
   }
-  if (process.env['CODEBURN_VERBOSE'] === '1') {
+  if (process.env['KYBERDASH_VERBOSE'] === '1') {
     process.stderr.write(`codeburn: startup timing refresh-lock=${(performance.now() - refreshWaitStarted).toFixed(1)}ms outcome=${refresh.outcome}\n`)
   }
   if (refresh.outcome === 'timed-out' || refresh.outcome === 'unavailable') {
@@ -5247,7 +5247,7 @@ async function runParseInner(
   const timingStarted = performance.now()
   let timingPrevious = timingStarted
   const traceTiming = (stage: string, extra = ''): void => {
-    if (process.env['CODEBURN_VERBOSE'] !== '1') return
+    if (process.env['KYBERDASH_VERBOSE'] !== '1') return
     const now = performance.now()
     process.stderr.write(`codeburn: startup timing ${stage}=${(now - timingPrevious).toFixed(1)}ms total=${(now - timingStarted).toFixed(1)}ms${extra}\n`)
     timingPrevious = now

@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { mkdir, open, readdir, readFile, rename, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 
-import { getCodeburnCacheDir } from './cache-dir.js'
+import { getCacheDir } from './cache-dir.js'
 import type { DateRange, ProjectSummary } from '../types.js'
 
 // Bumped to 27: claude-haiku-4.5 copilot store rows now price correctly (alias added) — #1093.
@@ -312,7 +312,7 @@ export function currentTzKey(): string {
 }
 
 function getCachePath(): string {
-  return join(getCodeburnCacheDir(), DAILY_CACHE_FILENAME)
+  return join(getCacheDir(), DAILY_CACHE_FILENAME)
 }
 
 /** Absolute path of the active (version-suffixed) daily cache file. */
@@ -517,7 +517,7 @@ function isAdoptableCache(parsed: unknown): parsed is AdoptableCache {
 /// bump lossless: the new version starts from the union of everything every
 /// previous version ever recorded, then re-derives what sources still support.
 async function adoptOlderDailyCaches(): Promise<DailyCache> {
-  const dir = getCodeburnCacheDir()
+  const dir = getCacheDir()
   let names: string[] = []
   try {
     names = await readdir(dir)
@@ -592,7 +592,7 @@ async function adoptOlderDailyCaches(): Promise<DailyCache> {
 }
 
 export async function saveDailyCache(cache: DailyCache): Promise<void> {
-  const dir = getCodeburnCacheDir()
+  const dir = getCacheDir()
   if (!existsSync(dir)) await mkdir(dir, { recursive: true })
   const finalPath = getCachePath()
   const tempPath = `${finalPath}.${randomBytes(8).toString('hex')}.tmp`

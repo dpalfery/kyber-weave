@@ -39,13 +39,13 @@ describe.skipIf(!isSqliteAvailable())('cachedCallToApiCall threads nanoAiu', () 
 
     process.env['HOME'] = tmpHome
     process.env['USERPROFILE'] = tmpHome
-    process.env['CODEBURN_CACHE_DIR'] = tmpCache
-    process.env['CODEBURN_COPILOT_SESSION_STORE_DB'] = dbPath
-    process.env['CODEBURN_COPILOT_DISABLE_OTEL'] = '1'
-    process.env['CODEBURN_COPILOT_SESSION_STATE_DIR'] = join(tmpHome, 'no-jsonl')
-    process.env['CODEBURN_COPILOT_WS_STORAGE_DIR'] = join(tmpHome, 'no-ws')
-    process.env['CODEBURN_COPILOT_GLOBAL_STORAGE_DIR'] = join(tmpHome, 'no-global')
-    process.env['CODEBURN_COPILOT_JETBRAINS_DIR'] = join(tmpHome, 'no-jb')
+    process.env['KYBERDASH_CACHE_DIR'] = tmpCache
+    process.env['KYBERDASH_COPILOT_SESSION_STORE_DB'] = dbPath
+    process.env['KYBERDASH_COPILOT_DISABLE_OTEL'] = '1'
+    process.env['KYBERDASH_COPILOT_SESSION_STATE_DIR'] = join(tmpHome, 'no-jsonl')
+    process.env['KYBERDASH_COPILOT_WS_STORAGE_DIR'] = join(tmpHome, 'no-ws')
+    process.env['KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR'] = join(tmpHome, 'no-global')
+    process.env['KYBERDASH_COPILOT_JETBRAINS_DIR'] = join(tmpHome, 'no-jb')
 
     const { DatabaseSync } = requireForTest('node:sqlite') as { DatabaseSync: new (path: string) => TestDb }
     const db = new DatabaseSync(dbPath)

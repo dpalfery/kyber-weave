@@ -1344,8 +1344,8 @@ describe('codex auto-review pricing (#1047)', () => {
   it('discards a warm v11 versioned $0 exact hit so unchanged rollouts reprice', async () => {
     const cacheDir = join(tmpDir, 'cache')
     await mkdir(cacheDir, { recursive: true })
-    const prev = process.env['CODEBURN_CACHE_DIR']
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
+    const prev = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
     try {
       const filePath = await writeSession(tmpDir, '2026-04-14', 'rollout-stale-auto.jsonl', [
         sessionMeta({ session_id: 'sess-stale-auto', model: 'codex-auto-review' }),
@@ -1388,8 +1388,8 @@ describe('codex auto-review pricing (#1047)', () => {
       expect(calls[0]!.costUSD).toBe(calculateCost('gpt-5.5', 1_000_000, 1_000_000, 0, 0, 0))
     } finally {
       clearCodexMemCaches()
-      if (prev === undefined) delete process.env['CODEBURN_CACHE_DIR']
-      else process.env['CODEBURN_CACHE_DIR'] = prev
+      if (prev === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = prev
     }
   })
 })

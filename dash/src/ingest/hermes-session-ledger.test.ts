@@ -26,15 +26,15 @@ let originalCacheDir: string | undefined
 
 beforeEach(async () => {
   cacheDir = await mkdtemp(join(tmpdir(), 'hermes-ledger-unit-'))
-  originalCacheDir = process.env['CODEBURN_CACHE_DIR']
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  originalCacheDir = process.env['KYBERDASH_CACHE_DIR']
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   resetHermesSessionLedgerForTests()
 })
 
 afterEach(async () => {
   resetHermesSessionLedgerForTests()
-  if (originalCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = originalCacheDir
+  if (originalCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = originalCacheDir
   await rm(cacheDir, { recursive: true, force: true })
 })
 

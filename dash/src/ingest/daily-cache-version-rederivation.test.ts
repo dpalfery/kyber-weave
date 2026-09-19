@@ -60,7 +60,7 @@ function day(date: string, cost: number): DailyEntry {
 }
 
 beforeEach(async () => {
-  process.env['CODEBURN_CACHE_DIR'] = cacheRoot
+  process.env['KYBERDASH_CACHE_DIR'] = cacheRoot
   await rm(cacheRoot, { recursive: true, force: true })
   await mkdir(cacheRoot, { recursive: true })
 })

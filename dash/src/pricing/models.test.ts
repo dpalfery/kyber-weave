@@ -907,7 +907,7 @@ describe('DeepSeek v4 models resolve to pricing', () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), 'codeburn-pricing-cache-'))
 
     try {
-      process.env['CODEBURN_CACHE_DIR'] = cacheRoot
+      process.env['KYBERDASH_CACHE_DIR'] = cacheRoot
       await mkdir(cacheRoot, { recursive: true })
       await writeFile(join(cacheRoot, 'litellm-pricing.json'), JSON.stringify({
         version: CACHE_SCHEMA_VERSION,
@@ -940,7 +940,7 @@ describe('pricing cache schema version (#1075/#1078 follow-up)', () => {
   it('discards a cache written by a pre-#1078 binary instead of reading its missing cacheWriteCostIsExplicit as false', async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), 'codeburn-pricing-cache-'))
     try {
-      process.env['CODEBURN_CACHE_DIR'] = cacheRoot
+      process.env['KYBERDASH_CACHE_DIR'] = cacheRoot
       await mkdir(cacheRoot, { recursive: true })
       // Shape of a cache file written before #1078 added `version` and
       // `cacheWriteCostIsExplicit`: no version field, and entries missing the
@@ -1107,7 +1107,7 @@ describe('findUnpricedModels', () => {
     // a stub hit means "unknown price", not "free".
     const cacheRoot = await mkdtemp(join(tmpdir(), 'codeburn-pricing-cache-'))
     try {
-      process.env['CODEBURN_CACHE_DIR'] = cacheRoot
+      process.env['KYBERDASH_CACHE_DIR'] = cacheRoot
       await writeFile(join(cacheRoot, 'litellm-pricing.json'), JSON.stringify({
         version: CACHE_SCHEMA_VERSION,
         timestamp: Date.now(),
@@ -1138,7 +1138,7 @@ describe('findUnpricedModels', () => {
       setPriceOverrides({ 'zz-zero-stub': { input: 0, output: 0 } })
       expect(findUnpricedModels(rows)).toHaveLength(1)
     } finally {
-      delete process.env['CODEBURN_CACHE_DIR']
+      delete process.env['KYBERDASH_CACHE_DIR']
       await rm(cacheRoot, { recursive: true, force: true })
       setPriceOverrides({})
       await loadPricing()
@@ -1350,8 +1350,8 @@ describe('unpricedModelHint', () => {
 
 describe('calculateCost verbose unknown-model warning', () => {
   it('does not present model-alias as the only fix for an unknown SKU', () => {
-    const previous = process.env['CODEBURN_VERBOSE']
-    process.env['CODEBURN_VERBOSE'] = '1'
+    const previous = process.env['KYBERDASH_VERBOSE']
+    process.env['KYBERDASH_VERBOSE'] = '1'
     const chunks: string[] = []
     const originalWrite = process.stderr.write.bind(process.stderr)
     process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
@@ -1362,8 +1362,8 @@ describe('calculateCost verbose unknown-model warning', () => {
       expect(calculateCost('zz-new-subscription-pass-sku', 10, 10, 0, 0, 0)).toBe(0)
     } finally {
       process.stderr.write = originalWrite
-      if (previous === undefined) delete process.env['CODEBURN_VERBOSE']
-      else process.env['CODEBURN_VERBOSE'] = previous
+      if (previous === undefined) delete process.env['KYBERDASH_VERBOSE']
+      else process.env['KYBERDASH_VERBOSE'] = previous
     }
     const text = chunks.join('')
     expect(text).toContain('zz-new-subscription-pass-sku')

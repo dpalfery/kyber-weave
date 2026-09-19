@@ -1485,7 +1485,7 @@ describe('provider-scoped remediation copy (#1044)', () => {
       expect(askAgentLabel(copy, 'audit the retry-heavy capability before changing config'))
         .toBe('Ask Claude to audit the retry-heavy capability before changing config:')
       expect(optimizeEmptyScanLines(provider)).toEqual([
-        'CodeBurn optimize scans your Claude Code sessions and config for',
+        'KyberDash optimize scans your Claude Code sessions and config for',
         'token waste: junk directory reads, duplicate file reads, unused',
         'agents/skills/MCP servers, bloated CLAUDE.md, and more.',
       ])
@@ -1495,7 +1495,7 @@ describe('provider-scoped remediation copy (#1044)', () => {
         .toBe('── Ask Claude in the current session '.padEnd(64, '─'))
     }
     const empty = strip(renderOptimize([], 0, 'lifetime', 0, 0, 0, 100, 'A', [], []))
-    expect(empty).toContain('CodeBurn optimize scans your Claude Code sessions and config for')
+    expect(empty).toContain('KyberDash optimize scans your Claude Code sessions and config for')
     expect(empty).toContain('bloated CLAUDE.md')
     expect(empty).not.toContain('Claude sessions')
   })

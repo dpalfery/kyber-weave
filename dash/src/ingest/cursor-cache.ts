@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, rename, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 
-import { getCodeburnCacheDir, readExistingTextFile } from './cache-dir.js'
+import { getCacheDir, readExistingTextFile } from './cache-dir.js'
 import type { ParsedProviderCall } from '../providers/types.js'
 
 // Bumped to 3 for the workspace-aware breakdown change: the cursor parser
@@ -34,11 +34,11 @@ type ResultCache = {
 }
 
 function getCachePath(): string {
-  return join(getCodeburnCacheDir(), cursorCacheFileName())
+  return join(getCacheDir(), cursorCacheFileName())
 }
 
 function getLegacyCachePath(): string {
-  return join(getCodeburnCacheDir(), CURSOR_LEGACY_CACHE_FILE)
+  return join(getCacheDir(), CURSOR_LEGACY_CACHE_FILE)
 }
 
 function isCurrentHit(cache: ResultCache, fp: { mtimeMs: number; size: number }, requestedFloor: string): boolean {
@@ -104,11 +104,11 @@ export async function writeCachedResults(
   // Diagnostic contexts (codeburn doctor) sample-parse providers under a
   // strictly read-only promise; this is the one parse path that writes to
   // disk before its first yield, so it honors the suppression flag.
-  if (process.env['CODEBURN_SUPPRESS_CACHE_WRITES']) return
+  if (process.env['KYBERDASH_SUPPRESS_CACHE_WRITES']) return
   const fp = await getDbFingerprint(dbPath)
   if (!fp) return
 
-  const dir = getCodeburnCacheDir()
+  const dir = getCacheDir()
   await mkdir(dir, { recursive: true }).catch(() => {})
   const cache: ResultCache = {
     version: CURSOR_CACHE_VERSION,

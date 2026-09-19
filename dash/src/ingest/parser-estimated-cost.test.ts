@@ -33,9 +33,9 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'codeburn-est-home-'))
   cacheDir = await mkdtemp(join(tmpdir(), 'codeburn-est-cache-'))
   prevHome = process.env['CODEWHALE_HOME']
-  prevCache = process.env['CODEBURN_CACHE_DIR']
+  prevCache = process.env['KYBERDASH_CACHE_DIR']
   process.env['CODEWHALE_HOME'] = home
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   clearSessionCache()
 })
 
@@ -43,8 +43,8 @@ afterEach(async () => {
   clearSessionCache()
   if (prevHome === undefined) delete process.env['CODEWHALE_HOME']
   else process.env['CODEWHALE_HOME'] = prevHome
-  if (prevCache === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = prevCache
+  if (prevCache === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = prevCache
   await rm(home, { recursive: true, force: true })
   await rm(cacheDir, { recursive: true, force: true })
 })

@@ -19,7 +19,7 @@ let tmpDir: string
 // a nonexistent file globally; tests that need a store pass an explicit
 // fixture path to createCopilotProvider (or re-stub the env themselves).
 beforeEach(() => {
-  vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', '/nonexistent/session-store.db')
+  vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', '/nonexistent/session-store.db')
 })
 
 afterEach(() => {
@@ -1053,7 +1053,7 @@ describe('copilot provider - session.shutdown token/cost rollup', () => {
     ])
 
     // Keep discovery hermetic: a real agent-traces.db on the host must not leak in.
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
     try {
       const provider = createCopilotProvider(tmpDir, '/nonexistent/vscode', '/nonexistent/global', '/nonexistent/jetbrains')
       const sessions = await provider.discoverSessions()
@@ -1076,7 +1076,7 @@ describe('copilot provider - session.shutdown token/cost rollup', () => {
 describe('copilot provider - chatSessions parsing', () => {
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'copilot-chatsessions-test-'))
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
   })
 
   afterEach(async () => {
@@ -1139,8 +1139,8 @@ describe('copilot provider - chatSessions parsing', () => {
 
     vi.unstubAllEnvs()
     const dbPath = join(tmpDir, 'agent-traces.db')
-    vi.stubEnv('CODEBURN_COPILOT_OTEL_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '')
+    vi.stubEnv('KYBERDASH_COPILOT_OTEL_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '')
     createOtelDb(dbPath)
     insertSpan(dbPath, {
       spanId: 'span-chatsession-skip',
@@ -1252,7 +1252,7 @@ describe('copilot provider - discoverSessions', () => {
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'copilot-test-'))
     // Disable OTel discovery so tests aren't contaminated by real sessions
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
   })
 
   afterEach(async () => {
@@ -1463,8 +1463,8 @@ describe('copilot provider - OTel cache token parsing', () => {
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'copilot-otel-test-'))
     dbPath = join(tmpDir, 'agent-traces.db')
-    vi.stubEnv('CODEBURN_COPILOT_OTEL_DB', dbPath)
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '')
+    vi.stubEnv('KYBERDASH_COPILOT_OTEL_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '')
   })
 
   afterEach(async () => {
@@ -1986,11 +1986,11 @@ describe.skipIf(!isSqliteAvailable())('copilot provider - session-store parsing'
   })
 
   it('probeRoots covers every discovery root, with the store contributing its parent directory', async () => {
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STORE_DB', join(tmpDir, 'store', 'session-store.db'))
-    vi.stubEnv('CODEBURN_COPILOT_SESSION_STATE_DIR', join(tmpDir, 'state'))
-    vi.stubEnv('CODEBURN_COPILOT_WS_STORAGE_DIR', join(tmpDir, 'ws'))
-    vi.stubEnv('CODEBURN_COPILOT_GLOBAL_STORAGE_DIR', join(tmpDir, 'global'))
-    vi.stubEnv('CODEBURN_COPILOT_JETBRAINS_DIR', join(tmpDir, 'jb'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STORE_DB', join(tmpDir, 'store', 'session-store.db'))
+    vi.stubEnv('KYBERDASH_COPILOT_SESSION_STATE_DIR', join(tmpDir, 'state'))
+    vi.stubEnv('KYBERDASH_COPILOT_WS_STORAGE_DIR', join(tmpDir, 'ws'))
+    vi.stubEnv('KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR', join(tmpDir, 'global'))
+    vi.stubEnv('KYBERDASH_COPILOT_JETBRAINS_DIR', join(tmpDir, 'jb'))
 
     const roots = await copilot.probeRoots!()
     const paths = roots.map(r => r.path)
@@ -2574,7 +2574,7 @@ describe.skipIf(!isSqliteAvailable())('copilot provider - session-store parsing'
 describe('copilot provider - JetBrains parsing', () => {
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'copilot-jetbrains-test-'))
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
   })
 
   afterEach(async () => {
@@ -3171,7 +3171,7 @@ describe('copilot provider - JetBrains parsing', () => {
 describe('copilot provider - JetBrains dedup key stability across store rewrites', () => {
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'copilot-jetbrains-dedup-'))
-    vi.stubEnv('CODEBURN_COPILOT_DISABLE_OTEL', '1')
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
   })
 
   afterEach(async () => {

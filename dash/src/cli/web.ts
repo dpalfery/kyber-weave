@@ -17,7 +17,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 // the assets are two levels up at dash/dist/dash (web/vite.config.ts's outDir).
 function resolveDashDir(): string | null {
   const candidates = [
-    process.env['CODEBURN_DASH_DIR'],
+    process.env['KYBERDASH_DASH_DIR'],
     join(HERE, 'dash'),
     join(HERE, '..', '..', 'dist', 'dash'),
   ].filter(Boolean) as string[]

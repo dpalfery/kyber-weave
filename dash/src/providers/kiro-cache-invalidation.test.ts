@@ -33,7 +33,7 @@ import { writeCacheOnDisk } from '../../tests/fixtures/session-cache-io.js'
 // imported, so HOME must point at the test root before ../src/parser.js is
 // evaluated. vi.hoisted runs ahead of the static imports above (but after
 // tests/setup/env-isolation.ts, whose per-test beforeEach re-sandboxes env
-// vars — anything read at *call* time, like CODEBURN_CACHE_DIR, must be
+// vars — anything read at *call* time, like KYBERDASH_CACHE_DIR, must be
 // re-asserted in this file's own beforeEach).
 const testRoot = vi.hoisted(() => {
   const root = `${process.env['TMPDIR'] || '/tmp'}/kiro-cache-inv-${process.pid}-${Date.now()}`
@@ -112,7 +112,7 @@ async function parseKiroCalls() {
 
 beforeEach(async () => {
   // Runs after env-isolation's global beforeEach, which cleared this var.
-  process.env['CODEBURN_CACHE_DIR'] = CACHE_DIR
+  process.env['KYBERDASH_CACHE_DIR'] = CACHE_DIR
   clearSessionCache()
   await rm(testRoot, { recursive: true, force: true })
 })

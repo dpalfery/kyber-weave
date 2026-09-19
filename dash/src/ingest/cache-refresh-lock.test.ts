@@ -43,7 +43,7 @@ async function exitedPid(): Promise<number> {
 }
 
 afterEach(async () => {
-  delete process.env['CODEBURN_CACHE_DIR']
+  delete process.env['KYBERDASH_CACHE_DIR']
   await Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })))
 })
 
@@ -312,7 +312,7 @@ describe('warm session-cache refresh lock', () => {
 
   it('fences publication and release removes only its own token', async () => {
     const dir = await tempDir()
-    process.env['CODEBURN_CACHE_DIR'] = dir
+    process.env['KYBERDASH_CACHE_DIR'] = dir
     const original = emptyCache()
     original.complete = true
     await saveCache(original)
@@ -539,9 +539,9 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
     const projectDir = join(config, 'projects', 'frozen-proj')
     await mkdir(cacheDir, { recursive: true })
     await mkdir(projectDir, { recursive: true })
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
     process.env['CLAUDE_CONFIG_DIR'] = config
-    process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(root, 'desktop-sessions')
+    process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(root, 'desktop-sessions')
 
     const session = (id: string, ts: string): string => [
       JSON.stringify({ type: 'user', sessionId: id, timestamp: ts, cwd: '/tmp/frozen-proj', message: { role: 'user', content: 'hi' } }),
@@ -575,6 +575,6 @@ describe('warm session-cache refresh lock: corrupt lock recovery', { retry: 6 },
 
     clearSessionCache()
     delete process.env['CLAUDE_CONFIG_DIR']
-    delete process.env['CODEBURN_DESKTOP_SESSIONS_DIR']
+    delete process.env['KYBERDASH_DESKTOP_SESSIONS_DIR']
   })
 })

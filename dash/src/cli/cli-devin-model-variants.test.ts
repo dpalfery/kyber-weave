@@ -15,7 +15,7 @@ function runCli(args: string[], home: string) {
       HOMEPATH: home,
       HOMEDRIVE: '',
       CLAUDE_CONFIG_DIR: join(home, '.claude'),
-      CODEBURN_CACHE_DIR: join(home, '.cache', 'codeburn'),
+      KYBERDASH_CACHE_DIR: join(home, '.cache', 'kyberdash'),
       TZ: 'UTC',
     },
     encoding: 'utf-8',
@@ -23,12 +23,12 @@ function runCli(args: string[], home: string) {
   })
 }
 
-describe('codeburn report Devin model variants', () => {
+describe('kyberdash report Devin model variants', () => {
   it('keeps friendly Devin effort-tier names in JSON model rows and efficiency rows', async () => {
     const home = await mkdtemp(join(tmpdir(), 'codeburn-cli-devin-models-'))
     try {
-      await mkdir(join(home, '.config', 'codeburn'), { recursive: true })
-      await writeFile(join(home, '.config', 'codeburn', 'config.json'), JSON.stringify({
+      await mkdir(join(home, '.kyberdash'), { recursive: true })
+      await writeFile(join(home, '.kyberdash', 'config.json'), JSON.stringify({
         devin: { acuUsdRate: 1 },
       }))
 

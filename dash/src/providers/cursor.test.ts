@@ -88,9 +88,9 @@ describe('cursor cache', () => {
     expect(result).toBeNull()
   })
 
-  it('honors CODEBURN_CACHE_DIR at call time', async () => {
+  it('honors KYBERDASH_CACHE_DIR at call time', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cursor-cache-override-'))
-    const previousCacheDir = process.env['CODEBURN_CACHE_DIR']
+    const previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
     const dbPath = join(root, 'state.vscdb')
     const firstCacheDir = join(root, 'cache-a')
     const secondCacheDir = join(root, 'cache-b')
@@ -100,10 +100,10 @@ describe('cursor cache', () => {
 
     try {
       const { writeCachedResults } = await import('../ingest/cursor-cache.js')
-      process.env['CODEBURN_CACHE_DIR'] = firstCacheDir
+      process.env['KYBERDASH_CACHE_DIR'] = firstCacheDir
       await writeCachedResults(dbPath, [], firstFloor)
 
-      process.env['CODEBURN_CACHE_DIR'] = secondCacheDir
+      process.env['KYBERDASH_CACHE_DIR'] = secondCacheDir
       await writeCachedResults(dbPath, [], secondFloor)
 
       const { cursorCacheFileName } = await import('../ingest/cursor-cache.js')
@@ -114,8 +114,8 @@ describe('cursor cache', () => {
       expect(first.lookbackFloor).toBe(firstFloor)
       expect(second.lookbackFloor).toBe(secondFloor)
     } finally {
-      if (previousCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-      else process.env['CODEBURN_CACHE_DIR'] = previousCacheDir
+      if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+      else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
       await rm(root, { recursive: true, force: true })
     }
   })

@@ -50,7 +50,7 @@ function expandHome(p: string): string {
 
 function getMuxRoot(override?: string): string {
   if (override) return resolve(expandHome(override))
-  const codeburnOverride = process.env['CODEBURN_MUX_DIR']
+  const codeburnOverride = process.env['KYBERDASH_MUX_DIR']
   if (codeburnOverride) return resolve(expandHome(codeburnOverride))
   const muxRoot = process.env['MUX_ROOT']
   if (muxRoot) return resolve(expandHome(muxRoot))

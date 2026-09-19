@@ -49,7 +49,7 @@ const V2_WORKSPACE = '/local/home/testuser/workplace/ide-project'
 beforeEach(() => {
   process.env['HOME'] = HOME
   process.env['USERPROFILE'] = HOME
-  process.env['CODEBURN_CACHE_DIR'] = CACHE_DIR
+  process.env['KYBERDASH_CACHE_DIR'] = CACHE_DIR
   delete process.env['KIRO_HOME']
   clearSessionCache()
 })

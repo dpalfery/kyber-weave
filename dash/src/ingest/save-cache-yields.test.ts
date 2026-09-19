@@ -21,12 +21,12 @@ let tmpDir: string
 beforeEach(async () => {
   clearLoadCacheMemo()
   tmpDir = await mkdtemp(join(tmpdir(), 'save-cache-yields-'))
-  process.env['CODEBURN_CACHE_DIR'] = join(tmpDir, 'cache')
+  process.env['KYBERDASH_CACHE_DIR'] = join(tmpDir, 'cache')
 })
 
 afterEach(async () => {
   clearLoadCacheMemo()
-  delete process.env['CODEBURN_CACHE_DIR']
+  delete process.env['KYBERDASH_CACHE_DIR']
   await rm(tmpDir, { recursive: true, force: true })
 })
 

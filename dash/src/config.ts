@@ -3,7 +3,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { randomBytes } from 'crypto'
 
-export type CodeburnConfig = {
+export type KyberdashConfig = {
   devin?: {
     acuUsdRate?: number
   }
@@ -50,24 +50,28 @@ export type CodeburnConfig = {
   proxyPaths?: string[]
 }
 
+// All KyberDash state lives under ~/.kyberdash (R3.5). The upstream
+// ~/.config/codeburn directory is neither read nor removed: a user's declared
+// proxy paths do not silently carry into the renamed product, and an existing
+// CodeBurn install keeps its own config.
 function getConfigDir(): string {
-  return join(homedir(), '.config', 'codeburn')
+  return join(homedir(), '.kyberdash')
 }
 
 function getConfigPath(): string {
   return join(getConfigDir(), 'config.json')
 }
 
-export async function readConfig(): Promise<CodeburnConfig> {
+export async function readConfig(): Promise<KyberdashConfig> {
   try {
     const raw = await readFile(getConfigPath(), 'utf-8')
-    return JSON.parse(raw) as CodeburnConfig
+    return JSON.parse(raw) as KyberdashConfig
   } catch {
     return {}
   }
 }
 
-export async function saveConfig(config: CodeburnConfig): Promise<void> {
+export async function saveConfig(config: KyberdashConfig): Promise<void> {
   await mkdir(getConfigDir(), { recursive: true })
   const configPath = getConfigPath()
   // Randomize the temp path so two simultaneous saveConfig calls (from

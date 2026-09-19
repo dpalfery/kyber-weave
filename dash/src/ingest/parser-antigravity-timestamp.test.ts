@@ -55,12 +55,12 @@ beforeEach(async () => {
   cacheDir = await mkdtemp(join(tmpdir(), 'codeburn-antigravity-ts-cache-'))
   previousHome = process.env['HOME']
   previousUserProfile = process.env['USERPROFILE']
-  previousCacheDir = process.env['CODEBURN_CACHE_DIR']
+  previousCacheDir = process.env['KYBERDASH_CACHE_DIR']
   // os.homedir() reads HOME on POSIX and USERPROFILE on Windows — set both so
   // discovery walks the temp home on either platform.
   process.env['HOME'] = home
   process.env['USERPROFILE'] = home
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
 })
 
 afterEach(async () => {
@@ -69,8 +69,8 @@ afterEach(async () => {
   else process.env['HOME'] = previousHome
   if (previousUserProfile === undefined) delete process.env['USERPROFILE']
   else process.env['USERPROFILE'] = previousUserProfile
-  if (previousCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = previousCacheDir
+  if (previousCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = previousCacheDir
   await rm(home, { recursive: true, force: true })
   await rm(cacheDir, { recursive: true, force: true })
 })

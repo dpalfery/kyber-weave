@@ -3,7 +3,7 @@ import { existsSync, readFileSync, unlinkSync } from 'fs'
 import { mkdir, open, readFile, stat, unlink, utimes, writeFile } from 'fs/promises'
 import { join } from 'path'
 
-import { getCodeburnCacheDir } from './cache-dir.js'
+import { getCacheDir } from './cache-dir.js'
 
 const LOCK_FILE = 'session-refresh.lock'
 const DEFAULT_HEARTBEAT_MS = 10_000
@@ -252,7 +252,7 @@ async function enterSingleFlight(lockPath: string): Promise<() => void> {
  * Lock ordering, when the daily-cache follow-up lands, is daily → session.
  */
 export async function acquireCacheRefreshLock(options: RefreshLockOptions = {}): Promise<RefreshLockOutcome> {
-  const cacheDir = options.cacheDir ?? getCodeburnCacheDir()
+  const cacheDir = options.cacheDir ?? getCacheDir()
   const lockFile = options.lockFile ?? LOCK_FILE
   // Never allow a caller-controlled path to escape cacheDir or collide with
   // the takeover suffix. All current callers use fixed names or a hex digest.

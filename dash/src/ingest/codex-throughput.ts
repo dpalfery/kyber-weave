@@ -44,7 +44,7 @@ type RolloutLine = {
 
 const CHUNK_BYTES = 64 * 1024
 const MAX_PENDING_LINE_CHARS = 4 * 1024 * 1024
-const TRUNCATION_MARKER = '__CODEBURN_TRUNCATED_LINE__'
+const TRUNCATION_MARKER = '__KYBERDASH_TRUNCATED_LINE__'
 
 function rawString(source: string, field: string): string | undefined {
   const match = new RegExp(`"${field}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`).exec(source)
@@ -511,7 +511,7 @@ export function renderCodexThroughput(points: CodexThroughputPoint[], filePath: 
   const latest = points.at(-1)
   if (!latest) return `No token_count checkpoints found in ${filePath}.`
   const lines = [
-    'CodeBurn Codex throughput estimate',
+    'KyberDash Codex throughput estimate',
     `Session: ${filePath}`,
     `Latest checkpoint: ${latest.timestamp}`,
     `Latest checkpoint tokens: ${latest.generatedTokens.toLocaleString()} (${latest.outputTokens.toLocaleString()} output + ${latest.reasoningTokens.toLocaleString()} reasoning)`,

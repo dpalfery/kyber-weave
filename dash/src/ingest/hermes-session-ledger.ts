@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs'
 import { randomBytes } from 'crypto'
 import { join } from 'path'
 
-import { getCodeburnCacheDir } from './cache-dir.js'
+import { getCacheDir } from './cache-dir.js'
 import type { CachedCall, ProviderSection } from './session-cache.js'
 
 // Sidecar ledger for Hermes lifetime totals that keep growing after a day is
@@ -97,7 +97,7 @@ export function hermesLedgerNow(): Date {
 }
 
 export function hermesSessionLedgerPath(): string {
-  return join(getCodeburnCacheDir(), HERMES_SESSION_LEDGER_FILENAME)
+  return join(getCacheDir(), HERMES_SESSION_LEDGER_FILENAME)
 }
 
 export function emptyHermesSessionLedger(): HermesSessionLedger {
@@ -357,7 +357,7 @@ function readLedgerFromDisk(): HermesSessionLedger {
 }
 
 export function loadHermesSessionLedger(): HermesSessionLedger {
-  const dir = getCodeburnCacheDir()
+  const dir = getCacheDir()
   if (memory && memoryDir === dir) return memory
   const loaded = readLedgerFromDisk()
   memory = loaded
@@ -392,7 +392,7 @@ async function writeFileAtomic(finalPath: string, payload: string): Promise<void
 }
 
 export async function persistHermesSessionLedger(ledger: HermesSessionLedger): Promise<void> {
-  const dir = getCodeburnCacheDir()
+  const dir = getCacheDir()
   const finalPath = join(dir, HERMES_SESSION_LEDGER_FILENAME)
   try {
     await mkdir(dir, { recursive: true })

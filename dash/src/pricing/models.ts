@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { createHash } from 'crypto'
 
-import { getCodeburnCacheDir } from '../ingest/cache-dir.js'
+import { getCacheDir } from '../ingest/cache-dir.js'
 import snapshotData from './data/litellm-snapshot.json' with { type: 'json' }
 import fallbackData from './data/pricing-fallback.json' with { type: 'json' }
 import { fetchWithTimeout } from './fetch-utils.js'
@@ -200,7 +200,7 @@ function getLowercasePricingIndex(): Map<string, ModelCosts> {
 }
 
 function getCachePath(): string {
-  return join(getCodeburnCacheDir(), 'litellm-pricing.json')
+  return join(getCacheDir(), 'litellm-pricing.json')
 }
 
 /// Clamp a per-token rate to a sane non-negative value. Defense in depth
@@ -235,7 +235,7 @@ export function parseLiteLLMEntry(entry: LiteLLMEntry): ModelCosts | null {
 // Timestamp of whichever live LiteLLM data (freshly fetched or read back from
 // the on-disk cache) is currently loaded into pricingCache; null when nothing
 // live is loaded and pricing is purely the bundled snapshot (offline/first
-// run, CODEBURN_PRICING_SNAPSHOT_ONLY, or a failed fetch with no cache hit).
+// run, KYBERDASH_PRICING_SNAPSHOT_ONLY, or a failed fetch with no cache hit).
 // Read by getPricingGenerationKey() so a consumer that persists rendered
 // costs across process invocations (the menubar's status snapshot) can tell
 // "the live pricing data actually changed" apart from "nothing changed" —
@@ -264,7 +264,7 @@ async function fetchAndCachePricing(): Promise<Map<string, ModelCosts>> {
   }
 
   const timestamp = Date.now()
-  await mkdir(getCodeburnCacheDir(), { recursive: true })
+  await mkdir(getCacheDir(), { recursive: true })
   await writeFile(getCachePath(), JSON.stringify({
     version: CACHE_SCHEMA_VERSION,
     timestamp,
@@ -312,7 +312,7 @@ export async function loadPricing(): Promise<void> {
   // Test-only escape hatch, set for the whole suite in
   // tests/setup/env-isolation.ts: skip the live LiteLLM fetch and price purely
   // off the bundled snapshot, so an upstream reprice can't turn tests red.
-  if (process.env['CODEBURN_PRICING_SNAPSHOT_ONLY']) {
+  if (process.env['KYBERDASH_PRICING_SNAPSHOT_ONLY']) {
     livePricingTimestamp = null
     setPricingCache(mergeSnapshotFallbacks(new Map()))
     return
@@ -795,7 +795,7 @@ export function getPriceOverridesConfigHash(): string {
 // Absolute directory prefixes whose sessions are routed through a
 // subscription-backed proxy (config `proxyPaths`). Stored already-normalized so
 // the per-project match is a cheap compare. Set during preAction. See
-// CodeburnConfig.proxyPaths for the product rationale.
+// KyberdashConfig.proxyPaths for the product rationale.
 let userProxyPaths: string[] = []
 
 /// Normalize a path for prefix comparison: backslashes -> forward slashes
@@ -1172,7 +1172,7 @@ function shouldWarnAboutUnknownModel(name: string): boolean {
   // data" lines greet a user before the dashboard even draws. Now opt-in
   // via --verbose. The unknown model still costs $0 in reports; users who
   // suspect missing models run `codeburn --verbose` to see the list.
-  if (process.env['CODEBURN_VERBOSE'] !== '1') return false
+  if (process.env['KYBERDASH_VERBOSE'] !== '1') return false
   return true
 }
 

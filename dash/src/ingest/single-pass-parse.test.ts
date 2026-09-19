@@ -63,15 +63,15 @@ beforeEach(async () => {
     asstLine('msg-c', `${DAY}T21:00:01.000Z`, 40),
   ].join('\n') + '\n')
   process.env['CLAUDE_CONFIG_DIR'] = tmpDir
-  process.env['CODEBURN_CACHE_DIR'] = join(tmpDir, 'cache')
-  process.env['CODEBURN_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
+  process.env['KYBERDASH_CACHE_DIR'] = join(tmpDir, 'cache')
+  process.env['KYBERDASH_DESKTOP_SESSIONS_DIR'] = join(tmpDir, 'desktop-sessions')
 })
 
 afterEach(async () => {
   clearSessionCache()
   delete process.env['CLAUDE_CONFIG_DIR']
-  delete process.env['CODEBURN_CACHE_DIR']
-  delete process.env['CODEBURN_DESKTOP_SESSIONS_DIR']
+  delete process.env['KYBERDASH_CACHE_DIR']
+  delete process.env['KYBERDASH_DESKTOP_SESSIONS_DIR']
   await rm(tmpDir, { recursive: true, force: true })
 })
 

@@ -130,7 +130,7 @@ beforeEach(async () => {
   clearSessionCache()
   await rm(testRoot, { recursive: true, force: true })
   process.env['GROK_HOME'] = GROK_HOME
-  process.env['CODEBURN_CACHE_DIR'] = CACHE_DIR
+  process.env['KYBERDASH_CACHE_DIR'] = CACHE_DIR
 })
 
 afterEach(async () => {

@@ -16,12 +16,12 @@ describe('web dashboard server: serving and the loopback guard', () => {
   let base: string
   let port: number
   let dashDir: string
-  const prevDashDir = process.env['CODEBURN_DASH_DIR']
+  const prevDashDir = process.env['KYBERDASH_DASH_DIR']
 
   beforeAll(async () => {
     dashDir = await mkdtemp(join(tmpdir(), 'kyberdash-web-ui-'))
     await writeFile(join(dashDir, 'index.html'), '<!doctype html><title>CodeBurn</title><script type="module" src="/app.js"></script>')
-    process.env['CODEBURN_DASH_DIR'] = dashDir
+    process.env['KYBERDASH_DASH_DIR'] = dashDir
     server = await runWebDashboard({ port: 0, open: false })
     port = (server.address() as AddressInfo).port
     base = `http://127.0.0.1:${port}`
@@ -29,8 +29,8 @@ describe('web dashboard server: serving and the loopback guard', () => {
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
-    if (prevDashDir === undefined) delete process.env['CODEBURN_DASH_DIR']
-    else process.env['CODEBURN_DASH_DIR'] = prevDashDir
+    if (prevDashDir === undefined) delete process.env['KYBERDASH_DASH_DIR']
+    else process.env['KYBERDASH_DASH_DIR'] = prevDashDir
     await rm(dashDir, { recursive: true, force: true })
   })
 
@@ -38,7 +38,7 @@ describe('web dashboard server: serving and the loopback guard', () => {
     const res = await fetch(`${base}/`)
     expect(res.status).toBe(200)
     const html = await res.text()
-    expect(html).not.toContain('__CODEBURN_BOOTSTRAP__')
+    expect(html).not.toContain('__KYBERDASH_BOOTSTRAP__')
     expect(html).not.toContain('<title>CodeBurn</title>')
   })
 

@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { getCodeburnCacheDir } from './cache-dir.js'
+import { getCacheDir } from './cache-dir.js'
 
 /// Thin SQLite read-only wrapper over Node's built-in `node:sqlite` module (stable in
 /// Node 24, experimental in Node 22 / 23). Replaces the earlier `better-sqlite3` binding
@@ -327,7 +327,7 @@ function publish(tempPath: string, finalPath: string): void {
 }
 
 function readOnlyCachePath(sourcePath: string, fingerprint: DatabaseFingerprint): string {
-  const cacheDir = join(getCodeburnCacheDir(), 'sqlite-ro')
+  const cacheDir = join(getCacheDir(), 'sqlite-ro')
   mkdirSync(cacheDir, { recursive: true, mode: 0o700 })
 
   const sourceKey = sourceKeyOf(sourcePath)

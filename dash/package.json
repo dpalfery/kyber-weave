@@ -1,11 +1,10 @@
 {
-  "name": "codeburn",
+  "name": "kyberdash",
   "version": "0.9.23",
-  "description": "See where your AI spend goes - by task, tool, model, and project",
+  "description": "Context health reports and dashboards for AI coding sessions",
   "type": "module",
   "main": "./dist/cli.js",
   "bin": {
-    "codeburn": "dist/cli.js",
     "kyberdash": "dist/cli.js"
   },
   "files": [
@@ -50,16 +49,16 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "author": "AgentSeal <hello@agentseal.org>",
+  "author": "Dave Palfery <dpalfery@users.noreply.github.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/getagentseal/codeburn.git"
+    "url": "git+https://github.com/dpalfery/kyber-weave.git"
   },
   "bugs": {
-    "url": "https://github.com/getagentseal/codeburn/issues"
+    "url": "https://github.com/dpalfery/kyber-weave/issues"
   },
-  "homepage": "https://github.com/getagentseal/codeburn#readme",
+  "homepage": "https://github.com/dpalfery/kyber-weave#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "bonjour-service": "^1.4.1",

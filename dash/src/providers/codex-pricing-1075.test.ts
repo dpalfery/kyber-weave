@@ -210,22 +210,22 @@ describe('#1075 cache invalidation', () => {
       files: { [sessionFile]: { dev: s.dev, ino: s.ino, mtimeMs: s.mtimeMs, sizeBytes: s.size, project: 'p', calls: [stale] } },
     }))
 
-    const prevCacheDir = process.env['CODEBURN_CACHE_DIR']
-    process.env['CODEBURN_CACHE_DIR'] = cacheDir
+    const prevCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheDir
     try {
       clearCodexMemCaches()
       // Revert CODEX_CACHE_VERSION to 10 and this returns the stale $0.0445 call.
       expect(await readCachedCodexResults(sessionFile)).toBeNull()
     } finally {
-      if (prevCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']; else process.env['CODEBURN_CACHE_DIR'] = prevCacheDir
+      if (prevCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']; else process.env['KYBERDASH_CACHE_DIR'] = prevCacheDir
     }
   })
 
   it('re-derives days finalized at daily-cache v20', async () => {
     const cacheRoot = join(tmpDir, 'daily')
     await mkdir(cacheRoot, { recursive: true })
-    const prevCacheDir = process.env['CODEBURN_CACHE_DIR']
-    process.env['CODEBURN_CACHE_DIR'] = cacheRoot
+    const prevCacheDir = process.env['KYBERDASH_CACHE_DIR']
+    process.env['KYBERDASH_CACHE_DIR'] = cacheRoot
     try {
       const date = toDateString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
       const yesterday = toDateString(new Date(Date.now() - 24 * 60 * 60 * 1000))
@@ -255,7 +255,7 @@ describe('#1075 cache invalidation', () => {
       expect(hydrated.days.find(d => d.date === date)?.cost).toBe(2)
       expect(JSON.parse(await readFile(oldPath, 'utf8'))).toEqual(oldCache)
     } finally {
-      if (prevCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']; else process.env['CODEBURN_CACHE_DIR'] = prevCacheDir
+      if (prevCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']; else process.env['KYBERDASH_CACHE_DIR'] = prevCacheDir
     }
   })
 })

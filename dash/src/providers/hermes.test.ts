@@ -27,9 +27,9 @@ beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'hermes-provider-test-'))
   cacheDir = await mkdtemp(join(tmpdir(), 'hermes-provider-cache-'))
   originalHermesHome = process.env['HERMES_HOME']
-  originalCodeburnCacheDir = process.env['CODEBURN_CACHE_DIR']
+  originalCodeburnCacheDir = process.env['KYBERDASH_CACHE_DIR']
   process.env['HERMES_HOME'] = tmpDir
-  process.env['CODEBURN_CACHE_DIR'] = cacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = cacheDir
   const { resetHermesSessionLedgerForTests } = await import('../ingest/hermes-session-ledger.js')
   resetHermesSessionLedgerForTests()
 })
@@ -37,8 +37,8 @@ beforeEach(async () => {
 afterEach(async () => {
   if (originalHermesHome === undefined) delete process.env['HERMES_HOME']
   else process.env['HERMES_HOME'] = originalHermesHome
-  if (originalCodeburnCacheDir === undefined) delete process.env['CODEBURN_CACHE_DIR']
-  else process.env['CODEBURN_CACHE_DIR'] = originalCodeburnCacheDir
+  if (originalCodeburnCacheDir === undefined) delete process.env['KYBERDASH_CACHE_DIR']
+  else process.env['KYBERDASH_CACHE_DIR'] = originalCodeburnCacheDir
   await rm(tmpDir, { recursive: true, force: true })
   await rm(cacheDir, { recursive: true, force: true })
 })
@@ -187,7 +187,7 @@ function dayRange(): DateRange {
 
 async function loadParserWithHermesHome(hermesHome: string, codeburnCacheDir: string) {
   process.env['HERMES_HOME'] = hermesHome
-  process.env['CODEBURN_CACHE_DIR'] = codeburnCacheDir
+  process.env['KYBERDASH_CACHE_DIR'] = codeburnCacheDir
   vi.resetModules()
   const parser = await import('../ingest/parser.js')
   return parser

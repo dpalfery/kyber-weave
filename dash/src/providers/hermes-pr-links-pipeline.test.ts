@@ -57,7 +57,7 @@ beforeEach(async () => {
   await rm(testRoot, { recursive: true, force: true })
   await mkdir(HERMES_HOME, { recursive: true })
   process.env['HERMES_HOME'] = HERMES_HOME
-  process.env['CODEBURN_CACHE_DIR'] = CACHE_DIR
+  process.env['KYBERDASH_CACHE_DIR'] = CACHE_DIR
 })
 
 afterEach(async () => {
