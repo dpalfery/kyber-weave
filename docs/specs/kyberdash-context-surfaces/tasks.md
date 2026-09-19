@@ -285,7 +285,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Write round-trip tests (spine location → path → location) for every pattern in
     `view-paths.json`, then implement `dash/web/src/lib/router.ts`.
   - _Requirements: 5.1_
-- [ ] 7.2 Wire history and direct opens
+- [x] 7.2 Wire history and direct opens
   - Stream D.
   - Test that `openSpine` pushes history, that `popstate` restores the stack, and that opening
     `/run/:id`, `/session/:id`, `/session/:id/turn/:n` or `/finding/:id` directly rebuilds
