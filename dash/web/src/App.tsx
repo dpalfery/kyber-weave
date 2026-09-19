@@ -6,7 +6,19 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { QuarantineView, type QuarantineEntry } from '@/components/analysis/QuarantineView'
 import { ProblemsView, type ProblemEntry } from '@/components/analysis/ProblemsView'
 import { LightsaberLogo } from '@/components/LightsaberLogo'
+import { NotFoundPanel } from '@/components/analysis/NotFoundPanel'
 import { fetchHarnesses, type KyberHarnessSummary } from '@/lib/kyberApi'
+import {
+  applySpineAction,
+  createAncestryApi,
+  locationFromPath,
+  pathFromLocation,
+  pushView,
+  replaceView,
+  resolveAncestry,
+  restoreFromPopState,
+  type SpineLocation,
+} from '@/lib/router'
 import { ContextDoctor, HARNESS_CATALOG, harnessDisplayName } from '@/pages/ContextDoctor'
 import { CompareRuns } from '@/pages/CompareRuns'
 import { Sessions } from '@/pages/Sessions'
@@ -52,47 +64,30 @@ function useHarnessTabs(): Array<{ harness: string; name: string }> {
   return useMemo(() => harnessTabsFrom(data), [data])
 }
 
-export type SpineLocation = {
-  level: 'context-doctor' | 'harness' | 'run' | 'execution' | 'turn' | 'finding' | 'compare'
-  harnessId?: string
-  runId?: string
-  executionId?: string
-  turnIndex?: number
-  findingId?: string
+export type { SpineLocation }
+
+function hrefFromWindow(): string {
+  if (typeof window === 'undefined' || typeof window.location?.pathname !== 'string') return '/'
+  return `${window.location.pathname}${window.location.search}`
 }
 
-type SpineAction =
-  | { type: 'push'; location: SpineLocation }
-  | { type: 'pop' }
-  | { type: 'replace'; location: SpineLocation }
-  | { type: 'goTo'; location: SpineLocation }
+function pageFor(location: SpineLocation): KyberPage {
+  if (location.level === 'quarantine') return 'quarantine'
+  if (location.level === 'problems') return 'problems'
+  if (location.level === 'compare') return 'compare'
+  return 'context-doctor'
+}
 
-function spineReducer(stack: SpineLocation[], action: SpineAction): SpineLocation[] {
-  switch (action.type) {
-    case 'push':
-      return [...stack, action.location]
-    case 'pop':
-      return stack.length > 1 ? stack.slice(0, -1) : stack
-    case 'replace':
-      return [...stack.slice(0, -1), action.location]
-    case 'goTo': {
-      let matchingIndex = -1
-      for (let i = stack.length - 1; i >= 0; i--) {
-        const location = stack[i]!
-        if (
-          location.level === action.location.level &&
-          location.harnessId === action.location.harnessId &&
-          location.runId === action.location.runId &&
-          location.executionId === action.location.executionId &&
-          location.turnIndex === action.location.turnIndex
-        ) {
-          matchingIndex = i
-          break
-        }
-      }
-      return matchingIndex >= 0 ? stack.slice(0, matchingIndex + 1) : [stack[0]!, action.location]
-    }
-  }
+function viewFromProps(initialPage: KyberPage, initialPath?: string): SpineLocation {
+  const href = initialPath ?? hrefFromWindow()
+  const fromUrl = locationFromPath(href)
+  // An explicit initialPath always wins. Otherwise a bare `/` must not override
+  // `initialPage` — tests (and the Sessions rail) land on a tab without a URL.
+  if (fromUrl && (initialPath !== undefined || (href !== '/' && href !== ''))) return fromUrl
+  if (initialPage === 'quarantine') return { level: 'quarantine' }
+  if (initialPage === 'problems') return { level: 'problems' }
+  if (initialPage === 'compare') return { level: 'compare' }
+  return { level: 'context-doctor' }
 }
 
 function SideLink({ active, onClick, children, testId }: { active: boolean; onClick: () => void; children: ReactNode; testId?: string }) {
@@ -243,22 +238,29 @@ export function KyberProblemsPanel() {
 
 export interface AppProps {
   initialPage?: KyberPage
+  /** Path to parse on first paint; defaults to `window.location` so a deep link lands. */
+  initialPath?: string
+  /** A missing-id deep link that already 404'd, used by tests that cannot run effects. */
+  initialNotFoundId?: string
 }
 
 /**
  * Renders the KyberDash shell and coordinates its top-level navigation and
  * diagnostic spine.
  */
-export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
-  const [section, setSection] = useState<KyberPage>(initialPage)
-  const [spine, dispatchSpine] = useReducer(spineReducer, [
-    { level: initialPage === 'compare' ? 'compare' : 'context-doctor' },
+export function App({ initialPage = 'context-doctor', initialPath, initialNotFoundId }: AppProps = {}) {
+  const [section, setSection] = useState<KyberPage>(() =>
+    initialPage === 'sessions' ? 'sessions' : pageFor(viewFromProps(initialPage, initialPath)),
+  )
+  const [spine, dispatchSpine] = useReducer(applySpineAction, undefined, (): SpineLocation[] => [
+    viewFromProps(initialPage, initialPath),
   ])
   const location = spine.at(-1)!
   const harnessTabs = useHarnessTabs()
   // Mobile only: the sidebar collapses to an off-canvas drawer below md.
   // On desktop this flag is inert (the max-md: transform classes don't apply).
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [notFoundId, setNotFoundId] = useState<string | null>(initialNotFoundId ?? null)
 
   // Follow the OS theme live while the user has no explicit preference, so
   // flipping the system theme updates the dashboard without a reload.
@@ -280,11 +282,83 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
     return () => mql.removeEventListener('change', apply)
   }, [])
 
+  // Direct opens have a URL but no history.state stack. Rebuild the ancestry
+  // navigating there would have pushed, then replaceState so Back leaves the app.
+  useEffect(() => {
+    let cancelled = false
+    const href = initialPath ?? hrefFromWindow()
+    const loc = locationFromPath(href)
+    if (
+      !loc ||
+      loc.level === 'context-doctor' ||
+      loc.level === 'quarantine' ||
+      loc.level === 'problems' ||
+      (loc.level === 'compare' && !loc.compareA)
+    ) {
+      return
+    }
+    void createAncestryApi().then((api) =>
+      resolveAncestry(loc, api).then((result) => {
+        if (cancelled) return
+        if (result.status === 'not-found') {
+          setNotFoundId(result.id)
+          return
+        }
+        setNotFoundId(null)
+        dispatchSpine({ type: 'reset', stack: result.stack })
+        setSection(pageFor(result.stack.at(-1)!))
+        const path = pathFromLocation(result.stack.at(-1)!)
+        if (path) replaceView(path, result.stack)
+      }),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [initialPath])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.addEventListener) return
+    const onPop = (event: PopStateEvent) => {
+      const restored = restoreFromPopState(event.state, hrefFromWindow())
+      if (Array.isArray(restored)) {
+        setNotFoundId(null)
+        dispatchSpine({ type: 'reset', stack: restored })
+        setSection(pageFor(restored.at(-1) ?? { level: 'context-doctor' }))
+        return
+      }
+      void createAncestryApi().then((api) =>
+        resolveAncestry(restored.needsAncestry, api).then((result) => {
+          if (result.status === 'not-found') {
+            setNotFoundId(result.id)
+            return
+          }
+          setNotFoundId(null)
+          dispatchSpine({ type: 'reset', stack: result.stack })
+          setSection(pageFor(result.stack.at(-1)!))
+        }),
+      )
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
   const showSpine = section === 'context-doctor' || section === 'compare'
-  /** Opens a diagnostic spine location and makes Context Doctor active. */
+  /** Opens a diagnostic spine location, records it in history, and makes Context Doctor active. */
   const openSpine = (next: SpineLocation, action: 'push' | 'replace' | 'goTo' = 'push') => {
-    setSection('context-doctor')
+    setNotFoundId(null)
+    setSection(pageFor(next))
+    const nextStack = applySpineAction(spine, { type: action, location: next })
     dispatchSpine({ type: action, location: next })
+    const path = pathFromLocation(nextStack.at(-1)!)
+    if (path) pushView(path, nextStack)
+  }
+
+  const goHeader = (next: SpineLocation) => {
+    setNotFoundId(null)
+    setSection(pageFor(next))
+    dispatchSpine({ type: 'reset', stack: [next] })
+    const path = pathFromLocation(next)
+    if (path) pushView(path, [next])
   }
 
   return (
@@ -318,8 +392,9 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
                 type="button"
                 data-testid={`nav-tab-${pg.key}`}
                 onClick={() => {
-                  setSection(pg.key)
-                  if (pg.key === 'context-doctor') dispatchSpine({ type: 'goTo', location: { level: 'context-doctor' } })
+                  if (pg.key === 'context-doctor') goHeader({ level: 'context-doctor' })
+                  else if (pg.key === 'quarantine') goHeader({ level: 'quarantine' })
+                  else goHeader({ level: 'problems' })
                 }}
                 className={cn(
                   'rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
@@ -402,8 +477,7 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
                 testId="nav-rail-context-doctor"
                 active={section === 'context-doctor'}
                 onClick={() => {
-                  setSection('context-doctor')
-                  dispatchSpine({ type: 'goTo', location: { level: 'context-doctor' } })
+                  goHeader({ level: 'context-doctor' })
                   setSidebarOpen(false)
                 }}
               >
@@ -413,6 +487,7 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
                 testId="nav-rail-sessions"
                 active={section === 'sessions'}
                 onClick={() => {
+                  setNotFoundId(null)
                   setSection('sessions')
                   setSidebarOpen(false)
                 }}
@@ -423,8 +498,9 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
                 testId="nav-rail-compare"
                 active={section === 'compare'}
                 onClick={() => {
+                  setNotFoundId(null)
                   setSection('compare')
-                  dispatchSpine({ type: 'goTo', location: { level: 'compare' } })
+                  dispatchSpine({ type: 'reset', stack: [{ level: 'compare' }] })
                   setSidebarOpen(false)
                 }}
               >
@@ -448,7 +524,9 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
               </h1>
             </div>
 
-            {showSpine ? (
+            {notFoundId ? (
+              <NotFoundPanel id={notFoundId} onHome={() => goHeader({ level: 'context-doctor' })} />
+            ) : showSpine ? (
               location.level === 'context-doctor' ? (
                 <ContextDoctor
                   onSelectHarness={(harnessId) => openSpine({ level: 'harness', harnessId })}
@@ -485,7 +563,7 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
                   onSelectExecution={(executionId) => openSpine({ level: 'execution', harnessId: location.harnessId, runId: location.runId, executionId }, 'goTo')}
                 />
               ) : location.level === 'compare' ? (
-                <CompareRuns />
+                <CompareRuns initialRunAId={location.compareA} initialRunBId={location.compareB} />
               ) : (
                 <FindingDetail
                   findingId={location.findingId}
@@ -494,7 +572,12 @@ export function App({ initialPage = 'context-doctor' }: AppProps = {}) {
                   onSelectRun={(runId) => openSpine({ level: 'run', runId }, 'goTo')}
                   onSelectExecution={(executionId) => openSpine({ level: 'execution', executionId })}
                   onSelectTurn={(turnIndex, executionId, runId) => openSpine({ level: 'turn', harnessId: location.harnessId, runId: runId ?? location.runId, executionId, turnIndex })}
-                  onBack={() => dispatchSpine({ type: 'pop' })}
+                  onBack={() => {
+                    const nextStack = applySpineAction(spine, { type: 'pop' })
+                    dispatchSpine({ type: 'pop' })
+                    const path = pathFromLocation(nextStack.at(-1)!)
+                    if (path) pushView(path, nextStack)
+                  }}
                 />
               )
             ) : section === 'sessions' ? (

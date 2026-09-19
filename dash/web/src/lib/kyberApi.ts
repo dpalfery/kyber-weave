@@ -23,9 +23,26 @@ export type KyberComparisonTable = {
 export type KyberQuarantineEntry = import('@/components/analysis/QuarantineView').QuarantineEntry
 export type KyberProblemEntry = import('@/components/analysis/ProblemsView').ProblemEntry
 
+/** Thrown when a REST call is not 2xx. `status` is how 404 becomes not-found (R5.4). */
+export class KyberApiError extends Error {
+  readonly status: number
+  readonly path: string
+  constructor(status: number, path: string) {
+    super(`Request failed (${status}) for ${path}`)
+    this.name = 'KyberApiError'
+    this.status = status
+    this.path = path
+  }
+}
+
+export function isNotFoundError(error: unknown): boolean {
+  if (error instanceof KyberApiError) return error.status === 404
+  return typeof error === 'object' && error !== null && 'status' in error && (error as { status: unknown }).status === 404
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const res = await fetch(path)
-  if (!res.ok) throw new Error(`Request failed (${res.status}) for ${path}`)
+  if (!res.ok) throw new KyberApiError(res.status, path)
   return res.json() as Promise<T>
 }
 
@@ -66,6 +83,25 @@ export interface KyberSessionSummary {
   costUsd?: number | null
   models?: string[]
   problems?: number
+}
+
+/**
+ * The session payload fields ancestry needs. `runId` is optional because the
+ * served document does not yet carry it — resolveAncestry reads it when present
+ * rather than inventing a run by scanning other endpoints (R7.5).
+ */
+export type KyberSessionAncestry = {
+  id?: string
+  session_id?: string
+  harness: string
+  runId?: string
+  run_id?: string
+  executionId?: string
+  execution_id?: string
+}
+
+export async function fetchKyberSession(sessionId: string): Promise<KyberSessionAncestry> {
+  return fetchJson<KyberSessionAncestry>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
 }
 
 export async function fetchKyberSessions(harness?: string | null): Promise<KyberSessionSummary[]> {

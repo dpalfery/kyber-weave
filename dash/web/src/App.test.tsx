@@ -308,6 +308,20 @@ describe('App: Page Switching & Title Rendering', () => {
     expect(html).toContain('reconciliation_failed')
     expect(html).toContain('Token mismatch')
   })
+
+  it('renders NotFoundPanel inside the shell for a missing id, naming it and linking home (R5.4)', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <App initialNotFoundId="fid-missing" />
+      </QueryClientProvider>
+    )
+    expect(html).toContain('data-testid="nav-tabs"')
+    expect(html).toContain('data-testid="not-found-panel"')
+    expect(html).toContain('fid-missing')
+    expect(html).toMatch(/href="\/"/)
+    expect(html).not.toContain('data-testid="page-finding"')
+  })
 })
 
 describe('KyberQuarantinePanel', () => {

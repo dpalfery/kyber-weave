@@ -280,29 +280,29 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 11.14_
 
 - [ ] 7. Web deep links
-- [ ] 7.1 URL router
+- [x] 7.1 URL router
   - Stream D.
   - Write round-trip tests (spine location → path → location) for every pattern in
     `view-paths.json`, then implement `dash/web/src/lib/router.ts`.
   - _Requirements: 5.1_
-- [ ] 7.2 Wire history and direct opens
+- [x] 7.2 Wire history and direct opens
   - Stream D.
   - Test that `openSpine` pushes history, that `popstate` restores the stack, and that opening
     `/run/:id`, `/session/:id`, `/session/:id/turn/:n` or `/finding/:id` directly rebuilds
     the same ancestry navigation would.
   - Implement `resolveAncestry` and wire the router into `App`.
   - _Requirements: 5.2, 5.3_
-- [ ] 7.3 Not-found state
+- [x] 7.3 Not-found state
   - Stream D.
   - Test that a URL naming an id the API returns 404 for renders `NotFoundPanel` inside the
     shell, naming the id and linking to `/`. Then implement it.
   - _Requirements: 5.4_
-- [ ] 7.4 End-to-end deep links
+- [x] 7.4 End-to-end deep links
   - Stream D.
   - Add Playwright specs under the existing config: open each route directly, reload, go
     back and forward, and hit an unknown id, all against a seeded store.
   - _Requirements: 5.1, 5.2, 5.3, 5.4_
-- [ ] 7.5 Extract the shared design tokens
+- [x] 7.5 Extract the shared design tokens
   - Stream D.
   - Move the dashboard `@theme` tokens into `dash/web/src/tokens.css`, imported by the
     dashboard.
