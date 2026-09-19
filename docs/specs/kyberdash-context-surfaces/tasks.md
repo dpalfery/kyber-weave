@@ -143,7 +143,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 2.3, 2.6, 2.7, 2.8, 7.6_
 
 - [ ] 3. Restructure into one tree
-- [ ] 3.1 Move to the target layout
+- [x] 3.1 Move to the target layout
   - Stream A.
   - Move `dash/kyber/**` and the retained `dash/src/**` into the layout in the design's
     target-layout table: `cli`, `providers`, `ingest`, `pricing`, `synth`, `canon`,
