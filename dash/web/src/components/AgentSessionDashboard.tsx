@@ -5,9 +5,17 @@ import { Card } from './ui/card.js'
 import { Skeleton } from './ui/skeleton.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.js'
-import { SchemaCostRanking, type SchemaCostAnalysis } from './SchemaCostRanking.js'
+import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel } from './SessionCostPanel.js'
+import type {
+  KyberContextBucket,
+  KyberContextTurn,
+  KyberSessionContext,
+  KyberSessionTurnRow,
+  KyberToolDefinitionShadow,
+  KyberTurnContentShadow,
+} from '../lib/kyberApi.js'
 
 // ---------------------------------------------------------------------------
 // Types & Contracts
@@ -81,7 +89,9 @@ export interface ReconciliationRow {
 }
 
 export interface ToolRow {
-  name: string
+  // The served tools rows carry no name today (AsadTool); the table labels
+  // from schema ranking where it can.
+  name?: string
   server?: string
   is_mcp?: boolean
   schema_tokens?: number | null
@@ -107,6 +117,7 @@ export interface ServerRow {
 
 export interface SessionTimelineNode {
   spanId: string
+  id?: string
   traceId?: string
   parentId?: string | null
   name: string
@@ -121,9 +132,11 @@ export interface SessionTimelineNode {
   tool?: string | null
   content?: Record<string, unknown>
   attributes?: Record<string, unknown>
+  raw_attributes?: Record<string, unknown>
+  cost?: CostBlock | Record<string, unknown>
+  cost_usd?: number | null
   isSubagent?: boolean
   isAuxiliary?: boolean
-  cost?: CostBlock | any
   children?: SessionTimelineNode[]
 }
 
@@ -149,10 +162,10 @@ export interface AgentSessionPayload {
   parent_session?: string | null
   span_count?: number
   summary?: SessionSummaryPayload
-  turns?: any[]
+  turns?: KyberSessionTurnRow[]
   tools?: ToolRow[]
   servers?: ServerRow[]
-  context?: any
+  context?: KyberSessionContext
   coverage?: Record<string, number>
   notes?: string[]
   timeline?: SessionTimelineNode[]
@@ -161,7 +174,7 @@ export interface AgentSessionPayload {
 }
 
 export interface AgentSessionDashboardProps {
-  session?: AgentSessionPayload | any
+  session?: AgentSessionPayload | null
   sessionId?: string
   isLoading?: boolean
   error?: Error | string | null
@@ -169,6 +182,41 @@ export interface AgentSessionDashboardProps {
   initialTimelineTab?: 'tree' | 'bars'
   className?: string
 }
+
+/**
+ * What the inspector drawer is currently showing. The drawer's panes
+ * runtime-dispatch on the value's shape (see `InspectorContent`), so the
+ * union names the producers rather than gating the consumers: a turn row, a
+ * payload timeline node, the light span reference the timeline view hands
+ * back on click, a tool with its definition row, or one context-bucket
+ * drill-down.
+ */
+export type DrawerContent =
+  | KyberSessionTurnRow
+  | SessionTimelineNode
+  | { spanId?: string; name?: string; kind?: string; op?: string; durationMs?: number }
+  | {
+      tool: ToolRow
+      definition: KyberToolDefinitionShadow | null
+      contentRequest: { span?: string; part: string }
+    }
+  | string
+  | {
+      turnIndex: number
+      bucket: string
+      key: string
+      tokens: number
+      value: number
+      total: number
+      label: string
+      content: unknown
+      turn: KyberSessionTurnRow
+      context: KyberSessionContext
+    }
+  // Anything else InspectorContent's shape dispatch can render — tests hand
+  // the drawer bare records, and the runtime dispatch is the contract.
+  | Record<string, unknown>
+  | null
 
 // ---------------------------------------------------------------------------
 // Helpers & Formatters
@@ -199,8 +247,8 @@ export const TIMELINE_OP_COLORS: Record<string, string> = {
   embeddings: '#8b5cf6', // purple
 }
 
-function adaptTimelineNode(node: any, parentId: string | null = null): TimelineNode {
-  const rawCost = node.cost ?? {}
+function adaptTimelineNode(node: SessionTimelineNode, parentId: string | null = null): TimelineNode {
+  const rawCost = (node.cost ?? {}) as Partial<CostBlock> & { cost_usd?: number | null }
   const cost: CostBlock = {
     basis: rawCost.basis ?? 'none',
     status: rawCost.status ?? (rawCost.value != null ? 'ok' : '—'),
@@ -212,7 +260,7 @@ function adaptTimelineNode(node: any, parentId: string | null = null): TimelineN
     spanId: node.spanId || node.id || 'span',
     parentId: parentId ?? node.parentId ?? null,
     children: Array.isArray(node.children)
-      ? node.children.map((c: any) => adaptTimelineNode(c, node.spanId))
+      ? node.children.map((c) => adaptTimelineNode(c, node.spanId))
       : [],
     startMs: node.offsetMs ?? node.startMs ?? 0,
     durationMs: node.durationMs ?? 0,
@@ -332,7 +380,7 @@ export function AgentSessionContent({
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTitle, setDrawerTitle] = useState('')
   const [drawerSubtitle, setDrawerSubtitle] = useState<string | undefined>(undefined)
-  const [drawerContent, setDrawerContent] = useState<any>(null)
+  const [drawerContent, setDrawerContent] = useState<DrawerContent>(null)
 
   // 3. State for timeline view mode ('tree' vs 'bars')
   const [timelineTab, setTimelineTab] = useState<'tree' | 'bars'>(initialTimelineTab ?? 'tree')
@@ -356,8 +404,8 @@ export function AgentSessionContent({
 
   // 4. Map of spanId -> full timeline node for quick lookup on click
   const spanMap = useMemo(() => {
-    const map = new Map<string, any>()
-    const walk = (nodes: any[]) => {
+    const map = new Map<string, SessionTimelineNode>()
+    const walk = (nodes: SessionTimelineNode[]) => {
       for (const node of nodes) {
         if (node?.spanId) {
           map.set(node.spanId, node)
@@ -377,7 +425,7 @@ export function AgentSessionContent({
     return {
       spanId: 'session-root',
       parentId: null,
-      children: timelineNodes.map((n: any) => adaptTimelineNode(n, 'session-root')),
+      children: timelineNodes.map((n) => adaptTimelineNode(n, 'session-root')),
       startMs: 0,
       durationMs: session.summary?.duration_ms ?? 0,
       kind: 'session',
@@ -396,8 +444,8 @@ export function AgentSessionContent({
 
   // 6. Flattened timeline spans for horizontal duration bars view
   const flattenedTimeline = useMemo(() => {
-    const list: Array<{ node: any; depth: number }> = []
-    const walk = (nodes: any[], depth = 0) => {
+    const list: Array<{ node: SessionTimelineNode; depth: number }> = []
+    const walk = (nodes: SessionTimelineNode[], depth = 0) => {
       for (const n of nodes) {
         list.push({ node: n, depth })
         if (Array.isArray(n.children)) {
@@ -426,7 +474,7 @@ export function AgentSessionContent({
       setSelectedSpanId(undefined)
       const turns = session?.turns || []
       const turn = turns.find(
-        (t: any, i: number) =>
+        (t, i) =>
           t.index === turnIndex ||
           t.turn === turnIndex ||
           i === turnIndex ||
@@ -436,22 +484,23 @@ export function AgentSessionContent({
 
       const turnNum = turn.index ?? turn.turn ?? turnIndex
       if (bucketName) {
-        const contextTurns = session?.context?.turns || []
-        const ctxTurn =
+        const ctx = session?.context
+        const contextTurns: KyberContextTurn[] = ctx?.measurable ? ctx.turns : []
+        const ctxTurn: KyberContextTurn | KyberContextBucket | undefined =
           contextTurns.find(
-            (ct: any, i: number) =>
+            (ct, i) =>
               ct.turn === turnNum ||
               ct.index === turnNum ||
               i === turnNum ||
               i + 1 === turnNum
           ) ||
-          (turnNum === 1 ? session?.context?.first : undefined) ||
-          session?.context?.last
+          (turnNum === 1 ? ctx?.first : undefined) ||
+          ctx?.last
 
-        const rawBuckets = (ctxTurn?.buckets ?? (turn as any)?.buckets ?? {}) as Record<string, any>
-        const tokens = Number(rawBuckets[bucketName] ?? (turn as any)?.[bucketName] ?? 0)
+        const rawBuckets = ctxTurn?.buckets ?? turn.buckets ?? {}
+        const tokens = Number(rawBuckets[bucketName] ?? turn[bucketName] ?? 0)
         const bucketSum = Object.values(rawBuckets).reduce(
-          (sum: number, v: any) => sum + (typeof v === 'number' ? v : 0),
+          (sum: number, v) => sum + (typeof v === 'number' ? v : 0),
           0
         )
         const reported = Number(
@@ -468,7 +517,7 @@ export function AgentSessionContent({
         const content =
           turn.content && typeof turn.content === 'object' && bucketName in turn.content
             ? turn.content[bucketName]
-            : ((turn as any)[bucketName] ?? (typeof turn.content === 'string' ? turn.content : turn))
+            : (turn[bucketName] ?? (typeof turn.content === 'string' ? turn.content : turn))
 
         setDrawerTitle(`Turn ${turnNum} · ${bucketName}`)
         setDrawerSubtitle(
@@ -484,7 +533,7 @@ export function AgentSessionContent({
           label,
           content,
           turn,
-          context: session?.context,
+          context: ctx as KyberSessionContext,
         })
       } else {
         setDrawerTitle(`Turn ${turnNum}`)
@@ -499,15 +548,18 @@ export function AgentSessionContent({
   )
 
   const openDrawerForSpan = useCallback(
-    (nodeOrId: any) => {
+    (nodeOrId: string | { spanId?: string; name?: string; kind?: string; op?: string; durationMs?: number }) => {
       const spanId = typeof nodeOrId === 'string' ? nodeOrId : nodeOrId?.spanId
       const fullSpan = (spanId ? spanMap.get(spanId) : null) ?? nodeOrId
       if (!fullSpan) return
 
+      // A span id the payload map never held falls through as a bare string;
+      // its property reads were undefined then, and render as such below.
+      const ref = typeof fullSpan === 'string' ? {} : fullSpan
       setSelectedSpanId(spanId)
-      setDrawerTitle(`Span: ${fullSpan.name || fullSpan.spanId || 'Inspection'}`)
+      setDrawerTitle(`Span: ${ref.name || ref.spanId || 'Inspection'}`)
       setDrawerSubtitle(
-        `${fullSpan.kind || fullSpan.op || 'span'} · ${formatDuration(fullSpan.durationMs)} · Span ID: ${fullSpan.spanId || '—'}`
+        `${ref.kind || ref.op || 'span'} · ${formatDuration(ref.durationMs)} · Span ID: ${ref.spanId || '—'}`
       )
       setDrawerContent(fullSpan)
       setDrawerOpen(true)
@@ -523,14 +575,19 @@ export function AgentSessionContent({
         `Server: ${tool.server || 'built-in'}${tool.is_mcp ? ' (MCP)' : ''} · Invocations: ${tool.invocations}`
       )
 
-      // Find tool definition from turns if available
+      // Find tool definition from turns if available. The served turn rows do
+      // not carry a content object; the read survives payloads that did.
       const turnWithDefs = (session?.turns || []).find(
-        (t: any) => t.has_tool_defs || t.content?.tool_definitions
+        (t) =>
+          Boolean(t.has_tool_defs) ||
+          Boolean(t.content && typeof t.content === 'object' && t.content.tool_definitions)
       )
-      const defs = turnWithDefs?.content?.tool_definitions || []
-      const def = defs.find(
-        (d: any) => (d.name || d.function?.name) === tool.name
-      )
+      const contentObj =
+        typeof turnWithDefs?.content === 'object' && turnWithDefs.content !== null
+          ? (turnWithDefs.content as KyberTurnContentShadow)
+          : undefined
+      const defs = contentObj?.tool_definitions ?? []
+      const def = defs.find((d) => (d.name || d.function?.name) === tool.name)
 
       setDrawerContent({
         tool,
@@ -576,6 +633,40 @@ export function AgentSessionContent({
   const toolRows = session.tools || []
   const schemaOffered = toolRows.filter((t) => t.in_definitions)
   const isSchemaMeasurable = schemaOffered.length > 0
+
+  // Which content-route request the drawer should issue for what it is
+  // showing: an explicit span selection, the tool-definition drawer, a bucket
+  // drill-down onto its turn's span, or the span the drawer is inspecting.
+  const drawerContentRequest = (() => {
+    const sessionId = session.id ?? session.session_id
+    if (!sessionId) return undefined
+    if (selectedSpanId) return { sessionId: String(sessionId), span: selectedSpanId }
+    if (drawerContent && typeof drawerContent === 'object' && 'contentRequest' in drawerContent) {
+      return { sessionId: String(sessionId), ...(drawerContent.contentRequest as { span?: string; part: string }) }
+    }
+    if (
+      drawerContent &&
+      typeof drawerContent === 'object' &&
+      'bucket' in drawerContent &&
+      typeof (drawerContent as { bucket?: unknown }).bucket === 'string'
+    ) {
+      const bucketItem = drawerContent as { bucket: string; turn?: { spanId?: string } }
+      return {
+        sessionId: String(sessionId),
+        span: bucketItem.turn?.spanId,
+        part: bucketItem.bucket,
+      }
+    }
+    if (
+      drawerContent &&
+      typeof drawerContent === 'object' &&
+      'spanId' in drawerContent &&
+      typeof (drawerContent as { spanId?: unknown }).spanId === 'string'
+    ) {
+      return { sessionId: String(sessionId), span: (drawerContent as { spanId: string }).spanId }
+    }
+    return undefined
+  })()
 
   return (
     <div
@@ -1029,7 +1120,9 @@ export function AgentSessionContent({
         {/* Tools Ranking */}
         <SchemaCostRanking
           schema={(session as { schema?: SchemaCostAnalysis }).schema}
-          tools={toolRows}
+          // The payload's tools rows carry no name today; the ranking table's
+          // row type still expects one and labels empty cells where absent.
+          tools={toolRows as unknown as SchemaCostToolRow[]}
           onSelectTool={openDrawerForTool}
         />
       </div>
@@ -1185,33 +1278,7 @@ export function AgentSessionContent({
         title={drawerTitle}
         subtitle={drawerSubtitle}
         rawContent={drawerContent}
-        contentRequest={
-          (session.id ?? session.session_id) && selectedSpanId
-            ? {
-                sessionId: String(session.id ?? session.session_id),
-                span: selectedSpanId,
-              }
-            : (session.id ?? session.session_id) && typeof drawerContent?.contentRequest === 'object'
-            ? {
-                sessionId: String(session.id ?? session.session_id),
-                ...drawerContent.contentRequest,
-              }
-            : typeof drawerContent?.bucket === 'string' && (session.id ?? session.session_id)
-              ? {
-                  sessionId: String(session.id ?? session.session_id),
-                  span:
-                    typeof drawerContent.turn?.spanId === 'string' && drawerContent.turn.spanId
-                      ? drawerContent.turn.spanId
-                      : undefined,
-                  part: drawerContent.bucket,
-                }
-              : (session.id ?? session.session_id) && typeof drawerContent?.spanId === 'string'
-                ? {
-                    sessionId: String(session.id ?? session.session_id),
-                    span: drawerContent.spanId,
-                  }
-                : undefined
-        }
+        contentRequest={drawerContentRequest}
       />
     </div>
   )

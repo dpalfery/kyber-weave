@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { cn, fmtNum, fmtTokens } from '../lib/utils.js'
+import type { AgentSessionPayload } from './AgentSessionDashboard.js'
 
 // ---------------------------------------------------------------------------
 // Types & Contracts
@@ -97,7 +98,7 @@ export interface ContextCompositionChartProps {
 }
 
 export interface SessionSpendChartsProps {
-  session?: any
+  session?: AgentSessionPayload | null
   turns?: TurnSpendItem[]
   context?: ContextCompositionData | null
   selectedTurnIndex?: number | null
@@ -1430,8 +1431,11 @@ export function SessionSpendCharts({
   onSelectTurn,
   className,
 }: SessionSpendChartsProps) {
-  const turns = propsTurns ?? session?.turns
-  const context = propsContext ?? session?.context
+  // The charts read looser views of the payload than the served contract
+  // names — `TurnSpendItem` and `ContextCompositionData` are the shapes these
+  // components actually consume, narrowed once at the seam.
+  const turns = (propsTurns ?? session?.turns) as TurnSpendItem[] | undefined
+  const context = (propsContext ?? session?.context) as unknown as ContextCompositionData | undefined
   return (
     <div className={cn('flex flex-col gap-6', className)} data-testid="session-spend-charts">
       <TurnSpendChart

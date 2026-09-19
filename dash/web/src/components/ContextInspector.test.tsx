@@ -28,7 +28,7 @@ function createTestQueryClient() {
 const reactInternals = (
   React as unknown as {
     __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
-      H?: any
+      H?: Record<string, unknown>
     }
   }
 ).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
@@ -52,7 +52,7 @@ function renderHtml(element: React.ReactElement | null | undefined, qc = createT
   )
 }
 
-function findNodeByTestId(node: unknown, testId: string): React.ReactElement<any> | null {
+function findNodeByTestId(node: unknown, testId: string): React.ReactElement | null {
   if (node == null) return null
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -62,7 +62,7 @@ function findNodeByTestId(node: unknown, testId: string): React.ReactElement<any
     return null
   }
   if (React.isValidElement(node)) {
-    const props = node.props as Record<string, any>
+    const props = node.props as Record<string, unknown>
     if (props && props['data-testid'] === testId) {
       return node
     }
@@ -78,16 +78,16 @@ function findNodeByTestId(node: unknown, testId: string): React.ReactElement<any
 function renderComponentWithState<P>(
   Component: (props: P) => React.ReactElement | null,
   initialProps: P,
-  stateOverrides?: Record<number, any>
+  stateOverrides?: Record<number, unknown>
 ): {
   tree: React.ReactElement | null
-  state: any[]
+  state: unknown[]
   renderWithState: (props: P) => React.ReactElement | null
-  setHookState: (index: number, val: any) => void
+  setHookState: (index: number, val: unknown) => void
 } {
-  const internals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+  const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: Record<string, unknown> } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
   const prevDispatcher = internals?.H
-  const state: any[] = []
+  const state: unknown[] = []
   if (stateOverrides) {
     Object.entries(stateOverrides).forEach(([k, v]) => {
       state[Number(k)] = v
@@ -97,19 +97,19 @@ function renderComponentWithState<P>(
   let stateCursor = 0
 
   const dispatcher = {
-    useState: (initial: any) => {
+    useState: (initial: unknown) => {
       const idx = stateCursor++
       if (!(idx in state)) {
-        state[idx] = typeof initial === 'function' ? initial() : initial
+        state[idx] = typeof initial === 'function' ? (initial as () => unknown)() : initial
       }
-      const setter = (next: any) => {
-        state[idx] = typeof next === 'function' ? next(state[idx]) : next
+      const setter = (next: unknown) => {
+        state[idx] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[idx]) : next
       }
       return [state[idx], setter]
     },
-    useMemo: (factory: any) => factory(),
-    useCallback: (fn: any) => fn,
-    useRef: (v: any) => ({ current: v }),
+    useMemo: (factory: () => unknown) => factory(),
+    useCallback: (fn: unknown) => fn,
+    useRef: (v: unknown) => ({ current: v }),
     useEffect: () => {},
     useLayoutEffect: () => {},
     useId: () => 'stateful-id',
@@ -135,7 +135,7 @@ function renderComponentWithState<P>(
     tree,
     state,
     renderWithState,
-    setHookState: (index: number, val: any) => {
+    setHookState: (index: number, val: unknown) => {
       state[index] = val
     },
   }
@@ -323,12 +323,12 @@ describe('copyToClipboard & Clipboard Mocking', () => {
     if (originalClipboardDesc) {
       Object.defineProperty(globalThis.navigator, 'clipboard', originalClipboardDesc)
     } else {
-      delete (globalThis.navigator as any).clipboard
+      ;(globalThis.navigator as { clipboard?: unknown }).clipboard = undefined
     }
     if (originalDocumentDesc) {
       Object.defineProperty(globalThis, 'document', originalDocumentDesc)
     } else {
-      delete (globalThis as any).document
+      delete (globalThis as { document?: unknown }).document
     }
     vi.restoreAllMocks()
   })
@@ -491,14 +491,14 @@ describe('CopyButton Component', () => {
       const button = findNodeByTestId(tree, 'copy-interactive-button')
       expect(button).not.toBeNull()
 
-      const fakeEvent = { stopPropagation: vi.fn() } as any
+      const fakeEvent = { stopPropagation: vi.fn() } as unknown as React.MouseEvent
       await button!.props.onClick(fakeEvent)
 
       expect(fakeEvent.stopPropagation).toHaveBeenCalled()
       expect(writeTextMock).toHaveBeenCalledWith('Text to copy')
       expect(onClickMock).toHaveBeenCalled()
     } finally {
-      delete (globalThis.navigator as any).clipboard
+      ;(globalThis.navigator as { clipboard?: unknown }).clipboard = undefined
     }
   })
 })

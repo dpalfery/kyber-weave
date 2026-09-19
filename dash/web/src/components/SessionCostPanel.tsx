@@ -5,9 +5,38 @@ import type { CostBasis, CostBlock, CostStatus } from '../../../src/canon/types.
 
 export type { CostBasis, CostBlock, CostStatus }
 
+/**
+ * The cost-bearing slice of the session payload the panel reads. The summary
+ * token fields are the ones `buildSessionRow` writes; anything else it may
+ * carry stays reachable through the index signature.
+ */
+export interface SessionCostSummary {
+  cost?: unknown
+  costs?: unknown
+  total_input?: number | null
+  total_output?: number | null
+  total_cache_read?: number | null
+  total_cache_creation?: number | null
+  cache_hit_ratio?: number | null
+  cost_basis_mismatch?: unknown
+}
+
+export interface SessionCostProblem {
+  code?: string
+  message?: string
+}
+
+export interface SessionCostSource {
+  cost?: unknown
+  costs?: unknown
+  summary?: SessionCostSummary
+  problems?: SessionCostProblem[]
+  cost_basis_mismatch?: unknown
+}
+
 export interface SessionCostPanelProps {
-  session?: any
-  cost?: CostBlock | CostBlock[] | any
+  session?: SessionCostSource
+  cost?: unknown
   costs?: CostBlock[]
   className?: string
 }
@@ -53,54 +82,59 @@ export function formatCostFigure(block: CostBlock): string {
 /**
  * Normalizes an arbitrary cost block or legacy object into canonical CostBlock shape.
  */
-export function normalizeCostBlock(raw: any): CostBlock {
+export function normalizeCostBlock(raw: unknown): CostBlock {
   if (!raw || typeof raw !== 'object') {
     return { basis: 'unknown', status: 'no_rate' }
   }
+  const r = raw as Record<string, unknown>
 
   let basis: CostBasis = 'unknown'
-  if (raw.basis === 'published' || raw.basis === 'published_rates') {
+  if (r.basis === 'published' || r.basis === 'published_rates') {
     basis = 'published'
-  } else if (raw.basis === 'harness' || raw.basis === 'harness_reported') {
+  } else if (r.basis === 'harness' || r.basis === 'harness_reported') {
     basis = 'harness'
-  } else if (raw.basis === 'unknown') {
+  } else if (r.basis === 'unknown') {
     basis = 'unknown'
   }
 
   let status: CostStatus = 'no_rate'
   if (
-    raw.status === 'priced' ||
-    raw.status === 'partial' ||
-    raw.status === 'no_rate' ||
-    raw.status === 'out_of_scope' ||
-    raw.status === 'not_billed'
+    r.status === 'priced' ||
+    r.status === 'partial' ||
+    r.status === 'no_rate' ||
+    r.status === 'out_of_scope' ||
+    r.status === 'not_billed'
   ) {
-    status = raw.status
-  } else if (raw.status === 'ok' || raw.status === 'success') {
+    status = r.status
+  } else if (r.status === 'ok' || r.status === 'success') {
     status = 'priced'
   }
 
   const value =
-    typeof raw.value === 'number' && Number.isFinite(raw.value)
-      ? raw.value
-      : typeof raw.usd === 'number' && Number.isFinite(raw.usd)
-        ? raw.usd
+    typeof r.value === 'number' && Number.isFinite(r.value)
+      ? r.value
+      : typeof r.usd === 'number' && Number.isFinite(r.usd)
+        ? r.usd
         : undefined
 
   const currency =
-    typeof raw.currency === 'string'
-      ? raw.currency
+    typeof r.currency === 'string'
+      ? r.currency
       : value !== undefined
         ? 'USD'
         : undefined
 
   let byModel: Record<string, number> | undefined
-  if (raw.byModel && typeof raw.byModel === 'object' && Object.keys(raw.byModel).length > 0) {
-    byModel = raw.byModel
-  } else if (raw.by_model && Array.isArray(raw.by_model) && raw.by_model.length > 0) {
-    const entries = raw.by_model
-      .filter((m: any) => m && m.model && typeof (m.usd ?? m.value) === 'number')
-      .map((m: any) => [m.model, m.usd ?? m.value] as [string, number])
+  if (r.byModel && typeof r.byModel === 'object' && Object.keys(r.byModel as Record<string, unknown>).length > 0) {
+    byModel = r.byModel as Record<string, number>
+  } else if (Array.isArray(r.by_model) && r.by_model.length > 0) {
+    const entries: Array<[string, number]> = []
+    for (const m of r.by_model) {
+      if (!m || typeof m !== 'object') continue
+      const row = m as Record<string, unknown>
+      const amount = (row.usd ?? row.value) as unknown
+      if (row.model && typeof amount === 'number') entries.push([row.model as string, amount])
+    }
     if (entries.length > 0) {
       byModel = Object.fromEntries(entries)
     }
@@ -172,9 +206,9 @@ export function SessionCostPanel({ session, cost, costs, className }: SessionCos
     }
 
     if (session?.problems && Array.isArray(session.problems)) {
-      const problem = session.problems.find((p: any) => p.code === COST_BASIS_MISMATCH)
+      const problem = session.problems.find((p) => p.code === COST_BASIS_MISMATCH)
       if (problem) {
-        return problem.message
+        return problem.message ?? null
       }
     }
 

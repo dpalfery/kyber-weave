@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { cn, usd, fmtTokens } from '../lib/utils.js'
 import { fetchKyberSessionContent, fetchSpanAttributes } from '../lib/kyberApi.js'
+import type { KyberMessageLike, KyberTurnContentShadow } from '../lib/kyberApi.js'
+import type { DrawerContent, SessionTimelineNode } from './AgentSessionDashboard.js'
 import { Skeleton } from './ui/skeleton.js'
 
 /**
@@ -228,9 +230,9 @@ export function KeyValueList({ data, className }: { data: unknown; className?: s
 /**
  * Tool call component: displays wrench icon, tool name, and parameters.
  */
-export function ToolCallView({ call, className }: { call: any; className?: string }) {
-  const src = call?.raw ?? call ?? {}
-  const toolName = src.name ?? src.tool ?? src.tool_name ?? 'tool_call'
+export function ToolCallView({ call, className }: { call: KyberMessageLike | null; className?: string }) {
+  const src: KyberMessageLike = (call?.raw as KyberMessageLike | undefined) ?? call ?? {}
+  const toolName = String(src.name ?? src.tool ?? src.tool_name ?? 'tool_call')
   const rawParams = src.arguments !== undefined ? src.arguments : (src.parameters !== undefined ? src.parameters : (src.input !== undefined ? src.input : src.args))
   const params = tryParseJson(rawParams)
 
@@ -259,8 +261,8 @@ export function ToolCallView({ call, className }: { call: any; className?: strin
 /**
  * Tool result component: displays return icon and formatted output.
  */
-export function ToolResultView({ result, className }: { result: any; className?: string }) {
-  const src = result?.raw !== undefined ? result.raw : (result?.response !== undefined ? result.response : (result?.result !== undefined ? result.result : (result?.output !== undefined ? result.output : result)))
+export function ToolResultView({ result, className }: { result: KyberMessageLike | null; className?: string }) {
+  const src: unknown = result?.raw !== undefined ? result.raw : (result?.response !== undefined ? result.response : (result?.result !== undefined ? result.result : (result?.output !== undefined ? result.output : result)))
   const parsed = tryParseJson(src)
   const isJson = parsed !== null && typeof parsed === 'object'
 
@@ -294,7 +296,7 @@ export function ToolResultView({ result, className }: { result: any; className?:
 /**
  * Formats a single message part (text, reasoning, tool_call, tool_result).
  */
-export function MessagePartView({ part }: { part: any }) {
+export function MessagePartView({ part }: { part: KyberMessageLike | null }) {
   if (!part) return null
   if (typeof part === 'string') {
     return <XmlFoldedText text={part} />
@@ -303,12 +305,12 @@ export function MessagePartView({ part }: { part: any }) {
   const type = part.type
 
   if (type === 'text') {
-    const text = part.content !== undefined ? part.content : (part.text ?? '')
+    const text = (part.content ?? part.text ?? '') as string
     return <XmlFoldedText text={text} />
   }
 
   if (type === 'reasoning' || type === 'thinking') {
-    const rawReasoning = part.content ?? part.text ?? (part.raw && (part.raw.content || part.raw.text)) ?? part.raw ?? part
+    const rawReasoning: unknown = part.content ?? part.text ?? ((typeof part.raw === 'object' && part.raw !== null) ? ((part.raw as KyberMessageLike).content ?? (part.raw as KyberMessageLike).text) : undefined) ?? part.raw ?? part
     const reasoningStr = typeof rawReasoning === 'string' ? rawReasoning : JSON.stringify(rawReasoning, null, 2)
 
     return (
@@ -353,8 +355,8 @@ export function MessagePartView({ part }: { part: any }) {
 /**
  * Message view with role badge and border styling.
  */
-function MessageView({ message }: { message: any }) {
-  const role = message.role ?? 'unknown'
+function MessageView({ message }: { message: KyberMessageLike }) {
+  const role = (message.role as string | undefined) ?? 'unknown'
   const isUser = role === 'user'
   const isAssistant = role === 'assistant'
   const isSystem = role === 'system'
@@ -382,13 +384,13 @@ function MessageView({ message }: { message: any }) {
         <span className={cn('rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider', badgeClass)}>
           {role}
         </span>
-        {message.name && (
-          <span className="text-[11px] font-mono text-tertiary-foreground">{message.name}</span>
-        )}
+        {message.name ? (
+          <span className="text-[11px] font-mono text-tertiary-foreground">{String(message.name)}</span>
+        ) : null}
       </div>
       <div className="space-y-1.5">
         {parts ? (
-          parts.map((part: any, idx: number) => <MessagePartView key={idx} part={part} />)
+          parts.map((part, idx: number) => <MessagePartView key={idx} part={part as KyberMessageLike} />)
         ) : typeof content === 'string' ? (
           <XmlFoldedText text={content} />
         ) : content ? (
@@ -400,12 +402,49 @@ function MessageView({ message }: { message: any }) {
 }
 
 /**
+ * The turn row the Turn Inspector reads. The token fields must be numbers to
+ * chart; everything the payload may carry beside them stays unknown through
+ * the index signature.
+ */
+interface TurnInspectorRow {
+  cache_read?: number
+  cache_creation?: number
+  fresh?: number
+  fresh_input?: number
+  visible_output?: number
+  output?: number
+  reasoning?: number
+  total?: number
+  tokens?: {
+    cache_read?: number
+    cache_creation?: number
+    fresh?: number
+    fresh_input?: number
+    output?: number
+    reasoning?: number
+    total?: number
+  }
+  content?: KyberTurnContentShadow | string | null
+  input_messages?: KyberMessageLike[]
+  output_messages?: KyberMessageLike[]
+  model?: string | null
+  durationMs?: number
+  ttft_ms?: number
+  credits?: number | null
+  usd?: number | null
+  fresh_jump_pct?: number
+  request_start?: string
+  tool_calls?: KyberMessageLike[]
+  [key: string]: unknown
+}
+
+/**
  * Turn Inspector rendering token spend, minibar, model, and message content.
  */
 function TurnInspector({
   turn,
 }: {
-  turn: any
+  turn: TurnInspectorRow
 }) {
   const cacheRead = turn.cache_read ?? turn.tokens?.cache_read ?? 0
   const cacheCreation = turn.cache_creation ?? turn.tokens?.cache_creation ?? 0
@@ -423,7 +462,9 @@ function TurnInspector({
 
   const totalTokens = segs.reduce((a, s) => a + s.value, 0) || (turn.total ?? turn.tokens?.total ?? 1)
 
-  const content = turn.content ?? {}
+  const content: KyberTurnContentShadow = (
+    typeof turn.content === 'object' && turn.content !== null ? turn.content : {}
+  ) as KyberTurnContentShadow
   const inMsgs = content.input_messages ?? turn.input_messages
   const outMsgs = content.output_messages ?? turn.output_messages
 
@@ -521,23 +562,23 @@ function TurnInspector({
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
             User / Conversation Input
           </h4>
-          {inMsgs.map((m: any, idx: number) => (
+          {inMsgs.map((m, idx: number) => (
             <MessageView key={idx} message={m} />
           ))}
         </div>
       )}
 
       {/* Prompt text (flattened harness) */}
-      {!inMsgs && content.prompt_text && (
+      {!inMsgs && content.prompt_text ? (
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
             Prompt (flattened)
           </h4>
           <div className="rounded border border-border bg-card p-3">
-            <XmlFoldedText text={content.prompt_text} />
+            <XmlFoldedText text={content.prompt_text as string} />
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Output Messages */}
       {Array.isArray(outMsgs) && outMsgs.length > 0 && (
@@ -545,33 +586,33 @@ function TurnInspector({
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
             Model Response
           </h4>
-          {outMsgs.map((m: any, idx: number) => (
+          {outMsgs.map((m, idx: number) => (
             <MessageView key={idx} message={m} />
           ))}
         </div>
       )}
 
       {/* Response text (flattened harness) */}
-      {!outMsgs && content.response_text && (
+      {!outMsgs && content.response_text ? (
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
             Model Response
           </h4>
           <div className="rounded border border-border bg-card p-3">
-            <XmlFoldedText text={content.response_text} />
+            <XmlFoldedText text={content.response_text as string} />
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Reasoning text */}
-      {(content.reasoning_text || content.thinking_text) && (
+      {(content.reasoning_text || content.thinking_text) ? (
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
             {content.thinking_text && !content.reasoning_text ? 'Thinking' : 'Reasoning'}
           </h4>
           <MessagePartView part={{ type: content.thinking_text && !content.reasoning_text ? 'thinking' : 'reasoning', content: content.reasoning_text || content.thinking_text }} />
         </div>
-      )}
+      ) : null}
 
       {/* Tool Calls */}
       {Array.isArray(turn.tool_calls) && turn.tool_calls.length > 0 && (
@@ -579,7 +620,7 @@ function TurnInspector({
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
             Tool Calls ({turn.tool_calls.length})
           </h4>
-          {turn.tool_calls.map((tc: any, idx: number) => (
+          {turn.tool_calls.map((tc, idx: number) => (
             <ToolCallView key={idx} call={tc} />
           ))}
         </div>
@@ -591,7 +632,7 @@ function TurnInspector({
 /**
  * Timeline Span / Node Inspector rendering attributes and metadata.
  */
-function SpanInspector({ node }: { node: any }) {
+function SpanInspector({ node }: { node: SessionTimelineNode }) {
   // Timeline nodes carry structure and metadata; their attribute map is the
   // raw span payload and is no longer copied into every session row. A node
   // that still has one inline renders it directly, otherwise the span on
@@ -730,12 +771,27 @@ function SpanInspector({ node }: { node: any }) {
 }
 
 /**
+ * One context-bucket drill-down as the dashboard's `openDrawerForTurn`
+ * assembles it.
+ */
+interface ContextBucketItem {
+  bucket?: string
+  key?: string
+  label?: string
+  value?: number
+  tokens?: number
+  total?: number
+  content?: unknown
+  [key: string]: unknown
+}
+
+/**
  * Context Bucket Inspector.
  */
 function ContextBucketInspector({
   item,
 }: {
-  item: any
+  item: ContextBucketItem
 }) {
   const tokens = item.value ?? item.tokens ?? 0
   const total = item.total ?? 0
@@ -763,14 +819,22 @@ function ContextBucketInspector({
         )}
       </div>
 
-      {item.content && (
+      {item.content ? (
         <div className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bucket Content</h4>
           <InspectorContent data={item.content} />
         </div>
-      )}
+      ) : null}
     </div>
   )
+}
+
+/**
+ * True for the plain objects every inspector branch dispatches on; arrays and
+ * null fall through to the generic renderer below.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**
@@ -779,7 +843,7 @@ function ContextBucketInspector({
 export function InspectorContent({
   data,
 }: {
-  data: any
+  data: unknown
 }) {
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted')
   const [copied, setCopied] = useState(false)
@@ -793,42 +857,44 @@ export function InspectorContent({
     return <XmlFoldedText text={data} />
   }
 
+  const record = isRecord(data) ? data : null
+
   // Handle Turn payload
-  if (typeof data === 'object' && (data.fresh !== undefined || data.cache_read !== undefined || (data.index !== undefined && data.tokens !== undefined))) {
-    return <TurnInspector turn={data} />
+  if (record && (record.fresh !== undefined || record.cache_read !== undefined || (record.index !== undefined && record.tokens !== undefined))) {
+    return <TurnInspector turn={record as TurnInspectorRow} />
   }
 
   // Handle Timeline Span Node
-  if (typeof data === 'object' && ('spanId' in data || ('name' in data && 'attributes' in data))) {
-    return <SpanInspector node={data} />
+  if (record && ('spanId' in record || ('name' in record && 'attributes' in record))) {
+    return <SpanInspector node={record as unknown as SessionTimelineNode} />
   }
 
   // Handle Context bucket item
-  if (typeof data === 'object' && ('bucket' in data || ('key' in data && 'total' in data))) {
-    return <ContextBucketInspector item={data} />
+  if (record && ('bucket' in record || ('key' in record && 'total' in record))) {
+    return <ContextBucketInspector item={record as ContextBucketItem} />
   }
 
   // Handle Tool Call
-  if (typeof data === 'object' && (data.type === 'tool_call' || (data.name && (data.arguments !== undefined || data.input !== undefined)))) {
-    return <ToolCallView call={data} />
+  if (record && (record.type === 'tool_call' || (record.name && (record.arguments !== undefined || record.input !== undefined)))) {
+    return <ToolCallView call={record} />
   }
 
   // Handle Tool Result
-  if (typeof data === 'object' && (data.type === 'tool_result' || data.type === 'tool_call_response' || data.type === 'tool_call_result' || data.result !== undefined || data.output !== undefined)) {
-    return <ToolResultView result={data} />
+  if (record && (record.type === 'tool_result' || record.type === 'tool_call_response' || record.type === 'tool_call_result' || record.result !== undefined || record.output !== undefined)) {
+    return <ToolResultView result={record} />
   }
 
   // Handle Message
-  if (typeof data === 'object' && ('role' in data && ('content' in data || 'parts' in data))) {
-    return <MessageView message={data} />
+  if (record && ('role' in record && ('content' in record || 'parts' in record))) {
+    return <MessageView message={record} />
   }
 
   // Handle array of messages
-  if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object' && ('role' in data[0] || 'parts' in data[0])) {
+  if (Array.isArray(data) && data.length > 0 && isRecord(data[0]) && ('role' in data[0] || 'parts' in data[0])) {
     return (
       <div className="space-y-2">
-        {data.map((m: any, idx: number) => (
-          <MessageView key={idx} message={m} />
+        {data.map((m, idx: number) => (
+          <MessageView key={idx} message={m as KyberMessageLike} />
         ))}
       </div>
     )
@@ -977,13 +1043,19 @@ function FullContentPanel({
   )
 }
 
+/**
+ * The drawer's own content union, shared with the dashboard that assembles
+ * it; the body only spreads it and probes a legacy `content` leaf.
+ */
+export type { DrawerContent }
+
 export interface SessionInspectorDrawerProps {
   open: boolean
   onClose: () => void
   title: string
   subtitle?: string
   children?: React.ReactNode
-  rawContent?: any
+  rawContent?: DrawerContent
   contentRequest?: SessionContentRequest
 }
 
@@ -1016,14 +1088,10 @@ export function SessionInspectorDrawer({
 
   // Drop the clipped leaf while the unclipped route is in play, otherwise the
   // 2000-char stub renders next to (or instead of) the text this route exists for.
-  const inspectorData =
-    contentRequest && rawContent !== null && rawContent !== undefined && typeof rawContent === 'object'
-      ? { ...rawContent, content: undefined }
-      : rawContent
-  const fallbackContent =
-    rawContent !== null && rawContent !== undefined && typeof rawContent === 'object'
-      ? rawContent.content
-      : undefined
+  const rawRecord =
+    rawContent !== null && rawContent !== undefined && typeof rawContent === 'object' ? rawContent : null
+  const inspectorData = contentRequest && rawRecord ? { ...rawRecord, content: undefined } : rawContent
+  const fallbackContent = rawRecord && 'content' in rawRecord ? rawRecord.content : undefined
 
   return (
     <div className="relative z-50">

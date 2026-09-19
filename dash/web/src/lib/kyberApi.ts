@@ -80,6 +80,143 @@ export async function fetchKyberSessions(harness?: string | null): Promise<Kyber
   return list
 }
 
+// ── Session view payload (/api/kyber/session/:id) ───────────────────────────
+//
+// The document `buildSessionRow` (src/canon/sessions.ts) writes into the
+// session table and `KyberBridge.getSessionPayload` serves verbatim. Typed
+// here rather than imported from the engine so the web tree stays
+// self-contained: when the `ContextReport` contract (spec task 5.1) lands,
+// Stream D replaces these names with type-only imports from
+// `src/analysis/report/types.ts` and rebuilds the consumers against it.
+
+/** A figure the source could not measure, serialized as its reason object. */
+export type KyberUnmeasurable = { availability: 'not_measurable'; reason: string }
+
+/** A bucket or input total: a token count, or the explicit refusal with its reason. */
+export type KyberMeasuredFigure = number | KyberUnmeasurable
+
+/** Context composition of one turn, or of the session payload's `first`/`last` edge. */
+export interface KyberContextBucket {
+  buckets: Record<string, KyberMeasuredFigure>
+  reported_input: KyberMeasuredFigure
+}
+
+/**
+ * One turn of the serialized context analysis — the engine's `TurnPressure`
+ * with its per-server map turned into an object for JSON.
+ */
+export interface KyberContextTurn {
+  index: number
+  buckets: Record<string, KyberMeasuredFigure>
+  toolDefinitionsByServer: Record<string, number>
+  builtinToolDefinitionTokens: number
+  strippedInstructionBlocks: { count: number; tokens: number }
+  bucketedTokens: number
+  residual: { tokens: number; attribution: string }
+  headroom: number
+  pressure: number
+  accumulationRate: number
+  freshInput: number
+  freshJumpFactor?: number
+  freshInputJump?: { previous: number; factor: number }
+  // Read defensively: the bucket drill-down probes a reported-input figure on
+  // turn rows too, though the engine's TurnPressure does not carry one.
+  reported_input?: KyberMeasuredFigure
+  // Read defensively: legacy rows numbered turns under `turn`.
+  turn?: number
+}
+
+export type KyberSessionContext = {
+  measurable: true
+  contextLimit: number
+  turns: KyberContextTurn[]
+  residualTotal: number
+  derivedCounts: boolean
+  freshJumpFactor: number
+  flaggedTurns: number[]
+  sessionAccumulationRate: number
+  first: KyberContextBucket
+  last: KyberContextBucket
+  unmeasuredTurns: number
+} | {
+  measurable: false
+  reason: string
+  turns?: number
+  contextLimit?: number
+  first: KyberContextBucket
+  last: KyberContextBucket
+  unmeasuredTurns: number
+}
+
+/**
+ * One turn row of the served payload. The ten fields up to `reasoning` are
+ * what `buildSessionRow` emits today; the rest are read defensively for
+ * richer or older rows and are not part of the current writer's shape —
+ * which is also why the row carries an index signature.
+ */
+export interface KyberSessionTurnRow {
+  index: number
+  spanId?: string
+  timestamp?: string
+  model?: string | null
+  input?: number
+  output?: number
+  fresh?: number
+  cache_read?: number
+  cache_creation?: number
+  reasoning?: number | null
+  // Defensive reads, not emitted by the current writer:
+  turn?: number
+  cumulative_input?: number
+  durationMs?: number
+  buckets?: Record<string, KyberMeasuredFigure>
+  content?: KyberTurnContentShadow | string | null
+  has_tool_defs?: boolean
+  [key: string]: unknown
+}
+
+/** The tool-definition rows legacy turn content carried under `tool_definitions`. */
+export interface KyberToolDefinitionShadow {
+  name?: string
+  function?: { name?: string }
+  [key: string]: unknown
+}
+
+/** The content object legacy turn rows carried beside their token figures. */
+export interface KyberTurnContentShadow {
+  tool_definitions?: KyberToolDefinitionShadow[]
+  input_messages?: KyberMessageLike[]
+  output_messages?: KyberMessageLike[]
+  prompt_text?: unknown
+  response_text?: unknown
+  reasoning_text?: unknown
+  thinking_text?: unknown
+  [key: string]: unknown
+}
+
+/**
+ * A message as any harness emits it. The content routes serve harness-native
+ * payloads verbatim, so the views probe the common aliases instead of
+ * assuming one shape; every leaf stays unknown and is narrowed where used.
+ */
+export interface KyberMessageLike {
+  type?: string
+  role?: unknown
+  name?: unknown
+  content?: unknown
+  text?: unknown
+  raw?: unknown
+  parts?: unknown
+  response?: unknown
+  result?: unknown
+  output?: unknown
+  arguments?: unknown
+  input?: unknown
+  args?: unknown
+  parameters?: unknown
+  [key: string]: unknown
+}
+
 export interface KyberSessionContentPart {
   spanId: string
   part: string

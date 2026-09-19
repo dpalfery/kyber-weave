@@ -14,8 +14,8 @@ import {
 import type { KyberHarnessSummary } from '@/lib/kyberApi'
 
 // Ensure minimal browser environment shims in Node
-if (typeof (globalThis as any).window === 'undefined') {
-  ;(globalThis as any).window = {
+if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
+  ;(globalThis as { window?: unknown }).window = {
     matchMedia: () => ({
       matches: false,
       addEventListener: () => {},
@@ -29,8 +29,8 @@ if (typeof (globalThis as any).window === 'undefined') {
   }
 }
 
-if (typeof (globalThis as any).document === 'undefined') {
-  ;(globalThis as any).document = {
+if (typeof (globalThis as { document?: unknown }).document === 'undefined') {
+  ;(globalThis as { document?: unknown }).document = {
     documentElement: {
       classList: {
         contains: () => false,
@@ -54,7 +54,7 @@ function clearHooks() {
 const reactInternals = (
   React as unknown as {
     __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
-      H?: any
+      H?: Record<string, unknown>
     }
   }
 ).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE

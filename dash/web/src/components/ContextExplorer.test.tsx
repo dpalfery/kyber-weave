@@ -20,7 +20,7 @@ function clearHooks() {
 
 const reactInternals = (
   React as unknown as {
-    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: any }
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: Record<string, unknown> }
   }
 ).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
 
@@ -152,10 +152,11 @@ describe('ContextExplorer: canonical session-list contract', () => {
       onSelectSession,
     })
 
-    let parentLink: any = null
-    const walk = (node: any) => {
-      if (!node || parentLink) return
-      if (node.props?.['data-testid'] === 'parent-session-link') {
+    let parentLink: React.ReactElement | null = null
+    const walk = (node: unknown): void => {
+      if (!React.isValidElement(node) || parentLink) return
+      const props = node.props as Record<string, unknown> | undefined
+      if (props?.['data-testid'] === 'parent-session-link') {
         parentLink = node
         return
       }

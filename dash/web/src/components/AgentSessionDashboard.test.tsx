@@ -7,19 +7,24 @@ import {
   AgentSessionContent,
   AgentSessionLoader,
   type AgentSessionPayload,
+  type DrawerContent,
   formatDuration,
   formatCredits,
 } from './AgentSessionDashboard.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
+import type { TimelineNode } from './analysis/TimelineView.js'
+import type { KyberSessionContext } from '../lib/kyberApi.js'
 
 // Set up React 19 test hook dispatcher so components using hooks can be rendered in tests
-const reactInternals = (
-  React as unknown as {
-    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
-      H?: any
-    }
+type ReactInternals = {
+  __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
+    H?: Record<string, unknown>
   }
-).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+}
+const internalsOf = (): ReactInternals['__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE'] =>
+  (React as unknown as ReactInternals).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+
+const reactInternals = internalsOf()
 
 if (reactInternals) {
   reactInternals.H = {
@@ -38,7 +43,7 @@ function renderHtml(element: React.ReactElement | null | undefined): string {
   return renderToStaticMarkup(element)
 }
 
-function findElementByTestId(node: unknown, testId: string): React.ReactElement<any> | null {
+function findElementByTestId(node: unknown, testId: string): React.ReactElement | null {
   if (node == null) return null
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -48,7 +53,7 @@ function findElementByTestId(node: unknown, testId: string): React.ReactElement<
     return null
   }
   if (React.isValidElement(node)) {
-    const props = node.props as Record<string, any>
+    const props = node.props as Record<string, unknown>
     if (props && props['data-testid'] === testId) {
       return node
     }
@@ -173,6 +178,8 @@ const sampleSession: AgentSessionPayload = {
       output: 1800,
     },
   ],
+  // The fixture carries the context fields this file exercises; the served
+  // contract is the full KyberSessionContext.
   context: {
     measurable: true,
     contextLimit: 200000,
@@ -190,7 +197,7 @@ const sampleSession: AgentSessionPayload = {
         },
       },
     ],
-  },
+  } as unknown as KyberSessionContext,
   tools: [
     {
       name: 'read_file',
@@ -339,7 +346,7 @@ const b1Session = {
     ],
     first: { buckets: { system_prompt: 400 }, reported_input: 4200 },
     last: { buckets: { system_prompt: 400 }, reported_input: 4200 },
-  },
+  } as unknown as KyberSessionContext,
   // B1 serializes tool metadata in `schema`; tools is deliberately free of
   // content fields such as descriptions or definitions.
   tools: [{ schema_tokens: 300, invocations: 0, turns_resident: 2 }],
@@ -580,7 +587,7 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
     })
     const link = findElementByTestId(tree, 'parent-session-link')
     expect(link).not.toBeNull()
-    link?.props.onClick()
+    ;(link!.props as { onClick: () => void }).onClick()
     expect(onSelectSession).toHaveBeenCalledWith('parent-sess-888888')
   })
 
@@ -598,7 +605,7 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
       context: {
         measurable: false,
         reason,
-      },
+      } as unknown as KyberSessionContext,
     }
 
     const html = renderHtml(<AgentSessionDashboard session={unavailableBucketSession} />)
@@ -746,21 +753,22 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
       timeline: singleSpanTimeline,
     }
     const tree = AgentSessionContent({ session: singleTimelineSession })
-    let timelineViewEl: any = null
-    const walk = (node: any) => {
-      if (!node) return
-      if (node.props?.root && node.props?.onSelectNode) {
+    let timelineViewEl: React.ReactElement | null = null
+    const walk = (node: unknown): void => {
+      if (!React.isValidElement(node)) return
+      const props = node.props as Record<string, unknown> | undefined
+      if (props?.root && props?.onSelectNode) {
         timelineViewEl = node
         return
       }
-      if (node.props?.children) {
-        React.Children.forEach(node.props.children, walk)
+      if (props?.children) {
+        React.Children.forEach(props.children, walk)
       }
     }
     walk(tree)
 
     expect(timelineViewEl).not.toBeNull()
-    const root = timelineViewEl.props.root
+    const root = (timelineViewEl!.props as { root: TimelineNode }).root
     expect(root.spanId).toBe('session-root')
     expect(root.children).toHaveLength(1)
     expect(root.children[0].spanId).toBe('root-span-1')
@@ -821,7 +829,7 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
           kind: 'tool',
           durationMs: 500,
           offsetMs: 0,
-        } as any,
+        },
       ],
     }
     const html = renderHtml(<AgentSessionDashboard session={sessionWithKindOnly} initialTimelineTab="bars" />)
@@ -834,9 +842,9 @@ describe('AgentSessionDashboard: Assembly and Subpanels', () => {
 
 describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
   it('routes turn bands, tool rows, and timeline spans through full-content requests', () => {
-    const internals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+    const internals = internalsOf()
     const originalUseState = internals?.H?.useState
-    const state: any[] = []
+    const state: unknown[] = []
     let stateCursor = 0
 
     const renderWithState = (initialTimelineTab?: 'tree' | 'bars') => {
@@ -844,7 +852,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       return AgentSessionContent({ session: sampleSession, initialTimelineTab })
     }
 
-    const drawerFrom = (node: unknown): React.ReactElement<any> | null => {
+    const drawerFrom = (node: unknown): React.ReactElement | null => {
       if (node == null) return null
       if (Array.isArray(node)) {
         for (const child of node) {
@@ -859,15 +867,15 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
     }
 
     if (internals?.H) {
-      internals.H.useState = (initial: any) => {
+      internals.H.useState = (initial: unknown) => {
         const index = stateCursor++
         if (!(index in state)) {
-          state[index] = typeof initial === 'function' ? initial() : initial
+          state[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
         }
         return [
           state[index],
-          (next: any) => {
-            state[index] = typeof next === 'function' ? next(state[index]) : next
+          (next: unknown) => {
+            state[index] = typeof next === 'function' ? (next as (s: unknown) => unknown)(state[index]) : next
           },
         ]
       }
@@ -875,35 +883,38 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
 
     try {
       const turnTree = renderWithState()
-      let spendCharts: any = null
-      const findSpendCharts = (node: any): void => {
-        if (!node || spendCharts) return
-        if (node.props?.onSelectTurn && node.props?.session) {
+      let spendCharts: React.ReactElement | null = null
+      const findSpendCharts = (node: unknown): void => {
+        if (!React.isValidElement(node) || spendCharts) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
           spendCharts = node
           return
         }
-        React.Children.forEach(node.props?.children, findSpendCharts)
+        if (props?.children) {
+          React.Children.forEach(props.children, findSpendCharts)
+        }
       }
       findSpendCharts(turnTree)
       expect(spendCharts).not.toBeNull()
-      spendCharts.props.onSelectTurn(1, 'tool_definitions')
-      expect(drawerFrom(renderWithState())?.props.contentRequest).toEqual({
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
+      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
         part: 'tool_definitions',
       })
 
       const toolTree = renderWithState()
-      findElementByTestId(toolTree, 'tool-row-read_file')?.props.onClick()
-      expect(drawerFrom(renderWithState())?.props.contentRequest).toEqual({
+      ;(findElementByTestId(toolTree, 'tool-row-read_file')!.props as { onClick: () => void }).onClick()
+      expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
         part: 'tool_definitions',
       })
 
       const spanTree = renderWithState('bars')
-      findElementByTestId(spanTree, 'timeline-bar-row')?.props.onClick()
-      expect(drawerFrom(renderWithState('bars'))?.props.contentRequest).toEqual({
+      ;(findElementByTestId(spanTree, 'timeline-bar-row')!.props as { onClick: () => void }).onClick()
+      expect((drawerFrom(renderWithState('bars'))!.props as { contentRequest?: unknown }).contentRequest).toEqual({
         sessionId: 'sess-abc-123',
         span: 'root-span-1',
       })
@@ -917,19 +928,19 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
   it('opens drawer when clicking a tool row', () => {
     let capturedOpen = false
     let capturedTitle = ''
-    let capturedContent: any = null
+    let capturedContent: unknown = null
 
-    const reactInternals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+    const reactInternals = internalsOf()
     const origState = reactInternals?.H?.useState
     if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: any) => {
+      reactInternals.H.useState = (initial: unknown) => {
         if (typeof initial === 'boolean') {
           return [capturedOpen, (v: boolean) => { capturedOpen = v }]
         }
         if (initial === '') {
           return [capturedTitle, (t: string) => { capturedTitle = t }]
         }
-        return [capturedContent, (c: any) => { capturedContent = c }]
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
       }
     }
 
@@ -937,13 +948,13 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       const tree = AgentSessionDashboard({ session: sampleSession })
       const toolRow = findElementByTestId(tree, 'tool-row-read_file')
       expect(toolRow).not.toBeNull()
-      expect(toolRow?.props.onClick).toBeTypeOf('function')
+      expect((toolRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
 
-      toolRow?.props.onClick()
+      ;(toolRow!.props as { onClick: () => void }).onClick()
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Tool: read_file')
       expect(capturedContent).toBeDefined()
-      expect(capturedContent.tool.name).toBe('read_file')
+      expect((capturedContent as { tool: { name: string } }).tool.name).toBe('read_file')
     } finally {
       if (reactInternals?.H) {
         reactInternals.H.useState = origState
@@ -954,19 +965,19 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
   it('opens drawer when clicking a timeline span in duration bars view', () => {
     let capturedOpen = false
     let capturedTitle = ''
-    let capturedContent: any = null
+    let capturedContent: unknown = null
 
-    const reactInternals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+    const reactInternals = internalsOf()
     const origState = reactInternals?.H?.useState
     if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: any) => {
+      reactInternals.H.useState = (initial: unknown) => {
         if (typeof initial === 'boolean') {
           return [capturedOpen, (v: boolean) => { capturedOpen = v }]
         }
         if (initial === '') {
           return [capturedTitle, (t: string) => { capturedTitle = t }]
         }
-        return [capturedContent, (c: any) => { capturedContent = c }]
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
       }
     }
 
@@ -974,9 +985,9 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       const tree = AgentSessionDashboard({ session: sampleSession, initialTimelineTab: 'bars' })
       const barRow = findElementByTestId(tree, 'timeline-bar-row')
       expect(barRow).not.toBeNull()
-      expect(barRow?.props.onClick).toBeTypeOf('function')
+      expect((barRow!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
 
-      barRow?.props.onClick()
+      ;(barRow!.props as { onClick: () => void }).onClick()
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toContain('Span:')
       expect(capturedContent).toBeDefined()
@@ -990,33 +1001,34 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
   it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with 1-based index and populates bucket analysis data', () => {
     let capturedOpen = false
     let capturedTitle = ''
-    let capturedContent: any = null
+    let capturedContent: unknown = null
 
-    const reactInternals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+    const reactInternals = internalsOf()
     const origState = reactInternals?.H?.useState
     if (reactInternals?.H) {
-      reactInternals.H.useState = (initial: any) => {
+      reactInternals.H.useState = (initial: unknown) => {
         if (typeof initial === 'boolean') {
           return [capturedOpen, (v: boolean) => { capturedOpen = v }]
         }
         if (typeof initial === 'string') {
           return [capturedTitle, (t: string) => { capturedTitle = t }]
         }
-        return [capturedContent, (c: any) => { capturedContent = c }]
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
       }
     }
 
     try {
       const tree = AgentSessionContent({ session: sampleSession })
-      let spendChartsEl: any = null
-      const walk = (node: any) => {
-        if (!node) return
-        if (node.props?.onSelectTurn && node.props?.session) {
+      let spendChartsEl: React.ReactElement | null = null
+      const walk = (node: unknown): void => {
+        if (!React.isValidElement(node)) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
           spendChartsEl = node
           return
         }
-        if (node.props?.children) {
-          React.Children.forEach(node.props.children, walk)
+        if (props?.children) {
+          React.Children.forEach(props.children, walk)
         }
       }
       walk(tree)
@@ -1024,27 +1036,36 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       expect(spendChartsEl).not.toBeNull()
 
       // 1-based turn lookup: Turn 1
-      spendChartsEl.props.onSelectTurn(1)
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1')
-      expect(capturedContent.spanId).toBe('turn-span-1')
+      expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-1')
 
       // 1-based turn lookup: Turn 2
-      spendChartsEl.props.onSelectTurn(2)
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(2)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 2')
-      expect(capturedContent.spanId).toBe('turn-span-2')
+      expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-2')
 
       // 1-based turn lookup with bucket: tool_definitions
-      spendChartsEl.props.onSelectTurn(1, 'tool_definitions')
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1 · tool_definitions')
       expect(capturedContent).toBeDefined()
-      expect(capturedContent.bucket).toBe('tool_definitions')
-      expect(capturedContent.tokens).toBe(2800)
-      expect(capturedContent.total).toBe(45500)
-      expect(capturedContent.label).toBe('Tool definitions')
-      expect(capturedContent.content).toEqual(sampleSession.turns![0].content.tool_definitions)
+      const bucketData = capturedContent as {
+        bucket?: string
+        tokens?: number
+        total?: number
+        label?: string
+        content?: unknown
+      }
+      expect(bucketData.bucket).toBe('tool_definitions')
+      expect(bucketData.tokens).toBe(2800)
+      expect(bucketData.total).toBe(45500)
+      expect(bucketData.label).toBe('Tool definitions')
+      expect(bucketData.content).toEqual(
+        (sampleSession.turns![0].content as { tool_definitions?: unknown }).tool_definitions
+      )
 
       // Verify ContextBucketInspector properly renders the populated bucket data
       const drawerHtml = renderHtml(
@@ -1052,7 +1073,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
           open={true}
           onClose={() => {}}
           title={capturedTitle}
-          rawContent={capturedContent}
+          rawContent={capturedContent as DrawerContent}
         />
       )
       expect(drawerHtml).toContain('data-testid="context-bucket-inspector"')

@@ -497,7 +497,7 @@ describe('ContextCompositionChart', () => {
     clearHooks()
     // Initial render in bars mode
     hookIndex = 0
-    const initialTree = (ContextCompositionChart as (p: any) => React.ReactElement)({
+    const initialTree = (ContextCompositionChart as (p: Record<string, unknown>) => React.ReactElement)({
       context: sampleContext,
     })
     const barViews = findAllElements(
@@ -516,12 +516,12 @@ describe('ContextCompositionChart', () => {
     // Click heatmap tab
     const tabBtn = heatmapTabs[0]!
     if (typeof tabBtn.props.onClick === 'function') {
-      tabBtn.props.onClick({ stopPropagation: vi.fn() } as any)
+      tabBtn.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
     }
 
     // Re-render after state change
     hookIndex = 0
-    const heatmapTree = (ContextCompositionChart as (p: any) => React.ReactElement)({
+    const heatmapTree = (ContextCompositionChart as (p: Record<string, unknown>) => React.ReactElement)({
       context: sampleContext,
     })
     const heatmapViews = findAllElements(
@@ -542,11 +542,11 @@ describe('ContextCompositionChart', () => {
     )
     expect(barTabs.length).toBe(1)
     if (typeof barTabs[0]!.props.onClick === 'function') {
-      barTabs[0]!.props.onClick({ stopPropagation: vi.fn() } as any)
+      barTabs[0]!.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
     }
 
     hookIndex = 0
-    const toggledBackTree = (ContextCompositionChart as (p: any) => React.ReactElement)({
+    const toggledBackTree = (ContextCompositionChart as (p: Record<string, unknown>) => React.ReactElement)({
       context: sampleContext,
     })
     const backToBars = findAllElements(
@@ -577,7 +577,7 @@ describe('ContextCompositionChart', () => {
     expect(toolDefLegend).toBeDefined()
 
     if (toolDefLegend && typeof toolDefLegend.props.onClick === 'function') {
-      toolDefLegend.props.onClick({ stopPropagation: vi.fn() } as any)
+      toolDefLegend.props.onClick({ stopPropagation: vi.fn() } as { stopPropagation: () => void })
       expect(onSelect).toHaveBeenCalledWith(2, 'tool_definitions')
     }
   })

@@ -20,7 +20,7 @@ function clearHooks() {
 
 const reactInternals = (
   React as unknown as {
-    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: any }
+    __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: Record<string, unknown> }
   }
 ).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
 
@@ -64,7 +64,7 @@ function renderHtml(element: React.ReactElement | null | undefined, qc = createT
   )
 }
 
-function findNodeByTestId(node: unknown, testId: string): React.ReactElement<any> | null {
+function findNodeByTestId(node: unknown, testId: string): React.ReactElement | null {
   if (node == null) return null
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -74,7 +74,7 @@ function findNodeByTestId(node: unknown, testId: string): React.ReactElement<any
     return null
   }
   if (React.isValidElement(node)) {
-    const props = node.props as Record<string, any>
+    const props = node.props as Record<string, unknown>
     if (props && props['data-testid'] === testId) {
       return node
     }

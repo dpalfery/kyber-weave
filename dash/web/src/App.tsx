@@ -182,7 +182,8 @@ export function KyberQuarantinePanel() {
     return <QuarantineView entries={[]} />
   }
 
-  const entries: QuarantineEntry[] = rawEntries.map((e: any, idx: number) => {
+  const entries: QuarantineEntry[] = rawEntries.map((raw, idx: number) => {
+    const e = raw as Record<string, unknown>
     let ns: string[] = []
     if (Array.isArray(e.namespaces)) {
       ns = e.namespaces.map(String)
@@ -226,13 +227,16 @@ export function KyberProblemsPanel() {
     return <ProblemsView problems={[]} />
   }
 
-  const problems: ProblemEntry[] = rawProblems.map((p: any) => ({
-    severity: (p.severity === 'error' ? 'error' : 'warning') as 'error' | 'warning',
-    code: String(p.code || 'unknown'),
-    message: String(p.message || ''),
-    location: p.location || p.at || p.harness || undefined,
-    spanId: p.spanId || p.span_id || undefined,
-  }))
+  const problems: ProblemEntry[] = rawProblems.map((raw) => {
+    const p = raw as Record<string, unknown>
+    return {
+      severity: (p.severity === 'error' ? 'error' : 'warning') as 'error' | 'warning',
+      code: String(p.code || 'unknown'),
+      message: String(p.message || ''),
+      location: (p.location || p.at || p.harness || undefined) as string | undefined,
+      spanId: (p.spanId || p.span_id || undefined) as string | undefined,
+    }
+  })
 
   return <ProblemsView problems={problems} />
 }

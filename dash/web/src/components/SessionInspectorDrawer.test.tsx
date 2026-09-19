@@ -21,7 +21,7 @@ import type { KyberSessionContentResult } from '../lib/kyberApi.js'
 const reactInternals = (
   React as unknown as {
     __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: {
-      H?: any
+      H?: Record<string, unknown>
     }
   }
 ).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
@@ -43,7 +43,7 @@ function renderHtml(element: React.ReactElement | null | undefined): string {
   return renderToStaticMarkup(element)
 }
 
-function findElementByTestId(node: unknown, testId: string): React.ReactElement<any> | null {
+function findElementByTestId(node: unknown, testId: string): React.ReactElement | null {
   if (node == null) return null
   if (Array.isArray(node)) {
     for (const child of node) {
@@ -53,7 +53,7 @@ function findElementByTestId(node: unknown, testId: string): React.ReactElement<
     return null
   }
   if (React.isValidElement(node)) {
-    const props = node.props as Record<string, any>
+    const props = node.props as Record<string, unknown>
     if (props && props['data-testid'] === testId) {
       return node
     }
@@ -65,8 +65,8 @@ function findElementByTestId(node: unknown, testId: string): React.ReactElement<
   return null
 }
 
-function findDetailsNodes(element: React.ReactElement | null | undefined): any[] {
-  const matches: any[] = []
+function findDetailsNodes(element: React.ReactElement | null | undefined): React.ReactElement[] {
+  const matches: React.ReactElement[] = []
   const walk = (node: unknown): void => {
     if (node == null) return
     if (Array.isArray(node)) {
@@ -140,7 +140,7 @@ Suffix text`
     expect(details.length).toBe(1)
 
     const detailsEl = details[0]
-    expect(detailsEl.props.className).toContain('group border border-border rounded my-1 bg-card/60')
+    expect((detailsEl!.props as { className?: string }).className).toContain('group border border-border rounded my-1 bg-card/60')
 
     const html = renderHtml(element)
     expect(html).toContain('&lt;instructions&gt;')
@@ -479,18 +479,18 @@ describe('SessionInspectorDrawer: InspectorContent', () => {
 
 function renderDrawerComponent(
   props: React.ComponentProps<typeof SessionInspectorDrawer>,
-  onEffect?: (effect: () => void | (() => void), deps?: any[]) => void
+  onEffect?: (effect: () => void | (() => void), deps?: unknown[]) => void
 ) {
-  const internals = (React as any).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+  const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?: { H?: Record<string, unknown> } }).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
   const prevDispatcher = internals?.H
   try {
     if (internals) {
       internals.H = {
-        useEffect: (effect: any, deps: any) => {
-          onEffect?.(effect, deps)
+        useEffect: (effect: () => void | (() => void), deps: unknown) => {
+          onEffect?.(effect, deps as unknown[] | undefined)
         },
-        useState: (initial: any) => [typeof initial === 'function' ? initial() : initial, () => {}],
-        useMemo: (factory: any) => factory(),
+        useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => {}],
+        useMemo: (factory: () => unknown) => factory(),
       }
     }
     return SessionInspectorDrawer(props)
@@ -535,12 +535,12 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
   it('registers keydown listener in SessionInspectorDrawer via useEffect and invokes onClose on Escape', () => {
     let capturedEffect: (() => (() => void) | void) | null = null
     const originalWindow = globalThis.window
-    const listeners: Record<string, (e: any) => void> = {}
+    const listeners: Record<string, (e: unknown) => void> = {}
     const mockWindow = {
-      addEventListener: vi.fn((event: string, handler: any) => {
+      addEventListener: vi.fn((event: string, handler: (e: unknown) => void) => {
         listeners[event] = handler
       }),
-      removeEventListener: vi.fn((event: string, handler: any) => {
+      removeEventListener: vi.fn((event: string, handler: (e: unknown) => void) => {
         if (listeners[event] === handler) {
           delete listeners[event]
         }
@@ -548,7 +548,7 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
     }
 
     try {
-      globalThis.window = mockWindow as any
+      globalThis.window = mockWindow as unknown as Window & typeof globalThis
       const onClose = vi.fn()
 
       // Execute actual SessionInspectorDrawer component function to trigger its useEffect
@@ -590,7 +590,8 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
       if (originalWindow !== undefined) {
         globalThis.window = originalWindow
       } else {
-        delete (globalThis as any).window
+        const g = globalThis as { window?: unknown }
+        delete g.window
       }
     }
   })
@@ -604,7 +605,7 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
     }
 
     try {
-      globalThis.window = mockWindow as any
+      globalThis.window = mockWindow as unknown as Window & typeof globalThis
       const onClose = vi.fn()
 
       renderDrawerComponent(
@@ -626,7 +627,8 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
       if (originalWindow !== undefined) {
         globalThis.window = originalWindow
       } else {
-        delete (globalThis as any).window
+        const g = globalThis as { window?: unknown }
+        delete g.window
       }
     }
   })
@@ -641,9 +643,9 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
 
     const backdrop = findElementByTestId(tree, 'drawer-backdrop')
     expect(backdrop).not.toBeNull()
-    expect(backdrop?.props.onClick).toBeTypeOf('function')
+    expect((backdrop!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
 
-    backdrop?.props.onClick()
+    ;(backdrop!.props as { onClick: () => void }).onClick()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -657,9 +659,9 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
 
     const closeButton = findElementByTestId(tree, 'drawer-close-button')
     expect(closeButton).not.toBeNull()
-    expect(closeButton?.props.onClick).toBeTypeOf('function')
+    expect((closeButton!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
 
-    closeButton?.props.onClick()
+    ;(closeButton!.props as { onClick: () => void }).onClick()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
@@ -673,10 +675,10 @@ describe('SessionInspectorDrawer: Drawer Modal Transitions and Interactions', ()
 
     const panel = findElementByTestId(tree, 'session-inspector-drawer')
     expect(panel).not.toBeNull()
-    expect(panel?.props.onClick).toBeTypeOf('function')
+    expect((panel!.props as { onClick?: unknown }).onClick).toBeTypeOf('function')
 
     const stopPropagation = vi.fn()
-    panel?.props.onClick({ stopPropagation } as any)
+    ;(panel!.props as { onClick: (e: { stopPropagation: () => void }) => void }).onClick({ stopPropagation })
     expect(stopPropagation).toHaveBeenCalledTimes(1)
     expect(onClose).not.toHaveBeenCalled()
   })
