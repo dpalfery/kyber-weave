@@ -227,13 +227,13 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - A non-loopback `Host` is still rejected.
   - Implement both routes in `src/server/routes.ts`.
   - _Requirements: 5.5, 6.7, 7.1, 7.5_
-- [ ] 5.6 Receiver health endpoint
+- [x] 5.6 Receiver health endpoint
   - Stream B.
   - Test that `GET /healthz` returns `{"service":"kyberdash-otlp","version":…}` while other
     `GET` paths still return 404 or 405.
   - Implement the route in `src/otel/receiver.ts`.
   - _Requirements: 10.6, 10.8_
-- [ ] 5.7 Listening line, view paths and `--view`
+- [x] 5.7 Listening line, view paths and `--view`
   - Stream B.
   - Create `dash/src/server/view-paths.json`, the one list of view path patterns shared by the
     CLI, the web router and the tray.

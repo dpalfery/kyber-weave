@@ -30,6 +30,7 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
@@ -37,9 +38,20 @@ const execFileAsync = promisify(execFile)
 /** The OTLP/HTTP standard port (R2.1). */
 export const DEFAULT_OTLP_PORT = 4318
 
-/** The only endpoint this receiver serves (R2.1). */
+/** OTLP/HTTP trace export path (R2.1). */
 export const OTLP_TRACES_PATH = '/v1/traces'
 export const OTLP_LOGS_PATH = '/v1/logs'
+
+/**
+ * Liveness probe the tray uses to tell *this* receiver from some other
+ * process sitting on 4318 (R10.6, R10.8). Matched before the POST-only
+ * rule so a GET here is not 405'd as an OTLP method error.
+ */
+export const OTLP_HEALTHZ_PATH = '/healthz'
+
+const KYBERDASH_VERSION = String(
+  (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
+)
 
 /**
  * Request bodies are whole `ExportTraceServiceRequest`s; collectors batch.
@@ -1154,6 +1166,17 @@ export class OtlpReceiver {
 
   private async dispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = (req.url ?? '/').split('?')[0]
+    if (path === OTLP_HEALTHZ_PATH) {
+      if (req.method !== 'GET') {
+        res.setHeader('Allow', 'GET')
+        respondJson(res, 405, {
+          error: { code: 'OTLP_METHOD_NOT_ALLOWED', message: `${req.method} is not supported: use GET` },
+        })
+        return
+      }
+      respondJson(res, 200, { service: 'kyberdash-otlp', version: KYBERDASH_VERSION })
+      return
+    }
     if (path !== OTLP_TRACES_PATH && path !== OTLP_LOGS_PATH) {
       respondJson(res, 404, {
         error: {

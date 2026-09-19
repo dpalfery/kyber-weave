@@ -7,6 +7,8 @@
 // JSON body relabelled — so the equality assertion exercises the receiver's
 // protobuf decoder rather than trusting it.
 
+import { createRequire } from 'node:module'
+
 import { afterAll, describe, expect, it } from 'vitest'
 
 import {
@@ -24,6 +26,10 @@ import {
   type OtlpLog,
   type OtlpSpan,
 } from './receiver.js'
+
+const PACKAGE_VERSION = String(
+  (createRequire(import.meta.url)('../../package.json') as { version?: string }).version,
+)
 
 // ---------------------------------------------------------------------------
 // One fixture, two encodings
@@ -737,5 +743,31 @@ describe('OtlpReceiver malformed payloads', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ acceptedSpans: 0 })
     expect(store.spans).toEqual([])
+  })
+})
+
+describe('OtlpReceiver GET /healthz (R10.6, R10.8)', () => {
+  it('identifies this process as the KyberDash receiver, with the build version', async () => {
+    const { url } = await startReceiver()
+    const response = await fetch(`${url}/healthz`)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(await response.json()).toEqual({
+      service: 'kyberdash-otlp',
+      version: PACKAGE_VERSION,
+    })
+  })
+
+  it('still returns 404 or 405 for every other GET path', async () => {
+    const { url } = await startReceiver()
+
+    expect((await fetch(`${url}/`)).status).toBe(404)
+    expect((await fetch(`${url}/v1/metrics`)).status).toBe(404)
+
+    const traces = await fetch(`${url}${OTLP_TRACES_PATH}`)
+    expect(traces.status).toBe(405)
+    const logs = await fetch(`${url}${OTLP_LOGS_PATH}`)
+    expect(logs.status).toBe(405)
   })
 })

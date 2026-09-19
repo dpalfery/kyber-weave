@@ -62,6 +62,7 @@ describe('GET /api/kyber/span/:spanId/attributes', () => {
     server = await runWebDashboard({
       port: 0,
       open: false,
+      writeStdout: () => {},
       kyberBridge: new KyberBridge({
         store,
         canonDb: new DatabaseSync(':memory:'),

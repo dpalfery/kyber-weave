@@ -22,7 +22,7 @@ describe('web dashboard server: serving and the loopback guard', () => {
     dashDir = await mkdtemp(join(tmpdir(), 'kyberdash-web-ui-'))
     await writeFile(join(dashDir, 'index.html'), '<!doctype html><title>CodeBurn</title><script type="module" src="/app.js"></script>')
     process.env['KYBERDASH_DASH_DIR'] = dashDir
-    server = await runWebDashboard({ port: 0, open: false })
+    server = await runWebDashboard({ port: 0, open: false, writeStdout: () => {} })
     port = (server.address() as AddressInfo).port
     base = `http://127.0.0.1:${port}`
   })
@@ -236,7 +236,7 @@ describe('web dashboard server: /api/kyber/* routes', () => {
       ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
     })
 
-    server = await runWebDashboard({ port: 0, open: false, kyberBridge: testBridge })
+    server = await runWebDashboard({ port: 0, open: false, kyberBridge: testBridge, writeStdout: () => {} })
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 

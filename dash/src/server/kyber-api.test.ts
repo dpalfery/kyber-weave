@@ -331,7 +331,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
     })
 
-    server = await runWebDashboard({ port: 0, open: false, kyberBridge: testBridge })
+    server = await runWebDashboard({ port: 0, open: false, kyberBridge: testBridge, writeStdout: () => {} })
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
@@ -380,7 +380,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       process.env.AGENTDASH_DB = legacyPath
       process.env.KYBER_DB = legacyPath
       const canonicalBridge = new KyberBridge({ canonPath: ':memory:' })
-      const canonicalServer = await runWebDashboard({ port: 0, open: false, kyberBridge: canonicalBridge })
+      const canonicalServer = await runWebDashboard({ port: 0, open: false, kyberBridge: canonicalBridge, writeStdout: () => {} })
 
       try {
         const canonicalBase = `http://127.0.0.1:${(canonicalServer.address() as AddressInfo).port}`
@@ -578,7 +578,7 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       ]
       store.upsertMany(records)
       const comparisonBridge = new KyberBridge({ canonPath: ':memory:', store })
-      const comparisonServer = await runWebDashboard({ port: 0, open: false, kyberBridge: comparisonBridge })
+      const comparisonServer = await runWebDashboard({ port: 0, open: false, kyberBridge: comparisonBridge, writeStdout: () => {} })
 
       try {
         const comparisonBase = `http://127.0.0.1:${(comparisonServer.address() as AddressInfo).port}`

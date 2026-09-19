@@ -7,7 +7,7 @@ import { CATEGORY_LABELS, type DateRange, type ProjectSummary, type TaskCategory
 import { aggregateModelEfficiency } from '../metrics/model-efficiency.js'
 import { buildDurablePeriod, type DurablePeriod } from '../metrics/usage-aggregator.js'
 import { renderDashboard } from '../tui/dashboard.js'
-import { runWebDashboard } from './web.js'
+import { runWebDashboard, UnknownViewError } from './web.js'
 import { resolveCliName } from '../brand-overlay.js'
 import { formatDateRangeLabel, parseDateRangeFlags, parseDayFlag, getDateRange, toPeriod, type Period } from './cli-date.js'
 import { registerKyberCommands } from './register.js'
@@ -395,8 +395,19 @@ program
   .description('Open the local KyberDash web dashboard in your browser')
   .option('--port <number>', 'Port to listen on (falls back to a free port if taken)', parseInteger, 4747)
   .option('--no-open', 'Do not open the browser automatically')
-  .action(async (opts) => {
-    await runWebDashboard({ port: opts.port, open: opts.open })
+  .option('--view <path>', 'Open a dashboard view (for example finding/<id>)')
+  .action(async (opts: { port: number; open: boolean; view?: string }) => {
+    try {
+      await runWebDashboard({ port: opts.port, open: opts.open, view: opts.view })
+    } catch (err) {
+      if (err instanceof UnknownViewError) {
+        // Exit 2 is the bad-argument contract; starting the server and then
+        // refusing would leave the tray holding a listener it did not ask for.
+        process.stderr.write(`kyberdash web: ${err.message}\n`)
+        process.exit(2)
+      }
+      throw err
+    }
   })
 
 program

@@ -104,7 +104,7 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       ratesPath: join(tmpdir(), 'nonexistent-rates.json'),
     })
 
-    server = await runWebDashboard({ port: 0, open: false, kyberBridge: testBridge })
+    server = await runWebDashboard({ port: 0, open: false, kyberBridge: testBridge, writeStdout: () => {} })
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
   })
 
