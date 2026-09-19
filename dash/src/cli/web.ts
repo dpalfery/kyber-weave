@@ -2,12 +2,19 @@ import { createServer, type Server } from 'http'
 import { exec } from 'child_process'
 import { readFile } from 'fs/promises'
 import { existsSync } from 'fs'
+import { createRequire } from 'node:module'
 import { join, normalize, extname, dirname, sep } from 'path'
 import { fileURLToPath } from 'url'
 import { AddressInfo } from 'net'
 import { applyHtmlBrand, BRAND } from '../brand-overlay.js'
+import { REPORT_SCHEMA_VERSION } from '../analysis/report/types.js'
 import { KyberBridge } from '../server/bridge.js'
 import { handleKyberRequest } from '../server/routes.js'
+import { formatValidViewForms, matchesViewPath } from '../server/view-paths.js'
+
+const KYBERDASH_VERSION = String(
+  (createRequire(import.meta.url)('../../package.json') as { version?: string }).version ?? '0.0.0',
+)
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -58,13 +65,36 @@ function openBrowser(url: string): void {
   }
 }
 
+export class UnknownViewError extends Error {
+  readonly validForms: string
+
+  constructor(view: string, validForms: string) {
+    super(`unknown view "${view}". Valid forms: ${validForms}`)
+    this.name = 'UnknownViewError'
+    this.validForms = validForms
+  }
+}
+
+function joinViewUrl(origin: string, view: string | undefined): string {
+  if (view === undefined || view.trim() === '' || view.trim() === '/') return origin
+  return `${origin}/${view.trim().replace(/^\/+/, '')}`
+}
+
 export async function runWebDashboard(opts: {
   port: number
   open: boolean
+  view?: string
   kyberBridge?: KyberBridge
+  openUrl?: (url: string) => void
+  writeStdout?: (text: string) => void
 }): Promise<Server> {
+  if (opts.view !== undefined && !matchesViewPath(opts.view)) {
+    throw new UnknownViewError(opts.view, formatValidViewForms())
+  }
+
   const dashDir = resolveDashDir()
   const bridge = opts.kyberBridge ?? new KyberBridge()
+  const writeStdout = opts.writeStdout ?? ((text: string) => { process.stdout.write(text) })
 
   const serveIndexHtml = async (res: import('http').ServerResponse, filePath: string): Promise<void> => {
     const html = applyHtmlBrand(await readFile(filePath, 'utf8'))
@@ -139,11 +169,22 @@ export async function runWebDashboard(opts: {
   server.on('error', () => {})
 
   const url = `http://127.0.0.1:${port}`
+  // First, and machine-readable: the tray supervisor reads this line and
+  // nowhere else, so a human banner printed first would look like a hang (R5.7).
+  writeStdout(
+    `${JSON.stringify({
+      event: 'kyberdash.web.listening',
+      url,
+      pid: process.pid,
+      version: KYBERDASH_VERSION,
+      apiVersion: REPORT_SCHEMA_VERSION,
+    })}\n`,
+  )
   if (!dashDir) {
-    process.stdout.write(`\n  Dashboard UI is not built. Run: cd dash && npm install && npm run build\n`)
+    writeStdout(`\n  Dashboard UI is not built. Run: cd dash && npm install && npm run build\n`)
   }
-  process.stdout.write(`\n  ${BRAND.productName} dashboard at ${url}\n  Press Ctrl+C to stop.\n\n`)
-  if (opts.open) openBrowser(url)
+  writeStdout(`\n  ${BRAND.productName} dashboard at ${url}\n  Press Ctrl+C to stop.\n\n`)
+  if (opts.open) (opts.openUrl ?? openBrowser)(joinViewUrl(url, opts.view))
 
   const onSigint = () => {
     bridge.close()

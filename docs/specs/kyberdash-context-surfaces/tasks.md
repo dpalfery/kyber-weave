@@ -233,7 +233,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     `GET` paths still return 404 or 405.
   - Implement the route in `src/otel/receiver.ts`.
   - _Requirements: 10.6, 10.8_
-- [ ] 5.7 Listening line, view paths and `--view`
+- [x] 5.7 Listening line, view paths and `--view`
   - Stream B.
   - Create `dash/src/server/view-paths.json`, the one list of view path patterns shared by the
     CLI, the web router and the tray.
