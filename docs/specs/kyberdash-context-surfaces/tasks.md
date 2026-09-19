@@ -227,7 +227,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - A non-loopback `Host` is still rejected.
   - Implement both routes in `src/server/routes.ts`.
   - _Requirements: 5.5, 6.7, 7.1, 7.5_
-- [ ] 5.6 Receiver health endpoint
+- [x] 5.6 Receiver health endpoint
   - Stream B.
   - Test that `GET /healthz` returns `{"service":"kyberdash-otlp","version":…}` while other
     `GET` paths still return 404 or 405.
