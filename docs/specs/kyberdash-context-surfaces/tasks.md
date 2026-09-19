@@ -302,7 +302,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Add Playwright specs under the existing config: open each route directly, reload, go
     back and forward, and hit an unknown id, all against a seeded store.
   - _Requirements: 5.1, 5.2, 5.3, 5.4_
-- [ ] 7.5 Extract the shared design tokens
+- [x] 7.5 Extract the shared design tokens
   - Stream D.
   - Move the dashboard `@theme` tokens into `dash/web/src/tokens.css`, imported by the
     dashboard.
