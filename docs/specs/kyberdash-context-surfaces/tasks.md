@@ -297,7 +297,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Test that a URL naming an id the API returns 404 for renders `NotFoundPanel` inside the
     shell, naming the id and linking to `/`. Then implement it.
   - _Requirements: 5.4_
-- [ ] 7.4 End-to-end deep links
+- [x] 7.4 End-to-end deep links
   - Stream D.
   - Add Playwright specs under the existing config: open each route directly, reload, go
     back and forward, and hit an unknown id, all against a seeded store.
