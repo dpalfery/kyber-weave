@@ -107,6 +107,16 @@ from every entry point (CLI, SEA shim, parse worker, operator tools, web app) an
 non-test source file the walk never visits. Those files are deleted. The script stays as the
 `check:reachable` npm script in CI, so dead code cannot build up again. The graph comes from
 TypeScript's `preProcessFile`, which sees static, type-only and dynamic imports.
+
+It runs two passes, because a file can be dead in two ways. The production pass starts at
+`ENTRIES` and reports modules under `src/` and `web/src/` that nothing reaches. The test pass
+starts at every `*.test.ts` plus `TEST_ENTRIES` and reports test-support files - fixtures,
+helpers, setup - that no test reaches. The second exists because the first cannot see those
+files at all: its scan roots exclude `tests/`, and `isTestOnly` filters out anything under a
+`fixtures/` directory so that test files do not all read as dead from a production entry
+point. That left test-support code ungated, and a mock identity provider outlived the sign-in
+feature it existed for. `TEST_ENTRIES` names the fixtures spawned by path rather than
+imported, which `preProcessFile` cannot see because the path is a string literal.
 *Rejected:*
 - hand-deleting from the list in 2.1, which misses the long tail of helpers that only
   deleted commands used

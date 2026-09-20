@@ -12,6 +12,18 @@
 // and dynamic `import()` specifiers alike, and `typescript` is already a dev dependency, so no
 // new package (such as knip) is needed to answer the question.
 //
+// Two passes run, because a file can be dead in two different ways:
+//
+//   production  entries are ENTRIES; reports src/ and web/src/ modules no entry reaches.
+//   test        entries are every *.test.ts/*.spec.ts plus TEST_ENTRIES; reports test-support
+//               files - fixtures, helpers, setup - that no test reaches.
+//
+// The test pass exists because the production pass cannot see these files at all: its scan
+// roots exclude tests/, and isTestOnly() filters out anything under a fixtures/ directory so
+// that test files do not all read as dead from a production entry point. That left
+// test-support code with no gate on it, and a mock identity provider outlived by two years
+// the sign-in feature it existed for.
+//
 // Usage: node scripts/unreachable.mjs        prints unreachable files, exits 1 if any
 //        node scripts/unreachable.mjs --json prints them as a JSON array
 
@@ -32,6 +44,22 @@ export function isTestOnly(relPath) {
   if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(name)) return true
   if (name.endsWith('.d.ts') || /^testing\.[cm]?[jt]sx?$/.test(name)) return true
   return parts.some(part => part === '__snapshots__' || part === 'fixtures' || part === '__fixtures__' || part === 'test-utils')
+}
+
+const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/
+
+/**
+ * A file is test-support when tests are the only thing that should reach it, but it is not
+ * itself a test: fixtures, helpers, worker bodies, setup. These are what the test pass scans.
+ */
+export function isTestSupport(relPath) {
+  const parts = relPath.split(/[\\/]/)
+  const name = parts[parts.length - 1]
+  if (TEST_FILE_RE.test(name)) return false // a test is an entry, never a subject
+  if (name.endsWith('.d.ts')) return false
+  if (/^testing\.[cm]?[jt]sx?$/.test(name)) return true
+  return parts.some(part => part === 'fixtures' || part === '__fixtures__' || part === 'test-utils') ||
+    relPath.split(/[\\/]/).slice(0, 2).join('/') === 'tests/setup'
 }
 
 function walk(dir, out) {
@@ -70,12 +98,15 @@ function resolveSpecifier(importer, specifier, aliases) {
 }
 
 /**
- * @param {{ root: string, entries: string[], scanRoots: string[], aliases?: Record<string, string> }} options
+ * @param {{ root: string, entries: string[], scanRoots: string[], aliases?: Record<string, string>,
+ *   subject?: (relPath: string) => boolean }} options
  *   `root` is the directory paths are reported relative to; `entries`, `scanRoots` and alias
  *   targets are relative to it. `aliases` maps a specifier prefix such as `@` to a directory.
- * @returns {Promise<string[]>} unreachable non-test files, relative to `root`, sorted.
+ *   `subject` decides which walked files this pass reports on; the default reports every file
+ *   that is not test-only, which is the production pass.
+ * @returns {Promise<string[]>} unreachable subject files, relative to `root`, sorted.
  */
-export async function findUnreachable({ root, entries, scanRoots, aliases = {} }) {
+export async function findUnreachable({ root, entries, scanRoots, aliases = {}, subject = rel => !isTestOnly(rel) }) {
   const absoluteAliases = Object.fromEntries(Object.entries(aliases).map(([prefix, dir]) => [prefix, resolve(root, dir)]))
   const reached = new Set()
   const queue = entries.map(entry => resolve(root, entry))
@@ -93,7 +124,7 @@ export async function findUnreachable({ root, entries, scanRoots, aliases = {} }
   for (const scanRoot of scanRoots) {
     for (const file of walk(resolve(root, scanRoot), [])) {
       const rel = relative(root, file)
-      if (isTestOnly(rel) || reached.has(file)) continue
+      if (!subject(rel) || reached.has(file)) continue
       unreachable.push(rel.split(sep).join('/'))
     }
   }
@@ -119,18 +150,61 @@ export const ENTRIES = [
 export const SCAN_ROOTS = ['src', 'web/src']
 export const ALIASES = { '@': 'web/src' }
 
+/**
+ * Test-support files loaded other than by an import, so the walk cannot find them itself.
+ * Each is spawned or injected by path, which `preProcessFile` cannot see - the path is a
+ * string literal, not a specifier. Anything not listed here has to be imported by a test.
+ */
+export const TEST_ENTRIES = [
+  'tests/setup/env-isolation.ts', //                  vitest.config.ts setupFiles
+  'tests/fixtures/cache-refresh-worker.ts', //        spawned by path from lock-process.test.ts
+  'tests/fixtures/cache-refresh-corrupt-owner.ts', // spawned via spawnFixture() in lock-corrupt-body.test.ts
+  'tests/fixtures/cache-refresh-slow-owner.ts', //    spawned via spawnFixture() in lock-corrupt-body.test.ts
+]
+
+/** Where tests and their support live; mirrors vitest.config.ts `include`. */
+export const TEST_SCAN_ROOTS = ['src', 'web/src', 'tests', 'scripts']
+
+/** Every test file under the test scan roots, which are the test pass's entry points. */
+export function findTestFiles(root) {
+  const found = []
+  for (const scanRoot of TEST_SCAN_ROOTS) {
+    for (const file of walk(resolve(root, scanRoot), [])) {
+      const rel = relative(root, file).split(sep).join('/')
+      if (TEST_FILE_RE.test(rel)) found.push(rel)
+    }
+  }
+  return found.sort()
+}
+
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
   const unreachable = await findUnreachable({ root, entries: ENTRIES, scanRoots: SCAN_ROOTS, aliases: ALIASES })
+  const unreachableTestSupport = await findUnreachable({
+    root,
+    entries: [...TEST_ENTRIES, ...findTestFiles(root)],
+    scanRoots: TEST_SCAN_ROOTS,
+    aliases: ALIASES,
+    subject: isTestSupport,
+  })
   if (process.argv.includes('--json')) {
-    process.stdout.write(JSON.stringify(unreachable, null, 2) + '\n')
-  } else if (unreachable.length === 0) {
+    process.stdout.write(JSON.stringify({ source: unreachable, testSupport: unreachableTestSupport }, null, 2) + '\n')
+    process.exit(unreachable.length + unreachableTestSupport.length === 0 ? 0 : 1)
+  }
+  if (unreachable.length === 0) {
     process.stdout.write('check:reachable: every source file is reached by an entry point\n')
   } else {
     process.stdout.write(`check:reachable: ${unreachable.length} source file(s) no entry point reaches:\n`)
     for (const file of unreachable) process.stdout.write(`  ${file}\n`)
     process.stdout.write('Delete them with their tests, or add the entry that legitimately loads them.\n')
   }
-  process.exit(unreachable.length === 0 ? 0 : 1)
+  if (unreachableTestSupport.length === 0) {
+    process.stdout.write('check:reachable: every test-support file is reached by a test\n')
+  } else {
+    process.stdout.write(`check:reachable: ${unreachableTestSupport.length} test-support file(s) no test reaches:\n`)
+    for (const file of unreachableTestSupport) process.stdout.write(`  ${file}\n`)
+    process.stdout.write('Delete them, or add the TEST_ENTRIES line naming what loads them by path.\n')
+  }
+  process.exit(unreachable.length + unreachableTestSupport.length === 0 ? 0 : 1)
 }

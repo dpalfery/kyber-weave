@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 // @ts-expect-error -- plain ESM script without type declarations
-import { findUnreachable, isTestOnly } from './unreachable.mjs'
+import { findUnreachable, isTestOnly, isTestSupport } from './unreachable.mjs'
 
 const dirs: string[] = []
 
@@ -81,5 +81,74 @@ describe('isTestOnly', () => {
     ['src/test-harness.ts', false],
   ])('%s → %s', (path, expected) => {
     expect(isTestOnly(path)).toBe(expected)
+  })
+})
+
+describe('the test-support pass', () => {
+  // The production pass cannot see these files: its scan roots exclude tests/, and
+  // isTestOnly filters out anything under fixtures/. That gap let a mock identity
+  // provider outlive the sign-in feature it existed for.
+  it('reports a fixture no test imports, and spares one a test does', async () => {
+    const root = tree({
+      'src/thing.test.ts': "import { help } from '../tests/fixtures/used.js'\nhelp()\n",
+      'tests/fixtures/used.ts': 'export function help() {}\n',
+      'tests/fixtures/orphan.ts': 'export function stale() {}\n',
+    })
+    const unreachable = await findUnreachable({
+      root,
+      entries: ['src/thing.test.ts'],
+      scanRoots: ['src', 'tests'],
+      subject: isTestSupport,
+    })
+    expect(unreachable).toEqual(['tests/fixtures/orphan.ts'])
+  })
+
+  it('does not report the test files themselves, which are the entries', async () => {
+    const root = tree({
+      'src/a.test.ts': 'export {}\n',
+      'tests/fixtures/helper.ts': 'export const h = 1\n',
+    })
+    const unreachable = await findUnreachable({
+      root,
+      entries: ['src/a.test.ts'],
+      scanRoots: ['src', 'tests'],
+      subject: isTestSupport,
+    })
+    expect(unreachable).toEqual(['tests/fixtures/helper.ts'])
+    expect(unreachable).not.toContain('src/a.test.ts')
+  })
+
+  it('reports a fixture spawned by a path string unless it is declared an entry', async () => {
+    // preProcessFile reads specifiers, not string literals, so a worker spawned by path is
+    // invisible to the walk. This is why TEST_ENTRIES exists and has to name each one.
+    const files = {
+      'src/spawn.test.ts': "import { spawn } from 'node:child_process'\nspawn('node', ['tests/fixtures/worker.ts'])\n",
+      'tests/fixtures/worker.ts': 'process.exit(0)\n',
+    }
+    const root = tree(files)
+    const opts = { root, scanRoots: ['src', 'tests'], subject: isTestSupport }
+
+    expect(await findUnreachable({ ...opts, entries: ['src/spawn.test.ts'] })).toEqual([
+      'tests/fixtures/worker.ts',
+    ])
+    expect(
+      await findUnreachable({ ...opts, entries: ['src/spawn.test.ts', 'tests/fixtures/worker.ts'] }),
+    ).toEqual([])
+  })
+})
+
+describe('isTestSupport', () => {
+  it('claims fixtures, test kits and setup', () => {
+    expect(isTestSupport('tests/fixtures/mock-idp.ts')).toBe(true)
+    expect(isTestSupport('src/canon/adapters/testing.ts')).toBe(true)
+    expect(isTestSupport('tests/setup/env-isolation.ts')).toBe(true)
+    expect(isTestSupport('src/__fixtures__/seed.ts')).toBe(true)
+  })
+
+  it('does not claim tests, declarations or ordinary source', () => {
+    expect(isTestSupport('tests/fixtures/thing.test.ts')).toBe(false)
+    expect(isTestSupport('src/ingest/parser.test.ts')).toBe(false)
+    expect(isTestSupport('src/types.d.ts')).toBe(false)
+    expect(isTestSupport('src/ingest/parser.ts')).toBe(false)
   })
 })
