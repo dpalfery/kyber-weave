@@ -59,14 +59,20 @@ const CLAUDE_NAMES: [&str; 2] = ["claude.cmd", "claude.exe"];
 #[cfg(not(windows))]
 const CLAUDE_NAMES: [&str; 1] = ["claude"];
 
-/// Alphanumerics plus `._/-` and space, with `\`, `:`, `(`, `)` also allowed on Windows
+/// Alphanumerics plus `._/-~` and space, with `\`, `:`, `(`, `)` also allowed on Windows
 /// so a user-supplied `KYBERDASH_BIN` path like `C:\Users\...\kyberdash.cmd` is accepted.
-/// None of these are shell metacharacters in a direct-argv spawn (we never invoke `sh -c`).
+///
+/// `~` is here because Windows substitutes 8.3 short names for any path component
+/// over eight characters, so ordinary paths arrive as `C:\Users\RUNNER~1\...` —
+/// and a tilde is a legal directory character on every platform besides. It is
+/// shell syntax only to a shell, and this never reaches one: the caller spawns a
+/// direct argv (we never invoke `sh -c`), and `parse_env_bin` additionally
+/// requires the result to be an absolute path to an existing file.
 fn is_safe_arg(value: &str) -> bool {
     !value.is_empty()
         && value.chars().all(|c| {
             c.is_ascii_alphanumeric()
-                || matches!(c, '.' | '_' | '/' | '-' | ' ')
+                || matches!(c, '.' | '_' | '/' | '-' | '~' | ' ')
                 || (cfg!(windows) && matches!(c, '\\' | ':' | '(' | ')'))
         })
 }
@@ -956,6 +962,29 @@ mod tests {
             parse_env_bin(&scratch.root.to_string_lossy()).is_none(),
             "a directory is not a program"
         );
+    }
+
+    /// Windows hands out 8.3 short names for any path component over eight
+    /// characters, so a real `KYBERDASH_BIN` routinely looks like
+    /// `C:\Users\RUNNER~1\AppData\Local\Temp\kyberdash.exe`. The tilde is
+    /// part of the filesystem path, not shell syntax — nothing here reaches a
+    /// shell — and rejecting it told those users the CLI was missing when it was
+    /// sitting at the path they gave. Reproduced on every platform, because a
+    /// tilde is a legal directory character everywhere.
+    #[test]
+    fn env_bin_accepts_a_short_name_path() {
+        let scratch = Scratch::new("short-name");
+        let short = scratch.dir("RUNNER~1");
+        let real = short.join("kyberdash");
+        std::fs::write(&real, b"#!/bin/sh\n").unwrap();
+
+        let cli = parse_env_bin(&real.to_string_lossy())
+            .expect("an 8.3 short-name path is a path, not shell syntax");
+        assert_eq!(cli.program(), real.to_string_lossy());
+
+        let with_args = parse_env_bin(&format!("{} --no-color", real.to_string_lossy()))
+            .expect("the program-plus-arguments form too");
+        assert_eq!(with_args.extra_args, vec!["--no-color".to_string()]);
     }
 
     /// The program-plus-arguments form is still honoured, under the same rule.
