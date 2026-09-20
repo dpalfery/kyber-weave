@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { readFile, rm, writeFile } from 'fs/promises'
+import { mkdtempSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -17,7 +18,7 @@ import {
 // untrusted, which is what makes the re-derivation global rather than
 // provider-scoped.
 const PRE_FIX_DAILY_VERSION = 20
-const cacheRoot = join(tmpdir(), `codeburn-daily-rederive-${process.pid}-${Date.now()}`)
+let cacheRoot: string
 
 function day(date: string, cost: number): DailyEntry {
   return {
@@ -59,10 +60,9 @@ function day(date: string, cost: number): DailyEntry {
   }
 }
 
-beforeEach(async () => {
+beforeEach(() => {
+  cacheRoot = mkdtempSync(join(tmpdir(), 'kyberdash-daily-rederive-'))
   process.env['KYBERDASH_CACHE_DIR'] = cacheRoot
-  await rm(cacheRoot, { recursive: true, force: true })
-  await mkdir(cacheRoot, { recursive: true })
 })
 
 afterEach(async () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import { createOpenClawProvider } from './openclaw.js'
 import type { ParsedProviderCall } from './types.js'
 import { writeFile, mkdir, rm } from 'fs/promises'
+import { mkdtempSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -44,7 +45,7 @@ async function setupFixture(dir: string, agentName: string, sessionId: string, l
 }
 
 describe('openclaw provider', () => {
-  const baseDir = join(tmpdir(), `codeburn-openclaw-test-${Date.now()}`)
+  const baseDir = mkdtempSync(join(tmpdir(), 'kyberdash-openclaw-test-'))
 
   it('discovers sessions in agent directories', async () => {
     const dir = join(baseDir, 'discover')

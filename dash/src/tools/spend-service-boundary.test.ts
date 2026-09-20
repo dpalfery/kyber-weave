@@ -36,7 +36,11 @@ const BANNED_MODULES = new Set([
 ])
 
 /** Hosts that would mean a third-party rate is being fetched again. */
-const BANNED_HOSTS = [/\bapi\.frankfurter\.app\b/, /\bopenexchangerates\.org\b/, /\bexchangerate\b/i]
+const BANNED_HOSTS = [
+  /^.*\bapi\.frankfurter\.app\b.*$/m,
+  /^.*\bopenexchangerates\.org\b.*$/m,
+  /^.*\bexchangerate\b.*$/im,
+]
 
 export type BannedImport = { file: string; specifier: string; resolved: string }
 

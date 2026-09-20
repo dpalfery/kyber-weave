@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readFile, rm, utimes, writeFile, mkdir } from 'fs/promises'
-import { existsSync } from 'fs'
+import { existsSync, mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
 
@@ -29,14 +29,15 @@ import { readCacheOnDisk, writeCacheOnDisk } from '../../tests/fixtures/session-
 // Version-suffixed directory (e.g. session-cache.v8) the cache now writes to.
 const CACHE_DIR = () => basename(sessionCacheDir())
 
-const TMP_DIR = join(tmpdir(), `codeburn-scache-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+let TMP_DIR: string
 
 beforeEach(() => {
+  TMP_DIR = mkdtempSync(join(tmpdir(), 'kyberdash-scache-test-'))
   process.env['KYBERDASH_CACHE_DIR'] = TMP_DIR
 })
 
 afterEach(async () => {
-  if (existsSync(TMP_DIR)) await rm(TMP_DIR, { recursive: true })
+  await rm(TMP_DIR, { recursive: true, force: true })
 })
 
 function makeCall(overrides: Partial<CachedCall> = {}): CachedCall {
@@ -169,7 +170,6 @@ describe('loadCache / saveCache', () => {
 
   it('returns empty cache on version mismatch', async () => {
     const bad: SessionCache = { version: 999, providers: { claude: { envFingerprint: 'x', files: {} } } }
-    await mkdir(TMP_DIR, { recursive: true })
     await writeFile(join(TMP_DIR, 'session-cache.json'), JSON.stringify(bad))
 
     const loaded = await loadCache()
@@ -178,7 +178,6 @@ describe('loadCache / saveCache', () => {
   })
 
   it('returns empty cache on corrupt JSON', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     await writeFile(join(TMP_DIR, 'session-cache.json'), '{broken')
 
     const loaded = await loadCache()
@@ -212,7 +211,6 @@ describe('versioned cache file + legacy adoption', () => {
   })
 
   it('adopts a matching-version legacy file once, without deleting or rewriting it', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const legacy = join(TMP_DIR, 'session-cache.json')
     await writeFile(legacy, JSON.stringify(validCache()))
 
@@ -220,7 +218,6 @@ describe('versioned cache file + legacy adoption', () => {
     expect(await loadCache()).toEqual(validCache())
     expect(existsSync(sessionCacheDir())).toBe(true)
     // Legacy left intact (not deleted, not rewritten).
-    expect(existsSync(legacy)).toBe(true)
     expect(JSON.parse(await readFile(legacy, 'utf-8'))).toEqual(validCache())
 
     // Adoption is one-time: a later legacy edit is ignored once the versioned
@@ -231,7 +228,6 @@ describe('versioned cache file + legacy adoption', () => {
   })
 
   it('ignores a different-version legacy file and never touches it', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const legacy = join(TMP_DIR, 'session-cache.json')
     const stale = { version: 999, providers: { claude: { envFingerprint: 'x', files: {} } } }
     await writeFile(legacy, JSON.stringify(stale))
@@ -243,7 +239,6 @@ describe('versioned cache file + legacy adoption', () => {
   })
 
   it('saveCache never creates or overwrites a pre-existing legacy file', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const legacy = join(TMP_DIR, 'session-cache.json')
     const legacyContent = JSON.stringify({ version: CACHE_VERSION, providers: {} })
     await writeFile(legacy, legacyContent)
@@ -413,7 +408,6 @@ describe('provider env overrides invalidate the fingerprint (#920)', () => {
 
 describe('fingerprintFile', () => {
   it('returns fingerprint for existing file', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const filePath = join(TMP_DIR, 'test.jsonl')
     await writeFile(filePath, 'line1\nline2\n')
 
@@ -431,7 +425,6 @@ describe('fingerprintFile', () => {
   })
 
   it('resolves compound path with # separator (Cursor workspace)', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const filePath = join(TMP_DIR, 'state.vscdb')
     await writeFile(filePath, 'cursor-data')
 
@@ -441,7 +434,6 @@ describe('fingerprintFile', () => {
   })
 
   it('resolves compound path with : separator (OpenCode session)', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const filePath = join(TMP_DIR, 'opencode.db')
     await writeFile(filePath, 'opencode-data')
 
@@ -456,7 +448,6 @@ describe('fingerprintFile', () => {
   })
 
   it('prefers # separator over : when both present', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const filePath = join(TMP_DIR, 'state.vscdb')
     await writeFile(filePath, 'both-seps')
 
@@ -471,7 +462,6 @@ describe('fingerprintFile', () => {
   // hours. A fingerprint from the main file alone reports data older than
   // what is really committed (issue #913). The WAL sibling must be folded in.
   it('folds -wal sibling into a # compound fingerprint (Hermes session)', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const dbPath = join(TMP_DIR, 'state.db')
     await writeFile(dbPath, 'main-db')
     const past = new Date(Date.now() - 48 * 3600 * 1000)
@@ -487,7 +477,6 @@ describe('fingerprintFile', () => {
   })
 
   it('folds -wal sibling into a : compound fingerprint (OpenCode session)', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const dbPath = join(TMP_DIR, 'opencode.db')
     await writeFile(dbPath, 'oc-db')
     const past = new Date(Date.now() - 48 * 3600 * 1000)
@@ -501,7 +490,6 @@ describe('fingerprintFile', () => {
   })
 
   it('folds -wal sibling into a bare SQLite path (copilot agent-traces.db)', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const dbPath = join(TMP_DIR, 'agent-traces.db')
     await writeFile(dbPath, 'traces')
     const past = new Date(Date.now() - 48 * 3600 * 1000)
@@ -515,7 +503,6 @@ describe('fingerprintFile', () => {
   })
 
   it('keeps compound fingerprints working when no -wal sibling exists', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const dbPath = join(TMP_DIR, 'state.db')
     await writeFile(dbPath, 'main-only')
 
@@ -525,7 +512,6 @@ describe('fingerprintFile', () => {
   })
 
   it('does not fold sibling files into non-SQLite fingerprints', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
     const filePath = join(TMP_DIR, 'session.jsonl')
     await writeFile(filePath, 'jsonl-data')
     // A stray neighbor that happens to match the -wal naming must not leak
@@ -662,7 +648,6 @@ describe('mergeCallByDedupKey', () => {
 
 describe('loadCache validation', () => {
   async function writeRawCache(data: unknown): Promise<void> {
-    await mkdir(TMP_DIR, { recursive: true })
     await writeFile(join(TMP_DIR, 'session-cache.json'), JSON.stringify(data))
   }
 
@@ -846,8 +831,6 @@ describe('loadCache validation', () => {
 
 describe('cleanupOrphanedTempFiles', () => {
   it('removes .tmp files older than 5 minutes', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
-
     await mkdir(join(TMP_DIR, CACHE_DIR()), { recursive: true })
     const oldTmp = join(TMP_DIR, CACHE_DIR(), 'claude.abc123.json.tmp')
     await writeFile(oldTmp, 'stale')
@@ -860,8 +843,6 @@ describe('cleanupOrphanedTempFiles', () => {
   })
 
   it('preserves recent .tmp files', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
-
     await mkdir(join(TMP_DIR, CACHE_DIR()), { recursive: true })
     const recentTmp = join(TMP_DIR, CACHE_DIR(), 'claude.def456.json.tmp')
     await writeFile(recentTmp, 'recent')
@@ -871,8 +852,6 @@ describe('cleanupOrphanedTempFiles', () => {
   })
 
   it('ignores .tmp files from other caches', async () => {
-    await mkdir(TMP_DIR, { recursive: true })
-
     const otherTmp = join(TMP_DIR, 'codex-results.json.abc123.tmp')
     await writeFile(otherTmp, 'other cache temp')
     const { utimes } = await import('fs/promises')
