@@ -90,7 +90,7 @@ function loadDriver(): boolean {
     loadError =
       'SQLite-based providers (Cursor, OpenCode) need Node 22+ with the node:sqlite module.\n' +
       `Current Node: ${process.version}.\n` +
-      'Upgrade Node (https://nodejs.org) and run codeburn again.\n' +
+      'Upgrade Node (https://nodejs.org) and run kyberdash again.\n' +
       `(underlying error: ${message})`
     return false
   } finally {
@@ -202,7 +202,7 @@ function warnSqliteOnce(path: string, message: string): void {
 export function warnSqliteReadonlyOnce(path: string): void {
   warnSqliteOnce(
     path,
-    `codeburn: SQLite database ${path} is in a read-only directory and needs sidecar files; using a cache copy when necessary. ` +
+    `kyberdash: SQLite database ${path} is in a read-only directory and needs sidecar files; using a cache copy when necessary. ` +
     'The original database is not modified.\n',
   )
 }
@@ -399,7 +399,7 @@ function openReadonlyCache(path: string, originalError: unknown): DatabaseSyncIn
   } catch (err) {
     warnSqliteOnce(
       path,
-      `codeburn: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
+      `kyberdash: SQLite database ${path} is in a read-only directory and its cache copy could not be written ` +
       `(${describeError(err)}); skipping this database.\n`,
     )
     throw originalError

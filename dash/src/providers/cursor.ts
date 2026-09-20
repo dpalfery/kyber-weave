@@ -940,7 +940,7 @@ function parseBubbles(
   }
 
   if (skipped > 0) {
-    process.stderr.write(`codeburn: skipped ${skipped} unreadable Cursor entries\n`)
+    process.stderr.write(`kyberdash: skipped ${skipped} unreadable Cursor entries\n`)
   }
 
   return { calls: results }
@@ -1000,7 +1000,7 @@ function createParser(
           db = openDatabase(dbPath)
         } catch (err) {
           rethrowBusy(err)
-          process.stderr.write(`codeburn: cannot open Cursor database: ${err instanceof Error ? err.message : err}\n`)
+          process.stderr.write(`kyberdash: cannot open Cursor database: ${err instanceof Error ? err.message : err}\n`)
           return
         }
         try {

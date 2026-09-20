@@ -186,7 +186,7 @@ function isReadableVersion(header: DshEvent): boolean {
   if (header.version === SESSION_FORMAT_VERSION) return true
   // Keyed on the version, not the path: a DSH upgrade makes EVERY session
   // unreadable at once, and one line per session log is noise, not a report.
-  notice(`codeburn: skipping DSH sessions written in session format version ${String(header.version)}; upgrade codeburn.\n`)
+  notice(`kyberdash: skipping DSH sessions written in session format version ${String(header.version)}; upgrade kyberdash.\n`)
   return false
 }
 
@@ -239,7 +239,7 @@ export function* readZstdLines(
 async function readEventLines(filePath: string): Promise<string[] | null> {
   if (filePath.endsWith('.zstd')) {
     if (!zstdDecompress) {
-      notice('codeburn: DSH sessions need Node >= 22.15 (zstd support); skipping DSH usage.\n')
+      notice('kyberdash: DSH sessions need Node >= 22.15 (zstd support); skipping DSH usage.\n')
       return null
     }
     let buffer: Buffer
@@ -248,7 +248,7 @@ async function readEventLines(filePath: string): Promise<string[] | null> {
       // oversize guard readSessionFile applies to the uncompressed variant.
       const size = (await stat(filePath)).size
       if (size > MAX_SESSION_FILE_BYTES) {
-        notice(`codeburn: skipped oversize DSH session log ${filePath} (${size} bytes)\n`)
+        notice(`kyberdash: skipped oversize DSH session log ${filePath} (${size} bytes)\n`)
         return null
       }
       buffer = await readFile(filePath)
@@ -258,7 +258,7 @@ async function readEventLines(filePath: string): Promise<string[] | null> {
     try {
       return [...readZstdLines(buffer)]
     } catch (err) {
-      notice(`codeburn: skipped corrupt DSH session log ${filePath}: ${err instanceof Error ? err.message : err}\n`)
+      notice(`kyberdash: skipped corrupt DSH session log ${filePath}: ${err instanceof Error ? err.message : err}\n`)
       return null
     }
   }

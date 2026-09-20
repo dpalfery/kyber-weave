@@ -585,7 +585,7 @@ async function discoverFromDb(dbPath: string, profile: string): Promise<SessionS
     return sources
   } catch (err) {
     if (isSqliteBusyError(err)) throw err
-    process.stderr.write(`codeburn: error querying Hermes database: ${err instanceof Error ? err.message : err}\n`)
+    process.stderr.write(`kyberdash: error querying Hermes database: ${err instanceof Error ? err.message : err}\n`)
     return []
   } finally {
     db.close()
@@ -608,7 +608,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>, hermesHome: 
       try {
         db = openDatabase(decoded.dbPath)
       } catch (err) {
-        process.stderr.write(`codeburn: cannot open Hermes database: ${err instanceof Error ? err.message : err}\n`)
+        process.stderr.write(`kyberdash: cannot open Hermes database: ${err instanceof Error ? err.message : err}\n`)
         return
       }
 
@@ -760,7 +760,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>, hermesHome: 
         // into an empty (negatively cached) result.
         if (isSqliteBusyError(err) || isHermesLedgerPublicationError(err)) throw err
         const detail = err instanceof Error ? err.message : err
-        process.stderr.write(`codeburn: error querying Hermes database: ${detail}\n`)
+        process.stderr.write(`kyberdash: error querying Hermes database: ${detail}\n`)
         return
       } finally {
         db.close()

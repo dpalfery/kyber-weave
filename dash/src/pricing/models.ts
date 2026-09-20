@@ -759,9 +759,12 @@ export function isFlatRateModel(model: string): boolean {
 /// mapping a subscription SKU onto a priced row invents spend. Optional `model`
 /// interpolates the sanitized id so the verbose calculateCost path names the
 /// same two hatches.
+///
+/// The hatches are config keys, not subcommands: the commands that used to edit
+/// them went with the spend product, while `loadConfig` still reads both.
 export function unpricedModelHint(model = '<model>'): string {
   const safe = model.replace(/[\x00-\x1F\x7F-\x9F]/g, '?').slice(0, 200)
-  return `If a model is billed per token, map it with: codeburn model-alias "${safe}" <known-model>. If $0 is correct (subscription / flat-rate): codeburn model-flat-rate "${safe}".`
+  return `If a model is billed per token, map it in ~/.kyberdash/config.json under modelAliases: {"${safe}": "<known-model>"}. If $0 is correct (subscription / flat-rate), list it under flatRateModels: ["${safe}"].`
 }
 
 /// Stable hash of the model-alias map, for the same staleness class as the
@@ -1200,8 +1203,8 @@ export function calculateCost(
       // could embed terminal escape sequences here.
       const safeName = sanitizeModelForDisplay(model)
       process.stderr.write(
-        `codeburn: no pricing data for model "${safeName}" — costs for this model will show $0. ` +
-        `${unpricedModelHint(safeName)} Or track local-model savings with: codeburn model-savings "${safeName}" <baseline-model>, or update with: npx codeburn@latest.\n`,
+        `kyberdash: no pricing data for model "${safeName}" — costs for this model will show $0. ` +
+        `${unpricedModelHint(safeName)} Or track local-model savings under localModelSavings: {"${safeName}": "<baseline-model>"}, or update with: npx kyberdash@latest.\n`,
       )
     }
     return 0

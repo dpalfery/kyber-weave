@@ -25,11 +25,11 @@ export type KyberdashConfig = {
   // Model ids whose $0 cost is correct because they are billed as a
   // subscription / flat-rate product, not missing LiteLLM rows. Distinct from
   // modelAliases (which invent per-token spend) and localModelSavings
-  // (counterfactual local baseline). See `codeburn model-flat-rate`.
+  // (counterfactual local baseline). Edited by hand: the subcommands that wrote
+  // these keys went with the spend product, but loadConfig still reads them.
   flatRateModels?: string[]
-  // Opt-outs from the built-in flat-rate classifier. `model-flat-rate --remove`
-  // on a built-in SKU records the id here so a false positive can warn again
-  // without waiting for a release.
+  // Opt-outs from the built-in flat-rate classifier. Recording a built-in SKU
+  // here lets a false positive warn again without waiting for a release.
   flatRateModelsRemoved?: string[]
   // Spend budgets are stored in the configured display currency, not USD.
   budget?: {

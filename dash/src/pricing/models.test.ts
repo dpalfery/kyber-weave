@@ -1312,16 +1312,24 @@ describe('pricing snapshot carries flat-rate marks', () => {
 describe('unpricedModelHint', () => {
   it('never tells the user to alias unconditionally', () => {
     expect(unpricedModelHint()).toContain('If a model is billed per token')
-    expect(unpricedModelHint()).toContain('model-flat-rate')
-    expect(unpricedModelHint()).not.toContain('Fix: codeburn model-alias')
+    expect(unpricedModelHint()).toContain('flatRateModels')
+    expect(unpricedModelHint()).not.toContain('Fix: modelAliases')
   })
 
   it('names both hatches for a concrete unknown SKU', () => {
     const hint = unpricedModelHint('zz-new-subscription-pass-sku')
-    expect(hint).toContain('codeburn model-alias "zz-new-subscription-pass-sku"')
-    expect(hint).toContain('codeburn model-flat-rate "zz-new-subscription-pass-sku"')
+    expect(hint).toContain('modelAliases: {"zz-new-subscription-pass-sku"')
+    expect(hint).toContain('flatRateModels: ["zz-new-subscription-pass-sku"]')
     expect(hint).toContain('If a model is billed per token')
     expect(hint).toContain('If $0 is correct')
+  })
+
+  /// The subcommands that used to edit these keys went with the spend product,
+  /// so copy naming them would send the user to a command that exits 1.
+  it('points at config keys rather than removed subcommands', () => {
+    const hint = unpricedModelHint('zz-new-subscription-pass-sku')
+    expect(hint).toContain('~/.kyberdash/config.json')
+    expect(hint).not.toMatch(/model-alias|model-flat-rate|model-savings/)
   })
 })
 
@@ -1345,8 +1353,8 @@ describe('calculateCost verbose unknown-model warning', () => {
     const text = chunks.join('')
     expect(text).toContain('zz-new-subscription-pass-sku')
     expect(text).toContain('If a model is billed per token')
-    expect(text).toContain('model-flat-rate')
-    expect(text).toContain('model-alias')
-    expect(text).not.toMatch(/Map it with: codeburn model-alias/)
+    expect(text).toContain('flatRateModels')
+    expect(text).toContain('modelAliases')
+    expect(text).not.toMatch(/Map it with: modelAliases/)
   })
 })

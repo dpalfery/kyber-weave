@@ -1991,7 +1991,7 @@ async function scanProjectDirs(
   const pendingBytes = changedFiles.reduce((n, f) => f.append ? n : n + f.info.fp.sizeBytes, 0)
   const decision = decideParseWorkers({ files: fullReparsePaths.length, bytes: pendingBytes })
   if (process.env['KYBERDASH_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: claude parse workers=${decision.workers} (${decision.reason})\n`)
+    process.stderr.write(`kyberdash: claude parse workers=${decision.workers} (${decision.reason})\n`)
   }
   // A pool that cannot even start (worker entry missing from an odd packaging,
   // thread limit reached) must degrade to the serial parse, not fail the run.
@@ -2229,7 +2229,7 @@ async function scanProjectDirs(
     await pool?.close()
   }
   if (pool && process.env['KYBERDASH_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: claude parse workers done, ${workerDiscards}/${fullReparsePaths.length} results re-parsed in-process on id overlap\n`)
+    process.stderr.write(`kyberdash: claude parse workers done, ${workerDiscards}/${fullReparsePaths.length} results re-parsed in-process on id overlap\n`)
   }
   parseProgress.finish()
 
@@ -2972,7 +2972,7 @@ function warnProviderReadFailureOnce(providerName: string, err: unknown): void {
   warnedProviderReadFailures.add(key)
   if (isSqliteBusyError(err)) {
     process.stderr.write(
-      `codeburn: skipped ${providerName} data because its SQLite database is temporarily locked; will retry on the next refresh.\n`
+      `kyberdash: skipped ${providerName} data because its SQLite database is temporarily locked; will retry on the next refresh.\n`
     )
   }
 }
@@ -2993,7 +2993,7 @@ function warnProviderParseFailure(providerName: string, sourcePath: string, err:
     ? ` (further ${providerName} parse failures this run are suppressed)`
     : ''
   process.stderr.write(
-    `codeburn: skipped ${providerName} session that failed to parse: ${sourcePath} (${msg})${tail}\n`
+    `kyberdash: skipped ${providerName} session that failed to parse: ${sourcePath} (${msg})${tail}\n`
   )
 }
 
@@ -3105,7 +3105,7 @@ export function createScanProgress(label: string, total: number) {
       const now = Date.now()
       if (done !== total && now - lastWrite < 100) return
       lastWrite = now
-      process.stderr.write(`\rcodeburn: ${label} ${done}/${total}…`)
+      process.stderr.write(`\rkyberdash: ${label} ${done}/${total}…`)
     },
     finish(): void {
       if (!show) return
@@ -5136,7 +5136,7 @@ async function parseAllSessionsInCacheScope(dateRange?: DateRange, providerFilte
   let diskCache = await loadCache(loadScope)
   await cleanupOrphanedTempFiles()
   if (process.env['KYBERDASH_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: startup timing cache-load=${(performance.now() - cacheLoadStarted).toFixed(1)}ms complete=${isCacheComplete(diskCache)}\n`)
+    process.stderr.write(`kyberdash: startup timing cache-load=${(performance.now() - cacheLoadStarted).toFixed(1)}ms complete=${isCacheComplete(diskCache)}\n`)
   }
 
   // Cold-hydration coordination (advisory, cross-process). Engages whenever the
@@ -5185,7 +5185,7 @@ async function parseAllSessionsInCacheScope(dateRange?: DateRange, providerFilte
     stopProgressKeepalive()
   }
   if (process.env['KYBERDASH_VERBOSE'] === '1') {
-    process.stderr.write(`codeburn: startup timing refresh-lock=${(performance.now() - refreshWaitStarted).toFixed(1)}ms outcome=${refresh.outcome}\n`)
+    process.stderr.write(`kyberdash: startup timing refresh-lock=${(performance.now() - refreshWaitStarted).toFixed(1)}ms outcome=${refresh.outcome}\n`)
   }
   if (refresh.outcome === 'timed-out' || refresh.outcome === 'unavailable') {
     return runParse(key, priorSnapshot, dateRange, providerFilter, { readOnly: true, burstSig, parseStartedAt })
@@ -5249,7 +5249,7 @@ async function runParseInner(
   const traceTiming = (stage: string, extra = ''): void => {
     if (process.env['KYBERDASH_VERBOSE'] !== '1') return
     const now = performance.now()
-    process.stderr.write(`codeburn: startup timing ${stage}=${(now - timingPrevious).toFixed(1)}ms total=${(now - timingStarted).toFixed(1)}ms${extra}\n`)
+    process.stderr.write(`kyberdash: startup timing ${stage}=${(now - timingPrevious).toFixed(1)}ms total=${(now - timingStarted).toFixed(1)}ms${extra}\n`)
     timingPrevious = now
   }
   readOnlyServedStale = false
@@ -5319,7 +5319,7 @@ async function runParseInner(
       if (claudeSources.length > 0) emitScanProgress({ kind: 'provider', provider: 'claude', state: 'done', files: claudeSources.length })
     } catch (err) {
       if (!isPermissionError(err)) throw err
-      process.stderr.write(`codeburn: skipped claude data (permission denied; grant Full Disk Access to include it)\n`)
+      process.stderr.write(`kyberdash: skipped claude data (permission denied; grant Full Disk Access to include it)\n`)
       emitScanProgress({ kind: 'provider', provider: 'claude', state: 'skipped' })
     }
   }
@@ -5336,7 +5336,7 @@ async function runParseInner(
       // A permission-locked provider skips-and-continues; any other error is a
       // real bug and still aborts (per-file/DB-lock cases are handled deeper).
       if (!isPermissionError(err)) throw err
-      process.stderr.write(`codeburn: skipped ${providerName} data (permission denied; grant Full Disk Access to include it)\n`)
+      process.stderr.write(`kyberdash: skipped ${providerName} data (permission denied; grant Full Disk Access to include it)\n`)
       emitScanProgress({ kind: 'provider', provider: providerName, state: 'skipped' })
     }
     await saveProgress()
