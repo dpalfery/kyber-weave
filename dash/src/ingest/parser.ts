@@ -1,5 +1,5 @@
 import { existsSync } from 'fs'
-import { lstat, readFile, readdir, stat } from 'fs/promises'
+import { readFile, readdir, stat } from 'fs/promises'
 import { createHash } from 'crypto'
 import { performance } from 'node:perf_hooks'
 import { basename, dirname, join, resolve, sep } from 'path'
@@ -150,25 +150,37 @@ async function resolveCanonicalProjectPathUncached(cwd: string): Promise<{ path:
   let dir = trimmed
   while (true) {
     const gitEntry = join(dir, '.git')
-    const entryStat = await lstat(gitEntry).catch(() => null)
-    if (entryStat?.isDirectory()) {
-      return { path: dir === trimmed ? dir : cwd, isWorktree: false }
+    // Attempt the read in one step rather than lstat-then-readFile: the two-
+    // syscall pattern left a TOCTOU window where a symlink could be injected
+    // between the lstat and the read. readFile's error code tells us what the
+    // entry is without a separate stat:
+    //   EISDIR  → a real .git directory; we found the repo root.
+    //   ENOENT  → no .git entry here; walk up.
+    //   success → a .git file (git worktree pointer); parse below.
+    let gitFile: string | null
+    try {
+      gitFile = await readFile(gitEntry, 'utf-8')
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'EISDIR') {
+        // .git is a directory — this is a real repo root.
+        return { path: dir === trimmed ? dir : cwd, isWorktree: false }
+      }
+      // ENOENT, ENOTDIR, EACCES, or any other error: no .git here.
+      const parent = dirname(dir)
+      if (parent === dir) return { path: cwd, isWorktree: false }
+      dir = parent
+      continue
     }
-    if (entryStat?.isFile()) {
-      const gitFile = await readFile(gitEntry, 'utf-8').catch(() => null)
-      if (gitFile === null) return { path: dir === trimmed ? dir : cwd, isWorktree: false }
-      const match = gitFile.match(/^gitdir:\s*(.+?)\s*$/m)
-      if (!match?.[1]) return { path: dir === trimmed ? dir : cwd, isWorktree: false }
-      const gitDir = resolve(dir, match[1])
-      const normalizedGitDir = gitDir.replace(/\\/g, '/')
-      const worktreeMarker = '/.git/worktrees/'
-      const markerIndex = normalizedGitDir.lastIndexOf(worktreeMarker)
-      if (markerIndex === -1) return { path: dir === trimmed ? dir : cwd, isWorktree: false }
-      return { path: normalizedGitDir.slice(0, markerIndex), isWorktree: true }
-    }
-    const parent = dirname(dir)
-    if (parent === dir) return { path: cwd, isWorktree: false }
-    dir = parent
+    // We read a file: parse it as a worktree pointer.
+    const match = gitFile.match(/^gitdir:\s*(.+?)\s*$/m)
+    if (!match?.[1]) return { path: dir === trimmed ? dir : cwd, isWorktree: false }
+    const gitDir = resolve(dir, match[1])
+    const normalizedGitDir = gitDir.replace(/\\/g, '/')
+    const worktreeMarker = '/.git/worktrees/'
+    const markerIndex = normalizedGitDir.lastIndexOf(worktreeMarker)
+    if (markerIndex === -1) return { path: dir === trimmed ? dir : cwd, isWorktree: false }
+    return { path: normalizedGitDir.slice(0, markerIndex), isWorktree: true }
   }
 }
 

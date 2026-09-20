@@ -433,12 +433,15 @@ export class CodexThroughputReader {
   }
 
   async update(filePath: string, limit = 10, finalize = false): Promise<CodexThroughputPoint[]> {
-    const info = await stat(filePath)
-    if (info.size < this.offset) this.reset()
-    const bytesToRead = info.size - this.offset
-    if (bytesToRead > 0) {
-      const file = await open(filePath, 'r')
-      try {
+    // Open the file first, then stat through the handle: this binds the size
+    // measurement and the read to the same file descriptor, eliminating the
+    // TOCTOU race that existed between stat(path) and open(path, 'r').
+    const file = await open(filePath, 'r')
+    try {
+      const info = await file.stat()
+      if (info.size < this.offset) this.reset()
+      const bytesToRead = info.size - this.offset
+      if (bytesToRead > 0) {
         let position = this.offset
         while (position < info.size) {
           const buffer = Buffer.allocUnsafe(Math.min(CHUNK_BYTES, info.size - position))
@@ -477,9 +480,9 @@ export class CodexThroughputReader {
             this.pending = TRUNCATION_MARKER + body.slice(0, 256 * 1024) + body.slice(-256 * 1024)
           }
         }
-      } finally {
-        await file.close()
       }
+    } finally {
+      await file.close()
     }
     if (finalize && this.pending) {
       this.processLine(this.pending, this.pendingDurationMs)
