@@ -380,7 +380,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - tooltip text
   - Render the state as title text on macOS and as a `tray_badge.rs` badge on Windows.
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
-- [ ] 8.8 Settings and launch at login
+- [x] 8.8 Settings and launch at login
   - Stream E.
   - Test the settings JSON round trip and defaults: harness `all`, window 7 days, refresh
     every 5 minutes, thresholds 0.70 and 0.90, launch at login off, receiver hosting off.

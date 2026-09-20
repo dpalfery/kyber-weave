@@ -2,9 +2,7 @@
 //! executable. Linux: an XDG autostart .desktop file. No extra crates; both are a few
 //! lines of `reg` / plain file IO.
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use anyhow::Context;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 const APP_NAME: &str = "KyberDash";
@@ -87,14 +85,26 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
     Ok(())
 }
 
+/// macOS registers a LaunchAgent. The writer lives in `login_item_macos`,
+/// which takes its directory as an argument so it can be tested; this is the
+/// thin binding to the real home directory and the running executable.
 #[cfg(target_os = "macos")]
 pub fn is_enabled() -> bool {
-    false
+    match dirs::home_dir() {
+        Some(home) => {
+            crate::login_item_macos::is_enabled(&crate::login_item_macos::agent_dir(&home))
+        }
+        None => false,
+    }
 }
 
 #[cfg(target_os = "macos")]
-pub fn set_enabled(_enabled: bool) -> Result<()> {
-    // Requirement 6.8's macOS LaunchAgent is new code (task 8.9); this stub
-    // keeps the salvaged module compiling until that lands.
-    Err(anyhow!("macOS launch at login is not implemented yet"))
+pub fn set_enabled(enabled: bool) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("no home directory"))?;
+    let program = std::env::current_exe().context("locating this executable")?;
+    crate::login_item_macos::set_enabled(
+        &crate::login_item_macos::agent_dir(&home),
+        enabled,
+        &program,
+    )
 }

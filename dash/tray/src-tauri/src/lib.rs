@@ -2,9 +2,12 @@ pub mod api;
 mod args;
 pub mod autostart;
 pub mod cli;
+#[cfg(target_os = "macos")]
+pub mod login_item_macos;
 pub mod position;
 pub mod receiver;
 pub mod scheduler;
+pub mod settings;
 pub mod status_item;
 pub mod supervisor;
 pub mod tray_badge;
