@@ -26,24 +26,45 @@ internal sealed class SelfUpdater : IDisposable
     /// </summary>
     private const string KyberDashMinVersion = "0.1.7-rc.9";
 
+    /// <summary>
+    /// First release whose <c>build-tray</c> job publishes the tray installers.
+    /// </summary>
+    /// <remarks>
+    /// Provisional: no release has published them yet, so this names the release
+    /// the job is expected to ship in rather than one observed in the wild.
+    /// Confirm it against the first release whose <c>build-tray</c> job succeeds
+    /// and correct it if that lands under a different tag — the floor exists so
+    /// an update resolving an older release does not delegate to a tray that
+    /// release never carried.
+    /// </remarks>
+    private const string TrayMinVersion = "0.10.0";
+
+    /// <summary>Where <c>kyberdash menubar</c> records what it installed.</summary>
+    private const string TrayRecordFile = "tray.json";
+
     private readonly GitHubReleaseClient _releases;
     private readonly SelfUpdateHost _host;
     private readonly Action<string> _log;
+    private readonly Func<string, IReadOnlyList<string>, int> _runProcess;
+    private readonly Func<string, string?> _readEnvironment;
 
     internal SelfUpdater(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         Action<string>? log = null,
-        Func<string, string?>? readEnvironment = null)
+        Func<string, string?>? readEnvironment = null,
+        Func<string, IReadOnlyList<string>, int>? runProcess = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
         _host = host;
         _log = log ?? (_ => { });
+        _runProcess = runProcess ?? RunProcess;
+        _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
         _releases = new GitHubReleaseClient(
             handler,
             host.CurrentVersion,
-            readEnvironment ?? Environment.GetEnvironmentVariable);
+            _readEnvironment);
     }
 
     [SuppressMessage(
@@ -211,10 +232,115 @@ internal sealed class SelfUpdater : IDisposable
             }
         }
 
+        // After the binaries are in place, so the tray installer that runs is the
+        // new one and it resolves the release this update just installed.
+        if (ShouldUpdateTray(options, version, windows))
+            UpdateTray(windows);
+
         string installed = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(CliBaseName, windows));
         return new SelfUpdateOutcome(0, $"updated kyber-weave {version} → {installed}");
+    }
+
+    /// <summary>Whether to delegate to <c>kyberdash menubar --update</c>.</summary>
+    /// <remarks>
+    /// Mirrors <see cref="ShouldUpdateKyberDash"/>, and for the same reason:
+    /// update replaces what is installed, it does not add a surface the user
+    /// left out. Every skip is logged, because a silent one reads as the update
+    /// having covered the tray when it did not.
+    /// </remarks>
+    private bool ShouldUpdateTray(SelfUpdateOptions options, string version, bool windows)
+    {
+        if (options.NoMenubar)
+        {
+            _log("--no-menubar given; leaving the KyberDash tray unchanged");
+            return false;
+        }
+
+        if (options.NoKyberDash)
+        {
+            // The tray installer is the kyberdash binary. Leaving that at its old
+            // version and then asking it to update the tray would install a tray
+            // from whichever release the old binary resolves.
+            _log("--no-kyberdash given; leaving the KyberDash tray unchanged");
+            return false;
+        }
+
+        if (ReleaseVersion.Compare(version, TrayMinVersion) < 0)
+        {
+            _log($"release {version} predates the KyberDash tray (first published in {TrayMinVersion}); leaving the tray unchanged");
+            return false;
+        }
+
+        string record = Path.Combine(TrayConfigDirectory(), TrayRecordFile);
+        if (!File.Exists(record))
+        {
+            _log($"no tray install recorded in {record}; install it with `kyberdash menubar`");
+            return false;
+        }
+
+        string kyberdash = Path.Combine(
+            _host.InstallDirectory,
+            BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
+        if (!File.Exists(kyberdash))
+        {
+            _log($"kyberdash is not installed in {_host.InstallDirectory}; leaving the KyberDash tray unchanged");
+            return false;
+        }
+
+        return true;
+    }
+
+    private void UpdateTray(bool windows)
+    {
+        string kyberdash = Path.Combine(
+            _host.InstallDirectory,
+            BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
+
+        _log("updating the KyberDash tray…");
+        int exitCode = _runProcess(kyberdash, ["menubar", "--update"]);
+        if (exitCode != 0)
+        {
+            // Named, so the user can tell a tray failure from a CLI one. The
+            // binaries are already committed, so this does not roll anything
+            // back — it reports that one step of the update did not finish.
+            throw new SelfUpdateException(
+                $"the KyberDash tray step failed: `{kyberdash} menubar --update` exited {exitCode}.");
+        }
+        _log("updated the KyberDash tray");
+    }
+
+    /// <summary>
+    /// <c>~/.kyberdash</c>, where the CLI writes its own state (R3.5).
+    /// </summary>
+    /// <remarks>
+    /// Read through the injected environment reader rather than
+    /// <c>SpecialFolder.UserProfile</c>, so a test asserting the "no tray.json"
+    /// skip does not depend on whether the developer running it happens to have
+    /// a tray installed.
+    /// </remarks>
+    private string TrayConfigDirectory()
+    {
+        string home =
+            _readEnvironment("HOME")
+            ?? _readEnvironment("USERPROFILE")
+            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".kyberdash");
+    }
+
+    private static int RunProcess(string fileName, IReadOnlyList<string> arguments)
+    {
+        System.Diagnostics.ProcessStartInfo start = new(fileName) { UseShellExecute = false };
+        foreach (string argument in arguments)
+            start.ArgumentList.Add(argument);
+
+        using System.Diagnostics.Process? process = System.Diagnostics.Process.Start(start);
+        if (process is null)
+            throw new SelfUpdateException($"the KyberDash tray step could not start {fileName}.");
+
+        process.WaitForExit();
+        return process.ExitCode;
     }
 
     private (string BaseName, string ExtractedPath, string Destination) StageBinary(

@@ -432,7 +432,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Extend `ReleaseTests.cs`: the script invokes `"${INSTALL_DIR}/kyberdash" menubar --force`,
     and dies with a message when `--no-kyberdash` is also set. Then change the script.
   - _Requirements: 12.7_
-- [ ] 9.3 Self-updater delegates to `kyberdash`
+- [x] 9.3 Self-updater delegates to `kyberdash`
   - Stream F.
   - With the existing fake host, write xunit tests for:
     - the `--no-menubar` option

@@ -4,7 +4,7 @@ title: The local release loop cannot exercise the KyberDash install or update pa
 doc-type: todo
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-10
+last-reviewed: 2026-09-19
 status: draft
 ---
 
@@ -77,6 +77,31 @@ both were an abort. Both are fixed now, and both would have been caught on first
   the SEA build depends on; SEA-only files, so the vendored subtree stays clean.
 - `scripts/update-loop.sh` — drives the pieces and asserts the outcome.
 
+## The tray widens the same gap
+
+The KyberDash tray (`dash/tray/`) is now a third artifact the loop does not build, and it is
+further out of reach than `kyberdash` is. The `build-kyberdash` job needs Node and `postject`;
+`build-tray` needs a Rust toolchain, `tauri build`, and — on macOS — a Developer ID
+certificate, an App Store Connect key and a notarization round trip. The last of those cannot
+run on a developer machine at all without the team's signing secrets, and
+[the signing todo](macos-developer-id-signing.md) is where that dependency lives.
+
+So the loop can never verify the whole tray path locally. What it *can* reach is the part that
+does not need a tray to exist:
+
+- **The skip reasons are already exercised.** A loop run on 2026-09-19 against the
+  self-updater's tray delegation logged `no tray install recorded in ~/.kyberdash/tray.json;
+  install it with 'kyberdash menubar'` and exited 0, which is the behaviour Requirement 15.3
+  asks for — an update must not install a surface the user never chose. `--no-menubar`,
+  `--no-kyberdash` and the `TrayMinVersion` floor are the same shape and equally reachable.
+- **The delegation itself is not.** Proving `kyberdash menubar --update` actually runs needs a
+  `tray.json` and a `kyberdash` binary in the loop's throwaway prefix. Writing a `tray.json`
+  fixture would exercise the spawn without building a tray at all, which is the cheap half.
+- **`TrayMinVersion` is provisional.** No release has published tray assets yet, so the
+  constant in `SelfUpdater` names the release the `build-tray` job is *expected* to ship in.
+  It has to be confirmed against the first release whose job succeeds; until then the floor is
+  an assumption the loop cannot check.
+
 ## How to verify
 
 - A local release published at or above the floor installs `kyberdash` beside the CLI, and the
@@ -85,3 +110,6 @@ both were an abort. Both are fixed now, and both would have been caught on first
   skip — never the empty-install failure this todo records.
 - `kyber-weave update` from an older local build replaces an installed `kyberdash`, leaves an
   absent one absent, and honours `--no-kyberdash`.
+- With a `tray.json` fixture in the loop's prefix, `kyber-weave update` spawns
+  `kyberdash menubar --update` and turns its non-zero exit into a named failure; without one,
+  it logs the skip and still exits 0.

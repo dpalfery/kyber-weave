@@ -20,4 +20,8 @@ public sealed class UpdateSettings : CommandSettings
     [CommandOption("--no-kyberdash")]
     [Description("Leave an installed kyberdash unchanged.")]
     public bool NoKyberDash { get; set; }
+
+    [CommandOption("--no-menubar")]
+    [Description("Leave an installed KyberDash tray unchanged.")]
+    public bool NoMenubar { get; set; }
 }
