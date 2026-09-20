@@ -15,7 +15,6 @@ use tokio::time::{timeout, Duration};
 /// 60s. A hostile KYBERDASH_BIN is rejected before any shell-resembling path is taken.
 const MAX_PAYLOAD_BYTES: usize = 20 * 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 256 * 1024;
-const FETCH_TIMEOUT_SECS: u64 = 60;
 const VERSION_TIMEOUT_SECS: u64 = 20;
 
 /// Oldest CLI this app can talk to, by semver. Informational only: the gate
@@ -301,37 +300,6 @@ impl KyberdashCli {
             }
         }
         status
-    }
-
-    /// Spawns `kyberdash status --format menubar-json --period X --provider Y` and decodes the
-    /// output. Pipes are drained concurrently so a chatty stderr cannot deadlock stdout.
-    pub async fn fetch_menubar_payload(
-        &self,
-        period: &str,
-        provider: &str,
-        include_optimize: bool,
-    ) -> Result<Value> {
-        if !is_safe_arg(period) || !is_safe_arg(provider) {
-            bail!("invalid period/provider argument");
-        }
-
-        let mut args = vec![
-            "status",
-            "--format",
-            "menubar-json",
-            "--period",
-            period,
-            "--provider",
-            provider,
-        ];
-        if !include_optimize {
-            args.push("--no-optimize");
-        }
-
-        let stdout = self.run_capture(&args, FETCH_TIMEOUT_SECS).await?;
-        let payload: Value =
-            serde_json::from_str(&stdout).with_context(|| "CLI returned invalid JSON")?;
-        Ok(payload)
     }
 
     async fn run_capture(&self, args: &[&str], timeout_secs: u64) -> Result<String> {
