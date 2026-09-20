@@ -8,6 +8,8 @@ import { isSqliteAvailable } from '../ingest/sqlite.js'
 import {
   antigravityAppDataDirFromSourcePath,
   antigravityCascadeIdFromPath,
+  getAgent,
+  isAntigravityCascadeId,
   createAntigravityProvider,
   discoverAntigravitySessionSources,
   extractAntigravityAppDataDirFromLine,
@@ -728,5 +730,40 @@ describe('antigravity provider helpers', () => {
     expect(antigravityAppDataDirFromSourcePath(
       'C:\\Users\\Antigravity IDE\\.gemini\\antigravity\\conversations\\abc.db',
     )).toBe('antigravity')
+  })
+})
+
+describe('loopback-only TLS waiver', () => {
+  // The waiver has to be enforced where it runs. A checkServerIdentity callback
+  // on an agent built with rejectUnauthorized:false never executes — Node skips
+  // the authorization step that would call it — so the check lives at the call.
+  it('returns an agent for loopback hosts', () => {
+    for (const host of ['127.0.0.1', '::1', 'localhost']) {
+      expect(getAgent(host)).toBeDefined()
+    }
+  })
+
+  it('throws rather than waiving verification for a non-loopback host', () => {
+    for (const host of ['example.com', '10.0.0.5', '127.0.0.1.evil.com']) {
+      expect(() => getAgent(host)).toThrow(/loopback-only/)
+    }
+  })
+})
+
+describe('cascade ids crossing the network boundary', () => {
+  it('accepts identifier-shaped ids', () => {
+    expect(isAntigravityCascadeId('789.db-wal')).toBe(true)
+    expect(isAntigravityCascadeId('a1b2-c3d4_e5')).toBe(true)
+  })
+
+  it('rejects anything carrying path or injection shape', () => {
+    expect(isAntigravityCascadeId('../../etc/passwd')).toBe(false)
+    expect(isAntigravityCascadeId('id/with/slashes')).toBe(false)
+    expect(isAntigravityCascadeId('id\u0000null')).toBe(false)
+    expect(isAntigravityCascadeId('')).toBe(false)
+  })
+
+  it('parses ids from paths without throwing, so one odd filename cannot abort ingest', () => {
+    expect(() => antigravityCascadeIdFromPath('/tmp/../../weird name!.pb')).not.toThrow()
   })
 })
