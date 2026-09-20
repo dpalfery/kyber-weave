@@ -2,6 +2,7 @@ mod args;
 pub mod autostart;
 pub mod cli;
 pub mod position;
+pub mod supervisor;
 pub mod tray_badge;
 
 use std::time::Duration;

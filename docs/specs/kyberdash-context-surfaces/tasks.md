@@ -334,7 +334,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Test that a missing binary, or an `apiVersion` below the declared minimum, yields the
     `setup` phase with the probed paths and the remedy.
   - _Requirements: 6.6, 6.7_
-- [ ] 8.3 Supervise the web server
+- [x] 8.3 Supervise the web server
   - Stream E.
   - Using a fake process runner and a fake clock, test the following, then implement
     `supervisor.rs`:
