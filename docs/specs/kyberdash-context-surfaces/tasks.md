@@ -427,7 +427,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - the Linux refusal message
   - Implement `dash/src/install/`, replacing `menubar-installer.ts`.
   - _Requirements: 12.5, 12.6, 12.8, 12.10, 12.11, 15.5, 15.6_
-- [ ] 9.2 `install.sh --with-menubar`
+- [x] 9.2 `install.sh --with-menubar`
   - Stream F.
   - Extend `ReleaseTests.cs`: the script invokes `"${INSTALL_DIR}/kyberdash" menubar --force`,
     and dies with a message when `--no-kyberdash` is also set. Then change the script.

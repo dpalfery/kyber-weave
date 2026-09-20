@@ -361,13 +361,123 @@ public sealed class ReleaseTests
     // ------------------------------------------------------------- Sandbox
 
     /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>
+    // ---- --with-menubar (task 9.2, Requirement 12.7) ----
+
+    /// <summary>The argv --with-menubar must produce, asserted by two tests.</summary>
+    private static readonly string[] ExpectedMenubarArgv = ["menubar", "--force"];
+
+    /// <summary>
+    /// The tray installer is a <c>kyberdash</c> subcommand, so
+    /// <c>--with-menubar</c> has to invoke that binary. It previously invoked
+    /// <c>kyber-weave menubar</c>, which is not a command this repository
+    /// ships — the flag installed nothing.
+    /// </summary>
+    [Fact]
+    public void WithMenubarInvokesTheKyberdashBinaryWithForce()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        // A stand-in for the installed CLI that records how it was called.
+        string recorder = sandbox.WriteExecutable(
+            "kyberdash",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/argv.txt\"\n");
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "kyber_weave_run_menubar '" + Path.GetDirectoryName(recorder) + "'");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        string[] argv = File.ReadAllLines(
+            Path.Combine(Path.GetDirectoryName(recorder)!, "argv.txt"));
+        Assert.Equal(ExpectedMenubarArgv, argv);
+    }
+
+    /// <summary>
+    /// An install directory with a space in it must reach the binary as one
+    /// path, not two arguments.
+    /// </summary>
+    [Fact]
+    public void WithMenubarQuotesAnInstallDirectoryContainingASpace()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new("with space");
+        string recorder = sandbox.WriteExecutable(
+            "kyberdash",
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/argv.txt\"\n");
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "kyber_weave_run_menubar \"" + Path.GetDirectoryName(recorder) + "\"");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(
+            ExpectedMenubarArgv,
+            File.ReadAllLines(Path.Combine(Path.GetDirectoryName(recorder)!, "argv.txt")));
+    }
+
+    /// <summary>
+    /// Requirement 12.7: the two flags contradict each other, and the
+    /// contradiction is reported before anything is downloaded rather than as
+    /// a "not found" after the CLI and MCP are already on disk.
+    /// </summary>
+    [Theory]
+    [InlineData("1", "1", 2)]
+    [InlineData("1", "", 0)]
+    [InlineData("", "1", 0)]
+    [InlineData("", "", 0)]
+    public void WithMenubarConflictsWithNoKyberdash(
+        string withMenubar,
+        string noKyberdash,
+        int expectedExitCode)
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; " +
+            "kyber_weave_menubar_conflict '" + withMenubar + "' '" + noKyberdash + "'");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(expectedExitCode, result.ExitCode);
+        if (expectedExitCode != 0)
+        {
+            Assert.Contains("--with-menubar", result.StandardError, StringComparison.Ordinal);
+            Assert.Contains("--no-kyberdash", result.StandardError, StringComparison.Ordinal);
+        }
+    }
+
     private sealed class Sandbox : IDisposable
     {
-        private readonly string _dir = Path.Combine(
-            Path.GetTempPath(),
-            "kyber-weave-release-test-" + Guid.NewGuid().ToString("N"));
+        private readonly string _dir;
         public string SumsPath => Path.Combine(_dir, "SHA256SUMS.txt");
-        public Sandbox() { Directory.CreateDirectory(_dir); }
+
+        public Sandbox(string suffix = "")
+        {
+            _dir = Path.Combine(
+                Path.GetTempPath(),
+                "kyber-weave-release-test-" + Guid.NewGuid().ToString("N") + suffix);
+            Directory.CreateDirectory(_dir);
+        }
+
+        /// <summary>Writes a stand-in binary and makes it executable.</summary>
+        public string WriteExecutable(string name, string script)
+        {
+            string path = Path.Combine(_dir, name);
+            File.WriteAllText(path, script);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    path,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+            return path;
+        }
 
         public string WriteArchive(string name, string content)
         {
