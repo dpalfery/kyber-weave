@@ -1,11 +1,11 @@
-/* TODO(8.12): import the shared dashboard tokens from dash/web/src/tokens.css
-   once Stream D extracts them. D8 says the tray imports that file rather than
-   copying token values into this tree. */
+/* The dashboard's tokens, imported rather than copied (R8.12 / D8). Copying
+   the values is how the two surfaces would drift; sharing components would
+   pull in a wide layout the popover cannot use. */
+@import url('../../../web/src/tokens.css');
 
 :root {
-  font-family: system-ui, sans-serif;
-  color: CanvasText;
-  background: Canvas;
+  color: var(--foreground);
+  background: var(--background);
 }
 
 html,

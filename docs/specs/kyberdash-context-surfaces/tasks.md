@@ -396,7 +396,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     `include_str!`) and opens server URL + path. Everything else is refused.
   - Test that `refresh_now`, `set_settings` and `quit` behave as specified.
   - _Requirements: 6.10, 8.6, 8.7_
-- [ ] 8.10 Popover UI
+- [x] 8.10 Popover UI
   - Stream E.
   - Write Testing Library tests over every report fixture and every `ViewState` phase:
     - order: harness selector, session panel, findings (at most 3), health footer, actions
