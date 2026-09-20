@@ -25,7 +25,7 @@ export function resolveCliName(argv1 = process.argv[1]): string {
 }
 
 export function applyHtmlBrand(html: string): string {
-  return html
-    .replace(/<title>[^<]*<\/title>/i, `<title>${BRAND.htmlTitle}</title>`)
-    .replace(/href="\/codeburn-logo\.png"/g, `href="${BRAND.faviconPngHref}"`)
+  // The favicon hrefs are authored in index.html and need no rewrite; only the
+  // title is overlaid, so a served page cannot disagree with BRAND.
+  return html.replace(/<title>[^<]*<\/title>/i, `<title>${BRAND.htmlTitle}</title>`)
 }

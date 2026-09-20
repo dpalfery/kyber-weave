@@ -9,16 +9,14 @@ describe('KyberDash brand overlay', () => {
   })
 
   it('follows the installed binary basename', () => {
-    expect(resolveCliName('/usr/local/bin/codeburn')).toBe('codeburn')
+    expect(resolveCliName('/usr/local/bin/kyberdash-nightly')).toBe('kyberdash-nightly')
   })
 
-  it('rewrites upstream HTML chrome without touching the bootstrap marker', () => {
-    const html =
-      '<title>CodeBurn - Local Dashboard</title><link rel="icon" href="/codeburn-logo.png" />'
+  it('overlays the title and leaves the authored favicon href alone', () => {
+    const html = `<title>Whatever - Local Dashboard</title><link rel="icon" href="${BRAND.faviconPngHref}" />`
     const branded = applyHtmlBrand(html)
     expect(branded).toContain(`<title>${BRAND.htmlTitle}</title>`)
     expect(branded).toContain(`href="${BRAND.faviconPngHref}"`)
-    expect(branded).not.toContain('CodeBurn')
-    expect(branded).not.toContain('/codeburn-logo.png')
+    expect(branded).not.toContain('Whatever')
   })
 })

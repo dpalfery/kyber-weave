@@ -9,7 +9,8 @@ it might later disagree with.
 | --- | --- |
 | Installed binary | `scripts/install.sh` and the SEA job name it `kyberdash` |
 | CLI help (`Usage:`) | `dash/src/brand-overlay.ts` → `program.name(resolveCliName())` |
-| Web title / favicon | `index.html` plus `applyHtmlBrand` when the CLI serves `index.html` |
+| Web title | `applyHtmlBrand` overlays it when the CLI serves `index.html` |
+| Favicon | `index.html` authors the hrefs; nothing rewrites them |
 | Web chrome logo | `LightsaberLogo` / `kyberdash-logo.*` |
 
 `KYBERDASH_CLI_NAME` overrides the display command if a wrapper needs it.

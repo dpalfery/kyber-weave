@@ -108,7 +108,8 @@ function SideLink({ active, onClick, children, testId }: { active: boolean; onCl
 }
 
 // Theme toggle: mirrors the .dark class set by the index.html pre-paint script
-// and persists the choice to the same localStorage key.
+// and persists the choice to the same localStorage key (`kyberdash-theme`,
+// falling back to the pre-severance key on read until a release ships past it).
 function ThemeToggle() {
   const [dark, setDark] = useState(() =>
     typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : false,
@@ -120,7 +121,8 @@ function ThemeToggle() {
       document.documentElement.classList.toggle('dark', next)
     }
     try {
-      localStorage.setItem('codeburn-theme', next ? 'dark' : 'light')
+      localStorage.setItem('kyberdash-theme', next ? 'dark' : 'light')
+      localStorage.removeItem('codeburn-theme')
     } catch {
       // storage disabled (some embeds/webviews): persist nothing, OS theme wins next load
     }
@@ -270,7 +272,7 @@ export function App({ initialPage = 'context-doctor', initialPath, initialNotFou
     const apply = () => {
       let saved: string | null = null
       try {
-        saved = localStorage.getItem('codeburn-theme')
+        saved = localStorage.getItem('kyberdash-theme') ?? localStorage.getItem('codeburn-theme')
       } catch {
         // storage disabled: OS theme only
       }

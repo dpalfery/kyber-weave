@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 const srcRoot = dirname(fileURLToPath(import.meta.url))
 const webRoot = join(srcRoot, '..')
 const dashRoot = join(webRoot, '..')
-const tokensPath = join(srcRoot, 'tokens.css')
+const tokensPath = join(srcRoot, 'kyber.css')
 const indexPath = join(srcRoot, 'index.css')
 const distCssDir = join(dashRoot, 'dist', 'dash', 'assets')
 
@@ -21,8 +21,8 @@ function walk(dir: string, out: string[] = []): string[] {
     }
     if (
       /\.(tsx|ts|css)$/.test(name.name) &&
-      name.name !== 'tokens.css' &&
-      name.name !== 'tokens.test.ts'
+      name.name !== 'kyber.css' &&
+      name.name !== 'kyber.test.ts'
     ) {
       out.push(path)
     }
@@ -114,12 +114,12 @@ function presentInBuilt(themeToken: string, built: string): boolean {
 }
 
 describe('shared design tokens (R8.12)', () => {
-  it('lives in tokens.css and is imported by the dashboard stylesheet', () => {
-    expect(existsSync(tokensPath), 'dash/web/src/tokens.css must exist so the tray can import the same file').toBe(
+  it('lives in kyber.css and is imported by the dashboard stylesheet', () => {
+    expect(existsSync(tokensPath), 'dash/web/src/kyber.css must exist so the tray can import the same file').toBe(
       true,
     )
     const index = readFileSync(indexPath, 'utf8')
-    expect(index).toMatch(/@import\s+["'].\/tokens\.css["']/)
+    expect(index).toMatch(/@import\s+["'].\/kyber\.css["']/)
     expect(index).not.toMatch(/@theme\s+inline/)
   })
 

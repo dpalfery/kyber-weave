@@ -154,7 +154,7 @@ cleanly on Windows. This plugin is the one new Rust dependency. It is an officia
 plugin, and every alternative is platform-specific IPC code.
 
 **D8 — Share design tokens, not components, between web and tray (8.12).** The dashboard's
-`@theme` tokens move into `web/src/tokens.css`, which both Vite builds import. The popover's
+`@theme` tokens move into `web/src/kyber.css`, which both Vite builds import. The popover's
 components are purpose-built, because the dashboard's panels assume a wide layout.
 
 **D9 — ADRs.** ADR 0020 records the one-time fork, restates ADR 0006's surviving decisions,

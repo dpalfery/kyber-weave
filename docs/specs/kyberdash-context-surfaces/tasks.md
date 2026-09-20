@@ -304,7 +304,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 5.1, 5.2, 5.3, 5.4_
 - [x] 7.5 Extract the shared design tokens
   - Stream D.
-  - Move the dashboard `@theme` tokens into `dash/web/src/tokens.css`, imported by the
+  - Move the dashboard `@theme` tokens into `dash/web/src/kyber.css`, imported by the
     dashboard.
   - Add a test that the built CSS still defines every token the components reference.
   - _Requirements: 8.12_
@@ -408,7 +408,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - the setup and stale states
   - Implement `SessionPanel`, `FindingsList`, `HarnessSelector`, `HealthFooter`, `Actions`,
     `SetupState`, `EmptyState`, `StaleBanner` and `SettingsView`, importing
-    `dash/web/src/tokens.css` and the report types with type-only imports.
+    `dash/web/src/kyber.css` and the report types with type-only imports.
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.8, 8.9, 8.10, 8.11, 8.12, 14.1, 14.2, 14.3, 14.4_
 
 - [ ] 9. Distribution

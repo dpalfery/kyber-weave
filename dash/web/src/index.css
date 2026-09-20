@@ -1,6 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@300..600&display=swap");
 @import "tailwindcss";
-@import "./tokens.css";
+@import "./kyber.css";
 
 @custom-variant dark (&:is(.dark *));
 

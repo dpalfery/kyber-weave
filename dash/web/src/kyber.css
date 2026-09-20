@@ -1,105 +1,124 @@
 /*
- * Shared design tokens for the dashboard and, next, the tray (R8.12 / D8).
+ * Shared design tokens for the dashboard and the tray (R8.12 / D8).
  *
  * Colour, type scale and density live here rather than in the dashboard's
  * page stylesheet so the popover can import the same file. Duplicating the
  * values would let the two surfaces drift; sharing components would pull in
  * a wide layout the tray cannot use.
  *
- * Archival warmth + forensic precision. Warm paper surfaces, ink text, a
- * forest-green accent, and a green -> gold -> terracotta ramp for stacked
- * charts. No pure white background, no pure black, no cold neutrals.
+ * The palette is derived from the KyberDash mark (`public/kyberdash-logo.svg`)
+ * rather than authored separately, so the product and its icon cannot drift.
+ * Every colour below traces to a stop in that file:
+ *
+ *   blade      #10b981 -> #34d399 -> #6ee7b7   primary, positive, focus ring
+ *   hilt       #1e293b -> #475569 -> #94a3b8   surfaces, borders, muted text
+ *   emitter    #fbbf24 -> #d97706              attention, context pressure >= 70% (R9.1)
+ *   switch     #ef4444                         critical, context pressure >= 90% (R9.2)
+ *
+ * The mark already carries the three-state semantic the status item needs, so
+ * the thresholds read as the saber does: a calm blade, a lit emitter, a live
+ * switch. Light mode takes the darker stop of each gradient so both schemes
+ * come from one source and each clears contrast on its own background.
+ *
+ * Cool slate throughout: no warm paper, no sepia neutrals.
  */
 :root {
   font-family: "Geist", "Geist Fallback", system-ui, sans-serif;
   --radius: 0.375rem;
 
-  --background: #f6f4ef;
-  --outer-background: #e9e6de;
-  --foreground: #16181d;
+  --background: #f8fafc;
+  --outer-background: #eef2f7;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-foreground: #16181d;
+  --card-foreground: #0f172a;
   --popover: #ffffff;
-  --popover-foreground: #16181d;
-  --muted: #efece4;
-  --muted-foreground: #5d626b;
-  --tertiary-foreground: #8a857c;
-  --heading: #2c5242;
-  --border: rgba(23, 27, 32, 0.08);
-  --input: rgba(23, 27, 32, 0.14);
-  --interactive-secondary: rgba(23, 27, 32, 0.04);
-  --interactive-secondary-hover: rgba(23, 27, 32, 0.08);
+  --popover-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #475569;
+  --tertiary-foreground: #64748b;
+  --heading: #065f46;
+  --border: rgba(15, 23, 42, 0.08);
+  --input: rgba(15, 23, 42, 0.14);
+  --interactive-secondary: rgba(15, 23, 42, 0.04);
+  --interactive-secondary-hover: rgba(15, 23, 42, 0.08);
   --active-primary: #ffffff;
-  --accent: #efece4;
-  --accent-foreground: #16181d;
-  --subtle: #8a857c;
-  --primary: #1f8a5b;
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
+  --subtle: #64748b;
+  --primary: #059669;
   --primary-foreground: #ffffff;
-  --ring: #1f8a5b;
-  --positive: #1f8a5b;
-  --brand: #e8553a;
+  --ring: #10b981;
+  --positive: #059669;
+  --brand: #10b981;
 
-  --chart-1: #1f8a5b;
-  --chart-2: #4fd394;
-  --chart-3: #2c5242;
-  --chart-4: #d99a3c;
-  --chart-5: #c8541f;
-  --chart-6: #2f5fd0;
-  --chart-7: #7aa86f;
-  --chart-8: #b5403a;
-  --chart-9: #3f8f6b;
-  --chart-10: #a98b4f;
-  --chart-grid-stroke: rgba(23, 27, 32, 0.07);
-  --chart-hover-cursor: rgba(0, 0, 0, 0.04);
+  /*
+   * Categorical ramp. 1-2 and 4-7 are the mark's own hues; 3, 8, 9 and 10 are
+   * deliberate extensions, because a saber carries three hue families and a
+   * categorical scale needs ten that stay apart at a glance. All sit at the
+   * 600-700 weight so no series reads as louder than its neighbours.
+   */
+  --chart-1: #059669;
+  --chart-2: #0d9488;
+  --chart-3: #0369a1;
+  --chart-4: #d97706;
+  --chart-5: #b45309;
+  --chart-6: #dc2626;
+  --chart-7: #475569;
+  --chart-8: #7c3aed;
+  --chart-9: #be185d;
+  --chart-10: #4d7c0f;
+  --chart-grid-stroke: rgba(15, 23, 42, 0.07);
+  --chart-hover-cursor: rgba(15, 23, 42, 0.04);
 
   color-scheme: light;
 }
 
 /*
- * Dark surface: chart colors are re-derived for dark-background contrast.
- * The .dark class is applied to <html> by index.html before first paint
- * and toggled in the header.
+ * Dark surface: the mark's own reading — a lit blade against slate. Chart
+ * colours are re-derived at the 400-500 weight for contrast on a dark
+ * background. The .dark class is applied to <html> by index.html before first
+ * paint and toggled in the header.
  */
 .dark {
   color-scheme: dark;
 
-  --background: #0e1013;
-  --outer-background: #0e1013;
-  --foreground: #e8eaee;
-  --card: #16181d;
-  --card-foreground: #e8eaee;
-  --popover: #16181d;
-  --popover-foreground: #e8eaee;
-  --muted: #1a1d22;
-  --muted-foreground: #959ca8;
-  --tertiary-foreground: #8b93a1;
-  --heading: #7aa86f;
-  --border: #282c33;
-  --input: #282c33;
-  --interactive-secondary: rgba(255, 255, 255, 0.06);
-  --interactive-secondary-hover: rgba(255, 255, 255, 0.1);
-  --active-primary: #2a2f38;
-  --accent: #1a1d22;
-  --accent-foreground: #e8eaee;
-  --subtle: #8b93a1;
-  --primary: #3ecf8e;
-  --primary-foreground: #0e1013;
-  --ring: #3ecf8e;
-  --positive: #3ecf8e;
-  --brand: #f2701c;
+  --background: #0f172a;
+  --outer-background: #0b1120;
+  --foreground: #e2e8f0;
+  --card: #1e293b;
+  --card-foreground: #e2e8f0;
+  --popover: #1e293b;
+  --popover-foreground: #e2e8f0;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --tertiary-foreground: #64748b;
+  --heading: #6ee7b7;
+  --border: #334155;
+  --input: #334155;
+  --interactive-secondary: rgba(226, 232, 240, 0.06);
+  --interactive-secondary-hover: rgba(226, 232, 240, 0.1);
+  --active-primary: #334155;
+  --accent: #1e293b;
+  --accent-foreground: #e2e8f0;
+  --subtle: #64748b;
+  --primary: #10b981;
+  --primary-foreground: #022c22;
+  --ring: #34d399;
+  --positive: #10b981;
+  --brand: #10b981;
 
-  --chart-1: #3ecf8e;
-  --chart-2: #7ce0b0;
-  --chart-3: #2f9e6e;
-  --chart-4: #e8b93e;
-  --chart-5: #f2701c;
-  --chart-6: #5b9bef;
-  --chart-7: #8bb6a0;
-  --chart-8: #f26d6d;
-  --chart-9: #4fbf93;
-  --chart-10: #d5b26a;
-  --chart-grid-stroke: rgba(255, 255, 255, 0.08);
-  --chart-hover-cursor: rgba(255, 255, 255, 0.06);
+  --chart-1: #10b981;
+  --chart-2: #2dd4bf;
+  --chart-3: #38bdf8;
+  --chart-4: #fbbf24;
+  --chart-5: #f59e0b;
+  --chart-6: #ef4444;
+  --chart-7: #94a3b8;
+  --chart-8: #a78bfa;
+  --chart-9: #f472b6;
+  --chart-10: #a3e635;
+  --chart-grid-stroke: rgba(226, 232, 240, 0.08);
+  --chart-hover-cursor: rgba(226, 232, 240, 0.06);
 }
 
 @theme inline {

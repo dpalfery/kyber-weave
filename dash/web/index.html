@@ -8,12 +8,14 @@
     <title>kyberDash - Local Dashboard</title>
     <script>
       // Apply the saved theme before first paint so the dashboard never flashes light.
-      // Keep the localStorage key `codeburn-theme` — renaming it both loses
-      // existing prefs and conflicts with every upstream pull of this script.
+      // `kyberdash-theme` is the key. The pre-severance `codeburn-theme` is read
+      // once as a fallback so a browser holding the old preference keeps it; the
+      // first toggle rewrites to the new key and clears the old one. The fallback
+      // can go once a release has shipped past it.
       (function () {
         var saved = null
         try {
-          saved = localStorage.getItem('codeburn-theme')
+          saved = localStorage.getItem('kyberdash-theme') || localStorage.getItem('codeburn-theme')
         } catch (e) {
           // storage disabled (some embeds/webviews): fall back to OS theme
         }

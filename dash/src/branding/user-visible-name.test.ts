@@ -38,7 +38,10 @@ const ALLOWED = [
   },
   { pattern: /^codeburn\/$/, why: 'canon FILE_SOURCE_PREFIX, written into stored rows' },
   { pattern: /^codeburn$/, why: 'vendor namespace matched against what emitters send' },
-  { pattern: /^codeburn-theme$/, why: 'browser storage key already set in live browsers' },
+  {
+    pattern: /^codeburn-theme$/,
+    why: 'legacy browser storage key, read once so an existing preference survives the rename to kyberdash-theme',
+  },
   { pattern: /^file:codeburn-uri-probe\?mode=memory$/, why: 'in-memory probe URI, never rendered' },
 ]
 

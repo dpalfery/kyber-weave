@@ -1,7 +1,7 @@
 /* The dashboard's tokens, imported rather than copied (R8.12 / D8). Copying
    the values is how the two surfaces would drift; sharing components would
    pull in a wide layout the popover cannot use. */
-@import url('../../../web/src/tokens.css');
+@import url('../../../web/src/kyber.css');
 
 :root {
   color: var(--foreground);
