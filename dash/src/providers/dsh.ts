@@ -244,14 +244,13 @@ async function readEventLines(filePath: string): Promise<string[] | null> {
     }
     let buffer: Buffer
     try {
-      // The whole log is buffered to scan its frames, so it needs the same
-      // oversize guard readSessionFile applies to the uncompressed variant.
-      const size = (await stat(filePath)).size
-      if (size > MAX_SESSION_FILE_BYTES) {
-        notice(`kyberdash: skipped oversize DSH session log ${filePath} (${size} bytes)\n`)
+      // Read atomically: checking size via stat before readFile leaves a race
+      // window. Read the bytes first and check their length afterwards.
+      buffer = await readFile(filePath)
+      if (buffer.length > MAX_SESSION_FILE_BYTES) {
+        notice(`kyberdash: skipped oversize DSH session log ${filePath} (${buffer.length} bytes)\n`)
         return null
       }
-      buffer = await readFile(filePath)
     } catch {
       return null
     }
@@ -294,8 +293,10 @@ async function readSessionHeader(filePath: string): Promise<DshEvent | null> {
         // first batch carries the whole inherited seed, so this is reachable on
         // a real log and needs the same oversize guard as the parse read.
         try {
-          if ((await stat(filePath)).size > MAX_SESSION_FILE_BYTES) return null
+          // Read atomically: checking size via stat before readFile leaves a
+          // race window. Read the bytes first and check their length afterwards.
           const full = await readFile(filePath)
+          if (full.length > MAX_SESSION_FILE_BYTES) return null
           frames = scanZstdFrames(full, 1).frames
           if (frames.length === 0) return null
           head = full

@@ -375,6 +375,17 @@ function logId(value: string): string {
   return value.replace(/[^\x20-\x7e]/g, '?').slice(0, 120)
 }
 
+/**
+ * Sanitizes an unknown caught value for a log line. Extracts the message from
+ * an Error, or converts any other value to a string, then strips CR/LF and
+ * other control characters so a crafted database error cannot forge log entries.
+ */
+function logErr(value: unknown): string {
+  const raw = value instanceof Error ? value.message : String(value)
+  return raw.replace(/[^\x20-\x7e]/g, '?').slice(0, 500)
+}
+
+
 function isCanonicalPart(value: string): value is CanonicalContentKey {
   return (CANONICAL_CONTENT_KEYS as readonly string[]).includes(value)
 }
@@ -878,9 +889,9 @@ export class KyberBridge {
         }
       } catch (err) {
         console.warn(
-          '[KyberBridge] Error reading session payload from canon.db for %s:',
+          '[KyberBridge] Error reading session payload from canon.db for %s: %s',
           logId(sessionId),
-          err,
+          logErr(err),
         )
       }
     }

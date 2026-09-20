@@ -123,11 +123,22 @@ function parseTurnContentPath(pathname: string): { sessionId: string; turnIndex:
 }
 
 function sendKyberJson(res: ServerResponse, status: number, body: unknown): void {
+  let serialized: string
+  try {
+    serialized = JSON.stringify(body)
+  } catch (err) {
+    // Serialization failure (e.g. circular reference) must not leak internal
+    // detail to the client. Log it server-side and return a generic error.
+    console.error('[KyberRoutes] Failed to serialize response:', err instanceof Error ? err.message : String(err))
+    res.writeHead(500, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify({ error: 'Internal server error' }))
+    return
+  }
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
   })
-  res.end(JSON.stringify(body))
+  res.end(serialized)
 }
 
 type SessionViewPayload = {

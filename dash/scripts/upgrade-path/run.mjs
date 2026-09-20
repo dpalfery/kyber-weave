@@ -18,7 +18,7 @@
 // upgrade from), UPGRADE_PATH_KEEP=1 to leave the work dir behind.
 
 import { spawnSync, spawn } from 'node:child_process'
-import { mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync, statSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -26,7 +26,11 @@ import { tmpdir } from 'node:os'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = join(HERE, '..', '..')
 const OLD_VERSION = process.env['UPGRADE_PATH_OLD'] || '0.9.20'
-const WORK = process.env['UPGRADE_PATH_WORK'] || join(tmpdir(), 'codeburn upgrade path')
+// When UPGRADE_PATH_WORK is not set, create an atomically unique work directory
+// with mkdtempSync (0700, random suffix) so the path cannot be predicted by
+// another process on the same machine. A guessable name in the shared OS temp
+// directory allows pre-creation or symlink attacks before this script runs.
+const WORK = process.env['UPGRADE_PATH_WORK'] || mkdtempSync(join(tmpdir(), 'kyberdash-upgrade-'))
 
 // The published binary's cache versions. If a future baseline writes something
 // else these two are the knobs to move, and the assertions below will say so.
@@ -163,7 +167,11 @@ function shardMtimes(cacheDir) {
 // ── 1. corpus ────────────────────────────────────────────────────────────────
 
 step(`work dir: ${WORK}`)
-try { rmSync(WORK, { recursive: true, force: true }) } catch (err) { console.log(`  note  could not clear the work dir (${err.code}); reusing it`) }
+if (process.env['UPGRADE_PATH_WORK']) {
+  // Caller-supplied path: clear any previous run's artifacts first.
+  try { rmSync(WORK, { recursive: true, force: true }) } catch (err) { console.log(`  note  could not clear the work dir (${err.code}); reusing it`) }
+}
+// mkdtempSync already created WORK; subdirectories are always created fresh.
 mkdirSync(HOME, { recursive: true })
 mkdirSync(PAYLOADS, { recursive: true })
 

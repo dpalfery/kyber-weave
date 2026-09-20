@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'crypto'
 import { existsSync, readFileSync, unlinkSync } from 'fs'
-import { mkdir, open, readFile, stat, unlink, utimes, writeFile } from 'fs/promises'
+import { mkdir, open, unlink, utimes, writeFile } from 'fs/promises'
 import { join } from 'path'
 
 import { homedir } from 'os'
@@ -192,10 +192,23 @@ async function observe(path: string): Promise<ObservationResult> {
   let sawChange = false
   let corrupt: Observation | null = null
   for (let attempt = 0; attempt < 3; attempt++) {
+    let handle: import('fs/promises').FileHandle | null = null
     try {
-      const before = await stat(path)
-      const raw = await readFile(path, 'utf-8')
-      const after = await stat(path)
+      try {
+        handle = await open(path, 'r')
+      } catch (err) {
+        if (isMissingError(err)) return 'missing'
+        const code = (err as NodeJS.ErrnoException | undefined)?.code
+        if (code === 'EACCES' || code === 'EPERM') return 'unavailable'
+        throw err
+      }
+      // All three operations go through the same file handle, binding the
+      // before-stat, the read, and the after-stat to the same inode.
+      // This eliminates the TOCTOU race that existed when stat and readFile
+      // were separate path-based syscalls.
+      const before = await handle.stat()
+      const raw = await handle.readFile({ encoding: 'utf-8' })
+      const after = await handle.stat()
       if (before.mtimeMs !== after.mtimeMs || before.size !== after.size) {
         sawChange = true
         await delay(1)
@@ -222,6 +235,8 @@ async function observe(path: string): Promise<ObservationResult> {
       if (isMissingError(err)) return 'missing'
       const code = (err as NodeJS.ErrnoException | undefined)?.code
       if (code === 'EACCES' || code === 'EPERM') return 'unavailable'
+    } finally {
+      await handle?.close().catch(() => {})
     }
     await delay(1)
   }

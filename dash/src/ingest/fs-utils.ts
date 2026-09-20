@@ -1,5 +1,5 @@
 import { readFile, stat } from 'fs/promises'
-import { readFileSync, statSync, createReadStream } from 'fs'
+import { readFileSync, createReadStream } from 'fs'
 
 // Hard cap well below V8's 512 MB string limit. Callers that need line-by-line
 // processing should use readSessionLines(), which avoids materializing the
@@ -33,47 +33,42 @@ export async function readSessionFile(
   filePath: string,
   encoding: BufferEncoding = 'utf-8'
 ): Promise<string | null> {
-  let size: number
+  // Read atomically: checking size via stat before readFile leaves a race
+  // window where the file can be replaced or grown between the two calls.
+  // Instead, read the bytes first and check their length afterwards.
+  let buf: Buffer
   try {
-    size = (await stat(filePath)).size
-  } catch (err) {
-    warn(`stat failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
-    return null
-  }
-
-  if (size > MAX_SESSION_FILE_BYTES) {
-    warn(`skipped oversize file ${filePath} (${size} bytes > cap ${MAX_SESSION_FILE_BYTES})`)
-    return null
-  }
-
-  try {
-    return await readFile(filePath, encoding)
+    buf = await readFile(filePath)
   } catch (err) {
     warn(`read failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
     return null
   }
+
+  if (buf.length > MAX_SESSION_FILE_BYTES) {
+    warn(`skipped oversize file ${filePath} (${buf.length} bytes > cap ${MAX_SESSION_FILE_BYTES})`)
+    return null
+  }
+
+  return buf.toString(encoding)
 }
 
 export function readSessionFileSync(filePath: string): string | null {
-  let size: number
+  // Read atomically: checking size via statSync before readFileSync leaves a
+  // race window. Read the buffer directly and check its length afterwards.
+  let buf: Buffer
   try {
-    size = statSync(filePath).size
-  } catch (err) {
-    warn(`stat failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
-    return null
-  }
-
-  if (size > MAX_SESSION_FILE_BYTES) {
-    warn(`skipped oversize file ${filePath} (${size} bytes > cap ${MAX_SESSION_FILE_BYTES})`)
-    return null
-  }
-
-  try {
-    return readFileSync(filePath, 'utf-8')
+    buf = readFileSync(filePath)
   } catch (err) {
     warn(`read failed for ${filePath}: ${(err as NodeJS.ErrnoException).code ?? 'unknown'}`)
     return null
   }
+
+  if (buf.length > MAX_SESSION_FILE_BYTES) {
+    warn(`skipped oversize file ${filePath} (${buf.length} bytes > cap ${MAX_SESSION_FILE_BYTES})`)
+    return null
+  }
+
+  return buf.toString('utf-8')
 }
 
 export type SessionLine = string | Buffer

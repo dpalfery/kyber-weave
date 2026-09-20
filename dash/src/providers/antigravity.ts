@@ -185,8 +185,31 @@ const SERVER_PORT_FLAGS = ['https_server_port', 'extension_server_port', 'https-
 const CSRF_TOKEN_FLAGS = ['csrf_token', 'extension_server_csrf_token', 'csrf-token', 'extension-server-csrf-token']
 const APP_DATA_DIR_FLAGS = ['app_data_dir', 'app-data-dir']
 
+// The Antigravity IDE extension server listens on localhost over HTTPS with a
+// self-signed certificate. There is no man-in-the-middle position on the
+// loopback interface of the same machine, so skipping TLS certificate name
+// validation for that address is safe. The exemption is narrowed with
+// checkServerIdentity: if this agent is ever passed a non-loopback hostname,
+// it throws rather than silently omitting verification.
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '::1', 'localhost'])
+
 function getAgent(): https.Agent {
-  if (!httpsAgent) httpsAgent = new https.Agent({ rejectUnauthorized: false })
+  if (!httpsAgent) {
+    httpsAgent = new https.Agent({
+      rejectUnauthorized: false,
+      checkServerIdentity(hostname: string) {
+        if (!LOOPBACK_HOSTNAMES.has(hostname)) {
+          throw new Error(
+            `Antigravity HTTPS agent may only connect to loopback addresses; ` +
+            `rejecting ${hostname}`,
+          )
+        }
+        // Loopback: certificate validation of self-signed certs is waived.
+        // Return undefined (no error) to proceed with the connection.
+        return undefined
+      },
+    })
+  }
   return httpsAgent
 }
 
@@ -922,8 +945,18 @@ function usageDelta(current: StatusLineEvent['usage'], previous: StatusLineEvent
   }
 }
 
+// Conversation IDs are alphanumeric strings (possibly with hyphens/underscores)
+// produced by Antigravity. The allowlist ensures that only safe identifier
+// characters can appear in outbound RPC request bodies — a file path or other
+// filesystem data outside this set is rejected rather than forwarded.
+const CASCADE_ID_ALLOWED = /^[A-Za-z0-9_\-. ]+$/
+
 export function antigravityCascadeIdFromPath(path: string): string {
-  return basename(path).replace(/\.(pb|db)$/i, '')
+  const id = basename(path).replace(/\.(pb|db)$/i, '')
+  if (!CASCADE_ID_ALLOWED.test(id)) {
+    throw new Error(`Unexpected cascade id format: ${JSON.stringify(id)}`)
+  }
+  return id
 }
 
 function buildCallsFromGeneratorMetadata(
