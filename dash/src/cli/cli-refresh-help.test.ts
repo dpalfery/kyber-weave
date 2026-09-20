@@ -2,14 +2,18 @@ import { spawnSync } from 'node:child_process'
 
 import { describe, expect, it } from 'vitest'
 
-describe('CLI refresh help', () => {
-  it.each(['report'])('%s discloses the refresh floor and disable value', command => {
-    const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', command, '--help'], {
+describe('CLI report help', () => {
+  it('discloses the context-report flags', () => {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', 'report', '--help'], {
       cwd: process.cwd(),
       encoding: 'utf8',
     })
 
-    expect(result.status).toBe(0)
-    expect(result.stdout).toMatch(/Auto-refresh interval in seconds \(minimum 60; 0 to\s+disable\)/)
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).toMatch(/--format/)
+    expect(result.stdout).toMatch(/--harness/)
+    expect(result.stdout).toMatch(/--days/)
+    expect(result.stdout).toMatch(/--limit/)
+    expect(result.stdout).toMatch(/--db/)
   })
 })

@@ -14,7 +14,7 @@ import {
   loadCache,
   type SessionCache,
 } from '../ingest/session-cache.js'
-import { renderTable } from '../tui/text-table.js'
+import { renderTable } from './text-table.js'
 import { collectLauncherNotes, type LauncherNote } from '../ingest/launcher-homes.js'
 import { BRAND } from '../brand-overlay.js'
 

@@ -1,0 +1,412 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderMarkdown snapshots > renders empty 1`] = `
+"# KyberDash context report
+
+Window: last 7 days
+
+## Data coverage
+
+- **Store:** \`canon.db\`
+- **Refresh:** never
+- **Quarantine:** 0
+- **Problems:** 0
+- **Harnesses:** none in the window
+
+> No session in the window. Run \`kyberdash dash refresh\` to read local harness history.
+
+> No successful refresh recorded. Run \`kyberdash dash refresh\`.
+
+## Findings
+
+None in the window.
+
+## Harness dimensions
+
+None in the window.
+
+## Latest session
+
+No session in the window.
+
+## Cost
+
+| Basis | Amount |
+| --- | --- |
+| unknown | — (no session in scope carried a cost) |
+"
+`;
+
+exports[`renderMarkdown snapshots > renders full 1`] = `
+"# KyberDash context report
+
+Window: last 7 days
+
+## Data coverage
+
+- **Store:** \`canon.db\`
+- **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Quarantine:** 0
+- **Problems:** 0
+
+| Harness | Detected | Sessions |
+| --- | --- | ---: |
+| claude-code | yes | 1 |
+| codex | no | 0 |
+
+## Findings
+
+### 1. Tool definitions hold 9,000 tokens across every turn
+
+- **Class:** deterministic
+- **Confidence:** high (resident in 14 of 14 turns, called in 0)
+- **Mechanism:** Four MCP servers publish their full schemas into every request, whether or not a tool from them is called.
+- **Evidence:** \`span-0d41\`, \`span-0d52\`
+- **Recoverable:** 6400 tokens (5200–7600)
+- **Outcome risk:** Relocating schemas adds a load step the first time a tool is used in a session.
+- **Recommendation:** Move the github and filesystem server schemas behind an on-demand skill so they load only when a tool from them is called.
+- \`kyberdash web --view finding/finding-tool-schema-residency\`
+
+### 2. The same search ran four times
+
+- **Class:** deterministic
+- **Confidence:** high (resident in 14 of 14 turns, called in 0)
+- **Mechanism:** Four MCP servers publish their full schemas into every request, whether or not a tool from them is called.
+- **Evidence:** \`span-0d41\`, \`span-0d52\`
+- **Recoverable:** 900 tokens (700–1200)
+- **Outcome risk:** Relocating schemas adds a load step the first time a tool is used in a session.
+- **Recommendation:** Move the github and filesystem server schemas behind an on-demand skill so they load only when a tool from them is called.
+- \`kyberdash web --view finding/finding-duplicate-grep\`
+
+
+## Harness dimensions
+
+### claude-code
+
+| Dimension | Value |
+| --- | --- |
+| Context Hygiene | 63% |
+| Cache Efficiency | 81% |
+| Tool Yield | 2.4x |
+| Skill Utilisation | — (Telemetry missing: skill activation unobserved on this harness) |
+| Delegation Overhead | 7% |
+| Continuity | — (Telemetry missing: turn outcome or correction telemetry unobserved) |
+
+### codex
+
+| Dimension | Value |
+| --- | --- |
+| Context Hygiene | 21% |
+| Cache Efficiency | — (Telemetry missing: harness does not export cache read/creation counters) |
+| Tool Yield | — (Telemetry missing: tool call residency and schema tokens unobserved) |
+| Skill Utilisation | — (Telemetry missing: skill activation unobserved on this harness) |
+| Delegation Overhead | — (Telemetry missing: no delegation events recorded or single-agent run) |
+| Continuity | — (Telemetry missing: turn outcome or correction telemetry unobserved) |
+
+
+## Latest session
+
+**sess-alpha** · claude-code · kyber-weave
+
+- **Last activity:** 2026-09-19T10:00:00.000Z
+- **Turns:** 14
+- \`kyberdash web --view session/sess-alpha\`
+- **Latest turn:** #14
+- **Pressure:** 63%
+- **Window:** 200000 tokens
+
+| Bucket | Tokens |
+| --- | --- |
+| System prompt | 1200 tokens |
+| Tool definitions | 9000 tokens |
+| Instruction context | 3400 tokens |
+| Conversation history | 81000 tokens |
+| Tool result content | 31600 tokens |
+
+- **Residual:** 512 tokens
+- **Cache break:** no
+
+| Tool definition source | Tokens |
+| --- | --- |
+| mcp-github | 5100 tokens |
+| mcp-filesystem | 2600 tokens |
+| mcp-fetch | 1300 tokens |
+
+Cache-invalidation turns: 9
+
+## Cost
+
+| Basis | Amount |
+| --- | --- |
+| harness | $4.12 USD |
+"
+`;
+
+exports[`renderMarkdown snapshots > renders mixed-basis-cost 1`] = `
+"# KyberDash context report
+
+Window: last 7 days
+
+## Data coverage
+
+- **Store:** \`canon.db\`
+- **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Quarantine:** 0
+- **Problems:** 0
+
+| Harness | Detected | Sessions |
+| --- | --- | ---: |
+| claude-code | — | 1 |
+
+## Findings
+
+None in the window.
+
+## Harness dimensions
+
+### claude-code
+
+| Dimension | Value |
+| --- | --- |
+| Context Hygiene | 63% |
+| Cache Efficiency | 81% |
+| Tool Yield | 2.4x |
+| Skill Utilisation | — (Telemetry missing: skill activation unobserved on this harness) |
+| Delegation Overhead | 7% |
+| Continuity | — (Telemetry missing: turn outcome or correction telemetry unobserved) |
+
+
+## Latest session
+
+**sess-alpha** · claude-code · kyber-weave
+
+- **Last activity:** 2026-09-19T10:00:00.000Z
+- **Turns:** 14
+- \`kyberdash web --view session/sess-alpha\`
+- **Latest turn:** #0
+- **Pressure:** — (harness exported no message structure for this session)
+- **Window:** — (harness exported no message structure for this session)
+
+| Bucket | Tokens |
+| --- | --- |
+| System prompt | — (harness exported no message structure for this session) |
+| Tool definitions | — (harness exported no message structure for this session) |
+| Instruction context | — (harness exported no message structure for this session) |
+| Conversation history | — (harness exported no message structure for this session) |
+| Tool result content | — (harness exported no message structure for this session) |
+
+- **Residual:** — (harness exported no message structure for this session)
+- **Cache break:** no
+
+## Cost
+
+| Basis | Amount |
+| --- | --- |
+| harness | $4.12 USD |
+| published | $3.87 USD |
+| unknown | — (no priced record on this basis (no_rate)) |
+"
+`;
+
+exports[`renderMarkdown snapshots > renders no-findings 1`] = `
+"# KyberDash context report
+
+Window: last 7 days
+
+## Data coverage
+
+- **Store:** \`canon.db\`
+- **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Quarantine:** 0
+- **Problems:** 0
+
+| Harness | Detected | Sessions |
+| --- | --- | ---: |
+| claude-code | — | 1 |
+
+## Findings
+
+None in the window.
+
+## Harness dimensions
+
+### claude-code
+
+| Dimension | Value |
+| --- | --- |
+| Context Hygiene | 63% |
+| Cache Efficiency | 81% |
+| Tool Yield | 2.4x |
+| Skill Utilisation | — (Telemetry missing: skill activation unobserved on this harness) |
+| Delegation Overhead | 7% |
+| Continuity | — (Telemetry missing: turn outcome or correction telemetry unobserved) |
+
+
+## Latest session
+
+**sess-alpha** · claude-code · kyber-weave
+
+- **Last activity:** 2026-09-19T10:00:00.000Z
+- **Turns:** 14
+- \`kyberdash web --view session/sess-alpha\`
+- **Latest turn:** #14
+- **Pressure:** 63%
+- **Window:** 200000 tokens
+
+| Bucket | Tokens |
+| --- | --- |
+| System prompt | 1200 tokens |
+| Tool definitions | 9000 tokens |
+| Instruction context | 3400 tokens |
+| Conversation history | 81000 tokens |
+| Tool result content | 31600 tokens |
+
+- **Residual:** 512 tokens
+- **Cache break:** no
+
+| Tool definition source | Tokens |
+| --- | --- |
+| mcp-github | 5100 tokens |
+| mcp-filesystem | 2600 tokens |
+| mcp-fetch | 1300 tokens |
+
+Cache-invalidation turns: 9
+
+## Cost
+
+| Basis | Amount |
+| --- | --- |
+| unknown | — (no session in scope carried a cost) |
+"
+`;
+
+exports[`renderMarkdown snapshots > renders stale 1`] = `
+"# KyberDash context report
+
+Window: last 7 days
+
+## Data coverage
+
+- **Store:** \`canon.db\`
+- **Refresh:** 2026-09-17T10:00:00.000Z (2d ago)
+- **Last fail:** 2026-09-19T10:00:00.000Z: 2 of 6 source job(s) failed
+- **Quarantine:** 0
+- **Problems:** 0
+
+| Harness | Detected | Sessions |
+| --- | --- | ---: |
+| claude-code | — | 1 |
+
+> Last successful refresh was 2026-09-17T10:00:00.000Z. Run \`kyberdash dash refresh\`.
+
+## Findings
+
+None in the window.
+
+## Harness dimensions
+
+### claude-code
+
+| Dimension | Value |
+| --- | --- |
+| Context Hygiene | 63% |
+| Cache Efficiency | 81% |
+| Tool Yield | 2.4x |
+| Skill Utilisation | — (Telemetry missing: skill activation unobserved on this harness) |
+| Delegation Overhead | 7% |
+| Continuity | — (Telemetry missing: turn outcome or correction telemetry unobserved) |
+
+
+## Latest session
+
+**sess-alpha** · claude-code · kyber-weave
+
+- **Last activity:** 2026-09-17T10:00:00.000Z
+- **Turns:** 14
+- \`kyberdash web --view session/sess-alpha\`
+- **Latest turn:** #0
+- **Pressure:** — (harness exported no message structure for this session)
+- **Window:** — (harness exported no message structure for this session)
+
+| Bucket | Tokens |
+| --- | --- |
+| System prompt | — (harness exported no message structure for this session) |
+| Tool definitions | — (harness exported no message structure for this session) |
+| Instruction context | — (harness exported no message structure for this session) |
+| Conversation history | — (harness exported no message structure for this session) |
+| Tool result content | — (harness exported no message structure for this session) |
+
+- **Residual:** — (harness exported no message structure for this session)
+- **Cache break:** no
+
+## Cost
+
+| Basis | Amount |
+| --- | --- |
+| unknown | — (no session in scope carried a cost) |
+"
+`;
+
+exports[`renderMarkdown snapshots > renders unmeasurable-pressure 1`] = `
+"# KyberDash context report
+
+Window: last 7 days
+
+## Data coverage
+
+- **Store:** \`canon.db\`
+- **Refresh:** 2026-09-19T11:00:00.000Z (1h ago)
+- **Quarantine:** 0
+- **Problems:** 0
+
+| Harness | Detected | Sessions |
+| --- | --- | ---: |
+| cursor | — | 1 |
+
+## Findings
+
+None in the window.
+
+## Harness dimensions
+
+### cursor
+
+| Dimension | Value |
+| --- | --- |
+| Context Hygiene | — (Telemetry missing: context composition not recorded) |
+| Cache Efficiency | 81% |
+| Tool Yield | 2.4x |
+| Skill Utilisation | — (Telemetry missing: skill activation unobserved on this harness) |
+| Delegation Overhead | 7% |
+| Continuity | — (Telemetry missing: turn outcome or correction telemetry unobserved) |
+
+
+## Latest session
+
+**sess-alpha** · cursor · kyber-weave
+
+- **Last activity:** 2026-09-19T10:00:00.000Z
+- **Turns:** 14
+- \`kyberdash web --view session/sess-alpha\`
+- **Latest turn:** #0
+- **Pressure:** — (harness exported no message structure for this session)
+- **Window:** — (harness exported no message structure for this session)
+
+| Bucket | Tokens |
+| --- | --- |
+| System prompt | — (harness exported no message structure for this session) |
+| Tool definitions | — (harness exported no message structure for this session) |
+| Instruction context | — (harness exported no message structure for this session) |
+| Conversation history | — (harness exported no message structure for this session) |
+| Tool result content | — (harness exported no message structure for this session) |
+
+- **Residual:** — (harness exported no message structure for this session)
+- **Cache break:** no
+
+## Cost
+
+| Basis | Amount |
+| --- | --- |
+| unknown | — (no session in scope carried a cost) |
+"
+`;

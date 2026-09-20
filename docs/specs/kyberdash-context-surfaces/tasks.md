@@ -242,8 +242,8 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     the valid forms.
   - _Requirements: 5.6, 5.7_
 
-- [ ] 6. CLI context report
-- [ ] 6.1 Text and Markdown renderers
+- [x] 6. CLI context report
+- [x] 6.1 Text and Markdown renderers
   - Stream C.
   - Write snapshot tests over every fixture for `render-text.ts` and `render-markdown.ts`.
   - Add display-rule assertions:
@@ -255,7 +255,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - text is coloured only for a TTY with `NO_COLOR` unset
   - Implement the renderers.
   - _Requirements: 11.8, 11.9, 14.1, 14.2, 14.3, 14.4_
-- [ ] 6.2 Replace `report` with the context report
+- [x] 6.2 Replace `report` with the context report
   - Stream C.
   - Write command tests first:
     - It is the default command.
@@ -273,7 +273,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     equivalence cases to `dash refresh` (the retained caller of `parseAllSessions`), and
     rewrite provider validation against `--harness`.
   - _Requirements: 11.1, 11.4, 11.5, 11.10, 11.11, 11.12, 11.13_
-- [ ] 6.3 Prove report and API parity
+- [x] 6.3 Prove report and API parity
   - Stream C.
   - Add a test that runs `kyberdash report --format json` and `GET /api/kyber/report` against
     the same seeded store and scope, and asserts deep equality ignoring `generatedAt`.
