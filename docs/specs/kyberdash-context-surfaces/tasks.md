@@ -310,7 +310,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 8.12_
 
 - [ ] 8. Tray
-- [ ] 8.1 Scaffold the Tauri app and its CI
+- [x] 8.1 Scaffold the Tauri app and its CI
   - Stream E.
   - Create `dash/tray/` with a Tauri 2 crate in `src-tauri` and a React/Vite UI in `ui`.
   - `tauri.conf.json` sets identifier `io.github.dpalfery.kyberdash`, product name
