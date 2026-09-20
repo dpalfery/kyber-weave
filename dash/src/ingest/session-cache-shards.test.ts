@@ -6,7 +6,7 @@
 // them), and that one unreadable shard costs exactly one month.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, readFile, readdir, rm, utimes, writeFile } from 'fs/promises'
-import { existsSync } from 'fs'
+import { existsSync, mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -28,15 +28,14 @@ import {
 
 let TMP_DIR: string
 
-beforeEach(async () => {
-  TMP_DIR = join(tmpdir(), `codeburn-shard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+beforeEach(() => {
+  TMP_DIR = mkdtempSync(join(tmpdir(), 'kyberdash-shard-'))
   process.env['KYBERDASH_CACHE_DIR'] = TMP_DIR
-  await mkdir(TMP_DIR, { recursive: true })
   clearLoadCacheMemo()
 })
 
 afterEach(async () => {
-  if (existsSync(TMP_DIR)) await rm(TMP_DIR, { recursive: true })
+  await rm(TMP_DIR, { recursive: true, force: true })
 })
 
 function turnAt(timestamp: string, key = 'msg-1'): CachedFile['turns'][number] {

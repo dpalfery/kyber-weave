@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { readFile, rm } from 'fs/promises'
-import { existsSync } from 'fs'
+import { readFile, rm, writeFile } from 'fs/promises'
+import { existsSync, mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -39,17 +39,16 @@ function emptyDay(date: string, cost = 0, calls = 0): DailyEntry {
   }
 }
 
-const TMP_CACHE_ROOT = join(tmpdir(), `codeburn-cache-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+let TMP_CACHE_ROOT: string
 
 beforeEach(() => {
+  TMP_CACHE_ROOT = mkdtempSync(join(tmpdir(), 'kyberdash-cache-test-'))
   process.env['KYBERDASH_CACHE_DIR'] = TMP_CACHE_ROOT
 })
 
 afterEach(async () => {
   vi.useRealTimers()
-  if (existsSync(TMP_CACHE_ROOT)) {
-    await rm(TMP_CACHE_ROOT, { recursive: true, force: true })
-  }
+  await rm(TMP_CACHE_ROOT, { recursive: true, force: true })
 })
 
 describe('loadDailyCache', () => {
@@ -61,8 +60,6 @@ describe('loadDailyCache', () => {
   })
 
   it('returns an empty cache when the file contains invalid JSON', async () => {
-    const { writeFile, mkdir } = await import('fs/promises')
-    await mkdir(TMP_CACHE_ROOT, { recursive: true })
     await writeFile(join(TMP_CACHE_ROOT, 'daily-cache.json'), 'not valid json{{', 'utf-8')
     const cache = await loadDailyCache()
     expect(cache.days).toEqual([])
@@ -78,8 +75,6 @@ describe('loadDailyCache', () => {
       lastComputedDate: '2026-04-10',
       days: [{ date: '2026-04-10', cost: 10, calls: 5 }],
     }
-    const { writeFile, mkdir } = await import('fs/promises')
-    await mkdir(TMP_CACHE_ROOT, { recursive: true })
     const legacy = join(TMP_CACHE_ROOT, 'daily-cache.json')
     await writeFile(legacy, JSON.stringify(saved), 'utf-8')
     const cache = await loadDailyCache()
@@ -103,8 +98,6 @@ describe('loadDailyCache', () => {
         models: { 'claude-opus-4-6': { calls: 5, cost: 10, inputTokens: 1000, outputTokens: 500, cacheReadTokens: 200, cacheWriteTokens: 100 } },
       }],
     }
-    const { writeFile, mkdir } = await import('fs/promises')
-    await mkdir(TMP_CACHE_ROOT, { recursive: true })
     const legacy = join(TMP_CACHE_ROOT, 'daily-cache.json')
     await writeFile(legacy, JSON.stringify(saved), 'utf-8')
     const cache = await loadDailyCache()
@@ -136,8 +129,6 @@ describe('loadDailyCache', () => {
         providers: { claude: { calls: 1, cost: 0.37575 } },
       }],
     }
-    const { writeFile, mkdir } = await import('fs/promises')
-    await mkdir(TMP_CACHE_ROOT, { recursive: true })
     const legacy = join(TMP_CACHE_ROOT, 'daily-cache.json')
     await writeFile(legacy, JSON.stringify(saved), 'utf-8')
     const cache = await loadDailyCache()
@@ -156,8 +147,6 @@ describe('loadDailyCache', () => {
       lastComputedDate: '2026-05-01',
       days: [emptyDay('2026-05-01', 3.5, 9)],
     }
-    const { writeFile, mkdir } = await import('fs/promises')
-    await mkdir(TMP_CACHE_ROOT, { recursive: true })
     const legacy = join(TMP_CACHE_ROOT, 'daily-cache.json')
     await writeFile(legacy, JSON.stringify(saved), 'utf-8')
 
@@ -167,7 +156,7 @@ describe('loadDailyCache', () => {
     expect(first.savingsConfigHash).toBe('legacy-hash')
     expect(existsSync(dailyCachePath())).toBe(true)
     // Legacy file is NOT deleted.
-    expect(existsSync(legacy)).toBe(true)
+    expect(JSON.parse(await readFile(legacy, 'utf-8'))).toEqual(saved)
 
     // Adoption is one-time: mutate the legacy file, load again — the versioned
     // file now wins and the stale legacy edit is never re-adopted.
@@ -377,8 +366,6 @@ describe('ensureCacheHydrated: schema version invalidation (#873)', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-12T12:00:00.000Z'))
 
-    const { writeFile, mkdir } = await import('fs/promises')
-    await mkdir(TMP_CACHE_ROOT, { recursive: true })
     // A cache exactly as a pre-fix release left it: current schema at the time,
     // finalized off a complete parse, watermark at yesterday, matching tz.
     // Nothing but the version bump can invalidate it.
@@ -416,8 +403,6 @@ describe('ensureCacheHydrated: schema version invalidation (#873)', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-12T12:00:00.000Z'))
 
-    const { writeFile, mkdir } = await import('fs/promises')
-    await mkdir(TMP_CACHE_ROOT, { recursive: true })
     const v15 = {
       version: 15,
       savingsConfigHash: '',

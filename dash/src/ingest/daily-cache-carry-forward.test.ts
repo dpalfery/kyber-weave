@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
-import { existsSync } from 'fs'
+import { readFile, rename, rm, writeFile } from 'fs/promises'
+import { existsSync, mkdtempSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -20,17 +20,15 @@ import {
   saveDailyCache,
 } from './daily-cache.js'
 
-const TMP_CACHE_ROOT = join(tmpdir(), `codeburn-carry-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+let TMP_CACHE_ROOT: string
 
-beforeEach(async () => {
+beforeEach(() => {
+  TMP_CACHE_ROOT = mkdtempSync(join(tmpdir(), 'kyberdash-carry-test-'))
   process.env['KYBERDASH_CACHE_DIR'] = TMP_CACHE_ROOT
-  await mkdir(TMP_CACHE_ROOT, { recursive: true })
 })
 
 afterEach(async () => {
-  if (existsSync(TMP_CACHE_ROOT)) {
-    await rm(TMP_CACHE_ROOT, { recursive: true, force: true })
-  }
+  await rm(TMP_CACHE_ROOT, { recursive: true, force: true })
 })
 
 function slice(cost: number, calls: number, extra: Partial<ProviderDaySlice> = {}): ProviderDaySlice {
