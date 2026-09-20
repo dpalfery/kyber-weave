@@ -326,7 +326,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     macOS and Windows, plus the UI's typecheck, lint and test. Fix findings rather than
     baselining them.
   - _Requirements: 3.6, 4.1, 4.2, 4.4, 4.5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.11_
-- [ ] 8.2 Resolve `kyberdash` and gate on its version
+- [x] 8.2 Resolve `kyberdash` and gate on its version
   - Stream E.
   - Test the resolution order: `KYBERDASH_BIN`, then `tray.json` `kyberdashPath`, then
     `~/.local/bin/kyberdash`, then `PATH`. Only validated absolute paths are spawned, with the

@@ -18,12 +18,38 @@ const MAX_STDERR_BYTES: usize = 256 * 1024;
 const FETCH_TIMEOUT_SECS: u64 = 60;
 const VERSION_TIMEOUT_SECS: u64 = 20;
 
-/// Oldest CLI this app can talk to. 0.9.9 is the first release whose
-/// `status --format menubar-json` accepts `--no-optimize`, which every quiet background
-/// refresh passes; it also emits all the payload fields the popover reads
-/// (`current.providers`, `current.cacheHitPercent`, `history.daily[].topModels`). Older CLIs
-/// get the setup screen instead of a half-rendered popover or a stream of spawn failures.
+/// Oldest CLI this app can talk to, by semver. Informational only: the gate
+/// Requirement 6.7 describes is [`MIN_API_VERSION`], because a release number
+/// says nothing about the REST contract the tray actually reads.
 pub const MIN_CLI_VERSION: (u32, u32, u32) = (0, 9, 9);
+
+/// Oldest REST contract the tray can read, matched against the `apiVersion`
+/// that `kyberdash web` prints on its listening line and serves from
+/// `GET /api/kyber/meta`. The server sends `REPORT_SCHEMA_VERSION`, so this
+/// moves only when that document's shape changes in a way the popover feels.
+pub const MIN_API_VERSION: u32 = 1;
+
+/// The setup state to show, or `None` when the tray can go on.
+///
+/// Both halves of Requirement 6.7 land here: a CLI that could not be resolved,
+/// and one whose REST contract is older than this tray understands. Taking the
+/// observed version as an argument keeps it a pure decision — the supervisor
+/// reads it off the listening line, and a test does not need a server.
+pub fn setup_state_for(resolution: &Resolution, api_version: Option<u32>) -> Option<SetupState> {
+    if resolution.cli.is_none() {
+        return Some(SetupState::new(
+            SetupReason::NotFound,
+            resolution.probed.clone(),
+        ));
+    }
+    match api_version {
+        Some(version) if version < MIN_API_VERSION => Some(SetupState::new(
+            SetupReason::TooOld,
+            resolution.probed.clone(),
+        )),
+        _ => None,
+    }
+}
 
 #[cfg(windows)]
 const WINDOWS_CLI_NAMES: [&str; 2] = ["kyberdash.cmd", "kyberdash.exe"];
@@ -62,40 +88,179 @@ pub struct CliStatus {
     pub error: Option<String>,
 }
 
-impl KyberdashCli {
-    /// Honours `KYBERDASH_BIN` only when every whitespace-delimited token passes the
-    /// allowlist. Otherwise resolves `kyberdash` from PATH and the usual install locations.
-    pub fn resolve() -> Self {
-        let raw = env::var("KYBERDASH_BIN").unwrap_or_default();
-        if raw.is_empty() {
-            return Self::default_program();
-        }
-        // A bare path (which may contain spaces, e.g. under Program Files) is used whole;
-        // only otherwise is the value split into program + leading arguments.
-        if is_safe_arg(&raw) && std::path::Path::new(&raw).is_file() {
-            return KyberdashCli {
-                program: raw,
-                extra_args: vec![],
-            };
-        }
-        let parts: Vec<String> = raw.split_whitespace().map(String::from).collect();
-        if parts.iter().all(|p| is_safe_arg(p)) {
-            if let Some((first, rest)) = parts.split_first() {
-                return KyberdashCli {
-                    program: first.clone(),
-                    extra_args: rest.to_vec(),
-                };
+/// Why the tray is showing setup instead of a report (R6.7).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SetupReason {
+    NotFound,
+    TooOld,
+}
+
+/// The `setup` arm of the design's `ViewState`. `probed` names the locations
+/// that were looked in, in order, so the user can see which one to fix.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupState {
+    pub probed: Vec<String>,
+    pub remedy: String,
+    pub reason: SetupReason,
+}
+
+impl SetupState {
+    pub fn new(reason: SetupReason, probed: Vec<String>) -> Self {
+        // Both commands are the ones the README documents; a remedy that names
+        // a command the user does not have is worse than none.
+        let remedy = match reason {
+            SetupReason::NotFound => {
+                "Install kyberdash: curl -fsSL \
+                 https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh"
             }
+            SetupReason::TooOld => "Update kyberdash: kyber-weave update",
+        };
+        SetupState {
+            probed,
+            remedy: remedy.to_string(),
+            reason,
         }
-        eprintln!("kyberdash-tray: refusing unsafe KYBERDASH_BIN; falling back to `kyberdash`");
-        Self::default_program()
+    }
+}
+
+/// The locations the tray looks in, in the order Requirement 6.6 fixes.
+///
+/// These are inputs rather than reads of the real environment because the
+/// process environment is shared by every test in the binary: a test that set
+/// `KYBERDASH_BIN` would race any other test resolving the CLI.
+#[derive(Clone, Debug, Default)]
+pub struct CliSources {
+    /// `KYBERDASH_BIN`, honoured only when it passes the argument allowlist.
+    pub env_bin: Option<String>,
+    /// `kyberdashPath` as `kyberdash menubar` recorded it in `~/.kyberdash/tray.json`.
+    ///
+    /// Second because a GUI launched at login inherits neither the shell's
+    /// `PATH` nor `KYBER_WEAVE_INSTALL_DIR`, so the installer's own record is
+    /// worth more than either.
+    pub recorded: Option<PathBuf>,
+    /// `install.sh`'s default prefix, `~/.local/bin`.
+    pub install_dir: Option<PathBuf>,
+    /// `PATH`, plus the package-manager prefixes `extra_search_dirs` knows.
+    pub path_dirs: Vec<PathBuf>,
+}
+
+/// Where the CLI was found, and everywhere that was tried getting there.
+#[derive(Clone, Debug)]
+pub struct Resolution {
+    pub cli: Option<KyberdashCli>,
+    pub probed: Vec<String>,
+}
+
+/// Walks the sources in order, recording each one it looked at. The first hit
+/// wins; `probed` is what the setup state shows when none does.
+pub fn resolve_from(sources: &CliSources) -> Resolution {
+    let mut probed: Vec<String> = Vec::new();
+
+    if let Some(raw) = sources.env_bin.as_deref().filter(|v| !v.trim().is_empty()) {
+        probed.push(format!("KYBERDASH_BIN={raw}"));
+        match parse_env_bin(raw) {
+            Some(cli) => {
+                return Resolution {
+                    cli: Some(cli),
+                    probed,
+                }
+            }
+            None => eprintln!(
+                "kyberdash-tray: refusing unsafe KYBERDASH_BIN; continuing with the other locations"
+            ),
+        }
     }
 
-    fn default_program() -> Self {
-        KyberdashCli {
-            program: locate_cli().unwrap_or_else(default_program_name),
-            extra_args: vec![],
+    for candidate in [sources.recorded.as_ref(), sources.install_dir.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        // An install dir is a directory; a recorded path is the binary itself.
+        let path = if candidate.is_dir() {
+            candidate.join(default_program_name())
+        } else {
+            candidate.clone()
+        };
+        probed.push(path.display().to_string());
+        if path.is_absolute() && path.is_file() {
+            return Resolution {
+                cli: Some(KyberdashCli {
+                    program: path.to_string_lossy().into_owned(),
+                    extra_args: vec![],
+                }),
+                probed,
+            };
         }
+    }
+
+    probed.push("PATH".to_string());
+    let names = candidate_names();
+    if let Some(found) = find_in_dirs(&sources.path_dirs, &names) {
+        return Resolution {
+            cli: Some(KyberdashCli {
+                program: found,
+                extra_args: vec![],
+            }),
+            probed,
+        };
+    }
+
+    Resolution { cli: None, probed }
+}
+
+/// `KYBERDASH_BIN` is either one path (which may hold spaces, as under Program
+/// Files) or a program followed by leading arguments. Every token has to pass
+/// the allowlist, and the program itself has to be an absolute path to a file
+/// that exists: Requirement 6.6 spawns only a validated absolute path, so a
+/// bare name resolved by the OS loader is not enough, and neither is a path
+/// that is not there yet.
+fn parse_env_bin(raw: &str) -> Option<KyberdashCli> {
+    let spawnable = |program: &str| {
+        let path = std::path::Path::new(program);
+        path.is_absolute() && path.is_file()
+    };
+
+    if is_safe_arg(raw) && spawnable(raw) {
+        return Some(KyberdashCli {
+            program: raw.to_string(),
+            extra_args: vec![],
+        });
+    }
+
+    let parts: Vec<String> = raw.split_whitespace().map(String::from).collect();
+    if !parts.iter().all(|p| is_safe_arg(p)) {
+        return None;
+    }
+    let (first, rest) = parts.split_first()?;
+    if !spawnable(first) {
+        return None;
+    }
+    Some(KyberdashCli {
+        program: first.clone(),
+        extra_args: rest.to_vec(),
+    })
+}
+
+impl KyberdashCli {
+    /// Resolves against the real environment. The order, and everything that
+    /// makes it testable, lives in [`resolve_from`].
+    pub fn resolve() -> Self {
+        Self::resolve_detailed()
+            .cli
+            .unwrap_or_else(|| KyberdashCli {
+                // Nothing was found, so the setup state is what the user will see.
+                // Keeping the bare name here means a later PATH change still works
+                // without a restart.
+                program: default_program_name(),
+                extra_args: vec![],
+            })
+    }
+
+    /// The same resolution, with the probed locations Requirement 6.7 shows.
+    pub fn resolve_detailed() -> Resolution {
+        resolve_from(&live_sources())
     }
 
     pub fn program(&self) -> &str {
@@ -256,10 +421,54 @@ pub fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
     ))
 }
 
-/// Locates the CLI without relying on the inherited PATH being fresh. A tray app is often
-/// launched from Explorer or at login, before (or long after) installing kyberdash
-/// changed the user's PATH, so we also read the live PATH from the registry on Windows and
-/// probe the standard npm / node install prefixes.
+/// The real environment's answer to each of [`CliSources`].
+///
+/// A tray app is often launched from Explorer or at login, before (or long
+/// after) installing kyberdash changed the user's PATH, so the PATH list also
+/// carries the live registry PATH on Windows and the standard npm / node
+/// prefixes.
+fn live_sources() -> CliSources {
+    let home = dirs::home_dir();
+    let mut path_dirs: Vec<PathBuf> = Vec::new();
+    if let Some(path) = env::var_os("PATH") {
+        path_dirs.extend(env::split_paths(&path));
+    }
+    path_dirs.extend(extra_search_dirs());
+
+    CliSources {
+        env_bin: env::var("KYBERDASH_BIN").ok(),
+        recorded: home
+            .as_ref()
+            .and_then(|h| recorded_cli_path(&tray_config_path(h))),
+        install_dir: home.as_ref().map(|h| h.join(".local").join("bin")),
+        path_dirs,
+    }
+}
+
+/// Where `kyberdash menubar` records what it installed.
+fn tray_config_path(home: &std::path::Path) -> PathBuf {
+    home.join(".kyberdash").join("tray.json")
+}
+
+/// Reads `kyberdashPath` out of `tray.json`.
+///
+/// A missing, unreadable or malformed file is simply "not recorded": this runs
+/// at startup on every machine, and a hand-edited config must not stop the tray
+/// from falling through to the locations that still work.
+fn recorded_cli_path(config: &std::path::Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(config).ok()?;
+    let value: Value = serde_json::from_str(&text).ok()?;
+    let recorded = value.get("kyberdashPath")?.as_str()?;
+    if recorded.trim().is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(recorded))
+}
+
+/// Second lookup for the Windows terminal spawn, which runs with whatever
+/// `cli.program` was resolved to at startup and re-checks the default name
+/// against the live PATH. `resolve_from` is the startup path; this is not.
+#[cfg(target_os = "windows")]
 fn locate_cli() -> Option<String> {
     find_in_search_dirs(&candidate_names())
 }
@@ -580,6 +789,302 @@ mod which {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scratch directory holding a file that looks like an installed CLI.
+    /// Dropped on scope exit, so a failing assertion cannot leak it.
+    struct Scratch {
+        root: PathBuf,
+    }
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "kyberdash-tray-{tag}-{}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            Scratch { root }
+        }
+
+        /// Writes an executable-looking file and returns its path.
+        fn binary(&self, name: &str) -> PathBuf {
+            let path = self.root.join(name);
+            std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+            path
+        }
+
+        fn dir(&self, name: &str) -> PathBuf {
+            let path = self.root.join(name);
+            std::fs::create_dir_all(&path).unwrap();
+            path
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.root).ok();
+        }
+    }
+
+    /// Requirement 6.6 fixes the order. Each case removes the winner above it,
+    /// so the next source has to take over.
+    #[test]
+    fn resolves_env_bin_then_recorded_then_install_dir_then_path() {
+        let scratch = Scratch::new("order");
+        let env_bin = scratch.binary("from-env");
+        let recorded = scratch.binary("from-tray-json");
+        let install_dir = scratch.dir("local-bin");
+        let in_install = install_dir.join(default_program_name());
+        std::fs::write(&in_install, b"#!/bin/sh\n").unwrap();
+        let path_dir = scratch.dir("path-bin");
+        std::fs::write(path_dir.join(default_program_name()), b"#!/bin/sh\n").unwrap();
+
+        let all = CliSources {
+            env_bin: Some(env_bin.to_string_lossy().into_owned()),
+            recorded: Some(recorded.clone()),
+            install_dir: Some(install_dir.clone()),
+            path_dirs: vec![path_dir.clone()],
+        };
+
+        let winner = |sources: &CliSources| {
+            resolve_from(sources)
+                .cli
+                .expect("a source should match")
+                .program()
+                .to_string()
+        };
+
+        assert_eq!(winner(&all), env_bin.to_string_lossy());
+
+        let without_env = CliSources {
+            env_bin: None,
+            ..all.clone()
+        };
+        assert_eq!(winner(&without_env), recorded.to_string_lossy());
+
+        let without_recorded = CliSources {
+            recorded: None,
+            ..without_env.clone()
+        };
+        assert_eq!(winner(&without_recorded), in_install.to_string_lossy());
+
+        let path_only = CliSources {
+            install_dir: None,
+            ..without_recorded.clone()
+        };
+        assert_eq!(
+            winner(&path_only),
+            path_dir.join(default_program_name()).to_string_lossy()
+        );
+    }
+
+    /// Requirement 6.7: the setup state names where it looked. The order is
+    /// the order it looked in, so the user reads it as a trail.
+    #[test]
+    fn records_every_probed_location_when_nothing_is_found() {
+        let scratch = Scratch::new("probed");
+        let missing_recorded = scratch.root.join("recorded").join("kyberdash");
+        let empty_install = scratch.dir("empty-local-bin");
+
+        let resolution = resolve_from(&CliSources {
+            env_bin: Some("/nonexistent/kyberdash".to_string()),
+            recorded: Some(missing_recorded.clone()),
+            install_dir: Some(empty_install.clone()),
+            path_dirs: vec![scratch.dir("empty-path")],
+        });
+
+        assert!(resolution.cli.is_none());
+        assert_eq!(
+            resolution.probed,
+            vec![
+                "KYBERDASH_BIN=/nonexistent/kyberdash".to_string(),
+                missing_recorded.display().to_string(),
+                empty_install
+                    .join(default_program_name())
+                    .display()
+                    .to_string(),
+                "PATH".to_string(),
+            ]
+        );
+    }
+
+    /// A hostile `KYBERDASH_BIN` must not be spawned, and must not take the
+    /// tray down with it: the remaining locations still get their turn.
+    #[test]
+    fn unsafe_env_bin_is_refused_but_falls_through() {
+        let scratch = Scratch::new("unsafe");
+        let install_dir = scratch.dir("local-bin");
+        let good = install_dir.join(default_program_name());
+        std::fs::write(&good, b"#!/bin/sh\n").unwrap();
+
+        let resolution = resolve_from(&CliSources {
+            env_bin: Some("kyberdash; rm -rf ~".to_string()),
+            recorded: None,
+            install_dir: Some(install_dir),
+            path_dirs: vec![],
+        });
+
+        let program = resolution
+            .cli
+            .expect("install dir should win")
+            .program()
+            .to_string();
+        assert_eq!(program, good.to_string_lossy());
+        assert!(resolution.probed[0].starts_with("KYBERDASH_BIN="));
+    }
+
+    /// Requirement 6.6 spawns only a validated absolute path. A bare name would
+    /// be resolved by the OS loader against a search order the tray does not
+    /// control, and a path that is not there yet cannot be validated at all.
+    #[test]
+    fn env_bin_must_be_an_absolute_path_that_exists() {
+        let scratch = Scratch::new("env-validation");
+        let real = scratch.binary("kyberdash");
+
+        assert!(parse_env_bin(&real.to_string_lossy()).is_some());
+        assert!(parse_env_bin("kyberdash").is_none(), "bare name");
+        assert!(parse_env_bin("./kyberdash").is_none(), "relative path");
+        assert!(
+            parse_env_bin("/nonexistent/kyberdash").is_none(),
+            "absent file"
+        );
+        assert!(
+            parse_env_bin(&scratch.root.to_string_lossy()).is_none(),
+            "a directory is not a program"
+        );
+    }
+
+    /// The program-plus-arguments form is still honoured, under the same rule.
+    #[test]
+    fn env_bin_keeps_leading_arguments() {
+        let scratch = Scratch::new("env-args");
+        let real = scratch.binary("kyberdash");
+
+        let cli = parse_env_bin(&format!("{} --no-color", real.to_string_lossy()))
+            .expect("an absolute program with arguments is spawnable");
+        assert_eq!(cli.program(), real.to_string_lossy());
+        assert_eq!(cli.extra_args, vec!["--no-color".to_string()]);
+    }
+
+    /// An empty or whitespace-only value is "unset", not a path to probe.
+    #[test]
+    fn blank_env_bin_is_not_probed() {
+        let resolution = resolve_from(&CliSources {
+            env_bin: Some("   ".to_string()),
+            ..CliSources::default()
+        });
+        assert_eq!(resolution.probed, vec!["PATH".to_string()]);
+    }
+
+    /// The recorded path is the binary, not the directory holding it.
+    #[test]
+    fn recorded_path_is_read_from_tray_json() {
+        let scratch = Scratch::new("tray-json");
+        let config = scratch.root.join("tray.json");
+
+        std::fs::write(
+            &config,
+            br#"{"kyberdashPath":"/opt/kyberdash/bin/kyberdash"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            recorded_cli_path(&config),
+            Some(PathBuf::from("/opt/kyberdash/bin/kyberdash"))
+        );
+
+        // A hand-edited or half-written file must not stop the walk.
+        for bad in [r#"{"kyberdashPath":""}"#, r#"{"other":1}"#, "{ not json"] {
+            std::fs::write(&config, bad).unwrap();
+            assert_eq!(recorded_cli_path(&config), None, "input: {bad}");
+        }
+
+        assert_eq!(recorded_cli_path(&scratch.root.join("absent.json")), None);
+    }
+
+    /// Requirement 6.7's two triggers, and the case that must not fire: a
+    /// resolved CLI serving a contract the tray understands.
+    #[test]
+    fn setup_state_covers_missing_and_too_old_but_not_healthy() {
+        let scratch = Scratch::new("gate");
+        let install_dir = scratch.dir("local-bin");
+        std::fs::write(install_dir.join(default_program_name()), b"#!/bin/sh\n").unwrap();
+
+        let found = resolve_from(&CliSources {
+            install_dir: Some(install_dir),
+            ..CliSources::default()
+        });
+        let missing = resolve_from(&CliSources::default());
+
+        assert_eq!(
+            setup_state_for(&missing, None).map(|s| s.reason),
+            Some(SetupReason::NotFound)
+        );
+        // Not found outranks the version: there is nothing to ask for a version.
+        assert_eq!(
+            setup_state_for(&missing, Some(MIN_API_VERSION)).map(|s| s.reason),
+            Some(SetupReason::NotFound)
+        );
+        assert_eq!(
+            setup_state_for(&found, Some(MIN_API_VERSION - 1)).map(|s| s.reason),
+            Some(SetupReason::TooOld)
+        );
+        assert_eq!(setup_state_for(&found, Some(MIN_API_VERSION)), None);
+        assert_eq!(setup_state_for(&found, Some(MIN_API_VERSION + 1)), None);
+        // Nothing observed yet — the supervisor has not read a listening line.
+        assert_eq!(setup_state_for(&found, None), None);
+    }
+
+    /// The probed trail survives into the setup state; it is the whole point of
+    /// collecting it.
+    #[test]
+    fn setup_state_carries_the_probed_trail() {
+        let missing = resolve_from(&CliSources {
+            env_bin: Some("/nonexistent/kyberdash".to_string()),
+            ..CliSources::default()
+        });
+        let state = setup_state_for(&missing, None).expect("nothing was found");
+        assert_eq!(state.probed, missing.probed);
+        assert!(state.probed.iter().any(|p| p.starts_with("KYBERDASH_BIN=")));
+    }
+
+    /// Requirement 6.7 asks for the command that installs or updates, and the
+    /// two reasons are answered differently.
+    #[test]
+    fn setup_state_names_a_remedy_for_each_reason() {
+        let probed = vec!["PATH".to_string()];
+
+        let missing = SetupState::new(SetupReason::NotFound, probed.clone());
+        assert_eq!(missing.reason, SetupReason::NotFound);
+        assert!(missing.remedy.contains("install.sh"));
+        assert_eq!(missing.probed, probed);
+
+        let old = SetupState::new(SetupReason::TooOld, probed.clone());
+        assert_eq!(old.reason, SetupReason::TooOld);
+        assert!(old.remedy.contains("kyber-weave update"));
+    }
+
+    /// The UI reads these as the design's `ViewState.setup`, so the wire names
+    /// are part of the contract.
+    #[test]
+    fn setup_state_serializes_with_the_design_s_names() {
+        let json = serde_json::to_value(SetupState::new(
+            SetupReason::TooOld,
+            vec!["PATH".to_string()],
+        ))
+        .unwrap();
+
+        assert_eq!(json["reason"], "too-old");
+        assert_eq!(json["probed"][0], "PATH");
+        assert!(json["remedy"].is_string());
+
+        let not_found =
+            serde_json::to_value(SetupState::new(SetupReason::NotFound, vec![])).unwrap();
+        assert_eq!(not_found["reason"], "not-found");
+    }
 
     /// The `;;` / trailing-`;` case: an empty PATH entry must not turn into a
     /// current-directory lookup, which is how a planted binary would win at login.
