@@ -370,7 +370,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Test that hosting (off by default) starts `kyberdash otel` with backoff, and is not
     attempted, or retried, when the port is held by another process.
   - _Requirements: 10.6, 10.7, 10.8_
-- [ ] 8.7 Status item
+- [x] 8.7 Status item
   - Stream E.
   - Test a pure function from report, settings and phase to status-item state:
     - the whole-number percentage

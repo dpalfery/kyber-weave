@@ -5,6 +5,7 @@ pub mod cli;
 pub mod position;
 pub mod receiver;
 pub mod scheduler;
+pub mod status_item;
 pub mod supervisor;
 pub mod tray_badge;
 
