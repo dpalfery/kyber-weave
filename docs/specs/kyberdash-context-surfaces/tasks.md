@@ -363,7 +363,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - A refresh started from a terminal (visible in the report's `coverage.refresh`) blocks
       a new one.
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
-- [ ] 8.6 Receiver status and optional hosting
+- [x] 8.6 Receiver status and optional hosting
   - Stream E.
   - Test that probing `127.0.0.1:4318/healthz` yields `reachable`, `not-reachable`,
     `port-held-by-other` or `unknown`.

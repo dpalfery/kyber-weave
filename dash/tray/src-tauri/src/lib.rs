@@ -3,6 +3,7 @@ mod args;
 pub mod autostart;
 pub mod cli;
 pub mod position;
+pub mod receiver;
 pub mod scheduler;
 pub mod supervisor;
 pub mod tray_badge;
