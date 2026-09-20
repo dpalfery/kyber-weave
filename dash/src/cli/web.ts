@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'http'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { readFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { createRequire } from 'node:module'
@@ -56,10 +56,23 @@ const NOT_BUILT_PAGE =
   '<p>The CLI keeps serving the live data API in the meantime.</p></body>'
 
 function openBrowser(url: string): void {
-  const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start ""' : 'xdg-open'
+  // execFile, not exec: the arguments go to the process as an argv array, so no
+  // shell parses them and there is no command string for a URL to break out of.
+  // This matters because the URL is no longer purely internal — `--view` puts a
+  // user-supplied path into it (runWebDashboard validates it against
+  // matchesViewPath first, but this must not depend on a check made elsewhere).
+  // On Windows `start` is a cmd builtin rather than an executable, so cmd is the
+  // program; the empty string is the window title `start` expects before a URL.
+  const [program, args] =
+    process.platform === 'darwin'
+      ? ['open', [url]]
+      : process.platform === 'win32'
+        ? ['cmd', ['/c', 'start', '', url]]
+        : ['xdg-open', [url]]
   try {
-    // command is internal, not user-controlled — cmd is platform branch, url is localhost dashboard
-    exec(`${cmd} ${url}`) // nosemgrep: javascript.lang.security.detect-child-process, detect-child-process
+    execFile(program!, args as string[], () => {
+      /* a browser that fails to launch is not an error the server should raise */
+    })
   } catch {
     /* user can open it manually */
   }
@@ -150,8 +163,12 @@ export async function runWebDashboard(opts: {
         await serveIndexHtml(res, join(dashDir, 'index.html'))
       }
     } catch (err) {
+      // The detail goes to the operator's terminal, not down the wire: an error
+      // message from the static-file path names real paths on this machine, and
+      // the dashboard has no use for it beyond knowing the request failed.
+      console.error(`${BRAND.cliName}: dashboard request failed:`, err)
       res.writeHead(500, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }))
+      res.end(JSON.stringify({ error: 'internal server error' }))
     }
   })
 

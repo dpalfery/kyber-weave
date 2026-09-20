@@ -343,6 +343,17 @@ jobs:
 
       # dash/ is first-party code since the one-time fork (ADR 0020), so it is
       # scanned like everything else.
+      #
+      # One rule is excluded rather than suppressed in source. p/default applies
+      # its React ruleset to every TypeScript file, and react-insecure-request
+      # fires on dash/src/otel/cursor-hook.ts, which is server-side Node posting
+      # OTLP to the loopback receiver at 127.0.0.1:4318. That hop never leaves
+      # the machine, so there is no transport for TLS to protect, and the local
+      # OTLP receiver serves plain HTTP by design - there is no code fix, only a
+      # rule that does not apply. Excluding it here keeps the decision visible in
+      # review instead of buried in a source comment. It costs nothing today:
+      # the rule finds nothing in dash/web, the actual React surface, which talks
+      # to its own origin over relative URLs.
       - name: Scan repository with Semgrep
         run: |
           set -euo pipefail
@@ -355,6 +366,7 @@ jobs:
             --exclude 'artifacts/**' \
             --exclude '**/bin/**' \
             --exclude '**/obj/**' \
+            --exclude-rule typescript.react.security.react-insecure-request.react-insecure-request \
             --sarif-output semgrep.sarif
 
       # Intentional github/codeql-action v4 pin
