@@ -423,7 +423,13 @@ public sealed class SquadStateStore
             ValidateRequiredReceiptValue(degradation.Code, "degradation code");
         }
 
-        HashSet<string> portablePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Uniqueness is scoped the way the deployment engine scopes physical files. Project
+        // scope writes every target beneath the one deployment root, so two targets claiming
+        // one path would claim one physical file and the path alone must be unique. Global
+        // scope writes beneath each target's own root, so the same relative path legitimately
+        // appears once per target and only (target, path) must be unique — mirroring
+        // SquadDeploymentPlan's deployment identity.
+        HashSet<string> deployedIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (SquadOwnedFile? file in receipt.Files)
         {
             if (file is null)
@@ -445,15 +451,24 @@ public sealed class SquadStateStore
             }
 
             if (!string.Equals(normalizedPath, file.RelativePath, StringComparison.Ordinal) ||
-                !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal) ||
-                !portablePaths.Add(portableIdentity))
+                !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    $"Squad receipt file path '{file.RelativePath}' is not a unique portable path.");
+                    $"Squad receipt file path '{file.RelativePath}' is not a portable canonical path.");
             }
 
             ValidateDigest(file.Sha256, "file digest");
             ValidateCanonicalTarget(file.Target, "file target");
+
+            string deploymentIdentity = receipt.Scope == SquadDeploymentScope.Project
+                ? portableIdentity
+                : SquadDeploymentPlan.DeployedFileIdentity(file.Target, portableIdentity);
+            if (!deployedIdentities.Add(deploymentIdentity))
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
+                    "is not a unique portable deployment path.");
+            }
         }
     }
 

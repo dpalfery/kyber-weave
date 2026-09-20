@@ -337,6 +337,184 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.DoesNotContain(secondRoot, Store(applicationData).SerializeReceipt(secondReceipt), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Global renderers strip the target directory prefix because each target deploys beneath
+    /// its own root, so one relative path legitimately appears once per target. State store
+    /// validation must key uniqueness on (target, path), not on the path alone.
+    /// </summary>
+    [Fact]
+    public void GlobalReceiptSharingOnePathAcrossTargetsRoundTrips()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt receipt = new SquadReceipt(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile("agents/conductor.md", Digest("claude conductor"), "claude", false),
+                new SquadOwnedFile("agents/conductor.md", Digest("codex conductor"), "codex", false)
+            ]);
+
+        string json = store.SerializeReceipt(receipt);
+
+        AssertReceiptEqual(receipt, store.DeserializeReceipt(json));
+    }
+
+    [Fact]
+    public void SerializeReceiptDuplicatePathForOneTargetIsRejected()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt duplicate = new SquadReceipt(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile("agents/conductor.md", Digest("first"), "claude", false),
+                new SquadOwnedFile("agents/conductor.md", Digest("second"), "claude", false)
+            ]);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.SerializeReceipt(duplicate));
+
+        Assert.Contains("unique", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("claude", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Project scope writes every target beneath the one deployment root, so two targets
+    /// claiming one relative path would claim one physical file; the receipt must refuse it.
+    /// </summary>
+    [Fact]
+    public void SerializeReceiptProjectScopeSharedPathAcrossTargetsIsRejected()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt collision = new SquadReceipt(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Project,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile("agents/conductor.md", Digest("claude conductor"), "claude", false),
+                new SquadOwnedFile("agents/conductor.md", Digest("codex conductor"), "codex", false)
+            ]);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.SerializeReceipt(collision));
+
+        Assert.Contains("unique", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A global install across two targets that render the same relative path must deploy to
+    /// each target's own root, and status must verify the bytes there — not against the
+    /// deployment root, which holds none of the files.
+    /// </summary>
+    [Fact]
+    public void ExecuteGlobalInstallSharingPathsAcrossTargetsDeploysAndStatusVerifiesPerTargetRoots()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        string claudeRoot = Path.Combine(fixture.Path, "claude-home", ".claude");
+        string codexRoot = Path.Combine(fixture.Path, "codex-home", ".codex");
+        Directory.CreateDirectory(claudeRoot);
+        Directory.CreateDirectory(codexRoot);
+        FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
+        {
+            [SquadTarget.Claude] = claudeRoot,
+            [SquadTarget.Codex] = codexRoot
+        });
+        SquadStateStore store = Store(applicationData);
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateInstall(
+            fixture.Path,
+            SquadDeploymentScope.Global,
+            Lock(),
+            [
+                Rendered("agents/conductor.md", "claude conductor", "claude"),
+                Rendered("agents/conductor.md", "codex conductor", "codex")
+            ],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt),
+            globalRoots);
+
+        new SquadTransaction(store).Execute(plan);
+
+        Assert.Equal("claude conductor", Read(claudeRoot, "agents/conductor.md"));
+        Assert.Equal("codex conductor", Read(codexRoot, "agents/conductor.md"));
+        AssertReceiptEqual(
+            plan.Receipt,
+            Assert.IsType<SquadReceipt>(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Global)));
+
+        SquadStatusCommand command = new(stateStore: store, globalRoots: globalRoots);
+        CapturedConsoleExecution<int> clean = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = fixture.Path,
+                Global = true
+            }));
+        Assert.Equal(0, clean.Result);
+        Assert.Contains("(claude)", clean.Output, StringComparison.Ordinal);
+        Assert.Contains("(codex)", clean.Output, StringComparison.Ordinal);
+
+        Write(claudeRoot, "agents/conductor.md", "operator edit");
+        CapturedConsoleExecution<int> drifted = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = fixture.Path,
+                Global = true
+            }));
+
+        Assert.Equal(1, drifted.Result);
+        Assert.Contains("drift", drifted.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("(claude)", drifted.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An uninstall plan's receipt carries only retained files; the dry-run report must list
+    /// the planned removals with their target, and remove nothing.
+    /// </summary>
+    [Fact]
+    public void UninstallDryRunListsPlannedRemovalsWithTargetsAndRemovesNothing()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        const string relativePath = ".codex/agents/conductor.toml";
+        SquadReceipt receipt = Receipt(new SquadOwnedFile(
+            relativePath,
+            Digest("installed body"),
+            "codex",
+            false));
+        Write(fixture.Path, relativePath, "installed body");
+        WriteState(fixture.Path, Lock(), receipt);
+        SquadStateStore store = Store(fixture.Path);
+        SquadUninstallCommand command = new(
+            stateStore: store,
+            lifecycleService: SquadCommandComposition.CreateLifecycleService(stateStore: store));
+
+        CapturedConsoleExecution<int> dryRun = ProcessConsoleCapture.Run(() => command.Execute(
+            null!,
+            new SquadUninstallSettings
+            {
+                Path = fixture.Path,
+                DryRun = true
+            }));
+
+        Assert.Equal(0, dryRun.Result);
+        Assert.Contains("would uninstall 1 files", dryRun.Output, StringComparison.Ordinal);
+        Assert.Contains(relativePath, dryRun.Output, StringComparison.Ordinal);
+        Assert.Contains("(codex)", dryRun.Output, StringComparison.Ordinal);
+        Assert.True(File.Exists(ToPlatformPath(fixture.Path, relativePath)));
+    }
+
     [Fact]
     public void ExecuteGlobalScopeKeepsDurableIntentInStateAndStagesAndBackupsOnDestinationFilesystem()
     {
@@ -4920,6 +5098,15 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     private sealed class FakeSquadUserPaths(string applicationDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = applicationDataDirectory;
+    }
+
+    private sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
+        : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target) =>
+            roots.TryGetValue(target, out string? root)
+                ? root
+                : throw new ArgumentOutOfRangeException(nameof(target), target, "No root mapped for target.");
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
