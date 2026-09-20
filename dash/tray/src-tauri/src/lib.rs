@@ -1,3 +1,4 @@
+pub mod api;
 mod args;
 pub mod autostart;
 pub mod cli;

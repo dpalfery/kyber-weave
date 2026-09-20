@@ -345,7 +345,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - Quit kills the process tree, and an in-flight refresh either finishes or leaves no
       partial write.
   - _Requirements: 6.9, 7.1, 7.2, 7.3_
-- [ ] 8.4 Loopback client and polling
+- [x] 8.4 Loopback client and polling
   - Stream E.
   - Test, then implement `api.rs`:
     - Any host other than `127.0.0.1` is refused.
