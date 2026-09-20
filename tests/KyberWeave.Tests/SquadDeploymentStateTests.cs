@@ -387,6 +387,32 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// Project scope writes every target beneath the one deployment root, so two targets
+    /// claiming one relative path would claim one physical file; the receipt must refuse it.
+    /// </summary>
+    [Fact]
+    public void SerializeReceiptProjectScopeSharedPathAcrossTargetsIsRejected()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        SquadReceipt collision = new SquadReceipt(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Project,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile("agents/conductor.md", Digest("claude conductor"), "claude", false),
+                new SquadOwnedFile("agents/conductor.md", Digest("codex conductor"), "codex", false)
+            ]);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.SerializeReceipt(collision));
+
+        Assert.Contains("unique", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// A global install across two targets that render the same relative path must deploy to
     /// each target's own root, and status must verify the bytes there — not against the
     /// deployment root, which holds none of the files.
