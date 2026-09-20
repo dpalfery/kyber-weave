@@ -2,6 +2,7 @@ pub mod api;
 mod args;
 pub mod autostart;
 pub mod cli;
+pub mod ipc;
 #[cfg(target_os = "macos")]
 pub mod login_item_macos;
 pub mod position;

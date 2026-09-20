@@ -388,7 +388,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     LaunchAgent writer for `~/Library/LaunchAgents/io.github.dpalfery.kyberdash.plist`,
     against a temporary directory.
   - _Requirements: 6.8, 8.8, 9.2_
-- [ ] 8.9 IPC surface and opening views
+- [x] 8.9 IPC surface and opening views
   - Stream E.
   - Test that `get_view_state` and the `view-state-changed` event carry the design's
     `ViewState`.
