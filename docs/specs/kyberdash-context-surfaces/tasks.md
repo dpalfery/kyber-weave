@@ -412,7 +412,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.8, 8.9, 8.10, 8.11, 8.12, 14.1, 14.2, 14.3, 14.4_
 
 - [ ] 9. Distribution
-- [ ] 9.1 Tray installer in `kyberdash menubar`
+- [x] 9.1 Tray installer in `kyberdash menubar`
   - Stream F.
   - With a local HTTP origin (`KYBER_WEAVE_RELEASE_ORIGIN`) and an injected verifier, test:
     - origin resolution for the running version

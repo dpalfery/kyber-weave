@@ -34,13 +34,34 @@ describe('registered top-level commands', () => {
 })
 
 describe('menubar', () => {
-  it('refuses rather than install the upstream CodeBurn app', () => {
+  /**
+   * The installer's own behaviour is covered in `src/install/menubar.test.ts`
+   * against injected ports. What is worth checking through a real spawn is the
+   * wiring: the command reaches the installer, and a failure there exits
+   * non-zero with the step named (R15.6).
+   *
+   * The origin is pointed at a port nothing is listening on, so the run fails
+   * at the first fetch without touching the network or this machine's
+   * /Applications.
+   */
+  it('runs the installer and exits non-zero naming the failing step', () => {
     const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/launcher.ts', 'menubar'], {
       cwd: new URL('../..', import.meta.url),
       encoding: 'utf8',
       timeout: 60_000,
+      env: { ...process.env, KYBER_WEAVE_RELEASE_ORIGIN: 'http://127.0.0.1:1/release' },
     })
+
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain('KyberDash tray is not released yet')
+    expect(result.stderr).toContain('kyberdash menubar:')
+    // Either the platform refusal (Linux) or the first network step; both name
+    // where it stopped, which is the contract.
+    expect(result.stderr).toMatch(/checksums:|platform:/)
+  })
+
+  it('takes --force and --update', () => {
+    const menubar = buildProgram().commands.find(command => command.name() === 'menubar')!
+    const flags = menubar.options.map(option => option.long).sort()
+    expect(flags).toEqual(['--force', '--update'])
   })
 })

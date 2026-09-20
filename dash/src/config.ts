@@ -54,7 +54,7 @@ export type KyberdashConfig = {
 // ~/.config/codeburn directory is neither read nor removed: a user's declared
 // proxy paths do not silently carry into the renamed product, and an existing
 // CodeBurn install keeps its own config.
-function getConfigDir(): string {
+export function getConfigDir(): string {
   return join(homedir(), '.kyberdash')
 }
 

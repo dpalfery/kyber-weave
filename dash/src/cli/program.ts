@@ -84,12 +84,18 @@ export function buildProgram(): Command {
     .command('menubar')
     .description('Install and launch the KyberDash tray on macOS and Windows')
     .option('--force', 'Reinstall even if a copy is already installed')
-    .action(() => {
-      // The inherited command installed the upstream CodeBurn menubar app, which shows spend,
-      // not context, and is not built from this repository. It refuses until the KyberDash
-      // tray is released from here (spec task 9.1), rather than install the wrong app.
-      console.error('\n  The KyberDash tray is not released yet; this command will install it once it is.\n')
-      process.exit(1)
+    .option('--update', 'Update an existing install; do nothing if there is none')
+    .action(async (opts: { force?: boolean; update?: boolean }) => {
+      const { installTray } = await import('../install/menubar.js')
+      const { nodeInstallDeps } = await import('../install/node-deps.js')
+      try {
+        await installTray(nodeInstallDeps(), { force: opts.force, update: opts.update })
+      } catch (err) {
+        // The step is already in the message (R15.6); the exit code is what a
+        // caller such as the self-updater branches on.
+        process.stderr.write(`kyberdash menubar: ${err instanceof Error ? err.message : String(err)}\n`)
+        process.exit(1)
+      }
     })
 
   program
