@@ -423,7 +423,11 @@ public sealed class SquadStateStore
             ValidateRequiredReceiptValue(degradation.Code, "degradation code");
         }
 
-        HashSet<string> portablePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Uniqueness is scoped to (target, path), mirroring SquadDeploymentPlan's deployment
+        // identity: project renderers prefix paths with the target directory, but global
+        // renderers strip that prefix because each target deploys beneath its own root, so
+        // the same relative path legitimately appears once per target in a global receipt.
+        HashSet<string> deployedIdentities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (SquadOwnedFile? file in receipt.Files)
         {
             if (file is null)
@@ -445,15 +449,21 @@ public sealed class SquadStateStore
             }
 
             if (!string.Equals(normalizedPath, file.RelativePath, StringComparison.Ordinal) ||
-                !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal) ||
-                !portablePaths.Add(portableIdentity))
+                !string.Equals(portableIdentity, normalizedPath, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    $"Squad receipt file path '{file.RelativePath}' is not a unique portable path.");
+                    $"Squad receipt file path '{file.RelativePath}' is not a portable canonical path.");
             }
 
             ValidateDigest(file.Sha256, "file digest");
             ValidateCanonicalTarget(file.Target, "file target");
+
+            if (!deployedIdentities.Add(SquadDeploymentPlan.DeployedFileIdentity(file.Target, portableIdentity)))
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt file path '{file.RelativePath}' for target '{file.Target}' " +
+                    "is not a unique portable deployment path.");
+            }
         }
     }
 

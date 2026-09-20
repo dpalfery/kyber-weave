@@ -18,9 +18,19 @@ internal static class SquadCommandComposition
     public static bool IsInteractiveConsole() =>
         !Console.IsInputRedirected && AnsiConsole.Profile.Capabilities.Interactive;
 
-    /// <summary>Resolves a state store using the specified or default user paths.</summary>
+    /// <summary>Resolves the state store using the specified or default user paths.</summary>
     public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null) =>
         new(userPaths ?? SquadUserPaths.Instance);
+
+    /// <summary>
+    /// Resolves the per-target global deployment root resolver. Commands that read deployed
+    /// files back — status, uninstall dry-runs — need the same roots install resolved,
+    /// because a global receipt's relative paths are only meaningful beneath each target's
+    /// own root.
+    /// </summary>
+    public static ISquadGlobalRootResolver ResolveGlobalRoots() => new SquadGlobalRoots(
+        Environment.GetEnvironmentVariable,
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
     /// <summary>Resolves the Kyber-Weave MCP process probe using the specified process executor.</summary>
     public static McpProcessProbe ResolveProbe(IProcessExecutor? executor) =>
@@ -79,8 +89,7 @@ internal static class SquadCommandComposition
         ISquadReleaseSource resolvedReleaseSource = releaseSource
             ?? new GitHubSquadReleaseSource(ReleaseOrigin.Resolve(Environment.GetEnvironmentVariable).ApiRoot);
         ISquadRenderer resolvedRenderer = renderer ?? ResolveRenderer();
-        ISquadGlobalRootResolver resolvedGlobalRoots = globalRoots
-            ?? new SquadGlobalRoots(Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        ISquadGlobalRootResolver resolvedGlobalRoots = globalRoots ?? ResolveGlobalRoots();
 
         return new SquadLifecycleService(
             releaseSource: resolvedReleaseSource,

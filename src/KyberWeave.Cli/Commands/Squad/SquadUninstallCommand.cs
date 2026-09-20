@@ -61,11 +61,16 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
 
                 if (settings.DryRun)
                 {
-                    int fileCount = result.Plan.Receipt.Files.Count;
-                    AnsiConsole.MarkupLine($"[bold]Dry-run:[/] would uninstall {fileCount} files from [bold]{Markup.Escape(targetRoot)}[/]:");
-                    foreach (SquadOwnedFile file in result.Plan.Receipt.Files)
+                    // An uninstall plan's receipt holds only the files it retains; the
+                    // removals are the plan's Delete changes, which also carry the target
+                    // a global deployment removes each path from.
+                    IReadOnlyList<SquadPlannedFileChange> removals = result.Plan.PlannedFileChanges
+                        .Where(change => change.Kind == SquadFileMutationKind.Delete)
+                        .ToArray();
+                    AnsiConsole.MarkupLine($"[bold]Dry-run:[/] would uninstall {removals.Count} files from [bold]{Markup.Escape(targetRoot)}[/]:");
+                    foreach (SquadPlannedFileChange removal in removals)
                     {
-                        AnsiConsole.MarkupLine($"  [red]remove[/] {Markup.Escape(file.RelativePath)}");
+                        AnsiConsole.MarkupLine($"  [red]remove[/] {Markup.Escape(removal.RelativePath)} ({Markup.Escape(removal.Target)})");
                     }
 
                     return 0;

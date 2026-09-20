@@ -312,7 +312,12 @@ public sealed class SquadCliCommandTests : IDisposable
         SeedDeployment(globalRoot, SquadDeploymentScope.Global, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadStatusCommand command = new SquadStatusCommand(userPaths);
+        // A global receipt's paths resolve beneath each target's own global root, so the
+        // seeded deployment is only verifiable through a resolver that maps codex there.
+        SquadStatusCommand command = new SquadStatusCommand(
+            userPaths,
+            stateStore,
+            new FakeGlobalRootResolver(SquadTarget.Codex, globalRoot));
 
         // Project status should exit 1 because project has no receipt
         CommandExecution projectExecution = Capture(() => command.Execute(
@@ -1253,6 +1258,15 @@ public sealed class SquadCliCommandTests : IDisposable
     private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
         public string ApplicationDataDirectory { get; } = appDataDirectory;
+    }
+
+    private sealed class FakeGlobalRootResolver(SquadTarget target, string root)
+        : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget requested) =>
+            requested == target
+                ? root
+                : throw new ArgumentOutOfRangeException(nameof(requested), requested, "No root mapped for target.");
     }
 
     private sealed class SquadRepoFixture : IDisposable

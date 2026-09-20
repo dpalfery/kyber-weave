@@ -13,6 +13,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
 {
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
+    private readonly ISquadGlobalRootResolver? _globalRoots;
 
     /// <summary>Creates a new status command using default system paths.</summary>
     public SquadStatusCommand()
@@ -22,10 +23,12 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// <summary>Creates a new status command using injectable dependencies.</summary>
     internal SquadStatusCommand(
         ISquadUserPaths? userPaths = null,
-        SquadStateStore? stateStore = null)
+        SquadStateStore? stateStore = null,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
+        _globalRoots = globalRoots;
     }
 
     /// <inheritdoc />
@@ -36,6 +39,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
         string targetRoot = SquadCommandComposition.ResolveTargetRoot(settings.Path);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
+        ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
         SquadReceipt? receipt = stateStore.ReadReceipt(targetRoot, scope);
         if (receipt is null)
@@ -53,7 +57,11 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             string fullPath;
             try
             {
-                fullPath = SquadPathPolicy.ResolveFile(targetRoot, file.RelativePath);
+                // A receipt's relative paths are target-relative: beneath the deployment root
+                // for project scope, beneath each target's own global root otherwise. Joining
+                // targetRoot directly would check a global deployment against the project
+                // directory and report every file missing.
+                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(scope, targetRoot, globalRoots, file);
             }
             catch (Exception)
             {
@@ -64,7 +72,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
 
             if (!File.Exists(fullPath))
             {
-                AnsiConsole.MarkupLine($"  [red]missing[/] {Markup.Escape(file.RelativePath)}");
+                AnsiConsole.MarkupLine(StatusLine("red", "missing", file, scope));
                 hasIssues = true;
                 continue;
             }
@@ -73,12 +81,12 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             string actualSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
             if (!string.Equals(actualSha256, file.Sha256, StringComparison.Ordinal))
             {
-                AnsiConsole.MarkupLine($"  [yellow]drift[/]   {Markup.Escape(file.RelativePath)} (modified)");
+                AnsiConsole.MarkupLine(StatusLine("yellow", "drift", file, scope) + " (modified)");
                 hasIssues = true;
                 continue;
             }
 
-            AnsiConsole.MarkupLine($"  [green]ok[/]      {Markup.Escape(file.RelativePath)}");
+            AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
         }
 
         if (hasIssues)
@@ -91,6 +99,17 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine("[green]All deployed files match the recorded receipt.[/]");
         return 0;
+    }
+
+    /// <summary>
+    /// Renders one status line. Global scope deploys the same relative path to several
+    /// targets' roots, so the target token is part of the identity shown to the operator;
+    /// project scope already encodes the target in the path itself.
+    /// </summary>
+    private static string StatusLine(string color, string state, SquadOwnedFile file, SquadDeploymentScope scope)
+    {
+        string suffix = scope == SquadDeploymentScope.Global ? $" ({file.Target})" : string.Empty;
+        return $"  [{color}]{state.PadRight(7)}[/] {Markup.Escape(file.RelativePath)}{suffix}";
     }
 
     public int Execute(CommandContext context, SquadStatusSettings settings) => Execute(context, settings, CancellationToken.None);

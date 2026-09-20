@@ -26,6 +26,8 @@ public sealed class SquadDeploymentPlan
         Lock = squadLock;
         Receipt = receipt;
         FileMutations = fileMutations;
+        PlannedFileChanges = [.. fileMutations.Select(mutation =>
+            new SquadPlannedFileChange(mutation.RelativePath, mutation.Target, mutation.Kind))];
         FilePreconditions = filePreconditions;
         LockMutation = lockMutation;
         ReceiptMutation = receiptMutation;
@@ -48,7 +50,18 @@ public sealed class SquadDeploymentPlan
     /// <summary>The desired or retained ownership receipt.</summary>
     public SquadReceipt Receipt { get; }
 
+    /// <summary>
+    /// The pending file mutations, in apply order. Internal payload: hosts report
+    /// <see cref="PlannedFileChanges"/> instead.
+    /// </summary>
     internal IReadOnlyList<SquadFileMutation> FileMutations { get; }
+
+    /// <summary>
+    /// The pending file changes, in apply order, without payloads. Public so command hosts
+    /// can report what a plan will change — an uninstall plan's <see cref="Receipt"/> holds
+    /// only the files it retains, so the planned removals are readable from this list alone.
+    /// </summary>
+    public IReadOnlyList<SquadPlannedFileChange> PlannedFileChanges { get; }
 
     internal IReadOnlyList<SquadFilePrecondition> FilePreconditions { get; }
 
@@ -134,6 +147,32 @@ public sealed class SquadDeploymentPlan
         SquadPathPolicy.ResolveFile(
             ResolvePhysicalRoot(scope, physicalRootPath, globalRoots, target),
             relativePath);
+
+    /// <summary>
+    /// Resolves the absolute physical path where a receipt-owned file is deployed, using the
+    /// same scope and resolver rules as deploy time. Project scope resolves beneath
+    /// <paramref name="targetRoot"/>; Global scope resolves beneath the file's target root
+    /// from <paramref name="globalRoots"/> (falling back to the single root when no resolver
+    /// is supplied, matching legacy single-root deployments). Consumers that verify deployed
+    /// bytes — status reporting in particular — must use this rather than joining
+    /// <paramref name="targetRoot"/> with the relative path directly, which only holds for
+    /// Project scope.
+    /// </summary>
+    public static string ResolveOwnedFilePath(
+        SquadDeploymentScope scope,
+        string targetRoot,
+        ISquadGlobalRootResolver? globalRoots,
+        SquadOwnedFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        return ResolvePhysicalPath(
+            scope,
+            SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
+            globalRoots,
+            file.Target,
+            file.RelativePath);
+    }
 
     /// <summary>Preflights a new installation without changing the deployment tree.</summary>
     public static SquadDeploymentPlan CreateInstall(
@@ -674,15 +713,29 @@ public sealed record SquadUnmanagedPathCollision(
     string Target,
     string Identity);
 
-internal enum SquadFileMutationKind
+/// <summary>
+/// Whether a planned file change writes new bytes or removes a deployed file. Public so
+/// command hosts can report what a plan will do without seeing the internal payload record.
+/// </summary>
+public enum SquadFileMutationKind
 {
     Write,
     Delete
 }
 
 /// <summary>
+/// One planned file change without its payload, for command hosts that report what a plan
+/// will do. An uninstall plan's receipt holds only the files it retains, so the removals it
+/// plans are readable from these changes alone.
+/// </summary>
+public sealed record SquadPlannedFileChange(
+    string RelativePath,
+    string Target,
+    SquadFileMutationKind Kind);
+
+/// <summary>
 /// A pending write or delete for one deployed file, identified by <c>(Target, RelativePath)</c>
-/// so that Global scope's per-target physical roots (<see cref="SquadDeploymentPlan.ResolvePhysicalRoot(string)"/>)
+/// so that Global scope's per-target physical roots (<see cref="SquadDeploymentPlan.ResolvePhysicalRoot(string)"/>
 /// can be resolved without cross-referencing the receipt by relative path alone.
 /// </summary>
 internal sealed record SquadFileMutation(
