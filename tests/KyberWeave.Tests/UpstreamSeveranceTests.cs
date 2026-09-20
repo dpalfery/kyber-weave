@@ -48,10 +48,16 @@ public sealed class UpstreamSeveranceTests
 
     // Requirement 1.5: the attribution files are where the upstream notice is
     // allowed — and required — to live.
+    //
+    // This file is exempt for a different reason: a guard has to name what it
+    // forbids. Without the exemption the scan matches its own BannedMarkers
+    // array and fails on itself, which is what it did from the moment it was
+    // written — the test has never passed.
     private static readonly string[] AllowedPaths =
     {
         "dash/LICENSE",
         "dash/THIRD_PARTY_NOTICES.md",
+        "tests/KyberWeave.Tests/UpstreamSeveranceTests.cs",
     };
 
     [Fact]
@@ -88,6 +94,37 @@ public sealed class UpstreamSeveranceTests
             "Requirement 1.6: tracked files outside docs/ must not name the upstream. " +
             "Remove the reference, or move the record under docs/ where the fork's " +
             $"history is allowed to name it:\n  {string.Join("\n  ", offenders)}");
+    }
+
+    /// <summary>
+    /// The exemption above must not hollow the scan out: everything it exempts
+    /// is exempt for a stated reason, and the markers themselves still match.
+    /// A scan that matched nothing would pass just as quietly as a clean tree.
+    /// </summary>
+    [Fact]
+    public void TheScanStillMatchesTheMarkersItExempts()
+    {
+        Assert.NotEmpty(BannedMarkers);
+
+        // The guard's own file is exempt, and it is exempt because it contains
+        // them — if it stopped containing them, the exemption is dead weight.
+        string self = File.ReadAllText(
+            Path.Combine(RepoRoot, "tests", "KyberWeave.Tests", "UpstreamSeveranceTests.cs"));
+        Assert.True(
+            BannedMarkers.Any(marker => self.Contains(marker, StringComparison.OrdinalIgnoreCase)),
+            "UpstreamSeveranceTests.cs no longer names the markers it bans, so its " +
+            "entry in AllowedPaths can go.");
+
+        foreach (string allowed in AllowedPaths)
+        {
+            Assert.True(
+                IsExempt(allowed),
+                $"{allowed} is listed as allowed but IsExempt does not exempt it.");
+        }
+
+        // A path that is neither an attribution file nor under docs/ is not exempt.
+        Assert.False(IsExempt("dash/src/cli/report.ts"));
+        Assert.True(IsExempt("docs/adr/0020-one-time-fork.md"));
     }
 
     [Fact]

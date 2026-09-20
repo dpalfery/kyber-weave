@@ -11,9 +11,9 @@ import { describe, expect, it } from 'vitest'
  *
  * Task 4.1 renamed the package, variables and directories, but 39 `codeburn:`
  * prefixes survived in stderr copy and shipped, because nothing asserted 3.7 —
- * `UpstreamSeveranceTests` guards the *domain* ties (`getagentseal`,
- * `agentseal.org`, `codeburn.app`) that Requirement 1.6 names, and the bare
- * product name is not one of them.
+ * `UpstreamSeveranceTests` guards only the upstream *domain* markers that
+ * Requirement 1.6 lists, and the bare product name is not one of them. That
+ * test also owns those markers, so they are deliberately not repeated here.
  *
  * The scan reads literals off the TypeScript AST rather than matching text.
  * Comments are the reason: a doc comment may quote `` `kyberdash otel` `` to
