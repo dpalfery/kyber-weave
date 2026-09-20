@@ -353,7 +353,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     - The last good report is kept with its fetch time, and the view is marked stale on
       error.
   - _Requirements: 6.10, 7.4, 7.7_
-- [ ] 8.5 Scheduled refresh
+- [x] 8.5 Scheduled refresh
   - Stream E.
   - Test, then implement `scheduler.rs`:
     - A refresh runs at start and every *cadence* (default 5 minutes).
