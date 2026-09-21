@@ -57,3 +57,4 @@ last-reviewed: YYYY-MM-DD
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |
 | [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | draft | Packaging Squad as a ZCode plugin would trade per-file receipt ownership for per-unit enablement and namespace every agent — a deployment-model decision, not remaining ZCode work. |
+| [black-hawk-hotel-todo.md](black-hawk-hotel-todo.md) | KyberSquad | draft | Handover of in-flight harness fidelity work: emit `thinking` for Pi, and reclassify Antigravity from fallback role-skills to its native agent primitive. |
