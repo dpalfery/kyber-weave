@@ -68,7 +68,7 @@ Kyber-Squad declares ten coding-harness targets:
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), and `warp` (fallback role-skill lowering to `.warp/skills/`) have renderers. All ten declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native subagents and skills, with the primary agent lowered to a slash command) have renderers. All eleven declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
@@ -244,7 +244,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the ten declared targets can install today) and the Kyber-Weave MCP server:
+Run diagnostic checks on renderer coverage (which of the eleven declared targets can install today) and the Kyber-Weave MCP server:
 
 ```bash
 kyber-weave squad doctor

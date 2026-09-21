@@ -22,6 +22,8 @@ public interface ISquadGlobalRootResolver
 /// Factory personal droids and skills live under `~/.factory` with no environment override
 /// (docs.factory.ai/harness/subagents and docs.factory.ai/harness/skills, 2026-09-16).
 /// Warp skills live under `~/.warp` (`~/.warp/skills/`, verified against docs.warp.dev/features/skills).
+/// ZCode agents, skills, and commands live under `$ZCODE_STORAGE_DIR` (default `~/.zcode`),
+/// verified against zai-org/ZCode 3.14.0 on 2026-09-21.
 /// The home directory and every override environment value must be fully qualified:
 /// a relative root would be completed against the process working directory by
 /// <see cref="SquadPathPolicy.ResolveFile"/>.
@@ -44,6 +46,12 @@ public interface ISquadGlobalRootResolver
 ///   `~/.config/kilo/agents/` and global config at `~/.config/kilo/kilo.jsonc`.
 /// - Factory: `droids/` and `skills/` under `~/.factory` (no override; no all-users path).
 /// - Warp: `skills/` under `~/.warp` (`~/.warp/skills/`, verified against docs.warp.dev).
+/// - ZCode: `agents/`, `skills/`, and `commands/` under `$ZCODE_STORAGE_DIR`, default
+///   `~/.zcode`. The environment variable reaches the agent root through the runtime
+///   config's `storage.dir` (`env-config.adapter.ts` maps `ZCODE_STORAGE_DIR` onto it,
+///   and `create-app.ts` resolves the subagent root from it). The same key can also be
+///   set in `~/.zcode/cli/config.json`, which no environment read can observe — see
+///   [the todo](../../../../docs/todo/zcode-storage-dir-config-override.md).
 /// </remarks>
 public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 {
@@ -72,6 +80,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.Kilo => ResolveXdgConfigAppRoot("kilo"),
             SquadTarget.Factory => ResolveWithOverride(null, ".factory"),
             SquadTarget.Warp => ResolveWithOverride(null, ".warp"),
+            SquadTarget.ZCode => ResolveWithOverride("ZCODE_STORAGE_DIR", ".zcode"),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,

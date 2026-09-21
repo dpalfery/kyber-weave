@@ -62,6 +62,7 @@ internal static class SquadCommandComposition
             new PiRenderer(),
             new FactoryRenderer(),
             new WarpRenderer(),
+            new ZCodeRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>

@@ -9,14 +9,14 @@ last-reviewed: 2026-09-14
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 
-> **Govern a ten-target IDE harness catalog and deploy canonical AI agent squads and skills to all ten targets implemented today, with transactional safety.**
+> **Govern an eleven-target IDE harness catalog and deploy canonical AI agent squads and skills to all eleven targets implemented today, with transactional safety.**
 
 Engineering teams increasingly operate across heterogeneous AI development tools—some engineers build in Cursor or Windsurf, others in Claude Code, GitHub Copilot, Cline, Pi, or Antigravity. As teams author specialized agent personas (e.g. architects, database engineers, test specialists) and reusable skills, keeping these artifacts in sync across differing IDE configurations becomes an unmanageable maintenance burden.
 
 **Kyber-Squad** is the unified deployment control plane that compiles canonical agent definitions
 (`AgentIR`) and skill specifications into target-native configurations, backed by atomic
-transactional rollback. The catalog declares ten harness targets. All ten renderers are implemented
-and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, and `warp`.
+transactional rollback. The catalog declares eleven harness targets. All eleven renderers are implemented
+and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, and `zcode`.
 
 ---
 

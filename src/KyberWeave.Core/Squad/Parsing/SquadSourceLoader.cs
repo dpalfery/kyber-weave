@@ -44,7 +44,7 @@ public static class SquadSourceLoader
     private static readonly HashSet<string> ModelProfileFields = new(StringComparer.Ordinal)
     {
         "default", "codex", "cursor", "claude", "copilot", "opencode", "kilo",
-        "antigravity", "warp", "factory", "pi"
+        "antigravity", "warp", "factory", "pi", "zcode"
     };
 
     /// <summary>Loads the default bundle from a canonical product source root.</summary>

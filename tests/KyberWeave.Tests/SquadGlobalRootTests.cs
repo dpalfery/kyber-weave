@@ -44,6 +44,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Kilo, ".config/kilo")]
     [InlineData(SquadTarget.Factory, ".factory")]
     [InlineData(SquadTarget.Warp, ".warp")]
+    [InlineData(SquadTarget.ZCode, ".zcode")]
     public void ResolveGlobalRoot_NoOverrideSet_ReturnsHomeDirectoryDefault(
         SquadTarget target,
         string defaultRelativePath)
@@ -68,6 +69,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Copilot, "COPILOT_HOME")]
     [InlineData(SquadTarget.Pi, "PI_CODING_AGENT_DIR")]
     [InlineData(SquadTarget.OpenCode, "OPENCODE_CONFIG_DIR")]
+    [InlineData(SquadTarget.ZCode, "ZCODE_STORAGE_DIR")]
     public void ResolveGlobalRoot_OverrideSetAndNonEmpty_ReturnsTheOverridePath(
         SquadTarget target,
         string overrideEnvironmentVariable)
@@ -94,6 +96,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Copilot, "COPILOT_HOME", ".copilot")]
     [InlineData(SquadTarget.Pi, "PI_CODING_AGENT_DIR", ".pi/agent")]
     [InlineData(SquadTarget.OpenCode, "OPENCODE_CONFIG_DIR", ".config/opencode")]
+    [InlineData(SquadTarget.ZCode, "ZCODE_STORAGE_DIR", ".zcode")]
     public void ResolveGlobalRoot_OverrideSetToEmptyString_FallsBackToTheDefault(
         SquadTarget target,
         string overrideEnvironmentVariable,
@@ -247,6 +250,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.OpenCode)]
     [InlineData(SquadTarget.Kilo)]
     [InlineData(SquadTarget.Warp)]
+    [InlineData(SquadTarget.ZCode)]
     public async Task InstallAsync_GlobalScopeDryRun_PlansEveryFileUnderTheResolvedTargetRootWithBareRelativePaths(
         SquadTarget target)
     {
@@ -285,6 +289,7 @@ public sealed class SquadGlobalRootTests : IDisposable
 
         bool sawAgentFile = false;
         bool sawSkillFile = false;
+        bool sawCommandFile = false;
         foreach (SquadOwnedFile file in result.Receipt.Files)
         {
             Assert.False(
@@ -299,9 +304,18 @@ public sealed class SquadGlobalRootTests : IDisposable
             {
                 sawSkillFile = true;
             }
+            else if (target == SquadTarget.ZCode &&
+                     file.RelativePath.StartsWith("commands/", StringComparison.Ordinal))
+            {
+                // ZCode is the only target with a third primitive: its primary agent lowers to
+                // a slash command rather than to a skill.
+                sawCommandFile = true;
+            }
             else
             {
-                Assert.Fail($"Global-scope path '{file.RelativePath}' for {target} is neither agents/ nor skills/.");
+                Assert.Fail(
+                    $"Global-scope path '{file.RelativePath}' for {target} is outside that " +
+                    "target's declared global subtrees.");
             }
 
             string physicalPath = result.Plan.ResolvePhysicalPath(file);
@@ -321,6 +335,8 @@ public sealed class SquadGlobalRootTests : IDisposable
         }
 
         // Factory uses droids/, not agents/; do not add it to this theory.
+
+        Assert.Equal(target == SquadTarget.ZCode, sawCommandFile);
 
         Assert.True(sawSkillFile, $"{target} should emit at least one skills/ file.");
 
@@ -567,6 +583,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Pi, ".pi/")]
     [InlineData(SquadTarget.OpenCode, ".opencode/")]
     [InlineData(SquadTarget.Kilo, ".kilo/")]
+    [InlineData(SquadTarget.ZCode, ".zcode/")]
     public async Task InstallAsync_ProjectScopeDryRun_RelativePathsKeepTodaysHarnessPrefix(
         SquadTarget target,
         string expectedPrefix)
@@ -608,6 +625,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [Theory]
     [InlineData(SquadTarget.Claude)]
     [InlineData(SquadTarget.Pi)]
+    [InlineData(SquadTarget.ZCode)]
     public async Task InstallAsync_RealInstallGlobalScope_WritesOnlyUnderTheResolvedHomeSubtree(SquadTarget target)
     {
         // Arrange

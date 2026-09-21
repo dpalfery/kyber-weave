@@ -56,3 +56,6 @@ last-reviewed: YYYY-MM-DD
 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | draft | squad commands' positional path argument can silently target the wrong directory. |
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |
+| [zcode-deferred-primitives.md](zcode-deferred-primitives.md) | KyberSquad | draft | ZCode plugin packaging, hooks, and MCP-server projection are outside the first ZCode target release. |
+| [zcode-storage-dir-config-override.md](zcode-storage-dir-config-override.md) | KyberSquad | draft | A `storage.dir` set in `~/.zcode/cli/config.json` moves ZCode's global root where the environment-only resolver cannot see it. |
+| [zcode-skill-description-block-scalar.md](zcode-skill-description-block-scalar.md) | KyberSquad | draft | A ZCode description containing a double quote round-trips with the escape backslash visible, because ZCode's readers do not unescape. |

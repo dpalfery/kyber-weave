@@ -9,6 +9,7 @@ profiles:
     kilo: glm5.3
     opencode: zai-coding-plan/glm-5.3
     pi: zai/glm-5.3
+    zcode: glm-5.3
   fast:
     default: inherit
     claude: haiku
@@ -18,6 +19,7 @@ profiles:
     kilo: spark1.3 contributor
     opencode: opencode/muse-spark-1.3-contributor-free
     pi: opencode/muse-spark-1.3-contributor-free
+    zcode: glm-5.3-flash
   general:
     default: inherit
     claude: haiku
@@ -27,12 +29,14 @@ profiles:
     kilo: muse-spark1.3 contributor
     opencode: opencode/muse-spark-1.3-contributor-free
     pi: opencode/muse-spark-1.3-contributor-free
+    zcode: glm-5.3-flash
   orchestration:
     default: inherit
     claude: haiku
     kilo: inherit
     opencode: opencode/big-pickle
     pi: inherit
+    zcode: glm-5.3-flash
   reviewer:
     default: inherit
     claude: sonnet
@@ -42,3 +46,4 @@ profiles:
     kilo: kimi k2.7 code
     opencode: opencode-go/kimi-k2.7-code
     pi: opencode-go/kimi-k2.7-code
+    zcode: glm-5.3-flash
