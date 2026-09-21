@@ -48,6 +48,7 @@ last-reviewed: YYYY-MM-DD
 | [factory.md](factory.md) | KyberSquad | superseded | Add a native Factory (factory-droids) renderer to Kyber-Squad (superseded by [plan](../archive/plans/2026-09-14-factory-native-renderer.md)). |
 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | draft | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
 | [kyberdash-local-release-loop.md](kyberdash-local-release-loop.md) | Distribution | draft | The local release loop builds no `kyberdash`, so the KyberDash install and update path is unverifiable offline. |
+| [menu-bar-fix.md](menu-bar-fix.md) | KyberDash | draft | The tray popover hangs on its loading state: four of the six IPC commands the UI invokes are never registered, the supervisor is never started, and the status item uses the colour app icon as a template image. |
 | [macos-developer-id-signing.md](macos-developer-id-signing.md) | Distribution | draft | Every macOS binary ships ad-hoc signed; set up team `J2UNNQ466J` Developer ID and notarization credentials (needed first by the KyberDash tray) and sign the CLI binaries. |
 | [mistyped-release-tag.md](mistyped-release-tag.md) | Distribution | draft | The mistyped `v1.0.6-rc.6` tag outranks every real release in version-sorted resolution. |
 | [kilo.md](kilo.md) | KyberSquad | superseded | Add a native Kilo renderer to Kyber-Squad (completed via [plan](../plans/2026-09-14-kilo-native-renderer.md)). |
