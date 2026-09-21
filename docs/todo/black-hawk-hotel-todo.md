@@ -165,138 +165,37 @@ does not. `tools` is the only thing Pi enforces.
 
 ## 4. Task C — Antigravity has native agents; the renderer still lowers every role to a skill
 
-**Status: the largest open item. Verified enough to design; two questions still block a
-complete implementation.**
-
-This restates and extends `docs/todo/antigravity-native-agents.md`, which was written
-2026-09-18 and **lives only on the `claude/kyberdash-context-surfaces-spec-d5775e` branch
-(PR #96)** — it is not on `main`, so it is referenced here by path rather than linked. Fold the
-two together when that branch lands.
-
-### The gap
+**Status: fully specified, not built. Every open question is closed — see
+[antigravity-native-agents.md](antigravity-native-agents.md) for the verified spec.**
 
 `AntigravityRenderer` is a fallback renderer: every canonical role becomes a skill under
-`skills/`, `role-`-prefixed on a name clash. `SquadGlobalRoots` records Antigravity as
-`skills/` under `~/.gemini/config/`, "no override, no agent primitive". The renderer registry
-asserts that a fallback target emits no `/agents/` path at all.
+`skills/`, `role-`-prefixed on a name clash. Antigravity has had an agent primitive since
+before this was noticed, so a delegated Antigravity session cannot load a Squad role *as an
+agent* — it can only be told to follow the role's skill. The conductor suffers most, since it
+exists to spawn specialists.
 
-That was true when verified. It is not true now. The consequence is that a delegated
-Antigravity session cannot load a Squad role *as an agent* — it can only be told to follow the
-role's skill. The conductor suffers most, since it exists to spawn specialists.
+The companion page carries the whole contract: both discovery paths, the loading precedence,
+the frontmatter schema with value domains, the tool vocabulary and its proposed capability
+mapping, the code seam, and the deployment consequence. The headline facts:
 
-### Verified on 2026-09-21
-
-`agy` **1.2.7** at `~/.local/bin/agy`:
-
-- `agy agent` and `agy agents` — "List available agents".
-- `--agent <name>` — "Agent for the current CLI session".
-- `--mode` — `accept-edits` or `plan`.
-
-Agents live at **`~/.gemini/config/agents/<name>/agent.md`** — one directory per agent, holding
-a single `agent.md`. That directory is currently empty on this machine; 21 hand-authored agents
-were moved aside to `~/.gemini/config/agents.bak.20260918/` and remain there. They are the
-format evidence below.
-
-### The agent file format
-
-Frontmatter key frequency across those 21 agents:
-
-| Key | Count | Notes |
-|---|---|---|
-| `name` | 23 | |
-| `description` | 23 | |
-| `tools` | 20 | YAML list |
-| `model` | 20 | `flash` (13), `inherit` (4), `pro` (3) |
-| `subagent` | 19 | bool |
-| `enable_write_tools` | 19 | bool |
-| `enable_subagent_tools` | 19 | bool |
-| `enable_mcp_tools` | 19 | bool |
-| `reasoning_effort` | 18 | `high` (11), `medium` (7) |
-| `author` / `version` / `license` | 18 | provenance, no functional effect |
-| `mainAgent` | 1 | camelCase, unlike every other key; only on the orchestrator |
-
-The orchestrator (`conductor-v3`) is the shape to copy for a primary-invocation agent:
-
-```yaml
-name: conductor-v3
-subagent: false
-mainAgent: true
-model: inherit
-enable_write_tools: true
-enable_subagent_tools: false
-enable_mcp_tools: true
-tools:
-  - list_dir
-  - invoke_subagent
-  - manage_subagents
-```
-
-Note `enable_subagent_tools: false` on the very agent whose `tools` list contains
-`invoke_subagent` and `manage_subagents`. Whether the switch gates the tools or is independent
-of them is one of the open questions below — do not guess.
-
-### The tool vocabulary
-
-Observed across the 21 agents, with frequency:
-
-`view_file` (18), `list_dir` (16), `grep_search` (16), `write_to_file` (14), `run_command` (14),
-`replace_file_content` (14), `multi_replace_file_content` (14), `search_web` (8),
-`read_url_content` (8), `invoke_subagent` (6), `manage_subagents` (2).
-
-It maps onto the canonical capability vocabulary more cleanly than most targets do:
-
-| Capability | Proposed Antigravity tools |
+| | |
 |---|---|
-| `filesystem.read` | `view_file` |
-| `filesystem.search` | `list_dir`, `grep_search` |
-| `filesystem.write` | `write_to_file`, `replace_file_content`, `multi_replace_file_content` |
-| `process.execute` | `run_command` |
-| `network.read` | `search_web`, `read_url_content` |
-| `network.publish` | *(none — record `permission-not-expressible`)* |
-| `delegate` | `invoke_subagent`; `manage_subagents` for the orchestrator only |
+| Global path | `~/.gemini/config/agents/<name>/agent.md` |
+| Project path | `<workspace>/.agents/agents/<name>/agent.md` |
+| Output shape | a **directory** per agent holding `agent.md` — no existing target does this |
+| `model` | a closed tier enum (`inherit`/`flash`/`pro`), not a model id |
+| `reasoning_effort` | `minimal`/`low`/`medium`/`high` — no `max` |
+| `enable_write_tools` | spans `filesystem.write` **and** `process.execute` in one switch |
 
-**This mapping is a proposal derived from hand-authored files, not from a published schema.**
-It is the weakest link in this document. Treat it as a hypothesis to verify, not a contract.
+Two things a builder should not skim past. The single `enable_write_tools` switch covering both
+write and execute means an agent entitled to one but not the other cannot be expressed by the
+switch alone and must be narrowed through `tools`. And the capability→tool mapping is inferred
+from hand-authored files rather than read from a published schema — the tool names are certain,
+the capability each lowers from is a judgement to confirm against a live session.
 
-### What still blocks a complete implementation
-
-1. **The project-level agents path is unknown.** The global path is confirmed; a renderer
-   emits scope-relative paths and needs both. `agy agent` prints nothing even with agents
-   present, so it could not be probed from the CLI. A probe directory containing
-   `.gemini/config/agents/<name>/agent.md` produced no listing either. Until this is settled,
-   a native implementation is only correct under `--global`.
-2. **Whether `enable_*` switches gate the `tools` list or are independent.** This decides
-   whether the capability lowering is expressible at all. The orchestrator example above is
-   direct evidence that the two can disagree.
-3. **Whether the IDE and the CLI read the same directory.** The machine carries both
-   `~/.gemini/antigravity-ide` and `~/.gemini/antigravity-cli` state.
-4. **Whether `model` accepts arbitrary ids or only the observed `inherit`/`flash`/`pro`.**
-   `models.yml` has no `antigravity` column today; one would be needed, and its value domain
-   depends on this.
-
-### The code seam
-
-- `src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs` — moves from fallback to native.
-- `src/KyberWeave.Core/Squad/Rendering/SquadRendererRegistry.cs` — `isNative` currently excludes
-  Antigravity, and the fallback branch *asserts* that such a target emits no `/agents/` path and
-  that every role-skill collision produces a `role-`-prefixed pair. Both assertions invert.
-  `AgentOutputPath` and `SkillOutputPath` both need Antigravity branches; note the output is a
-  **directory plus `agent.md`**, a shape no existing target uses.
-- `src/KyberWeave.Core/Squad/Deployment/SquadGlobalRoots.cs` — the remarks state "no agent
-  primitive" for Antigravity and must be corrected.
-- `products/kyber-squad/profiles/models.yml` and its schema — an `antigravity` column, pending
-  question 4.
-- Docs: [architecture §8](../kyber-squad/architecture.md#8-rendering) rendering table,
-  [requirements](../kyber-squad/requirements.md) target matrix,
-  [renderer coverage](kyber-squad-renderer-coverage.md), and an ADR — this reclassifies a
-  target, which is exactly the kind of decision
-  [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md) records for ZCode.
-
-### Sequencing note
-
-Antigravity is currently deployed *as skills* on this machine and working. There is no outage
-to fix, so this can be done carefully. When it lands, the existing global receipt will need an
-uninstall/reinstall because the target's file shape changes.
+Verified 2026-09-21 against `agy` 1.2.7 from three independent sources: 21 hand-authored agents
+preserved at `~/.gemini/config/agents.bak.20260918/`, the `agy` binary's embedded changelog and
+Go struct tags, and the built-in `agy-customizations` skill.
 
 ---
 
@@ -308,4 +207,5 @@ uninstall/reinstall because the target's file shape changes.
 - [Claude/Pi ask-narrowing](claude-renderer-ask-narrowing.md) — the `ask` lowering that makes
   `architect` and `product-owner` unable to save their own plans on those harnesses; related in
   spirit to task B
-- `docs/todo/antigravity-native-agents.md` on the PR #96 branch — the earlier record of task C
+- [Antigravity native agents](antigravity-native-agents.md) — the full verified spec for
+  task C, originally written on the PR #96 branch and brought onto this one
