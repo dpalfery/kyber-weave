@@ -574,7 +574,14 @@ jobs:
 
       - name: Build and sign the tray (macOS)
         if: runner.os == 'macOS'
-        working-directory: dash/tray/ui
+        # cwd is dash/tray, not dash/tray/ui: the Tauri CLI looks for
+        # tauri.conf.json in a SUBfolder of the working directory and never
+        # walks up, so from ui/ the sibling src-tauri/ is invisible and the CLI
+        # aborts before it builds anything. The CLI itself still comes from
+        # ui/node_modules, where npm ci put it, and is invoked through node
+        # rather than the .bin shim so the same line works under pwsh on the
+        # Windows runner.
+        working-directory: dash/tray
         env:
           # The certificate is already in the keychain, so only the identity is
           # passed; setting APPLE_CERTIFICATE here would have the bundler import
@@ -582,12 +589,14 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: npx tauri build --target ${{ matrix.target }} --bundles app
+        run: node ui/node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles app
 
       - name: Build the tray (Windows)
         if: runner.os == 'Windows'
-        working-directory: dash/tray/ui
-        run: npx tauri build --target ${{ matrix.target }} --bundles nsis
+        # cwd is dash/tray and the CLI is invoked through node for the reason
+        # given on the macOS step above.
+        working-directory: dash/tray
+        run: node ui/node_modules/@tauri-apps/cli/tauri.js build --target ${{ matrix.target }} --bundles nsis
 
       # Requirement 12.3: the bundler's own success is not evidence of
       # notarization, so each property is asserted against the built app.
