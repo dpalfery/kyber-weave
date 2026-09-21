@@ -450,9 +450,210 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+  build-tray:
+    # The KyberDash tray (spec task 9.4 / design C13). Unlike every other build
+    # job this one runs under `environment: release`, because signing and
+    # notarizing needs the team's Apple credentials and those are scoped there.
+    #
+    # Tauri's macOS bundler logs a warning and skips notarization when the
+    # credentials are absent, rather than failing. A job that trusted it to fail
+    # closed would publish an unnotarized app, so the presence check below runs
+    # first and the assertions after the build check the result independently.
+    name: Build tray ${{ matrix.rid }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: darwin-arm64, os: macos-14,        target: aarch64-apple-darwin,   asset: kyberdash-tray-darwin-arm64.zip }
+          - { rid: darwin-x64,   os: macos-14,        target: x86_64-apple-darwin,    asset: kyberdash-tray-darwin-x64.zip }
+          - { rid: win-x64,      os: windows-latest,  target: x86_64-pc-windows-msvc, asset: kyberdash-tray-win-x64-setup.exe }
+    env:
+      NODE_VERSION: "24.21.0"
+      TEAM_ID: J2UNNQ466J
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Every macOS secret is checked before anything is built, so a missing
+      # one costs seconds rather than a full signed build that silently is not
+      # notarized (Requirements 12.2, 12.3).
+      #
+      # The environment variable names are Tauri's — its bundler reads
+      # APPLE_CERTIFICATE and friends and nothing else — but the secrets they
+      # come from are named for what they hold. The certificate pair exists on
+      # the `release` environment as APPLE_DEVELOPER_ID_P12_*; the four below
+      # it do not exist yet, which is why this job cannot go green. See
+      # docs/todo/macos-developer-id-signing.md, part A.
+      - name: Require the signing secrets
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf 'missing signing secret: %s\n' "${missing[@]}" >&2
+            echo "See docs/todo/macos-developer-id-signing.md for what each holds." >&2
+            exit 1
+          fi
+          echo "all signing secrets present"
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: dash/tray/src-tauri
+
+      - name: Install tray UI dependencies
+        working-directory: dash/tray/ui
+        run: npm ci --no-audit --no-fund
+
+      # A temporary keychain, deleted in the cleanup step, so the certificate
+      # never joins the runner's login keychain and cannot outlive the job.
+      - name: Import the Developer ID certificate
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/kyberdash-signing.keychain-db"
+          # Random: the keychain lives for one job, so a fixed password would be
+          # a checked-in secret for no benefit.
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/certificate.p12"
+
+          # Without this, codesign prompts for the keychain password and hangs.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+      - name: Write the App Store Connect key
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build and sign the tray (macOS)
+        if: runner.os == 'macOS'
+        working-directory: dash/tray/ui
+        env:
+          # The certificate is already in the keychain, so only the identity is
+          # passed; setting APPLE_CERTIFICATE here would have the bundler import
+          # it a second time into a keychain this job does not control.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npx tauri build --target ${{ matrix.target }} --bundles app
+
+      - name: Build the tray (Windows)
+        if: runner.os == 'Windows'
+        working-directory: dash/tray/ui
+        run: npx tauri build --target ${{ matrix.target }} --bundles nsis
+
+      # Requirement 12.3: the bundler's own success is not evidence of
+      # notarization, so each property is asserted against the built app.
+      - name: Verify the signature, the team and the notarization
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          APP="dash/tray/src-tauri/target/${{ matrix.target }}/release/bundle/macos/KyberDash.app"
+          [ -d "$APP" ] || { echo "no app bundle at $APP" >&2; exit 1; }
+
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          FOUND_TEAM="$(codesign --display --verbose=4 "$APP" 2>&1 \
+            | sed -n 's/^TeamIdentifier=//p')"
+          if [ "$FOUND_TEAM" != "${TEAM_ID}" ]; then
+            echo "expected TeamIdentifier ${TEAM_ID}, got '${FOUND_TEAM}'" >&2
+            exit 1
+          fi
+
+          # Gatekeeper's own verdict, which fails on an unnotarized bundle.
+          spctl --assess --type execute --verbose=4 "$APP"
+          # And the stapled ticket, so the app opens on a machine that is offline.
+          xcrun stapler validate "$APP"
+
+      - name: Pack the app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          APP="dash/tray/src-tauri/target/${{ matrix.target }}/release/bundle/macos/KyberDash.app"
+          mkdir -p dist-tray
+          # ditto, not zip: it preserves the resource forks and extended
+          # attributes the signature and the stapled ticket live in.
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist-tray/${{ matrix.asset }}"
+
+      - name: Collect the installer (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-tray
+          SETUP="$(find "dash/tray/src-tauri/target/${{ matrix.target }}/release/bundle/nsis" \
+            -name '*-setup.exe' -print -quit)"
+          [ -n "$SETUP" ] || { echo "no NSIS installer was produced" >&2; exit 1; }
+          cp "$SETUP" "dist-tray/${{ matrix.asset }}"
+
+      - name: Upload the tray asset
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tray-${{ matrix.rid }}
+          path: dist-tray/${{ matrix.asset }}
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Remove the signing keychain
+        # Runs even when the build failed, so a failure never leaves the
+        # certificate behind on the runner.
+        if: always() && runner.os == 'macOS'
+        run: |
+          rm -f "${APPLE_API_KEY_PATH:-}" || true
+          if [ -n "${KEYCHAIN:-}" ]; then
+            security delete-keychain "$KEYCHAIN" || true
+          fi
+
   release:
     name: Publish GitHub Release (David Palfery must approve)
-    needs: [version, build, build-kyberdash, pack-squad]
+    needs: [version, build, build-kyberdash, build-tray, pack-squad]
     runs-on: ubuntu-latest
     if: needs.version.outputs.create_release == 'true'
     environment: release
@@ -504,6 +705,7 @@ jobs:
           | CLI | \`kyber-weave-<rid>.tar.gz\` / \`.zip\` |
           | MCP | \`kyber-weave-mcp-<rid>.tar.gz\` / \`.zip\` |
           | KyberDash | \`kyberdash-<rid>.tar.gz\` / \`.zip\` |
+          | KyberDash tray | \`kyberdash-tray-darwin-<arch>.zip\` / \`kyberdash-tray-win-x64-setup.exe\` |
           | Squad APM | \`kyber-squad-<version>.zip\` |
           | Squad Plugins | \`kyber-squad-plugin-<version>.zip\` |
 
@@ -514,6 +716,15 @@ jobs:
           \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/install.sh | sh -s -- --version ${VERSION}
           \`\`\`
+
+          The KyberDash tray installs with \`kyberdash menubar\`, or with
+          \`install.sh --with-menubar\` on macOS.
+
+          > [!NOTE]
+          > **Windows SmartScreen**: the tray installer is not signed with an EV
+          > certificate, so SmartScreen may warn on first run until the download
+          > builds reputation. Choose **More info -> Run anyway**. The macOS app is
+          > signed with Developer ID (team \`J2UNNQ466J\`) and notarized.
           EOF
           )"
 

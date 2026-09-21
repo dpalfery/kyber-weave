@@ -50,17 +50,26 @@ What has to exist:
   already declare `environment: release`, so secrets scoped there are not exposed to CI
   runs on pull requests.
 
-Suggested secret names follow the environment variables Tauri 2's bundler reads, verified
-against the Tauri documentation, so the tray job can pass them straight through:
+Tauri 2's bundler reads a fixed set of environment variable names, so the job passes each
+secret through under the name the bundler expects. The secrets themselves are named for what
+they hold, which is not the same thing — the table below is what the `release` environment
+actually contains, not a suggestion:
 
-| Secret | Holds |
-|---|---|
-| `APPLE_CERTIFICATE` | The `.p12`, base64-encoded |
-| `APPLE_CERTIFICATE_PASSWORD` | The `.p12` export password |
-| `APPLE_SIGNING_IDENTITY` | The identity string, e.g. `Developer ID Application: <name> (J2UNNQ466J)` |
-| `APPLE_API_KEY` | The API key's Key ID |
-| `APPLE_API_ISSUER` | The Issuer ID shown above the keys table |
-| `APPLE_API_KEY_P8` | The `.p8` contents; the job writes it to a file and sets `APPLE_API_KEY_PATH` to that file |
+| Secret | Environment variable | Holds | Exists? |
+|---|---|---|---|
+| `APPLE_DEVELOPER_ID_P12_BASE64` | `APPLE_CERTIFICATE` | The `.p12`, base64-encoded | **yes** |
+| `APPLE_DEVELOPER_ID_P12_PASSWORD` | `APPLE_CERTIFICATE_PASSWORD` | The `.p12` export password | **yes** |
+| `APPLE_SIGNING_IDENTITY` | `APPLE_SIGNING_IDENTITY` | The identity string, e.g. `Developer ID Application: <name> (J2UNNQ466J)` | no |
+| `APPLE_API_KEY` | `APPLE_API_KEY` | The API key's Key ID | no |
+| `APPLE_API_ISSUER` | `APPLE_API_ISSUER` | The Issuer ID shown above the keys table | no |
+| `APPLE_API_KEY_P8` | `APPLE_API_KEY_P8` | The `.p8` contents; the job writes it to a file and sets `APPLE_API_KEY_PATH` to that file | no |
+
+**What is left.** The Developer ID certificate is done — the two `APPLE_DEVELOPER_ID_P12_*`
+secrets were added on 2026-09-18, so the tray can be *signed* today. The four rows marked
+`no` are all the App Store Connect API key, which has not been created yet, so the tray
+cannot be *notarized*: `build-tray` fails its presence check and that is the correct
+behaviour (Requirements 12.2–12.3). Creating that key under Users and Access → Integrations
+is the remaining part-A task, and only the account holder can do it.
 
 A keychain password does not need to be a secret. The job can generate a random one for the
 temporary keychain it creates and deletes.

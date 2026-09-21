@@ -30,6 +30,9 @@ public sealed class ReleaseTests
 {
     private static string InstallShPath => Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "install.sh");
 
+    private static string ReleaseWorkflowPath =>
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows", "release.yml");
+
     private static ProcessStartInfo CreateShellStartInfo(string script)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
@@ -361,6 +364,175 @@ public sealed class ReleaseTests
     // ------------------------------------------------------------- Sandbox
 
     /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>
+    // ---- build-tray release job (task 9.4, Requirements 12.1-12.4, 12.9) ----
+
+    /// <summary>
+    /// The asset names the <c>build-tray</c> job publishes, which are the same
+    /// names <c>trayArtifactName</c> in <c>dash/src/install/origin.ts</c> asks
+    /// for. A rename on either side leaves `kyberdash menubar` downloading an
+    /// asset the release does not carry, and nothing else would catch it.
+    /// </summary>
+    private static readonly string[] TrayAssetNames =
+    [
+        "kyberdash-tray-darwin-arm64.zip",
+        "kyberdash-tray-darwin-x64.zip",
+        "kyberdash-tray-win-x64-setup.exe",
+    ];
+
+    /// <summary>The macOS credentials the job requires before it builds anything.</summary>
+    private static readonly string[] RequiredSigningSecrets =
+    [
+        "APPLE_CERTIFICATE",
+        "APPLE_CERTIFICATE_PASSWORD",
+        "APPLE_SIGNING_IDENTITY",
+        "APPLE_API_KEY",
+        "APPLE_API_ISSUER",
+        "APPLE_API_KEY_P8",
+    ];
+
+    /// <summary>
+    /// The `secrets.*` the job actually reads, which are not the Tauri
+    /// environment variable names above. Asserting only the variable names
+    /// would pass against a workflow wired to a secret that does not exist —
+    /// which is exactly what it was, until the certificate pair was pointed at
+    /// the names the `release` environment really uses.
+    /// </summary>
+    private static readonly string[] RequiredSecretReferences =
+    [
+        "secrets.APPLE_DEVELOPER_ID_P12_BASE64",
+        "secrets.APPLE_DEVELOPER_ID_P12_PASSWORD",
+    ];
+
+    [Fact]
+    public void BuildTrayPublishesTheAssetNamesTheInstallerAsksFor()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        foreach (string asset in TrayAssetNames)
+        {
+            Assert.True(
+                workflow.Contains(asset, StringComparison.Ordinal),
+                $"release.yml does not publish {asset}, which kyberdash menubar downloads.");
+        }
+
+        // And the installer still asks for exactly these.
+        string origin = File.ReadAllText(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", "src", "install", "origin.ts"));
+        Assert.Contains("kyberdash-tray-darwin-", origin, StringComparison.Ordinal);
+        Assert.Contains("kyberdash-tray-win-x64-setup.exe", origin, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Requirements 12.2 and 12.3. Tauri's bundler warns and skips notarization
+    /// when credentials are missing rather than failing, so the job must check
+    /// for itself — before the build, and again on the result.
+    /// </summary>
+    [Fact]
+    public void BuildTrayFailsTheMacOsLegsBeforeBuildingWhenASecretIsMissing()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        foreach (string secret in RequiredSigningSecrets)
+        {
+            Assert.True(
+                workflow.Contains(secret, StringComparison.Ordinal),
+                $"release.yml never reads {secret}, so a missing one would not be caught.");
+        }
+
+        foreach (string reference in RequiredSecretReferences)
+        {
+            Assert.True(
+                workflow.Contains(reference, StringComparison.Ordinal),
+                $"release.yml does not read {reference}, the name the release environment "
+                    + "actually holds, so the certificate would be empty at signing time.");
+        }
+
+        int presenceCheck = workflow.IndexOf("Require the signing secrets", StringComparison.Ordinal);
+        int build = workflow.IndexOf("Build and sign the tray (macOS)", StringComparison.Ordinal);
+        Assert.True(presenceCheck >= 0, "release.yml has no secrets-presence step.");
+        Assert.True(build > presenceCheck, "the secrets check must run before the build.");
+
+        // The bundler's success is not evidence; each property is asserted.
+        foreach (string assertion in new[] { "spctl --assess", "stapler validate", "TeamIdentifier" })
+        {
+            Assert.True(
+                workflow.Contains(assertion, StringComparison.Ordinal),
+                $"release.yml does not check {assertion} on the built app.");
+        }
+
+        Assert.Contains("J2UNNQ466J", workflow, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Requirement 12.9: every action is pinned to a commit, not a tag. A tag
+    /// is a moving reference, so a pin that is not a full 40-character SHA is
+    /// not a pin at all.
+    /// </summary>
+    [Fact]
+    public void EveryWorkflowActionIsPinnedToAFullCommitSha()
+    {
+        string workflowsDir = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".github", "workflows");
+        List<string> unpinned = [];
+
+        foreach (string file in Directory.EnumerateFiles(workflowsDir, "*.yml"))
+        {
+            foreach (string line in File.ReadAllLines(file))
+            {
+                string trimmed = line.Trim();
+                if (!trimmed.StartsWith("uses:", StringComparison.Ordinal)) continue;
+
+                string reference = trimmed["uses:".Length..].Trim();
+                // A local composite action is a path, not a pinned reference.
+                if (reference.StartsWith('.')) continue;
+
+                int at = reference.IndexOf('@', StringComparison.Ordinal);
+                string sha = at < 0 ? string.Empty : reference[(at + 1)..].Split(' ')[0];
+                bool pinned =
+                    sha.Length == 40
+                    && sha.All(c => char.IsAsciiDigit(c) || (c >= 'a' && c <= 'f'));
+
+                if (!pinned)
+                {
+                    unpinned.Add($"{Path.GetFileName(file)}: {reference}");
+                }
+            }
+        }
+
+        Assert.True(
+            unpinned.Count == 0,
+            "Requirement 12.9: pin each of these to a 40-character commit SHA verified "
+                + $"against its repository:\n  {string.Join("\n  ", unpinned)}");
+    }
+
+    /// <summary>Requirement 12.4: the Windows SmartScreen warning is explained in the notes.</summary>
+    [Fact]
+    public void ReleaseNotesCarryTheWindowsSmartScreenLine()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        Assert.Contains("SmartScreen", workflow, StringComparison.Ordinal);
+        Assert.Contains("More info", workflow, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The tray assets have to reach the checksum manifest, which they do by
+    /// being artifacts the release job downloads before it runs sha256sum.
+    /// </summary>
+    [Fact]
+    public void TrayAssetsJoinTheChecksumManifest()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        Assert.Contains("name: tray-${{ matrix.rid }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("sha256sum *", workflow, StringComparison.Ordinal);
+
+        // The release job cannot publish what has not been built.
+        Assert.Contains(
+            "needs: [version, build, build-kyberdash, build-tray, pack-squad]",
+            workflow,
+            StringComparison.Ordinal);
+    }
+
     // ---- --with-menubar (task 9.2, Requirement 12.7) ----
 
     /// <summary>The argv --with-menubar must produce, asserted by two tests.</summary>
