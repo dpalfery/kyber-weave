@@ -1,11 +1,26 @@
 /* The dashboard's tokens, imported rather than copied (R8.12 / D8). Copying
    the values is how the two surfaces would drift; sharing components would
-   pull in a wide layout the popover cannot use. */
+   pull in a wide layout the popover cannot use.
+
+   Only the `:root` / `.dark` custom properties of that file are usable here.
+   Its `@theme inline` block is Tailwind v4 syntax, and the tray has no
+   Tailwind, so an unknown at-rule's declarations never apply: `--text-sm`,
+   `--spacing-*` and `--radius-sm` do not resolve in this stylesheet. The sizes
+   below are therefore literal, taken from the density scale that block
+   documents, and `--radius` is used because it is a real `:root` property.
+
+   Everything under `.popover` is the tray's own layout. The popover is a fixed
+   360x660 undecorated window (tauri.conf.json), glanced at rather than read,
+   so it is dense by design and nothing here is allowed to scroll the window
+   itself. */
 @import url('../../../web/src/kyber.css');
 
 :root {
   color: var(--foreground);
   background: var(--background);
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
 }
 
 html,
@@ -15,7 +30,480 @@ body,
   min-height: 100%;
 }
 
-main {
+/* The webview is the window: it must not scroll as a page, or the popover
+   drifts out from under the status item. Panels scroll internally instead. */
+html,
+body {
+  overflow: hidden;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------- shell -- */
+
+.popover {
   box-sizing: border-box;
-  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  height: 100vh;
+  padding: 0.75rem;
+  overflow-y: auto;
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+.popover--loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+}
+
+/* The panels take their natural height; the actions stay against the bottom
+   edge however little is above them. */
+.popover > .actions {
+  margin-top: auto;
+}
+
+/* --------------------------------------------------------- stale banner -- */
+
+.stale-banner {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--chart-4);
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.stale-banner__line {
+  margin: 0;
+  font-size: 12px;
+}
+
+.stale-banner__reason {
+  margin: 0.25rem 0 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+/* ------------------------------------------------------ harness selector -- */
+
+.harness-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.harness-selector__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.harness-selector select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background: var(--card);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- cards -- */
+
+.session-panel,
+.findings,
+.empty,
+.setup {
+  padding: 0.625rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--card-foreground);
+}
+
+/* -------------------------------------------------------- session panel -- */
+
+.session-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* A button because it navigates, but it reads as the panel's title. */
+.session-panel__title {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.session-panel__title:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.session-panel__turns {
+  flex: none;
+  font-size: 11px;
+  color: var(--tertiary-foreground);
+}
+
+.session-panel__pressure {
+  margin: 0.375rem 0 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.session-panel__pressure-value {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--foreground);
+}
+
+/* ------------------------------------------------------ composition bar -- */
+
+.composition-bar {
+  display: flex;
+  height: 8px;
+  margin: 0.5rem 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.composition-bar__part {
+  height: 100%;
+}
+
+/* One chart colour per canonical bucket, in BUCKET_ORDER, so the bar and the
+   list below name the same thing with the same hue. */
+.composition-bar__part--system_prompt { background: var(--chart-1); }
+.composition-bar__part--tool_definitions { background: var(--chart-2); }
+.composition-bar__part--instruction_context { background: var(--chart-3); }
+.composition-bar__part--conversation_history { background: var(--chart-4); }
+.composition-bar__part--tool_result_content { background: var(--chart-5); }
+
+/* The residual is deliberately the muted slate: it is drawn (R8.2) but it is
+   not one of the buckets, and colouring it like one would say it was. */
+.composition-bar__part--residual { background: var(--chart-7); }
+
+/* ----------------------------------------------------------- bucket list -- */
+
+.bucket-list {
+  margin: 0;
+  font-size: 12px;
+}
+
+.bucket-list__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.125rem 0;
+}
+
+.bucket-list__row dt {
+  position: relative;
+  padding-left: 0.875rem;
+  color: var(--muted-foreground);
+}
+
+/* The swatch ties each row to its segment above. Generated rather than marked
+   up, because the row's meaning is the label, not the dot. */
+.bucket-list__row dt::before {
+  content: '';
+  position: absolute;
+  top: 0.35em;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--chart-7);
+}
+
+.bucket-list__row:nth-of-type(1) dt::before { background: var(--chart-1); }
+.bucket-list__row:nth-of-type(2) dt::before { background: var(--chart-2); }
+.bucket-list__row:nth-of-type(3) dt::before { background: var(--chart-3); }
+.bucket-list__row:nth-of-type(4) dt::before { background: var(--chart-4); }
+.bucket-list__row:nth-of-type(5) dt::before { background: var(--chart-5); }
+
+.bucket-list__row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.bucket-list__row--residual {
+  margin-top: 0.125rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.bucket-list__row--residual dt::before { background: var(--chart-7); }
+
+.cache-notice {
+  margin: 0.5rem 0 0;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+/* -------------------------------------------------------------- findings -- */
+
+.findings__heading,
+.settings__heading,
+.setup__headline {
+  margin: 0 0 0.375rem;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.setup__headline {
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--foreground);
+}
+
+.findings__empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tertiary-foreground);
+}
+
+.findings__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.finding {
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--brand);
+}
+
+.finding__title {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.finding__title:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.finding__recovery {
+  margin: 0.125rem 0 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--positive);
+}
+
+/* Verbatim engine text (R14.4): it wraps, it is never clamped. */
+.finding__recommendation {
+  margin: 0.125rem 0 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.findings__more {
+  margin: 0.5rem 0 0;
+  font-size: 11px;
+  color: var(--tertiary-foreground);
+}
+
+/* ------------------------------------------------------- empty / setup -- */
+
+.empty {
+  text-align: center;
+}
+
+.empty__line {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.empty__hint {
+  margin: 0.25rem 0 0.625rem;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.setup__remedy {
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.setup__probed {
+  font-size: 11px;
+  color: var(--tertiary-foreground);
+}
+
+.setup__probed summary {
+  cursor: pointer;
+}
+
+.setup__probed ul {
+  margin: 0.375rem 0 0;
+  padding-left: 1rem;
+}
+
+.setup__probed code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------------------------- settings -- */
+
+.settings {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  height: 100vh;
+  padding: 0.75rem;
+  overflow-y: auto;
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+.settings .actions {
+  margin-top: auto;
+}
+
+.settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 12px;
+}
+
+.settings__row input[type='number'] {
+  width: 4.5rem;
+  padding: 0.25rem 0.375rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background: var(--card);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The checkbox leads its label, so this row reads left-to-right rather than
+   pushing the control to the far edge like the numeric rows above. */
+.settings__row--toggle {
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+/* --------------------------------------------------------- health footer -- */
+
+.health-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.health-footer__line {
+  margin: 0;
+  font-size: 11px;
+  color: var(--tertiary-foreground);
+}
+
+.health-footer__line--failure {
+  color: var(--chart-6);
+}
+
+/* Cost is secondary to the token figures above it (R8.9, R14.2), so it is the
+   quietest line in the quietest block. */
+.health-footer__line--cost {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------- actions -- */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.actions button {
+  flex: 1 1 auto;
+  padding: 0.3125rem 0.5rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background: var(--interactive-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.actions button:hover:not(:disabled) {
+  background: var(--interactive-secondary-hover);
+}
+
+/* Disabled is the running-refresh state (R10.2, R10.3), which the label
+   already explains, so the control only needs to look unavailable. */
+.actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.empty button {
+  padding: 0.3125rem 0.75rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background: var(--interactive-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.empty button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ----------------------------------------------------------------- focus -- */
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
 }
