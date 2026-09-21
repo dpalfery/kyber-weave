@@ -4,7 +4,7 @@
     {
       "label": "kyberdash:start-otel-collector",
       "type": "shell",
-      "command": "node --no-deprecation --import tsx src/cli.ts otel --port 4318",
+      "command": "node --no-deprecation --import tsx src/launcher.ts otel --port 4318",
       "options": {
         "cwd": "${workspaceFolder}/dash"
       },
@@ -24,7 +24,7 @@
     {
       "label": "kyberdash:build-supporting-system",
       "type": "shell",
-      "command": "npm --prefix dash run build:cli && npm --prefix dash run build:dash",
+      "command": "npm --prefix dash run build:cli && npm --prefix dash run build:web",
       "group": "build",
       "presentation": {
         "reveal": "silent"
@@ -34,7 +34,7 @@
     {
       "label": "kyberdash:run-supporting-system",
       "type": "shell",
-      "command": "node --no-deprecation --import tsx src/cli.ts web --port 4747 --no-open",
+      "command": "node --no-deprecation --import tsx src/launcher.ts web --port 4747 --no-open",
       "options": {
         "cwd": "${workspaceFolder}/dash"
       },
@@ -55,7 +55,7 @@
     {
       "label": "kyberdash:run-vite-dev-system",
       "type": "shell",
-      "command": "npm --prefix dash/dash run dev",
+      "command": "npm --prefix dash/web run dev",
       "dependsOn": "kyberdash:run-supporting-system",
       "isBackground": true,
       "problemMatcher": {
@@ -81,19 +81,9 @@
       "problemMatcher": []
     },
     {
-      "label": "kyberdash:build-electron",
-      "type": "shell",
-      "command": "npm --prefix dash run build:cli && npm --prefix dash/app run build:electron",
-      "group": "build",
-      "presentation": {
-        "reveal": "silent"
-      },
-      "problemMatcher": ["$tsc"]
-    },
-    {
       "label": "kyberdash:build-tauri-debug",
       "type": "shell",
-      "command": "npm --prefix dash run build:cli && cargo build --manifest-path dash/windows/src-tauri/Cargo.toml",
+      "command": "npm --prefix dash run build:cli && cargo build --manifest-path dash/tray/src-tauri/Cargo.toml",
       "group": "build",
       "presentation": {
         "reveal": "silent"
