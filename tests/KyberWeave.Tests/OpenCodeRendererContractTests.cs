@@ -27,21 +27,33 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     /// <summary>
-    /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent configurations
-    /// and schema validation. A permission outside this vocabulary would be rejected or unhandled by
-    /// the harness.
+    /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent
+    /// configurations and schema validation. A permission outside this vocabulary would be
+    /// rejected or unhandled by the harness.
     /// </summary>
+    /// <remarks>
+    /// <c>question</c>, <c>lsp</c>, <c>external_directory</c> and <c>doom_loop</c> were added
+    /// 2026-09-21 from opencode.ai/docs/permissions' "Available Permissions" list, corroborated
+    /// by a live OpenCode deployment on this machine that emitted all four. They matter because
+    /// an omitted key is not a withheld one: agent permissions merge with the global config,
+    /// where most permissions default to <c>allow</c>, so any key the renderer fails to pin is
+    /// granted ambiently.
+    /// </remarks>
     private static readonly string[] DocumentedOpenCodePermissions =
     [
         "todowrite",
         "skill",
+        "question",
         "read",
+        "lsp",
         "grep",
         "glob",
         "edit",
         "bash",
         "webfetch",
         "websearch",
+        "external_directory",
+        "doom_loop",
         "kyber-weave_*",
         "task"
     ];
@@ -69,13 +81,17 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     [
         "todowrite",
         "skill",
+        "question",
         "read",
+        "lsp",
         "grep",
         "glob",
         "edit",
         "bash",
         "webfetch",
         "websearch",
+        "external_directory",
+        "doom_loop",
         "kyber-weave_*",
         "task"
     ];
@@ -273,14 +289,16 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                                decision == SquadPermissionDecision.Allow;
                 foreach (string perm in mapped)
                 {
-                    bool hasPerm = permissionMap.Children.ContainsKey(new YamlScalarNode(perm));
+                    // Presence is not the signal: an absent key inherits the global default,
+                    // which is allow. Every key must be pinned, and the value carries the
+                    // decision.
                     Assert.True(
-                        allowed == hasPerm,
-                        $"Agent '{agent.Name}' capability '{capability}' allowed={allowed} permission '{perm}'.");
-                    if (hasPerm)
-                    {
-                        Assert.Equal("allow", RequireScalar(permissionMap, perm, agent.Name));
-                    }
+                        permissionMap.Children.ContainsKey(new YamlScalarNode(perm)),
+                        $"Agent '{agent.Name}' leaves permission '{perm}' unpinned, so OpenCode's " +
+                        "default-allow would grant it.");
+                    Assert.Equal(
+                        allowed ? "allow" : "deny",
+                        RequireScalar(permissionMap, perm, agent.Name));
                 }
             }
 
@@ -289,14 +307,12 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             bool readAllowed = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
                                readDecision == SquadPermissionDecision.Allow;
             bool expectedKwMcp = !isPureOrchestrator && !sharedIdentities.Contains(agent.Name) && readAllowed;
-            bool hasKwMcp = permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*"));
             Assert.True(
-                expectedKwMcp == hasKwMcp,
-                $"Agent '{agent.Name}' kyber-weave_* expected={expectedKwMcp}, actual={hasKwMcp}");
-            if (hasKwMcp)
-            {
-                Assert.Equal("allow", RequireScalar(permissionMap, "kyber-weave_*", agent.Name));
-            }
+                permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*")),
+                $"Agent '{agent.Name}' leaves 'kyber-weave_*' unpinned.");
+            Assert.Equal(
+                expectedKwMcp ? "allow" : "deny",
+                RequireScalar(permissionMap, "kyber-weave_*", agent.Name));
 
             // Delegation lowering
             bool delegateAllowed = capProfile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
@@ -328,9 +344,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             }
             else
             {
-                Assert.False(
-                    permissionMap.Children.ContainsKey(new YamlScalarNode("task")),
-                    $"Agent '{agent.Name}' should not have 'task' permission.");
+                Assert.Equal("deny", RequireScalar(permissionMap, "task", agent.Name));
             }
 
             // Ordering: permission map keys must be deterministically ordered
@@ -367,16 +381,22 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             {
                 ["todowrite"] = "allow",
                 ["skill"] = "allow",
+                ["question"] = "allow",
                 ["read"] = "allow",
+                ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["edit"] = "deny",
+                ["bash"] = "deny",
                 ["webfetch"] = "allow",
                 ["websearch"] = "allow",
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
                 ["kyber-weave_*"] = "allow",
                 ["task"] = new Dictionary<string, string>
                 {
                     ["azure-reader"] = "allow",
-                    ["research-agent"] = "allow"
+                    ["research-agent"] = "allow",
                 }
             });
 
@@ -389,11 +409,19 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             {
                 ["todowrite"] = "allow",
                 ["skill"] = "allow",
+                ["question"] = "allow",
                 ["read"] = "allow",
+                ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
                 ["edit"] = "allow",
-                ["kyber-weave_*"] = "allow"
+                ["bash"] = "deny",
+                ["webfetch"] = "deny",
+                ["websearch"] = "deny",
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
+                ["kyber-weave_*"] = "allow",
+                ["task"] = "deny"
             });
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
@@ -405,13 +433,19 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             {
                 ["todowrite"] = "allow",
                 ["skill"] = "allow",
+                ["question"] = "allow",
                 ["read"] = "allow",
+                ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["edit"] = "deny",
                 ["bash"] = "allow",
                 ["webfetch"] = "allow",
                 ["websearch"] = "allow",
-                ["kyber-weave_*"] = "allow"
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
+                ["kyber-weave_*"] = "allow",
+                ["task"] = "deny"
             });
 
         // Skills verification

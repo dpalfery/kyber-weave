@@ -316,6 +316,15 @@ and validates.
   resource closure beside it — each resource at its artifact-relative path under the principal's
   directory — so authored relative links resolve verbatim in the deployed tree. A resource that
   would alias another principal's output is a validation error, never an overwrite.
+- **An omitted permission is not a withheld one on `opencode`.** Agent permissions merge with
+  OpenCode's global config, whose documented behaviour is that most permissions default to
+  `allow` (`external_directory` and `doom_loop` are the stated exceptions). A renderer that
+  emitted only the granted keys would therefore hand back every canonical `deny` and `ask` as
+  an ambient allow, inverting the
+  [non-broadening guarantee](requirements.md#non-broadening-guarantee). `OpenCodeRenderer`
+  consequently pins every key in the taxonomy, writing `deny` wherever the lattice does not
+  grant. A target whose permission model is an allow-list — Claude, ZCode, Pi — needs no such
+  treatment, because omitting a name there withholds it.
 - **MCP grants differ per target, and `zcode` is the one that enumerates.** `ClaudeRenderer`
   grants three MCP server wildcards (`mcp__codegraph__*`, `mcp__kyber-weave__*`,
   `mcp__context7__*`) to any agent allowed to read the filesystem except the pure orchestrator.
