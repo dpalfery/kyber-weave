@@ -101,21 +101,34 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>allow</c> for it records <c>permission-not-expressible</c>.
 /// </para>
 /// <para>
-/// <b>MCP is not expressible, in either direction.</b> <c>registerMcpTools</c> admits a tool
-/// only on an exact set membership test against <c>toolAllowlist</c>
-/// (<c>!allowed.has(name) &amp;&amp; !allowed.has(descriptorName)</c>), with no wildcard
-/// expansion, so <see cref="ClaudeRenderer"/>'s <c>mcp__kyber-weave__*</c> server-selector
-/// form registers nothing here — it would only flip <c>shouldBorrowParentMcp</c> to true while
-/// granting no tool. Enumerating concrete <c>mcp__server__tool</c> names instead would make
-/// every Squad agent fail closed for any operator who does not happen to run that server,
-/// because <c>validateSubagentMcpRequirements</c> treats a concrete MCP name as a hard
-/// requirement. The <c>mcpServers</c> frontmatter key has the same problem from the other
-/// side: <c>resolveSubagentMcpAccess</c> throws
-/// <c>Required MCP server is not connected</c> for any scoped server the parent has not
-/// connected. So no MCP is emitted, and every agent records
-/// <c>permission-not-expressible</c> naming the canonical servers it cannot reach. Because a
-/// non-empty, MCP-free <c>tools</c> list also makes <c>shouldBorrowParentMcp</c> return false,
-/// the rendered agents inherit no parent MCP either — the omission is a narrowing, not a leak.
+/// <b>MCP is granted by concrete tool name, and fails closed when a server is missing.</b>
+/// <c>registerMcpTools</c> admits a tool only on an exact set membership test against
+/// <c>toolAllowlist</c>, with no wildcard expansion, so <see cref="ClaudeRenderer"/>'s
+/// <c>mcp__kyber-weave__*</c> server-selector form registers nothing here — and worse, it is
+/// still collected into <c>requiredServerNames</c>, so it imposes a connected-server
+/// requirement while granting no tool. This renderer therefore emits the fully qualified
+/// <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> names declared by <c>toolchain.yml</c>'s
+/// <c>required-mcp-tools</c>, which <c>registerMcpTools</c> matches exactly and
+/// <c>validateSubagentMcpRequirements</c> treats as hard requirements: an agent whose server
+/// is not connected, or whose tool is absent from the parent startup snapshot, fails with a
+/// configuration error rather than running under-equipped. That is the intended behaviour —
+/// <c>squad doctor</c> reports a missing server against the same declared roster, so the
+/// breakage surfaces at diagnosis time rather than mid-run.
+/// </para>
+/// <para>
+/// The roster is read from canonical source rather than hardcoded here because it is an
+/// external contract that drifts — context7 renamed <c>get-library-docs</c> to
+/// <c>query-docs</c> — and because a harness matching by exact name breaks on a rename
+/// instead of degrading. Keeping one declared roster also means the renderer and the doctor
+/// check cannot disagree. <c>mcpServers</c> is still never emitted: it would scope the
+/// borrowed connection set, but the tool allow-list already decides what the model can see,
+/// and naming a server there adds a second, redundant failure mode.
+/// </para>
+/// <para>
+/// A pure orchestrator gets no MCP, matching <see cref="ClaudeRenderer"/>'s carve-out: a role
+/// that only routes work has no use for documentation or code-graph lookups, and granting
+/// them would hand it a research surface its own capability profile denies. It records
+/// <c>permission-not-expressible</c> for the withheld servers so the omission is visible.
 /// </para>
 /// <para>
 /// <b>Delegation cannot be scoped.</b> <c>toolNameFromSpec</c> truncates every specifier at
@@ -165,6 +178,12 @@ public sealed class ZCodeRenderer : ISquadRenderer
     private const string AgentsDirectory = ".zcode/agents";
     private const string SkillsDirectory = ".zcode/skills";
     private const string CommandsDirectory = ".zcode/commands";
+
+    /// <summary>
+    /// The capability profile whose holder routes work rather than researching it, and which
+    /// <see cref="ClaudeRenderer"/> also excludes from the standard MCP grant.
+    /// </summary>
+    private const string PureOrchestratorProfile = "orchestrator";
 
     /// <summary>
     /// ZCode drops a skill whose description exceeds this length outright rather than
@@ -258,9 +277,10 @@ public sealed class ZCodeRenderer : ISquadRenderer
         // permission-not-expressible details without a renderer change.
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
 
-        // Read from the canonical mcp.json rather than a renderer-local list, so a server
-        // added there appears in the not-expressible record without a renderer change.
-        string[] mcpServerNames = ReadCanonicalMcpServerNames(source);
+        // Read from canonical source rather than a renderer-local list, so a tool renamed
+        // upstream is a source edit, and so the doctor check reads the same roster.
+        IReadOnlyList<string> qualifiedMcpToolNames = QualifiedMcpToolNames(source);
+        IReadOnlyList<string> mcpServerNames = DeclaredMcpServerNames(source);
 
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
@@ -270,7 +290,14 @@ public sealed class ZCodeRenderer : ISquadRenderer
             if (agent.Invocation == SquadInvocation.Subagent)
             {
                 RenderSubagent(
-                    agent, source, request.Scope, skillIdentities, mcpServerNames, files, degradations);
+                    agent,
+                    source,
+                    request.Scope,
+                    skillIdentities,
+                    qualifiedMcpToolNames,
+                    mcpServerNames,
+                    files,
+                    degradations);
                 continue;
             }
 
@@ -280,6 +307,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 request.Scope,
                 skillIdentities,
                 capabilityVocabulary,
+                qualifiedMcpToolNames,
                 mcpServerNames,
                 files,
                 degradations);
@@ -316,6 +344,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadSource source,
         SquadDeploymentScope scope,
         IReadOnlySet<string> skillIdentities,
+        IReadOnlyList<string> qualifiedMcpToolNames,
         IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
@@ -334,7 +363,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        IReadOnlyList<string> tools = ResolveTools(agent, source.CapabilityProfiles.Profiles);
+        IReadOnlyList<string> tools = ResolveTools(
+            agent, source.CapabilityProfiles.Profiles, qualifiedMcpToolNames);
 
         string agentsDirectory = ResolvePrefixedDirectory(AgentsDirectory, scope);
         files.Add(new SquadDeploymentFile(
@@ -347,6 +377,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         AppendRewrittenResources(files, agent, scope, rewritten);
         degradations.AddRange(BuildCapabilityDegradations(
             agent, source.CapabilityProfiles.Profiles, mcpServerNames));
+
     }
 
     private static void RenderPrimaryAgent(
@@ -355,6 +386,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadDeploymentScope scope,
         IReadOnlySet<string> skillIdentities,
         IReadOnlyList<string> capabilityVocabulary,
+        IReadOnlyList<string> qualifiedMcpToolNames,
         IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
@@ -407,7 +439,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
-        IReadOnlyList<string> tools = ResolveTools(agent, source.CapabilityProfiles.Profiles);
+        IReadOnlyList<string> tools = ResolveTools(
+            agent, source.CapabilityProfiles.Profiles, qualifiedMcpToolNames);
 
         string commandsDirectory = ResolvePrefixedDirectory(CommandsDirectory, scope);
         files.Add(new SquadDeploymentFile(
@@ -728,7 +761,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
     /// </summary>
     private static IReadOnlyList<string> ResolveTools(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> qualifiedMcpToolNames)
     {
         HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
 
@@ -747,7 +781,14 @@ public sealed class ZCodeRenderer : ISquadRenderer
             }
         }
 
-        IReadOnlyList<string> resolved = ToolOrder.Where(granted.Contains).ToArray();
+        // MCP names append after the built-ins rather than joining ToolOrder: they come from
+        // source, so they cannot be part of a fixed renderer-local order, and they are already
+        // emitted in a stable server-then-tool order by the caller.
+        IReadOnlyList<string> resolved =
+        [
+            .. ToolOrder.Where(granted.Contains),
+            .. GrantsMcp(agent, capabilityProfiles) ? qualifiedMcpToolNames : []
+        ];
         if (resolved.Count == 0)
         {
             // Unreachable while the ungoverned base is non-empty, and deliberately loud if
@@ -797,9 +838,9 @@ public sealed class ZCodeRenderer : ISquadRenderer
 
         List<string> notExpressible = [];
 
-        if (mcpServerNames.Count > 0)
+        if (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles))
         {
-            notExpressible.Add(DescribeMcpGap(mcpServerNames));
+            notExpressible.Add(DescribeWithheldMcp(agent, mcpServerNames));
         }
 
         if (profile.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publish) &&
@@ -871,7 +912,9 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 "flat allow-list evaluated against the session the command runs in, not a " +
                 $"per-agent capability boundary, and its delegates-to roster ({rosterText}) is " +
                 "instruction-only." +
-                (mcpServerNames.Count > 0 ? " " + DescribeMcpGap(mcpServerNames) : string.Empty));
+                (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles)
+                    ? " " + DescribeWithheldMcp(agent, mcpServerNames)
+                    : string.Empty));
     }
 
     /// <summary>
@@ -899,35 +942,47 @@ public sealed class ZCodeRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// The canonical MCP servers a ZCode-rendered principal cannot be granted, and why. Shared
-    /// by the subagent and lowered-command records so the two cannot drift.
+    /// The fully qualified MCP tool names declared by <c>toolchain.yml</c>, in a stable order,
+    /// ready to append to a tool allow-list ZCode matches by exact name.
     /// </summary>
-    private static string DescribeMcpGap(IReadOnlyList<string> mcpServerNames) =>
-        $"Canonical MCP server(s) {string.Join(", ", mcpServerNames)} are not granted: ZCode's " +
-        "'registerMcpTools' admits a tool only on an exact name match against the allow-list, " +
-        "so a 'mcp__<server>__*' selector registers nothing, and a concrete " +
-        "'mcp__<server>__<tool>' name would instead become a hard requirement that fails the " +
-        "agent closed wherever that server is not connected. The 'mcpServers' key fails the " +
-        "same way. No MCP is emitted and none is inherited, because an MCP-free tool list " +
-        "leaves 'shouldBorrowParentMcp' false.";
+    private static IReadOnlyList<string> QualifiedMcpToolNames(SquadSource source) =>
+    [
+        .. source.Toolchain.RequiredMcpTools
+            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+            .SelectMany(entry => entry.Value
+                .OrderBy(tool => tool, StringComparer.Ordinal)
+                .Select(tool => $"mcp__{entry.Key}__{tool}"))
+    ];
 
     /// <summary>
-    /// Reads the canonical <c>mcp.json</c> server names from the loaded source, so the record
-    /// above names what the corpus actually declares rather than a renderer-local copy.
+    /// Why a principal did not receive the declared MCP tools. Only a profile outside the
+    /// standard grant reaches this: everything else is granted by concrete tool name.
     /// </summary>
-    private static string[] ReadCanonicalMcpServerNames(SquadSource source)
-    {
-        if (source.McpConfiguration.ValueKind != JsonValueKind.Object ||
-            !source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
-            servers.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
+    private static string DescribeWithheldMcp(
+        SquadAgent agent,
+        IReadOnlyList<string> mcpServerNames) =>
+        $"Declared MCP server(s) {string.Join(", ", mcpServerNames)} are withheld: capability " +
+        $"profile '{agent.CapabilityProfile}' does not allow 'filesystem.read', or is the pure " +
+        "orchestrator profile that routes work rather than researching it. A role that only " +
+        "routes has no use for documentation or code-graph lookups, and granting them would " +
+        "hand it a research surface its own profile denies.";
 
-        return [.. servers.EnumerateObject()
-            .Select(property => property.Name)
-            .Order(StringComparer.Ordinal)];
-    }
+    /// <summary>The declared MCP server names, for a record naming what was withheld.</summary>
+    private static IReadOnlyList<string> DeclaredMcpServerNames(SquadSource source) =>
+        [.. source.Toolchain.RequiredMcpTools.Keys.OrderBy(name => name, StringComparer.Ordinal)];
+
+    /// <summary>
+    /// Whether a principal is entitled to the declared MCP tools, mirroring
+    /// <see cref="ClaudeRenderer"/>'s rule: any agent allowed to read the filesystem, except a
+    /// pure orchestrator, which routes work rather than researching it.
+    /// </summary>
+    private static bool GrantsMcp(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles) =>
+        !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
+        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+        profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
+        decision == SquadPermissionDecision.Allow;
 
     private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
     {

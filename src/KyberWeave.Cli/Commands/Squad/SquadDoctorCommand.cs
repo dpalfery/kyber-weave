@@ -98,6 +98,11 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 SquadSource source = SquadSourceLoader.Load(canonicalSourcePath);
                 AnsiConsole.MarkupLine($"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
                 canonicalSourceValid = true;
+
+                if (ReportZCodeMcpConfiguration(source, workingDirectory))
+                {
+                    hasIssues = true;
+                }
             }
             catch (SquadSourceValidationException ex)
             {
@@ -129,6 +134,84 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     public int Execute(CommandContext context, SquadDoctorSettings settings) => Execute(context, settings, CancellationToken.None);
+
+    /// <summary>
+    /// Reports whether the ZCode installation declares the MCP servers the canonical toolchain
+    /// requires.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is a hard failure rather than a warning because ZCode makes it one.
+    /// <c>ZCodeRenderer</c> grants MCP by fully qualified tool name — the only form ZCode's
+    /// exact-match allow-list registers — and <c>validateSubagentMcpRequirements</c> then
+    /// treats each name as a requirement, so an agent whose server is not connected raises a
+    /// configuration error mid-run. Failing here moves that breakage to diagnosis time.
+    /// </para>
+    /// <para>
+    /// It fails only where ZCode is actually in play, keyed on the same <c>.zcode/</c> marker
+    /// <see cref="SquadTargetResolver"/> detects targets with. A repository that has never
+    /// deployed to ZCode is reported as skipped rather than failed, because requiring three MCP
+    /// servers of someone who does not use the harness would make doctor useless to them.
+    /// </para>
+    /// </remarks>
+    /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
+    private bool ReportZCodeMcpConfiguration(SquadSource source, string workingDirectory)
+    {
+        IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys.ToArray();
+        if (required.Count == 0)
+        {
+            return false;
+        }
+
+        string marker = Path.Combine(workingDirectory, ".zcode");
+        if (!Directory.Exists(marker))
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] ZCode MCP servers: not checked (no '.zcode/' in this directory)");
+            return false;
+        }
+
+        string zcodeRoot;
+        try
+        {
+            zcodeRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots())
+                .ResolveGlobalRoot(SquadTarget.ZCode);
+        }
+        catch (ArgumentException ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [red]fail[/] ZCode MCP servers: cannot resolve the ZCode storage root: {Markup.Escape(ex.Message)}");
+            return true;
+        }
+
+        ZCodeMcpConfigurationReport report = ZCodeMcpConfiguration.Inspect(
+            required,
+            zcodeRoot,
+            workingDirectory,
+            SquadCommandComposition.ReadFileTextOrNull);
+
+        if (report.MissingServers.Count == 0)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [green]ok[/] ZCode MCP servers: [bold]{Markup.Escape(string.Join(", ", required.Order(StringComparer.Ordinal)))}[/] configured");
+            return false;
+        }
+
+        AnsiConsole.MarkupLine(
+            $"  [red]fail[/] ZCode MCP servers not configured: [bold]{Markup.Escape(string.Join(", ", report.MissingServers))}[/]");
+        AnsiConsole.MarkupLine(
+            "         Squad agents on ZCode are granted these servers' tools by exact name, so " +
+            "ZCode fails an agent whose server is not connected.");
+        AnsiConsole.MarkupLine(
+            $"         Declare them under 'mcp.servers' in {Markup.Escape(Path.Combine(zcodeRoot, "cli", "config.json"))}, " +
+            "or in a project 'zcode.json' / '.zcode/config.json'.");
+        if (report.InspectedPaths.Count == 0)
+        {
+            AnsiConsole.MarkupLine("         No ZCode configuration file was found to read.");
+        }
+
+        return true;
+    }
 
     /// <returns>
     /// <see langword="true"/> when the scan itself failed and doctor should exit non-zero.

@@ -240,17 +240,44 @@ cannot be expressed as a permission, only as instruction text in the body.
   emitted carrying at least the ungoverned base, and a resolved grant of nothing is a
   fail-closed render error rather than an empty list.
 
-- **D4b (MCP is not expressible, in either direction).** `registerMcpTools` admits a tool
+- **D4b (MCP is granted by fully qualified tool name).** `registerMcpTools` admits a tool
   only on an exact set membership test against the allow-list, with no wildcard expansion, so
-  `ClaudeRenderer`'s `mcp__kyber-weave__*` server-selector form registers nothing on ZCode —
-  it would only flip `shouldBorrowParentMcp` to true while granting no tool. Enumerating
-  concrete `mcp__<server>__<tool>` names instead would make every Squad agent fail closed for
-  any operator not running that server, because `validateSubagentMcpRequirements` treats a
-  concrete MCP name as a hard requirement; the `mcpServers` key fails the same way, throwing
-  `Required MCP server is not connected`. So no MCP is emitted, every principal records
-  `permission-not-expressible` naming the canonical servers from `mcp.json`, and because an
-  MCP-free non-empty tool list leaves `shouldBorrowParentMcp` false, nothing is inherited
-  either. The omission is a narrowing, not a leak.
+  `ClaudeRenderer`'s `mcp__<server>__*` selector registers nothing here — and worse, the
+  selector is still collected into `requiredServerNames`, imposing a connected-server
+  requirement while granting no tool. The renderer therefore emits the fully qualified
+  `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`, which
+  `registerMcpTools` matches exactly.
+
+  That makes the grant real and makes it a hard requirement:
+  `validateSubagentMcpRequirements` raises a configuration error when a required tool's server
+  is not connected or the tool is absent from the parent startup snapshot. **This is the
+  intended behaviour** — `squad doctor` fails against the same declared roster, so the
+  breakage surfaces at diagnosis time rather than mid-run.
+
+  The roster lives in canonical source rather than in the renderer because it is an external
+  contract that drifts — context7 renamed `get-library-docs` to `query-docs` — and because a
+  harness matching by exact name breaks on a rename instead of degrading. One declared roster
+  also means the renderer and the doctor check cannot disagree. `mcpServers` is still never
+  emitted: it would scope the borrowed connection set, but the tool allow-list already decides
+  what the model can see, and naming a server there only adds a second failure mode.
+
+  A pure orchestrator gets no MCP, matching `ClaudeRenderer`'s carve-out, and records
+  `permission-not-expressible` naming the withheld servers. The declared roster, verified
+  2026-09-21 by listing each server's tools over MCP:
+
+  | Server | Tools |
+  |---|---|
+  | `codegraph` | `codegraph_explore` |
+  | `context7` | `resolve-library-id`, `query-docs` |
+  | `kyber-weave` | `docs_analysis_candidates`, `docs_explore`, `docs_for_symbol`, `docs_glossary` |
+
+- **D4c (`squad doctor` fails on a ZCode install missing those servers).** Reading the same
+  declared roster, doctor inspects ZCode's config tiers — the user file at
+  `<storage>/cli/config.json`, then `<dir>/zcode.json` and `<dir>/.zcode/config.json` for each
+  directory from the working directory up to the git worktree root — and errors naming any
+  required server no tier declares under `mcp.servers`. It fails only where ZCode is in play,
+  keyed on the same `.zcode/` marker target resolution uses, so a repository that never
+  deploys to ZCode is reported as skipped rather than failed.
 
 - **D5 (Model profiles).** Add a `zcode` key to `models.yml` and its schema:
   `deep-planning: glm-5.3`, and `glm-5.3-flash` for `fast`, `general`, `orchestration`,
@@ -294,7 +321,7 @@ for the owner.
 
 Two things that first looked like scope are not. **Hooks** have no canonical source —
 `products/kyber-squad/` declares no hook artifact and `SquadSource` models none — so there is
-nothing to render. **MCP** is decided rather than deferred, under D4b.
+nothing to render. **MCP** is granted, under D4b, and gated by doctor under D4c.
 
 ---
 
@@ -303,10 +330,14 @@ nothing to render. **MCP** is decided rather than deferred, under D4b.
 The declared gate suite (`kyber-weave review gates .`) plus:
 
 - a `ZCodeRendererContractTests` suite covering agent/skill/command layout at both scopes,
-  the tools lowering table, the ungoverned base, the never-empty tool list, the MCP
-  not-expressible record, every degradation code, single-line agent/command frontmatter
+  the tools lowering table, the ungoverned base, the never-empty tool list, the qualified MCP
+  grant and the pure-orchestrator withholding, every degradation code, single-line agent/command frontmatter
   values, the lossless skill block scalar, the 1024-character description cap, the resource
   rewrite, and the fail-closed paths;
+- `ZCodeMcpConfigurationTests` for the doctor check's config tiers, worktree-root walk,
+  partial configuration, and tolerance of unparseable or JSONC configuration;
+- `SquadSourceTests` for the `required-mcp-tools` roster: ordering, empty-server rejection,
+  duplicate rejection, and rejection of names a harness would rewrite;
 - `SquadGlobalRootTests` for `ZCODE_STORAGE_DIR`, the `storage.dir` config tier and its
   precedence, `~/`-expansion, malformed-config fallback, relative-path rejection, and the
   `~/.zcode` default;

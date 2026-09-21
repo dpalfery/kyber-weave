@@ -389,16 +389,99 @@ public static class SquadSourceLoader
     private static SquadToolchain ParseToolchain(SourceFile file)
     {
         YamlMappingNode root = ParseYamlMapping(file);
-        EnsureOnlyFields(root, ["schema", "required-features", "validated-release"], file.RelativePath);
+        EnsureOnlyFields(
+            root,
+            ["schema", "required-features", "required-mcp-tools", "validated-release"],
+            file.RelativePath);
         string schema = RequireSchema(root, "schema", ToolchainSchema, file.RelativePath);
         IReadOnlyList<string> requiredFeatures = RequireStringSequence(root, "required-features", file.RelativePath);
         EnsureDistinct(requiredFeatures, "required feature", file.RelativePath);
+        IReadOnlyDictionary<string, IReadOnlyList<string>> requiredMcpTools =
+            ParseRequiredMcpTools(root, file.RelativePath);
         YamlNode releaseNode = RequireNode(root, "validated-release", file.RelativePath);
         JsonElement? release = IsYamlNull(releaseNode)
             ? null
             : JsonSerializer.SerializeToElement(ToPlainValue(releaseNode));
-        return new SquadToolchain(schema, requiredFeatures, release, file.RelativePath);
+        return new SquadToolchain(schema, requiredFeatures, release, file.RelativePath, requiredMcpTools);
     }
+
+    /// <summary>
+    /// Parses the per-server MCP tool roster. The key is optional so an existing toolchain
+    /// document stays loadable, but a declared roster must be well formed: a mapping of
+    /// non-empty server names to non-empty, distinct tool-name sequences. Names are checked
+    /// against the character set a harness will accept in a qualified MCP tool name, so a
+    /// name that could never resolve fails at load rather than at deploy.
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseRequiredMcpTools(
+        YamlMappingNode root,
+        string sourcePath)
+    {
+        if (!root.Children.TryGetValue(new YamlScalarNode("required-mcp-tools"), out YamlNode? node))
+        {
+            return new SortedDictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        }
+
+        YamlMappingNode mapping = RequireMapping(node, "required-mcp-tools", sourcePath, nodeIsValue: true);
+        SortedDictionary<string, IReadOnlyList<string>> result = new(StringComparer.Ordinal);
+        foreach ((string? server, YamlNode? toolsNode) in MappingEntries(mapping, sourcePath))
+        {
+            if (!IsPortableMcpNamePart(server))
+            {
+                SquadSourceValidator.Throw(
+                    $"MCP server name '{server}' in 'required-mcp-tools' is not usable in a " +
+                    "qualified MCP tool name.",
+                    "required-mcp-tools",
+                    sourcePath,
+                    "Use only letters, digits, underscore, and hyphen.");
+            }
+
+            if (result.ContainsKey(server))
+            {
+                ThrowDuplicateKey(server, sourcePath);
+            }
+
+            IReadOnlyList<string> tools = RequireStringSequence(
+                new YamlMappingNode { { new YamlScalarNode(server), toolsNode } },
+                server,
+                sourcePath);
+            if (tools.Count == 0)
+            {
+                SquadSourceValidator.Throw(
+                    $"MCP server '{server}' in 'required-mcp-tools' declares no tools.",
+                    "required-mcp-tools",
+                    sourcePath,
+                    "Remove the server or list the tools agents are entitled to call.");
+            }
+
+            EnsureDistinct(tools, $"required MCP tool for '{server}'", sourcePath);
+            foreach (string tool in tools)
+            {
+                if (!IsPortableMcpNamePart(tool))
+                {
+                    SquadSourceValidator.Throw(
+                        $"MCP tool name '{tool}' for server '{server}' is not usable in a " +
+                        "qualified MCP tool name.",
+                        "required-mcp-tools",
+                        sourcePath,
+                        "Use only letters, digits, underscore, and hyphen.");
+                }
+            }
+
+            result.Add(server, tools);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The character set a qualified <c>mcp__server__tool</c> name survives. A harness that
+    /// sanitizes other characters would rewrite the name, and an allow-list that matches by
+    /// exact name would then never match what it rewrote.
+    /// </summary>
+    private static bool IsPortableMcpNamePart(string value) =>
+        !string.IsNullOrEmpty(value) &&
+        value.All(character =>
+            char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
 
     private static JsonElement ParseMcp(SourceFile file)
     {

@@ -39,7 +39,7 @@ internal static class SquadCommandComposition
     /// unreadable is not an error: the resolver falls back to that target's default, matching
     /// what the harness itself does with the same file.
     /// </summary>
-    private static string? ReadFileTextOrNull(string path)
+    internal static string? ReadFileTextOrNull(string path)
     {
         try
         {

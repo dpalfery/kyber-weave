@@ -112,8 +112,35 @@ public sealed class ZCodeRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
-    private static IReadOnlyList<string> ComputeExpectedTools(SquadCapabilityProfile profile)
+    /// <summary>
+    /// The pure-orchestrator profile, excluded from the MCP grant on ZCode exactly as it is on
+    /// Claude: a role that routes work has no use for documentation or code-graph lookups.
+    /// </summary>
+    private const string PureOrchestratorProfile = "orchestrator";
+
+    /// <summary>
+    /// The fully qualified MCP tool names the canonical toolchain declares, transcribed here
+    /// from source rather than from the renderer, in the same server-then-tool order.
+    /// </summary>
+    private static IReadOnlyList<string> ExpectedMcpToolNames(SquadSource source) =>
+    [
+        .. source.Toolchain.RequiredMcpTools
+            .OrderBy(entry => entry.Key, StringComparer.Ordinal)
+            .SelectMany(entry => entry.Value
+                .OrderBy(tool => tool, StringComparer.Ordinal)
+                .Select(tool => $"mcp__{entry.Key}__{tool}"))
+    ];
+
+    private static bool ExpectsMcp(SquadAgent agent, SquadCapabilityProfile profile) =>
+        !string.Equals(agent.CapabilityProfile, PureOrchestratorProfile, StringComparison.Ordinal) &&
+        profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
+        decision == SquadPermissionDecision.Allow;
+
+    private static IReadOnlyList<string> ComputeExpectedTools(
+        SquadAgent agent,
+        SquadSource source)
     {
+        SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
         HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
         foreach ((string capability, string[] tools) in CapabilityToolContract)
         {
@@ -127,7 +154,11 @@ public sealed class ZCodeRendererContractTests : IDisposable
             }
         }
 
-        return ToolOrder.Where(granted.Contains).ToArray();
+        return
+        [
+            .. ToolOrder.Where(granted.Contains),
+            .. ExpectsMcp(agent, profile) ? ExpectedMcpToolNames(source) : []
+        ];
     }
 
     /// <summary>
@@ -366,9 +397,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
         // The tool list is 'allowed-tools' on a command, not 'tools'.
         Assert.Contains("allowed-tools", lists.Keys, StringComparer.Ordinal);
         Assert.DoesNotContain("tools", lists.Keys, StringComparer.Ordinal);
-        Assert.Equal(
-            ComputeExpectedTools(source.CapabilityProfiles.Profiles[primary.CapabilityProfile]),
-            lists["allowed-tools"]);
+        Assert.Equal(ComputeExpectedTools(primary, source), lists["allowed-tools"]);
 
         SquadDegradationRecord lowering = Assert.Single(
             result.Degradations,
@@ -417,9 +446,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
             (_, Dictionary<string, List<string>> lists) = ParseFrontmatter(DocumentText(file), agent.Name);
 
             Assert.Contains("tools", lists.Keys, StringComparer.Ordinal);
-            Assert.Equal(
-                ComputeExpectedTools(source.CapabilityProfiles.Profiles[agent.CapabilityProfile]),
-                lists["tools"]);
+            Assert.Equal(ComputeExpectedTools(agent, source), lists["tools"]);
         }
     }
 
@@ -825,23 +852,25 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// No MCP is granted and none is inherited: the selector form registers nothing under
-    /// ZCode's exact-match rule, and a concrete name would fail the agent closed wherever the
-    /// server is absent. The gap is recorded against the canonical servers by name.
+    /// Every entitled principal is granted the declared MCP tools by fully qualified name —
+    /// the only form ZCode's exact-match allow-list registers.
     /// </summary>
+    /// <remarks>
+    /// The selector form <c>ClaudeRenderer</c> uses is strictly worse here: it registers no
+    /// tool, and it is still collected into <c>requiredServerNames</c>, so it imposes a
+    /// connected-server requirement while granting nothing. This suite therefore asserts the
+    /// qualified form is present and the selector form is absent.
+    /// </remarks>
     [Fact]
-    public async Task RenderAsync_ZCode_RecordsThatCanonicalMcpServersAreNotReachable()
+    public async Task RenderAsync_ZCode_GrantsEveryDeclaredMcpToolByQualifiedName()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
-        string[] canonicalServers = [.. source.McpConfiguration
-            .GetProperty("mcpServers")
-            .EnumerateObject()
-            .Select(property => property.Name)];
+        IReadOnlyList<string> expected = ExpectedMcpToolNames(source);
+        Assert.NotEmpty(expected);
 
-        Assert.NotEmpty(canonicalServers);
-
+        int granted = 0;
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile? principal = result.Files.FirstOrDefault(f =>
@@ -852,19 +881,92 @@ public sealed class ZCodeRendererContractTests : IDisposable
                 continue;
             }
 
-            // Neither an mcpServers key nor any mcp__ tool name reaches the output. An
-            // MCP-free tool list is also what keeps shouldBorrowParentMcp false.
             string document = DocumentText(principal);
-            Assert.DoesNotContain("mcpServers", document, StringComparison.Ordinal);
-            Assert.DoesNotContain("mcp__", document, StringComparison.Ordinal);
+            (_, Dictionary<string, List<string>> lists) = ParseFrontmatter(document, agent.Name);
+            List<string> tools = lists.TryGetValue("tools", out List<string>? agentTools)
+                ? agentTools
+                : lists["allowed-tools"];
 
+            // A wildcard selector would register nothing while still demanding the server.
+            Assert.DoesNotContain("__*", document, StringComparison.Ordinal);
+
+            // mcpServers is never emitted: the tool allow-list already decides visibility, and
+            // naming a server there only adds a second failure mode.
+            Assert.DoesNotContain("mcpServers", document, StringComparison.Ordinal);
+
+            if (ExpectsMcp(agent, source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
+            {
+                granted++;
+                Assert.All(expected, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
+            }
+            else
+            {
+                Assert.All(
+                    expected,
+                    tool => Assert.DoesNotContain(tool, tools, StringComparer.Ordinal));
+            }
+        }
+
+        Assert.True(granted > 0, "No canonical agent was granted the declared MCP tools.");
+    }
+
+    /// <summary>
+    /// A principal outside the standard grant records why, so the withholding is visible in
+    /// the receipt rather than looking like an oversight.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_ZCode_RecordsMcpWithheldFromThePureOrchestrator()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+
+        List<SquadAgent> withheld = source.Agents
+            .Where(agent => !ExpectsMcp(agent, source.CapabilityProfiles.Profiles[agent.CapabilityProfile]))
+            .ToList();
+
+        Assert.NotEmpty(withheld);
+
+        foreach (SquadAgent agent in withheld)
+        {
             SquadDegradationRecord record = Assert.Single(
                 result.Degradations,
                 d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
             Assert.All(
-                canonicalServers,
+                source.Toolchain.RequiredMcpTools.Keys,
                 server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
         }
+
+        // An entitled agent records no MCP gap, because it has none.
+        foreach (SquadAgent agent in source.Agents.Where(a =>
+                     ExpectsMcp(a, source.CapabilityProfiles.Profiles[a.CapabilityProfile])))
+        {
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
+                d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
+            if (record is not null)
+            {
+                Assert.DoesNotContain("withheld", record.Details!, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The qualified names must survive ZCode's own tool-name normalization unchanged, or the
+    /// exact-match allow-list would never match what the harness rewrote them to.
+    /// </summary>
+    [Fact]
+    public void ExpectedMcpToolNames_UseOnlyCharactersZCodePreservesInAToolName()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+
+        Assert.All(ExpectedMcpToolNames(source), name =>
+        {
+            Assert.StartsWith("mcp__", name, StringComparison.Ordinal);
+            Assert.All(
+                name,
+                character => Assert.True(
+                    char.IsAsciiLetterOrDigit(character) || character is '_' or '-',
+                    $"'{name}' contains '{character}', which toModelVisibleMcpNamePart rewrites."));
+        });
     }
 
     private static bool IsAgentOrCommand(SquadDeploymentFile file) =>

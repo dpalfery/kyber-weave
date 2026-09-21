@@ -316,6 +316,16 @@ and validates.
   resource closure beside it — each resource at its artifact-relative path under the principal's
   directory — so authored relative links resolve verbatim in the deployed tree. A resource that
   would alias another principal's output is a validation error, never an overwrite.
+- **MCP grants differ per target, and `zcode` is the one that enumerates.** `ClaudeRenderer`
+  grants three MCP server wildcards (`mcp__codegraph__*`, `mcp__kyber-weave__*`,
+  `mcp__context7__*`) to any agent allowed to read the filesystem except the pure orchestrator.
+  ZCode registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits
+  the fully qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s
+  `required-mcp-tools`. Those names are hard requirements in ZCode, so `squad doctor` fails a
+  ZCode install that does not declare the servers — see
+  [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md). The roster lives
+  in canonical source because it is an external contract that drifts, and because the renderer
+  and the doctor check must read the same list.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both
   `.zcode/agents/` and `.zcode/commands/` recursively, so a closure beside its principal would
   register as phantom agents and commands rather than as resources. `ZCodeRenderer` therefore

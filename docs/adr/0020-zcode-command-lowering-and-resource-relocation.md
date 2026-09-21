@@ -98,16 +98,37 @@ on ZCode the explicit empty list widens just as far.
    `Skill` is not a convenience: it is what makes the 24 skills this renderer deploys
    reachable, and withholding it would ship a skill tree no agent could open.
 
-5. **No MCP is emitted, and the gap is recorded per principal.** `registerMcpTools` admits a
-   tool only on an exact name match against the allow-list, so `ClaudeRenderer`'s
-   `mcp__<server>__*` selector form registers nothing here and would only flip
-   `shouldBorrowParentMcp` to true while granting no tool. A concrete `mcp__<server>__<tool>`
-   name would instead become a hard requirement that fails the agent closed wherever that
-   server is not connected, and the `mcpServers` key throws
-   `Required MCP server is not connected` the same way. Every principal therefore records
-   `permission-not-expressible` naming the canonical servers from `mcp.json`. Because an
-   MCP-free non-empty tool list leaves `shouldBorrowParentMcp` false, nothing is inherited
-   either — the omission narrows rather than leaks.
+5. **MCP is granted by fully qualified tool name, and the grant is a hard requirement.**
+   `registerMcpTools` admits a tool only on an exact name match against the allow-list, with
+   no wildcard expansion, so `ClaudeRenderer`'s `mcp__<server>__*` selector registers nothing
+   here — and it is still collected into `requiredServerNames`, so it imposes a
+   connected-server requirement while granting no tool: strictly worse than emitting nothing.
+   The renderer therefore emits the fully qualified `mcp__<server>__<tool>` names declared by
+   `toolchain.yml`'s `required-mcp-tools`.
+
+   `validateSubagentMcpRequirements` then treats each name as a requirement, so an agent whose
+   server is not connected fails with a configuration error rather than running
+   under-equipped. That failure mode is accepted deliberately: Squad agents are written
+   against these servers, and an agent that silently loses its code-graph and documentation
+   lookups produces worse work than one that refuses to start. Decision 7 moves the breakage
+   to diagnosis time.
+
+   The roster lives in canonical source, not in the renderer, because it is an external
+   contract that drifts — context7 renamed `get-library-docs` to `query-docs` — and a harness
+   matching by exact name breaks on a rename instead of degrading. One declared roster also
+   means the renderer and the doctor check cannot disagree. `mcpServers` is never emitted: it
+   would scope the borrowed connection set, but the tool allow-list already decides what the
+   model sees, and naming a server there adds a second, redundant failure mode. A pure
+   orchestrator is carved out exactly as it is on Claude and records
+   `permission-not-expressible` naming the withheld servers.
+
+7. **`squad doctor` fails a ZCode install that does not declare those servers.** Reading the
+   same roster, doctor inspects ZCode's config tiers — the user file at
+   `<storage>/cli/config.json`, then `<dir>/zcode.json` and `<dir>/.zcode/config.json` for
+   each directory from the working directory up to the git worktree root — and errors naming
+   any required server no tier declares under `mcp.servers`. It fails only where ZCode is in
+   play, keyed on the same `.zcode/` marker target resolution uses, so a repository that never
+   deploys to ZCode is reported as skipped rather than failed.
 
 6. **Skill descriptions use a folded block scalar; agent and command descriptions cannot.**
    The skill adapter supports block scalars and the desktop skill service parses skill
@@ -127,8 +148,14 @@ on ZCode the explicit empty list widens just as far.
   whose global root can be set in a config file rather than an environment variable. The port
   is supplied by the composition root, and a null reader leaves every existing two-argument
   construction unchanged.
-- Squad agents on ZCode reach no MCP server. That is a real capability difference from the
-  Claude rendering, and it is recorded on every principal rather than left to be discovered.
+- Squad agents on ZCode reach the same three MCP servers they reach on Claude, but by
+  enumerated tool name rather than by server wildcard. The cost is that an upstream tool
+  rename breaks the grant until `toolchain.yml` is updated — a one-line source edit, caught by
+  doctor rather than at run time.
+- `SquadToolchain` gains `RequiredMcpTools`, which is the first canonical statement of what
+  Squad agents need *from* MCP, as distinct from `mcp.json`'s statement of which servers Squad
+  *ships*. `ClaudeRenderer` still hardcodes its three wildcards and could later read the same
+  roster.
 - `SquadRendererRegistry.AgentOutputPath` gains a third output shape for one target: an agent
   may claim a command path. The native/fallback validation rules are otherwise unchanged.
 - A future ZCode release that stops scanning `.zcode/agents/` recursively would let the
