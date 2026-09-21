@@ -1,19 +1,19 @@
 ---
 id: adr/0020-zcode-command-lowering-and-resource-relocation
-title: ZCode Lowers the Primary Agent to a Slash Command and Relocates Agent Resources
+title: ZCode Command Lowering, Resource Relocation, and the Inverted Empty Tool List
 doc-type: adr
 status: current
 owner: dpalfery
 last-reviewed: 2026-09-21
 ---
 
-# ADR 0020: ZCode Lowers the Primary Agent to a Slash Command and Relocates Agent Resources
+# ADR 0020: ZCode Command Lowering, Resource Relocation, and the Inverted Empty Tool List
 
 ## Status
 
-Accepted, 2026-09-21. Records the two ZCode-specific rendering decisions delivered with the
-ZCode harness target. Does not change how any other target lowers agents or projects
-resources.
+Accepted, 2026-09-21. Records the ZCode-specific rendering decisions delivered with the
+ZCode harness target. Does not change how any other target lowers agents, projects resources,
+or emits tool lists.
 
 ## Context
 
@@ -42,6 +42,14 @@ should go instead.
 
 Three canonical agents — `architect`, `conductor`, `task-reviewer` — carry Markdown resource
 closures and link to them relatively, as `<agent-name>/references/<file>.md`.
+
+**And its empty tool list means the opposite of every other target's.** `resolveAllowedTools`
+reduces both a missing `tools` key and an explicit `tools: []` to an empty
+`request.allowedTools`; `resolveSubagentToolAllowlist` then reads that as
+`inheritsAvailableTools` and hands the child every tool the parent has, while
+`shouldBorrowParentMcp` additionally lends it the parent's MCP servers. On Claude, Factory and
+Pi the empty or absent list is the shape a renderer must avoid *because omitting it* widens;
+on ZCode the explicit empty list widens just as far.
 
 ## Decision
 
@@ -82,12 +90,45 @@ closures and link to them relatively, as `<agent-name>/references/<file>.md`.
    `resource-links-rewritten` degradation, so the one place Squad modifies an instruction body
    is visible in the receipt rather than discoverable only by reading the renderer.
 
+4. **A resolved grant of nothing fails the render closed.** Because `tools: []` is ZCode's
+   inherit-everything signal, it is the one value this renderer must never emit. The list
+   always carries at least the ungoverned base — `TodoWrite` and `Skill`, matching
+   `ClaudeRenderer` — and an empty resolution raises
+   `SquadRenderValidationException` rather than producing the literal that would widen.
+   `Skill` is not a convenience: it is what makes the 24 skills this renderer deploys
+   reachable, and withholding it would ship a skill tree no agent could open.
+
+5. **No MCP is emitted, and the gap is recorded per principal.** `registerMcpTools` admits a
+   tool only on an exact name match against the allow-list, so `ClaudeRenderer`'s
+   `mcp__<server>__*` selector form registers nothing here and would only flip
+   `shouldBorrowParentMcp` to true while granting no tool. A concrete `mcp__<server>__<tool>`
+   name would instead become a hard requirement that fails the agent closed wherever that
+   server is not connected, and the `mcpServers` key throws
+   `Required MCP server is not connected` the same way. Every principal therefore records
+   `permission-not-expressible` naming the canonical servers from `mcp.json`. Because an
+   MCP-free non-empty tool list leaves `shouldBorrowParentMcp` false, nothing is inherited
+   either — the omission narrows rather than leaks.
+
+6. **Skill descriptions use a folded block scalar; agent and command descriptions cannot.**
+   The skill adapter supports block scalars and the desktop skill service parses skill
+   frontmatter with a real YAML parser, so a skill description needs no quoting and carries an
+   embedded `"` intact. The agent reader cannot: a source comment in ZCode's own skill adapter
+   records that the agent side reads only the top-level `description: >` and skips the
+   indented continuation. Two emission styles in one renderer is the price of removing the
+   escape artifact from the only place it actually occurs.
+
 ## Consequences
 
 - ZCode is the only target that rewrites an instruction body, and the only one whose agent
   resources do not sit beside their principal. The architecture's
   "authored relative links resolve verbatim in the deployed tree" rule now carries this single
   named exception.
+- `SquadGlobalRoots` gains an optional file-reading port, because ZCode is the only target
+  whose global root can be set in a config file rather than an environment variable. The port
+  is supplied by the composition root, and a null reader leaves every existing two-argument
+  construction unchanged.
+- Squad agents on ZCode reach no MCP server. That is a real capability difference from the
+  Claude rendering, and it is recorded on every principal rather than left to be discovered.
 - `SquadRendererRegistry.AgentOutputPath` gains a third output shape for one target: an agent
   may claim a command path. The native/fallback validation rules are otherwise unchanged.
 - A future ZCode release that stops scanning `.zcode/agents/` recursively would let the

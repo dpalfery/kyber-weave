@@ -61,8 +61,9 @@ newer ZCode before treating any of it as current.
 
 `ZCODE_STORAGE_DIR` reaches the agent root through `config.storage.dir`
 (`adapters/src/config/env-config.adapter.ts` → `bootstrap/src/app/create-app.ts:202`). The
-same value can also be set in `~/.zcode/cli/config.json`, which no environment read can see —
-recorded as a known limitation, not solved here.
+same value can also be set in `~/.zcode/cli/config.json`, and `createConfig` layers the two —
+system defaults, user config file, project config files, then `ZCODE_*` environment
+variables — so the environment outranks the file. The resolver honours both tiers; see D1.
 
 `.agents/skills/` and `.agents/commands/` are **also** ZCode roots at both scopes
 (`skillRootsForBase`, `commandRootsForBase`). A repository that already carries an
@@ -92,9 +93,11 @@ note tells an operator to pick one scope per repository.
 - **`permissionMode` is stripped from project-scope profiles** by
   `sanitizeProjectAgentProfile`: repository content may not raise a child runtime to
   bypass/yolo. Squad never emits the key, so this is alignment rather than a constraint.
-- Omitting `tools` grants every built-in tool. An explicitly empty list (`tools: []`)
-  grants none. The renderer therefore always emits `tools`, for the same reason
-  `ClaudeRenderer` and `PiRenderer` always emit theirs.
+- Omitting `tools` grants every built-in tool — **and so does `tools: []`**. Both reduce to
+  an empty `request.allowedTools`, which `resolveSubagentToolAllowlist` reads as
+  `inheritsAvailableTools`. The renderer therefore always emits a **non-empty** `tools`, for
+  a sharper version of the reason `ClaudeRenderer` and `PiRenderer` always emit theirs: here
+  the restrictive-looking value is the permissive one. See D4a.
 
 ### 2.4 Two parser hazards the renderer must respect
 
@@ -104,12 +107,18 @@ list. Block scalars, folded scalars, and wrapped lines are silently dropped — 
 `description: >-` yields the literal string `>-`. Every emitted value must be a single
 physical line.
 
-`unquoteScalar` slices the outer quote pair without unescaping, so this renderer matches
-ZCode's own writer (`serializeSubagentMarkdown` → `formatYamlScalar`/`escapeYamlString`):
-plain scalar when safe, otherwise double-quoted with `\\`, `\"`, `\n`, `\r` escaped. A
-description containing a literal `"` round-trips through ZCode with the backslash visible.
-That is upstream's own behaviour for its own output; this renderer reproduces it rather than
-emitting a cleverer encoding that only ZCode's reader would accept.
+`unquoteScalar` slices the outer quote pair without unescaping, so for agents and commands
+this renderer matches ZCode's own writer (`serializeSubagentMarkdown` →
+`formatYamlScalar`/`escapeYamlString`): plain scalar when safe, otherwise double-quoted with
+`\\`, `\"`, `\n`, `\r` escaped. A description containing a literal `"` would round-trip with
+the backslash visible — upstream's own behaviour for its own output, and unavoidable on those
+two readers.
+
+**Skills escape the hazard entirely.** Their adapter *does* support block scalars, and the
+desktop skill service parses skill frontmatter with a real YAML parser, so a skill description
+is emitted as a folded block scalar and round-trips losslessly. See D6. The only canonical
+description containing a `"` is a skill, so the artifact does not arise in practice — pinned
+by a test.
 
 **`.zcode/agents/` is scanned recursively.** `listMarkdownFiles` walks subdirectories and
 collects every `*.md`/`*.markdown`. `.zcode/commands/` is scanned recursively too
@@ -134,8 +143,15 @@ cannot be expressed as a permission, only as instruction text in the body.
 - **D1 (Target, tokens, marker, global root).**
   - Target `SquadTarget.ZCode`, canonical token `zcode`.
   - Strong detection marker: `.zcode/`.
-  - Global root: `ZCODE_STORAGE_DIR`, default `~/.zcode` — a two-tier
-    `ResolveWithOverride` chain like Claude's and Codex's.
+  - Global root: `ZCODE_STORAGE_DIR`, then `storage.dir` from `~/.zcode/cli/config.json`,
+    then `~/.zcode`. This is the only target whose root can come from a file, because it is
+    the only one whose harness resolves the value through a layered runtime config:
+    `createConfig` layers system defaults, the user config file, project config files, then
+    `ZCODE_*` environment variables, so the environment outranks the file. Project config
+    files sit between the two and are deliberately not read — honouring them would make a
+    `--global` root depend on the working directory, which is the one thing `--global` exists
+    not to do. `SquadGlobalRoots` takes a file-reading port for this; the composition root
+    supplies it, per Core's rule that Core does not construct its own collaborators.
   - Project agent path `.zcode/agents/<name>.md`; skill path
     `.zcode/skills/<name>/SKILL.md`; command path `.zcode/commands/<name>.md`. Under
     `--global` the `.zcode/` prefix strips and the same three subtrees hang off the
@@ -206,8 +222,35 @@ cannot be expressed as a permission, only as instruction text in the body.
   `permission-not-expressible`. `delegate: allow` emits bare `Agent` and records
   `permission-not-expressible` naming the roster, because §2.5's truncation means the
   roster cannot be enforced — the same shape as `PiRenderer`'s empty-roster case, where an
-  unenforceable grant is recorded rather than silently claimed. `TodoWrite` is granted
-  unconditionally; it writes no file and executes nothing.
+  unenforceable grant is recorded rather than silently claimed.
+
+  **`TodoWrite` and `Skill` are granted unconditionally**, matching `ClaudeRenderer`'s own
+  ungoverned base. Neither can broaden a canonical decision: `TodoWrite` writes no file and
+  executes nothing, and `Skill` only opens the skill tree this renderer itself deploys —
+  without it the 24 deployed skills would be unreachable. The `skills` frontmatter key is
+  not emitted, because `resolveSubagentSkillPort` reads an absent list as "every discovered
+  skill" and a present one as a hard filter, and the canonical model declares no per-agent
+  skill roster.
+
+- **D4a (An empty tool list is not an empty grant).** `resolveAllowedTools` reduces both a
+  missing `tools` key and an explicit `tools: []` to an empty `request.allowedTools`, and
+  `resolveSubagentToolAllowlist` treats that as `inheritsAvailableTools` — the child then
+  receives every tool the parent has, plus parent MCP via `shouldBorrowParentMcp`. Emitting
+  `[]` would therefore be maximal widening dressed as maximal restriction. The key is always
+  emitted carrying at least the ungoverned base, and a resolved grant of nothing is a
+  fail-closed render error rather than an empty list.
+
+- **D4b (MCP is not expressible, in either direction).** `registerMcpTools` admits a tool
+  only on an exact set membership test against the allow-list, with no wildcard expansion, so
+  `ClaudeRenderer`'s `mcp__kyber-weave__*` server-selector form registers nothing on ZCode —
+  it would only flip `shouldBorrowParentMcp` to true while granting no tool. Enumerating
+  concrete `mcp__<server>__<tool>` names instead would make every Squad agent fail closed for
+  any operator not running that server, because `validateSubagentMcpRequirements` treats a
+  concrete MCP name as a hard requirement; the `mcpServers` key fails the same way, throwing
+  `Required MCP server is not connected`. So no MCP is emitted, every principal records
+  `permission-not-expressible` naming the canonical servers from `mcp.json`, and because an
+  MCP-free non-empty tool list leaves `shouldBorrowParentMcp` false, nothing is inherited
+  either. The omission is a narrowing, not a leak.
 
 - **D5 (Model profiles).** Add a `zcode` key to `models.yml` and its schema:
   `deep-planning: glm-5.3`, and `glm-5.3-flash` for `fast`, `general`, `orchestration`,
@@ -215,12 +258,23 @@ cannot be expressed as a permission, only as instruction text in the body.
   `config/provider/zcode-builtin.json`. Note that `deep-planning` also carries
   `bug-crusher-investigator` and `sql-database-architect`, not only `architect`.
 
-- **D6 (Skill frontmatter).** Emit `name`, `description`, `license` only.
-  `SAFE_FRONTMATTER_KEYS` for skills is `name`, `description`, `when_to_use`, `license`,
-  `metadata`, and **any key outside that set clears `safeToAutoLoad`**, disabling implicit
-  invocation. Descriptions are capped at 1024 characters (a longer one is dropped whole,
-  not truncated) and a body over 100 KB is truncated on load — both asserted in tests
-  against the canonical corpus.
+- **D6 (Skill frontmatter, and the one place a block scalar is safe).** Emit `name`,
+  `description`, `license` only. `SAFE_FRONTMATTER_KEYS` for skills is `name`,
+  `description`, `when_to_use`, `license`, `metadata`, and **any key outside that set clears
+  `safeToAutoLoad`**, disabling implicit invocation. Descriptions are capped at 1024
+  characters (a longer one is dropped whole, not truncated) and a body over 100 KB is
+  truncated on load — both asserted in tests against the canonical corpus.
+
+  A skill's `description` is emitted as a **folded block scalar** (`>-` plus one indented
+  line) rather than a quoted one. The skill adapter's `parseFlatYaml` supports block scalars
+  (`parseBlockScalarStyle` / `readBlockScalar`) and the desktop skill service parses skill
+  frontmatter with a real YAML parser, so the form needs no quoting and no escaping and an
+  embedded `"` survives intact on both readers. This removes the §2.4 escape artifact
+  wherever it could actually bite: the only canonical description containing a `"` is a
+  skill. Agents and commands cannot use it — a source comment in ZCode's own skill adapter
+  records that the agent side reads only the top-level `description: >` and skips the
+  indented continuation — so they keep the single-line quoted form. No canonical agent or
+  command description contains a character that form would escape, which a test pins.
 
 ---
 
@@ -231,9 +285,16 @@ validation wiring, CLI composition, packer exclusion, doctor coverage, `models.y
 schema, contract/lifecycle/global-root/CLI tests, and documentation alignment including
 ADR 0020.
 
-**Out:** ZCode plugin packaging (`.zcode-plugin/plugin.json`), hooks, MCP server projection,
-and reading `storage.dir` from `~/.zcode/cli/config.json`. Each becomes a todo rather than
-scope creep.
+**Out:** ZCode plugin packaging (`.zcode-plugin/plugin.json`) only, and only because it is a
+different deployment model rather than remaining renderer work: a plugin is enabled as one
+unit instead of per-file, which is what Squad's receipt, drift detection, and transactional
+rollback are built on, and `loadPluginAgentProfiles` would namespace every agent
+`<plugin>:<agent>`. Recorded in [the todo](../todo/zcode-plugin-packaging.md) as a decision
+for the owner.
+
+Two things that first looked like scope are not. **Hooks** have no canonical source —
+`products/kyber-squad/` declares no hook artifact and `SquadSource` models none — so there is
+nothing to render. **MCP** is decided rather than deferred, under D4b.
 
 ---
 
@@ -242,9 +303,13 @@ scope creep.
 The declared gate suite (`kyber-weave review gates .`) plus:
 
 - a `ZCodeRendererContractTests` suite covering agent/skill/command layout at both scopes,
-  the tools lowering table, every degradation code, single-line frontmatter values, the
-  1024-character description cap, the resource rewrite, and the fail-closed paths;
-- `SquadGlobalRootTests` for `ZCODE_STORAGE_DIR` and its `~/.zcode` default;
+  the tools lowering table, the ungoverned base, the never-empty tool list, the MCP
+  not-expressible record, every degradation code, single-line agent/command frontmatter
+  values, the lossless skill block scalar, the 1024-character description cap, the resource
+  rewrite, and the fail-closed paths;
+- `SquadGlobalRootTests` for `ZCODE_STORAGE_DIR`, the `storage.dir` config tier and its
+  precedence, `~/`-expansion, malformed-config fallback, relative-path rejection, and the
+  `~/.zcode` default;
 - `SquadTargetResolutionTests` for the `.zcode/` marker;
 - `docs validate` and `docs drift` at zero findings.
 

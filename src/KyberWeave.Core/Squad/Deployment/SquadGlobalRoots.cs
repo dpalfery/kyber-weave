@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Resolves the real per-user global root for each target's agents and skills.</summary>
@@ -46,23 +48,39 @@ public interface ISquadGlobalRootResolver
 ///   `~/.config/kilo/agents/` and global config at `~/.config/kilo/kilo.jsonc`.
 /// - Factory: `droids/` and `skills/` under `~/.factory` (no override; no all-users path).
 /// - Warp: `skills/` under `~/.warp` (`~/.warp/skills/`, verified against docs.warp.dev).
-/// - ZCode: `agents/`, `skills/`, and `commands/` under `$ZCODE_STORAGE_DIR`, default
-///   `~/.zcode`. The environment variable reaches the agent root through the runtime
-///   config's `storage.dir` (`env-config.adapter.ts` maps `ZCODE_STORAGE_DIR` onto it,
-///   and `create-app.ts` resolves the subagent root from it). The same key can also be
-///   set in `~/.zcode/cli/config.json`, which no environment read can observe — see
-///   [the todo](../../../../docs/todo/zcode-storage-dir-config-override.md).
+/// - ZCode: `agents/`, `skills/`, and `commands/` under the resolved storage directory —
+///   `$ZCODE_STORAGE_DIR` first, then `storage.dir` from `~/.zcode/cli/config.json`, then
+///   `~/.zcode`. This is the only target whose root can come from a file, because it is the
+///   only one whose harness resolves the value through a layered runtime config rather than
+///   an environment variable alone: `createConfig` layers system defaults, the user config
+///   file, project config files, then `ZCODE_*` environment variables, so the environment
+///   outranks the file. Project config files sit between the two and are deliberately not
+///   read here: honouring them would make a `--global` root depend on the working directory,
+///   which is the one thing `--global` exists not to do.
 /// </remarks>
 public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 {
     private readonly Func<string, string?> _getEnvironmentVariable;
+    private readonly Func<string, string?> _readFileText;
     private readonly string _homeDirectory;
 
-    public SquadGlobalRoots(Func<string, string?> getEnvironmentVariable, string homeDirectory)
+    /// <param name="getEnvironmentVariable">Reads an override environment variable's value.</param>
+    /// <param name="homeDirectory">The fully qualified per-user home directory.</param>
+    /// <param name="readFileText">
+    /// Reads a configuration file's text, or returns null when it is absent or unreadable.
+    /// Core defines the port and the composition root supplies the implementation; the
+    /// parameter is optional so every existing two-argument construction keeps working, and a
+    /// null reader simply means the one file-backed root falls through to its default.
+    /// </param>
+    public SquadGlobalRoots(
+        Func<string, string?> getEnvironmentVariable,
+        string homeDirectory,
+        Func<string, string?>? readFileText = null)
     {
         ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         _getEnvironmentVariable = getEnvironmentVariable;
+        _readFileText = readFileText ?? (_ => null);
         _homeDirectory = RequireFullyQualified(homeDirectory, nameof(homeDirectory));
     }
 
@@ -80,7 +98,7 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
             SquadTarget.Kilo => ResolveXdgConfigAppRoot("kilo"),
             SquadTarget.Factory => ResolveWithOverride(null, ".factory"),
             SquadTarget.Warp => ResolveWithOverride(null, ".warp"),
-            SquadTarget.ZCode => ResolveWithOverride("ZCODE_STORAGE_DIR", ".zcode"),
+            SquadTarget.ZCode => ResolveZCodeRoot(),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(target),
                 target,
@@ -102,6 +120,73 @@ public sealed class SquadGlobalRoots : ISquadGlobalRootResolver
 
         return Path.Combine(_homeDirectory, defaultRelativePath);
     }
+
+    /// <summary>
+    /// Resolves ZCode's storage directory the way ZCode itself layers it: the
+    /// <c>ZCODE_STORAGE_DIR</c> environment variable outranks <c>storage.dir</c> in
+    /// <c>~/.zcode/cli/config.json</c>, which outranks the <c>~/.zcode</c> default
+    /// (<c>createConfig</c> in <c>adapters/src/config/config-factory.ts</c>, verified against
+    /// zai-org/ZCode 3.14.0 on 2026-09-21).
+    /// </summary>
+    /// <remarks>
+    /// The configured value may itself be <c>~/</c>-relative, because ZCode expands that form
+    /// in <c>resolveConfigPath</c>. A value that is neither home-relative nor fully qualified
+    /// is rejected rather than completed against the process working directory, for the reason
+    /// <see cref="RequireFullyQualified"/> states. A malformed or unreadable file is not an
+    /// error: ZCode's own loader swallows it and falls back to the default, so resolving to a
+    /// root ZCode will not use would be worse than agreeing with it.
+    /// </remarks>
+    private string ResolveZCodeRoot()
+    {
+        string? environmentOverride = _getEnvironmentVariable("ZCODE_STORAGE_DIR");
+        if (!string.IsNullOrEmpty(environmentOverride))
+        {
+            return RequireFullyQualified(environmentOverride, "ZCODE_STORAGE_DIR");
+        }
+
+        string defaultRoot = Path.Combine(_homeDirectory, ".zcode");
+        string? configured = ReadZCodeConfiguredStorageDirectory(
+            Path.Combine(defaultRoot, "cli", "config.json"));
+
+        return configured is null
+            ? defaultRoot
+            : RequireFullyQualified(ExpandHomeRelative(configured), "storage.dir");
+    }
+
+    private string? ReadZCodeConfiguredStorageDirectory(string configPath)
+    {
+        string? text = _readFileText(configPath);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("storage", out JsonElement storage) ||
+                storage.ValueKind != JsonValueKind.Object ||
+                !storage.TryGetProperty("dir", out JsonElement dir) ||
+                dir.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            string? value = dir.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Expands the leading <c>~/</c> ZCode's own <c>resolveConfigPath</c> accepts.</summary>
+    private string ExpandHomeRelative(string path) =>
+        path.StartsWith("~/", StringComparison.Ordinal)
+            ? Path.Combine(_homeDirectory, path[2..])
+            : path;
 
     /// <summary>
     /// OpenCode's own config resolution (https://opencode.ai/docs/config) checks

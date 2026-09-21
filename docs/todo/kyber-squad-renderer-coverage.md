@@ -29,7 +29,7 @@ renderers today. All eleven declared harness targets are covered.
 | `pi` | Native (conductor lowered to skill) | Completed | `PiRenderer` (`src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`) · [archived todo](../archive/todo/pi.md) |
 | `factory` | Native | Completed | `FactoryRenderer` (`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`) · [factory.md](factory.md) |
 | `warp` | Fallback (role-skill lowering) | Completed | `WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) · [archived todo](../archive/todo/warp.md) |
-| `zcode` | Native (conductor lowered to slash command) | Completed | `ZCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`) · [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md) · [deferred primitives](zcode-deferred-primitives.md) |
+| `zcode` | Native (conductor lowered to slash command) | Completed | `ZCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`) · [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md) · [plugin packaging](zcode-plugin-packaging.md) |
 
 ### Target Checklist
 
@@ -46,8 +46,10 @@ renderers today. All eleven declared harness targets are covered.
 - [x] `zcode` — `ZCodeRenderer` (`.zcode/agents/*.md`, `.zcode/skills/*/SKILL.md`, `.zcode/commands/*.md`; `--global` under `$ZCODE_STORAGE_DIR`, default `~/.zcode`)
 
 All eleven declared targets are covered. `zcode` is covered by `ZCodeRenderer`
-(`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`); the ZCode primitives it deliberately
-does not deploy are listed in [zcode-deferred-primitives.md](zcode-deferred-primitives.md).
+(`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`), which deploys every ZCode primitive
+Squad has canonical source for. ZCode's separate *plugin* distribution channel is a
+deployment-model decision rather than renderer coverage — see
+[zcode-plugin-packaging.md](zcode-plugin-packaging.md).
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.
 
@@ -59,4 +61,3 @@ Found while verifying the Copilot renderer end-to-end, not renderer-coverage gap
 |---|---|
 | `squad install`/`squad update` have no `--version` flag — they can only install whatever release matches the running CLI's own build | [squad-install-version-flag.md](squad-install-version-flag.md) |
 | `squad` commands' `path` is a positional argument, not `--path` — a plausible flag guess silently defaults to the current directory instead of erroring | [squad-path-argument-safety.md](squad-path-argument-safety.md) |
-| ZCode's global root can be moved by `~/.zcode/cli/config.json`, which the environment-only resolver cannot read | [zcode-storage-dir-config-override.md](zcode-storage-dir-config-override.md) |

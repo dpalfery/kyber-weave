@@ -30,7 +30,26 @@ internal static class SquadCommandComposition
     /// </summary>
     public static ISquadGlobalRootResolver ResolveGlobalRoots() => new SquadGlobalRoots(
         Environment.GetEnvironmentVariable,
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ReadFileTextOrNull);
+
+    /// <summary>
+    /// The file-reading port <see cref="SquadGlobalRoots"/> uses for the one target whose
+    /// global root can be set in a config file rather than an environment variable. Absent or
+    /// unreadable is not an error: the resolver falls back to that target's default, matching
+    /// what the harness itself does with the same file.
+    /// </summary>
+    private static string? ReadFileTextOrNull(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Resolves the Kyber-Weave MCP process probe using the specified process executor.</summary>
     public static McpProcessProbe ResolveProbe(IProcessExecutor? executor) =>

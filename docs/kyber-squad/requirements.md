@@ -68,7 +68,7 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Pi** | Native `.pi/agents` + lowered conductor | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agent only) | Native execution + safety-narrowed |
 | **Warp** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Harness default; permission-not-expressible for non-deny decisions |
 | **Factory Droids** | Native `.factory/droids` | Implemented and registered | Supported | Not lowered | Explicit tools array (allow-only documented IDs); safety-narrowed on ask; permission-not-expressible for unmapped `network.publish`/`delegate` and `mcpServers: []` |
-| **ZCode** | Native `.zcode/agents` + conductor lowered to `.zcode/commands` | Implemented and registered | Supported (project and global scope) | Lowered (primary agent only, to a slash command) | Native execution + safety-narrowed; permission-not-expressible for `network.publish` and the unenforceable `delegate` roster |
+| **ZCode** | Native `.zcode/agents` + conductor lowered to `.zcode/commands` | Implemented and registered | Supported (project and global scope) | Lowered (primary agent only, to a slash command) | Native execution + safety-narrowed; always a non-empty tool list because `tools: []` is ZCode's inherit-everything signal; permission-not-expressible for `network.publish`, the unenforceable `delegate` roster, and all MCP servers |
 
 The eleven rows are the declared target roster. All eleven targets (`copilot`, `cursor`, `claude`, `codex`,
 `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, and `zcode`) have implemented and registered renderers.

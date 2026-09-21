@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad;
+using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -239,6 +240,131 @@ public sealed class SquadGlobalRootTests : IDisposable
     // ---------------------------------------------------------------------------------------
     // Criterion 2: a global dry run per target plans bare relative paths under the resolved root.
     // ---------------------------------------------------------------------------------------
+
+    // ---------------------------------------------------------------------------------------
+    // ZCode is the only target whose global root can come from a config file rather than an
+    // environment variable, because it is the only one whose harness resolves the value
+    // through a layered runtime config. ZCode's own layering (createConfig in
+    // adapters/src/config/config-factory.ts, zai-org/ZCode 3.14.0) is: system defaults, user
+    // config file, project config files, then ZCODE_* environment variables — so the
+    // environment outranks the file, and these tests pin that order.
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveGlobalRoot_ZCode_ReadsStorageDirFromTheUserConfigFile()
+    {
+        string tempHome = Path.Combine(_temp.Path, "zcode-config-home");
+        Directory.CreateDirectory(tempHome);
+        string configured = Path.Combine(_temp.Path, "zcode-elsewhere");
+
+        SquadGlobalRoots resolver = new(
+            _ => null,
+            tempHome,
+            path => IsZCodeCliConfig(path, tempHome) ? StorageDirConfig(configured) : null);
+
+        Assert.Equal(configured, resolver.ResolveGlobalRoot(SquadTarget.ZCode));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_ZCode_ExpandsAHomeRelativeConfiguredStorageDir()
+    {
+        string tempHome = Path.Combine(_temp.Path, "zcode-tilde-home");
+        Directory.CreateDirectory(tempHome);
+
+        SquadGlobalRoots resolver = new(
+            _ => null,
+            tempHome,
+            path => IsZCodeCliConfig(path, tempHome) ? StorageDirConfig("~/.zcode-beta") : null);
+
+        Assert.Equal(Path.Combine(tempHome, ".zcode-beta"), resolver.ResolveGlobalRoot(SquadTarget.ZCode));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_ZCode_EnvironmentOverrideOutranksTheConfigFile()
+    {
+        string tempHome = Path.Combine(_temp.Path, "zcode-precedence-home");
+        Directory.CreateDirectory(tempHome);
+        string fromEnvironment = Path.Combine(_temp.Path, "zcode-from-env");
+        string fromFile = Path.Combine(_temp.Path, "zcode-from-file");
+
+        SquadGlobalRoots resolver = new(
+            name => string.Equals(name, "ZCODE_STORAGE_DIR", StringComparison.Ordinal)
+                ? fromEnvironment
+                : null,
+            tempHome,
+            path => IsZCodeCliConfig(path, tempHome) ? StorageDirConfig(fromFile) : null);
+
+        Assert.Equal(fromEnvironment, resolver.ResolveGlobalRoot(SquadTarget.ZCode));
+    }
+
+    public static TheoryData<string, string> UnusableZCodeConfigs => new()
+    {
+        { "empty", "" },
+        { "whitespace", "   " },
+        { "not-json", "not json at all" },
+        { "no-storage", "{}" },
+        { "no-dir", "{\"storage\":{}}" },
+        { "blank-dir", "{\"storage\":{\"dir\":\"\"}}" },
+        { "numeric-dir", "{\"storage\":{\"dir\":42}}" },
+        { "storage-not-object", "{\"storage\":\"not-an-object\"}" },
+    };
+
+    [Theory]
+    [MemberData(nameof(UnusableZCodeConfigs))]
+    public void ResolveGlobalRoot_ZCode_UnusableConfigFallsBackToTheDefaultRatherThanFailing(
+        string caseName,
+        string configContent)
+    {
+        // ZCode's own loader swallows a malformed config and falls back, so resolving to a
+        // root ZCode will not use would be worse than agreeing with it.
+        string tempHome = Path.Combine(_temp.Path, $"zcode-bad-config-{caseName}");
+        Directory.CreateDirectory(tempHome);
+
+        SquadGlobalRoots resolver = new(
+            _ => null,
+            tempHome,
+            path => IsZCodeCliConfig(path, tempHome) ? configContent : null);
+
+        Assert.Equal(Path.Combine(tempHome, ".zcode"), resolver.ResolveGlobalRoot(SquadTarget.ZCode));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_ZCode_RejectsARelativeConfiguredStorageDir()
+    {
+        // A relative root would be completed against the process working directory by
+        // SquadPathPolicy.ResolveFile, so a --global install could land outside the home tree.
+        string tempHome = Path.Combine(_temp.Path, "zcode-relative-home");
+        Directory.CreateDirectory(tempHome);
+
+        SquadGlobalRoots resolver = new(
+            _ => null,
+            tempHome,
+            path => IsZCodeCliConfig(path, tempHome) ? StorageDirConfig("relative/zcode") : null);
+
+        Assert.Throws<ArgumentException>(() => resolver.ResolveGlobalRoot(SquadTarget.ZCode));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_ZCode_WithNoFileReaderUsesTheDefault()
+    {
+        // Every pre-existing two-argument construction keeps working: no reader means the one
+        // file-backed root simply falls through.
+        string tempHome = Path.Combine(_temp.Path, "zcode-no-reader-home");
+        Directory.CreateDirectory(tempHome);
+
+        SquadGlobalRoots resolver = new(_ => null, tempHome);
+
+        Assert.Equal(Path.Combine(tempHome, ".zcode"), resolver.ResolveGlobalRoot(SquadTarget.ZCode));
+    }
+
+    private static string StorageDirConfig(string directory) =>
+        $"{{\"storage\":{{\"dir\":{JsonSerializer.Serialize(directory)}}}}}";
+
+    private static bool IsZCodeCliConfig(string path, string homeDirectory) =>
+        string.Equals(
+            path,
+            Path.Combine(homeDirectory, ".zcode", "cli", "config.json"),
+            StringComparison.Ordinal);
 
     [Theory]
     [InlineData(SquadTarget.Claude)]

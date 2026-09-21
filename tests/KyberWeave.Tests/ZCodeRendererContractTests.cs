@@ -54,9 +54,20 @@ public sealed class ZCodeRendererContractTests : IDisposable
         ("delegate", ["Agent"]),
     ];
 
+    /// <summary>
+    /// Granted on every principal regardless of capability profile, transcribed from plan
+    /// section 3 (D4). Matches <c>ClaudeRenderer</c>'s own ungoverned base: neither can
+    /// broaden a canonical decision, and without <c>Skill</c> the deployed skill tree would be
+    /// unreachable.
+    /// </summary>
+    private static readonly string[] UngovernedTools = ["TodoWrite", "Skill"];
+
     /// <summary>Fixed emission order for the tool list, per plan section 3.</summary>
     private static readonly string[] ToolOrder =
-        ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "WebFetch", "WebSearch", "Agent", "TodoWrite"];
+    [
+        "TodoWrite", "Skill", "Read", "Grep", "Glob", "Edit", "Write", "Bash",
+        "WebFetch", "WebSearch", "Agent"
+    ];
 
     /// <summary>
     /// <c>SAFE_FRONTMATTER_KEYS</c> for a skill (<c>adapters/src/skills/index.ts</c>). A key
@@ -103,9 +114,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
 
     private static IReadOnlyList<string> ComputeExpectedTools(SquadCapabilityProfile profile)
     {
-        // TodoWrite is granted unconditionally: it writes no file and executes nothing, so it
-        // cannot broaden any canonical decision.
-        HashSet<string> granted = new(StringComparer.Ordinal) { "TodoWrite" };
+        HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
         foreach ((string capability, string[] tools) in CapabilityToolContract)
         {
             if (profile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
@@ -147,6 +156,28 @@ public sealed class ZCodeRendererContractTests : IDisposable
             {
                 Assert.NotNull(pendingListKey);
                 lists[pendingListKey!].Add(Unquote(line[4..]));
+                continue;
+            }
+
+            // A folded block scalar, which the skill readers support and the agent reader does
+            // not. Folded by the same rule readBlockScalar uses: non-empty lines join on a
+            // single space.
+            if (line.EndsWith(": >-", StringComparison.Ordinal))
+            {
+                string blockKey = line[..^4];
+                List<string> folded = [];
+                while (index + 1 < end && lines[index + 1].StartsWith("  ", StringComparison.Ordinal))
+                {
+                    index++;
+                    string content = lines[index].Trim();
+                    if (content.Length > 0)
+                    {
+                        folded.Add(content);
+                    }
+                }
+
+                scalars[blockKey] = string.Join(' ', folded);
+                pendingListKey = null;
                 continue;
             }
 
@@ -199,18 +230,19 @@ public sealed class ZCodeRendererContractTests : IDisposable
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
     /// <summary>
-    /// The canonical description as ZCode will actually hold it after reading a rendered file.
+    /// An agent or command description as ZCode will actually hold it after reading a rendered
+    /// file.
     /// </summary>
     /// <remarks>
     /// ZCode's writer escapes <c>\</c> and <c>"</c> when it emits a double-quoted scalar
-    /// (<c>escapeYamlString</c>), but neither of its readers unescapes them —
-    /// <c>unquoteScalar</c> and the skill adapter's <c>parseScalar</c> both just slice the
-    /// outer quote pair. A description containing either character therefore comes back with
-    /// the backslash visible. That asymmetry is upstream's own round-trip behaviour for its
-    /// own output, so this suite pins it rather than asserting a lossless round-trip the
-    /// harness does not provide. See
-    /// <c>docs/todo/zcode-skill-description-block-scalar.md</c> for the lossless alternative
-    /// available to skills only.
+    /// (<c>escapeYamlString</c>), but <c>unquoteScalar</c> only slices the outer quote pair,
+    /// so either character comes back with the backslash visible. That asymmetry is upstream's
+    /// own round-trip behaviour for its own output, and the agent and command readers leave no
+    /// alternative — they cannot read a block scalar. Skills are not subject to it: they use
+    /// the folded block form and round-trip losslessly, which is why their assertions compare
+    /// against the canonical description directly. No canonical agent or command description
+    /// contains either character today, which
+    /// <see cref="RenderAsync_ZCode_TheCanonicalCorpusEmitsNoEscapedScalars"/> pins.
     /// </remarks>
     private static string AsZCodeReadsIt(string canonical) =>
         CollapseToSingleLine(canonical)
@@ -491,7 +523,10 @@ public sealed class ZCodeRendererContractTests : IDisposable
                 scalars.Keys.Concat(lists.Keys),
                 key => Assert.Contains(key, SkillSafeFrontmatterKeys, StringComparer.Ordinal));
             Assert.Equal(skill.Name, scalars["name"]);
-            Assert.Equal(AsZCodeReadsIt(skill.Description), scalars["description"]);
+
+            // Lossless: the folded block scalar needs no quoting, so nothing is escaped and
+            // nothing has to be un-escaped back out.
+            Assert.Equal(CollapseToSingleLine(skill.Description), scalars["description"]);
             Assert.True(
                 scalars["description"].Length <= MaxDescriptionLength,
                 $"Skill '{skill.Name}' description is {scalars["description"].Length} characters; " +
@@ -500,16 +535,17 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// ZCode's frontmatter reader is a line parser, not a YAML parser: a value split across
-    /// physical lines is silently dropped. This is the guard that keeps a future serializer
-    /// change from folding a long description into something the harness cannot read.
+    /// The agent and command frontmatter readers are line parsers, not YAML parsers: a value
+    /// split across physical lines is silently dropped. This is the guard that keeps a future
+    /// serializer change from folding a long description into something they cannot read.
+    /// Skills are deliberately exempt — see the block-scalar test below.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_ZCode_EveryFrontmatterValueIsASinglePhysicalLine()
+    public async Task RenderAsync_ZCode_EveryAgentAndCommandFrontmatterValueIsASinglePhysicalLine()
     {
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
 
-        foreach (SquadDeploymentFile file in result.Files.Where(IsPrincipal))
+        foreach (SquadDeploymentFile file in result.Files.Where(IsAgentOrCommand))
         {
             string[] lines = DocumentText(file).Split('\n');
             int end = Array.FindIndex(lines, 1, line => line == "---");
@@ -672,11 +708,18 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Pins the one lossy edge of the emitted scalar form, so it stays a deliberate,
-    /// upstream-matching choice rather than drifting into an unnoticed corruption.
+    /// A skill description is emitted as a folded block scalar, which both skill readers
+    /// support — the CLI adapter's <c>readBlockScalar</c> and the desktop service's real YAML
+    /// parser — and which needs no quoting, so an embedded <c>"</c> survives intact.
     /// </summary>
+    /// <remarks>
+    /// The agent and command readers cannot do this: a source comment in ZCode's own skill
+    /// adapter records that the agent side reads only the top-level <c>description: &gt;</c>
+    /// and skips the indented continuation. This test therefore also asserts that the block
+    /// form appears nowhere outside the skill tree.
+    /// </remarks>
     [Fact]
-    public async Task RenderAsync_ZCode_EscapesEmbeddedQuotesTheWayZCodeEscapesItsOwn()
+    public async Task RenderAsync_ZCode_SkillDescriptionsUseALosslessFoldedBlockScalar()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
@@ -693,17 +736,142 @@ public sealed class ZCodeRendererContractTests : IDisposable
                 result.Files, f => f.RelativePath == $".zcode/skills/{skill.Name}/SKILL.md");
             string document = DocumentText(file);
 
-            // Emitted exactly as ZCode's own writer would: a double-quoted scalar with the
-            // inner quotes backslash-escaped.
-            Assert.Contains("\\\"", document, StringComparison.Ordinal);
+            Assert.Contains("description: >-\n  ", document, StringComparison.Ordinal);
 
-            // And read back with the backslash still attached, because neither ZCode reader
-            // unescapes. Apostrophes, by contrast, survive untouched inside the double quotes.
+            // Nothing escaped on the way out, and nothing left escaped on the way back in.
             (Dictionary<string, string> scalars, _) = ParseFrontmatter(document, skill.Name);
-            Assert.Equal(AsZCodeReadsIt(skill.Description), scalars["description"]);
-            Assert.DoesNotContain("\\'", scalars["description"], StringComparison.Ordinal);
+            Assert.Equal(CollapseToSingleLine(skill.Description), scalars["description"]);
+            Assert.DoesNotContain("\\\"", scalars["description"], StringComparison.Ordinal);
+        }
+
+        Assert.All(
+            result.Files.Where(IsAgentOrCommand),
+            file => Assert.DoesNotContain(": >-", DocumentText(file), StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The canonical corpus needs no escaping anywhere today: skills carry embedded quotes
+    /// losslessly through the block form, and no agent or command description contains a
+    /// character the quoted form would have to escape. This pins that, so a future canonical
+    /// description that would reintroduce the artifact fails here rather than shipping.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_ZCode_TheCanonicalCorpusEmitsNoEscapedScalars()
+    {
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+
+        Assert.All(
+            result.Files.Where(IsPrincipal),
+            file => Assert.DoesNotContain("\\\"", DocumentText(file), StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The ungoverned base appears on every principal. <c>Skill</c> in particular is what
+    /// makes the 24 skills this renderer deploys reachable; without it the skill tree would be
+    /// deployed and then unopenable.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_ZCode_GrantsTheUngovernedBaseOnEveryPrincipal()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+
+        Assert.Contains(
+            result.Files,
+            f => f.RelativePath.StartsWith(".zcode/skills/", StringComparison.Ordinal) &&
+                 f.RelativePath.EndsWith("/SKILL.md", StringComparison.Ordinal));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadDeploymentFile? principal = result.Files.FirstOrDefault(f =>
+                f.RelativePath == $".zcode/agents/{agent.Name}.md" ||
+                f.RelativePath == $".zcode/commands/{agent.Name}.md");
+            if (principal is null)
+            {
+                continue;
+            }
+
+            (_, Dictionary<string, List<string>> lists) =
+                ParseFrontmatter(DocumentText(principal), agent.Name);
+            List<string> tools = lists.TryGetValue("tools", out List<string>? agentTools)
+                ? agentTools
+                : lists["allowed-tools"];
+
+            Assert.All(UngovernedTools, tool => Assert.Contains(tool, tools, StringComparer.Ordinal));
         }
     }
+
+    /// <summary>
+    /// An empty tool list is ZCode's inherit-everything signal, not an empty grant, so it must
+    /// never be emitted — and the one path that could produce it fails closed instead.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_ZCode_NeverEmitsAnEmptyToolList()
+    {
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+
+        foreach (SquadDeploymentFile file in result.Files.Where(IsAgentOrCommand))
+        {
+            string document = DocumentText(file);
+            Assert.DoesNotContain("tools: []", document, StringComparison.Ordinal);
+            Assert.DoesNotContain("allowed-tools: []", document, StringComparison.Ordinal);
+
+            (_, Dictionary<string, List<string>> lists) = ParseFrontmatter(document, file.RelativePath);
+            List<string> tools = lists.TryGetValue("tools", out List<string>? agentTools)
+                ? agentTools
+                : lists["allowed-tools"];
+            Assert.NotEmpty(tools);
+        }
+    }
+
+    /// <summary>
+    /// No MCP is granted and none is inherited: the selector form registers nothing under
+    /// ZCode's exact-match rule, and a concrete name would fail the agent closed wherever the
+    /// server is absent. The gap is recorded against the canonical servers by name.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_ZCode_RecordsThatCanonicalMcpServersAreNotReachable()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+
+        string[] canonicalServers = [.. source.McpConfiguration
+            .GetProperty("mcpServers")
+            .EnumerateObject()
+            .Select(property => property.Name)];
+
+        Assert.NotEmpty(canonicalServers);
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadDeploymentFile? principal = result.Files.FirstOrDefault(f =>
+                f.RelativePath == $".zcode/agents/{agent.Name}.md" ||
+                f.RelativePath == $".zcode/commands/{agent.Name}.md");
+            if (principal is null)
+            {
+                continue;
+            }
+
+            // Neither an mcpServers key nor any mcp__ tool name reaches the output. An
+            // MCP-free tool list is also what keeps shouldBorrowParentMcp false.
+            string document = DocumentText(principal);
+            Assert.DoesNotContain("mcpServers", document, StringComparison.Ordinal);
+            Assert.DoesNotContain("mcp__", document, StringComparison.Ordinal);
+
+            SquadDegradationRecord record = Assert.Single(
+                result.Degradations,
+                d => d.CanonicalIdentity == agent.Name && d.Code == "permission-not-expressible");
+            Assert.All(
+                canonicalServers,
+                server => Assert.Contains(server, record.Details!, StringComparison.Ordinal));
+        }
+    }
+
+    private static bool IsAgentOrCommand(SquadDeploymentFile file) =>
+        file.RelativePath.StartsWith(".zcode/agents/", StringComparison.Ordinal) ||
+        file.RelativePath.StartsWith(".zcode/commands/", StringComparison.Ordinal) ||
+        file.RelativePath.StartsWith("agents/", StringComparison.Ordinal) ||
+        file.RelativePath.StartsWith("commands/", StringComparison.Ordinal);
 
     private static bool IsPrincipal(SquadDeploymentFile file) =>
         file.RelativePath.StartsWith(".zcode/agents/", StringComparison.Ordinal) ||

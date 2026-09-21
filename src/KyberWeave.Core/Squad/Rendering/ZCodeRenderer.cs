@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -64,13 +65,57 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// only ZCode's reader would accept.
 /// </para>
 /// <para>
-/// <b>Tools are binary, so the key is always emitted.</b> Omitting <c>tools</c> grants every
-/// built-in; an explicitly empty list grants none. Only
-/// <see cref="SquadPermissionDecision.Allow"/> grants — <c>ask</c> and <c>deny</c> both
-/// withhold, because ZCode has no per-capability permission prompt — which keeps the lowering
-/// non-broadening by construction and records <c>ask</c> as <c>safety-narrowed</c>.
-/// <c>network.publish</c> has no built-in tool at all, so an <c>allow</c> for it records
-/// <c>permission-not-expressible</c>.
+/// <b>Skills are the one exception, and they are lossless.</b> The skill adapter's
+/// <c>parseFlatYaml</c> does support block scalars (<c>parseBlockScalarStyle</c> /
+/// <c>readBlockScalar</c>), and the desktop skill service parses skill frontmatter with a real
+/// YAML parser. A skill description is therefore emitted as a folded block scalar —
+/// <c>description: &gt;-</c> followed by one indented line — which needs no quoting and no
+/// escaping, so an embedded <c>"</c> survives intact on both readers. The agent parser cannot
+/// do this: a source comment there records that the agent side reads only the top-level
+/// <c>description: &gt;</c> and skips the indented continuation, which is exactly the failure
+/// the single-line rule above exists to avoid. Agents and commands therefore keep the quoted
+/// form and its escape artifact; skills do not.
+/// </para>
+/// <para>
+/// <b>An empty tool list is not an empty grant.</b> <c>resolveAllowedTools</c> reduces both a
+/// missing <c>tools</c> key and an explicit <c>tools: []</c> to an empty
+/// <c>request.allowedTools</c>, and <c>resolveSubagentToolAllowlist</c> treats that as
+/// <c>inheritsAvailableTools</c> — the child then receives <b>every</b> tool the parent has,
+/// plus parent MCP via <c>shouldBorrowParentMcp</c>. Emitting <c>[]</c> would therefore be
+/// maximal widening dressed as maximal restriction. The key is always emitted with at least
+/// the ungoverned base below, and a resolved grant of nothing is a fail-closed render error
+/// rather than an empty list.
+/// </para>
+/// <para>
+/// <b>Ungoverned base tools.</b> <c>TodoWrite</c> and <c>Skill</c> are granted on every
+/// rendered principal, matching <see cref="ClaudeRenderer"/>'s base. <c>TodoWrite</c> writes
+/// no file and executes nothing. <c>Skill</c> is what makes the 24 canonical skills this
+/// renderer deploys reachable at all; withholding it would deploy a skill tree no agent could
+/// open. The <c>skills</c> frontmatter key is deliberately not emitted, because
+/// <c>resolveSubagentSkillPort</c> treats an absent list as "every discovered skill" and a
+/// present one as a hard filter — and the canonical model does not declare per-agent skill
+/// rosters. Only <see cref="SquadPermissionDecision.Allow"/> grants anything further;
+/// <c>ask</c> and <c>deny</c> both withhold, because ZCode has no per-capability permission
+/// prompt, which keeps the lowering non-broadening by construction and records <c>ask</c> as
+/// <c>safety-narrowed</c>. <c>network.publish</c> has no built-in tool at all, so an
+/// <c>allow</c> for it records <c>permission-not-expressible</c>.
+/// </para>
+/// <para>
+/// <b>MCP is not expressible, in either direction.</b> <c>registerMcpTools</c> admits a tool
+/// only on an exact set membership test against <c>toolAllowlist</c>
+/// (<c>!allowed.has(name) &amp;&amp; !allowed.has(descriptorName)</c>), with no wildcard
+/// expansion, so <see cref="ClaudeRenderer"/>'s <c>mcp__kyber-weave__*</c> server-selector
+/// form registers nothing here — it would only flip <c>shouldBorrowParentMcp</c> to true while
+/// granting no tool. Enumerating concrete <c>mcp__server__tool</c> names instead would make
+/// every Squad agent fail closed for any operator who does not happen to run that server,
+/// because <c>validateSubagentMcpRequirements</c> treats a concrete MCP name as a hard
+/// requirement. The <c>mcpServers</c> frontmatter key has the same problem from the other
+/// side: <c>resolveSubagentMcpAccess</c> throws
+/// <c>Required MCP server is not connected</c> for any scoped server the parent has not
+/// connected. So no MCP is emitted, and every agent records
+/// <c>permission-not-expressible</c> naming the canonical servers it cannot reach. Because a
+/// non-empty, MCP-free <c>tools</c> list also makes <c>shouldBorrowParentMcp</c> return false,
+/// the rendered agents inherit no parent MCP either — the omission is a narrowing, not a leak.
 /// </para>
 /// <para>
 /// <b>Delegation cannot be scoped.</b> <c>toolNameFromSpec</c> truncates every specifier at
@@ -146,13 +191,22 @@ public sealed class ZCodeRenderer : ISquadRenderer
     ];
 
     /// <summary>
+    /// Granted on every rendered principal regardless of capability profile, matching
+    /// <see cref="ClaudeRenderer"/>'s own ungoverned base. Neither can broaden a canonical
+    /// decision: <c>TodoWrite</c> writes no file and executes nothing, and <c>Skill</c> only
+    /// opens the skill tree this renderer itself deploys.
+    /// </summary>
+    private static readonly string[] UngovernedTools = ["TodoWrite", "Skill"];
+
+    /// <summary>
     /// Fixed <c>tools</c> emission order, so a rendered agent is byte-stable regardless of how
-    /// the capability profile's permissions happen to enumerate. <c>TodoWrite</c> is granted
-    /// unconditionally: it writes no file and executes nothing, so it cannot broaden any
-    /// canonical decision.
+    /// the capability profile's permissions happen to enumerate.
     /// </summary>
     private static readonly string[] ToolOrder =
-        ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "WebFetch", "WebSearch", "Agent", "TodoWrite"];
+    [
+        "TodoWrite", "Skill", "Read", "Grep", "Glob", "Edit", "Write", "Bash",
+        "WebFetch", "WebSearch", "Agent"
+    ];
 
     /// <summary>
     /// A Markdown inline link or image whose target is captured for resource-link rewriting.
@@ -204,6 +258,10 @@ public sealed class ZCodeRenderer : ISquadRenderer
         // permission-not-expressible details without a renderer change.
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
 
+        // Read from the canonical mcp.json rather than a renderer-local list, so a server
+        // added there appears in the not-expressible record without a renderer change.
+        string[] mcpServerNames = ReadCanonicalMcpServerNames(source);
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
@@ -211,7 +269,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
         {
             if (agent.Invocation == SquadInvocation.Subagent)
             {
-                RenderSubagent(agent, source, request.Scope, skillIdentities, files, degradations);
+                RenderSubagent(
+                    agent, source, request.Scope, skillIdentities, mcpServerNames, files, degradations);
                 continue;
             }
 
@@ -221,6 +280,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 request.Scope,
                 skillIdentities,
                 capabilityVocabulary,
+                mcpServerNames,
                 files,
                 degradations);
         }
@@ -256,6 +316,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadSource source,
         SquadDeploymentScope scope,
         IReadOnlySet<string> skillIdentities,
+        IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
     {
@@ -284,7 +345,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
             TargetToken));
 
         AppendRewrittenResources(files, agent, scope, rewritten);
-        degradations.AddRange(BuildCapabilityDegradations(agent, source.CapabilityProfiles.Profiles));
+        degradations.AddRange(BuildCapabilityDegradations(
+            agent, source.CapabilityProfiles.Profiles, mcpServerNames));
     }
 
     private static void RenderPrimaryAgent(
@@ -293,6 +355,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadDeploymentScope scope,
         IReadOnlySet<string> skillIdentities,
         IReadOnlyList<string> capabilityVocabulary,
+        IReadOnlyList<string> mcpServerNames,
         List<SquadDeploymentFile> files,
         List<SquadDegradationRecord> degradations)
     {
@@ -359,7 +422,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
             agent,
             fallbackProfile,
             source.CapabilityProfiles.Profiles,
-            capabilityVocabulary));
+            capabilityVocabulary,
+            mcpServerNames));
     }
 
     private static SquadDeploymentFile RenderSkill(
@@ -382,18 +446,20 @@ public sealed class ZCodeRenderer : ISquadRenderer
         // name, description, when_to_use, license, metadata are SAFE_FRONTMATTER_KEYS; any
         // key outside that set clears safeToAutoLoad and disables implicit invocation, so the
         // emitted set stays inside it.
-        Dictionary<string, string> frontmatter = new(StringComparer.Ordinal)
-        {
-            ["name"] = name,
-            ["description"] = collapsed,
-            ["license"] = "MIT"
-        };
+        StringBuilder frontmatter = new();
+        frontmatter.Append("name: ").Append(FormatScalar(name)).Append('\n');
+
+        // A folded block scalar rather than a quoted one: both skill readers support it, and
+        // it carries an embedded quote without the escape artifact the agent form leaves.
+        // The description is already collapsed to one line, so folding is a no-op on content.
+        frontmatter.Append("description: >-\n  ").Append(collapsed).Append('\n');
+        frontmatter.Append("license: MIT\n");
 
         string skillsDirectory = ResolvePrefixedDirectory(SkillsDirectory, scope);
         return new SquadDeploymentFile(
             $"{skillsDirectory}/{name}/SKILL.md",
             Encoding.UTF8.GetBytes(SquadMarkdownDocument.Compose(
-                ComposeFrontmatter(frontmatter),
+                frontmatter.ToString(),
                 instructionBody)),
             TargetToken);
     }
@@ -503,18 +569,19 @@ public sealed class ZCodeRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// Emits frontmatter in the scalar form ZCode's own writer produces, with an optional
-    /// tool list emitted last.
+    /// Emits agent and command frontmatter in the scalar form ZCode's own writer produces,
+    /// with the tool list last.
     /// </summary>
     /// <remarks>
-    /// The tool list is always emitted, even when empty: omitting the key grants every
-    /// built-in tool, which would silently widen every canonical <c>deny</c>. An explicitly
-    /// empty block sequence is how ZCode's parser records an empty allow-list, matching
-    /// <c>optionalList</c>'s <c>tools: []</c> branch.
+    /// The tool list is a required parameter rather than an optional one, because every
+    /// principal with a tool surface must carry it: omitting the key grants every built-in
+    /// tool, which would silently widen every canonical <c>deny</c>. Skills do not come
+    /// through here — they have no tool surface and their description uses a block scalar
+    /// this composer does not emit.
     /// </remarks>
     private static string ComposeFrontmatter(
         IReadOnlyDictionary<string, string> scalars,
-        (string Key, IReadOnlyList<string> Values)? toolList = null)
+        (string Key, IReadOnlyList<string> Values) toolList)
     {
         StringBuilder builder = new();
         foreach ((string key, string value) in scalars)
@@ -522,15 +589,15 @@ public sealed class ZCodeRenderer : ISquadRenderer
             builder.Append(key).Append(": ").Append(FormatScalar(value)).Append('\n');
         }
 
-        if (toolList is not (string listKey, IReadOnlyList<string> values))
-        {
-            return builder.ToString();
-        }
-
+        (string listKey, IReadOnlyList<string> values) = toolList;
         if (values.Count == 0)
         {
-            builder.Append(listKey).Append(": []\n");
-            return builder.ToString();
+            // Unreachable: ResolveTools already fails closed on an empty grant. Kept as a
+            // throw rather than an emit because '[]' is ZCode's inherit-everything literal,
+            // so the branch that used to produce it was a widening trap waiting for a caller.
+            throw new SquadRenderValidationException(
+                $"Refusing to emit an empty '{listKey}' list: ZCode reads it as " +
+                "inherit-every-parent-tool, not as an empty grant.");
         }
 
         builder.Append(listKey).Append(":\n");
@@ -663,7 +730,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
     {
-        HashSet<string> granted = new(StringComparer.Ordinal) { "TodoWrite" };
+        HashSet<string> granted = new(UngovernedTools, StringComparer.Ordinal);
 
         if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
@@ -680,12 +747,26 @@ public sealed class ZCodeRenderer : ISquadRenderer
             }
         }
 
-        return ToolOrder.Where(granted.Contains).ToArray();
+        IReadOnlyList<string> resolved = ToolOrder.Where(granted.Contains).ToArray();
+        if (resolved.Count == 0)
+        {
+            // Unreachable while the ungoverned base is non-empty, and deliberately loud if
+            // that ever changes: an empty list is ZCode's inherit-everything signal, so the
+            // one thing this renderer must never emit is the thing an empty grant would
+            // produce.
+            throw new SquadRenderValidationException(
+                $"Agent '{agent.Name}' resolved to an empty ZCode tool list. ZCode reads both a " +
+                "missing 'tools' key and 'tools: []' as inherit-every-parent-tool, so an empty " +
+                "list cannot be emitted as a restriction.");
+        }
+
+        return resolved;
     }
 
     private static IEnumerable<SquadDegradationRecord> BuildCapabilityDegradations(
         SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles)
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> mcpServerNames)
     {
         if (!capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile))
         {
@@ -715,6 +796,11 @@ public sealed class ZCodeRenderer : ISquadRenderer
         }
 
         List<string> notExpressible = [];
+
+        if (mcpServerNames.Count > 0)
+        {
+            notExpressible.Add(DescribeMcpGap(mcpServerNames));
+        }
 
         if (profile.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publish) &&
             publish == SquadPermissionDecision.Allow)
@@ -753,7 +839,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
         SquadAgent agent,
         SquadFallbackProfile fallbackProfile,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
+        IReadOnlyList<string> capabilityVocabulary,
+        IReadOnlyList<string> mcpServerNames)
     {
         yield return new SquadDegradationRecord(
             Target: TargetToken,
@@ -783,7 +870,8 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 "are not enforced as the canonical lattice: a command's 'allowed-tools' is a " +
                 "flat allow-list evaluated against the session the command runs in, not a " +
                 $"per-agent capability boundary, and its delegates-to roster ({rosterText}) is " +
-                "instruction-only.");
+                "instruction-only." +
+                (mcpServerNames.Count > 0 ? " " + DescribeMcpGap(mcpServerNames) : string.Empty));
     }
 
     /// <summary>
@@ -808,6 +896,37 @@ public sealed class ZCodeRenderer : ISquadRenderer
                         : SquadPermissionDecision.Deny;
                 return $"{capability}: {DescribeDecision(decision)}";
             }));
+    }
+
+    /// <summary>
+    /// The canonical MCP servers a ZCode-rendered principal cannot be granted, and why. Shared
+    /// by the subagent and lowered-command records so the two cannot drift.
+    /// </summary>
+    private static string DescribeMcpGap(IReadOnlyList<string> mcpServerNames) =>
+        $"Canonical MCP server(s) {string.Join(", ", mcpServerNames)} are not granted: ZCode's " +
+        "'registerMcpTools' admits a tool only on an exact name match against the allow-list, " +
+        "so a 'mcp__<server>__*' selector registers nothing, and a concrete " +
+        "'mcp__<server>__<tool>' name would instead become a hard requirement that fails the " +
+        "agent closed wherever that server is not connected. The 'mcpServers' key fails the " +
+        "same way. No MCP is emitted and none is inherited, because an MCP-free tool list " +
+        "leaves 'shouldBorrowParentMcp' false.";
+
+    /// <summary>
+    /// Reads the canonical <c>mcp.json</c> server names from the loaded source, so the record
+    /// above names what the corpus actually declares rather than a renderer-local copy.
+    /// </summary>
+    private static string[] ReadCanonicalMcpServerNames(SquadSource source)
+    {
+        if (source.McpConfiguration.ValueKind != JsonValueKind.Object ||
+            !source.McpConfiguration.TryGetProperty("mcpServers", out JsonElement servers) ||
+            servers.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return [.. servers.EnumerateObject()
+            .Select(property => property.Name)
+            .Order(StringComparer.Ordinal)];
     }
 
     private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
