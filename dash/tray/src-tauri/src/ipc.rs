@@ -17,7 +17,7 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
 
-use crate::api::ReportCache;
+use crate::api::{self, ReportCache};
 use crate::cli::SetupState;
 use crate::receiver::ReceiverStatus;
 use crate::scheduler::RefreshStatus;
@@ -173,10 +173,8 @@ pub fn matches_view_path(view: &str) -> bool {
 /// is handed to the system opener. An unchecked path is how `../`, a `file:`
 /// URL, or a whole different origin would be opened as the user.
 pub fn open_view_url(server_url: &str, view: &str) -> Result<String> {
-    let base = server_url.trim_end_matches('/');
-    if !base.starts_with("http://127.0.0.1") {
-        bail!("refusing to open a non-loopback URL: {server_url}");
-    }
+    let base = api::loopback_origin(server_url)
+        .map_err(|_| anyhow::anyhow!("refusing to open a non-loopback URL: {server_url}"))?;
     // A scheme, an authority, or a traversal in the view is never a route.
     if view.contains("://") || view.starts_with("//") || view.split('/').any(|s| s == "..") {
         bail!("refusing a view that is not a dashboard route: {view}");
@@ -399,5 +397,6 @@ mod tests {
     fn refuses_a_non_loopback_server_url() {
         assert!(open_view_url("http://evil.test", "finding/f-1").is_err());
         assert!(open_view_url("https://127.0.0.1:4747", "finding/f-1").is_err());
+        assert!(open_view_url("http://127.0.0.1:1@evil.test", "finding/f-1").is_err());
     }
 }

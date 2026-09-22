@@ -110,6 +110,11 @@ pub trait HealthProbe {
 /// Starts a hosted receiver.
 pub trait ReceiverSpawner {
     fn spawn(&mut self, program: &str, args: &[&str]) -> std::io::Result<()>;
+
+    /// Stops children this adapter owns.  The policy layer cannot assume that a
+    /// receiver is a child of the web server, so shutdown is part of the
+    /// adapter contract rather than an incidental process drop.
+    fn stop_all(&mut self) {}
 }
 
 /// The probe URL. Loopback only, like everything else the tray opens (6.10).
@@ -179,7 +184,7 @@ impl Receiver {
     /// Returns the delay owed before the next hosting attempt, or `None` when
     /// no attempt is pending — which is the shape 10.8 needs, because "not
     /// retrying in a loop" has to be observable.
-    pub fn poll<P: HealthProbe, S: ReceiverSpawner>(
+    pub fn poll<P: HealthProbe + ?Sized, S: ReceiverSpawner + ?Sized>(
         &mut self,
         prober: &mut P,
         spawner: &mut S,

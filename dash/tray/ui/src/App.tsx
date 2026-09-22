@@ -16,21 +16,38 @@ import type { TraySettings, ViewState } from './viewState'
  */
 export function App() {
   const [state, setState] = useState<ViewState | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
 
-    void invoke<ViewState>('get_view_state').then((initial) => {
-      if (!cancelled) setState(initial)
-    })
+    void invoke<ViewState>('get_view_state')
+      .then((initial) => {
+        if (!cancelled) {
+          setState(initial)
+          setLoadError(null)
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLoadError(errorMessage(error))
+      })
 
+    return () => {
+      cancelled = true
+    }
+  }, [loadAttempt])
+
+  useEffect(() => {
+    let cancelled = false
     const unlisten = listen<ViewState>('view-state-changed', (event) => {
-      setState(event.payload)
+      if (!cancelled) setState(event.payload)
     })
 
     return () => {
       cancelled = true
-      void unlisten.then((stop) => stop())
+      void unlisten.then((stop) => stop()).catch(() => undefined)
     }
   }, [])
 
@@ -44,6 +61,21 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  if (loadError !== null) {
+    return (
+      <main className="popover popover--error" data-testid="ipc-error" role="alert">
+        <p>Could not read the tray state: {loadError}</p>
+        <button
+          type="button"
+          onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+          data-testid="retry-load"
+        >
+          Retry
+        </button>
+      </main>
+    )
+  }
+
   if (state === null) {
     return (
       <main className="popover popover--loading" data-testid="popover-loading">
@@ -55,12 +87,30 @@ export function App() {
   return (
     <Popover
       state={state}
+      actionError={actionError}
       commands={{
-        refreshNow: () => void invoke('refresh_now'),
-        openView: (view) => void invoke('open_view', { view }),
-        setSettings: (patch: Partial<TraySettings>) => void invoke('set_settings', { patch }),
-        quit: () => void invoke('quit'),
+        refreshNow: () => invokeAction('refresh_now'),
+        openView: (view) => invokeAction('open_view', { view }),
+        setSettings: (patch: Partial<TraySettings>) => invokeAction('set_settings', { patch }),
+        quit: () => invokeAction('quit'),
       }}
     />
   )
+
+  function invokeAction(command: string, args?: Record<string, unknown>): void {
+    const request = args === undefined ? invoke(command) : invoke(command, args)
+    void request
+      .then(() => setActionError(null))
+      .catch((error: unknown) => setActionError(errorMessage(error)))
+  }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message !== '') return error.message
+  if (typeof error === 'string' && error !== '') return error
+  if (error !== null && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message !== '') return message
+  }
+  return 'The tray did not provide an error message.'
 }

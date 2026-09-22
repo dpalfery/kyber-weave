@@ -42,21 +42,98 @@ pub fn poll_interval(popover_open: bool) -> Duration {
 /// `http://127.0.0.1`, optionally with a port, and nothing that merely starts
 /// with those characters.
 pub fn report_url(base: &str) -> Result<String> {
-    let trimmed = base.trim_end_matches('/');
-    let Some(rest) = trimmed.strip_prefix("http://127.0.0.1") else {
+    Ok(format!("{}{REPORT_PATH}", loopback_origin(base)?))
+}
+
+/// Parses the one origin the tray is allowed to contact or open.
+///
+/// This intentionally does not use a prefix test.  A URL such as
+/// `http://127.0.0.1:1@evil.test` starts with the expected text while its
+/// authority is actually `evil.test`; treating it as loopback would turn a
+/// process-provided listening line into an SSRF/opening primitive.
+pub fn loopback_origin(base: &str) -> Result<String> {
+    let trimmed = base.trim();
+    let Some(authority_and_tail) = trimmed.strip_prefix("http://") else {
         bail!("refusing a non-loopback server URL: {base}");
     };
-    // Either nothing follows the host, or a port does. A path, or a longer
-    // hostname such as `127.0.0.1.evil.test`, is not this server.
-    if !rest.is_empty() {
-        let Some(port) = rest.strip_prefix(':') else {
-            bail!("refusing a non-loopback server URL: {base}");
-        };
-        if port.is_empty() || !port.chars().all(|c| c.is_ascii_digit()) {
-            bail!("refusing a non-loopback server URL: {base}");
+    let authority_end = authority_and_tail
+        .find(['/', '?', '#'])
+        .unwrap_or(authority_and_tail.len());
+    let authority = &authority_and_tail[..authority_end];
+    let tail = &authority_and_tail[authority_end..];
+
+    if authority.is_empty() || authority.contains('@') || authority.contains(['\\', '%']) {
+        bail!("refusing a non-loopback server URL: {base}");
+    }
+
+    let (host, port) = match authority.split_once(':') {
+        Some((host, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => {
+            let parsed = port
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port != 0)
+                .ok_or_else(|| anyhow::anyhow!("invalid loopback port"))?;
+            (host, Some(parsed))
+        }
+        Some(_) => bail!("refusing a non-loopback server URL: {base}"),
+        None => (authority, None),
+    };
+
+    if host != "127.0.0.1" {
+        bail!("refusing a non-loopback server URL: {base}");
+    }
+
+    // The server reports an origin.  A single or repeated trailing slash is
+    // harmless, but a path/query/fragment is not part of the reported origin.
+    if !tail.is_empty() && !tail.chars().all(|character| character == '/') {
+        bail!("refusing a non-loopback server URL: {base}");
+    }
+    Ok(match port {
+        Some(port) => format!("http://127.0.0.1:{port}"),
+        None => "http://127.0.0.1".to_string(),
+    })
+}
+
+/// Builds the report request for the tray's persisted scope controls.
+///
+/// The dashboard owns filtering and report derivation; the tray only carries
+/// the selected scope into the existing endpoint.  `all` is the UI's sentinel
+/// for an omitted harness filter.
+pub fn report_url_for_scope(base: &str, harness: &str, window_days: u32) -> Result<String> {
+    if window_days == 0 {
+        bail!("report window must be positive");
+    }
+    let mut url = format!("{}{REPORT_PATH}?days={window_days}", loopback_origin(base)?);
+    if harness != "all" {
+        url.push_str("&harness=");
+        url.push_str(&encode_query_component(harness));
+    }
+    Ok(url)
+}
+
+/// Re-validates a complete report request immediately before opening a socket.
+/// Scoped requests carry a query string, so validating them by stripping the
+/// unscoped path would reject the very settings the tray just applied.
+pub fn report_request_url(url: &str) -> Result<String> {
+    let Some((origin, suffix)) = url.split_once(REPORT_PATH) else {
+        bail!("refusing a non-report URL: {url}");
+    };
+    if !suffix.is_empty() && (!suffix.starts_with('?') || suffix.contains(['#', '/'])) {
+        bail!("refusing a non-report URL: {url}");
+    }
+    Ok(format!("{}{REPORT_PATH}{suffix}", loopback_origin(origin)?))
+}
+
+fn encode_query_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
         }
     }
-    Ok(format!("{trimmed}{REPORT_PATH}"))
+    encoded
 }
 
 /// The last report, and what happened on the most recent attempt.
@@ -130,7 +207,7 @@ impl ReportFetcher for LoopbackFetcher {
     fn fetch(&mut self, url: &str) -> Result<Value> {
         // Checked again here, not just by the caller: this is the only place
         // that opens a socket, so it is the only place the guarantee holds.
-        let checked = report_url(url.trim_end_matches(REPORT_PATH))?;
+        let checked = report_request_url(url)?;
         let response = self.client.get(&checked).send()?;
         if !response.status().is_success() {
             bail!("server returned {}", response.status());
@@ -225,10 +302,45 @@ mod tests {
             "http://127.0.0.1:4747@evil.test",
             "http://127.0.0.2:4747",
             "http://[::1]:4747",
+            "http://127.0.0.1:1@evil.test",
             "file:///etc/passwd",
             "",
         ] {
             assert!(report_url(refused).is_err(), "{refused} should be refused");
+        }
+    }
+
+    #[test]
+    fn carries_the_tray_scope_into_the_existing_report_request() {
+        assert_eq!(
+            report_url_for_scope("http://127.0.0.1:4747/", "all", 30).unwrap(),
+            "http://127.0.0.1:4747/api/kyber/report?days=30"
+        );
+        assert_eq!(
+            report_url_for_scope("http://127.0.0.1:4747", "claude code/+", 14).unwrap(),
+            "http://127.0.0.1:4747/api/kyber/report?days=14&harness=claude%20code%2F%2B"
+        );
+        assert_eq!(
+            report_request_url("http://127.0.0.1:4747/api/kyber/report?days=14&harness=codex")
+                .unwrap(),
+            "http://127.0.0.1:4747/api/kyber/report?days=14&harness=codex"
+        );
+    }
+
+    #[test]
+    fn loopback_origin_rejects_userinfo_and_non_origin_tails() {
+        for refused in [
+            "http://127.0.0.1:1@evil.test",
+            "http://127.0.0.1.evil.test:4747",
+            "http://127.0.0.1:4747/api/kyber",
+            "http://127.0.0.1:4747?next=evil.test",
+            "http://127.0.0.1:4747#fragment",
+            "http://127.0.0.1:0",
+        ] {
+            assert!(
+                loopback_origin(refused).is_err(),
+                "{refused} should be refused"
+            );
         }
     }
 

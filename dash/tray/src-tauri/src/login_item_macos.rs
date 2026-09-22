@@ -61,8 +61,10 @@ pub fn set_enabled(agent_dir: &Path, enabled: bool, program: &Path) -> Result<()
 
 /// The agent's plist.
 ///
-/// `RunAtLoad` and nothing else: no `KeepAlive`, because a tray the user quit
-/// must stay quit until the next login rather than being restarted under them.
+/// `RunAtLoad` starts the tray for a new login.  The crash-only `KeepAlive`
+/// policy deliberately distinguishes an abnormal exit from the user's Quit
+/// command: a clean exit stays stopped, while launchd restores collection
+/// after a crash.
 pub fn plist_for(program: &Path) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -77,6 +79,11 @@ pub fn plist_for(program: &Path) -> String {
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>ProcessType</key>
     <string>Interactive</string>
 </dict>
@@ -200,11 +207,15 @@ mod tests {
         assert!(written.contains("/Applications/KyberDash.app/Contents/MacOS/kyberdash-tray"));
     }
 
-    /// A tray the user quit stays quit until the next login; `KeepAlive` would
-    /// restart it under them.
+    /// A tray that exits cleanly after the user's Quit command stays stopped;
+    /// an unsuccessful exit is eligible for launchd recovery.
     #[test]
-    fn the_plist_does_not_keep_the_tray_alive() {
-        assert!(!plist_for(&program()).contains("KeepAlive"));
+    fn the_plist_keeps_the_tray_alive_only_after_an_unsuccessful_exit() {
+        let plist = plist_for(&program());
+
+        assert!(plist.contains("<key>KeepAlive</key>\n    <dict>"));
+        assert!(plist.contains("<key>SuccessfulExit</key>\n        <false/>"));
+        assert!(!plist.contains("<key>KeepAlive</key>\n    <true/>"));
     }
 
     /// The program path holds whatever the user named their directories, and it

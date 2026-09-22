@@ -5,6 +5,12 @@
 // of cost — not SQLite. A seeded store would make each case slower and would not catch a
 // single additional derivation bug.
 //
+// The bridge's two session reads are deliberately distinct doubles. `getSessionContent()`
+// is the unclipped `{ sessionId, parts }` view and never carries `context`; the derived
+// `context` a latest-turn measurement needs lives only in the persisted payload behind
+// `getSessionPayload()` (R8.2). A double that let a context-shaped fixture leak through
+// the content read masked that contract — and with it the bug these cases pin.
+//
 // The rule these cases exist to defend is that the report never invents a number. Wherever
 // a figure is absent, the assertion checks for `value: null` with a reason AND explicitly
 // that it is not `0`, because `0` is the plausible-looking wrong answer a refactor would
@@ -14,7 +20,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { KyberBridge, SessionSummary } from '../../server/bridge.js'
 import type { Finding } from '../findings.js'
-import type { HarnessRollupRow } from '../../canon/types.js'
+import { notMeasurable, type HarnessRollupRow } from '../../canon/types.js'
 import { buildContextReport, costByBasis, latestOf, rankFindings, sessionsInScope } from './build.js'
 import { isUnmeasurable, type ReportScope } from './types.js'
 
@@ -77,7 +83,8 @@ function bridgeOf(parts: {
   sessions?: SessionSummary[]
   findings?: Finding[]
   rollups?: HarnessRollupRow[]
-  content?: unknown
+  payload?: unknown
+  records?: Array<{ sessionId: string; cost: { basis: string; status: string; value?: number } }>
 }): KyberBridge {
   const stub: BridgeStub = {
     listSessions: () => parts.sessions ?? [],
@@ -85,9 +92,12 @@ function bridgeOf(parts: {
     listHarnessRollups: () => parts.rollups ?? [],
     getQuarantine: () => [],
     getProblems: () => [],
-    getSessionContent: () => parts.content,
+    getSessionContent: (sessionId: string) => ({ sessionId, parts: [] }),
+    getSessionPayload: () => parts.payload ?? null,
   }
-  return stub as unknown as KyberBridge
+  // The cost section reads priced records off the bridge's private store seam;
+  // without records the section reports absence, which is also a valid answer.
+  return { ...stub, store: { listAll: () => parts.records ?? [] } } as unknown as KyberBridge
 }
 
 const build = (bridge: KyberBridge, scope: ReportScope = { days: 7 }, options = {}) =>
@@ -138,7 +148,10 @@ describe('scope (R11.11)', () => {
 })
 
 describe('latest session (R8.2-R8.4, R11.7)', () => {
-  const measurableContent = {
+  // The persisted payload's shape: `summary` plus the derived `context`, with
+  // `toolDefinitionsByServer` as the plain object JSON storage leaves it as.
+  const measurablePayload = {
+    summary: { turn_count: 2, total_input: 127_512, total_output: 200 },
     context: {
       measurable: true,
       contextLimit: 200_000,
@@ -168,8 +181,19 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
     expect(latestOf([older, newer])?.session_id).toBe('newer')
   })
 
+  it('measures the latest turn from the persisted payload, never via the no-structure fallback', () => {
+    const report = build(bridgeOf({ sessions: [session()], payload: measurablePayload }))
+    const turn = report.latestSession!.latestTurn
+    expect(turn.index).toBe(2)
+    expect(turn.pressure).toEqual({ value: 0.63 })
+    expect(turn.contextWindow).toEqual({ value: 200_000, unit: 'tokens' })
+    expect(turn.buckets.conversation_history).toEqual({ value: 80_000, unit: 'tokens' })
+    expect(turn.residual).toEqual({ value: 512, unit: 'tokens' })
+    expect(JSON.stringify(report.latestSession)).not.toContain('harness exported no message structure')
+  })
+
   it('reports the latest turn pressure, all five buckets and the residual', () => {
-    const report = build(bridgeOf({ sessions: [session()], content: measurableContent }))
+    const report = build(bridgeOf({ sessions: [session()], payload: measurablePayload }))
     const turn = report.latestSession!.latestTurn
     expect(turn.index).toBe(2)
     expect(turn.pressure).toEqual({ value: 0.63 })
@@ -180,20 +204,23 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
   })
 
   it('flags the turn as a cache invalidation when the analysis flagged it (R8.3)', () => {
-    const report = build(bridgeOf({ sessions: [session()], content: measurableContent }))
+    const report = build(bridgeOf({ sessions: [session()], payload: measurablePayload }))
     expect(report.latestSession!.latestTurn.cacheInvalidation).toBe(true)
     expect(report.latestSession!.cacheInvalidationTurns).toEqual([2])
   })
 
   it('ranks tool-definition sources by resident tokens (R11.7)', () => {
-    const report = build(bridgeOf({ sessions: [session()], content: measurableContent }))
+    const report = build(bridgeOf({ sessions: [session()], payload: measurablePayload }))
     expect(report.latestSession!.toolDefinitionSources.map((s) => s.source))
       .toEqual(['mcp-github', 'mcp-fs'])
   })
 
   it('renders an unmeasurable session as reasons, never as zeros (R8.4, R14.1)', () => {
     const report = build(
-      bridgeOf({ sessions: [session()], content: { context: { measurable: false } } }),
+      bridgeOf({
+        sessions: [session()],
+        payload: { summary: { turn_count: 3 }, context: { measurable: false } },
+      }),
     )
     const turn = report.latestSession!.latestTurn
     for (const figure of [turn.pressure, turn.contextWindow, turn.residual, ...Object.values(turn.buckets)]) {
@@ -201,6 +228,18 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
       expect(figure.value).not.toBe(0)
       expect(isUnmeasurable(figure) && figure.reason.length).toBeGreaterThan(0)
     }
+  })
+
+  it('keeps the honest no-structure fallback when the payload carries no context at all', () => {
+    const report = build(
+      bridgeOf({
+        sessions: [session()],
+        payload: { summary: { turn_count: 3, total_input: 900, total_output: 90 } },
+      }),
+    )
+    const turn = report.latestSession!.latestTurn
+    expect(isUnmeasurable(turn.pressure)).toBe(true)
+    expect(turn.pressure).toMatchObject({ reason: 'harness exported no message structure for this session' })
   })
 
   it('is null when no session is in scope, rather than an empty shell', () => {
@@ -278,6 +317,93 @@ describe('harness dimensions (R11.6, R14.3)', () => {
       { days: 7, harness: 'codex' },
     )
     expect(report.harnesses!.map((h) => h.harness)).toEqual(['codex'])
+  })
+})
+
+describe('windowed coverage inventory (R8.8)', () => {
+  // The inventory is the harness selector's navigation metadata, not a second
+  // analytic report: every canonical harness with a derived session inside the
+  // day window, whatever harness the report is scoped to. A rollup row without
+  // a window session and a session outside the window are not selector
+  // entries, and the counts are window counts, not selected-scope counts.
+  const windowedSessions = () => [
+    session({ session_id: 'codex-live', harness: 'codex', ended: hoursAgo(1) }),
+    session({ session_id: 'claude-new', harness: 'claude-code', ended: hoursAgo(2) }),
+    session({ session_id: 'claude-old', harness: 'claude-code', ended: hoursAgo(30) }),
+    session({
+      session_id: 'claude-stale',
+      harness: 'claude-code',
+      started: hoursAgo(24 * 10),
+      ended: hoursAgo(24 * 9),
+    }),
+    session({
+      session_id: 'opencode-stale',
+      harness: 'opencode',
+      started: hoursAgo(24 * 10),
+      ended: hoursAgo(24 * 9),
+    }),
+  ]
+
+  // `codex` deliberately has no rollup: measurability enrichment is optional,
+  // and a window session alone must still produce an entry with an empty map.
+  const inventoryRollups = (): HarnessRollupRow[] => [
+    rollup({
+      harness: 'claude-code',
+      sampleCount: 9,
+      measurability: {
+        contextPressure: notMeasurable('claude transcripts do not expose a context limit'),
+        toolYield: 'measured',
+      },
+    }),
+    rollup({ harness: 'cursor', sampleCount: 4, measurability: {} }),
+  ]
+
+  it('carries exactly the in-window canonical harnesses, ordered by harness id', () => {
+    const report = build(
+      bridgeOf({ sessions: windowedSessions(), rollups: inventoryRollups() }),
+      { days: 7, harness: 'claude-code' },
+    )
+    expect(report.coverage!.harnesses).toEqual([
+      {
+        harness: 'claude-code',
+        name: 'claude-code',
+        sessionsInWindow: 2,
+        measurability: {
+          contextPressure: { reason: 'claude transcripts do not expose a context limit' },
+          toolYield: 'measurable',
+        },
+      },
+      { harness: 'codex', name: 'codex', sessionsInWindow: 1, measurability: {} },
+    ])
+  })
+
+  it('keeps the inventory and its window counts stable under harness selection', () => {
+    const seeded = { sessions: windowedSessions(), rollups: inventoryRollups() }
+    const scoped = build(bridgeOf(seeded), { days: 7, harness: 'claude-code' })
+    const unscoped = build(bridgeOf(seeded), { days: 7 })
+    expect(scoped.coverage!.harnesses).toEqual(unscoped.coverage!.harnesses)
+  })
+
+  it('keeps findings, dimensions, latest session and cost selected-scope while the inventory widens', () => {
+    const report = build(
+      bridgeOf({
+        sessions: windowedSessions(),
+        rollups: [...inventoryRollups(), rollup({ harness: 'codex', sampleCount: 1 })],
+        findings: [
+          finding({ id: 'claude-finding', sessionId: 'claude-new' }),
+          finding({ id: 'codex-finding', sessionId: 'codex-live' }),
+        ],
+        records: [
+          { sessionId: 'claude-new', cost: { basis: 'harness', status: 'priced', value: 1.25 } },
+          { sessionId: 'codex-live', cost: { basis: 'harness', status: 'priced', value: 4 } },
+        ],
+      }),
+      { days: 7, harness: 'claude-code' },
+    )
+    expect(report.findings!.map((f) => f.id)).toEqual(['claude-finding'])
+    expect(report.harnesses!.map((h) => h.harness)).toEqual(['claude-code'])
+    expect(report.latestSession!.sessionId).toBe('claude-new')
+    expect(report.cost).toEqual([{ basis: 'harness', amountUsd: { value: 1.25, unit: 'USD' } }])
   })
 })
 

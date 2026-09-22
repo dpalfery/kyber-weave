@@ -4,8 +4,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { recordValidationProblems } from '../canon/adapters/quarantine.js'
+// The shared projection entry point, not a private buildSessions call: static
+// refresh and the live OTLP collector must run the ONE full projection over
+// the canonical store (plan T20 → T21), or the two ingress paths drift.
+import { projectCanonicalStore } from '../canon/projection.js'
 import { purgeExpiredContent } from '../canon/retention.js'
-import { buildSessions } from '../canon/sessions.js'
 import type { CoverageInterval, RecordProvenance, SourceCheckpoint } from '../canon/source-state.js'
 import { checkpointIsReusable, uncoveredIntervals } from '../canon/source-state.js'
 import type { RefreshTrigger } from '../canon/refresh-run.js'
@@ -125,9 +128,11 @@ export async function refreshHarnessSources(
   }
   purgeExpiredContent(store, commandStartedAt)
 
+  // Exactly one projection per refresh, and only after the writer drained —
+  // projecting earlier would cache a store the writer was still committing to.
   let derivationFailed = false
   try {
-    await buildSessions(store)
+    await projectCanonicalStore(store)
   } catch {
     derivationFailed = true
   }

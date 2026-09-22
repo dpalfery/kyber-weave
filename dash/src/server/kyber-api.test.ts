@@ -198,7 +198,9 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         name TEXT,
         timestamp TEXT,
         op TEXT,
-        content_json TEXT
+        content_json TEXT,
+        tokens_json TEXT,
+        cost_json TEXT
       );
       CREATE TABLE quarantine (
         span_id TEXT PRIMARY KEY,
@@ -269,6 +271,28 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         '2026-09-03T10:01:00.000Z',
         'llm.invoke',
         JSON.stringify({ system_prompt: fullCanonicalPart, instruction_context: clippedPayloadPreview }),
+      )
+
+    // Raw record-only group: a trace with no derived `session` row. It sits
+    // between the derived sessions by timestamp so any list that synthesizes
+    // it displaces real derived rows — it must never be reported as a session.
+    canonDb
+      .prepare(
+        'INSERT INTO records (span_id, trace_id, parent_span_id, session_id, harness, source, name, timestamp, op, content_json, tokens_json, cost_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        'span-raw-only-001',
+        'trace-record-only',
+        null,
+        null,
+        'pi',
+        'pi-agent',
+        'Pi Record-Only Trace',
+        '2026-09-03T09:30:00.000Z',
+        'llm.invoke',
+        null,
+        JSON.stringify({ freshInput: 40, cacheRead: 0, cacheCreation: 0, output: 20, reportedModel: 'pi-default' }),
+        JSON.stringify({ basis: 'published', status: 'priced', value: 0.002, currency: 'USD' }),
       )
 
     // Seed all API-visible data in the canonical store.
@@ -400,14 +424,20 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       }
     })
 
-    it('returns sessions list with proper headers and complete schema', async () => {
+    it('serves only canonical derived sessions with proper headers and complete schema', async () => {
       const res = await fetch(`${base}/api/kyber/sessions`)
       expect(res.status).toBe(200)
       assertStandardKyberHeaders(res)
 
       const body = (await res.json()) as { sessions: Array<Record<string, unknown>> }
       expect(Array.isArray(body.sessions)).toBe(true)
-      expect(body.sessions.length).toBe(3)
+
+      // Derived sessions are the only reporting authority: the raw
+      // record-only group is absent and the list is exactly the three
+      // derived rows, newest first.
+      const ids = body.sessions.map((s) => s.session_id)
+      expect(ids).toEqual(['sess-copilot-001', 'sess-gemini-002', 'sess-asad-contract'])
+      expect(ids).not.toContain('trace-record-only')
 
       const copilotSession = body.sessions.find((s) => s.session_id === 'sess-copilot-001')
       expect(copilotSession).toBeDefined()
@@ -425,13 +455,29 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       expect(geminiSession?.harness).toBe('gemini')
     })
 
-    it('respects limit query parameter', async () => {
-      const res = await fetch(`${base}/api/kyber/sessions?limit=1`)
-      expect(res.status).toBe(200)
+    it('serves no session payload route for a record-only group', async () => {
+      const res = await fetch(`${base}/api/kyber/session/trace-record-only`)
+      expect(res.status).toBe(404)
       assertStandardKyberHeaders(res)
 
-      const body = (await res.json()) as { sessions: Array<Record<string, unknown>> }
-      expect(body.sessions.length).toBe(1)
+      const body = (await res.json()) as { error: string }
+      expect(body).toEqual({ error: 'Session not found' })
+    })
+
+    it('applies ordering and limit to derived rows only', async () => {
+      const resOne = await fetch(`${base}/api/kyber/sessions?limit=1`)
+      expect(resOne.status).toBe(200)
+      assertStandardKyberHeaders(resOne)
+
+      const bodyOne = (await resOne.json()) as { sessions: Array<{ session_id: string }> }
+      expect(bodyOne.sessions.map((s) => s.session_id)).toEqual(['sess-copilot-001'])
+
+      const resTwo = await fetch(`${base}/api/kyber/sessions?limit=2`)
+      expect(resTwo.status).toBe(200)
+      assertStandardKyberHeaders(resTwo)
+
+      const bodyTwo = (await resTwo.json()) as { sessions: Array<{ session_id: string }> }
+      expect(bodyTwo.sessions.map((s) => s.session_id)).toEqual(['sess-copilot-001', 'sess-gemini-002'])
     })
 
     it('filters sessions by harness parameter', async () => {
@@ -446,6 +492,13 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
       const bodyGemini = (await resGemini.json()) as { sessions: Array<{ harness: string }> }
       expect(bodyGemini.sessions.length).toBe(1)
       expect(bodyGemini.sessions[0].harness).toBe('gemini')
+
+      // A harness whose only trace is a record-only group has no
+      // authoritative session to report.
+      const resPi = await fetch(`${base}/api/kyber/sessions?harness=pi`)
+      expect(resPi.status).toBe(200)
+      const bodyPi = (await resPi.json()) as { sessions: Array<{ session_id: string }> }
+      expect(bodyPi.sessions).toEqual([])
     })
   })
 

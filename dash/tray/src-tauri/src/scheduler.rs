@@ -10,6 +10,8 @@
 //! [`RefreshOutcome::from_exit_code`] is the only place this crate decides what
 //! an exit code meant.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
@@ -75,6 +77,34 @@ fn summarize(stderr: &str, fallback: String) -> String {
 pub trait RefreshRunner {
     /// The process's exit code and stderr.
     fn run(&mut self, program: &str, args: &[&str]) -> (Option<i32>, String);
+
+    /// Runs a refresh while observing the runtime's shutdown request.
+    ///
+    /// Existing policy fakes only need `run`; production adapters override
+    /// this method so a child process can be killed before the tray exits.
+    fn run_cancellable(
+        &mut self,
+        program: &str,
+        args: &[&str],
+        cancellation: &RefreshCancellation,
+    ) -> (Option<i32>, String) {
+        let _ = cancellation;
+        self.run(program, args)
+    }
+}
+
+/// Cooperative cancellation shared by the runtime and its refresh worker.
+#[derive(Clone, Default)]
+pub struct RefreshCancellation(Arc<AtomicBool>);
+
+impl RefreshCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 /// Refresh state the footer renders (10.5): when it last worked, and what went
@@ -159,26 +189,29 @@ impl Scheduler {
         self.running || self.status.state == RefreshState::RunningElsewhere
     }
 
-    /// Runs a refresh unless one is already running.
-    ///
-    /// Returns `None` when it declined, which is what Refresh now needs to show
-    /// "a refresh is in progress" rather than silently doing nothing.
-    pub fn run_now<R: RefreshRunner>(
-        &mut self,
-        runner: &mut R,
-        now: SystemTime,
-    ) -> Option<RefreshOutcome> {
+    /// Marks a refresh as started without running its process on the caller's
+    /// thread.  The runtime owns the worker; this policy object owns the
+    /// visible state and serialization guarantee.
+    pub fn begin_refresh(&mut self) -> bool {
         if self.is_blocked() {
-            return None;
+            return false;
         }
-
         self.running = true;
         self.status.state = RefreshState::Running;
-        let (code, stderr) = runner.run(&self.program, &REFRESH_ARGS);
+        true
+    }
+
+    /// Folds an asynchronously collected process result into the scheduler.
+    pub fn finish_refresh(
+        &mut self,
+        code: Option<i32>,
+        stderr: &str,
+        now: SystemTime,
+    ) -> RefreshOutcome {
         self.running = false;
         self.last_run_at = Some(now);
 
-        let outcome = RefreshOutcome::from_exit_code(code, &stderr);
+        let outcome = RefreshOutcome::from_exit_code(code, stderr);
         match &outcome {
             RefreshOutcome::Succeeded => {
                 self.status.state = RefreshState::Idle;
@@ -195,11 +228,35 @@ impl Scheduler {
                 self.status.last_failure = Some(format!("{} at {}", reason, format_rfc3339(now)));
             }
         }
-        Some(outcome)
+        outcome
+    }
+
+    /// Clears the in-flight marker after the runtime has stopped its owned
+    /// child.  Shutdown is not a failed refresh and must not overwrite the
+    /// last successful run with a cancellation diagnostic.
+    pub fn cancel_refresh(&mut self) {
+        self.running = false;
+        self.status.state = RefreshState::Idle;
+    }
+
+    /// Runs a refresh unless one is already running.
+    ///
+    /// Returns `None` when it declined, which is what Refresh now needs to show
+    /// "a refresh is in progress" rather than silently doing nothing.
+    pub fn run_now<R: RefreshRunner + ?Sized>(
+        &mut self,
+        runner: &mut R,
+        now: SystemTime,
+    ) -> Option<RefreshOutcome> {
+        if !self.begin_refresh() {
+            return None;
+        }
+        let (code, stderr) = runner.run(&self.program, &REFRESH_ARGS);
+        Some(self.finish_refresh(code, &stderr, now))
     }
 
     /// The cadence tick: runs only when due and not blocked.
-    pub fn tick<R: RefreshRunner>(
+    pub fn tick<R: RefreshRunner + ?Sized>(
         &mut self,
         runner: &mut R,
         now: SystemTime,

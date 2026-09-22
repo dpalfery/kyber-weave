@@ -133,7 +133,11 @@ function bridgeOf(parts: Parts): KyberBridge {
     listHarnessRollups: () => parts.rollups ?? [],
     getQuarantine: () => [],
     getProblems: () => [],
-    getSessionContent: () => parts.content,
+    // The derived context a latest-turn measurement needs lives in the
+    // persisted payload behind `getSessionPayload()` (R8.2); the content read
+    // is the unclipped `{ sessionId, parts }` view and never carries context.
+    getSessionContent: () => ({ sessionId: '', parts: [] }),
+    getSessionPayload: () => parts.content ?? null,
     store: {
       listAll: () =>
         (parts.costs ?? []).map((cost) => ({

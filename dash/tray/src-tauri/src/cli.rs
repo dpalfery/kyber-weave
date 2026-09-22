@@ -272,6 +272,13 @@ impl KyberdashCli {
         &self.program
     }
 
+    /// Validated leading arguments from `KYBERDASH_BIN`.  The runtime carries
+    /// them to every direct process spawn without re-tokenising or routing
+    /// through a shell.
+    pub fn extra_args(&self) -> &[String] {
+        &self.extra_args
+    }
+
     /// Runs `kyberdash --version` and reports whether the CLI is present and new enough.
     pub async fn status(&self) -> CliStatus {
         let min_version = format!(

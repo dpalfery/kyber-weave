@@ -18,12 +18,6 @@
         "name": "claude-code",
         "sessionsInWindow": 1,
         "measurability": {}
-      },
-      {
-        "harness": "codex",
-        "name": "codex",
-        "sessionsInWindow": 0,
-        "measurability": {}
       }
     ],
     "quarantineCount": 0,

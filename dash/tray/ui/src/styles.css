@@ -65,6 +65,34 @@ select {
   color: var(--muted-foreground);
 }
 
+.popover--error {
+  align-items: stretch;
+  justify-content: center;
+  color: var(--popover-foreground);
+}
+
+.popover--error p {
+  margin: 0 0 0.75rem;
+}
+
+.popover--error button,
+.ipc-action-error {
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--chart-6);
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.popover--error button {
+  cursor: pointer;
+}
+
+.ipc-action-error {
+  flex: none;
+  color: var(--popover-foreground);
+  font-size: 12px;
+}
+
 /* The panels take their natural height; the actions stay against the bottom
    edge however little is above them. */
 .popover > .actions {

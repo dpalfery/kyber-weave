@@ -2,5 +2,14 @@
   "identifier": "tray",
   "description": "Popover webview: only the tray's own IPC commands. The webview reaches no network; Rust does all HTTP (design D3).",
   "windows": ["popover"],
-  "permissions": ["allow-quit", "allow-hide-popover"]
+  "permissions": [
+    "allow-get-view-state",
+    "allow-refresh-now",
+    "allow-open-view",
+    "allow-set-settings",
+    "allow-quit",
+    "allow-hide-popover",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

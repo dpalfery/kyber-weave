@@ -14,6 +14,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 
+use crate::api;
+
 /// How long the server has to announce itself before the attempt is a failure.
 pub const LISTENING_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -62,9 +64,7 @@ pub fn parse_listening_line(line: &str) -> Option<Listening> {
     }
 
     let url = value.get("url")?.as_str()?.to_string();
-    if !is_loopback_url(&url) {
-        return None;
-    }
+    let url = api::loopback_origin(&url).ok()?;
 
     Some(Listening {
         url,
@@ -72,14 +72,6 @@ pub fn parse_listening_line(line: &str) -> Option<Listening> {
         version: value.get("version")?.as_str()?.to_string(),
         api_version: u32::try_from(value.get("apiVersion")?.as_u64()?).ok()?,
     })
-}
-
-/// Only `127.0.0.1` over plain HTTP. Not `localhost`, which resolves through
-/// whatever the host's name service says, and not `::1`, which the server does
-/// not bind.
-fn is_loopback_url(url: &str) -> bool {
-    url.strip_prefix("http://127.0.0.1")
-        .is_some_and(|rest| rest.is_empty() || rest.starts_with(':') || rest.starts_with('/'))
 }
 
 /// The delay before the nth consecutive restart: 1, 2, 4, 8 … capped at 60 s.
@@ -102,6 +94,12 @@ pub trait ServerProcess: Send {
 
     /// Stops the server and everything it started (6.9).
     fn kill_tree(&mut self);
+
+    /// Whether the child is still alive.  Test doubles that only model the
+    /// listening handshake may omit this and remain alive by default.
+    fn is_running(&mut self) -> bool {
+        true
+    }
 }
 
 /// Starts server processes.
@@ -165,13 +163,26 @@ impl Supervisor {
         self.failures
     }
 
+    /// The runtime polls this before reusing the reported URL.  An exited
+    /// child keeps neither a misleading ready phase nor a stale socket forever;
+    /// the next `attempt` owns the documented bounded restart backoff.
+    pub fn is_running(&mut self) -> bool {
+        self.process
+            .as_mut()
+            .is_some_and(|process| process.is_running())
+    }
+
     /// Spawns the server and waits for its listening line.
     ///
     /// One attempt, so the caller owns the loop and a test can step it. The
     /// backoff for the *next* attempt is returned rather than slept here, but
     /// the delay owed by previous failures is slept first — that ordering is
     /// what makes the schedule observable.
-    pub fn attempt<S: Spawner, C: Clock>(&mut self, spawner: &mut S, clock: &mut C) -> Attempt {
+    pub fn attempt<S: Spawner + ?Sized, C: Clock + ?Sized>(
+        &mut self,
+        spawner: &mut S,
+        clock: &mut C,
+    ) -> Attempt {
         clock.sleep(restart_delay(self.failures));
 
         // A previous process may still be running if it announced itself and
@@ -613,5 +624,8 @@ mod tests {
         // A prefix match is not enough: this host is not loopback.
         let lookalike = r#"{"event":"kyberdash.web.listening","url":"http://127.0.0.1.evil.test/","pid":1,"version":"0.9.23","apiVersion":1}"#;
         assert_eq!(parse_listening_line(lookalike), None);
+
+        let userinfo = r#"{"event":"kyberdash.web.listening","url":"http://127.0.0.1:1@evil.test","pid":1,"version":"0.9.23","apiVersion":1}"#;
+        assert_eq!(parse_listening_line(userinfo), None);
     }
 }

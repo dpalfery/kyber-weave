@@ -6,6 +6,7 @@ import chalk from 'chalk'
 import { OtlpReceiver, PortConflictError, type OtlpLog, type OtlpSpan } from './receiver.js'
 import { IngestWriter, type SignalBatchSink } from './writer.js'
 import { CanonStore } from '../canon/store.js'
+import { CanonicalProjectionScheduler } from '../canon/projection.js'
 import { readUsageCounters, exclusiveConvention, canonicalContent } from '../canon/adapters/copilot.js'
 import { ingestBatch } from '../canon/ingest.js'
 import {
@@ -88,6 +89,7 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
   receiver: OtlpReceiver
   writer: IngestWriter
   canon: CanonStore
+  scheduler: CanonicalProjectionScheduler
   close: () => Promise<void>
 }> {
   const port = opts.port ?? 4318
@@ -97,6 +99,26 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
   const dbPath = opts.dbPath ?? join(defaultDir, 'canon.db')
 
   const canon = new CanonStore(dbPath)
+
+  // Canonical projection (plan T20 → T21): accepted live work must reach the
+  // same derived-session cache static refresh builds, so the collector owns
+  // one scheduler and its ingest sink marks it dirty. The sink never awaits
+  // or rejects on a projection: a slow or failing derivation must not block
+  // ingestion or fail an accepted batch — records are committed by the
+  // writer, and the scheduler retains dirty work and retries on the next
+  // request. Errors surface here rather than at the ingest boundary.
+  const scheduler = new CanonicalProjectionScheduler({
+    store: canon,
+    onError: (error) => {
+      console.error(
+        chalk.red(
+          `[${new Date().toLocaleTimeString()}] Canonical projection failed — ` +
+            'committed records are kept and the work retries on the next batch:',
+        ),
+        error,
+      )
+    },
+  })
 
   const toCanon: SignalBatchSink = {
     upsertMany: (spans) => {
@@ -117,6 +139,7 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
             `(${detail}) · total records: ${canon.count()}`,
         ),
       )
+      if (outcome.accepted > 0) void scheduler.request()
     },
     upsertLogs: (logs: readonly OtlpLog[]) => {
       const outcome = ingestLogBatch(logs, canon)
@@ -124,6 +147,9 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
         `[${new Date().toLocaleTimeString()}] Ingested ${logs.length} logs ` +
         `(${outcome.enriched} enriched, ${outcome.pending} pending, ${outcome.quarantined} quarantined)`,
       ))
+      // Only an enrichment changed a stored record; pending logs altered
+      // nothing a projection reads.
+      if (outcome.enriched > 0) void scheduler.request()
     },
   }
 
@@ -172,6 +198,13 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
     }
     await receiver.stop().catch(() => {})
     await writer.stop().catch(() => {})
+    // Shutdown order is load-bearing: the receiver stops first so no new
+    // work arrives, the writer stops next so every queued batch is committed
+    // (its sink marks the scheduler dirty on the way through), the projection
+    // drains after that so the derived caches are rebuilt, and only then is
+    // SQLite closed. Any other order either drops queued records or persists
+    // records whose derived session never lands.
+    await scheduler.close()
     canon.close()
   }
 
@@ -190,5 +223,5 @@ export async function startOtlpCollectorService(opts: CollectorOptions = {}): Pr
     void close().finally(() => process.exit(0))
   })
 
-  return { receiver, writer, canon, close }
+  return { receiver, writer, canon, scheduler, close }
 }

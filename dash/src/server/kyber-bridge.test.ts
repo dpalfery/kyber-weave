@@ -450,33 +450,46 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
     bridge.close()
   })
 
-  it('listSessions combines canonical derived sessions and records', () => {
+  it('listSessions reports only canonical derived sessions, never record-only groups', () => {
     const sessions = bridge.listSessions()
-    expect(sessions.length).toBe(3)
-
     const ids = sessions.map((s) => s.session_id)
+
+    // The raw `records` row keys a session that has no derived `session` row.
+    // It has no authoritative persisted payload, so it must not be synthesized
+    // into a reported session.
+    expect(ids).not.toContain('trace-records-1')
+    expect(sessions.length).toBe(2)
     expect(ids).toContain('sess-canon-new')
     expect(ids).toContain('sess-shared')
-    expect(ids).toContain('trace-records-1')
     expect(ids).not.toContain('sess-sessions-older')
+
+    // A record-only id consequently has no session payload either.
+    expect(bridge.getSessionPayload('trace-records-1')).toBeNull()
 
     // Verify deduplication: canonDb session took priority
     const shared = sessions.find((s) => s.session_id === 'sess-shared')!
     expect(shared.agent_name).toBe('canon-agent-wins')
     expect(shared.label).toBe('Shared Session (Canon)')
+
+    // Derived rows still parse their persisted summary payload.
+    const newest = sessions.find((s) => s.session_id === 'sess-canon-new')!
+    expect(newest.turn_count).toBe(5)
+    expect(newest.request_count).toBe(5)
+    expect(newest.total_input).toBe(1000)
+    expect(newest.total_output).toBe(500)
+    expect(newest.cost_usd).toBe(0.05)
+    expect(newest.models).toEqual(['gpt-4o'])
+    expect(newest.problems).toBe(1)
   })
 
-  it('listSessions sorts sessions strictly by started DESC before applying limit', () => {
+  it('listSessions sorts derived sessions strictly by started DESC before applying limit', () => {
     const sessions = bridge.listSessions()
-    expect(sessions[0].session_id).toBe('sess-canon-new') // 12:00:00Z
-    expect(sessions[1].session_id).toBe('sess-shared') // 11:00:00Z
-    expect(sessions[2].session_id).toBe('trace-records-1') // 10:30:00Z
+    expect(sessions.map((s) => s.session_id)).toEqual(['sess-canon-new', 'sess-shared']) // 12:00:00Z, 11:00:00Z
 
-    // Verify limit slices after global started DESC sort
+    // Verify limit slices after global started DESC sort over derived rows
     const top2 = bridge.listSessions(2)
     expect(top2.length).toBe(2)
-    expect(top2[0].session_id).toBe('sess-canon-new')
-    expect(top2[1].session_id).toBe('sess-shared')
+    expect(top2.map((s) => s.session_id)).toEqual(['sess-canon-new', 'sess-shared'])
 
     const top1 = bridge.listSessions(1)
     expect(top1.length).toBe(1)

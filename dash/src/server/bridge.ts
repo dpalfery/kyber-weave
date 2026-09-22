@@ -6,7 +6,6 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
-import { sumCosts } from '../canon/cost.js'
 import {
   CanonStore,
   decompressRaw,
@@ -40,7 +39,6 @@ import {
   type CanonicalContentKey,
   type CanonicalRecord,
   type ContentPart,
-  type CostBlock,
   type RunRow,
   type ExecutionRow,
   type ExecutionTreeNode,
@@ -266,20 +264,6 @@ interface SessionDbRow {
   summary_json?: string | object | null
   problems_count?: number | null
   payload?: string | null
-}
-
-interface TraceRecordRow {
-  session_key: string
-  harness: string
-  source?: string | null
-  name?: string | null
-  started?: string | null
-  ended?: string | null
-  span_count?: number | null
-  turn_count?: number | null
-  request_count?: number | null
-  tokens_json?: string | null
-  cost_json?: string | null
 }
 
 interface QuarantineDbRow {
@@ -617,9 +601,11 @@ export class KyberBridge {
    */
   listSessions(limit?: number): SessionSummary[] {
     const list: SessionSummary[] = []
-    const seenIds = new Set<string>()
 
-    // 1. Query primary canon.db `session` table if available
+    // The canonical derived `session` cache is the only reporting authority.
+    // Raw `records` are never synthesized into sessions here: projection
+    // (projectCanonicalStore) is what turns accepted spans into derived rows,
+    // so a record-only group is not yet a session and must not appear.
     if (this.hasTable(this.canonDb, 'session')) {
       try {
         let rows: SessionDbRow[] = []
@@ -644,7 +630,6 @@ export class KyberBridge {
         }
 
         for (const row of rows) {
-          seenIds.add(row.session_id)
           let summ: ParsedSummary | null = null
           let problemsCount = 0
 
@@ -688,171 +673,6 @@ export class KyberBridge {
         }
       } catch (err) {
         console.warn('[KyberBridge] Failed querying session table in canon.db:', err)
-      }
-    }
-
-    // 2. Query canon.db `records` table for sessions not yet in list.
-    // Groups by COALESCE(session_id, trace_id) + harness (the session identity).
-    // Tokens and cost are aggregated in TypeScript over parsed JSON columns so
-    // that the cost-basis blending rule (sumCosts) is enforced without SQL.
-    if (this.hasTable(this.canonDb, 'records')) {
-      try {
-        // Try the full query with session_id, tokens_json, cost_json columns
-        // (schema v3+). Fall back to a minimal query for older schemas.
-        let spanRows: TraceRecordRow[] = []
-        try {
-          spanRows = this.canonDb!
-            .prepare(
-              'SELECT COALESCE(session_id, trace_id) as session_key, harness, source, name, ' +
-                'timestamp as started, timestamp as ended, ' +
-                'op, parent_span_id, tokens_json, cost_json ' +
-                'FROM records WHERE COALESCE(session_id, trace_id) IS NOT NULL ' +
-                'ORDER BY timestamp ASC'
-            )
-            .all() as unknown as TraceRecordRow[]
-        } catch {
-          // Older schema without session_id or tokens_json/cost_json
-          spanRows = this.canonDb!
-            .prepare(
-              'SELECT trace_id as session_key, harness, source, name, ' +
-                'timestamp as started, timestamp as ended, ' +
-                'op, parent_span_id ' +
-                'FROM records WHERE trace_id IS NOT NULL ' +
-                'ORDER BY timestamp ASC'
-            )
-            .all() as unknown as TraceRecordRow[]
-        }
-
-        // Group rows by (session_key, harness) in TypeScript
-        type SpanRow = TraceRecordRow & {
-          op?: string | null
-          parent_span_id?: string | null
-        }
-        const groups = new Map<
-          string,
-          {
-            harness: string
-            source: string | null
-            name: string | null
-            started: string | null
-            ended: string | null
-            spanCount: number
-            turnCount: number
-            requestCount: number
-            costBlocks: CostBlock[]
-            totalInput: number
-            totalOutput: number
-            totalCacheRead: number
-            totalCacheCreation: number
-            models: Set<string>
-          }
-        >()
-
-        for (const row of spanRows as SpanRow[]) {
-          const key = `${row.session_key}\0${row.harness}`
-          const existing = groups.get(key)
-          const isLlmInvoke = row.op === 'llm.invoke'
-          const isRoot = row.parent_span_id == null
-
-          // Parse tokens
-          let freshInput = 0
-          let cacheRead = 0
-          let cacheCreation = 0
-          let output = 0
-          let modelStr: string | null = null
-          if (row.tokens_json) {
-            try {
-              const tok = JSON.parse(row.tokens_json) as {
-                freshInput?: number
-                cacheRead?: number
-                cacheCreation?: number
-                output?: number
-                reportedModel?: string
-              }
-              freshInput = Number(tok.freshInput) || 0
-              cacheRead = Number(tok.cacheRead) || 0
-              cacheCreation = Number(tok.cacheCreation) || 0
-              output = Number(tok.output) || 0
-              modelStr = tok.reportedModel ?? null
-            } catch {}
-          }
-
-          // Parse cost block
-          let costBlock: CostBlock | null = null
-          if (row.cost_json) {
-            try {
-              costBlock = JSON.parse(row.cost_json) as CostBlock
-            } catch {}
-          }
-
-          if (!existing) {
-            groups.set(key, {
-              harness: row.harness,
-              source: row.source ?? null,
-              name: row.name ?? null,
-              started: row.started ?? null,
-              ended: row.ended ?? null,
-              spanCount: 1,
-              turnCount: isLlmInvoke ? 1 : 0,
-              requestCount: isRoot ? 1 : 0,
-              costBlocks: costBlock ? [costBlock] : [],
-              totalInput: freshInput + cacheRead + cacheCreation,
-              totalOutput: output,
-              totalCacheRead: cacheRead,
-              totalCacheCreation: cacheCreation,
-              models: modelStr ? new Set([modelStr]) : new Set(),
-            })
-          } else {
-            existing.spanCount += 1
-            if (isLlmInvoke) existing.turnCount += 1
-            if (isRoot) existing.requestCount += 1
-            if (costBlock) existing.costBlocks.push(costBlock)
-            existing.totalInput += freshInput + cacheRead + cacheCreation
-            existing.totalOutput += output
-            existing.totalCacheRead += cacheRead
-            existing.totalCacheCreation += cacheCreation
-            if (row.ended && (existing.ended == null || row.ended > existing.ended)) {
-              existing.ended = row.ended
-            }
-            if (modelStr) existing.models.add(modelStr)
-          }
-        }
-
-        for (const [key, group] of groups) {
-          const sessionKey = key.split('\0')[0]!
-          if (seenIds.has(sessionKey)) continue
-          seenIds.add(sessionKey)
-
-          // Use sumCosts to respect cost-basis blending rules
-          const costResult = sumCosts(group.costBlocks)
-          const costUsd =
-            costResult.ok && costResult.total.status !== 'no_rate' &&
-            typeof costResult.total.value === 'number'
-              ? costResult.total.value
-              : null
-
-          list.push({
-            session_id: sessionKey,
-            harness: group.harness,
-            label: group.name || `${group.harness} session`,
-            is_subagent: false,
-            parent_session: null,
-            agent_name: group.source || group.harness,
-            repo: null,
-            branch: null,
-            started: group.started ?? null,
-            ended: group.ended ?? null,
-            turn_count: group.turnCount || group.spanCount || null,
-            request_count: group.requestCount || 1,
-            total_input: group.totalInput || null,
-            total_output: group.totalOutput || null,
-            cost_usd: costUsd,
-            models: [...group.models],
-            problems: 0,
-          })
-        }
-      } catch (err) {
-        console.warn('[KyberBridge] Failed querying records table in canon.db:', err)
       }
     }
 

@@ -1,4 +1,24 @@
 [[permission]]
+identifier = "allow-get-view-state"
+description = "Read the tray's complete cached view state."
+commands.allow = ["get_view_state"]
+
+[[permission]]
+identifier = "allow-refresh-now"
+description = "Start one validated KyberDash refresh when none is in flight."
+commands.allow = ["refresh_now"]
+
+[[permission]]
+identifier = "allow-open-view"
+description = "Open only a validated KyberDash loopback dashboard route."
+commands.allow = ["open_view"]
+
+[[permission]]
+identifier = "allow-set-settings"
+description = "Persist a validated partial tray-settings document."
+commands.allow = ["set_settings"]
+
+[[permission]]
 identifier = "allow-quit"
 description = "Quit the running tray instance."
 commands.allow = ["quit"]

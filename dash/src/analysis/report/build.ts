@@ -10,7 +10,7 @@
 // measurement. And cost is assembled last and kept per basis (R8.9, R14.2): bases are not
 // blended, and no section above cost may order itself by it.
 
-import type { CanonicalRecord } from '../../canon/types.js'
+import type { CanonicalRecord, MetricAvailability } from '../../canon/types.js'
 import type { KyberBridge, SessionSummary } from '../../server/bridge.js'
 import type { Finding } from '../findings.js'
 import { buildScorecard } from '../scorecard.js'
@@ -211,32 +211,58 @@ function readCostContributions(bridge: KyberBridge, sessionIds: ReadonlySet<stri
     }))
 }
 
+/**
+ * Carry a rollup's per-metric availability into the report's measurability map
+ * (R10.2): the object form carries its reason verbatim, and any string form —
+ * `measured` or `derived` — means the source could measure that metric, which
+ * this contract spells `measurable`.
+ */
+function toReportMeasurability(
+  measurability: Record<string, MetricAvailability> | undefined,
+): Record<string, 'measurable' | { reason: string }> {
+  return Object.fromEntries(
+    Object.entries(measurability ?? {}).map(([metric, availability]) => [
+      metric,
+      typeof availability === 'object' && availability !== null && 'reason' in availability
+        ? { reason: String((availability as { reason: unknown }).reason) }
+        : ('measurable' as const),
+    ]),
+  )
+}
+
+/**
+ * The coverage inventory is the harness selector's navigation metadata (R8.8),
+ * not a second analytic report: it lists every canonical harness with a derived
+ * session inside the day window — whatever harness the report is scoped to —
+ * while findings, dimensions, latest session and cost keep the selected scope.
+ * A rollup row with no window session is not a selector entry, and measurability
+ * enrichment is optional: a harness whose rollup has not been built reports an
+ * empty map rather than an invented one.
+ */
 function buildCoverage(
   bridge: KyberBridge,
   scoped: readonly SessionSummary[],
+  windowed: readonly SessionSummary[],
   storePath: string,
   now: Date,
 ): ReportCoverage {
   const refresh = readRefreshState(bridge)
   const perHarness = new Map<string, number>()
-  for (const session of scoped) {
+  for (const session of windowed) {
     perHarness.set(session.harness, (perHarness.get(session.harness) ?? 0) + 1)
   }
 
-  const rollups = safely(() => bridge.listHarnessRollups(), [])
-  const harnesses = rollups.map((row) => ({
-    harness: row.harness,
-    name: row.harness,
-    sessionsInWindow: perHarness.get(row.harness) ?? 0,
-    measurability: Object.fromEntries(
-      Object.entries(row.measurability ?? {}).map(([metric, availability]) => [
-        metric,
-        typeof availability === 'object' && availability !== null && 'reason' in availability
-          ? { reason: String((availability as { reason: unknown }).reason) }
-          : ('measurable' as const),
-      ]),
-    ),
-  }))
+  const measurabilityByHarness = new Map(
+    safely(() => bridge.listHarnessRollups(), []).map((row) => [row.harness, row.measurability]),
+  )
+  const harnesses = [...perHarness.keys()]
+    .sort((a, b) => a.localeCompare(b))
+    .map((harness) => ({
+      harness,
+      name: harness,
+      sessionsInWindow: perHarness.get(harness) ?? 0,
+      measurability: toReportMeasurability(measurabilityByHarness.get(harness)),
+    }))
 
   const hints: string[] = []
   if (scoped.length === 0) {
@@ -307,10 +333,15 @@ function buildLatestSession(
   bridge: KyberBridge,
   session: SessionSummary,
 ): ReportLatestSession {
-  const analysis = safely(() => bridge.getSessionContent(session.session_id), undefined) as
+  // The derived `context` a latest-turn measurement needs lives only in the
+  // persisted session payload behind `getSessionPayload()` (R8.2).
+  // `getSessionContent()` is the unclipped `{ sessionId, parts }` inspector
+  // view and never carries context — reading it here measured nothing and
+  // always fell through to the no-structure reason.
+  const payload = safely(() => bridge.getSessionPayload(session.session_id), null) as
     | { context?: unknown }
-    | undefined
-  const context = extractContext(analysis)
+    | null
+  const context = extractContext(payload ?? undefined)
 
   const unmeasured = (reason: string) => ({
     index: 0,
@@ -441,7 +472,16 @@ export function buildContextReport(
   }
 
   if (sections.has('coverage')) {
-    report.coverage = buildCoverage(bridge, scoped, options.storePath ?? 'canon.db', now)
+    // The inventory is window-only, recomputed from every listed session: by
+    // the time it runs, `scoped` has already been narrowed by the harness,
+    // session and run filters the inventory must ignore (R8.8).
+    report.coverage = buildCoverage(
+      bridge,
+      scoped,
+      sessionsInScope(allSessions, { days: scope.days }, now),
+      options.storePath ?? 'canon.db',
+      now,
+    )
   }
 
   if (sections.has('detection')) {

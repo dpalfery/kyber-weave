@@ -4,18 +4,27 @@ title: The tray popover cannot load because four of its six IPC commands do not 
 doc-type: todo
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-20
-status: draft
+last-reviewed: 2026-09-21
+status: needs-review
 ---
 
 # The tray popover cannot load because four of its six IPC commands do not exist
+
+> [!NOTE]
+> **Implementation status — review required:** The runtime wiring, six-command registration,
+> failure feedback, template glyph, built-CLI SQLite resolution, and Tauri hook paths were
+> implemented under the [menu-bar runtime wiring plan](../plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md).
+> Rust and UI contracts pass, and a real Tauri launch reached `127.0.0.1:4747` with HTTP 200
+> and clean child reaping. The todo remains open because CUA could not bind the macOS
+> `LSUIElement`/status-item host (`-10005`), so the real popover and glyph appearance have
+> not yet been observed or captured.
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the seam is. It does not sequence tasks or commit to an implementation.
 
 ## Why this exists
 
-Running the tray locally (`tauri dev` from `dash/tray`) builds, launches, puts a status item
+At intake, running the tray locally (`tauri dev` from `dash/tray`) built, launched, put a status item
 in the menu bar and opens the popover on click. The popover then shows `Reading the store…`
 forever, and no data ever arrives.
 
@@ -33,11 +42,11 @@ Both were found while verifying an unrelated CI fix (`b560d5f5`), by looking at 
 app rather than at the process table. A green build and a live PID had been taken as evidence
 that the tray worked; neither is.
 
-## What is known
+## Original findings at intake
 
-- **The UI calls six commands; the app registers two.** `get_view_state`, `refresh_now`,
-  `open_view` and `set_settings` have no `#[tauri::command]` anywhere in the crate. The only
-  registration point is [`lib.rs:129`](../../dash/tray/src-tauri/src/lib.rs:129),
+- **At intake, the UI called six commands while the app registered two.** `get_view_state`,
+  `refresh_now`, `open_view` and `set_settings` had no `#[tauri::command]` in the crate. The
+  registration point in [`lib.rs`](../../dash/tray/src-tauri/src/lib.rs) contained only
   `generate_handler![quit, hide_popover]`.
 - **The capability would refuse them anyway.**
   [`capabilities/tray.json`](../../dash/tray/src-tauri/capabilities/tray.json) grants
@@ -46,30 +55,51 @@ that the tray worked; neither is.
 - **The logic they would wrap already exists and is unit-tested.** `ipc.rs` has `view_state`,
   `view_path_patterns`, `matches_view_path` and `open_view_url`; `supervisor.rs` has
   `refresh_now`. What is missing is the command layer between them and the webview.
-- **Nothing produces data to serve.** `supervisor` and `scheduler` are declared as modules at
-  [`lib.rs:10-13`](../../dash/tray/src-tauri/src/lib.rs:10) but never instantiated, and
-  nothing is `manage()`d into Tauri state. The only `tauri::async_runtime::spawn` in the file
-  is the 150ms popover unfocus delay. Observed consequences on a live run: the tray spawns no
-  child process, never consults `KYBERDASH_BIN`, and emits no runtime output at all.
-- **The `view-state-changed` event has no emitter.** `App.tsx` subscribes to it; no Rust code
-  sends it. Even a working `get_view_state` would give one snapshot and never update.
-- **The failure is silent by construction.** The `invoke` at
-  [`App.tsx:23`](../../dash/tray/ui/src/App.tsx:23) has a `.then` and no `.catch`, so a
-  rejected command is indistinguishable from a slow one. This is why the symptom reads as a
-  hang.
-- **The status item uses the app icon as a template image.**
-  [`lib.rs:103-109`](../../dash/tray/src-tauri/src/lib.rs:103) passes `default_window_icon()`
-  to `TrayIconBuilder` with `.icon_as_template(true)`. macOS template images must be black
-  and transparent; a full-colour PNG flattens to a filled silhouette, which is the blank
-  square on screen. There is no monochrome template asset in
-  [`icons/`](../../dash/tray/src-tauri/icons).
+- **At intake, nothing produced data to serve.** `supervisor` and `scheduler` were declared
+  as modules but never instantiated, and nothing was `manage()`d into Tauri state. The tray
+  spawned no child process, never consulted `KYBERDASH_BIN`, and emitted no runtime output.
+- **At intake, the `view-state-changed` event had no emitter.** `App.tsx` subscribed to it;
+  no Rust code sent it. Even a working `get_view_state` would have given one snapshot and
+  never updated.
+- **At intake, the failure was silent by construction.** The mount `invoke` in
+  [`App.tsx`](../../dash/tray/ui/src/App.tsx) had a `.then` and no `.catch`, so a rejected
+  command was indistinguishable from a slow one. This is why the symptom read as a hang.
+- **At intake, the status item used the app icon as a template image.**
+  [`lib.rs`](../../dash/tray/src-tauri/src/lib.rs) passed `default_window_icon()` to
+  `TrayIconBuilder` with `.icon_as_template(true)`. macOS template images must be black and
+  transparent; a full-colour PNG flattened to a filled silhouette, which was the blank square
+  on screen. There was no monochrome template asset in [`icons/`](../../dash/tray/src-tauri/icons).
 - **Task 8.9 is marked complete.** [`tasks.md:393`](../specs/kyberdash-context-surfaces/tasks.md:393),
   "IPC surface and opening views", is `[x]`. Its acceptance is written entirely as tests of
   the helper functions — `get_view_state` carrying the design's `ViewState`, `open_view`
   refusing unmatched paths — every one of which passes against `ipc.rs` without a command
   ever being registered. The task is checked and the running app does not expose the surface.
 
-## What needs deciding
+## Verified implementation evidence
+
+- The Rust runtime contract moved from intentional RED to GREEN: 113 tray unit tests and 10
+  runtime contract tests pass.
+- The React rejection/retry and event-update coverage moved from intentional RED to GREEN;
+  the tray UI suite passes all 60 tests, with typecheck and lint passing.
+- A real Tauri launch using the built CLI resolved the CLI's SQLite dependency, reached the
+  real loopback server at `127.0.0.1:4747` with HTTP 200, and reaped its owned child cleanly.
+  The Tauri hook paths were corrected during the same implementation.
+- The broader Dash suite is 3,528/3,529 passing. Its one failure is the unrelated,
+  pre-existing `dash/kyber` source-layout failure.
+
+The remaining evidence is specifically visual and surface-level: CUA could not bind the
+`LSUIElement`/status-item KyberDash host (`-10005`), so it did not produce actual popover
+interaction or screenshots. On a host that can bind that status item, open the popover and
+exercise `refresh_now`, `open_view`, `set_settings`, `hide_popover`, and `quit`; observe the
+report/event update and visible CLI break/recovery; then capture the template glyph in light
+and dark menu bars with Reduce Transparency and accent settings. Keep this todo in
+`needs-review` until those observations are recorded.
+
+## Original open questions
+
+These questions were captured when the todo was written. The approved implementation plan
+settled the runtime startup and failure-feedback choices; the broader task-checkmark audit
+and live visual proof remain governed by the plan and are not claimed closed here.
 
 - **Whether the gap is the tasks or the task template.** 8.9 is not the only task whose
   acceptance is phrased as unit tests over helpers. If the wiring is what gets skipped, then
@@ -95,18 +125,18 @@ that the tray worked; neither is.
 ## The code seam
 
 - [`dash/tray/src-tauri/src/lib.rs`](../../dash/tray/src-tauri/src/lib.rs) — the
-  `generate_handler!` list at 129, the tray icon at 103-109, and `setup()`, which is where a
-  supervisor and scheduler would be constructed and managed.
+  `generate_handler!` list, the tray icon, and `setup()`, where the runtime is constructed and
+  managed.
 - [`dash/tray/src-tauri/src/ipc.rs`](../../dash/tray/src-tauri/src/ipc.rs) — `view_state`,
   `open_view_url`, `matches_view_path`; the functions the missing commands would wrap.
 - [`dash/tray/src-tauri/src/supervisor.rs`](../../dash/tray/src-tauri/src/supervisor.rs),
-  [`scheduler.rs`](../../dash/tray/src-tauri/src/scheduler.rs) — the data path that is
-  written, tested and never started.
+  [`scheduler.rs`](../../dash/tray/src-tauri/src/scheduler.rs) — the data path now composed by
+  the runtime.
 - [`dash/tray/src-tauri/capabilities/tray.json`](../../dash/tray/src-tauri/capabilities/tray.json),
-  [`permissions/tray.toml`](../../dash/tray/src-tauri/permissions/tray.toml) — both must gain
-  an entry per command, or the commands stay denied.
-- [`dash/tray/ui/src/App.tsx`](../../dash/tray/ui/src/App.tsx) — the uncaught `invoke` at 23
-  and the loading branch at 47-53.
+  [`permissions/tray.toml`](../../dash/tray/src-tauri/permissions/tray.toml) — the six-command
+  authorization boundary.
+- [`dash/tray/ui/src/App.tsx`](../../dash/tray/ui/src/App.tsx) — initial-state/error handling,
+  event subscription, and action rejection feedback.
 - [`dash/tray/src-tauri/icons/`](../../dash/tray/src-tauri/icons) — where a template asset
   would live.
 - [`docs/specs/kyberdash-context-surfaces/tasks.md`](../specs/kyberdash-context-surfaces/tasks.md) —
@@ -124,5 +154,5 @@ that the tray worked; neither is.
   `view-state-changed` is emitted and not merely subscribed to.
 - The status item renders as a legible glyph in both light and dark menu bars, and under
   "Reduce transparency" and the macOS accent settings.
-- `KYBERDASH_BIN` set to a built `dash/dist/cli.js` is honoured: the tray spawns it, and
-  `pgrep -P <tray pid>` shows the child. Today it shows nothing.
+- `KYBERDASH_BIN` set to a built `dash/dist/cli.js` is honoured: the tray spawns it, and the
+  real loopback server responds with HTTP 200. The owned child is reaped cleanly on shutdown.

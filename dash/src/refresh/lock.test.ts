@@ -6,6 +6,7 @@ import { join } from 'path'
 
 import {
   acquireCacheRefreshLock,
+  acquireStoreRefreshLock,
   type RefreshLockClock,
 } from './lock.js'
 import { clearSessionCache, parseAllSessions } from '../ingest/parser.js'
@@ -21,6 +22,10 @@ async function tempDir(): Promise<string> {
 
 function lockPath(dir: string): string {
   return join(dir, 'session-refresh.lock')
+}
+
+function storeLockPath(dir: string): string {
+  return join(dir, 'refresh.lock')
 }
 
 function fakeClock(start = 1_000): RefreshLockClock & { advance: (ms: number) => void } {
@@ -350,6 +355,46 @@ describe('warm session-cache refresh lock', () => {
     }
     await result.handle.release()
     await rm(dir, { recursive: true, force: true })
+  })
+})
+
+describe('canonical-store refresh lock', () => {
+  it('takes over a fresh lock owned by a definitively dead pid without waiting or sleeping', async () => {
+    const dir = await tempDir()
+    const path = storeLockPath(dir)
+    const gone = await exitedPid()
+    await writeFile(path, JSON.stringify({ pid: gone, token: 'dead-owner', at: Date.now() }))
+
+    let sleeps = 0
+    const result = await acquireStoreRefreshLock({
+      directory: dir,
+      waitMs: 0,
+      sleep: async () => { sleeps++ },
+    })
+
+    expect(result.outcome).toBe('acquired')
+    expect(sleeps).toBe(0)
+    if (result.outcome !== 'acquired') return
+    expect(JSON.parse(await readFile(path, 'utf-8'))).toMatchObject({
+      pid: process.pid,
+      token: result.handle.token,
+    })
+    await result.handle.release()
+  })
+
+  it('times out on a fresh lock owned by this live process without changing or deleting it', async () => {
+    const dir = await tempDir()
+    const path = storeLockPath(dir)
+    const bytes = JSON.stringify({ pid: process.pid, token: 'live-owner', at: Date.now() })
+    await writeFile(path, bytes)
+
+    const result = await acquireStoreRefreshLock({
+      directory: dir,
+      waitMs: 0,
+    })
+
+    expect(result).toEqual({ outcome: 'timed-out' })
+    await expect(readFile(path, 'utf-8')).resolves.toBe(bytes)
   })
 })
 

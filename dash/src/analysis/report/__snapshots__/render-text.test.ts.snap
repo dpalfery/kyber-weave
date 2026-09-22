@@ -36,7 +36,6 @@ Data coverage
   Refresh:    2026-09-19T11:00:00.000Z (1h ago)
   Harnesses:
     claude-code      detected        1 session
-    codex            not detected    0 sessions
   Quarantine: 0
   Problems:   0
 

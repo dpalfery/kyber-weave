@@ -1,7 +1,7 @@
 // Harness-source refresh contract: one job per registry descriptor, isolated
 // failures, no Gemini harness, and writes proportional to changed units.
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,6 +13,42 @@ import { descriptorFor } from './registry.js'
 import type { NativeUnit } from './source-reader.js'
 import { refreshHarnessSources } from './orchestrator.js'
 import { formatRefreshReport } from './report.js'
+
+// The canonical-projection correction pins static refresh to the SAME entry
+// point the live collector uses (plan: T20 → T21): refresh must reach
+// `projectCanonicalStore` once, after its writer has drained, rather than a
+// private `buildSessions` call that can drift from the live pipeline.
+//
+// The spy records into a hoisted side channel rather than being read back
+// through an import of `../canon/projection.js`, because that module does not
+// exist yet in the RED state and importing it here would fail the whole file
+// — the pre-existing refresh regressions below must keep running. While the
+// module is missing the probe simply observes zero calls; once it exists the
+// mock delegates to the real projection so every other test in this file
+// derives exactly as before.
+const projectionProbe = vi.hoisted(() => {
+  const key = '__kyberdash_projection_probe__'
+  const scope = globalThis as Record<string, unknown>
+  if (scope[key] === undefined) {
+    scope[key] = { calls: [] as Array<{ store: unknown; recordsAtCall: number }> }
+  }
+  return scope[key] as { calls: Array<{ store: unknown; recordsAtCall: number }> }
+})
+
+vi.mock('../canon/projection.js', async (importOriginal) => {
+  const actual = (await importOriginal<Record<string, unknown>>().catch(() => null)) ?? {}
+  const shared = actual['projectCanonicalStore']
+  const delegate = typeof shared === 'function'
+    ? (shared as (store: { count(): number }) => Promise<unknown>)
+    : undefined
+  return {
+    ...actual,
+    projectCanonicalStore: async (store: { count(): number }): Promise<unknown> => {
+      projectionProbe.calls.push({ store, recordsAtCall: store.count() })
+      return delegate !== undefined ? await delegate(store) : undefined
+    },
+  }
+})
 
 const temporaryRoots: string[] = []
 
@@ -442,6 +478,40 @@ describe('refreshHarnessSources — write volume', () => {
       const all = store.listAll()
       expect(all).toHaveLength(1)
       expect(all[0]!.spanId).toBe('bb22cc33dd44ee55')
+    } finally {
+      store.close()
+    }
+  })
+})
+
+describe('refreshHarnessSources — shared projection entry point', () => {
+  it('reaches projectCanonicalStore once, after the writer has drained its records', async () => {
+    const store = temporaryStore()
+    projectionProbe.calls.length = 0
+    try {
+      const sources = [source('pi', 'conversation')]
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [
+          nativeProvider('pi', sources, new Map([
+            [sources[0]!.path, [call('pi', 'pi-session')]],
+          ])),
+        ],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      expect(report.rows[0]).toMatchObject({ status: 'ok', created: 1 })
+
+      // One projection per refresh — the shared entry point, not a private
+      // buildSessions call and not one projection per harness job.
+      expect(projectionProbe.calls).toHaveLength(1)
+      expect(projectionProbe.calls[0]?.store).toBe(store)
+      // The fixture commits exactly one record, and the projection saw it:
+      // the writer drained before the projection ran. A projection racing
+      // the writer would have seen zero records here.
+      expect(projectionProbe.calls[0]?.recordsAtCall).toBe(1)
     } finally {
       store.close()
     }

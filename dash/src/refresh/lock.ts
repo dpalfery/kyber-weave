@@ -553,18 +553,29 @@ export async function acquireCacheRefreshLock(options: RefreshLockOptions = {}):
     }
 
     const deadline = clock.monotonicNow() + waitMs
-    while (clock.monotonicNow() < deadline) {
+    let firstObservation = true
+    while (firstObservation || clock.monotonicNow() < deadline) {
+      firstObservation = false
       const observation = await observe(lockPath)
       if (observation === 'unavailable') { leave(); return { outcome: 'unavailable' } }
-      if (observation === 'changing') { await sleep(pollMs); continue }
+      if (observation === 'changing') {
+        if (waitMs <= 0) break
+        await sleep(pollMs)
+        continue
+      }
       if (observation === 'missing') {
         // A stale taker removes the primary while holding the guard, then
         // exclusively creates its successor. Do not misreport that narrow gap
         // as a clean completion by the previous owner.
         const guard = await observe(takeoverPath)
         if (guard === 'unavailable') { leave(); return { outcome: 'unavailable' } }
-        if (guard === 'changing') { await sleep(pollMs); continue }
+        if (guard === 'changing') {
+          if (waitMs <= 0) break
+          await sleep(pollMs)
+          continue
+        }
         if (guard === 'missing') { leave(); return { outcome: 'completed-by-other' } }
+        if (waitMs <= 0) break
         await sleep(pollMs)
         continue
       }
@@ -582,6 +593,7 @@ export async function acquireCacheRefreshLock(options: RefreshLockOptions = {}):
           return takeover
         }
       }
+      if (waitMs <= 0) break
       await sleep(pollMs)
     }
     leave()

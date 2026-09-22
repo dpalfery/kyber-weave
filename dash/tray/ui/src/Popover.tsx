@@ -25,26 +25,41 @@ import type { TrayCommands, ViewState } from './viewState'
 type Props = {
   state: ViewState
   commands: TrayCommands
+  actionError?: string | null
   /** Injected so the rendered age is deterministic in tests. */
   now?: Date
 }
 
-export function Popover({ state, commands, now = new Date() }: Props) {
+export function Popover({ state, commands, actionError = null, now = new Date() }: Props) {
   const [showSettings, setShowSettings] = useState(false)
+  const actionErrorBanner =
+    actionError === null ? null : (
+      <div className="ipc-action-error" data-testid="ipc-action-error" role="alert">
+        Tray action failed: {actionError}
+      </div>
+    )
 
   // R6.7: a missing or too-old CLI replaces the panels. Showing the last
   // report beneath a setup notice would be presenting earlier data as current.
   if (state.phase === 'setup' && state.setup !== undefined) {
-    return <SetupState setup={state.setup} onQuit={commands.quit} />
+    return (
+      <>
+        {actionErrorBanner}
+        <SetupState setup={state.setup} onQuit={commands.quit} />
+      </>
+    )
   }
 
   if (showSettings) {
     return (
-      <SettingsView
-        settings={state.settings}
-        onChange={commands.setSettings}
-        onBack={() => setShowSettings(false)}
-      />
+      <>
+        {actionErrorBanner}
+        <SettingsView
+          settings={state.settings}
+          onChange={commands.setSettings}
+          onBack={() => setShowSettings(false)}
+        />
+      </>
     )
   }
 
@@ -54,6 +69,7 @@ export function Popover({ state, commands, now = new Date() }: Props) {
 
   return (
     <main className="popover" data-testid="popover" data-phase={state.phase}>
+      {actionErrorBanner}
       {state.phase === 'stale' && (
         <StaleBanner
           fetchedAt={state.reportFetchedAt}

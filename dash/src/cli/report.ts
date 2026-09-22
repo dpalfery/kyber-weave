@@ -11,7 +11,12 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import { DatabaseSync } from 'node:sqlite'
+
+const requireForSqlite = createRequire(import.meta.url)
+const { DatabaseSync } = requireForSqlite('node:sqlite') as {
+  DatabaseSync: typeof import('node:sqlite').DatabaseSync
+}
+type Database = import('node:sqlite').DatabaseSync
 
 import { Command, InvalidArgumentError } from 'commander'
 
@@ -149,7 +154,7 @@ function openStoreReadOnly(path: string): { bridge: KyberBridge; close: () => vo
     process.stderr.write(`kyberdash report: cannot open store ${path}\n`)
     process.exit(1)
   }
-  let db: DatabaseSync
+  let db: Database
   try {
     db = new DatabaseSync(path, { readOnly: true })
     db.prepare('SELECT 1').get()
