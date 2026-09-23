@@ -2,6 +2,7 @@ schema: kyber-squad.model-profiles/v1
 profiles:
   deep-planning:
     default: inherit
+    antigravity: pro
     claude: opus
     codex: gpt-5.6-sol
     copilot: GPT-5.6 Sol (copilot)
@@ -12,6 +13,7 @@ profiles:
     zcode: glm-5.3
   fast:
     default: inherit
+    antigravity: flash
     claude: haiku
     codex: gpt-5.6-luna
     copilot: MAI-Code-1.1-Flash (copilot)
@@ -22,6 +24,7 @@ profiles:
     zcode: glm-5.3-flash
   general:
     default: inherit
+    antigravity: flash
     claude: haiku
     codex: gpt-5.6-terra
     copilot: Grok 4.6 (copilot)
@@ -32,6 +35,7 @@ profiles:
     zcode: glm-5.3-flash
   orchestration:
     default: inherit
+    antigravity: flash
     claude: haiku
     kilo: inherit
     opencode: opencode/big-pickle
@@ -39,6 +43,7 @@ profiles:
     zcode: glm-5.3-flash
   reviewer:
     default: inherit
+    antigravity: pro
     claude: sonnet
     codex: gpt-5.6-terra
     copilot: Kimi K2.7 Code (copilot)

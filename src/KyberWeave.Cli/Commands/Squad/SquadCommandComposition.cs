@@ -60,11 +60,13 @@ internal static class SquadCommandComposition
 
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
-    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, and Factory are native;
-    /// Antigravity and Warp are fallback role-skill lowering (to <c>.agents/skills/</c> and
-    /// <c>.warp/skills/</c>). Pi is native through the third-party <c>@tintinweb/pi-subagents</c>
-    /// extension's custom-agent format, with its one <c>invocation: primary</c> agent lowered to
-    /// a top-level skill because Pi core has no primary-agent primitive (see <see cref="PiRenderer"/> remarks).
+    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, and Antigravity are native;
+    /// Warp is fallback role-skill lowering (to <c>.warp/skills/</c>). Antigravity is native via
+    /// per-agent directories at <c>.agents/agents/{name}/agent.md</c> with canonical skills at
+    /// <c>.agents/skills/{name}/SKILL.md</c> (the "Native Both" pattern). Pi is native through the
+    /// third-party <c>@tintinweb/pi-subagents</c> extension's custom-agent format, with its one
+    /// <c>invocation: primary</c> agent lowered to a top-level skill because Pi core has no
+    /// primary-agent primitive (see <see cref="PiRenderer"/> remarks).
     /// Every other approved target fails closed with a pointer to its <c>docs/todo/</c>
     /// entry rather than being silently dropped from the roster.
     /// </summary>

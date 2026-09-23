@@ -1,90 +1,74 @@
-using System.Globalization;
-using System.Text;
 using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>
-/// Shared helper for recording degradation when process.execute is allowed but filesystem.write
-/// is denied or ask, creating a capability-isolation breach.
+/// Shared degradation record builder for the capability-not-isolable pattern: when a
+/// harness grants a shell-class tool (Bash, Powershell, Execute, run_command, etc.),
+/// write access becomes reachable through redirection even when write-class tools are
+/// withheld. This gap appears in multiple renderers (Claude, Pi, ZCode, Factory,
+/// OpenCode, Antigravity) and is recorded via this shared helper to ensure consistent
+/// wording and structure across targets.
 /// </summary>
+/// <remarks>
+/// D10: This degradation is recorded when <c>process.execute: allow</c> and
+/// <c>filesystem.write: ask</c> or <c>deny</c>. The narrowing of write-class tools
+/// is still applied (no <c>Edit</c>, <c>Write</c>, etc., in the tools list), but
+/// this degradation explains why that narrowing is incomplete: the shell can reach
+/// write through I/O redirection (e.g., `cmd > file`, `echo text >> file`).
+/// </remarks>
 internal static class CapabilityDegradations
 {
     /// <summary>
-    /// Builds a <c>capability-not-isolable</c> degradation record when process.execute is allow
-    /// and filesystem.write is ask or deny, naming the granted shell tools and withheld write tools.
+    /// Determines whether a capability-not-isolable degradation should be recorded when
+    /// <c>process.execute: allow</c> coexists with <c>filesystem.write: ask</c> or <c>deny</c>,
+    /// meaning write access remains reachable through shell redirection despite narrowing
+    /// the write-class tool list.
     /// </summary>
-    /// <remarks>
-    /// A granted shell tool can write files through redirection (e.g., <c>bash > file.txt</c> or
-    /// <c>output=$(command)</c>), so withholding specific named write tools does not isolate the
-    /// write capability when the shell is granted. This degradation is structural and present across
-    /// all six renderers (Claude, Pi, ZCode, Factory, OpenCode, Antigravity) because the shell
-    /// behavior is constant — the tool names differ by renderer, but the logic is shared here.
-    /// </remarks>
-    /// <param name="targetToken">The rendering target token (e.g., "claude", "pi", "factory").</param>
-    /// <param name="canonicalIdentity">The canonical agent name.</param>
-    /// <param name="outputIdentity">The agent name in the rendered output.</param>
-    /// <param name="instructionDigest">The instruction body digest.</param>
-    /// <param name="executeDecision">The process.execute permission decision.</param>
-    /// <param name="writeDecision">The filesystem.write permission decision.</param>
-    /// <param name="grantedShellTools">The set of shell/execute tools granted to the agent.</param>
-    /// <param name="withheldWriteTools">The set of write tools withheld from the agent.</param>
+    /// <param name="targetToken">The target token (e.g., "antigravity", "claude").</param>
+    /// <param name="canonicalIdentity">The canonical agent identity.</param>
+    /// <param name="outputIdentity">The rendered output identity (usually same as canonical).</param>
+    /// <param name="instructionDigest">The agent's body digest.</param>
+    /// <param name="executeDecision">The <c>process.execute</c> permission decision from the capability profile.</param>
+    /// <param name="writeDecision">The <c>filesystem.write</c> permission decision from the capability profile.</param>
+    /// <param name="grantedShellTools">
+    /// The names of shell-class tools the target emits when process.execute is allowed
+    /// (e.g., ["run_command"] for Antigravity, ["Bash", "PowerShell"] for Claude).
+    /// </param>
+    /// <param name="withheldWriteTools">
+    /// The names of write-class tools the target withholds when write is not allowed
+    /// (e.g., ["write_to_file", "replace_file_content"] for Antigravity,
+    /// ["Edit", "Write"] for Claude).
+    /// </param>
     /// <returns>
-    /// A degradation record when executeDecision is Allow AND writeDecision is Ask or Deny
-    /// AND at least one shell tool is granted; null otherwise.
+    /// A degradation record with code "capability-not-isolable" naming both tool sets,
+    /// or <c>null</c> if the gap does not apply (write is allowed, or execute is not allowed).
     /// </returns>
-    internal static SquadDegradationRecord? BuildCapabilityNotIsolable(
+    public static SquadDegradationRecord? BuildCapabilityNotIsolable(
         string targetToken,
         string canonicalIdentity,
         string outputIdentity,
         string instructionDigest,
         SquadPermissionDecision executeDecision,
         SquadPermissionDecision writeDecision,
-        string[] grantedShellTools,
-        string[] withheldWriteTools)
+        IReadOnlyList<string> grantedShellTools,
+        IReadOnlyList<string> withheldWriteTools)
     {
-        ArgumentNullException.ThrowIfNull(targetToken);
-        ArgumentNullException.ThrowIfNull(canonicalIdentity);
-        ArgumentNullException.ThrowIfNull(outputIdentity);
-        ArgumentNullException.ThrowIfNull(instructionDigest);
-        ArgumentNullException.ThrowIfNull(grantedShellTools);
-        ArgumentNullException.ThrowIfNull(withheldWriteTools);
-
-        // XOR pattern: execute must be allow, write must be ask or deny, and at least one shell tool granted
-        if (executeDecision != SquadPermissionDecision.Allow)
+        // The gap applies only when execute is allow and write is NOT allow
+        if (executeDecision != SquadPermissionDecision.Allow || writeDecision == SquadPermissionDecision.Allow)
         {
             return null;
         }
 
-        if (writeDecision == SquadPermissionDecision.Allow)
+        // No gap if there are no shell tools to grant
+        if (grantedShellTools.Count == 0)
         {
             return null;
         }
 
-        if (grantedShellTools.Length == 0)
-        {
-            return null;
-        }
-
-        StringBuilder details = new StringBuilder();
-
-        // Name the target
-        details.Append(CultureInfo.InvariantCulture, $"Target '{targetToken}': ");
-
-        // Name all granted shell tools (in stable order)
-        string[] sortedShellTools = grantedShellTools.OrderBy(tool => tool, StringComparer.Ordinal).ToArray();
-        details.Append(CultureInfo.InvariantCulture, $"granted shell tool{(sortedShellTools.Length > 1 ? "s" : "")} ");
-        details.Append(string.Join(", ", sortedShellTools));
-
-        // Name all withheld write tools (in stable order)
-        if (withheldWriteTools.Length > 0)
-        {
-            string[] sortedWriteTools = withheldWriteTools.OrderBy(tool => tool, StringComparer.Ordinal).ToArray();
-            details.Append(CultureInfo.InvariantCulture, $"; withheld write tool{(sortedWriteTools.Length > 1 ? "s" : "")} ");
-            details.Append(string.Join(", ", sortedWriteTools));
-        }
-
-        details.Append('.');
+        // The gap exists: shell is allowed but write is denied or ask.
+        string shellTools = string.Join(", ", grantedShellTools.Order(StringComparer.Ordinal));
+        string writeTools = string.Join(", ", withheldWriteTools.Order(StringComparer.Ordinal));
 
         return new SquadDegradationRecord(
             Target: targetToken,
@@ -92,6 +76,7 @@ internal static class CapabilityDegradations
             OutputIdentity: outputIdentity,
             Code: "capability-not-isolable",
             InstructionDigest: instructionDigest,
-            Details: details.ToString());
+            Details: $"Capability profile grants process.execute ({shellTools}) but denies filesystem.write. " +
+                $"Write access remains reachable through shell redirection despite withholding write tools ({writeTools}).");
     }
 }

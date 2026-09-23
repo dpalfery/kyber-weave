@@ -451,7 +451,7 @@ public sealed class SquadGlobalRootTests : IDisposable
                 $"the resolved global root '{expectedRoot}'.");
         }
 
-        if (target == SquadTarget.Antigravity || target == SquadTarget.Warp)
+        if (target == SquadTarget.Warp)
         {
             Assert.False(sawAgentFile, $"{target} has no agent primitive; global scope must emit skills/ only.");
         }
@@ -705,7 +705,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Codex, ".codex/")]
     [InlineData(SquadTarget.Cursor, ".cursor/")]
     [InlineData(SquadTarget.Copilot, ".github/")]
-    [InlineData(SquadTarget.Antigravity, ".agents/skills/")]
+    [InlineData(SquadTarget.Antigravity, ".agents/")]
     [InlineData(SquadTarget.Pi, ".pi/")]
     [InlineData(SquadTarget.OpenCode, ".opencode/")]
     [InlineData(SquadTarget.Kilo, ".kilo/")]
@@ -739,9 +739,23 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors ?? Array.Empty<string>()));
         Assert.NotNull(result.Receipt);
         Assert.NotEmpty(result.Receipt.Files);
-        Assert.All(
-            result.Receipt.Files,
-            file => Assert.StartsWith(expectedPrefix, file.RelativePath, StringComparison.Ordinal));
+
+        // Antigravity (native dual-root) emits files under both .agents/agents/ and .agents/skills/.
+        if (target == SquadTarget.Antigravity)
+        {
+            Assert.All(
+                result.Receipt.Files,
+                file => Assert.True(
+                    file.RelativePath.StartsWith(".agents/agents/", StringComparison.Ordinal) ||
+                    file.RelativePath.StartsWith(".agents/skills/", StringComparison.Ordinal),
+                    $"Antigravity file '{file.RelativePath}' is not under .agents/agents/ or .agents/skills/."));
+        }
+        else
+        {
+            Assert.All(
+                result.Receipt.Files,
+                file => Assert.StartsWith(expectedPrefix, file.RelativePath, StringComparison.Ordinal));
+        }
     }
 
     // ---------------------------------------------------------------------------------------

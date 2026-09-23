@@ -37,7 +37,7 @@ public interface ISquadGlobalRootResolver
 ///   `CODEX_HOME` confirmed live in the owner's `config.toml` on this machine
 /// - Cursor: `.cursor/agents/` and `.cursor/skills/` under `$CURSOR_CONFIG_DIR` (default `~/.cursor`)
 /// - Copilot: `.copilot/agents/` and `.copilot/skills/` under `$COPILOT_HOME` (default `~/.copilot`)
-/// - Antigravity: `skills/` under `~/.gemini/config/` (no override, no agent primitive)
+/// - Antigravity: `agents/` and `skills/` under `~/.gemini/config/` (no override; native agent primitive since 1.2.7)
 /// - Pi: `agents/` and `skills/` under `$PI_CODING_AGENT_DIR` (default `~/.pi/agent`)
 /// - OpenCode: `agents/` and `skills/` under a three-tier root — `$OPENCODE_CONFIG_DIR` first,
 ///   then `$XDG_CONFIG_HOME/opencode`, then `~/.config/opencode` — unlike every other target's
