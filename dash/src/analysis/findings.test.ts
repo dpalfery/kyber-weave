@@ -415,6 +415,469 @@ describe('Detector 5: compaction-hazard', () => {
 
     expect(findings.length).toBe(0)
   })
+
+  it('derives the context window from the reported gen_ai.request.max_context_tokens attribute', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-early',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-peak',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 900_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 900_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [turn1, turn2],
+    })
+
+    // 85% of the reported 1,000,000 window is 850,000; the 900,000 peak
+    // exceeds it by 50,000 — not the 730,000 the fixed 200k default implies.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.detectorId).toBe('compaction-hazard')
+    expect(f.estimatedWasteTokens).toBe(50_000)
+    expect(f.mechanism).toContain('90%')
+    expect(f.mechanism).toMatch(/1,?000,000/)
+  })
+
+  it('derives the window per session and attributes the finding to the session that fired', () => {
+    const sessionATurn1 = makeMockRecord({
+      spanId: 'session-a-early',
+      op: 'llm.invoke',
+      sessionId: 'session-a',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const sessionATurn2 = makeMockRecord({
+      spanId: 'session-a-peak',
+      op: 'llm.invoke',
+      sessionId: 'session-a',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const sessionBTurn1 = makeMockRecord({
+      spanId: 'session-b-early',
+      op: 'llm.invoke',
+      sessionId: 'session-b',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const sessionBTurn2 = makeMockRecord({
+      spanId: 'session-b-peak',
+      op: 'llm.invoke',
+      sessionId: 'session-b',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [sessionATurn1, sessionATurn2, sessionBTurn1, sessionBTurn2],
+    })
+
+    // 190,000 tokens exceed 85% of session-a's reported 200,000 window but
+    // stay far under session-b's reported 1,000,000, so only session-a fires.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('session-a')
+    expect(findings.some((finding) => finding.sessionId === 'session-b')).toBe(false)
+    expect(f.estimatedWasteTokens).toBe(20_000) // 190k - 170k (85% of 200k)
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.payload?.contextLimitSource).toBe('reported')
+  })
+
+  it('emits one finding per session when both sessions exceed their own thresholds', () => {
+    const sessionATurn1 = makeMockRecord({
+      spanId: 'session-a-early',
+      op: 'llm.invoke',
+      sessionId: 'session-a',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const sessionATurn2 = makeMockRecord({
+      spanId: 'session-a-peak',
+      op: 'llm.invoke',
+      sessionId: 'session-a',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const sessionBTurn1 = makeMockRecord({
+      spanId: 'session-b-early',
+      op: 'llm.invoke',
+      sessionId: 'session-b',
+      raw: { 'gen_ai.request.max_context_tokens': 500_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const sessionBTurn2 = makeMockRecord({
+      spanId: 'session-b-peak',
+      op: 'llm.invoke',
+      sessionId: 'session-b',
+      raw: { 'gen_ai.request.max_context_tokens': 500_000 },
+      tokens: { freshInput: 450_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 450_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [sessionATurn1, sessionATurn2, sessionBTurn1, sessionBTurn2],
+    })
+
+    // Both sessions clear their own 85% threshold — 190,000 over 170,000
+    // (85% of 200,000) and 450,000 over 425,000 (85% of 500,000) — so each
+    // gets its own finding measured against its own window. Collapsing the
+    // groups back to run-level derivation would emit a single finding whose
+    // numbers belong to whichever record happened to come first.
+    expect(findings.length).toBe(2)
+    expect(new Set(findings.map((finding) => finding.sessionId)).size).toBe(2)
+    const sessionAFinding = findings.find((finding) => finding.sessionId === 'session-a')
+    const sessionBFinding = findings.find((finding) => finding.sessionId === 'session-b')
+    expect(sessionAFinding).toBeDefined()
+    expect(sessionBFinding).toBeDefined()
+    expect(sessionAFinding?.estimatedWasteTokens).toBe(20_000) // 190k - 170k (85% of 200k)
+    expect(sessionBFinding?.estimatedWasteTokens).toBe(25_000) // 450k - 425k (85% of 500k)
+    expect(sessionAFinding?.payload?.contextLimit).toBe(200_000)
+    expect(sessionAFinding?.payload?.contextLimitSource).toBe('reported')
+    expect(sessionBFinding?.payload?.contextLimit).toBe(500_000)
+    expect(sessionBFinding?.payload?.contextLimitSource).toBe('reported')
+  })
+
+  it('groups records that carry no session id under their trace id, the key the store uses', () => {
+    // Store-path shape: sessions are keyed by COALESCE(session_id, trace_id),
+    // so a harness that never emits a session id still forms a session — keyed
+    // by its trace id — and one run can carry several of them. Collapsing such
+    // records into one placeholder bucket would measure them all against
+    // whichever session reported a window first and stamp the finding with a
+    // sessionId that matches no session row.
+    const traceATurn1 = makeMockRecord({
+      spanId: 'trace-a-early',
+      traceId: 'trace-a',
+      sessionId: '', // mirrors the absent session id the store path produces
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const traceATurn2 = makeMockRecord({
+      spanId: 'trace-a-peak',
+      traceId: 'trace-a',
+      sessionId: '',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const traceBTurn1 = makeMockRecord({
+      spanId: 'trace-b-early',
+      traceId: 'trace-b',
+      sessionId: '',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const traceBTurn2 = makeMockRecord({
+      spanId: 'trace-b-peak',
+      traceId: 'trace-b',
+      sessionId: '',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 195_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 195_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [traceATurn1, traceATurn2, traceBTurn1, traceBTurn2],
+    })
+
+    // trace-a's 190,000-token peak crosses 85% of its own 200,000 window while
+    // trace-b's 195,000 stays far under its 1,000,000 — so only trace-a fires,
+    // named by its canonical session key (the trace id), not a placeholder.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('trace-a')
+    expect(f.estimatedWasteTokens).toBe(20_000) // 190k - 170k (85% of trace-a's window)
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.payload?.contextLimitSource).toBe('reported')
+  })
+
+  it('prefixes the canonical harness when one session key spans several harnesses', () => {
+    // buildSessions and buildRuns name a session key shared by multiple
+    // canonical harnesses `${harness}:${key}`; a finding for that session has
+    // to carry the same id or it matches no session row.
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'shared-sess',
+      harness: 'claude', // canonicalizes to claude-unclassified
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'shared-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const cursorTurn1 = makeMockRecord({
+      spanId: 'cursor-early',
+      sessionId: 'shared-sess',
+      harness: 'cursor',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const cursorTurn2 = makeMockRecord({
+      spanId: 'cursor-peak',
+      sessionId: 'shared-sess',
+      harness: 'cursor',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn1, claudeTurn2, cursorTurn1, cursorTurn2],
+    })
+
+    // Only the claude-side group crosses 85% of its window, and it is stored
+    // under the same prefixed id the session row uses.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('claude-unclassified:shared-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.id).toBe(`finding-compaction-hazard-${f.sessionId}-claude-peak`)
+  })
+
+  it('counts non-invocation records when deciding the prefixed canonical session id', () => {
+    // buildSessions and buildRuns group every record of a key through
+    // groupByCanonicalHarness, not just the turns: a key whose second
+    // canonical harness appears only on a non-invocation span is still stored
+    // as `${harness}:${key}`, so the finding for the invocation-side group
+    // has to carry that same prefixed id.
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const cursorSpan = makeMockRecord({
+      spanId: 'cursor-span',
+      sessionId: 'mixed-sess',
+      harness: 'cursor',
+      op: 'tool.invoke',
+      name: 'read_file',
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn1, claudeTurn2, cursorSpan],
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('claude-unclassified:mixed-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+  })
+
+  it('does not count harness identities the builders exclude when prefixing', () => {
+    // Gemini is excluded from canonical grouping (canonicalHarnessId returns
+    // null and groupByCanonicalHarness drops it), so a key holding claude
+    // invocations and a gemini invocation is stored unprefixed — the gemini
+    // span counts toward no session row and must not force a prefix here.
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const geminiTurn = makeMockRecord({
+      spanId: 'gemini-turn',
+      sessionId: 'mixed-sess',
+      harness: 'gemini',
+      tokens: { freshInput: 1000, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 1000, reportedOutput: 50 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn1, claudeTurn2, geminiTurn],
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('mixed-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+  })
+
+  it('does not let a noncanonical turn become the group peak', () => {
+    // A gemini span sharing the session key belongs to no canonical session
+    // row: groupByCanonicalHarness drops it, so the builders could never
+    // produce this session's findings from it. Letting its turn into the
+    // group would fire a claude finding from a peak the claude session
+    // never reached.
+    const claudeTurn = makeMockRecord({
+      spanId: 'claude-turn',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      tokens: { freshInput: 150_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 150_000, reportedOutput: 100 },
+    })
+    const geminiTurn = makeMockRecord({
+      spanId: 'gemini-turn',
+      sessionId: 'mixed-sess',
+      harness: 'gemini',
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn, geminiTurn],
+    })
+
+    // 150,000 stays under 85% of the 200,000 default; the 190,000 gemini
+    // reading is not this session's peak because the session was never
+    // gemini's.
+    expect(findings.length).toBe(0)
+  })
+
+  it('derives the group window from canonical turns only', () => {
+    // Same contamination, window side: a gemini turn that reports a window
+    // must not win the first-reported race for a group it does not belong
+    // to, or the claude session is measured against a million tokens it
+    // never had.
+    const geminiTurn = makeMockRecord({
+      spanId: 'gemini-turn',
+      sessionId: 'mixed-sess',
+      harness: 'gemini',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 1000, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 1000, reportedOutput: 50 },
+    })
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [geminiTurn, claudeTurn1, claudeTurn2],
+    })
+
+    // The claude session fires against its own (default) 200,000 window:
+    // 190,000 is 20,000 over the 85% line — not 19% of a borrowed window.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('mixed-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.payload?.contextLimitSource).toBe('default')
+  })
+
+  it('does NOT flag a session whose reported window keeps its peak below 85%', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-early',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-below-threshold',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [turn1, turn2],
+    })
+
+    // 190,000 is 19% of the reported window — only the fixed 200k default
+    // would read it as a hazard.
+    expect(findings.length).toBe(0)
+  })
+
+  it('explicit contextLimit overrides the window derived from record attributes', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-early',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-peak',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [turn1, turn2],
+      contextLimit: 200_000, // 85% is 170,000; 190,000 exceeds it despite the reported window
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.estimatedWasteTokens).toBe(20_000)
+    expect(f.mechanism).toMatch(/200,?000/)
+  })
+
+  it('marks a finding measured against a reported window with contextLimitSource "reported"', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-early',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 500_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-peak',
+      op: 'llm.invoke',
+      raw: { 'gen_ai.request.max_context_tokens': 500_000 },
+      tokens: { freshInput: 450_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 450_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [turn1, turn2],
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.estimatedWasteTokens).toBe(25_000) // 450k - 425k (85% of 500k)
+    expect(f.payload?.contextLimit).toBe(500_000)
+    expect(f.payload?.contextLimitSource).toBe('reported')
+  })
+
+  it('marks a finding measured against the default window with contextLimitSource "default"', () => {
+    const turn1 = makeMockRecord({
+      spanId: 'turn-early',
+      op: 'llm.invoke',
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const turn2 = makeMockRecord({
+      spanId: 'turn-peak',
+      op: 'llm.invoke',
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [turn1, turn2],
+    })
+
+    // No record reports a window, so the fallback default applies — and the
+    // payload has to say so instead of presenting 200,000 as a measurement.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.payload?.contextLimitSource).toBe('default')
+  })
 })
 
 describe('Detector 6: unbounded-delegation', () => {

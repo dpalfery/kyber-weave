@@ -127,8 +127,19 @@ public sealed record SquadFallbackOutputIdentity(
     string Prefix);
 
 /// <summary>The upstream APM feature and validated-release gate.</summary>
+/// <param name="Schema">The declared toolchain schema identifier.</param>
+/// <param name="RequiredFeatures">Upstream features the toolchain must provide.</param>
+/// <param name="ValidatedRelease">The validated upstream release, when one is pinned.</param>
+/// <param name="SourcePath">The canonical-source-relative path this was loaded from.</param>
+/// <param name="RequiredMcpTools">
+/// The MCP tools canonical agents are entitled to call, keyed by server name. Declared in
+/// source rather than in a renderer because it is an external contract that drifts, and
+/// because a renderer and <c>squad doctor</c> both consume it — two hardcoded copies would
+/// disagree the first time a server renamed a tool.
+/// </param>
 public sealed record SquadToolchain(
     string Schema,
     IReadOnlyList<string> RequiredFeatures,
     JsonElement? ValidatedRelease,
-    string SourcePath);
+    string SourcePath,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> RequiredMcpTools);

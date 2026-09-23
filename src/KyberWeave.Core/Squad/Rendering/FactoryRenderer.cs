@@ -342,6 +342,28 @@ public sealed class FactoryRenderer : ISquadRenderer
             Code: "permission-not-expressible",
             InstructionDigest: agent.BodyDigest,
             Details: string.Join(" ", notExpressibleDetails));
+
+        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+            ? exec
+            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+            ? write
+            : SquadPermissionDecision.Deny;
+
+        SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
+            targetToken: SquadTargetCatalog.GetToken(SquadTarget.Factory),
+            canonicalIdentity: agent.Name,
+            outputIdentity: agent.Name,
+            instructionDigest: agent.BodyDigest,
+            executeDecision: executeDecision,
+            writeDecision: writeDecision,
+            grantedShellTools: ["Execute"],
+            withheldWriteTools: ["ApplyPatch", "Create", "Edit"]);
+
+        if (notIsolable is not null)
+        {
+            yield return notIsolable;
+        }
     }
 
     /// <summary>
