@@ -373,8 +373,8 @@ public sealed class PiRenderer : ISquadRenderer
         int suffixEndIdx = modelValue.IndexOf(']', levelStartIdx);
         if (suffixEndIdx < 0)
         {
-            // No closing bracket — malformed suffix
-            return (modelValue, null);
+            throw new SquadRenderValidationException(
+                $"Malformed thinking suffix in model value '{modelValue}': missing closing ']'.");
         }
 
         string level = modelValue[levelStartIdx..suffixEndIdx];

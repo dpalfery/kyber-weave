@@ -827,6 +827,25 @@ public sealed class PiRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// Major 3: A malformed thinking suffix missing the closing bracket throws
+    /// <see cref="SquadRenderValidationException"/> naming the malformed value.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixMissingClosingBracket()
+    {
+        const string malformedModel = "zai/glm-5.3[thinking=high";
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: malformedModel,
+            thinkingLevel: null);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
+            () => RenderPiAsync(fixture.ProductRoot));
+
+        Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Plan §8 A1: A <c>pi:</c> value with no <c>[thinking=…]</c> suffix at all still
     /// emits <c>model:</c> and omits <c>thinking</c> entirely, preserving today's behavior
     /// for profiles whose <c>pi:</c> value carries no suffix.
