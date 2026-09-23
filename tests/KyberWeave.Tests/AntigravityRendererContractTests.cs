@@ -851,6 +851,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.NotEmpty(nonWriteAgents);
     }
 
+    /// <summary>
+    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
+    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
+    /// shell tools (run_command) and withheld write tools (write_to_file, replace_file_content, multi_replace_file_content).
+    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
+    /// </summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_CapabilityNotIsolableDegradationRecordPresent()
     {
@@ -865,21 +871,55 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        // D10: When process.execute: allow and filesystem.write: ask/deny, expect
-        // capability-not-isolable degradation recording residual write access through shell
-        var degradations = result.Degradations
-            .Where(d => d.Code == "capability-not-isolable")
+        string[] grantedShellTools = ["run_command"];
+        string[] withheldWriteTools = ["write_to_file", "replace_file_content", "multi_replace_file_content"];
+
+        List<string> expectedAgents = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                return exec && !write;
+            })
+            .Select(a => a.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
 
-        // There should be at least one (investigator/reviewer profile agents)
-        // Empty list is acceptable if the corpus has no such agents, but if they exist,
-        // the degradation must be recorded
-        if (source.Agents.Any(a =>
-                source.CapabilityProfiles.Profiles.TryGetValue(a.CapabilityProfile, out var profile) &&
-                profile.Permissions.TryGetValue("process.execute", out var exec) && exec == SquadPermissionDecision.Allow &&
-                profile.Permissions.TryGetValue("filesystem.write", out var write) && write != SquadPermissionDecision.Allow))
+        Assert.NotEmpty(expectedAgents);
+
+        foreach (SquadAgent agent in source.Agents)
         {
-            Assert.NotEmpty(degradations);
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+                exec == SquadPermissionDecision.Allow;
+            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+                write == SquadPermissionDecision.Allow;
+
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
+                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+
+            if (executeAllowed && !writeAllowed)
+            {
+                Assert.NotNull(record);
+                Assert.Equal("antigravity", record.Target);
+                Assert.Equal(agent.Name, record.CanonicalIdentity);
+                Assert.Equal(agent.Name, record.OutputIdentity);
+                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
+                Assert.NotNull(record.Details);
+                foreach (string shellTool in grantedShellTools)
+                {
+                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
+                }
+                foreach (string writeTool in withheldWriteTools)
+                {
+                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
+                }
+            }
+            else
+            {
+                Assert.Null(record);
+            }
         }
     }
 
@@ -899,6 +939,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         // D12: Agents with non-empty delegates-to must have invoke_subagent + enable_subagent_tools
         var delegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count > 0).ToList();
+        Assert.NotEmpty(delegatingAgents);
 
         foreach (var agent in delegatingAgents)
         {
@@ -937,6 +978,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         // D12: Agents with empty delegates-to must NOT have invoke_subagent or enable_subagent_tools: true
         var nonDelegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count == 0).ToList();
+        Assert.NotEmpty(nonDelegatingAgents);
 
         foreach (var agent in nonDelegatingAgents)
         {
@@ -1138,6 +1180,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // D12-delegate: Agents with non-empty delegates-to have an unenforceable roster,
         // which should be recorded as permission-not-expressible degradation
         var delegatingAgents = source.Agents.Where(a => a.DelegatesTo.Count > 0).ToList();
+        Assert.NotEmpty(delegatingAgents);
 
         foreach (var agent in delegatingAgents)
         {
