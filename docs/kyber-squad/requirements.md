@@ -4,10 +4,11 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-16
+last-reviewed: 2026-09-23
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
+  - adr/0022-antigravity-native-agents
 ---
 
 # Kyber-Squad requirements and degradation contract
@@ -36,8 +37,8 @@ This document defines the formal requirement specifications (**KS-001** through 
 Harnesses differ in their native capabilities (e.g. support for primary agents, subagent spawning, interactive confirmation prompts, and tool filtering). When a target harness cannot natively execute a canonical capability, Kyber-Squad degrades safely according to explicit rules.
 
 The product currently has seven agent/skill intersections, all distinct-body collisions, and no
-shared identities. Fallback targets preserve each of those skills and emit the matching agent as
-`role-<name>`. `conductor` has an unoccupied skill identity and therefore lowers to a same-name
+shared identities. Fallback targets (Warp) preserve each of those skills and emit the matching agent as
+`role-<name>`. `conductor` has an unoccupied skill identity and on Warp lowers to a same-name
 role skill.
 
 ### Degradation Taxonomy
@@ -46,7 +47,7 @@ Every non-native translation emits a structured degradation record in `squad.rec
 
 | Code | Meaning | Example |
 |---|---|---|
-| `lowered` | An agent role was projected to a role-skill because the target lacks a native agent primitive or primary agent role. | `architect` lowered to skill `architect` on Antigravity. |
+| `lowered` | An agent role was projected to a role-skill because the target lacks a native agent primitive or primary agent role. | `architect` lowered to skill `architect` on Warp, or `conductor` lowered to a skill on Pi or slash command on ZCode. |
 | `safety-narrowed` | An interactive confirmation requirement (`ask`) was narrowed to `deny` because the target cannot prompt the user. | A capability requiring `ask` narrowed to `deny` on non-interactive harnesses. |
 | `omitted` | An agent or skill was omitted because a required security or execution constraint cannot be enforced by the target. | A role with unenforceable `deny` constraints omitted to prevent unauthorized execution. |
 | `workspace-binding-required` | An MCP server configuration in an Agent Plugins package requires host-specific repository path bindings. | Client loads portable skills but requires manual MCP workspace binding. |
@@ -65,7 +66,7 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **GitHub Copilot** | Native instructions/agents | Implemented and registered | Supported | Not lowered | Native execution |
 | **OpenCode** | Native `.opencode/agents` | Implemented and registered | Supported | Not lowered | Native execution; every documented permission key is pinned explicitly, because an omitted key inherits OpenCode's default-allow rather than being withheld |
 | **Kilo** | Native `.kilo/agents` | Implemented and registered | Supported | Not lowered | Native execution |
-| **Antigravity** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Safety-narrowed |
+| **Antigravity** | Native `.agents/agents` (directory per agent) | Implemented and registered | Supported (`enable_subagent_tools: true`, `invoke_subagent`) | Not lowered (native conductor with `mainAgent: true`) | Native execution via tool allowlist (`tools:`) and execution switches (`enable_write_tools`); safety-narrowed; capability-not-isolable for shell-implies-write; permission-not-expressible for unenforceable delegates-to roster |
 | **Pi** | Native `.pi/agents` + lowered conductor | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agent only) | Native execution + safety-narrowed |
 | **Warp** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Harness default; permission-not-expressible for non-deny decisions |
 | **Factory Droids** | Native `.factory/droids` | Implemented and registered | Supported | Not lowered | Explicit tools array (allow-only documented IDs); safety-narrowed on ask; permission-not-expressible for unmapped `network.publish`/`delegate` and `mcpServers: []` |

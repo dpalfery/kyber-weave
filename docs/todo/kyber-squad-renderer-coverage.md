@@ -4,7 +4,7 @@ title: Kyber-Squad Renderer Coverage
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-21
+last-reviewed: 2026-09-23
 status: draft
 ---
 
@@ -12,7 +12,7 @@ status: draft
 
 `squad install`/`squad update` render canonical Squad source into a harness's native files
 through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native, with the conductor lowered to a skill), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native, with the conductor lowered to a slash command) have
+`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native, with the conductor lowered to a skill), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native, with the conductor lowered to a slash command) have
 renderers today. All eleven declared harness targets are covered.
 
 ## Coverage Status
@@ -23,7 +23,7 @@ renderers today. All eleven declared harness targets are covered.
 | `cursor` | Native | Completed | `CursorRenderer` (`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`) |
 | `claude` | Native | Completed | `ClaudeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs`) |
 | `codex` | Native | Completed | `CodexRenderer` (`src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`) |
-| `antigravity` | Fallback (role-skill lowering) | Completed | `AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) |
+| `antigravity` | Native (directory per agent) | Completed | `AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) · [ADR 0022](../adr/0022-antigravity-native-agents.md) |
 | `opencode` | Native | Completed | `OpenCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`) |
 | `kilo` | Native | Completed | `KiloRenderer` (`src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs`) · [kilo.md](kilo.md) |
 | `pi` | Native (conductor lowered to skill) | Completed | `PiRenderer` (`src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`) · [archived todo](../archive/todo/pi.md) |
@@ -37,7 +37,7 @@ renderers today. All eleven declared harness targets are covered.
 - [x] `cursor` — `CursorRenderer` (`.cursor/agents/*.md`, `.cursor/skills/*/SKILL.md`)
 - [x] `claude` — `ClaudeRenderer` (`.claude/agents/*.md`, `.claude/skills/*/SKILL.md`)
 - [x] `codex` — `CodexRenderer` (`.codex/agents/*.toml`, `.codex/skills/*/SKILL.md`)
-- [x] `antigravity` — `AntigravityRenderer` (`.agents/skills/role-*/SKILL.md`, `.agents/skills/*/SKILL.md`)
+- [x] `antigravity` — `AntigravityRenderer` (`.agents/agents/*/agent.md`, `.agents/skills/*/SKILL.md`)
 - [x] `opencode` — `OpenCodeRenderer` (`.opencode/agents/*.md`, `.opencode/skills/*/SKILL.md`)
 - [x] `kilo` — `KiloRenderer` (`.kilo/agents/*.md`, `.kilo/skills/*/SKILL.md`)
 - [x] `pi` — `PiRenderer` (`.pi/agents/*.md`, `.pi/skills/*/SKILL.md`; conductor as skill)

@@ -5,11 +5,12 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-16
+last-reviewed: 2026-09-23
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
+  - adr/0022-antigravity-native-agents
 keywords:
   - multi-harness
   - deployment
@@ -38,7 +39,7 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments. Its catalog declares ten target coding harnesses; nine have
+atomic, recoverable deployments. Its catalog declares eleven target coding harnesses; all eleven have
 implemented and registered renderers today.
 
 ---
@@ -60,7 +61,7 @@ flowchart TD
     end
 
     subgraph Compiler["Target Resolution & Lowering"]
-        SquadTargetResolver["SquadTargetResolver\n(10 Harness Targets)"]
+        SquadTargetResolver["SquadTargetResolver\n(11 Harness Targets)"]
         Lattice["Semantic Permission Lattice\n(deny < ask < allow)"]
         Lowering["Role-Skill Lowering\n(Unoccupied vs Collision role-*)"]
     end
@@ -73,7 +74,7 @@ flowchart TD
     end
 
     subgraph TargetHarnesses["Declared Target Harnesses"]
-        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory, Warp)"]
+        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory, Warp, ZCode)"]
         UnsupportedTargets["Coverage Preflight Failure\n(Future / Undeclared Targets)"]
     end
 
@@ -122,7 +123,9 @@ graph LR
 ## 3. Role-Skill Lowering and Namespace Resolution
 
 Targets without native agent primitives use **agent-to-role-skill lowering**, governed by
-`profiles/fallbacks.yml`. Antigravity and Warp have implemented renderers for this projection.
+`profiles/fallbacks.yml`. Warp is the sole remaining fallback target with an implemented renderer for
+this projection; Antigravity was previously classified as fallback and has been reclassified to native
+([ADR 0022](../adr/0022-antigravity-native-agents.md)).
 
 The current canonical agent and skill namespaces intersect at exactly seven names. Every
 intersection is a distinct-body collision; the product declares no shared identities:
@@ -278,7 +281,7 @@ and validates.
   `CopilotRenderer` for `.github/agents/*.agent.md` and `.github/skills/*/SKILL.md`,
   `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
   `CodexRenderer` for `.codex/agents/*.toml` and `.codex/skills/*/SKILL.md`,
-  `AntigravityRenderer` for fallback role-skill lowering to `.agents/skills/*/SKILL.md`,
+  `AntigravityRenderer` for native per-agent directory emission to `.agents/agents/*/agent.md` and canonical skills to `.agents/skills/*/SKILL.md` ([ADR 0022](../adr/0022-antigravity-native-agents.md)),
   `OpenCodeRenderer` for `.opencode/agents/*.md` and `.opencode/skills/*/SKILL.md`,
   `KiloRenderer` for `.kilo/agents/*.md` and `.kilo/skills/*/SKILL.md`,
   `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)),
@@ -292,7 +295,7 @@ and validates.
 | `copilot` | `CopilotRenderer` | `.github/agents/<name>.agent.md` | `.github/skills/<name>/SKILL.md` | Native |
 | `cursor` | `CursorRenderer` | `.cursor/agents/<name>.md` | `.cursor/skills/<name>/SKILL.md` | Native |
 | `codex` | `CodexRenderer` | `.codex/agents/<name>.toml` | `.codex/skills/<name>/SKILL.md` | Native |
-| `antigravity` | `AntigravityRenderer` | `.agents/skills/role-<name>/SKILL.md` (lowered) | `.agents/skills/<name>/SKILL.md` | Fallback |
+| `antigravity` | `AntigravityRenderer` | `.agents/agents/<name>/agent.md` | `.agents/skills/<name>/SKILL.md` | Native |
 | `opencode` | `OpenCodeRenderer` | `.opencode/agents/<name>.md` | `.opencode/skills/<name>/SKILL.md` | Native |
 | `kilo` | `KiloRenderer` | `.kilo/agents/<name>.md` | `.kilo/skills/<name>/SKILL.md` | Native |
 | `pi` | `PiRenderer` | `.pi/agents/<name>.md` | `.pi/skills/<name>/SKILL.md` (conductor lowered here) | Native |
@@ -370,8 +373,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (fallback role-skill lowering to
-  `.agents/skills/`), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`) are implemented and registered. All eleven declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`) are implemented and registered. All eleven declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
@@ -385,6 +387,7 @@ and validates.
 
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
 - [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
+- [ADR 0022](../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications
 - [Configuration](../configuration.md) — repository configuration options

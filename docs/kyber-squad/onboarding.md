@@ -5,10 +5,11 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-16
+last-reviewed: 2026-09-23
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
+  - adr/0022-antigravity-native-agents
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -17,8 +18,8 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**24 canonical skills**, with transactional recovery and state governance. Ten harness targets
-are declared; all ten are currently implemented and registered.
+**24 canonical skills**, with transactional recovery and state governance. Eleven harness targets
+are declared; all eleven are currently implemented and registered.
 
 ---
 
@@ -50,7 +51,7 @@ kyber-weave squad pack --format <apm|plugins|all> --out <directory>
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad declares ten coding-harness targets:
+Kyber-Squad declares eleven coding-harness targets:
 
 | Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
 |---|---|---|---|---|
@@ -60,15 +61,16 @@ Kyber-Squad declares ten coding-harness targets:
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
 | `opencode` | — | `.opencode/` | Native agents | Implemented and registered |
 | `kilo` | — | `.kilo/` | Native agents | Implemented and registered |
-| `antigravity` | — | *Explicit or configured target only* | Role-skill lowering | Implemented and registered |
+| `antigravity` | — | *Explicit or configured target only* | Native agents (directory per agent) | Implemented and registered |
 | `pi` | — | *Explicit or configured target only* | Native agents (with conductor lowered to skill) | Implemented and registered |
 | `warp` | — | `.warp/` | Role-skill lowering | Implemented and registered |
 | `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
+| `zcode` | — | `.zcode/` | Native agents (with conductor lowered to slash command) | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (fallback role-skill lowering to `.agents/skills/`), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native subagents and skills, with the primary agent lowered to a slash command) have renderers. All eleven declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native subagents and skills, with the primary agent lowered to a slash command) have renderers. All eleven declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
@@ -116,13 +118,13 @@ higher in `.pi/subagents.json` for full capability.
 the operator manages it.
 
 **Coexistence with Antigravity**: `--target antigravity,pi` produces disjoint output trees —
-`.agents/skills/` (Antigravity) and `.pi/` (Pi) — so neither target overwrites or orphans the
+`.agents/` (Antigravity agents and skills) and `.pi/` (Pi) — so neither target overwrites or orphans the
 other. Pi's own skill loader also reads the project's `.agents/skills/` in addition to
 `.pi/skills/`, and within a project `.pi/skills` is added first. With both targets installed, Pi
 therefore keeps its `.pi/skills` copy for any name that also appears under `.agents/skills/` — for
 example `conductor` — and prints a diagnostic naming the skipped `.agents/skills/` duplicate,
-which is not loaded. Pi also lists Antigravity's lowered agent skills whose names don't collide.
-This exposure already exists with `--target antigravity` alone; the renderer cannot prevent it.
+which is not loaded. Antigravity's native agents project to `.agents/agents/<name>/agent.md`, which
+Pi's skill loader does not inspect, avoiding collision with Pi's subagent tree.
 
 ### Factory notes
 
@@ -168,7 +170,7 @@ and `doctor`.
 | `codex` | `$CODEX_HOME` → `~/.codex` | `agents/<name>.toml`, `skills/<name>/SKILL.md` |
 | `cursor` | `$CURSOR_CONFIG_DIR` → `~/.cursor` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
 | `copilot` | `$COPILOT_HOME` → `~/.copilot` | `agents/<name>.agent.md`, `skills/<name>/SKILL.md` |
-| `antigravity` | `~/.gemini/config` (no override) | `skills/<role-or-name>/SKILL.md` |
+| `antigravity` | `~/.gemini/config` (no override) | `agents/<name>/agent.md`, `skills/<name>/SKILL.md` |
 | `opencode` | `$OPENCODE_CONFIG_DIR` → `$XDG_CONFIG_HOME/opencode` → `~/.config/opencode` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
 | `kilo` | `$XDG_CONFIG_HOME/kilo` → `~/.config/kilo` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
 | `pi` | `$PI_CODING_AGENT_DIR` → `~/.pi/agent` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
