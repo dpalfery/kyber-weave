@@ -1,23 +1,30 @@
 ---
-id: todo/kilo
+id: archive/todo/kilo
 title: Add a native Kilo renderer to Kyber-Squad
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-23
 status: superseded
 ---
 
 # Add a native Kilo renderer to Kyber-Squad
 
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+`KiloRenderer` is implemented and registered.
+
+---
+
 > [!NOTE]
 > **Status: Completed**  
 > This todo has been completed and superseded by implementation plan
-> [docs/plans/2026-09-14-kilo-native-renderer.md](../plans/2026-09-14-kilo-native-renderer.md).
+> [docs/plans/2026-09-14-kilo-native-renderer.md](../../plans/2026-09-14-kilo-native-renderer.md).
 >
 > **Implementation summary:**
-> - **Core Renderer:** [`KiloRenderer.cs`](../../src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs) implements `ISquadRenderer` for `SquadTarget.Kilo`, projecting 21 native agents to `.kilo/agents/<name>.md` and 24 skills to `.kilo/skills/<name>/SKILL.md` along with linked resource closures (113 files total). On native targets like Kilo, agents and skills have separate directory structures (`.kilo/agents/` and `.kilo/skills/`), so all 21 agents and all 24 skills (plus 68 resources = 113 files) are emitted. `shared-identities` in `fallbacks.yml` is empty (`[]`), so no skills are suppressed (the 7 corpus collisions only trigger `role-` prefixes on fallback targets where agents are lowered into skills).
-> - **Contract Tests:** [`KiloRendererContractTests.cs`](../../tests/KyberWeave.Tests/KiloRendererContractTests.cs) validates supported targets, non-Kilo target guards, canonical corpus rendering, deterministic serialization, frontmatter schemas, and degradation SHA-256 digest invariants.
+> - **Core Renderer:** [`KiloRenderer.cs`](../../../src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs) implements `ISquadRenderer` for `SquadTarget.Kilo`, projecting 21 native agents to `.kilo/agents/<name>.md` and 24 skills to `.kilo/skills/<name>/SKILL.md` along with linked resource closures (113 files total). On native targets like Kilo, agents and skills have separate directory structures (`.kilo/agents/` and `.kilo/skills/`), so all 21 agents and all 24 skills (plus 68 resources = 113 files) are emitted. `shared-identities` in `fallbacks.yml` is empty (`[]`), so no skills are suppressed (the 7 corpus collisions only trigger `role-` prefixes on fallback targets where agents are lowered into skills).
+> - **Contract Tests:** [`KiloRendererContractTests.cs`](../../../tests/KyberWeave.Tests/KiloRendererContractTests.cs) validates supported targets, non-Kilo target guards, canonical corpus rendering, deterministic serialization, frontmatter schemas, and degradation SHA-256 digest invariants.
 > - **CLI Wiring:** Registered in `SquadCommandComposition.ResolveRenderer()` (`src/KyberWeave.Cli/Commands/Squad/SquadCommandComposition.cs`) and verified via `SquadCliCommandTests.cs` doctor assertions.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
@@ -30,9 +37,9 @@ Historically, `squad install --target kilo` failed in preflight before any netwo
 because `SquadRendererRegistry` only had renderers for Copilot, Cursor, Claude, Codex,
 Antigravity, and OpenCode. This gap is resolved by `KiloRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs`). See
-[architecture.md §8](../kyber-squad/architecture.md#8-rendering) for how the render pipeline
+[architecture.md §8](../../kyber-squad/architecture.md#8-rendering) for how the render pipeline
 as a whole works, and
-[onboarding.md](../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
+[onboarding.md](../../kyber-squad/onboarding.md#harness-targets-and-auto-detection) for the
 full target roster and its current coverage.
 
 ## Classification
