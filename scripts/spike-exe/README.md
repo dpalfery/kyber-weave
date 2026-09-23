@@ -1,19 +1,20 @@
 # Spike 1 — Single-executable packaging
 
 Spike output for spec task **KyberDash / 1** (single-executable packaging). Records the
-inspection done against upstream `getagentseal/codeburn` while `dash/` is not yet vendored
-(Task 2.1 is the prerequisite). End-to-end build / parity runs are deferred until the vendoring
-step; this artifact is the recorded decision that authorizes the recipe Task 12.1 will
-implement.
+inspection done against the upstream repository — its coordinates are recorded in the
+archived fork records under `docs/`, which is where the severance rule (R1.6) keeps them —
+while `dash/` is not yet vendored (Task 2.1 is the prerequisite). End-to-end build / parity
+runs are deferred until the vendoring step; this artifact is the recorded decision that
+authorizes the recipe Task 12.1 will implement.
 
 ## What was inspected
 
 | File / source | Why | Finding |
 |---|---|---|
-| `getagentseal/codeburn@main/package.json` | Establishes package shape | ESM-only (`"type": "module"`); bin entry is `dist/cli.js`; engines `node >= 22.13.0`; build chain is **`tsup`**. |
-| `getagentseal/codeburn@main/tsup.config.ts` | Current bundler config | `entry: ['src/main.ts', 'src/parse-worker.ts']`, `format: ['esm']`, `target: 'node20'`, `external: ['@modelcontextprotocol/sdk', 'zod']`, other deps bundled. |
-| `getagentseal/codeburn@main/src/cli.ts` | Launcher pattern | A pre-22.13-check guard then a *single* dynamic `import('./main.js')` — distinctive idiom. |
-| `getagentseal/codeburn@main/src/main.ts` (2638 lines) | Whether CJS bundle is feasible | All `await`s are inside `async` function bodies. No top-level await. Pure ESM `import` statements only. |
+| `upstream@main/package.json` | Establishes package shape | ESM-only (`"type": "module"`); bin entry is `dist/cli.js`; engines `node >= 22.13.0`; build chain is **`tsup`**. |
+| `upstream@main/tsup.config.ts` | Current bundler config | `entry: ['src/main.ts', 'src/parse-worker.ts']`, `format: ['esm']`, `target: 'node20'`, `external: ['@modelcontextprotocol/sdk', 'zod']`, other deps bundled. |
+| `upstream@main/src/cli.ts` | Launcher pattern | A pre-22.13-check guard then a *single* dynamic `import('./main.js')` — distinctive idiom. |
+| `upstream@main/src/main.ts` (2638 lines) | Whether CJS bundle is feasible | All `await`s are inside `async` function bodies. No top-level await. Pure ESM `import` statements only. |
 | `@modelcontextprotocol/sdk@1.29.0` registry record | ESM/CJS dual-package hazard | Dual — both `import` and `require` entries present; safe to bundle as CJS. |
 | `zod@3.25.76` registry record | ESM/CJS dual-package hazard | Dual — `type: "module"` but `main: "./index.cjs"` is also set; safe to bundle as CJS. |
 | `ink@7`, `react@19`, `commander`, `chalk@5`, `undici`, `bonjour-service`, `selfsigned`, `strip-ansi` | TUI chain + transport deps | All pure JS, no native bindings, no node-gyp, no prebuilt binaries. |

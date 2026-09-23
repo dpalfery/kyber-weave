@@ -1,12 +1,12 @@
 import { join } from 'path'
 import { homedir } from 'os'
 
-import { extractBashCommands } from '../bash-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
-import { blobToText, getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../sqlite.js'
-import { estimateTokensFromChars } from '../token-estimate.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { blobToText, getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
+import { estimateTokensFromChars } from '../pricing/token-estimate.js'
 import type { ProbeRoot, ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
-import { safeNumber } from '../parser.js'
+import { safeNumber } from '../ingest/parser.js'
 
 const WARP_GROUP_CONTAINER = '2BBY89MBSN.dev.warp'
 const WARP_STABLE_BUNDLE_ID = 'dev.warp.Warp-Stable'
@@ -327,7 +327,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       try {
         db = openDatabase(dbPath)
       } catch (err) {
-        process.stderr.write(`codeburn: cannot open Warp database: ${err instanceof Error ? err.message : err}\n`)
+        process.stderr.write(`kyberdash: cannot open Warp database: ${err instanceof Error ? err.message : err}\n`)
         return
       }
 

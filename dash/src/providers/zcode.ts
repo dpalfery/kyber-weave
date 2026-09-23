@@ -1,8 +1,8 @@
 import { join } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost } from '../models.js'
-import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost } from '../pricing/models.js'
+import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 /// ZCode (CLI v0.14.x) records usage in a single SQLite database at
@@ -105,7 +105,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         db = openDatabase(dbPath)
       } catch (err) {
         process.stderr.write(
-          `codeburn: cannot open ZCode database: ${err instanceof Error ? err.message : err}\n`,
+          `kyberdash: cannot open ZCode database: ${err instanceof Error ? err.message : err}\n`,
         )
         return
       }

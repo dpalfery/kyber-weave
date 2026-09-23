@@ -3,9 +3,9 @@ import { join } from 'path'
 import { homedir } from 'os'
 import zlib from 'zlib'
 
-import { MAX_SESSION_FILE_BYTES, readSessionFile } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
+import { MAX_SESSION_FILE_BYTES, readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 // DeepSeek Harness (dsh) stores one session per directory:
@@ -186,7 +186,7 @@ function isReadableVersion(header: DshEvent): boolean {
   if (header.version === SESSION_FORMAT_VERSION) return true
   // Keyed on the version, not the path: a DSH upgrade makes EVERY session
   // unreadable at once, and one line per session log is noise, not a report.
-  notice(`codeburn: skipping DSH sessions written in session format version ${String(header.version)}; upgrade codeburn.\n`)
+  notice(`kyberdash: skipping DSH sessions written in session format version ${String(header.version)}; upgrade kyberdash.\n`)
   return false
 }
 
@@ -239,26 +239,25 @@ export function* readZstdLines(
 async function readEventLines(filePath: string): Promise<string[] | null> {
   if (filePath.endsWith('.zstd')) {
     if (!zstdDecompress) {
-      notice('codeburn: DSH sessions need Node >= 22.15 (zstd support); skipping DSH usage.\n')
+      notice('kyberdash: DSH sessions need Node >= 22.15 (zstd support); skipping DSH usage.\n')
       return null
     }
     let buffer: Buffer
     try {
-      // The whole log is buffered to scan its frames, so it needs the same
-      // oversize guard readSessionFile applies to the uncompressed variant.
-      const size = (await stat(filePath)).size
-      if (size > MAX_SESSION_FILE_BYTES) {
-        notice(`codeburn: skipped oversize DSH session log ${filePath} (${size} bytes)\n`)
+      // Read atomically: checking size via stat before readFile leaves a race
+      // window. Read the bytes first and check their length afterwards.
+      buffer = await readFile(filePath)
+      if (buffer.length > MAX_SESSION_FILE_BYTES) {
+        notice(`kyberdash: skipped oversize DSH session log ${filePath} (${buffer.length} bytes)\n`)
         return null
       }
-      buffer = await readFile(filePath)
     } catch {
       return null
     }
     try {
       return [...readZstdLines(buffer)]
     } catch (err) {
-      notice(`codeburn: skipped corrupt DSH session log ${filePath}: ${err instanceof Error ? err.message : err}\n`)
+      notice(`kyberdash: skipped corrupt DSH session log ${filePath}: ${err instanceof Error ? err.message : err}\n`)
       return null
     }
   }
@@ -294,8 +293,10 @@ async function readSessionHeader(filePath: string): Promise<DshEvent | null> {
         // first batch carries the whole inherited seed, so this is reachable on
         // a real log and needs the same oversize guard as the parse read.
         try {
-          if ((await stat(filePath)).size > MAX_SESSION_FILE_BYTES) return null
+          // Read atomically: checking size via stat before readFile leaves a
+          // race window. Read the bytes first and check their length afterwards.
           const full = await readFile(filePath)
+          if (full.length > MAX_SESSION_FILE_BYTES) return null
           frames = scanZstdFrames(full, 1).frames
           if (frames.length === 0) return null
           head = full

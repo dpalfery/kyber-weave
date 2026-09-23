@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-19T12:00:00.000Z",
+  "kyberdashVersion": "1.0.0",
+  "scope": {
+    "days": 7
+  },
+  "coverage": {
+    "storePath": "canon.db",
+    "refresh": {
+      "lastSuccessAt": "2026-09-17T10:00:00.000Z",
+      "lastFailure": {
+        "at": "2026-09-19T10:00:00.000Z",
+        "summary": "2 of 6 source job(s) failed"
+      },
+      "inProgress": null
+    },
+    "harnesses": [
+      {
+        "harness": "claude-code",
+        "name": "claude-code",
+        "sessionsInWindow": 1,
+        "measurability": {}
+      }
+    ],
+    "quarantineCount": 0,
+    "problemCount": 0,
+    "hints": [
+      "Last successful refresh was 2026-09-17T10:00:00.000Z. Run `kyberdash dash refresh`."
+    ]
+  },
+  "findings": [],
+  "harnesses": [
+    {
+      "harness": "claude-code",
+      "name": "claude-code",
+      "dimensions": {
+        "contextHygiene": {
+          "value": 0.63,
+          "display": "63%"
+        },
+        "cacheEfficiency": {
+          "value": 0.81,
+          "display": "81%"
+        },
+        "toolYield": {
+          "value": 2.4,
+          "display": "2.4x"
+        },
+        "skillUtilisation": {
+          "value": null,
+          "reason": "Telemetry missing: skill activation unobserved on this harness"
+        },
+        "delegationOverhead": {
+          "value": 0.07,
+          "display": "7%"
+        },
+        "continuity": {
+          "value": null,
+          "reason": "Telemetry missing: turn outcome or correction telemetry unobserved"
+        }
+      }
+    }
+  ],
+  "latestSession": {
+    "sessionId": "sess-alpha",
+    "harness": "claude-code",
+    "project": "kyber-weave",
+    "lastActivityAt": "2026-09-17T10:00:00.000Z",
+    "turnCount": 14,
+    "view": "session/sess-alpha",
+    "latestTurn": {
+      "index": 0,
+      "pressure": {
+        "value": null,
+        "reason": "harness exported no message structure for this session"
+      },
+      "contextWindow": {
+        "value": null,
+        "reason": "harness exported no message structure for this session"
+      },
+      "buckets": {
+        "system_prompt": {
+          "value": null,
+          "reason": "harness exported no message structure for this session"
+        },
+        "tool_definitions": {
+          "value": null,
+          "reason": "harness exported no message structure for this session"
+        },
+        "instruction_context": {
+          "value": null,
+          "reason": "harness exported no message structure for this session"
+        },
+        "conversation_history": {
+          "value": null,
+          "reason": "harness exported no message structure for this session"
+        },
+        "tool_result_content": {
+          "value": null,
+          "reason": "harness exported no message structure for this session"
+        }
+      },
+      "residual": {
+        "value": null,
+        "reason": "harness exported no message structure for this session"
+      },
+      "cacheInvalidation": false
+    },
+    "toolDefinitionSources": [],
+    "cacheInvalidationTurns": []
+  },
+  "cost": [
+    {
+      "basis": "unknown",
+      "amountUsd": {
+        "value": null,
+        "reason": "no session in scope carried a cost"
+      }
+    }
+  ]
+}

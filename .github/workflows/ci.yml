@@ -304,8 +304,6 @@ jobs:
             --skip-dirs artifacts \
             --skip-dirs '**/bin' \
             --skip-dirs '**/obj' \
-            --skip-dirs dash/windows \
-            --skip-dirs dash/gnome \
             .
 
       - name: Convert Trivy report to SARIF
@@ -343,9 +341,19 @@ jobs:
       - name: Install Semgrep Community Edition
         run: python -m pip install --disable-pip-version-check "setuptools<82" semgrep==1.136.0
 
-      # The dash/ exclusions mirror .github/codeql/codeql-config.yml: everything
-      # under the vendored codeburn subtree except the dash/kyber/** merge zone,
-      # which ADR 0006 forbids editing. That config carries the full rationale.
+      # dash/ is first-party code since the one-time fork (ADR 0020), so it is
+      # scanned like everything else.
+      #
+      # One rule is excluded rather than suppressed in source. p/default applies
+      # its React ruleset to every TypeScript file, and react-insecure-request
+      # fires on dash/src/otel/cursor-hook.ts, which is server-side Node posting
+      # OTLP to the loopback receiver at 127.0.0.1:4318. That hop never leaves
+      # the machine, so there is no transport for TLS to protect, and the local
+      # OTLP receiver serves plain HTTP by design - there is no code fix, only a
+      # rule that does not apply. Excluding it here keeps the decision visible in
+      # review instead of buried in a source comment. It costs nothing today:
+      # the rule finds nothing in dash/web, the actual React surface, which talks
+      # to its own origin over relative URLs.
       - name: Scan repository with Semgrep
         run: |
           set -euo pipefail
@@ -358,19 +366,7 @@ jobs:
             --exclude 'artifacts/**' \
             --exclude '**/bin/**' \
             --exclude '**/obj/**' \
-            --exclude 'dash/.github/**' \
-            --exclude 'dash/app/**' \
-            --exclude 'dash/assets/**' \
-            --exclude 'dash/dash/**' \
-            --exclude 'dash/docs/**' \
-            --exclude 'dash/e2e/**' \
-            --exclude 'dash/gnome/**' \
-            --exclude 'dash/mac/**' \
-            --exclude 'dash/scripts/**' \
-            --exclude 'dash/src/**' \
-            --exclude 'dash/test-results/**' \
-            --exclude 'dash/tests/**' \
-            --exclude 'dash/windows/**' \
+            --exclude-rule typescript.react.security.react-insecure-request.react-insecure-request \
             --sarif-output semgrep.sarif
 
       # Intentional github/codeql-action v4 pin
@@ -466,7 +462,7 @@ jobs:
       # Local/PR authors still run: docs drift . (see AGENTS.md).
 
   ts-gates:
-    name: TypeScript gates (dash subtree)
+    name: TypeScript gates (KyberDash)
     runs-on: ubuntu-latest
     needs: build-test
     # Mirrors the same three gates declared in .kyber-weave/kyber-weave.yml as
@@ -494,7 +490,8 @@ jobs:
           cache: npm
           cache-dependency-path: |
             dash/package-lock.json
-            dash/dash/package-lock.json
+            dash/web/package-lock.json
+            dash/tray/ui/package-lock.json
 
       # npm ci (not `npm install`): package-lock.json is committed so a CI
       # run reproduces the same devDependency graph a contributor's local
@@ -504,14 +501,18 @@ jobs:
         working-directory: dash
         run: npm ci --no-audit --no-fund
 
-      # dash/dash is a second package (codeburn-dash, the React web dashboard)
-      # with its own lockfile, and dash/vitest.config.ts includes its component
-      # tests via the `dash/src/**` pattern. Without this install those 15
-      # suites cannot resolve react-dom/server, clsx, or @tanstack/react-query,
-      # which is exactly how the ts-test gate was failing while passing on any
-      # machine that had run an install there.
+      # dash/web is a second package with its own lockfile, and
+      # dash/vitest.config.ts includes its component tests via the
+      # `web/src/**` pattern. Without this install those suites cannot resolve
+      # react-dom/server, clsx, or @tanstack/react-query, which is exactly how
+      # the ts-test gate was failing while passing on any machine that had run
+      # an install there.
       - name: Install web dashboard dependencies
-        working-directory: dash/dash
+        working-directory: dash/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Install tray UI dependencies
+        working-directory: dash/tray/ui
         run: npm ci --no-audit --no-fund
 
       - name: TypeScript type check (ts-typecheck gate)
@@ -529,6 +530,59 @@ jobs:
         working-directory: dash
         run: npm run lint
 
+      # Every non-test source file under dash/ must be reachable from an entry point, so a
+      # deleted command cannot leave its private modules behind (spec task 2.1).
+      - name: Unreachable module check
+        working-directory: dash
+        run: npm run check:reachable
+
+      - name: Tray UI typecheck
+        working-directory: dash/tray/ui
+        run: npm run typecheck
+
+      - name: Tray UI test
+        working-directory: dash/tray/ui
+        run: npm test
+
+  tray-rust:
+    name: Tray Rust gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Pin is the v1 tag (an ancestor of master). The toolchain is the input,
+      # not the action rev — dtolnay/rust-toolchain treats @rev as a rustc
+      # version unless toolchain is set explicitly.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: dash/tray/src-tauri
+
+      - name: cargo fmt --check
+        working-directory: dash/tray/src-tauri
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        working-directory: dash/tray/src-tauri
+        run: cargo clippy -- -D warnings
+
+      - name: cargo test
+        working-directory: dash/tray/src-tauri
+        run: cargo test
+
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
@@ -539,6 +593,7 @@ jobs:
       - codeql
       - skill-docs-gate
       - ts-gates
+      - tray-rust
     if: always()
     steps:
       - name: Evaluate gate results
@@ -553,7 +608,8 @@ jobs:
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
           echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> results.md
           echo "| Skill and docs gate | ${{ needs.skill-docs-gate.result }} |" >> results.md
-          echo "| TypeScript gates (dash subtree) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| TypeScript gates (KyberDash) | ${{ needs.ts-gates.result }} |" >> results.md
+          echo "| Tray Rust gates | ${{ needs.tray-rust.result }} |" >> results.md
           echo "" >> results.md
           echo "| Trivy OSS Security Scan | ${{ needs.trivy.result }} (advisory) |" >> results.md
           echo "| Semgrep Community SAST | ${{ needs.semgrep.result }} (advisory) |" >> results.md
@@ -567,7 +623,8 @@ jobs:
             "${{ needs.update-loop.result }}" \
             "${{ needs.codeql.result }}" \
             "${{ needs.skill-docs-gate.result }}" \
-            "${{ needs.ts-gates.result }}"; do
+            "${{ needs.ts-gates.result }}" \
+            "${{ needs.tray-rust.result }}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               FAILED=true
               break

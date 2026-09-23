@@ -580,6 +580,144 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal("new-kyberdash", File.ReadAllText(installed));
     }
 
+    // ---- tray delegation (task 9.3, Requirements 15.1-15.7) ----
+
+    /// <summary>
+    /// A home directory with, or without, a recorded tray install. Returned as
+    /// an environment reader so the updater looks there instead of at whichever
+    /// machine is running the tests.
+    /// </summary>
+    private Func<string, string?> HomeWithTrayRecord(bool recorded)
+    {
+        string home = Path.Combine(_install.Path, "home");
+        if (recorded)
+        {
+            string config = Path.Combine(home, ".kyberdash");
+            Directory.CreateDirectory(config);
+            File.WriteAllText(
+                Path.Combine(config, "tray.json"),
+                """{"path":"/Applications/KyberDash.app","version":"0.9.23"}""");
+        }
+        else
+        {
+            Directory.CreateDirectory(home);
+        }
+
+        return name => name switch
+        {
+            "HOME" => home,
+            "USERPROFILE" => home,
+            _ => null,
+        };
+    }
+
+    private SelfUpdateOutcome RunWithTray(
+        HttpMessageHandler handler,
+        SelfUpdateHost host,
+        SelfUpdateOptions options,
+        List<string> log,
+        List<(string File, IReadOnlyList<string> Args)> spawned,
+        bool trayRecorded = true,
+        int trayExitCode = 0)
+    {
+        using SelfUpdater updater = new SelfUpdater(
+            handler,
+            host,
+            log.Add,
+            HomeWithTrayRecord(trayRecorded),
+            (file, args) =>
+            {
+                spawned.Add((file, args));
+                return trayExitCode;
+            });
+        return updater.Run(options);
+    }
+
+    /// <summary>Requirement 15.1: the tray is updated after the CLI it belongs to.</summary>
+    [Fact]
+    public void RunDelegatesToKyberdashMenubarUpdate()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", windows: false, withKyberDash: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<(string File, IReadOnlyList<string> Args)> spawned = [];
+
+        SelfUpdateOutcome outcome = RunWithTray(
+            handler, host, new SelfUpdateOptions("0.10.0", false, false), log, spawned);
+
+        Assert.Equal(0, outcome.ExitCode);
+        (string File, IReadOnlyList<string> Args) call = Assert.Single(spawned);
+        Assert.Equal(Path.Combine(_install.Path, "kyberdash"), call.File);
+        Assert.Equal(["menubar", "--update"], call.Args);
+        Assert.Contains(log, line => line.Contains("updated the KyberDash tray", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Requirement 15.6: a failing tray step is named, so it is not mistaken
+    /// for a CLI failure.
+    /// </summary>
+    [Fact]
+    public void RunReportsANonZeroTrayExitAsANamedFailure()
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease("0.10.0", "osx-arm64", windows: false, withKyberDash: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<(string File, IReadOnlyList<string> Args)> spawned = [];
+
+        SelfUpdateOutcome outcome = RunWithTray(
+            handler,
+            host,
+            new SelfUpdateOptions("0.10.0", false, false),
+            log,
+            spawned,
+            trayExitCode: 3);
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("KyberDash tray step", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("exited 3", outcome.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Requirements 15.2-15.4: each skip has its own reason, and each is logged.
+    /// A silent skip reads as the update having covered the tray when it did not.
+    /// </summary>
+    [Theory]
+    // --no-menubar
+    [InlineData(true, false, "0.10.0", true, "--no-menubar")]
+    // --no-kyberdash: the tray installer is that binary.
+    [InlineData(false, true, "0.10.0", true, "--no-kyberdash")]
+    // A release that predates the tray.
+    [InlineData(false, false, "0.9.23", true, "predates the KyberDash tray")]
+    // Nothing recorded: update replaces, it does not add.
+    [InlineData(false, false, "0.10.0", false, "no tray install recorded")]
+    public void RunSkipsTheTrayWithAReason(
+        bool noMenubar,
+        bool noKyberDash,
+        string version,
+        bool trayRecorded,
+        string expectedLogFragment)
+    {
+        InstallKyberDash();
+        using MapHandler handler = MapRelease(version, "osx-arm64", windows: false, withKyberDash: true);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+        List<string> log = [];
+        List<(string File, IReadOnlyList<string> Args)> spawned = [];
+
+        SelfUpdateOutcome outcome = RunWithTray(
+            handler,
+            host,
+            new SelfUpdateOptions(version, false, false, NoKyberDash: noKyberDash, NoMenubar: noMenubar),
+            log,
+            spawned,
+            trayRecorded: trayRecorded);
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Empty(spawned);
+        Assert.Contains(log, line => line.Contains(expectedLogFragment, StringComparison.Ordinal));
+    }
+
     private SelfUpdateOutcome Run(
         HttpMessageHandler handler,
         SelfUpdateHost host,

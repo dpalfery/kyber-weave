@@ -1,0 +1,213 @@
+/*
+ * Shared design tokens for the dashboard and the tray (R8.12 / D8).
+ *
+ * Colour, type scale and density live here rather than in the dashboard's
+ * page stylesheet so the popover can import the same file. Duplicating the
+ * values would let the two surfaces drift; sharing components would pull in
+ * a wide layout the tray cannot use.
+ *
+ * The palette is derived from the KyberDash mark (`public/kyberdash-logo.svg`)
+ * rather than authored separately, so the product and its icon cannot drift.
+ * Every colour below traces to a stop in that file:
+ *
+ *   blade      #10b981 -> #34d399 -> #6ee7b7   primary, positive, focus ring
+ *   hilt       #1e293b -> #475569 -> #94a3b8   surfaces, borders, muted text
+ *   emitter    #fbbf24 -> #d97706              attention, context pressure >= 70% (R9.1)
+ *   switch     #ef4444                         critical, context pressure >= 90% (R9.2)
+ *
+ * The mark already carries the three-state semantic the status item needs, so
+ * the thresholds read as the saber does: a calm blade, a lit emitter, a live
+ * switch. Light mode takes the darker stop of each gradient so both schemes
+ * come from one source and each clears contrast on its own background.
+ *
+ * Cool slate throughout: no warm paper, no sepia neutrals.
+ */
+:root {
+  font-family: "Geist", "Geist Fallback", system-ui, sans-serif;
+  --radius: 0.375rem;
+
+  --background: #f8fafc;
+  --outer-background: #eef2f7;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #475569;
+  --tertiary-foreground: #64748b;
+  --heading: #065f46;
+  --border: rgba(15, 23, 42, 0.08);
+  --input: rgba(15, 23, 42, 0.14);
+  --interactive-secondary: rgba(15, 23, 42, 0.04);
+  --interactive-secondary-hover: rgba(15, 23, 42, 0.08);
+  --active-primary: #ffffff;
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
+  --subtle: #64748b;
+  --primary: #059669;
+  --primary-foreground: #ffffff;
+  --ring: #10b981;
+  --positive: #059669;
+  --brand: #10b981;
+
+  /*
+   * Categorical ramp. 1-2 and 4-7 are the mark's own hues; 3, 8, 9 and 10 are
+   * deliberate extensions, because a saber carries three hue families and a
+   * categorical scale needs ten that stay apart at a glance. All sit at the
+   * 600-700 weight so no series reads as louder than its neighbours.
+   */
+  --chart-1: #059669;
+  --chart-2: #0d9488;
+  --chart-3: #0369a1;
+  --chart-4: #d97706;
+  --chart-5: #b45309;
+  --chart-6: #dc2626;
+  --chart-7: #475569;
+  --chart-8: #7c3aed;
+  --chart-9: #be185d;
+  --chart-10: #4d7c0f;
+  --chart-grid-stroke: rgba(15, 23, 42, 0.07);
+  --chart-hover-cursor: rgba(15, 23, 42, 0.04);
+
+  color-scheme: light;
+}
+
+/*
+ * Dark surface: the mark's own reading — a lit blade against slate. Chart
+ * colours are re-derived at the 400-500 weight for contrast on a dark
+ * background. The .dark class is applied to <html> by index.html before first
+ * paint and toggled in the header.
+ */
+.dark {
+  color-scheme: dark;
+
+  --background: #0f172a;
+  --outer-background: #0b1120;
+  --foreground: #e2e8f0;
+  --card: #1e293b;
+  --card-foreground: #e2e8f0;
+  --popover: #1e293b;
+  --popover-foreground: #e2e8f0;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --tertiary-foreground: #64748b;
+  --heading: #6ee7b7;
+  --border: #334155;
+  --input: #334155;
+  --interactive-secondary: rgba(226, 232, 240, 0.06);
+  --interactive-secondary-hover: rgba(226, 232, 240, 0.1);
+  --active-primary: #334155;
+  --accent: #1e293b;
+  --accent-foreground: #e2e8f0;
+  --subtle: #64748b;
+  --primary: #10b981;
+  --primary-foreground: #022c22;
+  --ring: #34d399;
+  --positive: #10b981;
+  --brand: #10b981;
+
+  --chart-1: #10b981;
+  --chart-2: #2dd4bf;
+  --chart-3: #38bdf8;
+  --chart-4: #fbbf24;
+  --chart-5: #f59e0b;
+  --chart-6: #ef4444;
+  --chart-7: #94a3b8;
+  --chart-8: #a78bfa;
+  --chart-9: #f472b6;
+  --chart-10: #a3e635;
+  --chart-grid-stroke: rgba(226, 232, 240, 0.08);
+  --chart-hover-cursor: rgba(226, 232, 240, 0.06);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-outer-background: var(--outer-background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-tertiary-foreground: var(--tertiary-foreground);
+  --color-heading: var(--heading);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-interactive-secondary: var(--interactive-secondary);
+  --color-interactive-secondary-hover: var(--interactive-secondary-hover);
+  --color-active-primary: var(--active-primary);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-subtle: var(--subtle);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-positive: var(--positive);
+  --color-brand: var(--brand);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+  --color-chart-9: var(--chart-9);
+  --color-chart-10: var(--chart-10);
+  --color-chart-grid-stroke: var(--chart-grid-stroke);
+
+  --font-display: "Alga", Georgia, "Times New Roman", serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 20px;
+
+  /*
+   * Spine density: opt-in utilities so C-density can compact type, gaps,
+   * and chrome without retuning the inherited --text-* / --radius-* names.
+   * Consume as text-density-*, tracking-density, leading-density,
+   * gap-density-*, p-chrome, rounded-chrome.
+   */
+  --text-density-2xs: 10px;
+  --text-density-2xs--line-height: 1.2;
+  --text-density-xs: 11px;
+  --text-density-xs--line-height: 1.25;
+  --text-density-sm: 12px;
+  --text-density-sm--line-height: 1.3;
+  --text-density-md: 13px;
+  --text-density-md--line-height: 1.35;
+  --text-density-lg: 15px;
+  --text-density-lg--line-height: 1.35;
+  --text-density-xl: 18px;
+  --text-density-xl--line-height: 1.25;
+  --text-density-display: 20px;
+  --text-density-display--line-height: 1.15;
+
+  --tracking-density: -0.01em;
+  --leading-density: 1.25;
+
+  --spacing-density-hair: 0.125rem;
+  --spacing-density-tight: 0.25rem;
+  --spacing-density-inline: 0.375rem;
+  --spacing-density-cluster: 0.5rem;
+  --spacing-density-stack: 0.75rem;
+  --spacing-density-section: 1rem;
+
+  --spacing-chrome: 0.75rem;
+  --spacing-chrome-sm: 0.5rem;
+  --spacing-chrome-xs: 0.25rem;
+  --spacing-chrome-gutter: 0.75rem;
+
+  --radius-chrome: 0.25rem;
+  --radius-chrome-sm: 0.125rem;
+}

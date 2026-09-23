@@ -37,18 +37,8 @@ npm-debug.log*
 
 # Build artifacts
 *.tsbuildinfo
-
-# Local Discord brand / promo assets not yet ready to publish
-assets/discord-*.png
-
-# Desktop app experiments
-desktop/
-
-# Mac App Store app (private)
-appstore/
-
-# WIP / not ready
-src/summit.ts
+tray/src-tauri/target/
+tray/ui/dist/
 
 # SEA bundle output (tsup.sea.config.ts)
 dist-sea/

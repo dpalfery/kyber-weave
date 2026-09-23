@@ -2,11 +2,11 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { basename, dirname, join, resolve } from 'path'
 import { homedir } from 'os'
 
-import { readSessionLines } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
+import { readSessionLines } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
-import { safeNumber } from '../parser.js'
+import { safeNumber } from '../ingest/parser.js'
 
 const toolNameMap: Record<string, string> = {
   bash: 'Bash',
@@ -50,7 +50,7 @@ function expandHome(p: string): string {
 
 function getMuxRoot(override?: string): string {
   if (override) return resolve(expandHome(override))
-  const codeburnOverride = process.env['CODEBURN_MUX_DIR']
+  const codeburnOverride = process.env['KYBERDASH_MUX_DIR']
   if (codeburnOverride) return resolve(expandHome(codeburnOverride))
   const muxRoot = process.env['MUX_ROOT']
   if (muxRoot) return resolve(expandHome(muxRoot))

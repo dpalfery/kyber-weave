@@ -3,9 +3,9 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { homedir } from 'os'
 
-import { extractBashCommands } from '../bash-utils.js'
-import { readSessionLines } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { readSessionLines } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
 import type { ProbeRoot, ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
 
 type JsonObject = Record<string, unknown>

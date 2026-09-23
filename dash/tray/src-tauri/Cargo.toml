@@ -1,0 +1,47 @@
+[package]
+name = "kyberdash-tray"
+version = "0.1.0"
+description = "KyberDash menu-bar / notification-area tray"
+authors = ["Dave Palfery"]
+edition = "2021"
+license = "MIT"
+# Bundled as darwin-arm64, darwin-x64 and win-x64 (requirement 6.1).
+rust-version = "1.77"
+
+[lib]
+name = "kyberdash_tray_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "kyberdash-tray"
+path = "src/main.rs"
+
+# The Tauri CLI exports bundle.macOS.minimumSystemVersion (12.0) as
+# MACOSX_DEPLOYMENT_TARGET for the whole cargo invocation. At >= 12.0 the linker
+# omits dyld_stub_binder/__dyld_private, and rustc's `-C strip=debuginfo` pass then
+# leaves the LINKEDIT string pool at a 4-mod-8 offset. dyld refuses to dlopen that
+# ("mis-aligned LINKEDIT string pool"), so every proc-macro dylib fails to load and
+# release builds die with a cascade of E0463. Host-only artifacts are never shipped,
+# so leave them unstripped; the tray binary itself is still stripped.
+[profile.release.build-override]
+strip = "none"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+dirs = "6"
+fontdue = "0.9"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "process", "io-util", "time", "rt-multi-thread"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging"] }

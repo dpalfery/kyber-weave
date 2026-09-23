@@ -27,7 +27,8 @@ public sealed class UpdateCommand : Command<UpdateSettings>
                 settings.Version,
                 settings.ReleaseCandidate,
                 settings.NoMcp,
-                settings.NoKyberDash));
+                settings.NoKyberDash,
+                settings.NoMenubar));
             WriteOutcome(outcome);
             return outcome.ExitCode;
         }

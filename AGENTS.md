@@ -48,9 +48,20 @@ above reach it. Changes there run its own:
 npm --prefix dash run typecheck
 npm --prefix dash run lint
 npm --prefix dash run test
+npm --prefix dash run check:reachable
 ```
 
-The loop does not build `kyberdash` either, so the install and update path for that binary
+The tray (`dash/tray/`) is a Tauri 2 crate plus a React UI. After
+`npm --prefix dash/tray/ui ci`, its gates are:
+
+```bash
+npm --prefix dash/tray/ui run typecheck
+npm --prefix dash/tray/ui run test
+cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
+```
+
+`npm --prefix dash run lint` already covers `dash/tray/ui`. The loop does not build
+`kyberdash` either, so the install and update path for that binary
 cannot be verified offline today — see
 [the todo](docs/todo/kyberdash-local-release-loop.md) before assuming a green loop covered it.
 
@@ -98,13 +109,12 @@ claim is made in the README, and it has to remain true.
 **Do not widen the ontology to make a failure disappear.** If a document fails, fix the
 document.
 
-**KyberDash's merge zone is the place to write.** `dash/` is a vendored soft fork of
-[`getagentseal/codeburn`](https://github.com/getagentseal/codeburn) tracking an upstream
-remote. `dash/kyber/**` is the merge zone — upstream has no such path, so it never conflicts.
-Everything else under `dash/` is upstream's conflict surface: prefer adding a new file over
-editing one upstream owns, and when a change genuinely must live in upstream code, say why.
-The [architecture](docs/dash/architecture.md#repository-layout-and-the-merge-zone) has the
-per-directory ownership table.
+**KyberDash is first-party code.** `dash/` began as a soft fork of the CodeBurn project
+and was taken as a one-time fork ([ADR 0020](docs/adr/0020-kyberdash-one-time-fork.md)):
+nothing is merged from upstream any more, so judge an edit to any file under `dash/` on its
+merits, under the same gates as the rest of the repository. AgentSeal's MIT notice stays in
+`dash/LICENSE` and `dash/THIRD_PARTY_NOTICES.md`; outside those two files, no upstream
+reference belongs anywhere in the tree.
 
 **New dependencies need justification.** Core takes only Markdig and YamlDotNet. The
 CodeGraph index is read through the `sqlite3` CLI rather than `Microsoft.Data.Sqlite`

@@ -2,9 +2,9 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 
-import { extractBashCommands } from '../bash-utils.js'
-import { calculateCost } from '../models.js'
-import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../fs-utils.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { calculateCost } from '../pricing/models.js'
+import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../ingest/fs-utils.js'
 import type { ParsedProviderCall, ProbeRoot, Provider, SessionParser, SessionSource } from './types.js'
 
 type JsonObject = Record<string, unknown>
