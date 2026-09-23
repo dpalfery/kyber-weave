@@ -260,15 +260,41 @@ public sealed class AntigravityRendererContractTests : IDisposable
         // D12: delegates-to roster enforcement (agents with DelegatesTo constraints)
         // Verify that all reported permission-not-expressible degradations refer to valid agents
         // and match their instruction digests.
-        HashSet<string> agentNames = source.Agents.Select(a => a.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (SquadDegradationRecord degradation in result.Degradations.Where(d => d.Code == "permission-not-expressible"))
+        List<string> expectedPermissionAgents = [];
+        foreach (SquadAgent agent in source.Agents)
         {
-            Assert.Contains(agentNames, a => a == degradation.CanonicalIdentity);
-            SquadAgent agent = Assert.Single(source.Agents, a => a.Name == degradation.CanonicalIdentity);
             Assert.True(
-                string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
-                $"Permission degradation for '{agent.Name}' has the wrong instruction digest.");
+                source.CapabilityProfiles.Profiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile),
+                $"Agent '{agent.Name}' references undeclared capability profile '{agent.CapabilityProfile}'.");
+
+            bool executeAllowed = profile!.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+                exec == SquadPermissionDecision.Allow;
+            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+                write == SquadPermissionDecision.Allow;
+            bool isCapabilityNotIsolable = executeAllowed && !writeAllowed;
+
+            if (!isCapabilityNotIsolable && HasNonDenyCapability(source.CapabilityProfiles, profile))
+            {
+                expectedPermissionAgents.Add(agent.Name);
+            }
+
+            if (agent.DelegatesTo.Count > 0)
+            {
+                expectedPermissionAgents.Add(agent.Name);
+            }
         }
+
+        string[] expectedPermissionArray = expectedPermissionAgents
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        string[] actualPermissionAgents = result.Degradations
+            .Where(d => d.Code == "permission-not-expressible")
+            .Select(d => d.CanonicalIdentity)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expectedPermissionArray, actualPermissionAgents);
 
         // Native renderer permission degradations record constraints that cannot be expressed.
         // Each degradation's target, identity, and instruction digest must be consistent.
