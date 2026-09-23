@@ -147,6 +147,30 @@ public sealed class TodoInventoryValidatorTests
         Assert.True(report.Items.Count == 0, Describe(report));
     }
 
+    /// <summary>
+    /// Listed means reachable from the index through live documents. An archived document
+    /// is closed work, so when the index links into it, its links out do not list the
+    /// active todos they point at — otherwise a closed document could vouch live work into
+    /// the inventory.
+    /// </summary>
+    [Fact]
+    public void AnActiveTodoLinkedOnlyFromAnArchivedDocumentIsStillUnlisted()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/README.md", Index("- [Closed spike](archive/todo/closed-spike.md)", "docs/index"))
+            .Write(
+                "6-Docs/archive/todo/closed-spike.md",
+                Todo("todo/closed-spike", "- [Spike: cleanup](../../todo/spike-cleanup.md)"))
+            .Write("6-Docs/todo/spike-cleanup.md", Todo("todo/spike-cleanup"));
+
+        DocumentSet set = new DocumentLoader(fixture.Root, ArchiveInCorpus).Load();
+        DiagnosticReport report = new TodoInventoryValidator(HostOverrides).Validate(set);
+
+        Diagnostic finding = Assert.Single(report.Items);
+        Assert.Equal(TodoInventoryValidator.UnlistedTodo, finding.Code);
+        Assert.Equal("6-Docs/todo/spike-cleanup.md", finding.FilePath);
+    }
+
     [Fact]
     public void ACorpusWithoutATodoIndexIsSilent()
     {

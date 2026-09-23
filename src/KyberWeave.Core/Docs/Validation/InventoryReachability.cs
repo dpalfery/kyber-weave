@@ -35,8 +35,11 @@ internal static class InventoryReachability
         {
             foreach (string link in current.BodyLinks)
             {
+                // An archived target is closed work: it is not listed, and its links out
+                // do not list anything either — the listing chain stays in live space.
                 if (ResolveDocument(current.RelativePath, link, byPath) is not { } target
                     || !IsWithin(target.RelativePath, folder)
+                    || IsArchived(target.RelativePath)
                     || !reached.Add(target.RelativePath))
                 {
                     continue;
