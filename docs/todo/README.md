@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-23
 ---
 
 # Todos
@@ -59,3 +59,8 @@ last-reviewed: YYYY-MM-DD
 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | draft | squad commands' positional path argument can silently target the wrong directory. |
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |
+| [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | draft | Packaging Squad as a ZCode plugin would trade per-file receipt ownership for per-unit enablement and namespace every agent — a deployment-model decision, not remaining ZCode work. |
+| [black-hawk-hotel-todo.md](../archive/todo/black-hawk-hotel-todo.md) | KyberSquad | superseded | Handover of in-flight harness fidelity work: emit `thinking` for Pi, and reclassify Antigravity from fallback role-skills to its native agent primitive (superseded by [plan](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md)). |
+| [antigravity-native-agents.md](../archive/todo/antigravity-native-agents.md) | KyberSquad | superseded | Antigravity has a native agent primitive at `agents/<name>/agent.md`, but the renderer still lowers every role to a skill; the verified format, paths and capability mapping are recorded (superseded by [plan](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md)). |
+| [antigravity-capability-verification-evidence.md](antigravity-capability-verification-evidence.md) | KyberSquad | current | Live verification evidence for the Antigravity capability→tool mapping and model enum domains against agy 1.2.7; part of plan C0 gate per [2026-09-21-pi-thinking-and-antigravity-native-agents.md](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md). |
+| [shell-implies-write-live-verification-other-targets.md](shell-implies-write-live-verification-other-targets.md) | KyberSquad | draft | The `capability-not-isolable` degradation on Claude, Pi, ZCode, Factory, and OpenCode is grounded in structural code inspection (shell tools held distinct from write tools); live verification of the shell-implies-write property on each harness would strengthen confidence and could unlock withheld Antigravity tools pending live validation. |

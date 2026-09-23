@@ -400,7 +400,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 string.Equals("claude", degradation.Target, StringComparison.Ordinal),
                 $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
             Assert.True(
-                degradation.Code is "safety-narrowed" or "permission-not-expressible",
+                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable",
                 $"Degradation for '{degradation.CanonicalIdentity}' has an unexpected code '{degradation.Code}'.");
             Assert.True(
                 string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
@@ -409,6 +409,78 @@ public sealed class ClaudeRendererContractTests : IDisposable
             Assert.True(
                 string.Equals(agent.BodyDigest, degradation.InstructionDigest, StringComparison.Ordinal),
                 $"Degradation for '{degradation.CanonicalIdentity}' has the wrong instruction digest.");
+        }
+    }
+
+    /// <summary>
+    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
+    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
+    /// shell tools (Bash, PowerShell) and withheld write tools (Edit, NotebookEdit, Write).
+    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_RecordsCapabilityNotIsolableForShellImpliesWrite()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        string[] grantedShellTools = ["Bash", "PowerShell"];
+        string[] withheldWriteTools = ["Edit", "NotebookEdit", "Write"];
+
+        List<string> expectedAgents = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                return exec && !write;
+            })
+            .Select(a => a.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.NotEmpty(expectedAgents);
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+                exec == SquadPermissionDecision.Allow;
+            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+                write == SquadPermissionDecision.Allow;
+
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
+                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+
+            if (executeAllowed && !writeAllowed)
+            {
+                Assert.NotNull(record);
+                Assert.Equal("claude", record.Target);
+                Assert.Equal(agent.Name, record.CanonicalIdentity);
+                Assert.Equal(agent.Name, record.OutputIdentity);
+                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
+                Assert.NotNull(record.Details);
+                foreach (string shellTool in grantedShellTools)
+                {
+                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
+                }
+                foreach (string writeTool in withheldWriteTools)
+                {
+                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
+                }
+            }
+            else
+            {
+                Assert.Null(record);
+            }
         }
     }
 

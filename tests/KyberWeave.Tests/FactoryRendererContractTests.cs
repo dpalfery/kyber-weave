@@ -364,6 +364,77 @@ public sealed class FactoryRendererContractTests : IDisposable
                 $"Degradation names unknown identity '{d.CanonicalIdentity}'."));
     }
 
+    /// <summary>
+    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
+    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
+    /// shell tools (Execute) and withheld write tools (ApplyPatch, Create, Edit).
+    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Factory_RecordsCapabilityNotIsolableForShellImpliesWrite()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRendererRegistry registry = new([new FactoryRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Factory],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        string[] grantedShellTools = ["Execute"];
+        string[] withheldWriteTools = ["ApplyPatch", "Create", "Edit"];
+
+        List<string> expectedAgents = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                return exec && !write;
+            })
+            .Select(a => a.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.NotEmpty(expectedAgents);
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+                exec == SquadPermissionDecision.Allow;
+            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+                write == SquadPermissionDecision.Allow;
+
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
+                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+
+            if (executeAllowed && !writeAllowed)
+            {
+                Assert.NotNull(record);
+                Assert.Equal("factory", record.Target);
+                Assert.Equal(agent.Name, record.CanonicalIdentity);
+                Assert.Equal(agent.Name, record.OutputIdentity);
+                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
+                Assert.NotNull(record.Details);
+                foreach (string shellTool in grantedShellTools)
+                {
+                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
+                }
+                foreach (string writeTool in withheldWriteTools)
+                {
+                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
+                }
+            }
+            else
+            {
+                Assert.Null(record);
+            }
+        }
+    }
+
     [Fact]
     public async Task RenderAsync_Factory_GlobalScope_StripsFactoryPrefix()
     {

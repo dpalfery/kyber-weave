@@ -30,7 +30,26 @@ internal static class SquadCommandComposition
     /// </summary>
     public static ISquadGlobalRootResolver ResolveGlobalRoots() => new SquadGlobalRoots(
         Environment.GetEnvironmentVariable,
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ReadFileTextOrNull);
+
+    /// <summary>
+    /// The file-reading port <see cref="SquadGlobalRoots"/> uses for the one target whose
+    /// global root can be set in a config file rather than an environment variable. Absent or
+    /// unreadable is not an error: the resolver falls back to that target's default, matching
+    /// what the harness itself does with the same file.
+    /// </summary>
+    internal static string? ReadFileTextOrNull(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Resolves the Kyber-Weave MCP process probe using the specified process executor.</summary>
     public static McpProcessProbe ResolveProbe(IProcessExecutor? executor) =>
@@ -41,11 +60,13 @@ internal static class SquadCommandComposition
 
     /// <summary>
     /// Resolves the renderer used to lower canonical Squad source into harness-native
-    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, and Factory are native;
-    /// Antigravity and Warp are fallback role-skill lowering (to <c>.agents/skills/</c> and
-    /// <c>.warp/skills/</c>). Pi is native through the third-party <c>@tintinweb/pi-subagents</c>
-    /// extension's custom-agent format, with its one <c>invocation: primary</c> agent lowered to
-    /// a top-level skill because Pi core has no primary-agent primitive (see <see cref="PiRenderer"/> remarks).
+    /// files. Copilot, Cursor, Claude, Codex, OpenCode, Kilo, Pi, Factory, and Antigravity are native;
+    /// Warp is fallback role-skill lowering (to <c>.warp/skills/</c>). Antigravity is native via
+    /// per-agent directories at <c>.agents/agents/{name}/agent.md</c> with canonical skills at
+    /// <c>.agents/skills/{name}/SKILL.md</c> (the "Native Both" pattern). Pi is native through the
+    /// third-party <c>@tintinweb/pi-subagents</c> extension's custom-agent format, with its one
+    /// <c>invocation: primary</c> agent lowered to a top-level skill because Pi core has no
+    /// primary-agent primitive (see <see cref="PiRenderer"/> remarks).
     /// Every other approved target fails closed with a pointer to its <c>docs/todo/</c>
     /// entry rather than being silently dropped from the roster.
     /// </summary>
@@ -62,6 +83,7 @@ internal static class SquadCommandComposition
             new PiRenderer(),
             new FactoryRenderer(),
             new WarpRenderer(),
+            new ZCodeRenderer(),
         ]);
 
     /// <summary>Resolves a deployment transaction using the specified or default state store.</summary>

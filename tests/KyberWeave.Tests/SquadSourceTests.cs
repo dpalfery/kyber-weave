@@ -87,28 +87,28 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "cursor", "gpt-5.6-sol[context=272k,reasoning=high,fast=false]")]
     [InlineData("deep-planning", "kilo", "glm5.3")]
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
-    [InlineData("deep-planning", "pi", "zai/glm-5.3")]
+    [InlineData("deep-planning", "pi", "zai/glm-5.3[thinking=high]")]
     [InlineData("fast", "claude", "haiku")]
     [InlineData("fast", "codex", "gpt-5.6-luna")]
     [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "spark1.3 contributor")]
     [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
-    [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free")]
+    [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
     [InlineData("general", "claude", "haiku")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
     [InlineData("general", "copilot", "Grok 4.6 (copilot)")]
     [InlineData("general", "cursor", "grok-4.6[]")]
     [InlineData("general", "kilo", "muse-spark1.3 contributor")]
     [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
-    [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free")]
+    [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=medium]")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-5.6-terra")]
     [InlineData("reviewer", "copilot", "Kimi K2.7 Code (copilot)")]
     [InlineData("reviewer", "cursor", "kimi-k2.7-code[]")]
     [InlineData("reviewer", "kilo", "kimi k2.7 code")]
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
-    [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code")]
+    [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
     [InlineData("orchestration", "claude", "haiku")]
     [InlineData("orchestration", "kilo", "inherit")]
     [InlineData("orchestration", "opencode", "opencode/big-pickle")]
@@ -891,6 +891,117 @@ public sealed class SquadSourceTests
 
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "YAML source is invalid");
         Assert.Equal(3, diagnostic.StartLine);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // required-mcp-tools: the roster ZCodeRenderer grants by fully qualified name and
+    // `squad doctor` checks a ZCode install against. It lives in source because it is an
+    // external contract that drifts — context7 renamed `get-library-docs` to `query-docs` —
+    // and a harness matching an allow-list by exact name breaks on a rename rather than
+    // degrading. Names are validated at load so one that could never resolve fails here.
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void LoadToolchainWithoutRequiredMcpToolsYieldsAnEmptyRoster()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+
+        Assert.Empty(source.Toolchain.RequiredMcpTools);
+    }
+
+    [Fact]
+    public void LoadToolchainReadsRequiredMcpToolsInStableOrder()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("toolchain.yml", """
+            schema: kyber-squad.toolchain/v1
+            required-features: []
+            required-mcp-tools:
+              kyber-weave:
+                - docs_explore
+                - docs_glossary
+              codegraph:
+                - codegraph_explore
+            validated-release: null
+            """);
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+
+        Assert.Equal(["codegraph", "kyber-weave"], source.Toolchain.RequiredMcpTools.Keys);
+        Assert.Equal(["codegraph_explore"], source.Toolchain.RequiredMcpTools["codegraph"]);
+        Assert.Equal(
+            ["docs_explore", "docs_glossary"],
+            source.Toolchain.RequiredMcpTools["kyber-weave"]);
+    }
+
+    [Fact]
+    public void LoadToolchainRejectsAServerDeclaringNoTools()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("toolchain.yml", """
+            schema: kyber-squad.toolchain/v1
+            required-features: []
+            required-mcp-tools:
+              codegraph: []
+            validated-release: null
+            """);
+
+        AssertInvalid(fixture, "toolchain.yml", "declares no tools");
+    }
+
+    [Fact]
+    public void LoadToolchainRejectsDuplicateToolNames()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("toolchain.yml", """
+            schema: kyber-squad.toolchain/v1
+            required-features: []
+            required-mcp-tools:
+              codegraph:
+                - codegraph_explore
+                - codegraph_explore
+            validated-release: null
+            """);
+
+        AssertInvalid(fixture, "toolchain.yml", "duplicate");
+    }
+
+    [Theory]
+    [InlineData("code graph", "codegraph_explore")]
+    [InlineData("code:graph", "codegraph_explore")]
+    [InlineData("codegraph", "explore tool")]
+    [InlineData("codegraph", "explore/tool")]
+    public void LoadToolchainRejectsNamesAHarnessWouldRewrite(string server, string tool)
+    {
+        // toModelVisibleMcpNamePart replaces anything outside [A-Za-z0-9_-], so a name carrying
+        // another character would be rewritten and an exact-match allow-list would never match.
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("toolchain.yml", $"""
+            schema: kyber-squad.toolchain/v1
+            required-features: []
+            required-mcp-tools:
+              "{server}":
+                - "{tool}"
+            validated-release: null
+            """);
+
+        AssertInvalid(fixture, "toolchain.yml", "qualified MCP tool name");
+    }
+
+    [Fact]
+    public void LoadToolchainRejectsAnUnknownField()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("toolchain.yml", """
+            schema: kyber-squad.toolchain/v1
+            required-features: []
+            required-mcp-servers: []
+            validated-release: null
+            """);
+
+        AssertInvalid(fixture, "toolchain.yml", "required-mcp-servers");
     }
 
     private static Diagnostic AssertInvalid(
