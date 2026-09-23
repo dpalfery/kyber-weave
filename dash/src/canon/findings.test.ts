@@ -154,4 +154,59 @@ describe('buildFindings', () => {
     ).toHaveLength(0)
     store.close()
   })
+
+  it('attributes each persisted hazard to the canonical session key the run carried', async () => {
+    // Two harness sessions that never emitted a session id land in one run
+    // (a shared explicit run id) and are keyed by their trace ids — the store
+    // keys every record by COALESCE(session_id, trace_id), and buildSessions
+    // and buildRuns name the row after that key. Persisting one merged
+    // placeholder finding would measure both sessions against whichever
+    // window came first and match no session row.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      turn('t-a1', [], {
+        sessionId: null,
+        traceId: 'trace-a',
+        tokens: tokens({ freshInput: 100_000, reportedInput: 100_000 }),
+        raw: { 'gen_ai.run.id': 'run-shared', 'gen_ai.request.max_context_tokens': 200_000 },
+      }),
+      turn('t-a2', [], {
+        sessionId: null,
+        traceId: 'trace-a',
+        timestamp: '2026-09-03T10:05:00.000Z',
+        tokens: tokens({ freshInput: 190_000, reportedInput: 190_000 }),
+        raw: { 'gen_ai.run.id': 'run-shared', 'gen_ai.request.max_context_tokens': 200_000 },
+      }),
+      turn('t-b1', [], {
+        sessionId: null,
+        traceId: 'trace-b',
+        timestamp: '2026-09-03T10:06:00.000Z',
+        tokens: tokens({ freshInput: 100_000, reportedInput: 100_000 }),
+        raw: { 'gen_ai.run.id': 'run-shared', 'gen_ai.request.max_context_tokens': 1_000_000 },
+      }),
+      turn('t-b2', [], {
+        sessionId: null,
+        traceId: 'trace-b',
+        timestamp: '2026-09-03T10:07:00.000Z',
+        tokens: tokens({ freshInput: 195_000, reportedInput: 195_000 }),
+        raw: { 'gen_ai.run.id': 'run-shared', 'gen_ai.request.max_context_tokens': 1_000_000 },
+      }),
+    ])
+    await buildRuns(store)
+
+    buildFindings(store)
+
+    const hazards = persistedCompactionHazards(store)
+    expect(hazards).toHaveLength(1)
+    const hazard = hazards[0]!
+    // trace-a's own window puts its 190,000-token peak over the 85% line;
+    // trace-b's 1,000,000 window keeps its 195,000 well under it. The finding
+    // is named after the session that fired, not the bucket that absorbed both.
+    expect(hazard.sessionId).toBe('trace-a')
+    expect(hazard.estimatedWasteTokens).toBe(20_000)
+    const provenance = hazard as ContextWindowProvenance
+    expect(provenance.contextLimit).toBe(200_000)
+    expect(provenance.contextLimitSource).toBe('reported')
+    store.close()
+  })
 })

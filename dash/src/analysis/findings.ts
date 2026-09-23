@@ -13,6 +13,7 @@
 
 import { normalizeWhitespace, hashNormalized } from './signals.js'
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
+import { normalizeHarnessName } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
 
@@ -909,10 +910,11 @@ export type CompactionHazardInput = {
  * Context consumption exceeding 85% of window without summarization plan.
  *
  * The window is per session (plan D1): turns are grouped by their record's
- * `sessionId` and each group is measured against the window its own records
- * report — the same `contextLimitOf` rule the session analysis uses — so a
+ * canonical session identity — the same derivation buildSessions and
+ * buildRuns use — and each group is measured against the window its own
+ * records report, the `contextLimitOf` rule the session analysis uses, so a
  * run mixing models is not judged by whichever session happened to report
- * first, and the finding's `sessionId` names the session that actually fired.
+ * first, and the finding's `sessionId` names a session row that exists.
  * An explicit `input.contextLimit` overrides derivation for every group
  * (preserved for tests and the parity tool).
  */
@@ -947,10 +949,38 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
   }
 
   const turnRecords = records.filter((r) => r.op === 'llm.invoke')
+
+  // Canonical session identity, derived the way buildSessions and buildRuns
+  // derive it (canon/sessions.ts, canon/runs.ts): the record's session id, or
+  // the trace id when the harness emitted none — the store keys every record
+  // by COALESCE(session_id, trace_id), and one run can carry several
+  // trace-keyed sessions — prefixed with the canonical harness when one key
+  // spans several, as `${harness}:${key}`. Grouping by the bare record
+  // sessionId would collapse those sessions into one context window and stamp
+  // findings with an id that matches no session row; the 'session'
+  // placeholder now only covers degenerate direct calls whose records carry
+  // neither id.
+  const baseKeyOf = (record: CanonicalRecord): string =>
+    record.sessionId || record.traceId || invocationSession || 'session'
+
+  const harnessesByKey = new Map<string, Set<string>>()
+  for (const record of turnRecords) {
+    const key = baseKeyOf(record)
+    const harnesses = harnessesByKey.get(key) ?? new Set<string>()
+    harnesses.add(normalizeHarnessName(record.harness))
+    harnessesByKey.set(key, harnesses)
+  }
+  const groupIdOf = (record: CanonicalRecord): string => {
+    const key = baseKeyOf(record)
+    return (harnessesByKey.get(key)?.size ?? 1) > 1
+      ? `${normalizeHarnessName(record.harness)}:${key}`
+      : key
+  }
+
   for (let i = 0; i < turnRecords.length; i++) {
     const r = turnRecords[i]!
     const tokens = r.tokens.reportedInput || (r.tokens.freshInput + r.tokens.cacheRead + r.tokens.cacheCreation)
-    const group = groupFor(r.sessionId || invocationSession || 'session')
+    const group = groupFor(groupIdOf(r))
     group.turns.push({ spanId: r.spanId, turnIndex: i, tokens })
     group.records.push(r)
   }

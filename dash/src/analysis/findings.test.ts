@@ -542,6 +542,104 @@ describe('Detector 5: compaction-hazard', () => {
     expect(sessionBFinding?.payload?.contextLimitSource).toBe('reported')
   })
 
+  it('groups records that carry no session id under their trace id, the key the store uses', () => {
+    // Store-path shape: sessions are keyed by COALESCE(session_id, trace_id),
+    // so a harness that never emits a session id still forms a session — keyed
+    // by its trace id — and one run can carry several of them. Collapsing such
+    // records into one placeholder bucket would measure them all against
+    // whichever session reported a window first and stamp the finding with a
+    // sessionId that matches no session row.
+    const traceATurn1 = makeMockRecord({
+      spanId: 'trace-a-early',
+      traceId: 'trace-a',
+      sessionId: '', // mirrors the absent session id the store path produces
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const traceATurn2 = makeMockRecord({
+      spanId: 'trace-a-peak',
+      traceId: 'trace-a',
+      sessionId: '',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const traceBTurn1 = makeMockRecord({
+      spanId: 'trace-b-early',
+      traceId: 'trace-b',
+      sessionId: '',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const traceBTurn2 = makeMockRecord({
+      spanId: 'trace-b-peak',
+      traceId: 'trace-b',
+      sessionId: '',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 195_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 195_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [traceATurn1, traceATurn2, traceBTurn1, traceBTurn2],
+    })
+
+    // trace-a's 190,000-token peak crosses 85% of its own 200,000 window while
+    // trace-b's 195,000 stays far under its 1,000,000 — so only trace-a fires,
+    // named by its canonical session key (the trace id), not a placeholder.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('trace-a')
+    expect(f.estimatedWasteTokens).toBe(20_000) // 190k - 170k (85% of trace-a's window)
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.payload?.contextLimitSource).toBe('reported')
+  })
+
+  it('prefixes the canonical harness when one session key spans several harnesses', () => {
+    // buildSessions and buildRuns name a session key shared by multiple
+    // canonical harnesses `${harness}:${key}`; a finding for that session has
+    // to carry the same id or it matches no session row.
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'shared-sess',
+      harness: 'claude', // canonicalizes to claude-unclassified
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'shared-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const cursorTurn1 = makeMockRecord({
+      spanId: 'cursor-early',
+      sessionId: 'shared-sess',
+      harness: 'cursor',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const cursorTurn2 = makeMockRecord({
+      spanId: 'cursor-peak',
+      sessionId: 'shared-sess',
+      harness: 'cursor',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn1, claudeTurn2, cursorTurn1, cursorTurn2],
+    })
+
+    // Only the claude-side group crosses 85% of its window, and it is stored
+    // under the same prefixed id the session row uses.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('claude-unclassified:shared-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.id).toBe(`finding-compaction-hazard-${f.sessionId}-claude-peak`)
+  })
+
   it('does NOT flag a session whose reported window keeps its peak below 85%', () => {
     const turn1 = makeMockRecord({
       spanId: 'turn-early',
