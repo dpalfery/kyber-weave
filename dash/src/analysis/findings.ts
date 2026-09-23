@@ -948,7 +948,15 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     return created
   }
 
-  const turnRecords = records.filter((r) => r.op === 'llm.invoke')
+  // A turn is a model call from an identity the builders actually group:
+  // groupByCanonicalHarness drops excluded identities (gemini), so such a
+  // span belongs to no canonical session and must neither become a group's
+  // peak nor win the group's first-reported window race. `harnessesByKey`
+  // already excludes them, which would otherwise leave their turns inside
+  // the one unprefixed group the key does have.
+  const turnRecords = records.filter(
+    (r) => r.op === 'llm.invoke' && canonicalHarnessId(r.harness) !== null,
+  )
 
   // Canonical session identity, derived the way buildSessions and buildRuns
   // derive it (canon/sessions.ts, canon/runs.ts): the record's session id, or

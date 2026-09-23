@@ -714,6 +714,74 @@ describe('Detector 5: compaction-hazard', () => {
     expect(f.estimatedWasteTokens).toBe(20_000)
   })
 
+  it('does not let a noncanonical turn become the group peak', () => {
+    // A gemini span sharing the session key belongs to no canonical session
+    // row: groupByCanonicalHarness drops it, so the builders could never
+    // produce this session's findings from it. Letting its turn into the
+    // group would fire a claude finding from a peak the claude session
+    // never reached.
+    const claudeTurn = makeMockRecord({
+      spanId: 'claude-turn',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      tokens: { freshInput: 150_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 150_000, reportedOutput: 100 },
+    })
+    const geminiTurn = makeMockRecord({
+      spanId: 'gemini-turn',
+      sessionId: 'mixed-sess',
+      harness: 'gemini',
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn, geminiTurn],
+    })
+
+    // 150,000 stays under 85% of the 200,000 default; the 190,000 gemini
+    // reading is not this session's peak because the session was never
+    // gemini's.
+    expect(findings.length).toBe(0)
+  })
+
+  it('derives the group window from canonical turns only', () => {
+    // Same contamination, window side: a gemini turn that reports a window
+    // must not win the first-reported race for a group it does not belong
+    // to, or the claude session is measured against a million tokens it
+    // never had.
+    const geminiTurn = makeMockRecord({
+      spanId: 'gemini-turn',
+      sessionId: 'mixed-sess',
+      harness: 'gemini',
+      raw: { 'gen_ai.request.max_context_tokens': 1_000_000 },
+      tokens: { freshInput: 1000, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 1000, reportedOutput: 50 },
+    })
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [geminiTurn, claudeTurn1, claudeTurn2],
+    })
+
+    // The claude session fires against its own (default) 200,000 window:
+    // 190,000 is 20,000 over the 85% line — not 19% of a borrowed window.
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('mixed-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+    expect(f.payload?.contextLimit).toBe(200_000)
+    expect(f.payload?.contextLimitSource).toBe('default')
+  })
+
   it('does NOT flag a session whose reported window keeps its peak below 85%', () => {
     const turn1 = makeMockRecord({
       spanId: 'turn-early',
