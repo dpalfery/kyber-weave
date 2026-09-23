@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 public sealed class SquadSharedIdentityProjectionTests
 {
     [Fact]
-    public async Task AntigravityFallbackReusesSharedIdentityAsExactlyOneUnprefixedSkill()
+    public async Task AntigravitySuppressesRedundantSharedIdentitySkillProjection()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
@@ -25,9 +25,18 @@ public sealed class SquadSharedIdentityProjectionTests
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Native behavior: shared identity agent emits native agent.md
+        Assert.Single(
+            result.Files,
+            file => file.RelativePath == $".agents/agents/{SharedIdentitySquadFixture.Identity}/agent.md");
+
+        // Canonical skill still emitted (native both pattern)
         Assert.Single(
             result.Files,
             file => file.RelativePath == $".agents/skills/{SharedIdentitySquadFixture.Identity}/SKILL.md");
+
+        // No role-prefixed collision files in native mode (no collision prefix needed with dual namespaces)
         Assert.DoesNotContain(
             result.Files,
             file => file.RelativePath == $".agents/skills/role-{SharedIdentitySquadFixture.Identity}/SKILL.md");
