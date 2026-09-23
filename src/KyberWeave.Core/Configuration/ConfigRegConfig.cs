@@ -32,6 +32,7 @@ public sealed class ConfigRegConfig
     public const string ComponentCatalogProperty = "component-catalog";
     public const string StandardsRootProperty = "standards-root";
     public const string PlanIndexProperty = "plan-index";
+    public const string TodoIndexProperty = "todo-index";
 
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
@@ -47,7 +48,7 @@ public sealed class ConfigRegConfig
     [
         ("plans", PlanIndexProperty),
         ("specs", "specification-index"),
-        ("todo", "todo-index"),
+        ("todo", TodoIndexProperty),
         ("adr", "adr-index"),
         ("rules", "rules-index"),
         ("reference", "reference-index")

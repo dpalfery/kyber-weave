@@ -4,12 +4,14 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-23
 ---
 
 # Todos
 
 This directory captures reminders of work not done now — findings during development, deferred fixes, or declined suggestions.
+
+Every todo document under `docs/todo/` must be reachable from this inventory. `docs validate` reports one that is not as `KW-DOC-LIFECYCLE-002`.
 
 ## When to use a todo
 
@@ -44,6 +46,7 @@ last-reviewed: YYYY-MM-DD
 | [portable-artifacts-carry-project-standards.md](portable-artifacts-carry-project-standards.md) | KyberSquad | draft | Remove project-specific coding standards embedded in the 21 canonical agents and the seven code-review references, now that standards have a home. |
 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | draft | The authoring skill states a doc-type vocabulary missing `todo` and `coding-standard`. |
 | [embeddings-endpoint-loopback-check.md](embeddings-endpoint-loopback-check.md) | DocGraph | draft | A non-loopback HTTPS embeddings endpoint is accepted where the test asserts rejection. |
+| [docs-validate-todo-index-gap.md](docs-validate-todo-index-gap.md) | DocGraph | superseded | `docs validate` passed with zero findings when a todo file under `docs/todo/` had no row in this index — todos had no equivalent of the plans' `KW-DOC-LIFECYCLE-001` enforcement; fixed by `KW-DOC-LIFECYCLE-002` in PR #106, which also indexed the harness file. |
 | [kyber-squad-renderer-coverage.md](kyber-squad-renderer-coverage.md) | KyberSquad | draft | Overview of remaining Kyber-Squad renderer target coverage and CLI gaps. |
 | [factory.md](factory.md) | KyberSquad | superseded | Add a native Factory (factory-droids) renderer to Kyber-Squad (superseded by [plan](../archive/plans/2026-09-14-factory-native-renderer.md)). |
 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | draft | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
@@ -59,4 +62,5 @@ last-reviewed: YYYY-MM-DD
 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | draft | Add a `--version` flag to squad install and squad update. |
 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | draft | squad commands' positional path argument can silently target the wrong directory. |
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |
+| [harness-specific-instruction-inserts.md](harness-specific-instruction-inserts.md) | KyberSquad | draft | Add a mechanism to conditionally include, exclude, or swap instruction blocks in canonical agents based on the target harness or its capabilities. |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |

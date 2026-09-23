@@ -1,6 +1,5 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -35,8 +34,6 @@ public sealed class PlanInventoryValidator
     /// <summary>A plan document in the active plans folder that the plan index does not reach.</summary>
     public const string UnlistedPlan = "KW-DOC-LIFECYCLE-001";
 
-    private const string FolderIndexName = "README.md";
-
     private readonly KyberWeaveConfig _config;
 
     public PlanInventoryValidator(KyberWeaveConfig config)
@@ -63,11 +60,11 @@ public sealed class PlanInventoryValidator
             return report;
 
         string folder = Path.GetDirectoryName(indexPath)?.Replace('\\', '/') ?? string.Empty;
-        HashSet<string> listed = ReachableWithin(index, folder, byPath);
+        HashSet<string> listed = InventoryReachability.ReachableWithin(index, folder, byPath);
 
         foreach (DocumentModel doc in set.Documents)
         {
-            if (doc.DocType != DocType.Plan || !IsWithin(doc.RelativePath, folder) || listed.Contains(doc.RelativePath))
+            if (doc.DocType != DocType.Plan || !InventoryReachability.IsWithin(doc.RelativePath, folder) || listed.Contains(doc.RelativePath))
                 continue;
 
             report.Add(new Diagnostic(
@@ -81,62 +78,4 @@ public sealed class PlanInventoryValidator
 
         return report;
     }
-
-    /// <summary>
-    /// Every document inside <paramref name="folder"/> reachable from <paramref name="index"/>
-    /// by relative body links, the index included.
-    /// </summary>
-    private static HashSet<string> ReachableWithin(
-        DocumentModel index,
-        string folder,
-        Dictionary<string, DocumentModel> byPath)
-    {
-        HashSet<string> reached = new HashSet<string>(DocsRootPath.PathComparer) { index.RelativePath };
-        Queue<DocumentModel> pending = new Queue<DocumentModel>();
-        pending.Enqueue(index);
-
-        while (pending.TryDequeue(out DocumentModel? current))
-        {
-            foreach (string link in current.BodyLinks)
-            {
-                if (ResolveDocument(current.RelativePath, link, byPath) is not { } target
-                    || !IsWithin(target.RelativePath, folder)
-                    || !reached.Add(target.RelativePath))
-                {
-                    continue;
-                }
-
-                pending.Enqueue(target);
-            }
-        }
-
-        return reached;
-    }
-
-    /// <summary>
-    /// The document a link lands on. A link to a directory lands on that directory's README,
-    /// which is how a plan's pack is usually linked.
-    /// </summary>
-    private static DocumentModel? ResolveDocument(
-        string fromRelativePath,
-        string link,
-        Dictionary<string, DocumentModel> byPath)
-    {
-        string? target = DocGraphProjection.ResolveLink(fromRelativePath, link);
-        if (target is null)
-            return null;
-
-        if (byPath.TryGetValue(target, out DocumentModel? document))
-            return document;
-
-        return byPath.GetValueOrDefault($"{target}/{FolderIndexName}");
-    }
-
-    private static bool IsWithin(string relativePath, string folder) =>
-        folder.Length == 0
-        || relativePath.StartsWith(
-            folder + "/",
-            DocsRootPath.PathComparer == StringComparer.OrdinalIgnoreCase
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal);
 }
