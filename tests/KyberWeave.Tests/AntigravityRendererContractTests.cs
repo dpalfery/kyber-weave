@@ -739,10 +739,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 $"Delegating agent '{agent.Name}' enable_subagent_tools must be 'true', got '{enableSubagentTools}'");
 
             // Must have invoke_subagent in tools
-            YamlNode toolsNode = Assert.NotNull(
-                OptionalScalar(frontmatter, "tools"),
+            YamlNode? toolsNodeOptional = OptionalScalar(frontmatter, "tools");
+            Assert.True(
+                toolsNodeOptional is not null,
                 $"Delegating agent '{agent.Name}' must have tools list");
-            YamlSequenceNode toolsSeq = Assert.IsType<YamlSequenceNode>(toolsNode);
+            YamlSequenceNode toolsSeq = Assert.IsType<YamlSequenceNode>(toolsNodeOptional!);
             string[] tools = toolsSeq.Children
                 .OfType<YamlScalarNode>()
                 .Select(n => n.Value ?? string.Empty)
@@ -901,7 +902,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_Antigravity_Native_InconclusivelToolsWithheld()
+    public async Task RenderAsync_Antigravity_Native_InconclusiveToolsWithheld()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
