@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-18
+last-reviewed: 2026-09-23
 ---
 
 # Architecture decision records
@@ -37,6 +37,7 @@ a new ADR that supersedes the old one.
 | [0019](0019-pi-native-subagents-and-primary-lowering.md) | [Native Pi Agents via pi-subagents, with Primary-Agent Skill Lowering](0019-pi-native-subagents-and-primary-lowering.md) | Accepted | 2026-09-14 | Pi is a native target via `@tintinweb/pi-subagents`; the primary-invocation conductor lowers to a skill so nested delegation stays inside the default depth cap. |
 | [0020](0020-kyberdash-one-time-fork.md) | [KyberDash as a One-Time Fork, and the Engine Language Re-Decided](0020-kyberdash-one-time-fork.md) | Accepted | 2026-09-18 | `dash/` becomes first-party code after a one-time fork of CodeBurn; restates the embedded receiver, span-shaped canonical model and SEA distribution of the archived ADR 0006, keeps the engine in TypeScript on current grounds, and supersedes ADR 0016 decision 8. |
 | [0021](0021-zcode-command-lowering-and-resource-relocation.md) | [ZCode Command Lowering, Resource Relocation, and the Inverted Empty Tool List](0021-zcode-command-lowering-and-resource-relocation.md) | Accepted | 2026-09-21 | ZCode's conductor lowers to `/conductor`; agent resources move under `.zcode/skills/` with rewritten links because the agent and command roots are scanned recursively; `tools: []` means inherit-everything, so an empty grant fails the render closed; and MCP is granted by enumerated tool name, gated by `squad doctor`. |
+| [0022](0022-antigravity-native-agents.md) | [Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation](0022-antigravity-native-agents.md) | Accepted | 2026-09-23 | Antigravity reclassified from fallback role-skill lowering to native `.agents/agents/<name>/agent.md` alongside canonical skills; shell execution implies file-write via redirection, recorded cross-target as `capability-not-isolable`; and unenforceable delegates-to rosters record `permission-not-expressible`. |
 
 ## Writing one
 
