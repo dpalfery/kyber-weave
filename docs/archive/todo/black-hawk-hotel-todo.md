@@ -210,7 +210,7 @@ Go struct tags, and the built-in `agy-customizations` skill.
 
 ## Related
 
-- [Renderer coverage](../../todo/kyber-squad-renderer-coverage.md) — the eleven-target roster this work
+- [Renderer coverage](kyber-squad-renderer-coverage.md) — the eleven-target roster this work
   sits inside
 - [ZCode plugin packaging](../../todo/zcode-plugin-packaging.md) — the other open ZCode decision
 - [Claude/Pi ask-narrowing](../../todo/claude-renderer-ask-narrowing.md) — the `ask` lowering that makes

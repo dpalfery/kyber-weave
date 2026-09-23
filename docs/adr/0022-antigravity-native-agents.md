@@ -159,6 +159,6 @@ However, live verification also surfaced critical security and governance findin
 - [ADR 0019](0019-pi-native-subagents-and-primary-lowering.md) — Native Pi agents via pi-subagents, with primary-agent skill lowering
 - [ADR 0021](0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering, resource relocation, and the inverted empty tool list
 - [Pi thinking and Antigravity native agents plan](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) — The delivery plan defining tracks A, C, and D
-- [Antigravity capability verification evidence](../todo/antigravity-capability-verification-evidence.md) — Live verification against `agy` 1.2.7 (C0) establishing the shell-implies-write proof
+- [Antigravity capability verification evidence](../archive/todo/antigravity-capability-verification-evidence.md) — Live verification against `agy` 1.2.7 (C0) establishing the shell-implies-write proof
 - [Antigravity native agents spec](../archive/todo/antigravity-native-agents.md) — Verified technical specification for Antigravity native agents
 - [Black Hawk Hotel handover](../archive/todo/black-hawk-hotel-todo.md) — Initial handover documenting harness fidelity tasks

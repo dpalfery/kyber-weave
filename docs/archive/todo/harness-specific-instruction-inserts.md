@@ -1,14 +1,21 @@
 ---
-id: todo/harness-specific-instruction-inserts
+id: archive/todo/harness-specific-instruction-inserts
 title: Support harness-specific conditional inserts in canonical agent instructions
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-25
-status: draft
+last-reviewed: 2026-09-23
+status: superseded
 ---
 
 # Support harness-specific conditional inserts in canonical agent instructions
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+Its motivating case no longer exists: the unified conductor makes `architect` headless on every harness ("never prompt the user directly; the conductor relays every question"), so the Copilot-only restriction it described is now the intended behaviour everywhere. Reopen with a new motivating case if one appears.
+
+---
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding, and
 where the precedent already is.
@@ -26,7 +33,7 @@ However, harnesses have differing communication models, execution constraints, a
 - **Cursor / Antigravity / CLI tools**: Agents and subagents can often prompt the user directly or
   invoke interactive questioning tools (e.g. interactive multi-choice question tools, modals, or CLI prompts).
 
-Currently, instructions like those in [`architect.md`](../../products/kyber-squad/agents/architect.md)
+Currently, instructions like those in [`architect.md`](../../../products/kyber-squad/agents/architect.md)
 hardcode Copilot-specific constraints into the canonical agent body (for example, lines 36–39 and
 58–59 instructing the agent that it cannot prompt the user and must hand questions back to the
 orchestrator). When rendered for harnesses that do support user interaction, these instructions
