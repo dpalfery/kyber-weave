@@ -32,8 +32,8 @@ Antigravity supports first-class native custom agents:
   precedence over global configurations.
 - Custom agents are listed by `agy agent` / `agy agents` and selected for a session via
   `agy --agent <name>`.
-- The conductor runs natively as an orchestrator: Antigravity recognizes `mainAgent: true`,
-  `subagent: false`, and `enable_subagent_tools: true`.
+- The conductor runs natively as an orchestrator: Antigravity recognizes `mainAgent: true`
+  and `enable_subagent_tools: true`.
 - YAML frontmatter supports tool allowlists (`tools:`), execution switches (`enable_write_tools`,
   `enable_subagent_tools`, `enable_mcp_tools`), closed model tier enums (`inherit`, `flash`, `pro`),
   and reasoning effort tiers (`minimal`, `low`, `medium`, `high`).
@@ -80,8 +80,8 @@ However, live verification also surfaced critical security and governance findin
 3. **Conductor renders as a native primary agent.**
    Unlike Pi (which lowers `conductor` to a skill to preserve subagent depth cap) and ZCode (which
    lowers `conductor` to a `/conductor` slash command), Antigravity natively supports primary agent
-   execution. Conductor renders at `.agents/agents/conductor/agent.md` with `mainAgent: true`,
-   `subagent: false`, and `enable_subagent_tools: true`. Live verification confirmed that non-mainAgent
+   execution. Conductor renders at `.agents/agents/conductor/agent.md` with `mainAgent: true`
+   and `enable_subagent_tools: true`. Live verification confirmed that non-mainAgent
    custom agents are directly selectable via `agy --agent <name>`.
 
 4. **Residual write capability through shell execution is degraded as `capability-not-isolable`.**
