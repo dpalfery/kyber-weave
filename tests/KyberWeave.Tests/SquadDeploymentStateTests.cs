@@ -829,6 +829,175 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// When updating an existing deployment from Antigravity's fallback role-skill lowering
+    /// shape (.agents/skills/&lt;name&gt;/SKILL.md) to its native agent shape (.agents/agents/&lt;name&gt;/agent.md),
+    /// receipt-diff logic in <see cref="SquadDeploymentPlan.CreateUpdate"/> plans a Delete mutation
+    /// for orphaned fallback skill files whose on-disk bytes still match the previous receipt digest,
+    /// and retains orphaned skill files whose bytes were locally edited by an operator.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateReceiptDiffRetiresFallbackSkillPathsOnNativeAntigravityUpdateAndRetainsLocallyEdited()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        const string target = "antigravity";
+        const string retiredSkillPath = ".agents/skills/worker/SKILL.md";
+        const string editedSkillPath = ".agents/skills/reviewer/SKILL.md";
+        const string installedWorkerContent = "---\nname: worker\ndescription: fallback worker skill\n---\nFallback worker instructions\n";
+        const string installedReviewerContent = "---\nname: reviewer\ndescription: fallback reviewer skill\n---\nFallback reviewer instructions\n";
+        const string locallyEditedReviewerContent = "---\nname: reviewer\ndescription: operator edited reviewer\n---\nCustom operator instructions\n";
+
+        const string nativeWorkerAgentPath = ".agents/agents/worker/agent.md";
+        const string nativeReviewerAgentPath = ".agents/agents/reviewer/agent.md";
+        const string nativeWorkerAgentContent = "---\nname: worker\ndescription: native worker agent\nenable_write_tools: true\n---\nNative worker instructions\n";
+        const string nativeReviewerAgentContent = "---\nname: reviewer\ndescription: native reviewer agent\nenable_write_tools: true\n---\nNative reviewer instructions\n";
+
+        SquadOwnedFile retiredSkillOwned = new(
+            retiredSkillPath,
+            Digest(installedWorkerContent),
+            target,
+            Adopted: false);
+        SquadOwnedFile editedSkillOwned = new(
+            editedSkillPath,
+            Digest(installedReviewerContent),
+            target,
+            Adopted: false);
+        SquadReceipt previousReceipt = Receipt(retiredSkillOwned, editedSkillOwned);
+
+        Write(fixture.Path, retiredSkillPath, installedWorkerContent);
+        Write(fixture.Path, editedSkillPath, locallyEditedReviewerContent);
+        WriteState(fixture.Path, Lock(), previousReceipt);
+
+        // Verify pre-update on-disk state: fallback files exist with their initial contents, native paths do not yet exist
+        Assert.True(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
+        Assert.Equal(installedWorkerContent, Read(fixture.Path, retiredSkillPath));
+        Assert.True(File.Exists(ToPlatformPath(fixture.Path, editedSkillPath)));
+        Assert.Equal(locallyEditedReviewerContent, Read(fixture.Path, editedSkillPath));
+        Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeWorkerAgentPath)));
+        Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeReviewerAgentPath)));
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            fixture.Path,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [
+                Rendered(nativeWorkerAgentPath, nativeWorkerAgentContent, target),
+                Rendered(nativeReviewerAgentPath, nativeReviewerAgentContent, target)
+            ],
+            previousReceipt,
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddDays(1)));
+
+        // Verify planned changes: unmodified fallback path is planned for Delete; native paths are planned for Write; locally edited path is not touched
+        Assert.Contains(
+            plan.PlannedFileChanges,
+            change => change.RelativePath == retiredSkillPath &&
+                      change.Target == target &&
+                      change.Kind == SquadFileMutationKind.Delete);
+        Assert.Contains(
+            plan.PlannedFileChanges,
+            change => change.RelativePath == nativeWorkerAgentPath &&
+                      change.Target == target &&
+                      change.Kind == SquadFileMutationKind.Write);
+        Assert.Contains(
+            plan.PlannedFileChanges,
+            change => change.RelativePath == nativeReviewerAgentPath &&
+                      change.Target == target &&
+                      change.Kind == SquadFileMutationKind.Write);
+        Assert.DoesNotContain(
+            plan.PlannedFileChanges,
+            change => change.RelativePath == editedSkillPath);
+
+        // Verify planned mutations and preconditions
+        SquadFileMutation deleteMutation = Assert.Single(
+            plan.FileMutations,
+            m => m.RelativePath == retiredSkillPath);
+        Assert.Equal(SquadFileMutationKind.Delete, deleteMutation.Kind);
+        Assert.Equal(target, deleteMutation.Target);
+
+        SquadFileMutation workerWrite = Assert.Single(
+            plan.FileMutations,
+            m => m.RelativePath == nativeWorkerAgentPath);
+        Assert.Equal(SquadFileMutationKind.Write, workerWrite.Kind);
+        Assert.Equal(target, workerWrite.Target);
+        Assert.Equal(nativeWorkerAgentContent, Encoding.UTF8.GetString(workerWrite.Content!));
+
+        SquadFileMutation reviewerWrite = Assert.Single(
+            plan.FileMutations,
+            m => m.RelativePath == nativeReviewerAgentPath);
+        Assert.Equal(SquadFileMutationKind.Write, reviewerWrite.Kind);
+        Assert.Equal(target, reviewerWrite.Target);
+        Assert.Equal(nativeReviewerAgentContent, Encoding.UTF8.GetString(reviewerWrite.Content!));
+
+        Assert.DoesNotContain(plan.FileMutations, m => m.RelativePath == editedSkillPath);
+
+        SquadFilePrecondition deletePrecondition = Assert.Single(
+            plan.FilePreconditions,
+            p => p.RelativePath == retiredSkillPath);
+        Assert.Equal(SquadFilePreconditionKind.ExactFile, deletePrecondition.Kind);
+        Assert.Equal(Digest(installedWorkerContent), deletePrecondition.Sha256);
+
+        SquadFilePrecondition workerPrecondition = Assert.Single(
+            plan.FilePreconditions,
+            p => p.RelativePath == nativeWorkerAgentPath);
+        Assert.Equal(SquadFilePreconditionKind.Missing, workerPrecondition.Kind);
+
+        SquadFilePrecondition reviewerPrecondition = Assert.Single(
+            plan.FilePreconditions,
+            p => p.RelativePath == nativeReviewerAgentPath);
+        Assert.Equal(SquadFilePreconditionKind.Missing, reviewerPrecondition.Kind);
+
+        // Verify planned receipt: retired skill is omitted; edited skill is retained at original digest; new native agents are owned
+        Assert.DoesNotContain(plan.Receipt.Files, f => f.RelativePath == retiredSkillPath);
+
+        SquadOwnedFile retainedSkill = Assert.Single(
+            plan.Receipt.Files,
+            f => f.RelativePath == editedSkillPath);
+        Assert.Equal(Digest(installedReviewerContent), retainedSkill.Sha256);
+        Assert.False(retainedSkill.Adopted);
+        Assert.Equal(target, retainedSkill.Target);
+
+        SquadOwnedFile plannedWorkerAgent = Assert.Single(
+            plan.Receipt.Files,
+            f => f.RelativePath == nativeWorkerAgentPath);
+        Assert.Equal(Digest(nativeWorkerAgentContent), plannedWorkerAgent.Sha256);
+        Assert.False(plannedWorkerAgent.Adopted);
+        Assert.Equal(target, plannedWorkerAgent.Target);
+
+        SquadOwnedFile plannedReviewerAgent = Assert.Single(
+            plan.Receipt.Files,
+            f => f.RelativePath == nativeReviewerAgentPath);
+        Assert.Equal(Digest(nativeReviewerAgentContent), plannedReviewerAgent.Sha256);
+        Assert.False(plannedReviewerAgent.Adopted);
+        Assert.Equal(target, plannedReviewerAgent.Target);
+
+        Assert.Equal(3, plan.Receipt.Files.Count);
+
+        // Execute transaction and verify physical filesystem and receipt store outcomes
+        Transaction(fixture.Path).Execute(plan);
+
+        // Unmodified fallback skill was deleted from disk
+        Assert.False(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
+
+        // Locally edited fallback skill was retained untouched on disk with operator modifications intact
+        Assert.True(File.Exists(ToPlatformPath(fixture.Path, editedSkillPath)));
+        Assert.Equal(locallyEditedReviewerContent, Read(fixture.Path, editedSkillPath));
+
+        // Native agent files now exist on disk with rendered content
+        Assert.True(File.Exists(ToPlatformPath(fixture.Path, nativeWorkerAgentPath)));
+        Assert.Equal(nativeWorkerAgentContent, Read(fixture.Path, nativeWorkerAgentPath));
+        Assert.True(File.Exists(ToPlatformPath(fixture.Path, nativeReviewerAgentPath)));
+        Assert.Equal(nativeReviewerAgentContent, Read(fixture.Path, nativeReviewerAgentPath));
+
+        // Persisted receipt matches planned receipt and omits retired fallback skill
+        SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+            fixture.Path,
+            SquadDeploymentScope.Project));
+        AssertReceiptEqual(plan.Receipt, persisted);
+        Assert.DoesNotContain(persisted.Files, f => f.RelativePath == retiredSkillPath);
+    }
+
+    /// <summary>
     /// A failed resource update must restore the exact prior bytes and ownership receipt, even
     /// when the failure happens after the new resource after-image has been published.
     /// </summary>
