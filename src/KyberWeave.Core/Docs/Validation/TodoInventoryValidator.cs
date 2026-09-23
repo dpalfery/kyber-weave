@@ -61,8 +61,11 @@ public sealed class TodoInventoryValidator
 
         foreach (DocumentModel doc in set.Documents)
         {
-            if (doc.DocType != DocType.Todo || !InventoryReachability.IsWithin(doc.RelativePath, folder) || listed.Contains(doc.RelativePath))
+            if (doc.DocType != DocType.Todo || !InventoryReachability.IsWithin(doc.RelativePath, folder)
+                || InventoryReachability.IsArchived(doc.RelativePath) || listed.Contains(doc.RelativePath))
+            {
                 continue;
+            }
 
             report.Add(new Diagnostic(
                 UnlistedTodo, Severity.Error,

@@ -75,4 +75,19 @@ internal static class InventoryReachability
             DocsRootPath.PathComparer == StringComparer.OrdinalIgnoreCase
                 ? StringComparison.OrdinalIgnoreCase
                 : StringComparison.Ordinal);
+
+    /// <summary>
+    /// True when the document sits under the archive subtree, matched per segment the way
+    /// the loader matches its exclusions.
+    /// </summary>
+    /// <remarks>
+    /// The inventory rules protect the active folder, and their hints send closed work to
+    /// <c>archive/</c> — so an archived document is not live whatever the retrieval policy.
+    /// A host that lifts the loader's default exclusion of
+    /// <see cref="OntologyConfig.ArchiveSegment"/> and overrides an index above the subtree
+    /// makes the derived folder span the archive; without this check those closed documents
+    /// would fail <c>docs validate</c> as unlisted live work.
+    /// </remarks>
+    public static bool IsArchived(string relativePath) =>
+        relativePath.Split('/').Contains(OntologyConfig.ArchiveSegment, StringComparer.OrdinalIgnoreCase);
 }

@@ -44,7 +44,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | Id | Severity | Meaning |
 |---|---|---|
 | `KW-DOC-LIFECYCLE-001` | Error | A `plan` document in the plans folder that the plan index does not reach by links inside that folder |
-| `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index does not link to |
+| `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
 
 ### Drift — `docs drift`
 
