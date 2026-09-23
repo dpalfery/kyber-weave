@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-23
 ---
 
 # Rule reference
@@ -37,13 +37,14 @@ generated block, or it declared `config-reg` entries of its own.
 | `KW-CONFIG-REG-001` | Error | A registry property names a path that does not exist |
 | `KW-CONFIG-REG-002` | Error | The rendered `AGENTS.md` block no longer matches configuration |
 
-### Plan lifecycle — `docs validate`
+### Plan and todo lifecycle — `docs validate`
 
-Reported only when the `plan-index` registry property names a document in the corpus.
+Reported only when the `plan-index` or `todo-index` registry property names a document in the corpus.
 
 | Id | Severity | Meaning |
 |---|---|---|
 | `KW-DOC-LIFECYCLE-001` | Error | A `plan` document in the plans folder that the plan index does not reach by links inside that folder |
+| `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
 
 ### Drift — `docs drift`
 

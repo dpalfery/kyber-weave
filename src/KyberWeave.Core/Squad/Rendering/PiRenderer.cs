@@ -46,9 +46,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>output_transcript</c>, <c>session_dir</c>, <c>allowed_subagents</c>,
 /// <c>prompt_mode</c>, <c>inherit_context</c>, <c>run_in_background</c>, <c>isolated</c>,
 /// <c>enabled</c>. Every other key is silently ignored, so this renderer emits only
-/// <c>name</c>, <c>description</c>, <c>model</c>, <c>tools</c>, <c>extensions</c>, and
-/// <c>allowed_subagents</c> — the plan's approved subset — never the rest. A name containing
-/// <c>:</c> is skipped by the loader, so the canonical name is emitted verbatim and never
+/// <c>name</c>, <c>description</c>, <c>model</c>, <c>thinking</c> (conditionally), <c>tools</c>, <c>extensions</c>, and
+/// <c>allowed_subagents</c> — the plan's approved subset — never the rest. The <c>thinking</c>
+/// key is emitted only when the resolved <c>pi:</c> value carries a <c>[thinking=&lt;level&gt;]</c>
+/// suffix; the level is validated against the closed domain and the key is omitted if no suffix is present.
+/// A name containing <c>:</c> is skipped by the loader, so the canonical name is emitted verbatim and never
 /// decorated. Skill frontmatter accepts <c>name</c> (1-64 lowercase-a-z0-9-hyphen
 /// characters, no leading/trailing/doubled hyphen), a required <c>description</c> (up to
 /// 1024 characters), and an optional <c>license</c>; unknown fields are ignored there too.
@@ -129,6 +131,11 @@ public sealed class PiRenderer : ISquadRenderer
     /// regardless of how the profile's permissions enumerate.
     /// </summary>
     private static readonly string[] ToolOrder = ["read", "grep", "find", "ls", "edit", "write", "bash"];
+
+    private static readonly HashSet<string> AllowedThinkingLevels = new(StringComparer.Ordinal)
+    {
+        "off", "minimal", "low", "medium", "high", "max"
+    };
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -284,10 +291,15 @@ public sealed class PiRenderer : ISquadRenderer
             ["description"] = CollapseToSingleLine(agent.Description)
         };
 
-        string? model = ResolvePiModel(agent, modelProfiles);
+        var (model, thinkingLevel) = ResolvePiModelAndThinking(agent, modelProfiles);
         if (model is not null)
         {
             frontmatter["model"] = model;
+        }
+
+        if (thinkingLevel is not null)
+        {
+            frontmatter["thinking"] = thinkingLevel;
         }
 
         // Always emit tools: omitting the key grants every built-in (widening).
@@ -338,26 +350,92 @@ public sealed class PiRenderer : ISquadRenderer
     }
 
     /// <summary>
-    /// Resolves the harness-specific model exactly as <c>ClaudeRenderer.ResolveClaudeModel</c>
-    /// does (R12): the <c>pi</c> harness override when the model profile declares one,
-    /// otherwise the target-neutral <c>default</c>; either an explicit or a defaulted
-    /// <c>inherit</c> omits the key, since that is the harness's own deferral value.
+    /// Parses and validates a thinking level suffix from a model string. A model value like
+    /// <c>zai/glm-5.3[thinking=high]</c> splits into bare model id <c>zai/glm-5.3</c> and level
+    /// <c>high</c>. The level is validated against the closed six-value domain
+    /// <c>off | minimal | low | medium | high | max</c> with <see cref="StringComparison.Ordinal"/>
+    /// (case-sensitive); an invalid level throws <see cref="SquadRenderValidationException"/>.
+    /// Returns a tuple of (bareModelId, thinkingLevel) where thinkingLevel is null if no suffix.
     /// </summary>
-    private static string? ResolvePiModel(
+    private static (string BareModel, string? ThinkingLevel) ParseThinkingSuffix(string? modelValue)
+    {
+        if (string.IsNullOrEmpty(modelValue))
+        {
+            return (modelValue ?? string.Empty, null);
+        }
+
+        const string suffixPrefix = "[thinking=";
+        int suffixStartIdx = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
+        if (suffixStartIdx < 0)
+        {
+            // No suffix present
+            return (modelValue, null);
+        }
+
+        string bareModel = modelValue[..suffixStartIdx];
+        int levelStartIdx = suffixStartIdx + suffixPrefix.Length;
+        int suffixEndIdx = modelValue.IndexOf(']', levelStartIdx);
+        if (suffixEndIdx < 0)
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed thinking suffix in model value '{modelValue}': missing closing ']'.");
+        }
+
+        if (suffixEndIdx != modelValue.Length - 1)
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed thinking suffix in model value '{modelValue}': the suffix must be the last element of the value.");
+        }
+
+        if (bareModel.Length == 0)
+        {
+            throw new SquadRenderValidationException(
+                $"Malformed model value '{modelValue}': the model id before the thinking suffix is empty.");
+        }
+
+        string level = modelValue[levelStartIdx..suffixEndIdx];
+
+        // Validate level against closed domain
+        if (!AllowedThinkingLevels.Contains(level))
+        {
+            throw new SquadRenderValidationException(
+                $"Invalid thinking level '{level}' in model value. Allowed values are: off, minimal, low, medium, high, max.");
+        }
+
+        return (bareModel, level);
+    }
+
+    /// <summary>
+    /// Resolves the harness-specific model and optional thinking level. Mirrors
+    /// <c>ClaudeRenderer.ResolveClaudeModel</c> (R12): the <c>pi</c> harness override when
+    /// the model profile declares one, otherwise the target-neutral <c>default</c>; either an
+    /// explicit or a defaulted <c>inherit</c> omits both keys.
+    /// </summary>
+    private static (string? Model, string? ThinkingLevel) ResolvePiModelAndThinking(
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
     {
         if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
         {
-            return null;
+            return (null, null);
         }
 
+        string? resolvedModel;
         if (profile.HarnessModels.TryGetValue("pi", out string? piModel))
         {
-            return string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
+            resolvedModel = string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
+        }
+        else
+        {
+            resolvedModel = string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ? null : profile.Default;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ? null : profile.Default;
+        if (resolvedModel is null)
+        {
+            return (null, null);
+        }
+
+        return ParseThinkingSuffix(resolvedModel);
     }
 
     /// <summary>
@@ -466,6 +544,28 @@ public sealed class PiRenderer : ISquadRenderer
                 InstructionDigest: agent.BodyDigest,
                 Details: string.Join(" ", notExpressibleDetails));
         }
+
+        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+            ? exec
+            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+            ? write
+            : SquadPermissionDecision.Deny;
+
+        SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
+            targetToken: "pi",
+            canonicalIdentity: agent.Name,
+            outputIdentity: agent.Name,
+            instructionDigest: agent.BodyDigest,
+            executeDecision: executeDecision,
+            writeDecision: writeDecision,
+            grantedShellTools: ["bash"],
+            withheldWriteTools: ["edit", "write"]);
+
+        if (notIsolable is not null)
+        {
+            yield return notIsolable;
+        }
     }
 
     private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradations(
@@ -499,7 +599,7 @@ public sealed class PiRenderer : ISquadRenderer
             Details: "Capability decisions " +
                 $"({DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
                 "are not enforced: a top-level Pi skill runs under the harness default tool " +
-                $"set, not the canonical capability lattice, and its delegates-to roster " +
+                "set, not the canonical capability lattice, and its delegates-to roster " +
                 $"({rosterText}) is instruction-only, not a runtime-enforced " +
                 "'allowed_subagents' list.");
     }

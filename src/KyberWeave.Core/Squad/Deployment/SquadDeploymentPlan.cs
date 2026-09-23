@@ -531,6 +531,16 @@ public sealed class SquadDeploymentPlan
     internal static string IdentityFromRelativePath(string relativePath)
     {
         string fileName = Path.GetFileName(relativePath);
+
+        // Bare agent.md inside a directory (e.g., .agents/agents/<name>/agent.md) resolves
+        // to the parent directory name. This is Antigravity's native shape per the "Native Both"
+        // pattern: agents render to .agents/agents/<name>/agent.md with identity <name>.
+        if (fileName.Equals("agent.md", StringComparison.OrdinalIgnoreCase))
+        {
+            string? parent = Path.GetDirectoryName(relativePath);
+            return string.IsNullOrEmpty(parent) ? fileName : Path.GetFileName(parent);
+        }
+
         if (fileName.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase))
         {
             string? parent = Path.GetDirectoryName(relativePath);

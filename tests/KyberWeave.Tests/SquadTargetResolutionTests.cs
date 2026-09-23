@@ -9,7 +9,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadTargetResolutionTests : IDisposable
 {
-    private static readonly SquadTarget[] TenTargets =
+    private static readonly SquadTarget[] ElevenTargets =
     [
         SquadTarget.Codex,
         SquadTarget.Cursor,
@@ -20,7 +20,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
         SquadTarget.Antigravity,
         SquadTarget.Warp,
         SquadTarget.Factory,
-        SquadTarget.Pi
+        SquadTarget.Pi,
+        SquadTarget.ZCode
     ];
 
     private readonly TempDirectory _temp = new();
@@ -38,19 +39,20 @@ public sealed class SquadTargetResolutionTests : IDisposable
         { ".opencode", true, SquadTarget.OpenCode },
         { ".kilo", true, SquadTarget.Kilo },
         { ".warp", true, SquadTarget.Warp },
-        { ".factory", true, SquadTarget.Factory }
+        { ".factory", true, SquadTarget.Factory },
+        { ".zcode", true, SquadTarget.ZCode }
     };
 
     /// <summary>
     /// Receipts persist target tokens, so existing members keep their positions and a new
-    /// target is appended: Pi follows Factory.
+    /// target is appended: Pi follows Factory, and ZCode follows Pi.
     /// </summary>
     [Fact]
-    public void CatalogContainsExactlyTenTargetsInStableOrder()
+    public void CatalogContainsExactlyElevenTargetsInStableOrder()
     {
-        Assert.Equal(TenTargets, SquadTargetCatalog.All);
+        Assert.Equal(ElevenTargets, SquadTargetCatalog.All);
         Assert.Equal(
-            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi"],
+            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi", "zcode"],
             SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
     }
 
@@ -66,11 +68,21 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void ParseAllExpandsToTheApprovedTenTargetRoster()
+    public void ParseAllExpandsToTheApprovedElevenTargetRoster()
     {
         IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 
-        Assert.Equal(TenTargets, targets);
+        Assert.Equal(ElevenTargets, targets);
+    }
+
+    [Theory]
+    [InlineData("zcode")]
+    [InlineData("ZCode")]
+    public void ParseZCodeTokenSelectsZCodeCaseInsensitively(string token)
+    {
+        IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse([token]);
+
+        Assert.Equal(SquadTarget.ZCode, Assert.Single(targets));
     }
 
     [Theory]
@@ -150,7 +162,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
             SquadTarget.Kilo,
             SquadTarget.Antigravity,
             SquadTarget.Factory,
-            SquadTarget.Pi);
+            SquadTarget.Pi,
+            SquadTarget.ZCode);
     }
 
     [Theory]
