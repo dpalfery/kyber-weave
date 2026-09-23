@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { homedir } from 'os'
 
-import { getShortModelName } from '../models.js'
+import { getShortModelName } from '../pricing/models.js'
 import { discoverClineTasksInBaseDirs, createClineParser } from './vscode-cline-parser.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser } from './types.js'
 

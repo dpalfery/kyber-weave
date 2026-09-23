@@ -119,6 +119,6 @@ parity gate of Requirement 15 authorizes it.
 ## Related
 
 - [KyberDash architecture](../dash/architecture.md) — how the constraints shape the system.
-- [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — the
-  foundational decisions.
+- [ADR 0020](../adr/0020-kyberdash-one-time-fork.md) — the foundational decisions, restated
+  from the archived [ADR 0006](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md).
 - [KyberDash product story](../dash/README.md)

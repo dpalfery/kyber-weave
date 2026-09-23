@@ -1,3 +1,25 @@
 schema: kyber-squad.toolchain/v1
 required-features: []
+# The MCP tools canonical agents are entitled to call, declared per server.
+#
+# This roster lives in source rather than in a renderer because it is an external contract
+# that drifts: context7 renamed `get-library-docs` to `query-docs`, and a harness whose tool
+# allow-list matches by exact name breaks on a rename rather than degrading. Keeping it here
+# means a rename is a one-line source edit, and means the renderer and `squad doctor` read
+# the same list instead of two copies that can disagree.
+#
+# Verified 2026-09-21 by listing each server's tools over MCP: codegraph (`codegraph serve
+# --mcp`), context7 4.1.1 (https://mcp.context7.com/mcp), and kyber-weave
+# (src/KyberWeave.Mcp/DocsTools.cs).
+required-mcp-tools:
+  codegraph:
+    - codegraph_explore
+  context7:
+    - resolve-library-id
+    - query-docs
+  kyber-weave:
+    - docs_analysis_candidates
+    - docs_explore
+    - docs_for_symbol
+    - docs_glossary
 validated-release: null

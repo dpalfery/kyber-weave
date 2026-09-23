@@ -3,12 +3,12 @@ import { defineConfig } from 'tsup'
 
 // ESM bundle for the Node SEA build (release.yml, build-kyberdash).
 //
-// Emitted as ESM, not CJS: ink and its yoga-layout dependency are ESM-only and
-// use top-level await, which esbuild cannot express in CommonJS. Node runs a
-// SEA main as CommonJS regardless, so src/sea-shim.cjs is the actual entry and
-// evaluates this bundle from a data: URL. See that file.
+// Emitted as ESM, not CJS: several dependencies are ESM-only and use top-level
+// await, which esbuild cannot express in CommonJS. Node runs a SEA main as
+// CommonJS regardless, so src/sea-shim.cjs is the actual entry and evaluates
+// this bundle from a data: URL. See that file.
 export default defineConfig({
-  entry: ['src/main.ts'],
+  entry: ['src/cli/main.ts'],
   format: ['esm'],
   target: 'node22',
   outDir: 'dist-sea',
@@ -35,9 +35,7 @@ export default defineConfig({
   },
   define: { 'import.meta.url': '__seaImportMetaUrl' },
   esbuildOptions(options) {
-    // ink imports react-devtools-core at module scope but reaches it only when
-    // DEV is set. It is not installed, and leaving it external would put a bare
-    // specifier in the bundle, which cannot resolve inside a data: URL scope.
+    // A leftover bare specifier cannot resolve inside a data: URL scope.
     options.alias = {
       ...(options.alias ?? {}),
       'react-devtools-core': fileURLToPath(

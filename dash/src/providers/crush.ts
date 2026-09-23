@@ -2,8 +2,8 @@ import { readFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { homedir, platform } from 'os'
 
-import { calculateCost } from '../models.js'
-import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost } from '../pricing/models.js'
+import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 /// Crush stores per-project SQLite databases discovered through a JSON registry.
@@ -137,7 +137,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         db = openDatabase(dbPath)
       } catch (err) {
         process.stderr.write(
-          `codeburn: cannot open Crush database: ${err instanceof Error ? err.message : err}\n`,
+          `kyberdash: cannot open Crush database: ${err instanceof Error ? err.message : err}\n`,
         )
         return
       }

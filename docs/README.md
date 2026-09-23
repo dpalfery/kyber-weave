@@ -150,7 +150,7 @@ machine. Start at the [KyberDash Overview](dash/README.md) for the value proposi
 | Page | Covers |
 |---|---|
 | [Overview & Why KyberDash](dash/README.md) | Value proposition, the four surfaces, capabilities |
-| [Architecture](dash/architecture.md) | Ingest pipeline, canonical store, the soft fork and its merge zone |
+| [Architecture](dash/architecture.md) | Ingest pipeline, canonical store, analyses and surfaces |
 | [Runbook](dash/runbook.md) | Installing the released binary; building, running, and testing each surface locally |
 | [Telemetry inventory](dash/telemetry-inventory.md) | Which signals and content each harness actually makes available |
 

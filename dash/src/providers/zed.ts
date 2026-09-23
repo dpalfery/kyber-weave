@@ -3,8 +3,8 @@ import { join } from 'path'
 import { homedir } from 'os'
 import zlib from 'zlib'
 
-import { calculateCost } from '../models.js'
-import { getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost } from '../pricing/models.js'
+import { getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
 
 // Zed's built-in agent stores one row per thread in a single SQLite database;
@@ -165,7 +165,7 @@ function parseThreads(db: SqliteDatabase, seenKeys: Set<string>): ParsedProvider
   }
 
   if (skipped > 0) {
-    process.stderr.write(`codeburn: skipped ${skipped} unreadable Zed threads\n`)
+    process.stderr.write(`kyberdash: skipped ${skipped} unreadable Zed threads\n`)
   }
   return calls
 }
@@ -178,7 +178,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         return
       }
       if (!zstdDecompress) {
-        process.stderr.write('codeburn: Zed threads need Node >= 22.15 (zstd support); skipping Zed usage.\n')
+        process.stderr.write('kyberdash: Zed threads need Node >= 22.15 (zstd support); skipping Zed usage.\n')
         return
       }
 
@@ -186,7 +186,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       try {
         db = openDatabase(source.path)
       } catch (err) {
-        process.stderr.write(`codeburn: cannot open Zed database: ${err instanceof Error ? err.message : err}\n`)
+        process.stderr.write(`kyberdash: cannot open Zed database: ${err instanceof Error ? err.message : err}\n`)
         return
       }
       try {

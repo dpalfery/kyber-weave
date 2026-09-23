@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 36 36">
+  <!--
+    A monochrome, padded tray projection of the canonical KyberDash lightsaber.
+    The alpha silhouette lets macOS supply the menu-bar appearance color.
+  -->
+  <g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+    <!-- blade -->
+    <path d="M14.4 21.6 29.4 6.6" stroke-width="3.2"/>
+    <!-- emitter collar -->
+    <path d="m12.8 20 3.2 3.2" stroke-width="4.4"/>
+    <!-- hilt -->
+    <path d="m7.2 28.8 7.2-7.2" stroke-width="4.8"/>
+    <!-- grip bands preserve the saber silhouette at menu-bar scale -->
+    <path d="m8.3 24.9 2.4 2.4M10.3 22.9l2.4 2.4" stroke-width="1.25"/>
+  </g>
+</svg>

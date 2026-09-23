@@ -27,21 +27,34 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     /// <summary>
-    /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent configurations
-    /// and schema validation. A permission outside this vocabulary would be rejected or unhandled by
-    /// the harness.
+    /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent
+    /// configurations and schema validation. A permission outside this vocabulary would be
+    /// rejected or unhandled by the harness.
     /// </summary>
+    /// <remarks>
+    /// <c>question</c>, <c>lsp</c>, <c>external_directory</c> and <c>doom_loop</c> were added
+    /// 2026-09-21 from opencode.ai/docs/permissions' "Available Permissions" list, corroborated
+    /// by a live OpenCode deployment on this machine that emitted all four. They matter because
+    /// an omitted key is not a withheld one: agent permissions merge with the global config,
+    /// where most permissions default to <c>allow</c>, so any key the renderer fails to pin is
+    /// granted ambiently.
+    /// </remarks>
     private static readonly string[] DocumentedOpenCodePermissions =
     [
         "todowrite",
         "skill",
+        "question",
         "read",
+        "lsp",
         "grep",
         "glob",
+        "list",
         "edit",
         "bash",
         "webfetch",
         "websearch",
+        "external_directory",
+        "doom_loop",
         "kyber-weave_*",
         "task"
     ];
@@ -56,7 +69,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     private static readonly (string Capability, string[] Permissions)[] CapabilityPermissionContract =
     [
         ("filesystem.read", ["read"]),
-        ("filesystem.search", ["grep", "glob"]),
+        ("filesystem.search", ["grep", "glob", "list"]),
         ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
         ("network.read", ["webfetch", "websearch"])
@@ -69,13 +82,18 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     [
         "todowrite",
         "skill",
+        "question",
         "read",
+        "lsp",
         "grep",
         "glob",
+        "list",
         "edit",
         "bash",
         "webfetch",
         "websearch",
+        "external_directory",
+        "doom_loop",
         "kyber-weave_*",
         "task"
     ];
@@ -273,14 +291,16 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                                decision == SquadPermissionDecision.Allow;
                 foreach (string perm in mapped)
                 {
-                    bool hasPerm = permissionMap.Children.ContainsKey(new YamlScalarNode(perm));
+                    // Presence is not the signal: an absent key inherits the global default,
+                    // which is allow. Every key must be pinned, and the value carries the
+                    // decision.
                     Assert.True(
-                        allowed == hasPerm,
-                        $"Agent '{agent.Name}' capability '{capability}' allowed={allowed} permission '{perm}'.");
-                    if (hasPerm)
-                    {
-                        Assert.Equal("allow", RequireScalar(permissionMap, perm, agent.Name));
-                    }
+                        permissionMap.Children.ContainsKey(new YamlScalarNode(perm)),
+                        $"Agent '{agent.Name}' leaves permission '{perm}' unpinned, so OpenCode's " +
+                        "default-allow would grant it.");
+                    Assert.Equal(
+                        allowed ? "allow" : "deny",
+                        RequireScalar(permissionMap, perm, agent.Name));
                 }
             }
 
@@ -289,14 +309,12 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             bool readAllowed = capProfile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision readDecision) &&
                                readDecision == SquadPermissionDecision.Allow;
             bool expectedKwMcp = !isPureOrchestrator && !sharedIdentities.Contains(agent.Name) && readAllowed;
-            bool hasKwMcp = permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*"));
             Assert.True(
-                expectedKwMcp == hasKwMcp,
-                $"Agent '{agent.Name}' kyber-weave_* expected={expectedKwMcp}, actual={hasKwMcp}");
-            if (hasKwMcp)
-            {
-                Assert.Equal("allow", RequireScalar(permissionMap, "kyber-weave_*", agent.Name));
-            }
+                permissionMap.Children.ContainsKey(new YamlScalarNode("kyber-weave_*")),
+                $"Agent '{agent.Name}' leaves 'kyber-weave_*' unpinned.");
+            Assert.Equal(
+                expectedKwMcp ? "allow" : "deny",
+                RequireScalar(permissionMap, "kyber-weave_*", agent.Name));
 
             // Delegation lowering
             bool delegateAllowed = capProfile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
@@ -328,9 +346,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             }
             else
             {
-                Assert.False(
-                    permissionMap.Children.ContainsKey(new YamlScalarNode("task")),
-                    $"Agent '{agent.Name}' should not have 'task' permission.");
+                Assert.Equal("deny", RequireScalar(permissionMap, "task", agent.Name));
             }
 
             // Ordering: permission map keys must be deterministically ordered
@@ -367,16 +383,23 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             {
                 ["todowrite"] = "allow",
                 ["skill"] = "allow",
+                ["question"] = "allow",
                 ["read"] = "allow",
+                ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["list"] = "allow",
+                ["edit"] = "deny",
+                ["bash"] = "deny",
                 ["webfetch"] = "allow",
                 ["websearch"] = "allow",
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
                 ["kyber-weave_*"] = "allow",
                 ["task"] = new Dictionary<string, string>
                 {
                     ["azure-reader"] = "allow",
-                    ["research-agent"] = "allow"
+                    ["research-agent"] = "allow",
                 }
             });
 
@@ -389,11 +412,20 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             {
                 ["todowrite"] = "allow",
                 ["skill"] = "allow",
+                ["question"] = "allow",
                 ["read"] = "allow",
+                ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["list"] = "allow",
                 ["edit"] = "allow",
-                ["kyber-weave_*"] = "allow"
+                ["bash"] = "deny",
+                ["webfetch"] = "deny",
+                ["websearch"] = "deny",
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
+                ["kyber-weave_*"] = "allow",
+                ["task"] = "deny"
             });
 
         SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
@@ -405,13 +437,20 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             {
                 ["todowrite"] = "allow",
                 ["skill"] = "allow",
+                ["question"] = "allow",
                 ["read"] = "allow",
+                ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["list"] = "allow",
+                ["edit"] = "deny",
                 ["bash"] = "allow",
                 ["webfetch"] = "allow",
                 ["websearch"] = "allow",
-                ["kyber-weave_*"] = "allow"
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
+                ["kyber-weave_*"] = "allow",
+                ["task"] = "deny"
             });
 
         // Skills verification
@@ -534,7 +573,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         {
             Assert.Equal("opencode", degradation.Target);
             Assert.True(
-                degradation.Code is "safety-narrowed" or "permission-not-expressible",
+                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable",
                 $"Degradation for '{degradation.CanonicalIdentity}' has unexpected code '{degradation.Code}'.");
             Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
             SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
@@ -546,6 +585,77 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             result.Degradations,
             d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase) ||
                  (d.Details is not null && d.Details.Contains("widening", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
+    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
+    /// shell tools (bash) and withheld write tools (edit).
+    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_RecordsCapabilityNotIsolableForShellImpliesWrite()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRendererRegistry registry = new([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.OpenCode],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        string[] grantedShellTools = ["bash"];
+        string[] withheldWriteTools = ["edit"];
+
+        List<string> expectedAgents = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                return exec && !write;
+            })
+            .Select(a => a.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.NotEmpty(expectedAgents);
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+                exec == SquadPermissionDecision.Allow;
+            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+                write == SquadPermissionDecision.Allow;
+
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
+                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+
+            if (executeAllowed && !writeAllowed)
+            {
+                Assert.NotNull(record);
+                Assert.Equal("opencode", record.Target);
+                Assert.Equal(agent.Name, record.CanonicalIdentity);
+                Assert.Equal(agent.Name, record.OutputIdentity);
+                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
+                Assert.NotNull(record.Details);
+                foreach (string shellTool in grantedShellTools)
+                {
+                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
+                }
+                foreach (string writeTool in withheldWriteTools)
+                {
+                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
+                }
+            }
+            else
+            {
+                Assert.Null(record);
+            }
+        }
     }
 
     [Fact]

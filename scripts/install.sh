@@ -286,6 +286,38 @@ kyber_weave_verify_checksum() {
     return 1
 }
 
+# kyber_weave_menubar_conflict <with-menubar> <no-kyberdash>
+#
+# `menubar` is a kyberdash subcommand, so --with-menubar needs that binary on
+# disk. --no-kyberdash removes it, and the pair would otherwise fail late, after
+# the CLI and MCP were already installed, with a "not found" from a path the
+# user never asked to be missing.
+#
+#   exit 0  — the combination is installable
+#   exit 2  — the two flags contradict each other
+kyber_weave_menubar_conflict() {
+    if [ -n "$1" ] && [ -n "$2" ]; then
+        printf '%s\n' \
+            '--with-menubar installs the tray with the kyberdash binary, which --no-kyberdash skips; pass one or the other' >&2
+        return 2
+    fi
+    return 0
+}
+
+# kyber_weave_run_menubar <install-dir>
+#
+# Runs the tray installer and returns its exit status. The tray installer lives
+# in kyberdash, not kyber-weave: it resolves the release, verifies the signature
+# and the team id, and records tray.json. Naming the wrong binary here is how
+# --with-menubar would silently stop installing anything.
+#
+# A function rather than a line in the main body so the test drives the same
+# code the user runs, and so the path is quoted once — an install dir with a
+# space in it must not turn into two arguments.
+kyber_weave_run_menubar() {
+    "${1%/}/kyberdash" menubar --force
+}
+
 # Skip the installer body when sourced as a library by the test harness.
 # `return 0 2>/dev/null || exit 0`: in sourced mode `return 0` cleanly exits
 # the dotted file; in script mode `return` raises but is swallowed by stderr
@@ -293,6 +325,11 @@ kyber_weave_verify_checksum() {
 if [ "${KYBER_WEAVE_INSTALL_LIB:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
+
+# Checked before anything is downloaded: a contradiction the user can fix
+# should not cost them a half-finished install.
+kyber_weave_menubar_conflict "$WITH_MENUBAR" "$NO_KYBERDASH" \
+    || die "--with-menubar cannot be combined with --no-kyberdash"
 
 # ------------------------------------------------------------- platform → RID
 
@@ -513,9 +550,9 @@ if [ -n "$WITH_MENUBAR" ]; then
     if [ "${RID%%-*}" != "osx" ]; then
         log "--with-menubar is macOS only; skipping on ${RID%%-*}"
     else
-        KYBER_CLI="${INSTALL_DIR}/kyber-weave"
-        [ -x "$KYBER_CLI" ] || die "--with-menubar: ${KYBER_CLI} is not executable after install"
-        log "installing signed mac menubar app..."
-        "$KYBER_CLI" menubar --force
+        KYBERDASH_CLI="${INSTALL_DIR}/kyberdash"
+        [ -x "$KYBERDASH_CLI" ] || die "--with-menubar: ${KYBERDASH_CLI} is not executable after install"
+        log "installing the signed KyberDash tray..."
+        kyber_weave_run_menubar "$INSTALL_DIR"
     fi
 fi

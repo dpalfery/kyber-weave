@@ -3,14 +3,8 @@ import { basename } from 'path'
 /**
  * KyberDash user-facing brand overlay.
  *
- * Lives under `dash/src/` (not `dash/kyber/`) because tsup and `tsconfig`
- * `rootDir` are `dash/src` — the CLI bundle cannot import outside that tree.
- * This file is ours: upstream codeburn has no counterpart, so a subtree pull
- * keeps it as an extra path rather than a content conflict.
- *
- * Do not rename `dash/package.json` (`name`/`bin.codeburn`), `CODEBURN_*`
- * env vars, cache paths, or `dash/dash/public/codeburn-logo.png`. Those are
- * the upstream identity; renaming them fights every `git subtree pull`.
+ * One place for the product's name, CLI name and marks, so a surface renders
+ * them without hard-coding a string it might later disagree with.
  */
 export const BRAND = {
   productName: 'kyberDash',
@@ -20,7 +14,7 @@ export const BRAND = {
   faviconPngHref: '/kyberdash-logo.png',
 } as const
 
-const LAUNCHER_STEMS = new Set(['cli', 'main', 'launch'])
+const LAUNCHER_STEMS = new Set(['cli', 'main', 'launch', 'launcher'])
 
 export function resolveCliName(argv1 = process.argv[1]): string {
   const fromEnv = process.env['KYBERDASH_CLI_NAME']?.trim()
@@ -31,7 +25,7 @@ export function resolveCliName(argv1 = process.argv[1]): string {
 }
 
 export function applyHtmlBrand(html: string): string {
-  return html
-    .replace(/<title>[^<]*<\/title>/i, `<title>${BRAND.htmlTitle}</title>`)
-    .replace(/href="\/codeburn-logo\.png"/g, `href="${BRAND.faviconPngHref}"`)
+  // The favicon hrefs are authored in index.html and need no rewrite; only the
+  // title is overlaid, so a served page cannot disagree with BRAND.
+  return html.replace(/<title>[^<]*<\/title>/i, `<title>${BRAND.htmlTitle}</title>`)
 }

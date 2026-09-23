@@ -1,11 +1,12 @@
 # gitleaks config for kyber-weave (root).
-# Extends default and allowlists vendored codeburn false positives and
-# KyberDash test fixtures that are not secrets.
+# Extends the default ruleset and allowlists KyberDash test fixtures and public
+# identifiers that are not secrets. No path is allowlisted wholesale: dash/ was
+# once excluded as vendored code, and is scanned like everything else since the
+# one-time fork (ADR 0020).
 [extend]
 useDefault = true
 
-# Vendored codeburn false positives (from dash/.gitleaks.toml, mirrored here
-# so root scan covers the subtree).
+# KyberDash false positives, each confirmed not to be a secret.
 [[allowlists]]
 description = "Test fixtures: obviously-fake API keys used as parser/validator input."
 condition = "AND"
@@ -34,14 +35,14 @@ condition = "AND"
 regexes = ['''eyJhbGciOiJIUzI1NiIsIn''']
 paths = ['''(^|/)tests?/''']
 
-# KyberDash + vendored docs false positives (generic-api-key on pricing/cost semantics)
+# KyberDash docs false positives (generic-api-key on pricing/cost semantics)
 [[allowlists]]
-description = "KyberDash docs: pricing/cost semantics, not secrets (vendored)."
+description = "KyberDash docs: pricing/cost semantics, not secrets."
 regexes = ['''priced/unpriced/estimated''']
 
-# The 5 specific leaks from the squashed dash subtree commit (false positives)
+# Specific false positives in KyberDash test and synthesizer code
 [[allowlists]]
-description = "Vendored dash subtree false positives (synth dedup keys, JWT fixture, pricing)."
+description = "KyberDash false positives (synth dedup keys, JWT fixture, pricing)."
 regexes = [
   '''synth-retain-flag-91d''',
   '''synth-retain-89d''',
@@ -49,8 +50,3 @@ regexes = [
   '''priced/unpriced/estimated''',
   '''eyJhbGciOiJub25lIn0''',
 ]
-
-[[allowlists]]
-description = "Allow generic-api-key in vendored dash tests (already covered by synth allowlist)."
-regexes = ['''generic-api-key''']
-paths = ['''dash/''']

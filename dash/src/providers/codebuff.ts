@@ -2,8 +2,8 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
+import { calculateCost } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 // Codebuff (formerly Manicode) uses a credit-based billing system. The local

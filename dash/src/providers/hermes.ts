@@ -3,9 +3,9 @@ import { existsSync, readFileSync, statSync } from 'fs'
 import { basename, dirname, join } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost, getShortModelName } from '../models.js'
-import { isUserHomeRoot } from '../path-privacy.js'
-import { isSqliteAvailable, getSqliteLoadError, openDatabase, isSqliteBusyError, type SqliteDatabase } from '../sqlite.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { isUserHomeRoot } from '../ingest/path-privacy.js'
+import { isSqliteAvailable, getSqliteLoadError, openDatabase, isSqliteBusyError, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 import type { ToolCall } from '../types.js'
 import {
@@ -21,7 +21,7 @@ import {
   type HermesCostBasis,
   type HermesObservation,
   type HermesTokenTotals,
-} from '../hermes-session-ledger.js'
+} from '../ingest/hermes-session-ledger.js'
 
 type HermesSessionRow = {
   id: string
@@ -585,7 +585,7 @@ async function discoverFromDb(dbPath: string, profile: string): Promise<SessionS
     return sources
   } catch (err) {
     if (isSqliteBusyError(err)) throw err
-    process.stderr.write(`codeburn: error querying Hermes database: ${err instanceof Error ? err.message : err}\n`)
+    process.stderr.write(`kyberdash: error querying Hermes database: ${err instanceof Error ? err.message : err}\n`)
     return []
   } finally {
     db.close()
@@ -608,7 +608,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>, hermesHome: 
       try {
         db = openDatabase(decoded.dbPath)
       } catch (err) {
-        process.stderr.write(`codeburn: cannot open Hermes database: ${err instanceof Error ? err.message : err}\n`)
+        process.stderr.write(`kyberdash: cannot open Hermes database: ${err instanceof Error ? err.message : err}\n`)
         return
       }
 
@@ -760,7 +760,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>, hermesHome: 
         // into an empty (negatively cached) result.
         if (isSqliteBusyError(err) || isHermesLedgerPublicationError(err)) throw err
         const detail = err instanceof Error ? err.message : err
-        process.stderr.write(`codeburn: error querying Hermes database: ${detail}\n`)
+        process.stderr.write(`kyberdash: error querying Hermes database: ${detail}\n`)
         return
       } finally {
         db.close()

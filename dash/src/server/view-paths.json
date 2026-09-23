@@ -1,0 +1,11 @@
+[
+  "/",
+  "/harness/:harnessId",
+  "/run/:runId",
+  "/session/:sessionId",
+  "/session/:sessionId/turn/:turnIndex",
+  "/finding/:findingId",
+  "/compare?a=:runId&b=:runId",
+  "/quarantine",
+  "/problems"
+]

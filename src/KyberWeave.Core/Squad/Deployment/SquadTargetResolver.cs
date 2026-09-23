@@ -80,7 +80,8 @@ public static class SquadTargetResolver
             [SquadTarget.OpenCode] = [new(".opencode", true)],
             [SquadTarget.Kilo] = [new(".kilo", true)],
             [SquadTarget.Warp] = [new(".warp", true)],
-            [SquadTarget.Factory] = [new(".factory", true)]
+            [SquadTarget.Factory] = [new(".factory", true)],
+            [SquadTarget.ZCode] = [new(".zcode", true)]
         };
 
     /// <summary>Resolves targets according to the operation-specific precedence contract.</summary>

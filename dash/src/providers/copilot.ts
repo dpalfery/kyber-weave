@@ -35,12 +35,12 @@
 //     ~/Library/Application Support/Code/User/globalStorage/github.copilot-chat/agent-traces.db
 //
 // ENVIRONMENT VARIABLES:
-//   CODEBURN_COPILOT_OTEL_DB    — Override the agent-traces.db path
-//   CODEBURN_COPILOT_DISABLE_OTEL=1 — Skip OTel entirely, use only JSONL
-//   CODEBURN_COPILOT_WS_STORAGE_DIR — Override VS Code workspaceStorage
-//   CODEBURN_COPILOT_GLOBAL_STORAGE_DIR — Override VS Code globalStorage
-//   CODEBURN_COPILOT_JETBRAINS_DIR — Override the JetBrains github-copilot root
-//   CODEBURN_COPILOT_SESSION_STORE_DB — Override the ~/.copilot/session-store.db path
+//   KYBERDASH_COPILOT_OTEL_DB    — Override the agent-traces.db path
+//   KYBERDASH_COPILOT_DISABLE_OTEL=1 — Skip OTel entirely, use only JSONL
+//   KYBERDASH_COPILOT_WS_STORAGE_DIR — Override VS Code workspaceStorage
+//   KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR — Override VS Code globalStorage
+//   KYBERDASH_COPILOT_JETBRAINS_DIR — Override the JetBrains github-copilot root
+//   KYBERDASH_COPILOT_SESSION_STORE_DB — Override the ~/.copilot/session-store.db path
 //
 // ARCHITECTURE:
 //   discoverSessions() returns OTel sessions and legacy JSONL sessions. When
@@ -63,10 +63,10 @@ import { homedir, platform } from 'os'
 import { join, basename, dirname, posix, win32 } from 'path'
 import { existsSync } from 'fs'
 import { createHash } from 'crypto'
-import { readSessionFile } from '../fs-utils.js'
-import { calculateCost } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
-import { estimateTokens } from '../context-tree.js'
+import { readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { estimateTokens } from '../metrics/context-tree.js'
 import type {
   Provider,
   ProbeRoot,
@@ -274,24 +274,24 @@ interface SpanAttributes {
 // ---------------------------------------------------------------------------
 
 function getCopilotSessionStateDir(override?: string): string {
-  return override ?? process.env['CODEBURN_COPILOT_SESSION_STATE_DIR'] ?? join(homedir(), '.copilot', 'session-state')
+  return override ?? process.env['KYBERDASH_COPILOT_SESSION_STATE_DIR'] ?? join(homedir(), '.copilot', 'session-state')
 }
 
 function getSessionStoreDbPath(override?: string): string {
-  return override ?? process.env['CODEBURN_COPILOT_SESSION_STORE_DB'] ?? join(homedir(), '.copilot', 'session-store.db')
+  return override ?? process.env['KYBERDASH_COPILOT_SESSION_STORE_DB'] ?? join(homedir(), '.copilot', 'session-store.db')
 }
 
 /**
  * Locate the agent-traces.db file.
  *
  * Priority:
- *   1. CODEBURN_COPILOT_OTEL_DB env var
+ *   1. KYBERDASH_COPILOT_OTEL_DB env var
  *   2. Platform-specific default VS Code global storage path
  *   3. VSCodium variant paths
  */
 function getAgentTracesDbPath(): string | null {
   // Allow explicit override
-  const envOverride = process.env['CODEBURN_COPILOT_OTEL_DB']
+  const envOverride = process.env['KYBERDASH_COPILOT_OTEL_DB']
   if (envOverride) {
     return existsSync(envOverride) ? envOverride : null
   }
@@ -348,7 +348,7 @@ function getAgentTracesDbPath(): string | null {
  * chat-agent-sessions/, chat-sessions/, and chat-edit-sessions/.
  */
 function getJetBrainsCopilotRoot(override?: string): string {
-  const envOverride = override ?? process.env['CODEBURN_COPILOT_JETBRAINS_DIR']
+  const envOverride = override ?? process.env['KYBERDASH_COPILOT_JETBRAINS_DIR']
   if (envOverride) return envOverride
 
   const xdg = process.env['XDG_CONFIG_HOME']
@@ -385,7 +385,7 @@ function parseCwd(yaml: string): string | null {
  * are stored as separate key-value rows rather than a JSON blob.
  */
 function loadSpanAttributesFromTable(
-  db: ReturnType<typeof import('../sqlite.js')['openDatabase']>,
+  db: ReturnType<typeof import('../ingest/sqlite.js')['openDatabase']>,
   spanId: string
 ): SpanAttributes {
   try {
@@ -492,7 +492,7 @@ function ensureReplayParent(root: object, path: ChatJournalPathSegment[]): objec
   for (let i = 0; i < path.length - 1; i++) {
     const segment = path[i]!
     const nextSegment = path[i + 1]!
-    let child = getReplayValue(current, segment)
+    const child = getReplayValue(current, segment)
     if (!isReplayContainer(child)) {
       const created = createContainerForNext(nextSegment)
       setReplayValue(current, segment, created)
@@ -528,7 +528,7 @@ function applyChatJournalAppend(root: unknown, path: ChatJournalPathSegment[], i
   if (!parent) return workingRoot
 
   const last = path[path.length - 1]!
-  let target = getReplayValue(parent, last)
+  const target = getReplayValue(parent, last)
   const targetArray: unknown[] = Array.isArray(target) ? target : []
   if (target !== targetArray) {
     setReplayValue(parent, last, targetArray)
@@ -1299,7 +1299,7 @@ function extractJetBrainsProjectName(raw: string): string | undefined {
     // UTF-8 (repo names can contain non-ASCII). Reject only if the decoded value
     // holds control chars — a sign we matched a non-value occurrence, not a name.
     const val = Buffer.from(raw.slice(start, start + len), 'latin1').toString('utf8')
-    // eslint-disable-next-line no-control-regex
+     
     if (val.length > 0 && !/[\x00-\x1f]/.test(val)) return val
   }
   return undefined
@@ -1753,7 +1753,7 @@ function createOtelParser(
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       // Lazy-load the SQLite module (same pattern as Cursor/OpenCode providers)
-      const { openDatabase } = await import('../sqlite.js')
+      const { openDatabase } = await import('../ingest/sqlite.js')
 
       // One DB open handles ALL conversations — avoids N opens for N conversations.
       const db = openDatabase(source.path)
@@ -2098,7 +2098,7 @@ function createSessionStoreParser(
   return {
     async *parse(): AsyncGenerator<ParsedProviderCall> {
       // Lazy-load the SQLite module (same pattern as the OTel source)
-      const { openDatabase, isSqliteBusyError } = await import('../sqlite.js')
+      const { openDatabase, isSqliteBusyError } = await import('../ingest/sqlite.js')
 
       // The open sits inside the same classify-and-defer boundary as the
       // query: discovery validated this store moments ago, so a failure HERE
@@ -2475,7 +2475,7 @@ async function discoverSessionStoreSource(
     const code = (err as NodeJS.ErrnoException).code
     return code === 'ENOENT' || code === 'ENOTDIR' ? null : source
   }
-  const { openDatabase, isSqliteAvailable } = await import('../sqlite.js')
+  const { openDatabase, isSqliteAvailable } = await import('../ingest/sqlite.js')
   if (!isSqliteAvailable()) return null
   try {
     const db = openDatabase(dbPath)
@@ -2853,20 +2853,20 @@ export function createCopilotProvider(
   /**
    * Returns the workspaceStorage directories to scan for transcript sessions.
    * When workspaceStorageDir is explicitly provided (e.g. in tests), that single
-   * directory is used. The CODEBURN_COPILOT_WS_STORAGE_DIR env var provides a
+   * directory is used. The KYBERDASH_COPILOT_WS_STORAGE_DIR env var provides a
    * single-dir override (useful for tests). Otherwise all platform-default VS
    * Code variant paths are returned.
    */
   function getWsDirs(): string[] {
     if (workspaceStorageDir !== undefined) return [workspaceStorageDir]
-    const envDir = process.env['CODEBURN_COPILOT_WS_STORAGE_DIR']
+    const envDir = process.env['KYBERDASH_COPILOT_WS_STORAGE_DIR']
     if (envDir) return [envDir]
     return getVSCodeWorkspaceStorageDirs(homedir(), platform())
   }
 
   function getGlobalDirs(): string[] {
     if (globalStorageDir !== undefined) return [globalStorageDir]
-    const envDir = process.env['CODEBURN_COPILOT_GLOBAL_STORAGE_DIR']
+    const envDir = process.env['KYBERDASH_COPILOT_GLOBAL_STORAGE_DIR']
     if (envDir) return [envDir]
     return getVSCodeGlobalStorageDirs(homedir(), platform())
   }
@@ -2914,7 +2914,7 @@ export function createCopilotProvider(
       let discoveredOtel = false
 
       // 1. Discover OTel sessions (preferred — full token data)
-      const disableOtel = process.env['CODEBURN_COPILOT_DISABLE_OTEL'] === '1'
+      const disableOtel = process.env['KYBERDASH_COPILOT_DISABLE_OTEL'] === '1'
       if (!disableOtel) {
         const dbPath = getAgentTracesDbPath()
         if (dbPath) {

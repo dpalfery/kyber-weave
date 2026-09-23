@@ -19,17 +19,27 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// Skills are stored at <c>.opencode/skills/&lt;name&gt;/SKILL.md</c>.
 /// </para>
 /// <para>
-/// OpenCode's <c>permission</c> frontmatter key is an explicit map. Omitting it inherits
-/// ambient tool access — silent permission widening for any canonical <c>deny</c> — so this
-/// renderer always emits an explicit map. Only <c>allow</c> grants a permission; <c>ask</c> and
-/// <c>deny</c> both withhold. <c>ask</c> is recorded as <see cref="SquadDegradationRecord"/>
+/// OpenCode's <c>permission</c> frontmatter key is an explicit map, and <b>an omitted key is
+/// not a withheld one</b>: agent permissions merge with the global config, whose documented
+/// behaviour is that most permissions default to <c>allow</c> (opencode.ai/docs/permissions,
+/// read 2026-09-21; <c>external_directory</c> and <c>doom_loop</c> are the stated exceptions).
+/// Emitting only the granted keys therefore hands back every canonical <c>deny</c> and
+/// <c>ask</c> as an ambient allow — the exact escalation the non-broadening guarantee forbids.
+/// This renderer consequently pins <b>every</b> key in the taxonomy explicitly, writing
+/// <c>deny</c> wherever the lattice does not grant. Only <c>allow</c> grants a permission;
+/// <c>ask</c> and <c>deny</c> both withhold. <c>ask</c> is recorded as <see cref="SquadDegradationRecord"/>
 /// with code <c>safety-narrowed</c> because OpenCode subagents do not support interactive
 /// per-capability confirmation gates.
 /// </para>
 /// <para>
-/// Base ungoverned permissions on every agent: <c>todowrite</c>, <c>skill</c>. Semantic capabilities lower
+/// Base ungoverned permissions on every agent: <c>todowrite</c>, <c>skill</c>, <c>question</c>.
+/// The first two write nothing and execute nothing; <c>question</c> asks the operator rather
+/// than touching the machine, so none of the three can broaden a canonical decision.
+/// <c>external_directory</c> and <c>doom_loop</c> map to no capability and are therefore always
+/// denied. <c>lsp</c> is governed by <c>filesystem.read</c>: language-server introspection is
+/// reading code. Semantic capabilities lower
 /// onto OpenCode's permission taxonomy: <c>filesystem.read</c> -&gt; <c>read</c>, <c>filesystem.search</c> -&gt;
-/// <c>grep</c>, <c>glob</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>process.execute</c> -&gt; <c>bash</c>,
+/// <c>grep</c>, <c>glob</c>, <c>list</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>process.execute</c> -&gt; <c>bash</c>,
 /// <c>network.read</c> -&gt; <c>webfetch</c>, <c>websearch</c>, and <c>delegate</c> -&gt; pattern-based <c>task</c> rules.
 /// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to agents
 /// with <c>filesystem.read: allow</c>, excluding pure orchestrators and shared identities.
@@ -48,7 +58,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
 
     private const string KyberWeaveMcpPermission = "kyber-weave_*";
 
-    private static readonly string[] BaseUngovernedPermissions = ["todowrite", "skill"];
+    private static readonly string[] BaseUngovernedPermissions = ["todowrite", "skill", "question"];
 
     /// <summary>
     /// Lowers the semantic capability vocabulary onto OpenCode's built-in permission names.
@@ -57,8 +67,8 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     /// </summary>
     private static readonly (string Capability, string[] Permissions)[] CapabilityPermissions =
     [
-        ("filesystem.read", ["read"]),
-        ("filesystem.search", ["grep", "glob"]),
+        ("filesystem.read", ["read", "lsp"]),
+        ("filesystem.search", ["grep", "glob", "list"]),
         ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
         ("network.read", ["webfetch", "websearch"]),
@@ -68,17 +78,29 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     /// Emission order, fixed so a rendered agent file is byte-stable regardless of how the
     /// profile's permissions enumerate.
     /// </summary>
+    /// <remarks>
+    /// Every key OpenCode documents is listed, because a key this renderer leaves out is a key
+    /// the global config grants by default. <c>external_directory</c> and <c>doom_loop</c> have
+    /// no canonical capability and so are never granted, but they are still emitted: relying on
+    /// OpenCode's own default for them would make this map's safety depend on a default the
+    /// operator can change.
+    /// </remarks>
     private static readonly string[] PermissionOrder =
     [
         "todowrite",
         "skill",
+        "question",
         "read",
+        "lsp",
         "grep",
         "glob",
+        "list",
         "edit",
         "bash",
         "webfetch",
         "websearch",
+        "external_directory",
+        "doom_loop",
         KyberWeaveMcpPermission,
         "task"
     ];
@@ -323,18 +345,13 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         {
             if (string.Equals(key, "task", StringComparison.Ordinal))
             {
-                if (taskPermissionValue is not null)
-                {
-                    ordered["task"] = taskPermissionValue;
-                }
-
+                // A withheld delegate is an explicit deny, not an absent key: absent means the
+                // global default decides, and the global default is allow.
+                ordered["task"] = taskPermissionValue ?? "deny";
                 continue;
             }
 
-            if (granted.Contains(key))
-            {
-                ordered[key] = "allow";
-            }
+            ordered[key] = granted.Contains(key) ? "allow" : "deny";
         }
 
         return ordered;
@@ -400,6 +417,28 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 Code: "permission-not-expressible",
                 InstructionDigest: agent.BodyDigest,
                 Details: string.Join(" ", notExpressibleDetails));
+        }
+
+        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+            ? exec
+            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+            ? write
+            : SquadPermissionDecision.Deny;
+
+        SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
+            targetToken: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+            canonicalIdentity: agent.Name,
+            outputIdentity: agent.Name,
+            instructionDigest: agent.BodyDigest,
+            executeDecision: executeDecision,
+            writeDecision: writeDecision,
+            grantedShellTools: ["bash"],
+            withheldWriteTools: ["edit"]);
+
+        if (notIsolable is not null)
+        {
+            yield return notIsolable;
         }
     }
 }
