@@ -1,7 +1,7 @@
-import { getShortModelName } from '../models.js'
+import { getShortModelName } from '../pricing/models.js'
 import type { DateRange } from '../types.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
-import { fetchWithTimeout } from '../fetch-utils.js'
+import { fetchWithTimeout } from '../pricing/fetch-utils.js'
 
 const REPORT_URL = 'https://ai-gateway.vercel.sh/v1/report'
 
@@ -54,7 +54,7 @@ export async function fetchVercelGatewayReport(
     if (!res.ok) {
       const detail = await res.text().catch(() => '')
       process.stderr.write(
-        `codeburn: Vercel AI Gateway report failed (HTTP ${res.status}). ` +
+        `kyberdash: Vercel AI Gateway report failed (HTTP ${res.status}). ` +
           'Requires AI_GATEWAY_API_KEY or VERCEL_OIDC_TOKEN (Pro/Enterprise for /v1/report). ' +
           `${detail.slice(0, 200)}\n`,
       )
@@ -65,7 +65,7 @@ export async function fetchVercelGatewayReport(
     return body.results ?? []
   } catch (err) {
     process.stderr.write(
-      `codeburn: Vercel AI Gateway report unreachable (${err instanceof Error ? err.message : String(err)}).\n`,
+      `kyberdash: Vercel AI Gateway report unreachable (${err instanceof Error ? err.message : String(err)}).\n`,
     )
     return []
   }

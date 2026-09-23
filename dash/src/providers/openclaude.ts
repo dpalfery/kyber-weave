@@ -16,9 +16,9 @@ import { readdir } from 'fs/promises'
 import { homedir } from 'os'
 import { basename, join } from 'path'
 
-import { extractBashCommands } from '../bash-utils.js'
-import { readSessionFile } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
 import type { ToolCall } from '../types.js'
 import type { ParsedProviderCall, ProbeRoot, Provider, SessionParser, SessionSource } from './types.js'
 
@@ -27,10 +27,10 @@ const DISPLAY_NAME = 'OpenClaude'
 const MIN_REASONABLE_TIMESTAMP_MS = 1_000_000_000_000
 
 // Mirrors the CLI's own resolution chain, each level individually overridable:
-//   root     := CODEBURN_OPENCLAUDE_DIR ?? ~/.openclaude
+//   root     := KYBERDASH_OPENCLAUDE_DIR ?? ~/.openclaude
 //   projects := <root>/projects
 function openClaudeRootDir(): string {
-  return process.env['CODEBURN_OPENCLAUDE_DIR']?.trim() || join(homedir(), '.openclaude')
+  return process.env['KYBERDASH_OPENCLAUDE_DIR']?.trim() || join(homedir(), '.openclaude')
 }
 
 export function getOpenClaudeProjectsDir(): string {

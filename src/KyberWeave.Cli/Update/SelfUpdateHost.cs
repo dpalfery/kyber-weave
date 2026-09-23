@@ -40,6 +40,7 @@ internal readonly record struct SelfUpdateOptions(
     string? Version,
     bool ReleaseCandidate,
     bool NoMcp,
-    bool NoKyberDash = false);
+    bool NoKyberDash = false,
+    bool NoMenubar = false);
 
 internal sealed record SelfUpdateOutcome(int ExitCode, string Message);

@@ -4,10 +4,10 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { join, basename } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost, getShortModelName } from '../models.js'
-import { openDatabase, type SqliteDatabase } from '../sqlite.js'
-import { normalizeContentBlocks } from '../content-utils.js'
-import { estimateTokensFromChars } from '../token-estimate.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
+import { normalizeContentBlocks } from '../ingest/content-utils.js'
+import { estimateTokensFromChars } from '../pricing/token-estimate.js'
 import type {
   Provider,
   SessionSource,
@@ -435,7 +435,7 @@ function createParser(
         if (!parsed.recognized) {
           if (!warnedUnrecognizedTranscripts.has(source.path)) {
             warnedUnrecognizedTranscripts.add(source.path)
-            process.stderr.write(`codeburn: skipped ${basename(source.path)}: unrecognized cursor-agent transcript format\n`)
+            process.stderr.write(`kyberdash: skipped ${basename(source.path)}: unrecognized cursor-agent transcript format\n`)
           }
           return
         }

@@ -284,7 +284,7 @@ and validates.
   `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)),
   `FactoryRenderer` for `.factory/droids/*.md` and `.factory/skills/*/SKILL.md`,
   `WarpRenderer` for fallback role-skill lowering to `.warp/skills/*/SKILL.md`,
-  and `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md)).
+  and `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)).
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
@@ -332,7 +332,7 @@ and validates.
   the fully qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s
   `required-mcp-tools`. Those names are hard requirements in ZCode, so `squad doctor` fails a
   ZCode install that does not declare the servers — see
-  [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md). The roster lives
+  [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md). The roster lives
   in canonical source because it is an external contract that drifts, and because the renderer
   and the doctor check must read the same list.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both
@@ -341,7 +341,7 @@ and validates.
   projects an agent's closure under `.zcode/skills/<owner>/` and rewrites that owner's authored
   links to `../skills/…`, recording a `resource-links-rewritten` degradation so the deviation is
   visible in the receipt. Skill closures are unaffected; see
-  [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md).
+  [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
 - **Validate**: the registry re-checks the merged output — portable paths stay inside the
   extraction root, every file's target was actually requested, the native/fallback
   single-projection rules from [section 3](#3-role-skill-lowering-and-namespace-resolution)
@@ -384,7 +384,7 @@ and validates.
 ## Related
 
 - [ADR 0017](../adr/0017-copilot-deterministic-tool-order.md) — Copilot tool membership and global emission order
-- [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
+- [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — ZCode command lowering and resource relocation
 - [Kyber-Squad adoption guide](onboarding.md) — CLI commands, flags, and workflows
 - [Requirements and degradation contract](requirements.md) — KS-001 through KS-008 specifications
 - [Configuration](../configuration.md) — repository configuration options

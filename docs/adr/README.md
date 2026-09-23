@@ -4,15 +4,14 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-18
 ---
 
 # Architecture decision records
 
 One record per architectural decision: what was decided, the alternatives that were rejected,
 and why. An ADR is never edited to say something else — a decision that changes is recorded in
-a new ADR that supersedes the old one, and the old one keeps its `id` so the documents that
-cite it still resolve.
+a new ADR that supersedes the old one.
 
 ## Inventory
 
@@ -23,7 +22,6 @@ cite it still resolve.
 | [0003](0003-cross-file-duplication-and-prior-art-lenses.md) | [Cross-File Duplication Detection and Prior-Art Retrieval in Code Review](0003-cross-file-duplication-and-prior-art-lenses.md) | Accepted | 2026-08-22 | Promote InspectCode redundancies to warnings, introduce `prior-art` lens for CodeGraph pre-lookup, and implement `review duplicates` normalized statement clustering for `duplicate-implementation` lens. |
 | [0004](0004-solution-level-static-analysis-and-noise-suppression.md) | [Solution-Level Static Analysis Configuration and Clean Code Policy](0004-solution-level-static-analysis-and-noise-suppression.md) | Accepted | 2026-08-22 | Eliminate source `#pragma` clutter via root `KyberWeave.sln.DotSettings`, maintain `TreatWarningsAsErrors`, and enforce modern C# 12/13 idioms without `var` collection expressions. |
 | [0005](0005-task-level-fast-review.md) | [Deterministic Fixes and Task-Level Review Ahead of the Council](0005-task-level-fast-review.md) | Accepted | 2026-08-22 | Fix mechanical defects deterministically in the worker completion gate (`dotnet format`, analyzer fixes, `cleanupcode --include`), give single tasks to `task-reviewer` for up to three PASS/FAIL passes, and run `code-reviewer` once per run — never per task unless a human asks. |
-| [0006](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) | [KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) | Accepted | 2026-08-29 | Vendor `codeburn` under `dash/` with merge zone isolation in `dash/kyber/`, embed native OTLP receiver on port 4318, and standardize on single canonical span model. |
 | [0007](0007-kyberdash-agent-session-analysis-integration.md) | [KyberDash Agent Session Analysis Integration, Dual-Database Architecture, and Navigation Topology](0007-kyberdash-agent-session-analysis-integration.md) | Accepted | 2026-09-03 | Embed deep agent session analysis into Context Explorer, streamline top navigation to 5 tabs, establish dual-database SQLite bridge (`~/.kyberdash/canon.db` and fallback `sessions.db`), and implement formal `/api/kyber/*` REST contract. |
 | [0008](0008-kyberdash-single-canonical-store.md) | [Single Canonical Store; Supersede ADR 0007 D4](0008-kyberdash-single-canonical-store.md) | Accepted | 2026-09-03 | Restore `canon.db` as the only store with derived cached sessions, retire the `sessions.db` fallback, and store content once as compressed parts with the flat map derived on read. |
 | [0009](0009-multi-signal-ingestion-span-shaped-record.md) | [Multi-Signal Ingestion into a Span-Shaped Canonical Record](0009-multi-signal-ingestion-span-shaped-record.md) | Accepted | 2026-09-04 | Serve `/v1/logs` as an enrichment path onto one span-shaped record, quarantine uncorrelated logs and non-model spans, and fix OTel/dot-folder source precedence at one turn. |
@@ -37,7 +35,8 @@ cite it still resolve.
 | [0017](0017-copilot-deterministic-tool-order.md) | [Exact Copilot Tool Membership with One Cross-Agent Emission Order](0017-copilot-deterministic-tool-order.md) | Accepted | 2026-09-12 | Copilot `tools` membership comes from canonical `copilot-tools`; emission order is one global catalog sequence with no per-agent exceptions. |
 | [0018](0018-kyberdash-content-retention-purge.md) | [Stored Content with a 14-Day Automatic Purge](0018-kyberdash-content-retention-purge.md) | Accepted | 2026-09-13 | Persist inspector content; `purgeExpiredContent` after refresh empties `content_json`/`parts_json` after 14 days and never deletes `records.raw`. |
 | [0019](0019-pi-native-subagents-and-primary-lowering.md) | [Native Pi Agents via pi-subagents, with Primary-Agent Skill Lowering](0019-pi-native-subagents-and-primary-lowering.md) | Accepted | 2026-09-14 | Pi is a native target via `@tintinweb/pi-subagents`; the primary-invocation conductor lowers to a skill so nested delegation stays inside the default depth cap. |
-| [0020](0020-zcode-command-lowering-and-resource-relocation.md) | [ZCode Command Lowering, Resource Relocation, and the Inverted Empty Tool List](0020-zcode-command-lowering-and-resource-relocation.md) | Accepted | 2026-09-21 | ZCode's conductor lowers to `/conductor`; agent resources move under `.zcode/skills/` with rewritten links because the agent and command roots are scanned recursively; `tools: []` means inherit-everything, so an empty grant fails the render closed; and MCP is granted by enumerated tool name, gated by `squad doctor`. |
+| [0020](0020-kyberdash-one-time-fork.md) | [KyberDash as a One-Time Fork, and the Engine Language Re-Decided](0020-kyberdash-one-time-fork.md) | Accepted | 2026-09-18 | `dash/` becomes first-party code after a one-time fork of CodeBurn; restates the embedded receiver, span-shaped canonical model and SEA distribution of the archived ADR 0006, keeps the engine in TypeScript on current grounds, and supersedes ADR 0016 decision 8. |
+| [0021](0021-zcode-command-lowering-and-resource-relocation.md) | [ZCode Command Lowering, Resource Relocation, and the Inverted Empty Tool List](0021-zcode-command-lowering-and-resource-relocation.md) | Accepted | 2026-09-21 | ZCode's conductor lowers to `/conductor`; agent resources move under `.zcode/skills/` with rewritten links because the agent and command roots are scanned recursively; `tools: []` means inherit-everything, so an empty grant fails the render closed; and MCP is granted by enumerated tool name, gated by `squad doctor`. |
 
 ## Writing one
 
@@ -46,5 +45,9 @@ it decided with `decided-by: [<id>]`, and supersede a previous record with
 `supersedes: [<id>]` — both are validated, so a reference to a record that does not exist
 fails `KW-DOC-SPEC-006`.
 
-Superseded records move to `archive/adrs/`, which is outside the corpus and never returned as
-current guidance.
+A record superseded in part stays here, current, and the new record says which of its
+decisions it replaces — as [ADR 0008](0008-kyberdash-single-canonical-store.md) does for
+ADR 0007 D4. A record superseded in full moves to `archive/adrs/`, which is outside the corpus
+and never returned as current guidance. Its id stops resolving once it moves, so the record
+that replaces it names it in prose and links the archived path rather than listing it in
+`supersedes`, and every live link to it is repointed at the archive.

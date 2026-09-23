@@ -216,8 +216,8 @@ kyberdash report            # terminal TUI
 ```
 
 Installed by the same one-line installer as the CLI, from releases that publish it.
-KyberDash is a soft fork of [`getagentseal/codeburn`](https://github.com/getagentseal/codeburn)
-vendored under `dash/`, with Kyber-Weave's own analyzers isolated in a merge zone.
+KyberDash began as a fork of the MIT-licensed CodeBurn project and is now first-party code
+under `dash/` ([ADR 0020](docs/adr/0020-kyberdash-one-time-fork.md)).
 
 [Overview →](docs/dash/README.md) · [Architecture →](docs/dash/architecture.md) · [Runbook →](docs/dash/runbook.md) · [Telemetry inventory →](docs/dash/telemetry-inventory.md) · [Install →](docs/install.md#kyberdash-and-the-version-floor)
 
@@ -245,9 +245,9 @@ src/
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
   kyber-squad/            canonical 21 agents, 24 skills, profiles, and schemas
-dash/                     Feature 5 — KyberDash, a vendored soft fork of codeburn
-  src/ dash/ app/ windows/  upstream CLI engine and the four surfaces
-  kyber/                    the merge zone — Kyber-Weave's analyzers, OTLP receiver, canon store
+dash/                     Feature 5 — KyberDash, first-party since a one-time fork of CodeBurn
+  src/ dash/                CLI engine, provider parsers, and the web dashboard
+  kyber/                    analyzers, OTLP receiver, canon store
 tests/KyberWeave.Tests/
 .apm/skills/              kyber-weave-docs — the authoring skill, shipped as an APM package
 samples/                  exemplar and deliberately bad skills; routing eval set

@@ -29,7 +29,7 @@ renderers today. All eleven declared harness targets are covered.
 | `pi` | Native (conductor lowered to skill) | Completed | `PiRenderer` (`src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`) · [archived todo](../archive/todo/pi.md) |
 | `factory` | Native | Completed | `FactoryRenderer` (`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`) · [factory.md](factory.md) |
 | `warp` | Fallback (role-skill lowering) | Completed | `WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) · [archived todo](../archive/todo/warp.md) |
-| `zcode` | Native (conductor lowered to slash command) | Completed | `ZCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`) · [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md) · [plugin packaging](zcode-plugin-packaging.md) |
+| `zcode` | Native (conductor lowered to slash command) | Completed | `ZCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`) · [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) · [plugin packaging](zcode-plugin-packaging.md) |
 
 ### Target Checklist
 

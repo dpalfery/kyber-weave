@@ -11,7 +11,7 @@ import {
   saveCache,
   sessionCacheDir,
   type SessionCache,
-} from '../../src/session-cache.js'
+} from '../../src/ingest/session-cache.js'
 
 /** The cache exactly as it is on disk, bypassing the in-process memo. */
 export async function readCacheOnDisk(): Promise<SessionCache> {

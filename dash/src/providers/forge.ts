@@ -2,9 +2,9 @@ import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
-import { extractBashCommands } from '../bash-utils.js'
-import { calculateCost } from '../models.js'
-import { getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../sqlite.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { calculateCost } from '../pricing/models.js'
+import { getSqliteLoadError, isSqliteAvailable, openDatabase, type SqliteDatabase } from '../ingest/sqlite.js'
 import type { ParsedProviderCall, Provider, SessionParser, SessionSource } from './types.js'
 
 type ConversationRow = {

@@ -1,7 +1,7 @@
 import { readdir } from 'fs/promises'
 import { join } from 'path'
 
-import { calculateCost } from '../models.js'
+import { calculateCost } from '../pricing/models.js'
 import {
   isSqliteAvailable,
   getSqliteLoadError,
@@ -11,7 +11,7 @@ import {
   isSqliteReadonlyError,
   warnSqliteReadonlyOnce,
   type SqliteDatabase,
-} from '../sqlite.js'
+} from '../ingest/sqlite.js'
 import { buildAssistantCall, parseTimestamp, sanitize, type MessageData, type PartData } from './session-message.js'
 import type {
   SessionSource,
@@ -114,8 +114,8 @@ function warnUnrecognizedSchemaOnce(providerLabel: string, missing: string[]): v
   providerSet.add(key)
   warnedSchemas.set(providerLabel, providerSet)
   process.stderr.write(
-    `codeburn: ${providerLabel} database is missing expected tables (${missing.join(', ')}). ` +
-    `Run ${providerLabel} once to apply migrations, or report at https://github.com/getagentseal/codeburn/issues if this persists.\n`
+    `kyberdash: ${providerLabel} database is missing expected tables (${missing.join(', ')}). ` +
+    `Run ${providerLabel} once to apply migrations, or report at https://github.com/dpalfery/kyber-weave/issues if this persists.\n`
   )
 }
 
@@ -146,7 +146,7 @@ export function createSqliteSessionParser(
       try {
         db = openDatabase(dbPath)
       } catch (err) {
-        process.stderr.write(`codeburn: cannot open ${config.displayName} database: ${err instanceof Error ? err.message : err}\n`)
+        process.stderr.write(`kyberdash: cannot open ${config.displayName} database: ${err instanceof Error ? err.message : err}\n`)
         return
       }
 
@@ -282,9 +282,9 @@ export function createSqliteSessionParser(
             }
           }
 
-          if (yieldCount === 0 && process.env['CODEBURN_VERBOSE'] === '1') {
+          if (yieldCount === 0 && process.env['KYBERDASH_VERBOSE'] === '1') {
             process.stderr.write(
-              `codeburn: ${config.displayName} session ${sessionId} has ${messages.length} messages ` +
+              `kyberdash: ${config.displayName} session ${sessionId} has ${messages.length} messages ` +
               `(${parseFailCount} unparseable, ${roleSkipCount} non-user/assistant roles) ` +
               `but yielded 0 calls. Parts: ${parts.length}.\n`
             )

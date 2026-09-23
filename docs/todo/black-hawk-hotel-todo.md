@@ -37,7 +37,7 @@ Branch `claude/zcode-harness-subagents-e2fff4`, three commits, all 14 declared g
 | `ac6a6f90` | Pinned every OpenCode permission key, because an omitted key inherits OpenCode's default-allow |
 
 See [the ZCode plan](../plans/2026-09-21-zcode-harness-target.md) and
-[ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md).
+[ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
 
 ### The machine state this work left behind
 

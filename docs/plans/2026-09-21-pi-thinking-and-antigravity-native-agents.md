@@ -131,7 +131,7 @@ the operation brief were re-confirmed independently:
   `docs/kyber-squad/onboarding.md:63,71,77-78,118-125,171` — every location that currently
   documents Antigravity as "fallback" / "role-skill lowering" / "single-agent context", read and
   line-cited for Track C's docs task.
-- `docs/adr/README.md` — ADR 0019 (Pi: fallback→native reclassification) and ADR 0020 (ZCode:
+- `docs/adr/README.md` — ADR 0019 (Pi: fallback→native reclassification) and ADR 0021 (ZCode:
   command lowering, a first-of-its-kind primitive). Kilo and Factory (straightforward native
   agent+skill additions, no reclassification or novel primitive) have **no** ADR. This is the
   precedent behind D6 (§3).
@@ -371,7 +371,7 @@ naming explicitly because they are not obvious from the spec alone:
   unconditional `foreach (agent) render; foreach (skill not shared-identity) render` shape.
 - **`enable_mcp_tools`** inherits the parent's already-configured MCP servers (verified spec,
   Answer 2, citing a changelog fix) — it is not a per-server grant the way ZCode's MCP tool names
-  are (ADR 0020, decision 5). This plan does **not** attempt a ZCode-style fully-qualified MCP
+  are (ADR 0021, decision 5). This plan does **not** attempt a ZCode-style fully-qualified MCP
   roster for Antigravity; `enable_mcp_tools` is emitted as a plain boolean gated on whether the
   role's capability profile grants any of the two Squad capabilities MCP servers exist to serve
   (`network.read` for context7/docs lookups) — exact gating is part of C0's evidence-gathering
@@ -599,7 +599,7 @@ citation and the plan returns to Draft to address it rather than patching the te
 consequence, and — per D11 — the cross-target `capability-not-isolable` finding: that
 `process.execute`-grants-a-shell already exists on Claude/Pi/ZCode/Factory/OpenCode, why
 Codex/Kilo/Cursor/Warp were found unaffected, and why Copilot is excluded (§3 D11, §5); following
-ADR 0019/0020's structure.
+ADR 0019/0021's structure.
 **Acceptance:** `docs validate .` passes; the ADR's `Related` section links this plan and the two
 source todos.
 **Dependency note:** depends on DS2 in addition to C2, since it documents the shared helper DS2
@@ -804,11 +804,14 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
 - Cross-stream audit (2026-09-22). PR #96 (`claude/kyberdash-context-surfaces-spec-d5775e`, the
   KyberDash stream) does not duplicate this plan, but it crossed it in two ways. It carries a
   stale 2026-09-18 copy of `docs/todo/antigravity-native-agents.md` (an add/add conflict with this
-  branch's copy, which must win), and it adds its own ADR 0020
-  (`0020-kyberdash-one-time-fork.md`) beside this branch's `0020-zcode-command-lowering-and-resource-relocation.md`.
-  Whichever PR merges second renumbers its ADR 0020, so C4's ADR takes the next free number at
-  the time it is written, not a number fixed in advance. A note covering both, plus a diverged
-  kyberdash remote, was handed to the session working on PR #96.
+  branch's copy, which must win), and it added its own ADR 0020
+  (`0020-kyberdash-one-time-fork.md`) beside this branch's ZCode record, then numbered 0020 too. A
+  note covering both, plus a diverged kyberdash remote, was handed to the session working on PR #96.
+  **Resolved 2026-09-22:** PR #96 merged first (`f7054414`), so `origin/main` owns ADR 0020. This
+  branch merged `origin/main` and renumbered its ZCode record to
+  [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md), updating every
+  reference; the Antigravity todo resolved to this branch's superseded 2026-09-21 version, as
+  intended. C4's ADR takes the next free number after 0021.
 
 ---
 
@@ -820,7 +823,7 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
   contract (superseded by this plan once the conductor's promotion step runs)
 - [ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md) — the fallback→native
   reclassification precedent (Pi)
-- [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md) — the first-of-its-kind
+- [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — the first-of-its-kind
   rendering-mechanism precedent (ZCode); also the source of the models.yml schema's pre-existing
   `antigravity` key
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — §3 role-skill lowering, §8 rendering

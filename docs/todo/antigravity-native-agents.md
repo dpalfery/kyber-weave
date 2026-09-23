@@ -214,7 +214,7 @@ the renderer is trusted.
   [requirements](../kyber-squad/requirements.md) target matrix, this page's row in
   [renderer coverage](kyber-squad-renderer-coverage.md), and an ADR — reclassifying a target
   from fallback to native is the same class of decision
-  [ADR 0020](../adr/0020-zcode-command-lowering-and-resource-relocation.md) records for ZCode.
+  [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) records for ZCode.
 
 ## Deployment consequence
 

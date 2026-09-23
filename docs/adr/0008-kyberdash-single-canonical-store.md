@@ -11,7 +11,7 @@ last-reviewed: 2026-09-03
 
 ## Status
 
-Accepted, 2026-09-03. Supersedes [ADR 0007](0007-kyberdash-agent-session-analysis-integration.md) decision D4 ("zero-copy dual-database querying" across `canon.db` and the Python pipeline's `sessions.db`). Restores [ADR 0006](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) decision D3 ("there is one canonical model, and it is the span model").
+Accepted, 2026-09-03. Supersedes [ADR 0007](0007-kyberdash-agent-session-analysis-integration.md) decision D4 ("zero-copy dual-database querying" across `canon.db` and the Python pipeline's `sessions.db`). Restores [ADR 0006](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) decision D3 ("there is one canonical model, and it is the span model").
 
 ## Context
 
@@ -48,7 +48,7 @@ Because raw payloads were retained, the corpus was repairable in place: a backfi
 
 ## Related
 
-- [ADR 0006: KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)
+- [ADR 0006: KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)
 - [ADR 0007: KyberDash Agent Session Analysis Integration, Dual-Database Architecture, and Navigation Topology](0007-kyberdash-agent-session-analysis-integration.md)
 - [KyberDash architecture](../dash/architecture.md)
 - [KyberDash measurable rationale](../reference/kyberdash-rationale.md)

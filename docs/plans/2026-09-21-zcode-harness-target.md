@@ -310,7 +310,7 @@ cannot be expressed as a permission, only as instruction text in the body.
 **In:** target declaration, marker, global root, `ZCodeRenderer`, registry output-path and
 validation wiring, CLI composition, packer exclusion, doctor coverage, `models.yml` and its
 schema, contract/lifecycle/global-root/CLI tests, and documentation alignment including
-ADR 0020.
+ADR 0021.
 
 **Out:** ZCode plugin packaging (`.zcode-plugin/plugin.json`) only, and only because it is a
 different deployment model rather than remaining renderer work: a plugin is enabled as one

@@ -6,9 +6,9 @@ import { homedir } from 'os'
 import { fileURLToPath } from 'url'
 import https from 'https'
 
-import { getCodeburnCacheDir, readExistingTextFile } from '../cache-dir.js'
-import { calculateCost } from '../models.js'
-import { isSqliteAvailable, isSqliteBusyError, openDatabase } from '../sqlite.js'
+import { getCacheDir, readExistingTextFile } from '../ingest/cache-dir.js'
+import { calculateCost } from '../pricing/models.js'
+import { isSqliteAvailable, isSqliteBusyError, openDatabase } from '../ingest/sqlite.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 type AntigravityConversationRoot = {
@@ -185,13 +185,35 @@ const SERVER_PORT_FLAGS = ['https_server_port', 'extension_server_port', 'https-
 const CSRF_TOKEN_FLAGS = ['csrf_token', 'extension_server_csrf_token', 'csrf-token', 'extension-server-csrf-token']
 const APP_DATA_DIR_FLAGS = ['app_data_dir', 'app-data-dir']
 
-function getAgent(): https.Agent {
+// The Antigravity IDE extension server listens on loopback over HTTPS with a
+// self-signed certificate, so certificate verification is waived for it: there
+// is no man-in-the-middle position on the loopback interface of this machine,
+// and the IDE's certificate is not one we can pin across versions.
+//
+// The waiver is confined to loopback by checking the hostname HERE, at the call,
+// rather than in a `checkServerIdentity` callback on the agent. Node does not
+// call `checkServerIdentity` at all when `rejectUnauthorized` is false — it
+// skips the authorization step that would invoke it — so a guard written there
+// reads like protection while never executing. Verified against Node's actual
+// behaviour: with `rejectUnauthorized: false`, a `checkServerIdentity` that
+// unconditionally returns an Error still lets the connection through.
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '::1', 'localhost'])
+
+// Exported for the test that proves this guard actually runs; not part of the
+// provider's public surface.
+export function getAgent(hostname: string): https.Agent {
+  if (!LOOPBACK_HOSTNAMES.has(hostname)) {
+    throw new Error(
+      `Antigravity HTTPS agent is loopback-only; refusing to disable certificate ` +
+        `verification for ${JSON.stringify(hostname)}`,
+    )
+  }
   if (!httpsAgent) httpsAgent = new https.Agent({ rejectUnauthorized: false })
   return httpsAgent
 }
 
 function currentCacheDir(): string {
-  return resolve(getCodeburnCacheDir())
+  return resolve(getCacheDir())
 }
 
 function getCachePath(cacheDir: string): string {
@@ -207,7 +229,7 @@ function isCurrentCache(cache: AntigravityCache): boolean {
 }
 
 export function getAntigravityStatusLineEventsPath(): string {
-  return join(getCodeburnCacheDir(), 'antigravity-statusline.jsonl')
+  return join(getCacheDir(), 'antigravity-statusline.jsonl')
 }
 
 function execFileText(command: string, args: string[], timeout = 3000): Promise<string> {
@@ -493,7 +515,7 @@ async function resolveEphemeralPort(csrfToken: string, appDataDir?: 'antigravity
                 'X-Codeium-Csrf-Token': csrfToken,
                 'Content-Length': 2,
               },
-              agent: getAgent(),
+              agent: getAgent('127.0.0.1'),
               timeout: 1000,
             }, (res) => {
               if (res.statusCode === 200) resolve(true)
@@ -578,7 +600,7 @@ async function rpc(server: ServerInfo, method: string, body: Record<string, unkn
         'X-Codeium-Csrf-Token': server.csrfToken,
         'Content-Length': Buffer.byteLength(data),
       },
-      agent: getAgent(),
+      agent: getAgent('127.0.0.1'),
       timeout: RPC_TIMEOUT_MS,
     }, (res) => {
       const chunks: Buffer[] = []
@@ -807,7 +829,7 @@ function buildCallFromSqliteGenMetadataRow(cascadeId: string, row: AntigravityGe
     || protoFieldPositiveInteger(firstProtoField(usageFields, 1))
   const totalOutputTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 3))
   let responseTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 9))
-  let thinkingTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 10))
+  const thinkingTokens = protoFieldPositiveInteger(firstProtoField(usageFields, 10))
 
   if (responseTokens === 0 && thinkingTokens === 0) {
     responseTokens = totalOutputTokens
@@ -922,8 +944,20 @@ function usageDelta(current: StatusLineEvent['usage'], previous: StatusLineEvent
   }
 }
 
+// Conversation ids are identifier-shaped strings produced by Antigravity. The
+// allowlist keeps filesystem-derived data out of an outbound RPC body, and it is
+// applied at that boundary rather than where an id is parsed from a path:
+// antigravityCascadeIdFromPath runs inside ingest map()s over every session file,
+// where a throw would abort the whole refresh over one oddly-named file.
+const CASCADE_ID_ALLOWED = /^[A-Za-z0-9_\-. ]+$/
+
 export function antigravityCascadeIdFromPath(path: string): string {
   return basename(path).replace(/\.(pb|db)$/i, '')
+}
+
+/** True when a cascade id is safe to put in an outbound RPC body. */
+export function isAntigravityCascadeId(value: string): boolean {
+  return CASCADE_ID_ALLOWED.test(value)
 }
 
 function buildCallsFromGeneratorMetadata(
@@ -1065,7 +1099,7 @@ export async function recordAntigravityStatusLinePayload(input: unknown): Promis
   if (!event) return false
 
   const path = getAntigravityStatusLineEventsPath()
-  await mkdir(getCodeburnCacheDir(), { recursive: true, mode: 0o700 })
+  await mkdir(getCacheDir(), { recursive: true, mode: 0o700 })
   const fd = await open(path, 'a', 0o600)
   try {
     await fd.appendFile(`${JSON.stringify(event)}\n`, { encoding: 'utf-8' })
@@ -1242,6 +1276,9 @@ export async function snapshotAntigravityStatusLinePayload(input: unknown): Prom
 
   let metadata: GeneratorMetadata[]
   try {
+    if (!isAntigravityCascadeId(cascadeId)) {
+      throw new Error(`refusing to send a non-identifier cascade id: ${JSON.stringify(cascadeId)}`)
+    }
     const modelMap = await getModelMap(server)
     metadata = extractAntigravityGeneratorMetadata(
       await rpc(server, 'GetCascadeTrajectoryGeneratorMetadata', { cascadeId }),
