@@ -1,5 +1,7 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
@@ -12,6 +14,24 @@ namespace KyberWeave.Tests;
 public sealed class PlanInventoryValidatorTests
 {
     private const string PlanIndex = "6-Docs/plans/README.md";
+
+    /// <summary>
+    /// A host that wants archive content retrievable drops the archive segment from the
+    /// ontology exclusions, so the corpus loads documents under 6-Docs/archive/.
+    /// </summary>
+    private static readonly OntologyConfig ArchiveInCorpus =
+        OntologyConfig.ProductDefaults.Clone(excludedPathSegments: ["node_modules", "obj", "bin"]);
+
+    /// <summary>
+    /// The same host overrides plan-index to the repository-root index, so the folder the
+    /// validator derives spans the whole docs root, archive subtree included.
+    /// </summary>
+    private static readonly KyberWeaveConfig RootPlanIndexOverrides = KyberWeaveConfig.ProductDefaults
+        .WithConfigReg(new ConfigRegConfig
+        {
+            Additions = [new ConfigRegEntry(ConfigRegConfig.PlanIndexProperty, "6-Docs/README.md")]
+        })
+        .WithOntology(ArchiveInCorpus);
 
     private static string Index(string body, string id = "plans/index") =>
         $"""
@@ -113,6 +133,24 @@ public sealed class PlanInventoryValidatorTests
             .Write("6-Docs/plans/rollout.md", Plan("plans/rollout"));
 
         DiagnosticReport report = Validate(fixture);
+
+        Assert.True(report.Items.Count == 0, Describe(report));
+    }
+
+    /// <summary>
+    /// A host can lift the loader's archive exclusion and override plan-index to an index
+    /// above the archive subtree; the folder the validator derives then spans the archive.
+    /// Closed work must still not fail the inventory as unlisted open work.
+    /// </summary>
+    [Fact]
+    public void APlanUnderTheArchiveSegmentIsNotUnlistedWhenTheIndexSitsAboveTheArchiveSubtree()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/README.md", Index("None.", "docs/index"))
+            .Write("6-Docs/archive/plans/closed-spine.md", Plan("plans/closed-spine"));
+
+        DocumentSet set = new DocumentLoader(fixture.Root, ArchiveInCorpus).Load();
+        DiagnosticReport report = new PlanInventoryValidator(RootPlanIndexOverrides).Validate(set);
 
         Assert.True(report.Items.Count == 0, Describe(report));
     }

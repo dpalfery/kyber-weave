@@ -33,8 +33,15 @@ public sealed class OntologyConfig
     private static readonly string[] DefaultBaseRequiredKeys =
         ["id", "title", "owner", "last-reviewed", "doc-type", "status"];
 
+    /// <summary>
+    /// The folder the corpus moves closed documents into. The loader excludes it by
+    /// default, and the inventory rules treat it as not-active whatever the loader was
+    /// told — one name, so the loader's default and the validators cannot drift apart.
+    /// </summary>
+    public const string ArchiveSegment = "archive";
+
     private static readonly string[] DefaultExcludedSegments =
-        ["archive", "node_modules", "obj", "bin"];
+        [ArchiveSegment, "node_modules", "obj", "bin"];
 
     private static readonly string[] DefaultExcludedFiles =
     [

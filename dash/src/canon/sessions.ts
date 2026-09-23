@@ -16,6 +16,7 @@ import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
+import { contextLimitOf } from './context-window.js'
 import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
@@ -24,19 +25,12 @@ import { CanonStore, type SessionRow } from './store.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
 import { notMeasurable, type CanonicalRecord, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
-/**
- * Default context window, used when nothing on the record says otherwise.
- * Named rather than inlined so a wrong headroom figure is traceable to one
- * assumption instead of looking like a measurement.
- */
-export const DEFAULT_CONTEXT_LIMIT = 200_000
-
-/** Attributes a harness may report its context window under. */
-const CONTEXT_LIMIT_KEYS = [
-  'gen_ai.request.max_context_tokens',
-  'gen_ai.request.context_window',
-  'model_context_window',
-] as const
+// The default window and the reported-window rule moved to
+// `./context-window.js` so the finding detector can read the same derivation
+// without importing this module — `analysis/findings.js` must not import
+// `canon/sessions.js` (cycle via `canon/findings.ts`). Re-exported here so
+// existing importers keep resolving the default from the session analysis.
+export { DEFAULT_CONTEXT_LIMIT } from './context-window.js'
 
 /** Attributes naming the agent, repository and branch, for the session header. */
 const AGENT_NAME_KEYS = ['gen_ai.agent.name', 'agent.name'] as const
@@ -372,13 +366,13 @@ export function buildSessionRow(
     freshInput: record.tokens.freshInput,
   }))
 
-  const contextLimit = Number(
-    turnRecords.map((r) => attributeOf(r, CONTEXT_LIMIT_KEYS)).find((v) => v !== undefined) ??
-      DEFAULT_CONTEXT_LIMIT,
-  )
+  // Same rule the finding detector uses (`contextLimitOf`): first turn record
+  // to name a window wins, default otherwise, so a session row and a
+  // compaction finding built from the same records can never disagree.
+  const contextLimit = contextLimitOf(records).contextLimit
   const measurability = mergeMeasurability(records)
   const context = analyzeContext(contextTurns, {
-    contextLimit: Number.isFinite(contextLimit) && contextLimit > 0 ? contextLimit : DEFAULT_CONTEXT_LIMIT,
+    contextLimit,
     countTokens,
     ...(measurability !== undefined ? { measurability } : {}),
   })
