@@ -12,6 +12,8 @@
 // 5. Decision D16: skill utilisation findings are stamped at low confidence ('heuristic') and ranked last.
 
 import { normalizeWhitespace, hashNormalized } from './signals.js'
+import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
+import { canonicalHarnessId, normalizeHarnessName } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
 
@@ -903,44 +905,110 @@ export type CompactionHazardInput = {
   outcome?: OutcomeBlock
 }
 
-export const DEFAULT_COMPACTION_CONTEXT_LIMIT = 200_000
-
 /**
  * Detector 5: compaction-hazard
  * Context consumption exceeding 85% of window without summarization plan.
+ *
+ * The window is per session (plan D1): turns are grouped by their record's
+ * canonical session identity — the same derivation buildSessions and
+ * buildRuns use — and each group is measured against the window its own
+ * records report, the `contextLimitOf` rule the session analysis uses, so a
+ * run mixing models is not judged by whichever session happened to report
+ * first, and the finding's `sessionId` names a session row that exists.
+ * An explicit `input.contextLimit` overrides derivation for every group
+ * (preserved for tests and the parity tool).
  */
 export function detectCompactionHazard(input: CompactionHazardInput): Finding[] {
   const findings: Finding[] = []
   const records = input.records ?? []
   const runId = input.runId
-  const sessionId = (input.sessionId ?? records[0]?.sessionId) || undefined
   const outcome = input.outcome
   const discount = calculateOutcomeRiskDiscount(outcome, 'compaction-hazard')
-  const limit = input.contextLimit ?? DEFAULT_COMPACTION_CONTEXT_LIMIT
+  // An empty sessionId is no attribution at all, not a group key of its own.
+  const invocationSession = input.sessionId || undefined
 
   type TurnContext = {
     spanId: string
     turnIndex: number
     tokens: number
   }
+  type SessionGroup = {
+    sessionId: string
+    turns: TurnContext[]
+    /** The group's own turn records: its window is derived from its telemetry alone. */
+    records: CanonicalRecord[]
+  }
 
-  const turnList: TurnContext[] = []
+  const groups = new Map<string, SessionGroup>()
+  const groupFor = (sessionId: string): SessionGroup => {
+    const existing = groups.get(sessionId)
+    if (existing !== undefined) return existing
+    const created: SessionGroup = { sessionId, turns: [], records: [] }
+    groups.set(sessionId, created)
+    return created
+  }
 
-  const turnRecords = records.filter((r) => r.op === 'llm.invoke')
+  // A turn is a model call from an identity the builders actually group:
+  // groupByCanonicalHarness drops excluded identities (gemini), so such a
+  // span belongs to no canonical session and must neither become a group's
+  // peak nor win the group's first-reported window race. `harnessesByKey`
+  // already excludes them, which would otherwise leave their turns inside
+  // the one unprefixed group the key does have.
+  const turnRecords = records.filter(
+    (r) => r.op === 'llm.invoke' && canonicalHarnessId(r.harness) !== null,
+  )
+
+  // Canonical session identity, derived the way buildSessions and buildRuns
+  // derive it (canon/sessions.ts, canon/runs.ts): the record's session id, or
+  // the trace id when the harness emitted none — the store keys every record
+  // by COALESCE(session_id, trace_id), and one run can carry several
+  // trace-keyed sessions — prefixed with the canonical harness when one key
+  // spans several, as `${harness}:${key}`. Grouping by the bare record
+  // sessionId would collapse those sessions into one context window and stamp
+  // findings with an id that matches no session row; the 'session'
+  // placeholder now only covers degenerate direct calls whose records carry
+  // neither id.
+  const baseKeyOf = (record: CanonicalRecord): string =>
+    record.sessionId || record.traceId || invocationSession || 'session'
+
+  // Counted over every record the builders would group, not just the turns:
+  // buildSessions and buildRuns run groupByCanonicalHarness over all records
+  // of a key, so a key whose second canonical harness appears only on a
+  // non-invocation span is still stored as `${harness}:${key}`. Excluded
+  // identities (gemini) count toward no session row there and nowhere here —
+  // counting them would add a prefix the builders never wrote.
+  const harnessesByKey = new Map<string, Set<string>>()
+  for (const record of records) {
+    const harness = canonicalHarnessId(record.harness)
+    if (harness === null) continue
+    const key = baseKeyOf(record)
+    const harnesses = harnessesByKey.get(key) ?? new Set<string>()
+    harnesses.add(harness)
+    harnessesByKey.set(key, harnesses)
+  }
+  const groupIdOf = (record: CanonicalRecord): string => {
+    const key = baseKeyOf(record)
+    return (harnessesByKey.get(key)?.size ?? 1) > 1
+      ? `${normalizeHarnessName(record.harness)}:${key}`
+      : key
+  }
+
   for (let i = 0; i < turnRecords.length; i++) {
     const r = turnRecords[i]!
     const tokens = r.tokens.reportedInput || (r.tokens.freshInput + r.tokens.cacheRead + r.tokens.cacheCreation)
-    turnList.push({
-      spanId: r.spanId,
-      turnIndex: i,
-      tokens,
-    })
+    const group = groupFor(groupIdOf(r))
+    group.turns.push({ spanId: r.spanId, turnIndex: i, tokens })
+    group.records.push(r)
   }
 
+  // The `turns` override predates record-driven detection and carries no
+  // session attribution of its own, so it runs as one group under the
+  // invocation's scope.
   if (input.turns && input.turns.length > 0) {
+    const group = groupFor(invocationSession || 'session')
     for (let i = 0; i < input.turns.length; i++) {
       const t = input.turns[i]!
-      turnList.push({
+      group.turns.push({
         spanId: t.spanId ?? `turn-span-${i}`,
         turnIndex: t.turnIndex ?? i,
         tokens: t.inputTokens ?? 0,
@@ -948,66 +1016,91 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     }
   }
 
-  if (turnList.length === 0) return findings
+  for (const group of groups.values()) {
+    if (group.turns.length === 0) continue
 
-  let peakTurn: TurnContext = turnList[0]!
-  for (const t of turnList) {
-    if (t.tokens > peakTurn.tokens) {
-      peakTurn = t
+    // An explicit limit is a caller declaration, not an assumption. It is
+    // recorded as 'reported' because 'default' is reserved for the named
+    // 200,000 fallback that applies when nothing anywhere names a window.
+    const window =
+      input.contextLimit !== undefined
+        ? { contextLimit: input.contextLimit, contextLimitSource: 'reported' as const }
+        : contextLimitOf(group.records)
+    const limit = window.contextLimit
+
+    let peakTurn: TurnContext = group.turns[0]!
+    for (const t of group.turns) {
+      if (t.tokens > peakTurn.tokens) {
+        peakTurn = t
+      }
     }
-  }
 
-  const thresholdTokens = Math.floor(limit * 0.85)
-  if (peakTurn.tokens > thresholdTokens) {
-    const ratio = peakTurn.tokens / limit
-    const estimatedWasteTokens = peakTurn.tokens - thresholdTokens
+    const thresholdTokens = Math.floor(limit * 0.85)
+    if (peakTurn.tokens > thresholdTokens) {
+      const ratio = peakTurn.tokens / limit
+      const estimatedWasteTokens = peakTurn.tokens - thresholdTokens
 
-    // Link prior turn and peak turn
-    const priorTurn = turnList.find((t) => t.turnIndex !== peakTurn.turnIndex) ?? turnList[0]!
+      // Link prior turn and peak turn
+      const priorTurn = group.turns.find((t) => t.turnIndex !== peakTurn.turnIndex) ?? group.turns[0]!
 
-    const evidenceLinks: FindingEvidenceLink[] = [
-      {
-        spanId: priorTurn.spanId,
-        turnIndex: priorTurn.turnIndex,
-        description: `Turn ${priorTurn.turnIndex} consumed ${priorTurn.tokens} tokens (${Math.round((priorTurn.tokens / limit) * 100)}% capacity) approaching context limits.`,
-      },
-      {
-        spanId: peakTurn.spanId,
-        turnIndex: peakTurn.turnIndex,
-        description: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% capacity), exceeding the 85% compaction hazard threshold.`,
-      },
-    ]
+      const evidenceLinks: FindingEvidenceLink[] = [
+        {
+          spanId: priorTurn.spanId,
+          turnIndex: priorTurn.turnIndex,
+          description: `Turn ${priorTurn.turnIndex} consumed ${priorTurn.tokens} tokens (${Math.round((priorTurn.tokens / limit) * 100)}% capacity) approaching context limits.`,
+        },
+        {
+          spanId: peakTurn.spanId,
+          turnIndex: peakTurn.turnIndex,
+          description: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% capacity), exceeding the 85% compaction hazard threshold.`,
+        },
+      ]
 
-    const recommendation = `Apply progressive disclosure and relocate historical conversation turns into structured checkpoints or rollups before reaching the 85% window limit.`
-    const outcomeRiskCaveat = deriveOutcomeRiskCaveat(
-      outcome,
-      'compaction-hazard',
-      'Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.',
-    )
+      const recommendation = `Apply progressive disclosure and relocate historical conversation turns into structured checkpoints or rollups before reaching the 85% window limit.`
+      const outcomeRiskCaveat = deriveOutcomeRiskCaveat(
+        outcome,
+        'compaction-hazard',
+        'Abrupt context compaction or summarization risks discarding early user constraints or domain definitions.',
+      )
 
-    const rankScore = computeRankScore(estimatedWasteTokens, 'deterministic', discount)
+      const rankScore = computeRankScore(estimatedWasteTokens, 'deterministic', discount)
 
-    findings.push({
-      id: `finding-compaction-hazard-${sessionId ?? 'session'}-${peakTurn.spanId}`,
-      detectorId: 'compaction-hazard',
-      title: `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
-      mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization.`,
-      evidenceLinks,
-      confidence: 'deterministic',
-      estimatedWasteTokens,
-      recommendation,
-      errorBar: {
-        lower: Math.floor(estimatedWasteTokens * 0.9),
-        upper: Math.ceil(estimatedWasteTokens * 1.3),
-      },
-      outcomeRiskCaveat,
-      runId,
-      sessionId,
-      rankScore,
-      measurementClass: 'deterministic',
-      confidenceBasis: 'Deterministically measured by comparing peak turn input tokens against the declared context window limit.',
-      whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
-    })
+      // The raw window stays in the parenthetical (it is what the ratio was
+      // computed against); the trailing sentence names the window and where it
+      // came from, so a default denominator cannot pose as a measurement.
+      const windowPhrase =
+        input.contextLimit !== undefined
+          ? 'declared by the caller'
+          : window.contextLimitSource === 'reported'
+            ? 'reported by session telemetry'
+            : `the ${DEFAULT_CONTEXT_LIMIT.toLocaleString('en-US')} default; no source reported a window`
+
+      findings.push({
+        id: `finding-compaction-hazard-${group.sessionId}-${peakTurn.spanId}`,
+        detectorId: 'compaction-hazard',
+        title: `Compaction Hazard: Context consumption reached ${Math.round(ratio * 100)}% of window without summarization plan`,
+        mechanism: `Peak context consumption reached ${peakTurn.tokens} tokens (${Math.round(ratio * 100)}% of ${limit} token window), exceeding the 85% safety boundary without active compaction or summarization. Window of record: ${limit.toLocaleString('en-US')} tokens (${windowPhrase}).`,
+        evidenceLinks,
+        confidence: 'deterministic',
+        estimatedWasteTokens,
+        recommendation,
+        errorBar: {
+          lower: Math.floor(estimatedWasteTokens * 0.9),
+          upper: Math.ceil(estimatedWasteTokens * 1.3),
+        },
+        outcomeRiskCaveat,
+        runId,
+        sessionId: group.sessionId,
+        rankScore,
+        measurementClass: 'deterministic',
+        confidenceBasis: 'Deterministically measured by comparing the session peak turn input tokens against the context window in effect for that session.',
+        whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
+        payload: {
+          contextLimit: limit,
+          contextLimitSource: window.contextLimitSource,
+        },
+      })
+    }
   }
 
   return findings
