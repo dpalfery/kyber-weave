@@ -1,19 +1,26 @@
 ---
-id: todo/menu-bar-fix
+id: archive/todo/menu-bar-fix
 title: The tray popover cannot load because four of its six IPC commands do not exist
 doc-type: todo
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-23
 status: superseded
 ---
 
 # The tray popover cannot load because four of its six IPC commands do not exist
 
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+Delivered by the [menu-bar runtime wiring plan](../plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md); owner confirmed the deployed popover, selector, and glyph 2026-09-22.
+
+---
+
 > [!NOTE]
 > **Status: Completed — owner-confirmed 2026-09-22**
 > This todo was delivered by the
-> [menu-bar runtime wiring plan](../archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md)
+> [menu-bar runtime wiring plan](../plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md)
 > and its canonical-projection correction. The deployed launchd-owned tray renders a live
 > report in the popover, all six IPC commands work from the popover surface, the recovery
 > and event paths are reachable, and the status item shows the KyberDash lightsaber as a
@@ -33,7 +40,7 @@ forever, and no data ever arrives.
 It is not a configuration or environment fault. The popover's first act is
 `invoke<ViewState>('get_view_state')`, and that command is not registered in the Rust app.
 The invoke rejects, nothing catches the rejection, `state` stays `null`, and
-[`App.tsx`](../../dash/tray/ui/src/App.tsx) renders its loading branch for the rest of the
+[`App.tsx`](../../../dash/tray/ui/src/App.tsx) renders its loading branch for the rest of the
 process's life. The failure presents as a hang and leaves no trace in the terminal.
 
 The same run also shows a blank filled square where the status item's glyph should be. That
@@ -48,11 +55,11 @@ that the tray worked; neither is.
 
 - **At intake, the UI called six commands while the app registered two.** `get_view_state`,
   `refresh_now`, `open_view` and `set_settings` had no `#[tauri::command]` in the crate. The
-  registration point in [`lib.rs`](../../dash/tray/src-tauri/src/lib.rs) contained only
+  registration point in [`lib.rs`](../../../dash/tray/src-tauri/src/lib.rs) contained only
   `generate_handler![quit, hide_popover]`.
 - **The capability would refuse them anyway.**
-  [`capabilities/tray.json`](../../dash/tray/src-tauri/capabilities/tray.json) grants
-  `allow-quit` and `allow-hide-popover`; [`permissions/tray.toml`](../../dash/tray/src-tauri/permissions/tray.toml)
+  [`capabilities/tray.json`](../../../dash/tray/src-tauri/capabilities/tray.json) grants
+  `allow-quit` and `allow-hide-popover`; [`permissions/tray.toml`](../../../dash/tray/src-tauri/permissions/tray.toml)
   defines only those two. Registering the commands without widening both leaves them denied.
 - **The logic they would wrap already exists and is unit-tested.** `ipc.rs` has `view_state`,
   `view_path_patterns`, `matches_view_path` and `open_view_url`; `supervisor.rs` has
@@ -64,14 +71,14 @@ that the tray worked; neither is.
   no Rust code sent it. Even a working `get_view_state` would have given one snapshot and
   never updated.
 - **At intake, the failure was silent by construction.** The mount `invoke` in
-  [`App.tsx`](../../dash/tray/ui/src/App.tsx) had a `.then` and no `.catch`, so a rejected
+  [`App.tsx`](../../../dash/tray/ui/src/App.tsx) had a `.then` and no `.catch`, so a rejected
   command was indistinguishable from a slow one. This is why the symptom read as a hang.
 - **At intake, the status item used the app icon as a template image.**
-  [`lib.rs`](../../dash/tray/src-tauri/src/lib.rs) passed `default_window_icon()` to
+  [`lib.rs`](../../../dash/tray/src-tauri/src/lib.rs) passed `default_window_icon()` to
   `TrayIconBuilder` with `.icon_as_template(true)`. macOS template images must be black and
   transparent; a full-colour PNG flattened to a filled silhouette, which was the blank square
-  on screen. There was no monochrome template asset in [`icons/`](../../dash/tray/src-tauri/icons).
-- **Task 8.9 is marked complete.** [`tasks.md:393`](../specs/kyberdash-context-surfaces/tasks.md:393),
+  on screen. There was no monochrome template asset in [`icons/`](../../../dash/tray/src-tauri/icons).
+- **Task 8.9 is marked complete.** [`tasks.md:393`](../../specs/kyberdash-context-surfaces/tasks.md:393),
   "IPC surface and opening views", is `[x]`. Its acceptance is written entirely as tests of
   the helper functions — `get_view_state` carrying the design's `ViewState`, `open_view`
   refusing unmatched paths — every one of which passes against `ipc.rs` without a command
@@ -131,22 +138,22 @@ and live visual proof remain governed by the plan and are not claimed closed her
 
 ## The code seam
 
-- [`dash/tray/src-tauri/src/lib.rs`](../../dash/tray/src-tauri/src/lib.rs) — the
+- [`dash/tray/src-tauri/src/lib.rs`](../../../dash/tray/src-tauri/src/lib.rs) — the
   `generate_handler!` list, the tray icon, and `setup()`, where the runtime is constructed and
   managed.
-- [`dash/tray/src-tauri/src/ipc.rs`](../../dash/tray/src-tauri/src/ipc.rs) — `view_state`,
+- [`dash/tray/src-tauri/src/ipc.rs`](../../../dash/tray/src-tauri/src/ipc.rs) — `view_state`,
   `open_view_url`, `matches_view_path`; the functions the missing commands would wrap.
-- [`dash/tray/src-tauri/src/supervisor.rs`](../../dash/tray/src-tauri/src/supervisor.rs),
-  [`scheduler.rs`](../../dash/tray/src-tauri/src/scheduler.rs) — the data path now composed by
+- [`dash/tray/src-tauri/src/supervisor.rs`](../../../dash/tray/src-tauri/src/supervisor.rs),
+  [`scheduler.rs`](../../../dash/tray/src-tauri/src/scheduler.rs) — the data path now composed by
   the runtime.
-- [`dash/tray/src-tauri/capabilities/tray.json`](../../dash/tray/src-tauri/capabilities/tray.json),
-  [`permissions/tray.toml`](../../dash/tray/src-tauri/permissions/tray.toml) — the six-command
+- [`dash/tray/src-tauri/capabilities/tray.json`](../../../dash/tray/src-tauri/capabilities/tray.json),
+  [`permissions/tray.toml`](../../../dash/tray/src-tauri/permissions/tray.toml) — the six-command
   authorization boundary.
-- [`dash/tray/ui/src/App.tsx`](../../dash/tray/ui/src/App.tsx) — initial-state/error handling,
+- [`dash/tray/ui/src/App.tsx`](../../../dash/tray/ui/src/App.tsx) — initial-state/error handling,
   event subscription, and action rejection feedback.
-- [`dash/tray/src-tauri/icons/`](../../dash/tray/src-tauri/icons) — where a template asset
+- [`dash/tray/src-tauri/icons/`](../../../dash/tray/src-tauri/icons) — where a template asset
   would live.
-- [`docs/specs/kyberdash-context-surfaces/tasks.md`](../specs/kyberdash-context-surfaces/tasks.md) —
+- [`docs/specs/kyberdash-context-surfaces/tasks.md`](../../specs/kyberdash-context-surfaces/tasks.md) —
   task 8.9, and whatever the audit above concludes about its neighbours.
 
 ## How to verify

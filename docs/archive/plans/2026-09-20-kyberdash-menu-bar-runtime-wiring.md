@@ -22,7 +22,7 @@ development-mode: test-first
 
 At intake, the tray opened a popover that remained on `Reading the store…`. The missing Rust
 command, runtime orchestration, event emission, and template icon are documented in [the
-originating todo](../../todo/menu-bar-fix.md). This plan records how the implementation is
+originating todo](../todo/menu-bar-fix.md). This plan records how the implementation is
 reconciled with the existing context-surfaces requirements and design.
 
 ## Approved decisions and provenance
@@ -951,7 +951,7 @@ command calls `buildSessions` directly rather than through `projectCanonicalStor
 (rows at 03:34, 03:38, and 03:43 across 2026-09-21/22) and are recorded as separate deferred
 work in [docs/todo/stale-refresh-run-rows.md](../../todo/stale-refresh-run-rows.md); they are
 not on the report data path and are not claimed fixed by the projection work. The originating
-todo, [docs/todo/menu-bar-fix.md](../../todo/menu-bar-fix.md), is closed as completed by this
+todo, [docs/todo/menu-bar-fix.md](../todo/menu-bar-fix.md), is closed as completed by this
 plan.
 
 **Documentation closeout.** `docs/dash/architecture.md` and `docs/dash/runbook.md` now

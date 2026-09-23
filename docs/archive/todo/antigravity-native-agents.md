@@ -215,7 +215,7 @@ the renderer is trusted.
   `antigravity` column, whose values are tier names rather than model ids.
 - Docs: [architecture §8](../../kyber-squad/architecture.md#8-rendering) rendering table,
   [requirements](../../kyber-squad/requirements.md) target matrix, this page's row in
-  [renderer coverage](../../todo/kyber-squad-renderer-coverage.md), and an ADR — reclassifying a target
+  [renderer coverage](kyber-squad-renderer-coverage.md), and an ADR — reclassifying a target
   from fallback to native is the same class of decision
   [ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md) records for ZCode.
 
@@ -236,5 +236,5 @@ as inconclusive rather than as a failure, and confirm inside a real session.
 ## Related
 
 - [Black Hawk Hotel handover](black-hawk-hotel-todo.md) — the handover this task belongs to
-- [Renderer coverage](../../todo/kyber-squad-renderer-coverage.md) — lists Antigravity as
+- [Renderer coverage](kyber-squad-renderer-coverage.md) — lists Antigravity as
   fallback-complete, which this change supersedes
