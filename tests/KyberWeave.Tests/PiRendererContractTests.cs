@@ -245,6 +245,27 @@ public sealed class PiRendererContractTests : IDisposable
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
             };
 
+            // Extract thinking level from the profile's pi value
+            string? expectedThinking = null;
+            if (expectedModel != "inherit" && source.ModelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
+            {
+                if (profile.HarnessModels.TryGetValue("pi", out string? piValue))
+                {
+                    // Parse [thinking=<level>] suffix if present
+                    const string thinkingPrefix = "[thinking=";
+                    int thinkingStart = piValue.IndexOf(thinkingPrefix, 0, StringComparison.Ordinal);
+                    if (thinkingStart >= 0)
+                    {
+                        int thinkingValueStart = thinkingStart + thinkingPrefix.Length;
+                        int thinkingEnd = piValue.IndexOf(']', thinkingValueStart);
+                        if (thinkingEnd > thinkingValueStart)
+                        {
+                            expectedThinking = piValue.Substring(thinkingValueStart, thinkingEnd - thinkingValueStart);
+                        }
+                    }
+                }
+            }
+
             if (expectedModel == "inherit")
             {
                 Assert.False(
@@ -257,6 +278,20 @@ public sealed class PiRendererContractTests : IDisposable
                 Assert.True(
                     expectedModel == emittedModel,
                     $"Agent '{agent.Name}' model '{emittedModel}' does not match expected '{expectedModel}'.");
+
+                if (expectedThinking != null)
+                {
+                    string emittedThinking = RequireScalar(frontmatter, "thinking", agent.Name);
+                    Assert.True(
+                        expectedThinking == emittedThinking,
+                        $"Agent '{agent.Name}' thinking '{emittedThinking}' does not match expected '{expectedThinking}'.");
+                }
+                else
+                {
+                    Assert.False(
+                        frontmatter.Children.ContainsKey(new YamlScalarNode("thinking")),
+                        $"Agent '{agent.Name}' on profile '{agent.ModelProfile}' should omit 'thinking' (pi value has no suffix).");
+                }
             }
 
             SquadCapabilityProfile capabilityProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
@@ -294,12 +329,17 @@ public sealed class PiRendererContractTests : IDisposable
             }
 
             // Key order is the frontmatter contract (plan section 6): name, description, [model],
-            // tools, extensions, [allowed_subagents]. 'model' appears only when the resolved Pi
-            // model is not 'inherit' (plan section 7, T16 criterion 3).
+            // [thinking], tools, extensions, [allowed_subagents]. 'model' appears only when the resolved Pi
+            // model is not 'inherit' (plan section 7, T16 criterion 3). 'thinking' appears immediately
+            // after 'model' only when the resolved profile's pi value carries a [thinking=<level>] suffix.
             List<string> expectedKeyOrder = ["name", "description"];
             if (expectedModel != "inherit")
             {
                 expectedKeyOrder.Add("model");
+                if (expectedThinking != null)
+                {
+                    expectedKeyOrder.Add("thinking");
+                }
             }
             expectedKeyOrder.Add("tools");
             expectedKeyOrder.Add("extensions");
@@ -564,6 +604,76 @@ public sealed class PiRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Agents with process.execute: allow and filesystem.write: ask or deny (e.g. investigator and
+    /// reviewer profiles) receive a capability-not-isolable degradation record naming the granted
+    /// shell tools (bash) and withheld write tools (edit, write).
+    /// Agents with filesystem.write: allow or process.execute: deny do not receive this degradation.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_RecordsCapabilityNotIsolableForShellImpliesWrite()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        string[] grantedShellTools = ["bash"];
+        string[] withheldWriteTools = ["edit", "write"];
+
+        List<string> expectedAgents = source.Agents
+            .Where(a => a.Invocation == SquadInvocation.Subagent)
+            .Where(a =>
+            {
+                SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool exec = p.Permissions.TryGetValue("process.execute", out SquadPermissionDecision e) && e == SquadPermissionDecision.Allow;
+                bool write = p.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision w) && w == SquadPermissionDecision.Allow;
+                return exec && !write;
+            })
+            .Select(a => a.Name)
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+
+        Assert.NotEmpty(expectedAgents);
+
+        foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
+        {
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+                exec == SquadPermissionDecision.Allow;
+            bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
+                write == SquadPermissionDecision.Allow;
+
+            SquadDegradationRecord? record = result.Degradations.FirstOrDefault(
+                d => d.CanonicalIdentity == agent.Name && d.Code == "capability-not-isolable");
+
+            if (executeAllowed && !writeAllowed)
+            {
+                Assert.NotNull(record);
+                Assert.Equal("pi", record.Target);
+                Assert.Equal(agent.Name, record.CanonicalIdentity);
+                Assert.Equal(agent.Name, record.OutputIdentity);
+                Assert.Equal(agent.BodyDigest, record.InstructionDigest);
+                Assert.NotNull(record.Details);
+                foreach (string shellTool in grantedShellTools)
+                {
+                    Assert.Contains(shellTool, record.Details, StringComparison.Ordinal);
+                }
+                foreach (string writeTool in withheldWriteTools)
+                {
+                    Assert.Contains(writeTool, record.Details, StringComparison.Ordinal);
+                }
+            }
+            else
+            {
+                Assert.Null(record);
+            }
+        }
+
+        Assert.DoesNotContain(result.Degradations, d =>
+            d.Code == "capability-not-isolable" &&
+            source.Agents.Any(a => a.Invocation == SquadInvocation.Primary && a.Name == d.CanonicalIdentity));
+    }
+
     [Fact]
     public async Task RenderAsync_Pi_IsDeterministic()
     {
@@ -657,6 +767,259 @@ public sealed class PiRendererContractTests : IDisposable
         Assert.Contains(primaryAgent.Name, exception.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Plan §8 A1: A <c>pi:</c> model value with a trailing <c>[thinking=&lt;level&gt;]</c>
+    /// suffix splits into the bare model id and the thinking level. The level is validated
+    /// against the closed six-value domain <c>off | minimal | low | medium | high | max</c>
+    /// and rendered as <c>thinking: &lt;level&gt;</c> when present. This theory test validates
+    /// that all six approved levels are accepted.
+    /// </summary>
+    [Theory]
+    [InlineData("off")]
+    [InlineData("minimal")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("max")]
+    public async Task RenderAsync_Pi_EmitsThinkingKeyForEachValidLevel(string level)
+    {
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: "test-model/pi-1.0",
+            thinkingLevel: level);
+
+        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/agents/{PiThinkingSuffixFixture.TestAgentName}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(agentFile.Content.Span),
+            PiThinkingSuffixFixture.TestAgentName);
+
+        string emittedModel = RequireScalar(frontmatter, "model", PiThinkingSuffixFixture.TestAgentName);
+        Assert.Equal("test-model/pi-1.0", emittedModel);
+
+        string emittedThinking = RequireScalar(frontmatter, "thinking", PiThinkingSuffixFixture.TestAgentName);
+        Assert.Equal(level, emittedThinking);
+    }
+
+    /// <summary>
+    /// Plan §8 A1: An invalid thinking level like <c>[thinking=extreme]</c> throws
+    /// <see cref="SquadRenderValidationException"/> with the offending level named.
+    /// Matching is case-sensitive (<see cref="StringComparison.Ordinal"/>), so
+    /// <c>[thinking=High]</c> (capitalized) also fails closed.
+    /// </summary>
+    [Theory]
+    [InlineData("extreme")]
+    [InlineData("High")]
+    [InlineData("MEDIUM")]
+    [InlineData("")]
+    [InlineData("high ")]
+    public async Task RenderAsync_Pi_ThrowsOnInvalidThinkingLevel(string invalidLevel)
+    {
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: "test-model/pi-1.0",
+            thinkingLevel: invalidLevel);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
+            () => RenderPiAsync(fixture.ProductRoot));
+
+        Assert.Contains($"'{invalidLevel}'", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Major 3: A malformed thinking suffix missing the closing bracket throws
+    /// <see cref="SquadRenderValidationException"/> naming the malformed value.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixMissingClosingBracket()
+    {
+        const string malformedModel = "zai/glm-5.3[thinking=high";
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: malformedModel,
+            thinkingLevel: null);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
+            () => RenderPiAsync(fixture.ProductRoot));
+
+        Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixWithTrailingCharacters()
+    {
+        const string malformedModel = "test-model/pi-1.0[thinking=high]-v2";
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: malformedModel,
+            thinkingLevel: null);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
+            () => RenderPiAsync(fixture.ProductRoot));
+
+        Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("must be the last element", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixWithEmptyBareModel()
+    {
+        const string malformedModel = "[thinking=high]";
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: malformedModel,
+            thinkingLevel: null);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
+            () => RenderPiAsync(fixture.ProductRoot));
+
+        Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("model id before the thinking suffix is empty", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Plan §8 A1: A <c>pi:</c> value with no <c>[thinking=…]</c> suffix at all still
+    /// emits <c>model:</c> and omits <c>thinking</c> entirely, preserving today's behavior
+    /// for profiles whose <c>pi:</c> value carries no suffix.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_EmitsModelWithoutThinkingWhenNoSuffixPresent()
+    {
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: "test-model/pi-no-suffix",
+            thinkingLevel: null);
+
+        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/agents/{PiThinkingSuffixFixture.TestAgentName}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(agentFile.Content.Span),
+            PiThinkingSuffixFixture.TestAgentName);
+
+        string emittedModel = RequireScalar(frontmatter, "model", PiThinkingSuffixFixture.TestAgentName);
+        Assert.Equal("test-model/pi-no-suffix", emittedModel);
+
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("thinking")),
+            $"Agent '{PiThinkingSuffixFixture.TestAgentName}' should omit 'thinking' when no suffix is present.");
+    }
+
+    /// <summary>
+    /// Plan §8 A1: An explicit <c>pi: inherit</c> harness override must still omit both
+    /// <c>model</c> and <c>thinking</c> keys, since the harness's deferral value is unchanged.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_OmitsModelAndThinkingForInheritValue()
+    {
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: "inherit",
+            thinkingLevel: null);
+
+        SquadRenderResult result = await RenderPiAsync(fixture.ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/agents/{PiThinkingSuffixFixture.TestAgentName}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(agentFile.Content.Span),
+            PiThinkingSuffixFixture.TestAgentName);
+
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            $"Agent '{PiThinkingSuffixFixture.TestAgentName}' should omit 'model' for inherit.");
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("thinking")),
+            $"Agent '{PiThinkingSuffixFixture.TestAgentName}' should omit 'thinking' for inherit.");
+    }
+
+    /// <summary>
+    /// Plan §8 A1 / D2: The canonical corpus <c>models.yml</c> profiles render correctly
+    /// with their approved thinking levels. Against the real corpus, the D2 profiles resolve to:
+    /// deep-planning → model <c>zai/glm-5.3</c>, thinking <c>high</c>;
+    /// reviewer → <c>opencode-go/kimi-k2.7-code</c>, <c>high</c>;
+    /// general → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>medium</c>;
+    /// fast → <c>opencode/muse-spark-1.3-contributor-free</c>, <c>low</c>;
+    /// orchestration → no model, no thinking.
+    /// This contract pins the approved mapping directly from the plan.
+    /// </summary>
+    [Theory]
+    [InlineData("deep-planning", "zai/glm-5.3", "high")]
+    [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
+    [InlineData("general", "opencode/muse-spark-1.3-contributor-free", "medium")]
+    [InlineData("fast", "opencode/muse-spark-1.3-contributor-free", "low")]
+    public async Task RenderAsync_Pi_CanonicalProfilesEmitApprovedThinkingLevels(
+        string profileName,
+        string expectedModel,
+        string expectedThinking)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent targetAgent = source.Agents.First(a =>
+            a.Invocation == SquadInvocation.Subagent &&
+            string.Equals(a.ModelProfile, profileName, StringComparison.Ordinal));
+
+        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/agents/{targetAgent.Name}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(agentFile.Content.Span),
+            targetAgent.Name);
+
+        string emittedModel = RequireScalar(frontmatter, "model", targetAgent.Name);
+        Assert.Equal(expectedModel, emittedModel);
+
+        string emittedThinking = RequireScalar(frontmatter, "thinking", targetAgent.Name);
+        Assert.Equal(expectedThinking, emittedThinking);
+    }
+
+    /// <summary>
+    /// Plan §8 A1 / D2: The orchestration profile has <c>pi: inherit</c> and must omit
+    /// both <c>model</c> and <c>thinking</c> keys. The conductor (primary agent on orchestration)
+    /// lowers to a skill, so verify the lowered skill file omits these keys.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Pi_OrchestrationProfileOmitsModelAndThinking()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent conductor = source.Agents.First(a =>
+            a.Invocation == SquadInvocation.Primary &&
+            string.Equals(a.ModelProfile, "orchestration", StringComparison.Ordinal));
+
+        SquadRenderResult result = await RenderPiAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile skillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".pi/skills/{conductor.Name}/SKILL.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(skillFile.Content.Span),
+            conductor.Name);
+
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            $"Conductor lowered skill should omit 'model' (pi: inherit).");
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("thinking")),
+            $"Conductor lowered skill should omit 'thinking' (pi: inherit).");
+    }
+
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
     {
         const string delimiter = "---\n";
@@ -719,15 +1082,15 @@ internal sealed class PiModelOverrideFixture : IDisposable
     {
         PiModelOverrideFixture fixture = new();
         string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        CopyDirectory(canonicalRoot, fixture.ProductRoot);
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
         string original = File.ReadAllText(modelsPath);
 
         // Set or replace pi: values in the target profiles, whether they exist or not.
         // Regex pattern matches a profile section and replaces or inserts its pi: value.
-        string mutated = ReplaceOrInsertPiValue(original, OverriddenProfile, OverrideModel);
-        mutated = ReplaceOrInsertPiValue(mutated, InheritProfile, "inherit");
+        string mutated = PiCorpusFixtureHelpers.ReplaceOrInsertPiValue(original, OverriddenProfile, OverrideModel);
+        mutated = PiCorpusFixtureHelpers.ReplaceOrInsertPiValue(mutated, InheritProfile, "inherit");
 
         if (string.Equals(original, mutated, StringComparison.Ordinal))
         {
@@ -740,59 +1103,7 @@ internal sealed class PiModelOverrideFixture : IDisposable
         return fixture;
     }
 
-    /// <summary>
-    /// Replaces or inserts a pi: value in a profile section. Handles both cases where the
-    /// pi: line already exists and where it doesn't. Uses regex to robustly find and replace
-    /// within the profile block.
-    /// </summary>
-    private static string ReplaceOrInsertPiValue(string content, string profileName, string piValue)
-    {
-        // Use regex to find the profile section and its pi: line (if it exists)
-        Regex profileRegex = new(
-            $@"^  {Regex.Escape(profileName)}:\n    default: inherit\n((?:    \w+:.*\n)*)",
-            RegexOptions.Multiline);
-
-        Match match = profileRegex.Match(content);
-        if (!match.Success)
-        {
-            throw new InvalidOperationException($"Profile '{profileName}' not found in models.yml.");
-        }
-
-        // Check if pi: already exists in the captured lines
-        string existingLines = match.Groups[1].Value;
-        Regex piLineRegex = new(@"    pi:.*\n");
-        Match piMatch = piLineRegex.Match(existingLines);
-
-        string newProfile;
-        if (piMatch.Success)
-        {
-            // Replace existing pi: line
-            newProfile = piLineRegex.Replace(existingLines, $"    pi: {piValue}\n", 1);
-        }
-        else
-        {
-            // Insert new pi: line after default: inherit
-            newProfile = existingLines + $"    pi: {piValue}\n";
-        }
-
-        // Replace the entire matched section with the modified version
-        string replacement = $"  {profileName}:\n    default: inherit\n" + newProfile;
-        return content.Replace(match.Value, replacement, StringComparison.Ordinal);
-    }
-
     public void Dispose() => _temp.Dispose();
-
-    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
-    {
-        Directory.CreateDirectory(destinationDirectory);
-        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-        {
-            string relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
-            string destinationPath = Path.Combine(destinationDirectory, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            File.Copy(sourcePath, destinationPath);
-        }
-    }
 }
 
 /// <summary>
@@ -816,7 +1127,7 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
     {
         PiPrimaryIdentityCollisionFixture fixture = new();
         string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        CopyDirectory(canonicalRoot, fixture.ProductRoot);
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string skillDirectory = Path.Combine(fixture.ProductRoot, "skills", primaryAgentName);
         Directory.CreateDirectory(skillDirectory);
@@ -836,8 +1147,61 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
     }
 
     public void Dispose() => _temp.Dispose();
+}
 
-    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+/// <summary>
+/// Copies the real <c>products/kyber-squad</c> corpus and modifies the <c>pi:</c> value in a
+/// specified model profile to include a <c>[thinking=&lt;level&gt;]</c> suffix (or no suffix
+/// if null), so contract tests can validate thinking-level parsing and validation without
+/// needing to edit the canonical corpus itself.
+/// </summary>
+internal sealed class PiThinkingSuffixFixture : IDisposable
+{
+    internal const string TestAgentName = "dal-dev";
+
+    private readonly TempDirectory _temp = new();
+
+    private PiThinkingSuffixFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
+
+    internal string ProductRoot { get; }
+
+    internal static PiThinkingSuffixFixture Create(
+        string profileName,
+        string modelId,
+        string? thinkingLevel)
+    {
+        PiThinkingSuffixFixture fixture = new();
+        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
+
+        string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
+        string original = File.ReadAllText(modelsPath);
+
+        string piValue = thinkingLevel is null
+            ? modelId
+            : $"{modelId}[thinking={thinkingLevel}]";
+
+        string mutated = PiCorpusFixtureHelpers.ReplaceOrInsertPiValue(original, profileName, piValue);
+
+        if (string.Equals(original, mutated, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{modelsPath}' to contain profile '{profileName}' to mutate.");
+        }
+
+        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return fixture;
+    }
+
+    public void Dispose() => _temp.Dispose();
+}
+
+internal static class PiCorpusFixtureHelpers
+{
+    internal static void CopyDirectory(string sourceDirectory, string destinationDirectory)
     {
         Directory.CreateDirectory(destinationDirectory);
         foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
@@ -847,5 +1211,36 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
             File.Copy(sourcePath, destinationPath);
         }
+    }
+
+    internal static string ReplaceOrInsertPiValue(string content, string profileName, string piValue)
+    {
+        Regex profileRegex = new(
+            $@"^  {Regex.Escape(profileName)}:\n    default: inherit\n((?:    \w+:.*\n)*)",
+            RegexOptions.Multiline);
+
+        Match match = profileRegex.Match(content);
+        if (!match.Success)
+        {
+            throw new InvalidOperationException($"Profile '{profileName}' not found in models.yml.");
+        }
+
+        string existingLines = match.Groups[1].Value;
+        Regex piLineRegex = new(@"    pi:.*\n");
+        Match piMatch = piLineRegex.Match(existingLines);
+
+        string formattedPiValue = piValue.StartsWith('[') ? $"\"{piValue}\"" : piValue;
+        string newProfile;
+        if (piMatch.Success)
+        {
+            newProfile = piLineRegex.Replace(existingLines, $"    pi: {formattedPiValue}\n", 1);
+        }
+        else
+        {
+            newProfile = existingLines + $"    pi: {formattedPiValue}\n";
+        }
+
+        string replacement = $"  {profileName}:\n    default: inherit\n" + newProfile;
+        return content.Replace(match.Value, replacement, StringComparison.Ordinal);
     }
 }
