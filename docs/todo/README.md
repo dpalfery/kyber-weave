@@ -57,9 +57,5 @@ last-reviewed: YYYY-MM-DD
 | [claude-renderer-ask-narrowing.md](claude-renderer-ask-narrowing.md) | KyberSquad | draft | Claude and Pi both narrow `ask` to deny, so the rendered `architect` and `product-owner` cannot save their plans and specs on those harnesses. |
 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | draft | Add a `--version` flag to squad install and squad update. |
 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | draft | squad commands' positional path argument can silently target the wrong directory. |
-| [squad-global-multi-target-receipt-collision.md](squad-global-multi-target-receipt-collision.md) | KyberSquad | draft | A global install of `cursor,antigravity` fails at receipt write because the receipt keys files by relative path alone; the dry run does not predict it. |
-| [squad-global-receipt-bound-to-cwd.md](squad-global-receipt-bound-to-cwd.md) | KyberSquad | draft | A global receipt is bound to the `[path]` argument (default: current directory), so a deployment made from a worktree is orphaned when the worktree goes. |
-| [squad-global-status-and-uninstall-roots.md](squad-global-status-and-uninstall-roots.md) | KyberSquad | draft | `status -g` reports installed files missing and `uninstall -g --dry-run` reports nothing to remove; directories are left behind. |
-| [antigravity-native-agents.md](antigravity-native-agents.md) | KyberSquad | draft | `agy` 1.2.2 has native agents (`~/.gemini/config/agents/<name>/agent.md`), but the Antigravity renderer still lowers every role to a skill. |
 | [squad-hardcoded-docs-root.md](squad-hardcoded-docs-root.md) | KyberSquad | draft | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions. |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |
