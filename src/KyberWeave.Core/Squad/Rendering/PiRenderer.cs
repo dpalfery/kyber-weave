@@ -46,9 +46,11 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>output_transcript</c>, <c>session_dir</c>, <c>allowed_subagents</c>,
 /// <c>prompt_mode</c>, <c>inherit_context</c>, <c>run_in_background</c>, <c>isolated</c>,
 /// <c>enabled</c>. Every other key is silently ignored, so this renderer emits only
-/// <c>name</c>, <c>description</c>, <c>model</c>, <c>tools</c>, <c>extensions</c>, and
-/// <c>allowed_subagents</c> — the plan's approved subset — never the rest. A name containing
-/// <c>:</c> is skipped by the loader, so the canonical name is emitted verbatim and never
+/// <c>name</c>, <c>description</c>, <c>model</c>, <c>thinking</c> (conditionally), <c>tools</c>, <c>extensions</c>, and
+/// <c>allowed_subagents</c> — the plan's approved subset — never the rest. The <c>thinking</c>
+/// key is emitted only when the resolved <c>pi:</c> value carries a <c>[thinking=&lt;level&gt;]</c>
+/// suffix; the level is validated against the closed domain and the key is omitted if no suffix is present.
+/// A name containing <c>:</c> is skipped by the loader, so the canonical name is emitted verbatim and never
 /// decorated. Skill frontmatter accepts <c>name</c> (1-64 lowercase-a-z0-9-hyphen
 /// characters, no leading/trailing/doubled hyphen), a required <c>description</c> (up to
 /// 1024 characters), and an optional <c>license</c>; unknown fields are ignored there too.
@@ -290,6 +292,12 @@ public sealed class PiRenderer : ISquadRenderer
             frontmatter["model"] = model;
         }
 
+        string? thinkingLevel = ResolvePiThinkingLevel(agent, modelProfiles);
+        if (thinkingLevel is not null)
+        {
+            frontmatter["thinking"] = thinkingLevel;
+        }
+
         // Always emit tools: omitting the key grants every built-in (widening).
         IReadOnlyList<string> tools = ResolveTools(agent, capabilityProfiles);
         frontmatter["tools"] = tools.Count == 0 ? "none" : string.Join(", ", tools);
@@ -338,10 +346,61 @@ public sealed class PiRenderer : ISquadRenderer
     }
 
     /// <summary>
+    /// Parses and validates a thinking level suffix from a model string. A model value like
+    /// <c>zai/glm-5.3[thinking=high]</c> splits into bare model id <c>zai/glm-5.3</c> and level
+    /// <c>high</c>. The level is validated against the closed six-value domain
+    /// <c>off | minimal | low | medium | high | max</c> with <see cref="StringComparison.Ordinal"/>
+    /// (case-sensitive); an invalid level throws <see cref="SquadRenderValidationException"/>.
+    /// Returns a tuple of (bareModelId, thinkingLevel) where thinkingLevel is null if no suffix.
+    /// </summary>
+    private static (string BareModel, string? ThinkingLevel) ParseThinkingSuffix(string? modelValue)
+    {
+        if (string.IsNullOrEmpty(modelValue))
+        {
+            return (modelValue ?? string.Empty, null);
+        }
+
+        const string suffixPrefix = "[thinking=";
+        int suffixStartIdx = modelValue.LastIndexOf(suffixPrefix, StringComparison.Ordinal);
+        if (suffixStartIdx < 0)
+        {
+            // No suffix present
+            return (modelValue, null);
+        }
+
+        string bareModel = modelValue[..suffixStartIdx];
+        int levelStartIdx = suffixStartIdx + suffixPrefix.Length;
+        int suffixEndIdx = modelValue.IndexOf(']', levelStartIdx);
+        if (suffixEndIdx < 0)
+        {
+            // No closing bracket — malformed suffix
+            return (modelValue, null);
+        }
+
+        string level = modelValue[levelStartIdx..suffixEndIdx];
+
+        // Validate level against closed domain
+        if (!string.Equals(level, "off", StringComparison.Ordinal) &&
+            !string.Equals(level, "minimal", StringComparison.Ordinal) &&
+            !string.Equals(level, "low", StringComparison.Ordinal) &&
+            !string.Equals(level, "medium", StringComparison.Ordinal) &&
+            !string.Equals(level, "high", StringComparison.Ordinal) &&
+            !string.Equals(level, "max", StringComparison.Ordinal))
+        {
+            throw new SquadRenderValidationException(
+                $"Invalid thinking level '{level}' in model value. Allowed values are: off, minimal, low, medium, high, max.");
+        }
+
+        return (bareModel, level);
+    }
+
+    /// <summary>
     /// Resolves the harness-specific model exactly as <c>ClaudeRenderer.ResolveClaudeModel</c>
     /// does (R12): the <c>pi</c> harness override when the model profile declares one,
     /// otherwise the target-neutral <c>default</c>; either an explicit or a defaulted
     /// <c>inherit</c> omits the key, since that is the harness's own deferral value.
+    /// Returns the bare model id (without thinking suffix). Use <see cref="ParseThinkingSuffix"/>
+    /// to extract the thinking level separately.
     /// </summary>
     private static string? ResolvePiModel(
         SquadAgent agent,
@@ -352,12 +411,56 @@ public sealed class PiRenderer : ISquadRenderer
             return null;
         }
 
+        string? resolvedModel = null;
         if (profile.HarnessModels.TryGetValue("pi", out string? piModel))
         {
-            return string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
+            resolvedModel = string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
+        }
+        else
+        {
+            resolvedModel = string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ? null : profile.Default;
         }
 
-        return string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ? null : profile.Default;
+        if (resolvedModel is null)
+        {
+            return null;
+        }
+
+        // Parse and validate the thinking suffix, but return only the bare model
+        var (bareModel, _) = ParseThinkingSuffix(resolvedModel);
+        return bareModel;
+    }
+
+    /// <summary>
+    /// Extracts the thinking level from a resolved pi model value.
+    /// Returns the level string if present and valid, null if no suffix or if model resolves to inherit.
+    /// </summary>
+    private static string? ResolvePiThinkingLevel(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadModelProfile> modelProfiles)
+    {
+        if (!modelProfiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
+        {
+            return null;
+        }
+
+        string? resolvedModel = null;
+        if (profile.HarnessModels.TryGetValue("pi", out string? piModel))
+        {
+            resolvedModel = string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
+        }
+        else
+        {
+            resolvedModel = string.Equals(profile.Default, "inherit", StringComparison.Ordinal) ? null : profile.Default;
+        }
+
+        if (resolvedModel is null)
+        {
+            return null;
+        }
+
+        var (_, thinkingLevel) = ParseThinkingSuffix(resolvedModel);
+        return thinkingLevel;
     }
 
     /// <summary>
