@@ -1,18 +1,25 @@
 ---
-id: todo/kyber-squad-renderer-coverage
+id: archive/todo/kyber-squad-renderer-coverage
 title: Kyber-Squad Renderer Coverage
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-23
-status: draft
+status: superseded
 ---
 
 # Kyber-Squad renderer coverage — what's left
 
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+All eleven declared harness targets have a registered renderer. The two CLI gaps it listed are tracked in their own todos, [squad-install-version-flag](../../todo/squad-install-version-flag.md) and [squad-path-argument-safety](../../todo/squad-path-argument-safety.md). Current renderer behaviour lives in [architecture §8](../../kyber-squad/architecture.md#8-rendering).
+
+---
+
 `squad install`/`squad update` render canonical Squad source into a harness's native files
-through `ISquadRenderer` (see [architecture.md §8](../kyber-squad/architecture.md#8-rendering)).
-`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native, with the conductor lowered to a skill), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native, with the conductor lowered to a slash command) have
+through `ISquadRenderer` (see [architecture.md §8](../../kyber-squad/architecture.md#8-rendering)).
+`copilot` (native), `cursor` (native), `claude` (native), `codex` (native), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native, with the conductor lowered to a skill), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native, with the conductor lowered to a slash command) have
 renderers today. All eleven declared harness targets are covered.
 
 ## Coverage Status
@@ -23,13 +30,13 @@ renderers today. All eleven declared harness targets are covered.
 | `cursor` | Native | Completed | `CursorRenderer` (`src/KyberWeave.Core/Squad/Rendering/CursorRenderer.cs`) |
 | `claude` | Native | Completed | `ClaudeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ClaudeRenderer.cs`) |
 | `codex` | Native | Completed | `CodexRenderer` (`src/KyberWeave.Core/Squad/Rendering/CodexRenderer.cs`) |
-| `antigravity` | Native (directory per agent) | Completed | `AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) · [ADR 0022](../adr/0022-antigravity-native-agents.md) |
+| `antigravity` | Native (directory per agent) | Completed | `AntigravityRenderer` (`src/KyberWeave.Core/Squad/Rendering/AntigravityRenderer.cs`) · [ADR 0022](../../adr/0022-antigravity-native-agents.md) |
 | `opencode` | Native | Completed | `OpenCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/OpenCodeRenderer.cs`) |
 | `kilo` | Native | Completed | `KiloRenderer` (`src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs`) · [kilo.md](kilo.md) |
-| `pi` | Native (conductor lowered to skill) | Completed | `PiRenderer` (`src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`) · [archived todo](../archive/todo/pi.md) |
+| `pi` | Native (conductor lowered to skill) | Completed | `PiRenderer` (`src/KyberWeave.Core/Squad/Rendering/PiRenderer.cs`) · [archived todo](pi.md) |
 | `factory` | Native | Completed | `FactoryRenderer` (`src/KyberWeave.Core/Squad/Rendering/FactoryRenderer.cs`) · [factory.md](factory.md) |
-| `warp` | Fallback (role-skill lowering) | Completed | `WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) · [archived todo](../archive/todo/warp.md) |
-| `zcode` | Native (conductor lowered to slash command) | Completed | `ZCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`) · [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) · [plugin packaging](zcode-plugin-packaging.md) |
+| `warp` | Fallback (role-skill lowering) | Completed | `WarpRenderer` (`src/KyberWeave.Core/Squad/Rendering/WarpRenderer.cs`) · [archived todo](warp.md) |
+| `zcode` | Native (conductor lowered to slash command) | Completed | `ZCodeRenderer` (`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`) · [ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md) · [plugin packaging](../../todo/zcode-plugin-packaging.md) |
 
 ### Target Checklist
 
@@ -49,7 +56,7 @@ All eleven declared targets are covered. `zcode` is covered by `ZCodeRenderer`
 (`src/KyberWeave.Core/Squad/Rendering/ZCodeRenderer.cs`), which deploys every ZCode primitive
 Squad has canonical source for. ZCode's separate *plugin* distribution channel is a
 deployment-model decision rather than renderer coverage — see
-[zcode-plugin-packaging.md](zcode-plugin-packaging.md).
+[zcode-plugin-packaging.md](../../todo/zcode-plugin-packaging.md).
 
 `kyber-weave squad doctor` reports current renderer coverage against this same roster.
 
@@ -59,5 +66,5 @@ Found while verifying the Copilot renderer end-to-end, not renderer-coverage gap
 
 | Gap | Page |
 |---|---|
-| `squad install`/`squad update` have no `--version` flag — they can only install whatever release matches the running CLI's own build | [squad-install-version-flag.md](squad-install-version-flag.md) |
-| `squad` commands' `path` is a positional argument, not `--path` — a plausible flag guess silently defaults to the current directory instead of erroring | [squad-path-argument-safety.md](squad-path-argument-safety.md) |
+| `squad install`/`squad update` have no `--version` flag — they can only install whatever release matches the running CLI's own build | [squad-install-version-flag.md](../../todo/squad-install-version-flag.md) |
+| `squad` commands' `path` is a positional argument, not `--path` — a plausible flag guess silently defaults to the current directory instead of erroring | [squad-path-argument-safety.md](../../todo/squad-path-argument-safety.md) |

@@ -118,8 +118,8 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 Unified multi-harness deployment and lifecycle control plane for 21 canonical agents and
 24 skills, each owner projecting a validated resource closure beside its rendered principal.
-The product declares ten harness targets; all ten are implemented and registered today
-(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, and `warp`).
+The product declares eleven harness targets; all eleven are implemented and registered today
+(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, and `zcode`).
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.
 
 | Page | Covers |
@@ -128,7 +128,6 @@ Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition
 | [Adoption & usage guide](kyber-squad/onboarding.md) | `squad install`, `update`, `uninstall`, `status`, `doctor`, `pack`, scopes, target resolution |
 | [Architecture](kyber-squad/architecture.md) | AgentIR, permission lattice, role-skill lowering, state store, mutex lease, transaction engine |
 | [Requirements & degradation](kyber-squad/requirements.md) | KS-001–KS-008 specifications, structured degradation taxonomy, capability matrix |
-| [Renderer coverage — what's left](todo/kyber-squad-renderer-coverage.md) | Which of the 10 harnesses install today, and the per-target context for implementing the rest |
 
 ## Feature 4 — Review council
 

@@ -1,14 +1,21 @@
 ---
-id: todo/embeddings-endpoint-loopback-check
+id: archive/todo/embeddings-endpoint-loopback-check
 title: A non-loopback HTTPS embeddings endpoint is accepted where the test says it must be rejected
 doc-type: todo
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-16
-status: draft
+last-reviewed: 2026-09-23
+status: superseded
 ---
 
 # A non-loopback HTTPS embeddings endpoint is accepted where the test says it must be rejected
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+`DocsAnalysisConfigLoader` now rejects any embeddings endpoint that does not resolve only to loopback addresses, and every row of `DocsAnalysisConfigTests.LoadFromYamlWhenEmbeddingEndpointIsNotAbsoluteLoopbackHttpRejectsIt` passes, including the public HTTPS one.
+
+---
 
 This is **context for planning the work, not a plan**.
 
@@ -25,7 +32,7 @@ The configuration loads without the expected `YamlException`. The other two rows
 path, and an `ftp://` scheme — are rejected as intended.
 
 Found while working on
-[the standards plan](../archive/plans/2026-08-16-coding-standards-and-config-reg.md); it is unrelated
+[the standards plan](../plans/2026-08-16-coding-standards-and-config-reg.md); it is unrelated
 to that work and predates it, confirmed by re-running the test against a clean tree.
 
 ## What is known
@@ -36,7 +43,7 @@ to that work and predates it, confirmed by re-running the test against a clean t
   *absolute loopback HTTP*, so a public HTTPS endpoint should fail; the loader evidently
   admits HTTPS regardless of host.
 - The stake is the reason the restriction exists: embeddings are described in
-  [analysis](../docgraph/analysis.md) as local and optional. An endpoint that can be any
+  [analysis](../../docgraph/analysis.md) as local and optional. An endpoint that can be any
   public host means documentation content leaves the machine on the strength of one
   configuration line.
 - The parallel restriction on the release origin — loopback authorities only, HTTP permitted

@@ -388,9 +388,8 @@ and the usual cause needs a person.
 
 ## Current limitations
 
-Nine renderers are implemented and registered (`CopilotRenderer`, `CursorRenderer`, `ClaudeRenderer`, `CodexRenderer`, `AntigravityRenderer`, `OpenCodeRenderer`, `KiloRenderer`, `PiRenderer`, and `FactoryRenderer`). On these targets these permissions lower to their native representations and are enforced; on the remaining unimplemented target (`warp`) the council and the narrowing are instruction-only until
-that renderer lands — see
-[renderer coverage](../todo/kyber-squad-renderer-coverage.md).
+All eleven declared targets have a registered renderer. On the ten native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only — see
+[rendering](../kyber-squad/architecture.md#8-rendering).
 
 There is no cost measurement and no per-repository ceiling yet. The adversarial confirmation
 pass in particular is unmeasured and may exceed the council itself on a findings-heavy diff.

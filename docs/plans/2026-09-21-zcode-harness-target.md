@@ -351,4 +351,4 @@ The declared gate suite (`kyber-weave review gates .`) plus:
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — §8 rendering
 - [ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md) — the primary-agent
   lowering precedent this plan follows and departs from
-- [Renderer coverage](../todo/kyber-squad-renderer-coverage.md)
+- [Renderer coverage](../archive/todo/kyber-squad-renderer-coverage.md)
