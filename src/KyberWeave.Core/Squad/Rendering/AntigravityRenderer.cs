@@ -205,7 +205,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         string modelTier = "inherit";
         if (modelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? modelProfile))
         {
-            if (modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel) && antigravityModel is not null)
+            if (modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel))
             {
                 modelTier = antigravityModel;
             }
