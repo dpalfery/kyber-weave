@@ -142,14 +142,15 @@ public sealed class AntigravityRenderer : ISquadRenderer
             }
         }
 
-        // Project agent resources beneath their skill identities (the Native Both pattern:
-        // agent.md files exist at .agents/agents/<name>, but their resources project
-        // under the skills directory for deployment simplicity).
+        // Project agent resources beside their native agent.md so relative links in the
+        // unchanged instruction body resolve, and so a same-named canonical skill's
+        // resources cannot collide with them.
+        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, request.Scope);
         foreach (SquadAgent agent in source.Agents)
         {
             SquadResourceProjection.Append(
                 files,
-                $"{skillsDir}/{agent.Name}/SKILL.md",
+                $"{agentsDir}/{agent.Name}/agent.md",
                 agent.Resources,
                 "antigravity");
         }
@@ -299,15 +300,15 @@ public sealed class AntigravityRenderer : ISquadRenderer
             tools.Add("view_file");
         }
 
-        // filesystem.search - D12: grep_search is withheld pending live verification
+        // filesystem.search: D12 withholds grep_search pending live verification
         if (profile.Permissions.TryGetValue("filesystem.search", out SquadPermissionDecision searchDecision) &&
             searchDecision != SquadPermissionDecision.Deny)
         {
             tools.Add("list_dir");
-            // tools.Add("grep_search");  // D12: withheld
         }
 
         // filesystem.write - D4/D10: narrowed by XOR with process.execute
+        // Note: replace_file_content and multi_replace_file_content are withheld per D12 pending live verification.
         bool processExecuteAllow = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
                                    execDecision == SquadPermissionDecision.Allow;
         bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
@@ -315,18 +316,14 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         if (filesystemWriteAllow && !processExecuteAllow)
         {
-            // filesystem.write allowed, process.execute not: emit write tools (replace tools withheld per D12)
+            // filesystem.write allowed, process.execute not: emit write tools
             tools.Add("write_to_file");
-            // tools.Add("replace_file_content");  // D12: withheld
-            // tools.Add("multi_replace_file_content");  // D12: withheld
         }
         else if (filesystemWriteAllow && processExecuteAllow)
         {
-            // Both allowed: emit execute and write tools (replace tools withheld per D12)
+            // Both allowed: emit execute and write tools
             tools.Add("run_command");
             tools.Add("write_to_file");
-            // tools.Add("replace_file_content");  // D12: withheld
-            // tools.Add("multi_replace_file_content");  // D12: withheld
         }
         else if (!filesystemWriteAllow && processExecuteAllow)
         {
@@ -336,13 +333,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         // process.execute: already handled above in filesystem.write narrowing
 
-        // network.read - D12: withheld pending live verification
-        if (profile.Permissions.TryGetValue("network.read", out SquadPermissionDecision netReadDecision) &&
-            netReadDecision != SquadPermissionDecision.Deny)
-        {
-            // tools.Add("search_web");  // D12: withheld
-            // tools.Add("read_url_content");  // D12: withheld
-        }
+        // network.read: D12 withholds search_web and read_url_content pending live verification
 
         // Delegation: D12 - emit invoke_subagent + manage_subagents for orchestrator
         if (agent.DelegatesTo.Count > 0)
@@ -430,8 +421,8 @@ public sealed class AntigravityRenderer : ISquadRenderer
         SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision)
             ? execDecision
             : SquadPermissionDecision.Deny;
-        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision_value)
-            ? writeDecision_value
+        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision declaredWrite)
+            ? declaredWrite
             : SquadPermissionDecision.Deny;
 
         SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(

@@ -107,16 +107,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         int unoccupiedAgents = source.Agents.Count(a => !shared.Contains(a.Name) && !collisions.Contains(a.Name));
 
-        // Native dual-root rendering: every agent (except shared identities) emits an agent.md file,
+        // Native dual-root rendering: every agent emits an agent.md file,
         // all canonical skills are emitted, and each projects its validated resource closure beneath
-        // its identity directory. R17: Agents.Count + Σ agent resources + Skills.Count − shared-identity
-        // skills + Σ non-suppressed skill resources. (The conductor contributes one principal whether
-        // it renders as an agent.md or, when shared, is omitted in favor of the canonical skill.)
-        int suppressedSkillCount = source.Skills.Count(skill => shared.Contains(skill.Name));
+        // its identity directory. R17: Agents.Count + Σ agent resources + Skills.Count
+        // + Σ skill resources.
         int expectedFiles = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
-            + source.Skills.Count - suppressedSkillCount
-            + source.Skills.Where(skill => !shared.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
+            + source.Skills.Count
+            + source.Skills.Sum(skill => skill.Resources.Count);
 
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
         SquadRenderRequest request = new(
@@ -141,14 +138,13 @@ public sealed class AntigravityRendererContractTests : IDisposable
             duplicatePaths.Length == 0,
             $"Duplicate rendered paths: {string.Join(", ", duplicatePaths)}");
 
-        // Native dual-root rendering with unified resource projection: agent principals are
+        // Native dual-root rendering with distinct resource projection: agent principals are
         // .agents/agents/{name}/agent.md, skill principals are .agents/skills/{name}/SKILL.md;
-        // closure resources for BOTH agents and skills project under the skills directory for
-        // deployment simplicity: .agents/skills/{identity}/{resourcePath}.
+        // closure resources project beside their respective principal.
         HashSet<string> agentResourceOutputPaths = source.Agents
             .SelectMany(
                 agent => agent.Resources,
-                (agent, resource) => $".agents/skills/{agent.Name}/{resource.RelativePath}")
+                (agent, resource) => $".agents/agents/{agent.Name}/{resource.RelativePath}")
             .ToHashSet(StringComparer.Ordinal);
 
         HashSet<string> skillResourceOutputPaths = source.Skills
@@ -387,7 +383,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.Equal(first.Degradations[i], second.Degradations[i]);
         }
 
-        // Verify that agent resources are projected under .agents/skills/ (unified projection)
+        // Verify that agent resources are projected under .agents/agents/ beside agent.md
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         foreach (SquadAgent agent in source.Agents)
         {
@@ -395,7 +391,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             {
                 Assert.Contains(
                     first.Files,
-                    f => f.RelativePath == $".agents/skills/{agent.Name}/{resource.RelativePath}");
+                    f => f.RelativePath == $".agents/agents/{agent.Name}/{resource.RelativePath}");
             }
         }
 
@@ -1197,19 +1193,22 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     [Fact]
-    public void SquadRendererRegistry_IncludesAntigravityInNativeTargetSet()
+    public async Task SquadRendererRegistry_IncludesAntigravityInNativeTargetSet()
     {
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
 
-        // Verify Antigravity is in the native-target set (not fallback)
-        Assert.True(
-            registry.SupportedTargets.Contains(SquadTarget.Antigravity),
-            "SquadRendererRegistry must support Antigravity");
+        Assert.Contains(SquadTarget.Antigravity, registry.SupportedTargets);
 
-        // The native-target validation applies to Antigravity:
-        // - No role- prefixed files (dual emission namespace separation)
-        // - Single projection per identity (no role-prefix collisions)
-        // This is verified by RenderAsync_Antigravity_Native_OmitsRolePrefixForCollisions
+        // Native target validation applies to Antigravity: rendering must succeed without
+        // triggering native validation errors (no role- prefixes, single projection per identity)
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Antigravity],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1233,13 +1232,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
             SquadDeploymentFile agentFile = result.Files.First(
                 f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
 
-            // The relative path structure .agents/agents/<name>/agent.md allows
-            // IdentityFromRelativePath to extract <name> as the identity
-            string expectedPath = $".agents/agents/{agent.Name}/agent.md";
-            Assert.Equal(expectedPath, agentFile.RelativePath);
-            Assert.True(
-                agentFile.RelativePath.Contains($"/{agent.Name}/agent.md", StringComparison.Ordinal),
-                $"Agent file path must be resolvable to identity '{agent.Name}'");
+            string identity = SquadDeploymentPlan.IdentityFromRelativePath(agentFile.RelativePath);
+            Assert.Equal(agent.Name, identity);
         }
     }
 }

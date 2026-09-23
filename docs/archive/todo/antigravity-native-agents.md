@@ -221,8 +221,9 @@ the renderer is trusted.
 
 ## Deployment consequence
 
-Antigravity is currently deployed as skills and working, so there is no outage forcing this.
-When the change lands, the existing global receipt needs an uninstall and reinstall, because
+Antigravity was originally deployed as skills and working, so there was no outage forcing this.
+*(Superseded estimate: [ADR 0022](../../adr/0022-antigravity-native-agents.md) §Deployment and Migration resolved this — deployment automatically removes unchanged fallback files and preserves modified files without requiring a manual uninstall/reinstall).*
+Earlier estimate: When the change lands, the existing global receipt needs an uninstall and reinstall, because
 the target's file shape changes from `skills/<name>/SKILL.md` to `agents/<name>/agent.md`.
 
 ## How to verify the result

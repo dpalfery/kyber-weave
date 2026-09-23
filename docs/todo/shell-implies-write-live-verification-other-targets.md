@@ -26,7 +26,7 @@ Five other renderers share the same structural shape: `ClaudeRenderer`, `PiRende
 - **Factory (`FactoryRenderer.CapabilityTools`):** `Execute` is distinct from `Create`, `Edit`, `ApplyPatch` (lines 59-66 of `FactoryRenderer.cs`).
 - **OpenCode (`OpenCodeRenderer.CapabilityPermissions`):** `bash` is distinct from `edit` (lines 68-75 of `OpenCodeRenderer.cs`).
 
-Each renderer's mapping is read from source and confirms the shell/write-tool separation. When a role grants `process.execute: allow` and withholds `filesystem.write` (both at the capability level), every one of these renderers narrows the rendered `tools` list to exclude the write-tool names. The structure is identical across all six (Antigravity through OpenCode); the shell-implies-write property — that a granted shell can write files via redirection — was proven live for Antigravity and is identical across these five.
+Each renderer's mapping is read from source and confirms the shell/write-tool separation. When a role grants `process.execute: allow` and withholds `filesystem.write` (both at the capability level), every one of these renderers narrows the rendered `tools` list to exclude the write-tool names. The structure is identical across all six (Antigravity through OpenCode); the shell-implies-write property — that a granted shell can write files via redirection — was proven live for Antigravity and is inferred to hold across these five targets until independently verified.
 
 ## What is not yet live-exercised
 
@@ -57,9 +57,10 @@ The method used in C0 (evidence doc §5, methodology section):
 1. **Load proof:** Inject a unique token (`AGT-<hex>`) as a required first line of every reply, plus copy the test agent from the backup corpus with a distinguishing marker in its frontmatter.
 2. **Nonce and exec proof:** Create a fresh random nonce file, hash it with the harness's own command tool (`run_command` / `Bash` / `bash`), redirect to a proof file.
 3. **Write proof:** Ask the model to write a file with specific content via shell redirection (`printf "..." > file`), not via the withheld write-tool names.
-4. **Verification:** Check the file on disk and cross-check against the harness's own tool-call record (agy's conversation database; equivalent systems on other harnesses).
+4. **Withheld-tool check:** In a separate turn, ask the model explicitly to use the withheld write tool (e.g. `write_to_file`, `Edit`), and inspect the harness record to verify that the tool call fails or is unavailable.
+5. **Verification:** Check the file on disk and cross-check against the harness's own tool-call record (agy's conversation database; equivalent systems on other harnesses).
 
-This sequence confirms that the withheld tool name (`write_to_file`) stays unreachable while the underlying capability (file write via shell) is fully exercised.
+Together, these steps confirm that the withheld write tool name stays unreachable/uninvoked while the underlying file-write capability is achievable via shell redirection.
 
 ## Related
 

@@ -104,7 +104,7 @@ However, live verification also surfaced critical security and governance findin
    - **Factory:** grants `Execute`; withholds `Create`, `Edit`, `ApplyPatch`.
    - **OpenCode:** grants `bash`; withholds `edit`.
 
-6. **Four harness targets are deliberately excluded from `capability-not-isolable`.**
+6. **Five harness targets are deliberately excluded from `capability-not-isolable`.**
    - **Copilot:** Excluded because its frontmatter `tools:` membership derives from a hand-authored,
      per-agent catalog (`agent.CopilotTools`), not from the canonical capability lattice mapping.
    - **Codex & Kilo:** Excluded because neither harness supports a frontmatter tool allowlist; both

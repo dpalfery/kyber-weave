@@ -53,10 +53,10 @@ Two things that looked like gaps when the ZCode target landed turned out not to 
   so there is nothing to render. Project-scope hooks are also gated behind a workspace trust
   prompt (`bootstrap/src/workspace-hook-trust-cli.ts`), which would make deploying them a
   security decision rather than a rendering one.
-- **MCP servers.** Not deferred — decided. `ZCodeRenderer` emits no MCP and records
-  `permission-not-expressible` naming the canonical servers, because `registerMcpTools` admits
-  a tool only on an exact name match (so a `mcp__<server>__*` selector registers nothing), a
-  concrete `mcp__<server>__<tool>` name becomes a hard requirement that fails the agent closed
-  wherever that server is absent, and the `mcpServers` key throws
-  `Required MCP server is not connected` the same way. An MCP-free tool list also leaves
-  `shouldBorrowParentMcp` false, so nothing is inherited either.
+- **MCP servers.** Not deferred — decided per [ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md)
+  (Decision 5 & 7). `ZCodeRenderer` emits fully qualified `mcp__<server>__<tool>` names from
+  canonical `required-mcp-tools` on each entitled agent rather than omitting MCP, and
+  `squad doctor` checks that required servers are declared in ZCode's configuration. Only the
+  pure orchestrator has MCP withheld (recording `permission-not-expressible`). `mcpServers`
+  is deliberately omitted from agent frontmatter because the explicit tool allowlist already
+  governs model visibility and naming a server there introduces a redundant failure mode.

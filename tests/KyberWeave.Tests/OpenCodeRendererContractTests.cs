@@ -48,6 +48,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         "lsp",
         "grep",
         "glob",
+        "list",
         "edit",
         "bash",
         "webfetch",
@@ -68,7 +69,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     private static readonly (string Capability, string[] Permissions)[] CapabilityPermissionContract =
     [
         ("filesystem.read", ["read"]),
-        ("filesystem.search", ["grep", "glob"]),
+        ("filesystem.search", ["grep", "glob", "list"]),
         ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
         ("network.read", ["webfetch", "websearch"])
@@ -86,6 +87,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         "lsp",
         "grep",
         "glob",
+        "list",
         "edit",
         "bash",
         "webfetch",
@@ -386,6 +388,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["list"] = "allow",
                 ["edit"] = "deny",
                 ["bash"] = "deny",
                 ["webfetch"] = "allow",
@@ -414,6 +417,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["list"] = "allow",
                 ["edit"] = "allow",
                 ["bash"] = "deny",
                 ["webfetch"] = "deny",
@@ -438,6 +442,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["lsp"] = "allow",
                 ["grep"] = "allow",
                 ["glob"] = "allow",
+                ["list"] = "allow",
                 ["edit"] = "deny",
                 ["bash"] = "allow",
                 ["webfetch"] = "allow",

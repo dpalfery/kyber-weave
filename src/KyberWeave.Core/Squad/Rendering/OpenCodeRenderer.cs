@@ -39,7 +39,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// denied. <c>lsp</c> is governed by <c>filesystem.read</c>: language-server introspection is
 /// reading code. Semantic capabilities lower
 /// onto OpenCode's permission taxonomy: <c>filesystem.read</c> -&gt; <c>read</c>, <c>filesystem.search</c> -&gt;
-/// <c>grep</c>, <c>glob</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>process.execute</c> -&gt; <c>bash</c>,
+/// <c>grep</c>, <c>glob</c>, <c>list</c>, <c>filesystem.write</c> -&gt; <c>edit</c>, <c>process.execute</c> -&gt; <c>bash</c>,
 /// <c>network.read</c> -&gt; <c>webfetch</c>, <c>websearch</c>, and <c>delegate</c> -&gt; pattern-based <c>task</c> rules.
 /// Server-scoped MCP mapping for the declared <c>kyber-weave</c> server grants <c>kyber-weave_*</c> to agents
 /// with <c>filesystem.read: allow</c>, excluding pure orchestrators and shared identities.
@@ -68,7 +68,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
     private static readonly (string Capability, string[] Permissions)[] CapabilityPermissions =
     [
         ("filesystem.read", ["read", "lsp"]),
-        ("filesystem.search", ["grep", "glob"]),
+        ("filesystem.search", ["grep", "glob", "list"]),
         ("filesystem.write", ["edit"]),
         ("process.execute", ["bash"]),
         ("network.read", ["webfetch", "websearch"]),
@@ -94,6 +94,7 @@ public sealed class OpenCodeRenderer : ISquadRenderer
         "lsp",
         "grep",
         "glob",
+        "list",
         "edit",
         "bash",
         "webfetch",

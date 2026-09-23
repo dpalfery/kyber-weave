@@ -122,14 +122,6 @@ on ZCode the explicit empty list widens just as far.
    orchestrator is carved out exactly as it is on Claude and records
    `permission-not-expressible` naming the withheld servers.
 
-7. **`squad doctor` fails a ZCode install that does not declare those servers.** Reading the
-   same roster, doctor inspects ZCode's config tiers — the user file at
-   `<storage>/cli/config.json`, then `<dir>/zcode.json` and `<dir>/.zcode/config.json` for
-   each directory from the working directory up to the git worktree root — and errors naming
-   any required server no tier declares under `mcp.servers`. It fails only where ZCode is in
-   play, keyed on the same `.zcode/` marker target resolution uses, so a repository that never
-   deploys to ZCode is reported as skipped rather than failed.
-
 6. **Skill descriptions use a folded block scalar; agent and command descriptions cannot.**
    The skill adapter supports block scalars and the desktop skill service parses skill
    frontmatter with a real YAML parser, so a skill description needs no quoting and carries an
@@ -137,6 +129,14 @@ on ZCode the explicit empty list widens just as far.
    records that the agent side reads only the top-level `description: >` and skips the
    indented continuation. Two emission styles in one renderer is the price of removing the
    escape artifact from the only place it actually occurs.
+
+7. **`squad doctor` fails a ZCode install that does not declare those servers.** Reading the
+   same roster, doctor inspects ZCode's config tiers — the user file at
+   `<storage>/cli/config.json`, then `<dir>/zcode.json` and `<dir>/.zcode/config.json` for
+   each directory from the working directory up to the git worktree root — and errors naming
+   any required server no tier declares under `mcp.servers`. It fails only where ZCode is in
+   play, keyed on the same `.zcode/` marker target resolution uses, so a repository that never
+   deploys to ZCode is reported as skipped rather than failed.
 
 ## Consequences
 

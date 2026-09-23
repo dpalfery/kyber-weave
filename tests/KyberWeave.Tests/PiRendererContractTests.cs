@@ -621,6 +621,7 @@ public sealed class PiRendererContractTests : IDisposable
         string[] withheldWriteTools = ["edit", "write"];
 
         List<string> expectedAgents = source.Agents
+            .Where(a => a.Invocation == SquadInvocation.Subagent)
             .Where(a =>
             {
                 SquadCapabilityProfile p = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
@@ -634,7 +635,7 @@ public sealed class PiRendererContractTests : IDisposable
 
         Assert.NotEmpty(expectedAgents);
 
-        foreach (SquadAgent agent in source.Agents)
+        foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
         {
             SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
@@ -667,6 +668,10 @@ public sealed class PiRendererContractTests : IDisposable
                 Assert.Null(record);
             }
         }
+
+        Assert.DoesNotContain(result.Degradations, d =>
+            d.Code == "capability-not-isolable" &&
+            source.Agents.Any(a => a.Invocation == SquadInvocation.Primary && a.Name == d.CanonicalIdentity));
     }
 
     [Fact]
@@ -823,7 +828,7 @@ public sealed class PiRendererContractTests : IDisposable
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
             () => RenderPiAsync(fixture.ProductRoot));
 
-        Assert.Contains(invalidLevel, exception.Message, StringComparison.Ordinal);
+        Assert.Contains($"'{invalidLevel}'", exception.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -843,6 +848,38 @@ public sealed class PiRendererContractTests : IDisposable
             () => RenderPiAsync(fixture.ProductRoot));
 
         Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixWithTrailingCharacters()
+    {
+        const string malformedModel = "test-model/pi-1.0[thinking=high]-v2";
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: malformedModel,
+            thinkingLevel: null);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
+            () => RenderPiAsync(fixture.ProductRoot));
+
+        Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("must be the last element", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Pi_ThrowsOnMalformedThinkingSuffixWithEmptyBareModel()
+    {
+        const string malformedModel = "[thinking=high]";
+        using PiThinkingSuffixFixture fixture = PiThinkingSuffixFixture.Create(
+            profileName: "general",
+            modelId: malformedModel,
+            thinkingLevel: null);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
+            () => RenderPiAsync(fixture.ProductRoot));
+
+        Assert.Contains(malformedModel, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("model id before the thinking suffix is empty", exception.Message, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1045,15 +1082,15 @@ internal sealed class PiModelOverrideFixture : IDisposable
     {
         PiModelOverrideFixture fixture = new();
         string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        CopyDirectory(canonicalRoot, fixture.ProductRoot);
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
         string original = File.ReadAllText(modelsPath);
 
         // Set or replace pi: values in the target profiles, whether they exist or not.
         // Regex pattern matches a profile section and replaces or inserts its pi: value.
-        string mutated = ReplaceOrInsertPiValue(original, OverriddenProfile, OverrideModel);
-        mutated = ReplaceOrInsertPiValue(mutated, InheritProfile, "inherit");
+        string mutated = PiCorpusFixtureHelpers.ReplaceOrInsertPiValue(original, OverriddenProfile, OverrideModel);
+        mutated = PiCorpusFixtureHelpers.ReplaceOrInsertPiValue(mutated, InheritProfile, "inherit");
 
         if (string.Equals(original, mutated, StringComparison.Ordinal))
         {
@@ -1066,59 +1103,7 @@ internal sealed class PiModelOverrideFixture : IDisposable
         return fixture;
     }
 
-    /// <summary>
-    /// Replaces or inserts a pi: value in a profile section. Handles both cases where the
-    /// pi: line already exists and where it doesn't. Uses regex to robustly find and replace
-    /// within the profile block.
-    /// </summary>
-    private static string ReplaceOrInsertPiValue(string content, string profileName, string piValue)
-    {
-        // Use regex to find the profile section and its pi: line (if it exists)
-        Regex profileRegex = new(
-            $@"^  {Regex.Escape(profileName)}:\n    default: inherit\n((?:    \w+:.*\n)*)",
-            RegexOptions.Multiline);
-
-        Match match = profileRegex.Match(content);
-        if (!match.Success)
-        {
-            throw new InvalidOperationException($"Profile '{profileName}' not found in models.yml.");
-        }
-
-        // Check if pi: already exists in the captured lines
-        string existingLines = match.Groups[1].Value;
-        Regex piLineRegex = new(@"    pi:.*\n");
-        Match piMatch = piLineRegex.Match(existingLines);
-
-        string newProfile;
-        if (piMatch.Success)
-        {
-            // Replace existing pi: line
-            newProfile = piLineRegex.Replace(existingLines, $"    pi: {piValue}\n", 1);
-        }
-        else
-        {
-            // Insert new pi: line after default: inherit
-            newProfile = existingLines + $"    pi: {piValue}\n";
-        }
-
-        // Replace the entire matched section with the modified version
-        string replacement = $"  {profileName}:\n    default: inherit\n" + newProfile;
-        return content.Replace(match.Value, replacement, StringComparison.Ordinal);
-    }
-
     public void Dispose() => _temp.Dispose();
-
-    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
-    {
-        Directory.CreateDirectory(destinationDirectory);
-        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-        {
-            string relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
-            string destinationPath = Path.Combine(destinationDirectory, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            File.Copy(sourcePath, destinationPath);
-        }
-    }
 }
 
 /// <summary>
@@ -1142,7 +1127,7 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
     {
         PiPrimaryIdentityCollisionFixture fixture = new();
         string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        CopyDirectory(canonicalRoot, fixture.ProductRoot);
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string skillDirectory = Path.Combine(fixture.ProductRoot, "skills", primaryAgentName);
         Directory.CreateDirectory(skillDirectory);
@@ -1162,18 +1147,6 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
     }
 
     public void Dispose() => _temp.Dispose();
-
-    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
-    {
-        Directory.CreateDirectory(destinationDirectory);
-        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-        {
-            string relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
-            string destinationPath = Path.Combine(destinationDirectory, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            File.Copy(sourcePath, destinationPath);
-        }
-    }
 }
 
 /// <summary>
@@ -1202,7 +1175,7 @@ internal sealed class PiThinkingSuffixFixture : IDisposable
     {
         PiThinkingSuffixFixture fixture = new();
         string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        CopyDirectory(canonicalRoot, fixture.ProductRoot);
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
         string original = File.ReadAllText(modelsPath);
@@ -1211,7 +1184,7 @@ internal sealed class PiThinkingSuffixFixture : IDisposable
             ? modelId
             : $"{modelId}[thinking={thinkingLevel}]";
 
-        string mutated = ReplaceOrInsertPiValue(original, profileName, piValue);
+        string mutated = PiCorpusFixtureHelpers.ReplaceOrInsertPiValue(original, profileName, piValue);
 
         if (string.Equals(original, mutated, StringComparison.Ordinal))
         {
@@ -1223,11 +1196,24 @@ internal sealed class PiThinkingSuffixFixture : IDisposable
         return fixture;
     }
 
-    /// <summary>
-    /// Replaces or inserts a pi: value in a profile section, mirroring the pattern used by
-    /// <see cref="PiModelOverrideFixture"/>.
-    /// </summary>
-    private static string ReplaceOrInsertPiValue(string content, string profileName, string piValue)
+    public void Dispose() => _temp.Dispose();
+}
+
+internal static class PiCorpusFixtureHelpers
+{
+    internal static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+    {
+        Directory.CreateDirectory(destinationDirectory);
+        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
+            string destinationPath = Path.Combine(destinationDirectory, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(sourcePath, destinationPath);
+        }
+    }
+
+    internal static string ReplaceOrInsertPiValue(string content, string profileName, string piValue)
     {
         Regex profileRegex = new(
             $@"^  {Regex.Escape(profileName)}:\n    default: inherit\n((?:    \w+:.*\n)*)",
@@ -1243,31 +1229,18 @@ internal sealed class PiThinkingSuffixFixture : IDisposable
         Regex piLineRegex = new(@"    pi:.*\n");
         Match piMatch = piLineRegex.Match(existingLines);
 
+        string formattedPiValue = piValue.StartsWith('[') ? $"\"{piValue}\"" : piValue;
         string newProfile;
         if (piMatch.Success)
         {
-            newProfile = piLineRegex.Replace(existingLines, $"    pi: {piValue}\n", 1);
+            newProfile = piLineRegex.Replace(existingLines, $"    pi: {formattedPiValue}\n", 1);
         }
         else
         {
-            newProfile = existingLines + $"    pi: {piValue}\n";
+            newProfile = existingLines + $"    pi: {formattedPiValue}\n";
         }
 
         string replacement = $"  {profileName}:\n    default: inherit\n" + newProfile;
         return content.Replace(match.Value, replacement, StringComparison.Ordinal);
-    }
-
-    public void Dispose() => _temp.Dispose();
-
-    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
-    {
-        Directory.CreateDirectory(destinationDirectory);
-        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-        {
-            string relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
-            string destinationPath = Path.Combine(destinationDirectory, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            File.Copy(sourcePath, destinationPath);
-        }
     }
 }

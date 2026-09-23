@@ -76,7 +76,16 @@ internal static class CapabilityDegradations
             OutputIdentity: outputIdentity,
             Code: "capability-not-isolable",
             InstructionDigest: instructionDigest,
-            Details: $"Capability profile grants process.execute ({shellTools}) but denies filesystem.write. " +
+            Details: $"Capability profile grants process.execute ({shellTools}) but sets filesystem.write to " +
+                $"'{DescribeDecision(writeDecision)}'. " +
                 $"Write access remains reachable through shell redirection despite withholding write tools ({writeTools}).");
     }
+
+    private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
+    {
+        SquadPermissionDecision.Allow => "allow",
+        SquadPermissionDecision.Ask => "ask",
+        SquadPermissionDecision.Deny => "deny",
+        _ => "deny"
+    };
 }

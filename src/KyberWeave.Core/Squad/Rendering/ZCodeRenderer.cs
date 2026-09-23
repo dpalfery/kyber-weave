@@ -572,13 +572,16 @@ public sealed class ZCodeRenderer : ISquadRenderer
         string body = MarkdownLinkTarget.Replace(agent.InstructionBody, match =>
         {
             string target = match.Groups["target"].Value;
-            if (!resourcePaths.Contains(target))
+            int suffixIndex = target.IndexOfAny(['#', '?']);
+            string pathPart = suffixIndex < 0 ? target : target[..suffixIndex];
+            string linkSuffix = suffixIndex < 0 ? string.Empty : target[suffixIndex..];
+            if (pathPart.Length == 0 || !resourcePaths.Contains(Uri.UnescapeDataString(pathPart)))
             {
                 return match.Value;
             }
 
             changed = true;
-            return $"{match.Groups["prefix"].Value}../skills/{target}{match.Groups["suffix"].Value}";
+            return $"{match.Groups["prefix"].Value}../skills/{pathPart}{linkSuffix}{match.Groups["suffix"].Value}";
         });
 
         rewritten = true;
