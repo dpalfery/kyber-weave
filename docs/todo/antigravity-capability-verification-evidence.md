@@ -4,15 +4,15 @@ title: Live verification evidence for Antigravity capability mapping against agy
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-21
+last-reviewed: 2026-09-23
 status: current
 ---
 
 # Live verification evidence for Antigravity capability mapping against agy 1.2.7
 
-**Objective:** Verify the capability→tool mapping and model enum claims in the [Antigravity native agents verified spec](antigravity-native-agents.md) against the installed `agy` 1.2.7 (`/Users/dave/.local/bin/agy`, Mach-O arm64).
+**Objective:** Verify the capability→tool mapping and model enum claims in the [Antigravity native agents verified spec](../archive/todo/antigravity-native-agents.md) against the installed `agy` 1.2.7 (`/Users/dave/.local/bin/agy`, Mach-O arm64).
 
-**Scope:** Six verification items from the plan [2026-09-21-pi-thinking-and-antigravity-native-agents.md](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md), §9, C0 task.
+**Scope:** Six verification items from the plan [2026-09-21-pi-thinking-and-antigravity-native-agents.md](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md), §9, C0 task.
 
 **Date:** 2026-09-21 (this revision supersedes an earlier same-day pass whose §1/§5 sessions were run with `--mode plan` and, for the tool-listing and D4 tests, no verifiable proof that the named custom agent — as opposed to the built-in default agent — was actually loaded; see the "Methodology correction" note under §5 for the agy-record evidence of that failure mode).
 **agy version:** 1.2.7 (`agy --version`, re-confirmed this revision)
@@ -380,5 +380,5 @@ MODEL_TIER_INHERIT
 
 ## Related
 
-- [Antigravity native agents — verified spec](antigravity-native-agents.md)
-- [Pi thinking and Antigravity native agents plan](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) — §3 D3-D8, §8 C0 row, §9 C0
+- [Antigravity native agents — verified spec](../archive/todo/antigravity-native-agents.md)
+- [Pi thinking and Antigravity native agents plan](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) — §3 D3-D8, §8 C0 row, §9 C0

@@ -1,17 +1,18 @@
 ---
-id: plans/2026-09-21-pi-thinking-and-antigravity-native-agents
+id: archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents
 title: Emit Pi thinking levels and reclassify Antigravity as a native per-agent target
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-21
+last-reviewed: 2026-09-23
 component: KyberSquad
 development-mode: test-first
 ---
 
 # Emit Pi thinking levels and reclassify Antigravity as a native per-agent target
 
-**Status:** Ready
+**Status:** Complete
+**Archive Date:** 2026-09-23
 **Date:** 2026-09-21
 **Goal:** (Track A) Make `PiRenderer` emit a `thinking:` reasoning-effort key by splitting an
 optional `[thinking=<level>]` suffix off the `pi:` `models.yml` value. (Track C) Reclassify
@@ -412,7 +413,7 @@ records are structurally, not live, evidenced; contract-test coverage per render
 **Out:** Actually running `squad update --global --target antigravity` against the owner's live
 1017-file global receipt (a live-state operation the owner performs post-merge, not a plan task —
 §11); ZCode plugin packaging (unrelated, already tracked in
-[zcode-plugin-packaging.md](../todo/zcode-plugin-packaging.md)); any change to Warp, which remains
+[zcode-plugin-packaging.md](../../todo/zcode-plugin-packaging.md)); any change to Warp, which remains
 fallback role-skill lowering and is unaffected by this plan; archiving
 [the two source todos](../todo/black-hawk-hotel-todo.md) — per the intake contract, the
 conductor's docs-dev promotion step (run immediately after this Draft save) records this plan as
@@ -747,7 +748,7 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
 |---|---|---|
 | A1 | Done — `task-reviewer` pass 1 PASS | 18 new cases in `PiRendererContractTests.cs`. RED run: 15 failed for the intended reason (suffix passed through verbatim, no `thinking` key, no exception), 3 passed (behavior that already held), all 13 pre-existing tests passed. Reviewer note for the end-of-run council: two near-identical fixture helpers (`PiModelOverrideFixture` / `PiThinkingSuffixFixture` each carry `ReplaceOrInsertPiValue` and `CopyDirectory`). |
 | A2 | Done — `task-reviewer` pass 1 PASS (2026-09-22), no fixes. Track A is complete apart from the end-of-run council | `PiRenderer.cs` (+108/−5): trailing `[thinking=<level>]` split, Ordinal six-level validation, fail-closed `SquadRenderValidationException` naming the level, `thinking:` only when present, remarks updated. `models.yml`: the four D2 `pi:` suffixes. Two pre-existing tests that pinned pre-D2 behavior were aligned to D2 exactly, not loosened: `SquadSourceTests.ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan` (four `pi` rows) and `PiRendererContractTests.RenderAsync_Pi_EachSubagentAgentHasCanonicalFrontmatterAndBody` (key order with a conditional `thinking`). Current tree: `dotnet build KyberWeave.sln -c Release` 0 warnings; full suite 1995 passed, 0 failed; `dotnet format KyberWeave.sln whitespace --verify-no-changes` and `style --verify-no-changes --severity warn`, scoped with `--include` to `PiRenderer.cs`, `SquadSourceTests.cs` and `PiRendererContractTests.cs`, both exit 0 (2026-09-22). |
-| C0 | Done — `task-reviewer` pass 3 PASS | [Evidence](../todo/antigravity-capability-verification-evidence.md). Two earlier attempts failed review (model narration taken as proof, no load proof, sessions run in `--mode plan` outside the workspace). The plan's named owner (`csharp-dev`) then declined the task as outside its role; the owner reassigned the final attempt to a general-purpose agent. Its findings produced D10-D12. |
+| C0 | Done — `task-reviewer` pass 3 PASS | [Evidence](../../todo/antigravity-capability-verification-evidence.md). Two earlier attempts failed review (model narration taken as proof, no load proof, sessions run in `--mode plan` outside the workspace). The plan's named owner (`csharp-dev`) then declined the task as outside its role; the owner reassigned the final attempt to a general-purpose agent. Its findings produced D10-D12. |
 | DS1 | Done — `task-reviewer` pass 2 PASS (2026-09-22) | `tests/KyberWeave.Tests/CapabilityDegradationsTests.cs` (new): 20 cases across 7 methods pinning `BuildCapabilityNotIsolable(targetToken, canonicalIdentity, outputIdentity, instructionDigest, executeDecision, writeDecision, grantedShellTools, withheldWriteTools)`. Pass 1 FAILed: the first signature carried no identities or digest, so no valid per-agent `SquadDegradationRecord` could be built; the rework added them with exact-value assertions and made the no-granted-shell case return null per D10. RED was the accepted compile failure (CS0103 only). |
 | DS2 | Done — `task-reviewer` pass 2 PASS (2026-09-22) | Code: `src/KyberWeave.Core/Squad/Rendering/CapabilityDegradations.cs` (new) — all 20 DS1 cases pass, build 0 warnings, both verify-only format gates exit 0, full suite 2015 passed / 0 failed. Docs: the `capability-not-isolable` Degradation Taxonomy row in `docs/kyber-squad/requirements.md` and the new `docs/todo/shell-implies-write-live-verification-other-targets.md` with its index row; `docs validate .` and `docs drift .` at 0 findings. Pass 1 FAILed on the taxonomy row (incomplete tool mappings, an unsupported "listed in the receipt" claim); a wrong deep-link anchor was fixed too. Note for the council: the code worker's digest claimed a green full suite its own log contradicted (see the artifacts-path rule below). |
 | C1 | Done (2026-09-22) | Authored native-Antigravity contract tests in `AntigravityRendererContractTests.cs` and `SquadSharedIdentityProjectionTests.cs` (`e4e5eb2b`). |
@@ -756,7 +757,7 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
 | C4 | Done (2026-09-22) | ADR 0022 recorded (`f4e92939`). |
 | C5 | Done (2026-09-22) | Architecture, requirements, and onboarding docs aligned to native Antigravity (`f21820d9`). |
 | Track D (DCL, DZC, DFA, DOC, DPI) | Done (2026-09-23) | Collapsed from five separate pairs into one RED/GREEN pair, executed. RED: pinned `capability-not-isolable` contract tests across Claude, Pi, ZCode, Factory, and OpenCode (`4a57ed2b`). GREEN: wired `CapabilityDegradations.BuildCapabilityNotIsolable` across all 5 renderers (`ClaudeRenderer`, `PiRenderer`, `ZCodeRenderer`, `FactoryRenderer`, `OpenCodeRenderer`); all 81 contract tests pass. |
-| G1, G2 | Not started | Approved 2026-09-22. |
+| G1, G2 | Done (2026-09-23) | G1 review gates passed; G2 closeout plan and todos archived. |
 
 **Gate passed 2026-09-22.** Revision 2 — D10-D12 (§3), the reopened C1/C2 rows (§8), and Track D (§8, §9, §10) — was approved for execution 2026-09-22 (recorded in §3's Approval subsection).
 
@@ -776,7 +777,7 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
 - In Claude Code the conductor has to be the main thread: subagents cannot spawn subagents, so
   the `conductor` agent's `Agent(...)` roster only applies under `claude --agent conductor`.
 - `architect` and `product-owner` render with no Write, Edit, or Bash
-  ([ask-narrowing todo](../todo/claude-renderer-ask-narrowing.md)). The pattern used throughout:
+  ([ask-narrowing todo](../../todo/claude-renderer-ask-narrowing.md)). The pattern used throughout:
   the architect returns full content or exact OLD/NEW pairs, `docs-dev` applies them, and the
   conductor byte-compares the result against an independently computed copy with `cmp`, then runs
   `docs validate .` and `docs drift .`. The byte-compare caught two silent `docs-dev`
@@ -819,7 +820,7 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
   note covering both, plus a diverged kyberdash remote, was handed to the session working on PR #96.
   **Resolved 2026-09-22:** PR #96 merged first (`f7054414`), so `origin/main` owns ADR 0020. This
   branch merged `origin/main` and renumbered its ZCode record to
-  [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md), updating every
+  [ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md), updating every
   reference; the Antigravity todo resolved to this branch's superseded 2026-09-21 version, as
   intended. C4's ADR takes the next free number after 0021.
 
@@ -827,16 +828,16 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
 
 ## Related
 
-- [Black Hawk Hotel handover](../todo/black-hawk-hotel-todo.md) — the source todo (superseded by
-  this plan once the conductor's promotion step runs)
+- [Black Hawk Hotel handover](../todo/black-hawk-hotel-todo.md) — the source todo (superseded and archived)
 - [Antigravity native agents — verified spec](../todo/antigravity-native-agents.md) — the Task C
-  contract (superseded by this plan once the conductor's promotion step runs)
-- [ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md) — the fallback→native
+  contract (superseded and archived)
+- [ADR 0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) — the fallback→native
   reclassification precedent (Pi)
-- [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) — the first-of-its-kind
+- [ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md) — the first-of-its-kind
   rendering-mechanism precedent (ZCode); also the source of the models.yml schema's pre-existing
   `antigravity` key
-- [Kyber-Squad architecture](../kyber-squad/architecture.md) — §3 role-skill lowering, §8 rendering
-- [Renderer coverage](../todo/kyber-squad-renderer-coverage.md)
-- [Antigravity capability verification evidence](../todo/antigravity-capability-verification-evidence.md) — C0's evidence; the source of D10-D12
-- [Shell-implies-write live verification for other targets](../todo/shell-implies-write-live-verification-other-targets.md) — created by DS2 (D11, D12)
+- [ADR 0022](../../adr/0022-antigravity-native-agents.md) — Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation
+- [Kyber-Squad architecture](../../kyber-squad/architecture.md) — §3 role-skill lowering, §8 rendering
+- [Renderer coverage](../../todo/kyber-squad-renderer-coverage.md)
+- [Antigravity capability verification evidence](../../todo/antigravity-capability-verification-evidence.md) — C0's evidence; the source of D10-D12
+- [Shell-implies-write live verification for other targets](../../todo/shell-implies-write-live-verification-other-targets.md) — created by DS2 (D11, D12)

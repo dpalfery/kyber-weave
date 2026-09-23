@@ -5,7 +5,7 @@ doc-type: todo
 component: KyberSquad
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-23
 ---
 
 # Live verification of shell-implies-write structural findings across harness targets
@@ -14,7 +14,7 @@ This is **context for planning the work, not a plan** — it records what is kno
 
 ## Why this exists
 
-The plan [2026-09-21-pi-thinking-and-antigravity-native-agents](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (§3 D10, D11, D12; §9 DS2) added a new degradation code `capability-not-isolable` to the Kyber-Squad contract. The finding that grounds it — `process.execute: allow` on a target that grants shell tools can write files through redirection, making withheld write-tool names an ineffective security boundary — was live-verified against Antigravity (`agy` 1.2.7) in the plan's C0 task (evidence in [antigravity-capability-verification-evidence.md](antigravity-capability-verification-evidence.md) §5).
+The plan [2026-09-21-pi-thinking-and-antigravity-native-agents](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (§3 D10, D11, D12; §9 DS2) added a new degradation code `capability-not-isolable` to the Kyber-Squad contract. The finding that grounds it — `process.execute: allow` on a target that grants shell tools can write files through redirection, making withheld write-tool names an ineffective security boundary — was live-verified against Antigravity (`agy` 1.2.7) in the plan's C0 task (evidence in [antigravity-capability-verification-evidence.md](antigravity-capability-verification-evidence.md) §5).
 
 Five other renderers share the same structural shape: `ClaudeRenderer`, `PiRenderer`, `ZCodeRenderer`, `FactoryRenderer`, and `OpenCodeRenderer` all hold a single named shell-class tool distinct from a set of named write tools, both derived from capability-lattice mappings. The records emitted on these five targets are grounded in that structural code inspection, not in live redirection proof like Antigravity's.
 
@@ -63,6 +63,6 @@ This sequence confirms that the withheld tool name (`write_to_file`) stays unrea
 
 ## Related
 
-- [Plan: Emit Pi thinking levels and reclassify Antigravity as a native per-agent target](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) — §3 D10, D11, D12; §9 DS2
+- [Plan: Emit Pi thinking levels and reclassify Antigravity as a native per-agent target](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) — §3 D10, D11, D12; §9 DS2
 - [Live verification evidence for Antigravity capability mapping against agy 1.2.7](antigravity-capability-verification-evidence.md) — §5 D4 verdict and methodology
 - [Kyber-Squad requirements and degradation contract](../kyber-squad/requirements.md) — Degradation Taxonomy, `capability-not-isolable` row

@@ -1,16 +1,19 @@
 ---
-id: todo/antigravity-native-agents
+id: archive/todo/antigravity-native-agents
 title: Antigravity has native agents, but the Squad renderer still lowers roles to skills
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-21
+last-reviewed: 2026-09-23
 status: superseded
 ---
 
 # Antigravity has native agents, but the Squad renderer still lowers roles to skills
 
-**Superseded by:** [2026-09-21-pi-thinking-and-antigravity-native-agents](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (Draft)
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+**Superseded by:** [2026-09-21-pi-thinking-and-antigravity-native-agents](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (Complete)
 
 Task C of the Black Hawk Hotel handover (reclassify Antigravity from fallback role-skill lowering to a native per-agent target) is now tracked by that plan.
 
@@ -210,11 +213,11 @@ the renderer is trusted.
   only the subtree beneath it changes.
 - `products/kyber-squad/profiles/models.yml` and `schemas/model-profiles.schema.json` — an
   `antigravity` column, whose values are tier names rather than model ids.
-- Docs: [architecture §8](../kyber-squad/architecture.md#8-rendering) rendering table,
-  [requirements](../kyber-squad/requirements.md) target matrix, this page's row in
-  [renderer coverage](kyber-squad-renderer-coverage.md), and an ADR — reclassifying a target
+- Docs: [architecture §8](../../kyber-squad/architecture.md#8-rendering) rendering table,
+  [requirements](../../kyber-squad/requirements.md) target matrix, this page's row in
+  [renderer coverage](../../todo/kyber-squad-renderer-coverage.md), and an ADR — reclassifying a target
   from fallback to native is the same class of decision
-  [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) records for ZCode.
+  [ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md) records for ZCode.
 
 ## Deployment consequence
 
@@ -232,5 +235,5 @@ as inconclusive rather than as a failure, and confirm inside a real session.
 ## Related
 
 - [Black Hawk Hotel handover](black-hawk-hotel-todo.md) — the handover this task belongs to
-- [Renderer coverage](kyber-squad-renderer-coverage.md) — lists Antigravity as
+- [Renderer coverage](../../todo/kyber-squad-renderer-coverage.md) — lists Antigravity as
   fallback-complete, which this change supersedes

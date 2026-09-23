@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-23
 ---
 
 # Kyber-Weave Plan Inventory
@@ -19,7 +19,6 @@ Every plan document under `docs/plans/` must be reachable from this inventory, d
 |---|---|---|---|---|
 | [2026-09-14-kilo-native-renderer.md](2026-09-14-kilo-native-renderer.md) | Ready | 2026-09-14 | | Implement and register an ISquadRenderer for SquadTarget.Kilo (kilo) with native Kilo agent and skill layouts. |
 | [2026-09-21-zcode-harness-target.md](2026-09-21-zcode-harness-target.md) | Ready | 2026-09-21 | | Declare `zcode` as a Kyber-Squad target and register a ZCodeRenderer with native subagents, native skills, and the conductor lowered to a slash command. |
-| [2026-09-21-pi-thinking-and-antigravity-native-agents.md](2026-09-21-pi-thinking-and-antigravity-native-agents.md) | Ready | 2026-09-21 | Test-first | Emit a `thinking` reasoning-effort key for Pi models, and reclassify Antigravity from fallback role-skill lowering to a native per-agent directory primitive (`.agents/agents/<name>/agent.md`) with a capability mapping validated live against `agy` 1.2.7 before any Test contract pins it. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
@@ -27,6 +26,7 @@ Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](..
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-09-21-pi-thinking-and-antigravity-native-agents.md](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) | Complete | 2026-09-21 | 2026-09-23 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [ADR 0022](../adr/0022-antigravity-native-agents.md) | Emit a `thinking` reasoning-effort key for Pi models, and reclassify Antigravity from fallback role-skill lowering to a native per-agent directory primitive (`.agents/agents/<name>/agent.md`) with a capability mapping validated live against `agy` 1.2.7 before any Test contract pins it. |
 | [2026-09-20-kyberdash-menu-bar-runtime-wiring.md](../archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md) | Complete | 2026-09-21 | 2026-09-22 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [todo/menu-bar-fix.md](../todo/menu-bar-fix.md) (closed), [todo/stale-refresh-run-rows.md](../todo/stale-refresh-run-rows.md) (new deferred work), context-surfaces requirements 8.8/11.11 and design D2 clarifications | Route static refresh and live OTLP through one authoritative canonical projection, remove raw-record report fallback, render persisted context, expose a canonical windowed harness inventory, and redeploy for owner confirmation. Complete: review Approve (risk LOW, 0 findings) and owner-confirmed deployed behavior 2026-09-22. |
 | [2026-09-16-factory-renderer-droids-and-global.md](../archive/plans/2026-09-16-factory-renderer-droids-and-global.md) | Complete | 2026-09-16 | 2026-09-16 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [todo/factory.md](../todo/factory.md), [todo/kyber-squad-renderer-coverage.md](../todo/kyber-squad-renderer-coverage.md) | Correct FactoryRenderer project output to `.factory/droids/` and enable `squad install --global --target factory` under `~/.factory`. |
 | [2026-09-14-factory-native-renderer.md](../archive/plans/2026-09-14-factory-native-renderer.md) | Complete | 2026-09-14 | 2026-09-14 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [todo/factory.md](../todo/factory.md) | Implement and register an ISquadRenderer for SquadTarget.Factory (factory / factory-droids) with native Factory agent and skill layouts. |

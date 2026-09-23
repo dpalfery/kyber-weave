@@ -1,16 +1,19 @@
 ---
-id: todo/black-hawk-hotel-todo
+id: archive/todo/black-hawk-hotel-todo
 title: Black Hawk Hotel — handover of in-flight harness fidelity work
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-21
+last-reviewed: 2026-09-23
 status: superseded
 ---
 
 # Black Hawk Hotel — handover of in-flight harness fidelity work
 
-**Superseded by:** [2026-09-21-pi-thinking-and-antigravity-native-agents](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (Draft)
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+**Superseded by:** [2026-09-21-pi-thinking-and-antigravity-native-agents](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (Complete)
 
 Tasks A and C from this handover (emit `thinking` for Pi, and reclassify Antigravity from fallback role-skill lowering to a native per-agent target) are now tracked by that plan.
 
@@ -36,8 +39,8 @@ Branch `claude/zcode-harness-subagents-e2fff4`, three commits, all 14 declared g
 | `a56e679e` | Closed a ZCode tool-list widening trap; added the `storage.dir` config tier; lossless block-scalar skill descriptions |
 | `ac6a6f90` | Pinned every OpenCode permission key, because an omitted key inherits OpenCode's default-allow |
 
-See [the ZCode plan](../plans/2026-09-21-zcode-harness-target.md) and
-[ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+See [the ZCode plan](../../plans/2026-09-21-zcode-harness-target.md) and
+[ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md).
 
 ### The machine state this work left behind
 
@@ -207,10 +210,10 @@ Go struct tags, and the built-in `agy-customizations` skill.
 
 ## Related
 
-- [Renderer coverage](kyber-squad-renderer-coverage.md) — the eleven-target roster this work
+- [Renderer coverage](../../todo/kyber-squad-renderer-coverage.md) — the eleven-target roster this work
   sits inside
-- [ZCode plugin packaging](zcode-plugin-packaging.md) — the other open ZCode decision
-- [Claude/Pi ask-narrowing](claude-renderer-ask-narrowing.md) — the `ask` lowering that makes
+- [ZCode plugin packaging](../../todo/zcode-plugin-packaging.md) — the other open ZCode decision
+- [Claude/Pi ask-narrowing](../../todo/claude-renderer-ask-narrowing.md) — the `ask` lowering that makes
   `architect` and `product-owner` unable to save their own plans on those harnesses; related in
   spirit to task B
 - [Antigravity native agents](antigravity-native-agents.md) — the full verified spec for
