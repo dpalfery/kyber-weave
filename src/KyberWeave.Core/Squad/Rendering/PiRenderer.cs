@@ -411,7 +411,7 @@ public sealed class PiRenderer : ISquadRenderer
             return null;
         }
 
-        string? resolvedModel = null;
+        string? resolvedModel;
         if (profile.HarnessModels.TryGetValue("pi", out string? piModel))
         {
             resolvedModel = string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
@@ -444,7 +444,7 @@ public sealed class PiRenderer : ISquadRenderer
             return null;
         }
 
-        string? resolvedModel = null;
+        string? resolvedModel;
         if (profile.HarnessModels.TryGetValue("pi", out string? piModel))
         {
             resolvedModel = string.Equals(piModel, "inherit", StringComparison.Ordinal) ? null : piModel;
@@ -624,7 +624,7 @@ public sealed class PiRenderer : ISquadRenderer
             Details: "Capability decisions " +
                 $"({DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
                 "are not enforced: a top-level Pi skill runs under the harness default tool " +
-                $"set, not the canonical capability lattice, and its delegates-to roster " +
+                "set, not the canonical capability lattice, and its delegates-to roster " +
                 $"({rosterText}) is instruction-only, not a runtime-enforced " +
                 "'allowed_subagents' list.");
     }

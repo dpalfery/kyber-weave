@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -670,7 +669,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
     }
 
     private static readonly Regex SafePlainReserved = new(
-        @"^(?:false|null|true|~)$",
+        "^(?:false|null|true|~)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
@@ -695,7 +694,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
         TimeSpan.FromSeconds(2));
 
     private static readonly Regex CommandName = new(
-        @"^[a-z0-9][a-z0-9_:-]{0,63}$",
+        "^[a-z0-9][a-z0-9_:-]{0,63}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(2));
 
