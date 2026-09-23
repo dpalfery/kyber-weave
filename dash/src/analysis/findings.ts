@@ -13,7 +13,7 @@
 
 import { normalizeWhitespace, hashNormalized } from './signals.js'
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
-import { normalizeHarnessName } from '../canon/measurability.js'
+import { canonicalHarnessId, normalizeHarnessName } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
 
@@ -963,11 +963,19 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
   const baseKeyOf = (record: CanonicalRecord): string =>
     record.sessionId || record.traceId || invocationSession || 'session'
 
+  // Counted over every record the builders would group, not just the turns:
+  // buildSessions and buildRuns run groupByCanonicalHarness over all records
+  // of a key, so a key whose second canonical harness appears only on a
+  // non-invocation span is still stored as `${harness}:${key}`. Excluded
+  // identities (gemini) count toward no session row there and nowhere here —
+  // counting them would add a prefix the builders never wrote.
   const harnessesByKey = new Map<string, Set<string>>()
-  for (const record of turnRecords) {
+  for (const record of records) {
+    const harness = canonicalHarnessId(record.harness)
+    if (harness === null) continue
     const key = baseKeyOf(record)
     const harnesses = harnessesByKey.get(key) ?? new Set<string>()
-    harnesses.add(normalizeHarnessName(record.harness))
+    harnesses.add(harness)
     harnessesByKey.set(key, harnesses)
   }
   const groupIdOf = (record: CanonicalRecord): string => {

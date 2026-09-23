@@ -640,6 +640,80 @@ describe('Detector 5: compaction-hazard', () => {
     expect(f.id).toBe(`finding-compaction-hazard-${f.sessionId}-claude-peak`)
   })
 
+  it('counts non-invocation records when deciding the prefixed canonical session id', () => {
+    // buildSessions and buildRuns group every record of a key through
+    // groupByCanonicalHarness, not just the turns: a key whose second
+    // canonical harness appears only on a non-invocation span is still stored
+    // as `${harness}:${key}`, so the finding for the invocation-side group
+    // has to carry that same prefixed id.
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const cursorSpan = makeMockRecord({
+      spanId: 'cursor-span',
+      sessionId: 'mixed-sess',
+      harness: 'cursor',
+      op: 'tool.invoke',
+      name: 'read_file',
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn1, claudeTurn2, cursorSpan],
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('claude-unclassified:mixed-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+  })
+
+  it('does not count harness identities the builders exclude when prefixing', () => {
+    // Gemini is excluded from canonical grouping (canonicalHarnessId returns
+    // null and groupByCanonicalHarness drops it), so a key holding claude
+    // invocations and a gemini invocation is stored unprefixed — the gemini
+    // span counts toward no session row and must not force a prefix here.
+    const claudeTurn1 = makeMockRecord({
+      spanId: 'claude-early',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 100_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 100_000, reportedOutput: 100 },
+    })
+    const claudeTurn2 = makeMockRecord({
+      spanId: 'claude-peak',
+      sessionId: 'mixed-sess',
+      harness: 'claude',
+      raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      tokens: { freshInput: 190_000, cacheRead: 0, cacheCreation: 0, output: 100, reportedInput: 190_000, reportedOutput: 100 },
+    })
+    const geminiTurn = makeMockRecord({
+      spanId: 'gemini-turn',
+      sessionId: 'mixed-sess',
+      harness: 'gemini',
+      tokens: { freshInput: 1000, cacheRead: 0, cacheCreation: 0, output: 50, reportedInput: 1000, reportedOutput: 50 },
+    })
+
+    const findings = detectCompactionHazard({
+      records: [claudeTurn1, claudeTurn2, geminiTurn],
+    })
+
+    expect(findings.length).toBe(1)
+    const f = findings[0]!
+    expect(f.sessionId).toBe('mixed-sess')
+    expect(f.estimatedWasteTokens).toBe(20_000)
+  })
+
   it('does NOT flag a session whose reported window keeps its peak below 85%', () => {
     const turn1 = makeMockRecord({
       spanId: 'turn-early',
