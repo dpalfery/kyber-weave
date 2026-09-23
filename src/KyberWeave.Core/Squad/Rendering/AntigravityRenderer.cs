@@ -17,13 +17,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// skill files under separate namespace roots: agents at <c>.agents/agents/{name}/agent.md</c>
 /// and skills at <c>.agents/skills/{name}/SKILL.md</c>. The "Native Both" pattern applies:
 /// collisions (agent identity matching a canonical skill) render to both paths with no
-/// <c>role-</c> prefix required because the roots are separate. Shared conductor identities
-/// emit only the canonical skill (shared reuse); all other agents emit native agent.md files.
+/// <c>role-</c> prefix required because the roots are separate. All agents emit native
+/// agent.md files, and canonical skills emit SKILL.md files.
 /// </para>
 /// <para>
 /// Agent frontmatter includes validated keys from the capability profile and model tier:
 /// <c>name</c>, <c>description</c>, <c>model</c>, <c>enable_write_tools</c>,
-/// <c>enable_subagent_tools</c>, <c>enable_mcp_tools</c>, <c>reasoning_effort</c>,
+/// <c>enable_subagent_tools</c>, <c>reasoning_effort</c>,
 /// <c>tools</c> (narrowed by the capability profile's XOR decision on filesystem.write vs.
 /// process.execute; see <see cref="CapabilityDegradations"/>), and <c>mainAgent: true</c>
 /// only for the conductor. Granted shell capabilities do not fully isolate write access
@@ -39,23 +39,6 @@ public sealed class AntigravityRenderer : ISquadRenderer
 {
     private const string AgentsDirectory = ".agents/agents";
     private const string SkillsDirectory = ".agents/skills";
-
-    /// <summary>
-    /// Shared identities (the fallback profile's <c>shared-identities</c> list) whose
-    /// canonical skill is reused instead of emitting a redundant skill projection of that
-    /// agent's resources. Read from the loaded fallback profile so a change to
-    /// profiles/fallbacks.yml is honored without a renderer change. Native Both emits the
-    /// agent at its own path; what is suppressed is the redundant skill projection.
-    /// </summary>
-    private static HashSet<string> ResolveSharedIdentities(SquadSource source)
-    {
-        if (!source.FallbackProfiles.Profiles.TryGetValue("role-skill", out SquadFallbackProfile? profile))
-        {
-            return [];
-        }
-
-        return profile.SharedIdentities.ToHashSet(StringComparer.Ordinal);
-    }
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -111,15 +94,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         // change. Sorted for deterministic details strings.
         string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
 
-        // Shared identities come from the authoritative fallbacks.yml shared-identities
-        // list, not a renderer-local roster — a corpus change to that list is honored
-        // without a renderer change. Native Both: shared identities suppress the redundant
-        // skill projection, allowing agents and canonical skills to coexist at separate
-        // namespace roots.
-        HashSet<string> sharedIdentities = ResolveSharedIdentities(source);
-
         string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, request.Scope);
-        string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, request.Scope);
 
         // Emit canonical skills first, preserving the established ordering.
         foreach (SquadSkill skill in source.Skills)
@@ -127,10 +102,8 @@ public sealed class AntigravityRenderer : ISquadRenderer
             files.Add(RenderSkill(skill.Name, skill.Description, skill.InstructionBody, request.Scope));
         }
 
-        // Emit native agent.md files for all agents. Shared identities do not suppress the
-        // agent file; the Native Both pattern means agents and skills occupy separate
-        // namespaces, and shared identities simply suppress the redundant skill projection
-        // of their resources, not the agent file itself.
+        // Emit native agent.md files for all agents. The Native Both pattern means agents
+        // and skills occupy separate namespaces, allowing both to render without collision.
         foreach (SquadAgent agent in source.Agents)
         {
             files.Add(RenderAgent(
@@ -229,10 +202,10 @@ public sealed class AntigravityRenderer : ISquadRenderer
         }
 
         // Resolve model tier from the profiles/models.yml antigravity column
-        string? modelTier = "inherit";
+        string modelTier = "inherit";
         if (modelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? modelProfile))
         {
-            if (modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel))
+            if (modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel) && antigravityModel is not null)
             {
                 modelTier = antigravityModel;
             }
@@ -246,7 +219,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
         frontmatter.Add("model", modelTier);
 
         // Build tools list from capability profile with XOR narrowing
-        string[] tools = ResolveToolsForAgent(agent, profile, capabilityProfiles);
+        string[] tools = ResolveToolsForAgent(agent, profile);
         if (tools.Length > 0)
         {
             YamlSequenceNode toolsSeq = new();
@@ -315,8 +288,7 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
     private static string[] ResolveToolsForAgent(
         SquadAgent agent,
-        SquadCapabilityProfile profile,
-        SquadCapabilityProfiles capabilityProfiles)
+        SquadCapabilityProfile profile)
     {
         List<string> tools = [];
 
