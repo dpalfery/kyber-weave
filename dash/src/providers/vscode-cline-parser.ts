@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { basename, join, posix, win32 } from 'path'
 import { homedir } from 'os'
 
-import { calculateCost } from '../models.js'
+import { calculateCost } from '../pricing/models.js'
 import type { SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 type UiMessage = {

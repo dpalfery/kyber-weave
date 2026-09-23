@@ -2,10 +2,10 @@ import { readdir, stat, readFile } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 
-import { readSessionFile, readSessionLines } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
-import { normalizeContentBlocks } from '../content-utils.js'
+import { readSessionFile, readSessionLines } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
+import { normalizeContentBlocks } from '../ingest/content-utils.js'
 import type {
   Provider,
   SessionSource,
@@ -131,7 +131,7 @@ function createParser(
 
       const lines = content.split('\n').filter(l => l.trim())
       let sessionId = ''
-      let sessionModelDisplay = settings.model ? stripModelPrefix(settings.model) : 'unknown'
+      const sessionModelDisplay = settings.model ? stripModelPrefix(settings.model) : 'unknown'
       let currentUserMessage = ''
 
       // Collect all assistant messages with their tools

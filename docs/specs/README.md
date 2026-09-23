@@ -4,7 +4,7 @@ title: Specifications
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-09-18
 ---
 
 # Specifications
@@ -26,3 +26,4 @@ A specification is used at the start of a greenfield project or a large, complex
 
 | Spec | Component | Status | Date | Archive Date | Canonical Docs / Reference | Description |
 |---|---|---|---|---|---|---|
+| [KyberDash context surfaces](kyberdash-context-surfaces/README.md) | KyberDash | Draft | 2026-09-18 | — | [KyberDash](../dash/README.md) | One-time fork of codeburn, removal of non-context features, a Tauri tray for macOS and Windows, deep-linkable dashboard views, and a context-troubleshooting CLI report. |

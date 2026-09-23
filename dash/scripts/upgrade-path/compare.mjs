@@ -11,7 +11,7 @@
 //       upgrade. Calls and every token field must match EXACTLY; cost is allowed
 //       COST_TOLERANCE of drift because the two binaries carry different bundled
 //       LiteLLM price snapshots and only agree when the shared pricing cache in
-//       CODEBURN_CACHE_DIR is warm (which it is, unless the runner is offline).
+//       KYBERDASH_CACHE_DIR is warm (which it is, unless the runner is offline).
 //   grok    changed by design in #1015: usage now comes from the CLI's own
 //       turn_completed records instead of a context-curve estimate. The change
 //       is REPORTED, never asserted — not even directionally. On real corpora

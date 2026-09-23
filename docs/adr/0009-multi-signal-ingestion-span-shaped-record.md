@@ -11,7 +11,7 @@ last-reviewed: 2026-09-04
 
 ## Status
 
-Accepted, 2026-09-04. Amends the wording of [ADR 0006](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) decision D3 ("there is one canonical model, and it is the span model"), which [ADR 0008](0008-kyberdash-single-canonical-store.md) restored. The singularity of the model is upheld; its exclusive derivation from the trace signal is not. Everything else in ADR 0006 and ADR 0008 stands.
+Accepted, 2026-09-04. Amends the wording of [ADR 0006](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) decision D3 ("there is one canonical model, and it is the span model"), which [ADR 0008](0008-kyberdash-single-canonical-store.md) restored. The singularity of the model is upheld; its exclusive derivation from the trace signal is not. Everything else in ADR 0006 and ADR 0008 stands.
 
 ## Context
 
@@ -56,7 +56,7 @@ Finally, some harnesses are legitimately two sources at once. Claude Code emits 
 
 ## Related
 
-- [ADR 0006: KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver](0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)
+- [ADR 0006: KyberDash as a TypeScript Soft Fork with a Merge Zone and an Embedded OTLP Receiver](../archive/adrs/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md)
 - [ADR 0008: Single Canonical Store; Supersede ADR 0007 D4](0008-kyberdash-single-canonical-store.md)
 - [Telemetry inventory](../dash/telemetry-inventory.md)
 - [KyberDash architecture](../dash/architecture.md)

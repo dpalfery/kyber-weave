@@ -6,8 +6,9 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-22
 decided-by:
+  - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
   - adr/0009-multi-signal-ingestion-span-shaped-record
   - adr/0010-keywords-prefix-coverage-and-oov-idf
@@ -22,10 +23,10 @@ keywords:
   - dashboard
   - codeburn
   - tauri
-  - electron
   - desktop
   - menubar
-  - tui
+  - projection
+  - otlp
   - refresh
   - sessions
 code-refs:
@@ -40,12 +41,14 @@ code-refs:
   - Measurability
   - analyzeContext
   - ParityDigest
-  - DashboardData
   - refreshHarnessSources
   - registerKyberCommands
   - commitSourceUnit
   - purgeExpiredContent
   - formatDimensionDisplay
+  - projectCanonicalStore
+  - CanonicalProjectionScheduler
+  - buildContextReport
 ---
 
 # KyberDash architecture
@@ -55,20 +58,21 @@ they cost, what filled their context windows, and whether a change to either act
 It reads the session files that 41 agent tools already write to disk **and** receives
 OpenTelemetry spans directly, then runs the same normalization and analysis over both.
 
-It is a **soft fork** of [`getagentseal/codeburn`](https://github.com/getagentseal/codeburn)
-(MIT, TypeScript), vendored into this repository with `git subtree` under `dash/`. The
-session-file breadth and the terminal/menu-bar/desktop surfaces come from upstream; the span
-analysis depth — disjoint token accounting, basis-carrying cost, context composition, tool and
-schema cost, quarantine — comes from the retired Python pipeline
-(`agent-session-analysis-dashboard`), ported into the subtree's merge zone.
+It began as a soft fork of the MIT-licensed CodeBurn project and is now a **one-time fork**:
+first-party code under `dash/`, with no upstream relationship
+([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)). The session-file breadth came from
+CodeBurn; the span analysis depth — disjoint token accounting, basis-carrying cost, context
+composition, tool and schema cost, quarantine — came from the retired Python pipeline
+(`agent-session-analysis-dashboard`).
 
 The measured failures that shape several requirements — a 5.8× cost understatement, negative
 fresh input on 293 of 307 spans, 25 of 1,009 spans losing a parent, 2.9 GB for 37,623 stored
 spans — are recorded in [KyberDash measurable rationale](../reference/kyberdash-rationale.md).
 They are correctness constraints, not style choices: they document failures that already
 occurred in the Python pipeline, and a reimplementation that drops a requirement reproduces the
-failure. The foundational architecture decisions — the TypeScript soft fork, the merge zone,
-the embedded receiver — are recorded in [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md).
+failure. The foundational architecture decisions — the one-time fork, the embedded receiver,
+the span-shaped canonical model, SEA distribution and the engine language — are recorded in
+[ADR 0020](../adr/0020-kyberdash-one-time-fork.md).
 
 ## High-level architecture
 
@@ -82,11 +86,15 @@ flowchart TB
     end
 
     subgraph normalize["Normalization"]
-        SY["Synthesizer<br/>dash/kyber/synth"]
+        SY["Synthesizer<br/>dash/src/synth"]
         AD["Harness adapters<br/>fingerprint + vote"]
     end
 
     ST["CanonStore — SQLite<br/>disjoint tokens, cost basis, quarantine, problems"]
+
+    subgraph projection["Shared canonical projection"]
+        PR["projectCanonicalStore<br/>one full projection over buildSessions<br/>(live batches: CanonicalProjectionScheduler)"]
+    end
 
     subgraph analyses["Analyses"]
         AN1["Schema cost R8"]
@@ -96,16 +104,9 @@ flowchart TB
     end
 
     subgraph surfaces["Surfaces"]
-        TUI["Terminal TUI dashboard<br/>dash/src/dashboard.tsx"]
-        WEB["Web dashboard views<br/>dash/dash/"]
-        SC["Status contract<br/>menubar-json kyber field"]
-        MCP["MCP server"]
-    end
-
-    subgraph native["Native Desktop & Tray"]
-        ELEC["Electron desktop app<br/>dash/app/"]
-        TAURI["Tauri Windows tray<br/>dash/windows/"]
-        MAC["macOS menu bar<br/>dash/mac/"]
+        REPORT["ContextReport<br/>CLI report + GET /api/kyber/report"]
+        WEB["Web dashboard<br/>dash/web/"]
+        TRAY["Tray popover + status item<br/>dash/tray/"]
     end
 
     FS --> SY
@@ -114,9 +115,10 @@ flowchart TB
     AS --> AD
     SY --> ST
     AD --> ST
-    ST --> AN1 & AN2 & AN3 & AN4
-    AN1 & AN2 & AN3 & AN4 --> TUI & WEB & SC & MCP
-    SC --> ELEC & TAURI & MAC
+    ST --> PR
+    PR --> AN1 & AN2 & AN3 & AN4
+    AN1 & AN2 & AN3 & AN4 --> REPORT
+    REPORT --> WEB & TRAY
 ```
 
 One canonical model serves both ingest paths: the session-file providers are **span
@@ -124,48 +126,34 @@ synthesizers**, converting a parsed provider call into canonical records exactly
 payload is decoded and normalized. No analysis knows or asks which path its data arrived by,
 which is how Requirement 11.1 — one data path, not two parallel ones — is satisfied.
 
-## Repository layout and the merge zone
+Both ingest paths also end in **one shared projection** (below): no surface derives sessions
+from raw records, and no surface keeps a second derivation of the same figures.
 
-Requirement 14 makes mergeability a design constraint, and mergeability is a function of which
-files are touched. The tree is partitioned by ownership; the complete rule set lives in
-[`dash/kyber/README.md`](../../dash/kyber/README.md):
+## Repository layout
 
-| Path | Ownership | Merge behaviour |
-|---|---|---|
-| `dash/src/**` | Upstream | The conflict surface. Read-only. |
-| `dash/kyber/**` | KyberDash only | Never conflicts — upstream has no such path. The merge zone. |
-| `dash/dash/**` | Upstream React dashboard | Extended at the boundary; conflicts possible and expected. |
-| `dash/app/**` | Upstream Electron application | Extended at the boundary; conflicts possible. |
-| `dash/mac/**` | Upstream Swift menu-bar application | Extended at the boundary; conflicts possible. |
-| `dash/windows/**`, `dash/gnome/**` | Upstream | Unmodified and unbuilt (R14.4). |
+`dash/` is first-party code ([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)): any file is
+edited on its merits, under the repository's gates.
 
-KyberDash code lives only under `dash/kyber/**` and consumes upstream's *output* — the parsed
-call array its parser already produces and the deduplication set behind it — rather than
-reaching into its internals (R14.2). The `tests/KyberWeave.Tests/MergeBoundaryTests.cs` suite
-pins the boundary: no KyberDash source under upstream read-only roots, the unshipped surfaces
-present and unmodified, and the upstream remote registered.
-
-### Deliberate merge-zone edits
-
-Four files inside upstream's directories are changed on purpose, and each is recorded with its
-reason so a future merge conflict arrives with rationale attached (R14.3):
-
-| File | Reason |
+| Path | Contents |
 |---|---|
-| `dash/src/menubar-json.ts` | The status contract (R11.4): optional `kyber` field carrying the new analyses — context buckets and pressure (R7), schema ranking (R8), timeline (R9), comparison (R10), `quarantineCount` and `problems` (R6). Optional so old payloads still decode; extending it carries a new analysis into native clients without modifying them (R11.5). |
-| `dash/src/usage-aggregator.ts` | Wiring of the contract extension: `buildMenubarPayloadForRange` forwards the optional `kyber` payload; no analysis logic in the payload builder. |
-| `dash/app/electron/cli.ts` | Binary lookup falls back from `kyber-weave` to `codeburn` so the Electron app spawns the renamed CLI. |
-| `dash/mac/Sources/CodeBurnMenubar/Security/CodeburnCLI.swift` | Same binary-name fallback for the Swift menu bar; search order `kyber-weave` → `codeburn` keeps the decode path unchanged. |
+| `dash/src/**` | The CLI engine: provider session parsers, canonical store and projection, analyses, OTLP receiver, harness-source refresh, server, and CLI commands |
+| `dash/web/**` | The React web dashboard |
+| `dash/tray/**` | The KyberDash tray — a Tauri 2 Rust shell (`src-tauri/`) plus a React popover UI (`ui/`) |
+
+The former `dash/kyber/**` tree was folded into `dash/src/**`, and the Electron desktop app,
+the inherited Windows tray, the macOS menu-bar bundle, and the Ink TUI were deleted as the
+[context-surfaces specification](../specs/kyberdash-context-surfaces/README.md) delivered;
+the table above is the whole layout.
 
 ## Ingest layer
 
 | Component | Path | Contract |
 |---|---|---|
 | Upstream provider parser | `dash/src/` | Existing. Produces parsed calls plus its deduplication set. Not modified. |
-| `Synthesizer` | `dash/kyber/synth/synth.ts` | Consumes parsed calls; emits canonical records with a declared measurability map. Extends upstream's cross-provider deduplication key rather than adding a parallel mechanism (R3). |
-| `OtlpReceiver` | `dash/kyber/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. |
-| `AspireSource` | `dash/kyber/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
-| `IngestWriter` | `dash/kyber/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
+| `Synthesizer` | `dash/src/synth/synth.ts` | Consumes parsed calls; emits canonical records with a declared measurability map. Extends upstream's cross-provider deduplication key rather than adding a parallel mechanism (R3). |
+| `OtlpReceiver` | `dash/src/otel/receiver.ts` | HTTP listener on the OTLP-standard port 4318 at `POST /v1/traces` and `POST /v1/logs`. It decodes JSON and protobuf to span and log shapes. Each decoded log gets a unique `deriveLogId` (correlation identity, timestamp, and payload digest) so duplicate deliveries of the same class do not collide. A log enriches its correlated span-shaped record and is never a parallel canonical record. |
+| `AspireSource` | `dash/src/otel/aspire.ts` | Optional. Reads spans exported from a running Aspire dashboard (R2.6), supervised with backoff. Records whose parent is missing are grouped by attribute rather than ancestry (R2.7). |
+| `IngestWriter` | `dash/src/otel/writer.ts` | Batches writes and owns backpressure so no record is dropped under load (R2.5). |
 
 The receiver is embedded rather than relying on an external Aspire dashboard because the
 dashboard is a ring buffer — eviction is a measured data-loss class (R2.7) — and because
@@ -176,10 +164,9 @@ unmatched telemetry is quarantined with an auditable reason instead of becoming 
 ## Local harness-source refresh
 
 Session files also enter the store through `kyber-weave dash refresh` (`registerKyberCommands`
-in `dash/kyber/cli/register.ts`, `refreshHarnessSources` in `dash/kyber/refresh/orchestrator.ts`).
+in `dash/src/cli/register.ts`, `refreshHarnessSources` in `dash/src/refresh/orchestrator.ts`).
 That path is the production local-history ingest; OTLP remains a separate receiver. The
-scheduler, source reader, writer queue, and registry live under `dash/kyber/refresh/**`, an
-ADR 0006 adapter seam already allowlisted in `dash/kyber/tools/boundary.ts`.
+scheduler, source reader, writer queue, and registry live under `dash/src/refresh/**`.
 
 The command opens `~/.kyberdash/canon.db` (or `--db`), audits the harness-source registry
 against `getAllProviders()`, and runs **one logical job per harness source type**. Native
@@ -192,13 +179,40 @@ Success, including absent (`unavailable`) sources, exits **0**.
 Each accepted unit is persisted with `CanonStore.commitSourceUnit`: canonical rows,
 `record_provenance`, and `source_checkpoint` in one transaction (schema **11**). After jobs
 drain, `purgeExpiredContent` empties content older than 14 days without touching
-`records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then
-`buildSessions` rebuilds derived tables. Gemini is never a stored harness id; split client
-surfaces stay distinct. A Gemini **selector label** may still appear in the UI as usage /
-survey chrome; it is not `harness=gemini` in `canon.db`. There is no dashboard refresh
-button.
+`records.raw` ([ADR 0018](../adr/0018-kyberdash-content-retention-purge.md)), then the store
+is projected through `projectCanonicalStore` — the same shared entry the live receiver uses
+(see [The shared canonical projection](#the-shared-canonical-projection)). Gemini is never a
+stored harness id; split client surfaces stay distinct. A Gemini **selector label** may still
+appear in the UI as usage / survey chrome; it is not `harness=gemini` in `canon.db`. There is
+no dashboard refresh button.
 
 The contract is [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md).
+
+## The shared canonical projection
+
+Static dot-folder refresh and live OTLP are two ingress adapters over ONE canonical store,
+and both end in the same projection of it
+(`dash/src/canon/projection.ts`). `projectCanonicalStore` is the sole full projection: a
+thin, awaitable entry over the authoritative `buildSessions()`, which rebuilds every derived
+`session`, `run`, `execution`, `harness_rollup`, and `finding` row. Nothing else derives
+sessions — a second derivation or a second database is the divergence this seam exists to
+prevent, and the manual `kyberdash build` command runs the same derivation.
+
+The live collector does not call the projection inline. Accepted span batches and successful
+log enrichment mark a serialized `CanonicalProjectionScheduler` dirty instead:
+
+- At most one pass runs at a time; a burst of dirty marks costs one pass plus **one trailing
+  pass**, never one projection per batch.
+- A failed pass rolls nothing back — records the writer already committed stay committed —
+  reports the error, and leaves the work dirty; the next request retries it. A slow or failing
+  projection can therefore never block, reject, or drop accepted ingestion.
+- Shutdown orders receiver stop, writer stop, projection drain, then store close: `drain()`
+  and `close()` resolve only once no pass is in flight and no trailing pass is owed.
+
+`KyberBridge.listSessions()` (`dash/src/server/bridge.ts`) reads only the canonical derived
+`session` cache. Raw `records` are never synthesized into sessions for reporting: until the
+projection has turned accepted spans into derived rows, a record-only group is not a session
+and appears on no report surface or selector inventory.
 
 ## Normalization layer
 
@@ -216,7 +230,7 @@ flowchart LR
     VAL -->|"fail"| PROB["problem record"]
 ```
 
-Every `HarnessAdapter` (`dash/kyber/canon/adapters/base.ts`) implements the same interface:
+Every `HarnessAdapter` (`dash/src/canon/adapters/base.ts`) implements the same interface:
 detect, relevance, normalize, group, resolve a root, validate, and declare what the harness
 does not export. The last method is what turns a blank view into a stated limitation rather
 than a zero (R7.6, R8.5, R10.2).
@@ -231,7 +245,7 @@ per-instance suffixes, does not track content, and is not stable across reconfig
 ## Canonical model
 
 The canonical record, `TokenUsage`, `CostBlock`, `Measurability`, `Problem` and the canonical
-content keys are defined in `dash/kyber/canon/types.ts`. Field names follow the Python
+content keys are defined in `dash/src/canon/types.ts`. Field names follow the Python
 pipeline's contract so the parity gate can compare like with like.
 
 ### `TokenUsage` and the disjoint-class invariant
@@ -271,7 +285,7 @@ cannot report renders as "not measurable", never as zero — rendering an unrepo
 
 ### Store
 
-`CanonStore` (`dash/kyber/canon/store.ts`) is SQLite through the runtime's built-in module —
+`CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
 schema is a version-controlled constant executed on construction, currently at version 11;
 metadata carries the schema version, and a store built by an older version is migrated in
@@ -301,7 +315,7 @@ records, and the table is a cache: dropping every row and rebuilding loses nothi
 
 Single-session views obscure multi-agent collaboration overhead (tokens and latency spent
 handing off tasks to subagents). KyberDash introduces two first-class derived entities in
-`canon.db` (`dash/kyber/canon/runs.ts`):
+`canon.db` (`dash/src/canon/runs.ts`):
 
 - **`Run` (`RunRow`)**: Represents a single user-initiated task or unit of work. It aggregates
   all executions participating in that task, recording token totals, estimated waste,
@@ -318,17 +332,20 @@ explicitly recorded in `grouping_basis` as `derived` with the specific rule name
 are never silently presented as reported fact. Rebuilding via `kyber build` re-projects both
 tables deterministically from retained records.
 
-`KyberBridge` (`dash/kyber/server/bridge.ts`) reads `canon.db` and serves the derived sessions,
+`KyberBridge` (`dash/src/server/bridge.ts`) reads `canon.db` and serves the derived sessions,
 runs, harness rollups, findings, and unclipped content. That is the single-store end state in
-[ADR 0008](../adr/0008-kyberdash-single-canonical-store.md): production code under `dash/kyber`
-does not open a Python `sessions.db`, and `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy session.
-Tests under `dash/kyber` prove those environment variables are ignored for session listing and payload.
+[ADR 0008](../adr/0008-kyberdash-single-canonical-store.md): production code never opens a
+Python `sessions.db`, and `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy session.
+`dash/src/server/kyber-bridge.test.ts` proves those environment variables are ignored for
+session listing and payload, and that listing serves only derived sessions — record-only
+groups are excluded rather than synthesized
+(see [The shared canonical projection](#the-shared-canonical-projection)).
 
 The session projection emits the ASAD payload directly ([ADR 0011](../adr/0011-asad-only-context-view-and-payload-contract.md)).
 It preserves per-bucket measurability and reasons, so a source that cannot supply content, schemas,
 structure, or counters produces `not_measurable` rather than a misleading zero.
 
-Derived token counts (R4.6) come from `dash/kyber/canon/tokens.ts`, a tokenizer wrapper with a
+Derived token counts (R4.6) come from `dash/src/canon/tokens.ts`, a tokenizer wrapper with a
 store-backed memo cache, and are tagged as derived with the model name so consumers present
 them as a lower bound.
 
@@ -403,18 +420,18 @@ The analysis layer contains pure, hermetic analysis modules that operate over ca
 
 | Analysis | Module | Realizes |
 |---|---|---|
-| Context bucketing, residual, pressure, cache-invalidation flag | `dash/kyber/analysis/context.ts` (`analyzeContext`) | R7 |
-| Schema-cost ranking, never-invoked cost, bounded unused range | `dash/kyber/analysis/schema.ts` (`rankSchemas`) | R8 |
-| Hierarchical timeline, subagent and auxiliary separation | `dash/kyber/analysis/timeline.ts` (`buildTimeline`) | R9 |
-| Cross-harness metric table with availability | `dash/kyber/analysis/compare.ts` (`compareHarnesses`) | R10 |
-| Pure signal engine (8 detectors) | `dash/kyber/analysis/signals.ts` (`computeSignals`) | ADR 0012, ADR 0013 |
-| Context-item classification (evidence of use) | `dash/kyber/analysis/classify.ts` (`classifyContextItem`) | ADR 0013 (D15) |
-| Telemetry-grounded finding engine & waste ranking | `dash/kyber/analysis/findings.ts` (`detectFindings`) | ADR 0013 (D5, D6, D8) |
-| Run & turn comparison by task phase | `dash/kyber/analysis/compare.ts`, `pairing.ts` | ADR 0012 (D11) |
-| Prediction logging & calibration curve | `dash/kyber/analysis/calibration.ts` | ADR 0012 (D11) |
-| Opt-in LLM context review seam | `dash/kyber/analysis/review.ts` | ADR 0015 (D10) |
+| Context bucketing, residual, pressure, cache-invalidation flag | `dash/src/analysis/context.ts` (`analyzeContext`) | R7 |
+| Schema-cost ranking, never-invoked cost, bounded unused range | `dash/src/analysis/schema.ts` (`rankSchemas`) | R8 |
+| Hierarchical timeline, subagent and auxiliary separation | `dash/src/analysis/timeline.ts` (`buildTimeline`) | R9 |
+| Cross-harness metric table with availability | `dash/src/analysis/compare.ts` (`compareHarnesses`) | R10 |
+| Pure signal engine (8 detectors) | `dash/src/analysis/signals.ts` (`computeSignals`) | ADR 0012, ADR 0013 |
+| Context-item classification (evidence of use) | `dash/src/analysis/classify.ts` (`classifyContextItem`) | ADR 0013 (D15) |
+| Telemetry-grounded finding engine & waste ranking | `dash/src/analysis/findings.ts` (`detectFindings`) | ADR 0013 (D5, D6, D8) |
+| Run & turn comparison by task phase | `dash/src/analysis/compare.ts`, `pairing.ts` | ADR 0012 (D11) |
+| Prediction logging & calibration curve | `dash/src/analysis/calibration.ts` | ADR 0012 (D11) |
+| Opt-in LLM context review seam | `dash/src/analysis/review.ts` | ADR 0015 (D10) |
 
-### Pure Signals Engine (`dash/kyber/analysis/signals.ts`)
+### Pure Signals Engine (`dash/src/analysis/signals.ts`)
 
 The signal engine computes deterministic diagnostic signals as pure, testable detectors. Each
 detector declares its numerator, denominator, measurement class, and explicit unobservability rule:
@@ -461,7 +478,7 @@ Comparing runs across prompt revisions or harness configurations requires phase 
 `alignByPhase` aligns runs by logical task phase (discovery, editing, verification) rather than
 chronological turn index. Comparison verdicts enforce a statistical sufficiency threshold
 ($n \ge 5$ completed pairs without outcome regression) before promoting observations to advice.
-Diagnostic predictions are logged and scored in `dash/kyber/analysis/calibration.ts`.
+Diagnostic predictions are logged and scored in `dash/src/analysis/calibration.ts`.
 
 ### Opt-In LLM Context Review Seam (ADR 0015)
 
@@ -474,10 +491,24 @@ an on-demand second opinion:
 
 ## Surface Layer
 
-`dash/kyber/dashboard/data.ts` (`getDashboardData`) turns the canonical store into the single
-payload delivery surfaces consume (R11.1).
+Every reporting surface consumes one versioned `ContextReport` produced by `buildContextReport`
+(`dash/src/analysis/report/build.ts`). The CLI prints it (`kyberdash report`), the REST API
+serves it at `GET /api/kyber/report`, and the tray renders the same document fetched over
+loopback — report, API and tray agree because they share one builder, not because a test
+compares three implementations (design D2, Requirement 11.14;
+`dash/src/cli/report-api-parity.test.ts` proves CLI and REST equality).
 
-### Web Dashboard (dash/dash/)
+The builder reads only what the shared projection derived. The latest-session section reads
+the persisted session payload through `getSessionPayload()`, so a measurable session shows
+measured latest-turn context while a truly absent context keeps the honest
+"harness exported no message structure" reason rather than a fabricated figure.
+`coverage.harnesses` is selector/navigation metadata required by Requirement 8.8: the
+canonical harnesses that have a derived session inside the report's active day window, with
+unscoped window counts, stable under harness selection. Findings, dimensions, latest session,
+and cost remain scoped to the selected harness and window — the inventory is how you
+navigate, not a second analytic report.
+
+### Web Dashboard (dash/web/)
 
 The React web dashboard provides progressive-disclosure views matching the 6-level spine:
 - **`ContextDoctor.tsx`**: Cross-harness dashboard and fleet-wide finding leaderboard.
@@ -490,7 +521,7 @@ The React web dashboard provides progressive-disclosure views matching the 6-lev
 - **`ContextReviewPanel.tsx`**: Opt-in LLM review console with credential safety.
 - **`ScorecardMatrix.tsx`**: Cross-harness six-dimension matrix on Context Doctor.
 
-### Backend REST API Contract (dash/kyber/server/routes.ts)
+### Backend REST API Contract (dash/src/server/routes.ts)
 
 The web dashboard server wires HTTP requests directly to `KyberBridge`:
 
@@ -515,38 +546,43 @@ The web dashboard server wires HTTP requests directly to `KyberBridge`:
 | `/api/kyber/quarantine` | `GET` | `{ entries: QuarantineRow[] }` | Quarantined spans; supports `?limit=`. |
 | `/api/kyber/problems` | `GET` | `{ problems: ProblemRow[] }` | Recorded problems; supports `?limit=`. |
 | `/api/kyber/meta` | `GET` | `MetaResult` | Tokenizer configuration, rates, span counts, and sources. |
+| `/api/kyber/report` | `GET` | `ContextReport` | The versioned context report for the query scope (`harness`, `session`, `run`, `days`); the same document `kyberdash report` prints. |
 
 All `/api/kyber/*` responses return standard headers (`content-type: application/json; charset=utf-8`, `cache-control: no-store`). Unrecognized `/api/kyber/*` routes return HTTP 404 JSON (guaranteed never to fall through to SPA HTML), and non-GET requests return HTTP 405 Method Not Allowed.
 
-### Electron Desktop App (dash/app/)
+### The KyberDash Tray (dash/tray/)
 
-The Electron desktop application delivers a rich desktop window powered by a TypeScript main process
-and a Vite-bundled React renderer. The desktop client spawns the compiled CLI (`dist/cli.js`) to fetch
-dashboard state and stream telemetry updates. For development and visual testing without launching the full
-Electron runtime, a resident demo bridge (`dash/app/demo-bridge.mjs`) provides an HTTP mock bridge on port 4900.
+The tray is a Tauri 2 app: a Rust shell (`dash/tray/src-tauri/`) plus a React popover UI
+(`dash/tray/ui/`). The Rust core owns processes and pixels, not analysis (design D3): it
+resolves the `kyberdash` CLI through a validated-path resolution, supervises exactly one
+`kyberdash web --no-open` child and — when settings allow — the embedded OTLP receiver child,
+polls the bounded loopback report URL on its 15/60-second cadence, and publishes `ViewState`
+snapshots to the popover through `get_view_state` and `view-state-changed`. Exactly six
+commands are registered and capability-granted (`get_view_state`, `refresh_now`, `open_view`,
+`set_settings`, `quit`, `hide_popover`) alongside the narrow
+`core:event:allow-listen`/`core:event:allow-unlisten` grants; the webview holds no network
+permission and no analysis logic. The macOS status item is the KyberDash lightsaber projected
+as a monochrome template image (`icons/tray-template.svg`/`.png`).
 
-### Windows Menubar / Tray App (dash/windows/)
+On macOS the tray runs as a per-user launchd agent (label `io.github.dpalfery.kyberdash`)
+that starts at login and restarts only after an unsuccessful exit
+(`KeepAlive { SuccessfulExit = false }`); an intentional **Quit** stops collection and is not
+restarted. The [runbook](runbook.md) documents running and deploying it.
 
-The Windows menubar tray application is built with Tauri 2.x and Rust, residing in the taskbar notification
-tray to present instant spend statistics and popovers. It binds safely to the local CLI executable via the
-`CODEBURN_BIN` environment variable (validated by `CodeburnCli::resolve()` in `dash/windows/src-tauri/src/cli.rs`),
-enforcing bounded payloads, strict process timeouts, and version gating against CLIs older than `0.9.9`.
+### Report parity
 
-### Status Contract and Native Delivery
-
-The status contract is the one seam the native clients depend on: they spawn the CLI on an
-interval and decode its output, holding no analysis logic. Extending the optional `kyber`
-field in `dash/src/menubar-json.ts` is therefore sufficient to carry a new analysis into the
-menu bar and the Electron window without modifying the clients (R11.5). `tests/status.contract.test.ts`
-pins the contract so a change that would break the native clients fails in CI. The MCP server
-exposes the same figures (R11.6), and `tests/mcp-kyber-parity.test.ts` asserts the MCP payload
-and the status payload agree.
+The one seam every surface depends on is the `ContextReport` itself. The tray, the web
+dashboard, and the CLI render the same document, so parity is structural; the remaining risk —
+the CLI and REST paths drifting apart — is pinned by
+`dash/src/cli/report-api-parity.test.ts`, which runs `kyberdash report --format json` and
+`GET /api/kyber/report` against the same seeded store and scope and asserts deep equality
+(Requirement 11.14). A figure that diverges between surfaces fails CI rather than shipping.
 
 ## Parity gate and migration (R15)
 
-`dash/kyber/tools/parity.ts` runs the ported pipeline over a span corpus and emits the same
+`dash/src/tools/parity.ts` runs the ported pipeline over a span corpus and emits the same
 content-free digest shape as the Python pipeline; the digest test fails when the two differ
-and reports which section diverged (R15.1, R15.2). `dash/kyber/tools/reingest.ts` reconstructs
+and reports which section diverged (R15.1, R15.2). `dash/src/tools/reingest.ts` reconstructs
 a fresh store from existing span exports, so the corpus is re-ingestible without carrying the
 old derived store forward (R15.3). The parity gate is the authorization to retire the Python
 project; the measured rationale the retirement would otherwise take with it is preserved in
@@ -554,11 +590,11 @@ project; the measured rationale the retirement would otherwise take with it is p
 
 ## Related
 
-- [KyberDash runbook](runbook.md) — local development, execution runners, demo bridge, and test suites across all 4 surfaces.
+- [KyberDash runbook](runbook.md) — local development, CLI operations, the tray deployment, and test suites across all surfaces.
 - [KyberDash measurable rationale](../reference/kyberdash-rationale.md) — the measured
   failures behind Requirements 4, 5, 6 and the other quantified constraints.
-- [ADR 0006](../adr/0006-kyberdash-soft-fork-merge-zone-and-embedded-receiver.md) — the
-  foundational decisions and their rejected alternatives.
+- [ADR 0020](../adr/0020-kyberdash-one-time-fork.md) — the one-time fork and the foundational
+  decisions it restates from the archived ADR 0006, with their rejected alternatives.
 - [ADR 0007](../adr/0007-kyberdash-agent-session-analysis-integration.md) — Agent Session Analysis
   integration and navigation topology; its dual-database decision is superseded by
   [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md), and its dual Context

@@ -2,9 +2,9 @@ import { readdir, stat } from 'fs/promises'
 import { basename, dirname, join } from 'path'
 import { homedir } from 'os'
 
-import { FS_SCAN_CONCURRENCY, mapWithConcurrency, readSessionFile } from '../fs-utils.js'
-import { calculateCost, getModelCosts, getShortModelName } from '../models.js'
-import { extractBashCommands } from '../bash-utils.js'
+import { FS_SCAN_CONCURRENCY, mapWithConcurrency, readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost, getModelCosts, getShortModelName } from '../pricing/models.js'
+import { extractBashCommands } from '../ingest/bash-utils.js'
 import type { ProbeRoot, Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 // Grok Build (xAI's coding CLI) stores one session per directory at

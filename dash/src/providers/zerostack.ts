@@ -2,8 +2,8 @@ import { readdir } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir, platform } from 'os'
 
-import { readSessionFile } from '../fs-utils.js'
-import { calculateCost, getShortModelName } from '../models.js'
+import { readSessionFile } from '../ingest/fs-utils.js'
+import { calculateCost, getShortModelName } from '../pricing/models.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 // zerostack (https://github.com/gi-dellav/zerostack) is a minimal Rust coding

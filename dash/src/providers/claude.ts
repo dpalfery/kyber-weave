@@ -5,9 +5,9 @@ import { homedir } from 'os'
 import { createHash } from 'crypto'
 
 import type { Provider, ProbeRoot, SessionSource, SessionParser } from './types.js'
-import { getShortModelName } from '../models.js'
+import { getShortModelName } from '../pricing/models.js'
 import { readConfig } from '../config.js'
-import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../fs-utils.js'
+import { FS_SCAN_CONCURRENCY, mapWithConcurrency } from '../ingest/fs-utils.js'
 
 export type ClaudeConfigSource = {
   id: string
@@ -113,7 +113,7 @@ function cacheDesktopSessionsDirs(key: string, candidates: string[]): string[] {
 }
 
 export function getDesktopSessionsDirs(): string[] {
-  const override = process.env['CODEBURN_DESKTOP_SESSIONS_DIR']
+  const override = process.env['KYBERDASH_DESKTOP_SESSIONS_DIR']
   const appDataInput = process.env['APPDATA']
   const localAppDataInput = process.env['LOCALAPPDATA']
   const platform = process.platform
@@ -340,7 +340,7 @@ export const claude: Provider = {
     const explicitMulti = process.env['CLAUDE_CONFIG_DIRS']
     if (!anyDirReadable && explicitMulti !== undefined && explicitMulti !== '' && configSources.length > 0) {
       process.stderr.write(
-        `codeburn: CLAUDE_CONFIG_DIRS was set but no listed directory could be read. ` +
+        `kyberdash: CLAUDE_CONFIG_DIRS was set but no listed directory could be read. ` +
         `Tried: ${configSources.map(s => s.path).join(', ')}. ` +
         `Use "${pathDelimiter}" as the separator on this platform.\n`,
       )

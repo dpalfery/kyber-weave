@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-19T12:00:00.000Z",
+  "kyberdashVersion": "1.0.0",
+  "scope": {
+    "days": 7
+  },
+  "coverage": {
+    "storePath": "canon.db",
+    "refresh": {
+      "lastSuccessAt": null,
+      "lastFailure": null,
+      "inProgress": null
+    },
+    "harnesses": [],
+    "quarantineCount": 0,
+    "problemCount": 0,
+    "hints": [
+      "No session in the window. Run `kyberdash dash refresh` to read local harness history.",
+      "No successful refresh recorded. Run `kyberdash dash refresh`."
+    ]
+  },
+  "findings": [],
+  "harnesses": [],
+  "latestSession": null,
+  "cost": [
+    {
+      "basis": "unknown",
+      "amountUsd": {
+        "value": null,
+        "reason": "no session in scope carried a cost"
+      }
+    }
+  ]
+}

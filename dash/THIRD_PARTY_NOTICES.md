@@ -1,6 +1,22 @@
 # Third-party notices
 
-CodeBurn is MIT licensed (see `LICENSE`). It also contains code derived from the
+KyberDash ships code first published as CodeBurn. The upstream MIT license
+carries this copyright and permission notice, reproduced here so it travels
+with the binary (the full text lives in `LICENSE`):
+
+> Copyright (c) 2026 AgentSeal
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+
+CodeBurn also contains code derived from the
 projects below, which carry their own terms. Each notice is reproduced here as
 those terms require.
 
