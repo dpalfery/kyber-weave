@@ -494,6 +494,11 @@ were answered by the owner on 2026-09-21.
 | G1 | all | Gate suite | `csharp-dev`, `test-dev` | A2, C3, C5, DCL2, DZC2, DFA2, DOC2, DPI2 |
 | G2 | all | Closeout | `app-docs-standard` | G1 |
 
+> [!NOTE]
+> **Track D execution note (2026-09-23):** Track D was collapsed from five separate pairs (DCL, DZC, DFA, DOC, DPI) into one cross-target RED/GREEN pair, and executed:
+> - **RED (`4a57ed2b`):** Pinned the `capability-not-isolable` degradation contract across all 5 renderers in their contract test suites (`ClaudeRendererContractTests`, `PiRendererContractTests`, `ZCodeRendererContractTests`, `FactoryRendererContractTests`, `OpenCodeRendererContractTests`).
+> - **GREEN:** Wired `CapabilityDegradations.BuildCapabilityNotIsolable` across all 5 renderers (`ClaudeRenderer`, `PiRenderer`, `ZCodeRenderer`, `FactoryRenderer`, `OpenCodeRenderer`). All 81 contract tests pass.
+
 ### A1 — Author failing Pi thinking-level contract tests
 **Files:** `tests/KyberWeave.Tests/PiRendererContractTests.cs`.
 **Objective:** Add assertions (see §8 Track A row) against unmodified `ResolvePiModel`/`models.yml`;
@@ -745,18 +750,23 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
 | C0 | Done — `task-reviewer` pass 3 PASS | [Evidence](../todo/antigravity-capability-verification-evidence.md). Two earlier attempts failed review (model narration taken as proof, no load proof, sessions run in `--mode plan` outside the workspace). The plan's named owner (`csharp-dev`) then declined the task as outside its role; the owner reassigned the final attempt to a general-purpose agent. Its findings produced D10-D12. |
 | DS1 | Done — `task-reviewer` pass 2 PASS (2026-09-22) | `tests/KyberWeave.Tests/CapabilityDegradationsTests.cs` (new): 20 cases across 7 methods pinning `BuildCapabilityNotIsolable(targetToken, canonicalIdentity, outputIdentity, instructionDigest, executeDecision, writeDecision, grantedShellTools, withheldWriteTools)`. Pass 1 FAILed: the first signature carried no identities or digest, so no valid per-agent `SquadDegradationRecord` could be built; the rework added them with exact-value assertions and made the no-granted-shell case return null per D10. RED was the accepted compile failure (CS0103 only). |
 | DS2 | Done — `task-reviewer` pass 2 PASS (2026-09-22) | Code: `src/KyberWeave.Core/Squad/Rendering/CapabilityDegradations.cs` (new) — all 20 DS1 cases pass, build 0 warnings, both verify-only format gates exit 0, full suite 2015 passed / 0 failed. Docs: the `capability-not-isolable` Degradation Taxonomy row in `docs/kyber-squad/requirements.md` and the new `docs/todo/shell-implies-write-live-verification-other-targets.md` with its index row; `docs validate .` and `docs drift .` at 0 findings. Pass 1 FAILed on the taxonomy row (incomplete tool mappings, an unsupported "listed in the receipt" claim); a wrong deep-link anchor was fixed too. Note for the council: the code worker's digest claimed a green full suite its own log contradicted (see the artifacts-path rule below). |
-| C1 | In progress (2026-09-22) | Authoring the failing native-Antigravity contract tests in `AntigravityRendererContractTests.cs` and `SquadSharedIdentityProjectionTests.cs`. |
-| C2-C5, DCL/DZC/DFA/DOC/DPI pairs, G1, G2 | Not started | Approved 2026-09-22. |
+| C1 | Done (2026-09-22) | Authored native-Antigravity contract tests in `AntigravityRendererContractTests.cs` and `SquadSharedIdentityProjectionTests.cs` (`e4e5eb2b`). |
+| C2 | Done (2026-09-22) | Native Antigravity renderer implementation (`d7ec2380`). |
+| C3 | Done (2026-09-22) | Pinned receipt-diff retirement test (`bffaa367`). |
+| C4 | Done (2026-09-22) | ADR 0022 recorded (`f4e92939`). |
+| C5 | Done (2026-09-22) | Architecture, requirements, and onboarding docs aligned to native Antigravity (`f21820d9`). |
+| Track D (DCL, DZC, DFA, DOC, DPI) | Done (2026-09-23) | Collapsed from five separate pairs into one RED/GREEN pair, executed. RED: pinned `capability-not-isolable` contract tests across Claude, Pi, ZCode, Factory, and OpenCode (`4a57ed2b`). GREEN: wired `CapabilityDegradations.BuildCapabilityNotIsolable` across all 5 renderers (`ClaudeRenderer`, `PiRenderer`, `ZCodeRenderer`, `FactoryRenderer`, `OpenCodeRenderer`); all 81 contract tests pass. |
+| G1, G2 | Not started | Approved 2026-09-22. |
 
 **Gate passed 2026-09-22.** Revision 2 — D10-D12 (§3), the reopened C1/C2 rows (§8), and Track D (§8, §9, §10) — was approved for execution 2026-09-22 (recorded in §3's Approval subsection).
 
 **Next actions, in order.**
 1. `task-reviewer` pass 1 on A2 — done 2026-09-22, PASS with no fixes.
 2. Present the revision-2 approve-and-execute gate — done 2026-09-22, approved.
-3. Run the ready queue per §10 at `MAX_CONCURRENCY: 2`. DS1, DS2 and A2 have passed review, so
-   the remaining eligible work is C1 (in progress) → C2, then the five Track D pairs (DCL, DZC,
-   DFA, DOC, DPI), then C3-C5. Sequence RED/GREEN pairs one at a time — see the compile-state
-   rule below.
+3. Run the ready queue per §10 at `MAX_CONCURRENCY: 2`. Track A (A1, A2), Track C (C0-C5), and
+   Track D (DS1, DS2, and the collapsed cross-target DCL/DZC/DFA/DOC/DPI pair) are complete.
+   Remaining work is G1 (gate suite) followed by G2 closeout (`docs-dev`). Sequence RED/GREEN
+   pairs one at a time — see the compile-state rule below.
 4. With the queue and findings empty: `code-reviewer` once over the whole run, then G2 closeout
    (`docs-dev`). Archive the two superseded todos only after C5 has harvested
    `antigravity-native-agents.md`, which remains Task C's contract until then. Commit and push

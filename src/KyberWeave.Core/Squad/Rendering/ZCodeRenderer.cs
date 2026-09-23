@@ -874,6 +874,28 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 InstructionDigest: agent.BodyDigest,
                 Details: string.Join(" ", notExpressible));
         }
+
+        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+            ? exec
+            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+            ? write
+            : SquadPermissionDecision.Deny;
+
+        SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
+            targetToken: TargetToken,
+            canonicalIdentity: agent.Name,
+            outputIdentity: agent.Name,
+            instructionDigest: agent.BodyDigest,
+            executeDecision: executeDecision,
+            writeDecision: writeDecision,
+            grantedShellTools: ["Bash"],
+            withheldWriteTools: ["Edit", "Write"]);
+
+        if (notIsolable is not null)
+        {
+            yield return notIsolable;
+        }
     }
 
     private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradations(

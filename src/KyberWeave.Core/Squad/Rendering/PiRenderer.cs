@@ -569,6 +569,28 @@ public sealed class PiRenderer : ISquadRenderer
                 InstructionDigest: agent.BodyDigest,
                 Details: string.Join(" ", notExpressibleDetails));
         }
+
+        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+            ? exec
+            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+            ? write
+            : SquadPermissionDecision.Deny;
+
+        SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
+            targetToken: "pi",
+            canonicalIdentity: agent.Name,
+            outputIdentity: agent.Name,
+            instructionDigest: agent.BodyDigest,
+            executeDecision: executeDecision,
+            writeDecision: writeDecision,
+            grantedShellTools: ["bash"],
+            withheldWriteTools: ["edit", "write"]);
+
+        if (notIsolable is not null)
+        {
+            yield return notIsolable;
+        }
     }
 
     private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradations(

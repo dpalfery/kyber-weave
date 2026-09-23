@@ -417,5 +417,27 @@ public sealed class OpenCodeRenderer : ISquadRenderer
                 InstructionDigest: agent.BodyDigest,
                 Details: string.Join(" ", notExpressibleDetails));
         }
+
+        SquadPermissionDecision executeDecision = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+            ? exec
+            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+            ? write
+            : SquadPermissionDecision.Deny;
+
+        SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
+            targetToken: SquadTargetCatalog.GetToken(SquadTarget.OpenCode),
+            canonicalIdentity: agent.Name,
+            outputIdentity: agent.Name,
+            instructionDigest: agent.BodyDigest,
+            executeDecision: executeDecision,
+            writeDecision: writeDecision,
+            grantedShellTools: ["bash"],
+            withheldWriteTools: ["edit"]);
+
+        if (notIsolable is not null)
+        {
+            yield return notIsolable;
+        }
     }
 }
