@@ -4,20 +4,22 @@ title: The tray popover cannot load because four of its six IPC commands do not 
 doc-type: todo
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-21
-status: needs-review
+last-reviewed: 2026-09-22
+status: superseded
 ---
 
 # The tray popover cannot load because four of its six IPC commands do not exist
 
 > [!NOTE]
-> **Implementation status — review required:** The runtime wiring, six-command registration,
-> failure feedback, template glyph, built-CLI SQLite resolution, and Tauri hook paths were
-> implemented under the [menu-bar runtime wiring plan](../plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md).
-> Rust and UI contracts pass, and a real Tauri launch reached `127.0.0.1:4747` with HTTP 200
-> and clean child reaping. The todo remains open because CUA could not bind the macOS
-> `LSUIElement`/status-item host (`-10005`), so the real popover and glyph appearance have
-> not yet been observed or captured.
+> **Status: Completed — owner-confirmed 2026-09-22**
+> This todo was delivered by the
+> [menu-bar runtime wiring plan](../archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md)
+> and its canonical-projection correction. The deployed launchd-owned tray renders a live
+> report in the popover, all six IPC commands work from the popover surface, the recovery
+> and event paths are reachable, and the status item shows the KyberDash lightsaber as a
+> monochrome template image. On 2026-09-22 the owner confirmed the corrected behavior on the
+> deployed build: the multi-harness selector inventory, direct Codex scoping, and measured
+> Claude context with no generic fallback. The body below is retained as intake history.
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the seam is. It does not sequence tasks or commit to an implementation.
@@ -94,6 +96,11 @@ exercise `refresh_now`, `open_view`, `set_settings`, `hide_popover`, and `quit`;
 report/event update and visible CLI break/recovery; then capture the template glyph in light
 and dark menu bars with Reduce Transparency and accent settings. Keep this todo in
 `needs-review` until those observations are recorded.
+
+Resolution 2026-09-22: those observations were made — by the owner exercising the deployed
+launchd-owned tray directly rather than through CUA automation, across the plan's T13, T18,
+and T27 live tests and the owner's final confirmation. See the completion note above and the
+plan's closeout record.
 
 ## Original open questions
 

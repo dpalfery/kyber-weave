@@ -4,7 +4,7 @@ title: KyberDash context surfaces design
 doc-type: spec
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-18
+last-reviewed: 2026-09-22
 component: KyberDash
 ---
 
@@ -125,7 +125,11 @@ imported, which `preProcessFile` cannot see because the path is a string literal
 - `knip`, which adds a dependency to answer what `typescript` already can
 
 **D2 — One `ContextReport` model (7.5, 11.14).** The report, the API and the tray all read
-one versioned document. *Rejected:* separate tray endpoints such as `/glance`, which would
+one versioned document. That document itself carries the selector's window-wide harness
+inventory as `coverage.harnesses` — the canonical harnesses with a derived session in the
+active day window (Requirement 8.8) — so choosing a harness scopes the analytic sections of
+the same document and never triggers a second fetch, a second report, or a tray-side
+derivation. *Rejected:* separate tray endpoints such as `/glance`, which would
 be a second derivation of the same figures and need a parity test forever.
 
 **D3 — The tray's Rust core does all HTTP (5.5, 6.10).** The web server rejects a

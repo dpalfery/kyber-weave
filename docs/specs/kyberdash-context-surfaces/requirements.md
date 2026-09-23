@@ -4,7 +4,7 @@ title: KyberDash context surfaces requirements
 doc-type: requirements
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-18
+last-reviewed: 2026-09-22
 component: KyberDash
 keywords:
   - codeburn fork
@@ -345,7 +345,12 @@ browser.
 
 8.8. WHEN the harness selector renders THEN it SHALL list All plus every canonical harness
 with a session in the findings window, and choosing one SHALL scope the session panel, the
-findings list and the status item, and SHALL persist across restarts.
+findings list and the status item, and SHALL persist across restarts. The selector's
+inventory SHALL come from the report's window-wide canonical derived-session coverage — the
+canonical harnesses with a derived session in the active day window, carrying unscoped window
+counts and remaining stable under harness selection — so it stays a complete navigation
+inventory while the report's findings, dimensions, latest session and cost stay scoped to the
+selection (see 11.11).
 
 8.9. WHEN cost is shown THEN it SHALL be one secondary figure — the scope's cost over the
 findings window with its basis — placed after the token figures and never used as a sort
@@ -469,8 +474,12 @@ containing no terminal escape sequences.
 11.10. WHEN `--format` is `json` THEN the output SHALL be one JSON document carrying a
 `schemaVersion` field, in which an unmeasurable value is `null` with a reason and never `0`.
 
-11.11. WHEN `--harness`, `--session`, `--run` or `--days` is given THEN every section SHALL
-be scoped to it, and `--days` SHALL accept a positive integer defaulting to 7.
+11.11. WHEN `--harness`, `--session`, `--run` or `--days` is given THEN every analytic
+section SHALL be scoped to it — findings, harness dimensions, latest session and cost — and
+`--days` SHALL accept a positive integer defaulting to 7. The coverage section's harness
+inventory is the exception by design (Requirement 8.8): it lists the canonical harnesses with
+a derived session in the active day window regardless of the selected harness, because it is
+selector/navigation metadata rather than an analytic section.
 
 11.12. IF an argument is invalid THEN the report SHALL exit 2 before opening the store; IF
 the store cannot be opened or read THEN it SHALL exit 1; otherwise it SHALL exit 0, including

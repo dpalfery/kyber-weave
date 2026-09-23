@@ -1,17 +1,19 @@
 ---
-id: plans/2026-09-20-kyberdash-menu-bar-runtime-wiring
+id: archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring
 title: Restore KyberDash menu bar runtime wiring
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-21
+last-reviewed: 2026-09-22
 development-mode: test-first
 ---
 
 # Restore KyberDash menu bar runtime wiring
 
-**Status:** Ready — the owner approved the canonical-projection architecture and execution on 2026-09-21; T20–T28 below supersede the earlier proposed selector-only T20–T27 pass.  
+**Status:** Archived  
+**Archive Date:** 2026-09-22  
+**Completion:** Complete — executed, review-approved, and owner-confirmed on 2026-09-22; see [Closeout (T28, 2026-09-22)](#closeout-t28-2026-09-22). The owner approved the canonical-projection architecture and execution on 2026-09-21; T20–T28 superseded the earlier proposed selector-only T20–T27 pass.  
 **Date:** 2026-09-21  
 **Development mode:** test-first  
 **Goal:** Make the tray popover reach a live report, execute its commands, recover visibly from failures, show a legible macOS status glyph, and ensure static refresh plus live OTLP feed one authoritative canonical projection that every report surface reads.
@@ -20,12 +22,12 @@ development-mode: test-first
 
 At intake, the tray opened a popover that remained on `Reading the store…`. The missing Rust
 command, runtime orchestration, event emission, and template icon are documented in [the
-originating todo](../todo/menu-bar-fix.md). This plan records how the implementation is
+originating todo](../../todo/menu-bar-fix.md). This plan records how the implementation is
 reconciled with the existing context-surfaces requirements and design.
 
 ## Approved decisions and provenance
 
-The conductor relayed the owner's explicit **approve and execute** decision on 2026-09-20 for this plan and its test-first Test contract as saved in Draft. No additional product decision was required. The existing [context-surfaces requirements](../specs/kyberdash-context-surfaces/requirements.md), [design](../specs/kyberdash-context-surfaces/design.md) C9–C10, and [task list](../specs/kyberdash-context-surfaces/tasks.md) stream E supply the product contract. In particular, Requirements 7.1 and 10.1 already require a tray-owned server and a refresh at start. Requirements 6.7, 7.4, and 8.11 distinguish missing CLI, stale data, and empty data. The todo's startup question is therefore settled by the existing contract. A visible IPC failure and dedicated monochrome template glyph are reversible implementation details within the approved acceptance criteria. The stream E audit is an evidence task: checkmarks are preserved only where reachable behavior is demonstrated.
+The conductor relayed the owner's explicit **approve and execute** decision on 2026-09-20 for this plan and its test-first Test contract as saved in Draft. No additional product decision was required. The existing [context-surfaces requirements](../../specs/kyberdash-context-surfaces/requirements.md), [design](../../specs/kyberdash-context-surfaces/design.md) C9–C10, and [task list](../../specs/kyberdash-context-surfaces/tasks.md) stream E supply the product contract. In particular, Requirements 7.1 and 10.1 already require a tray-owned server and a refresh at start. Requirements 6.7, 7.4, and 8.11 distinguish missing CLI, stale data, and empty data. The todo's startup question is therefore settled by the existing contract. A visible IPC failure and dedicated monochrome template glyph are reversible implementation details within the approved acceptance criteria. The stream E audit is an evidence task: checkmarks are preserved only where reachable behavior is demonstrated.
 
 The conductor relayed a second explicit **approve and execute** decision on 2026-09-21 after the owner tested the locally deployed bundle. That approval covers the corrective Test contract and tasks T8–T14 below. The owner's direct report settles the remaining product choice: the menu-bar glyph is the existing KyberDash lightsaber, projected as a monochrome macOS template image, rather than the temporary letter `K`. No decision remains open.
 
@@ -903,3 +905,68 @@ authorization to execute this plan on 2026-09-21. Development mode remains test-
 are no open product or implementation decisions; the precise internal report-field treatment
 is pinned by T24–T25 as compatible `coverage.harnesses` navigation metadata, not a second
 endpoint or report fetch.
+
+## Closeout (T28, 2026-09-22)
+
+**Review verdict.** The code-review council returned **Approve** on 2026-09-22 with risk
+**LOW** and zero findings. All ten declared gates exited 0: dash typecheck, lint, test
+(3546/3546), test:locks (36/36), and check:reachable; tray UI typecheck and 60/60 tests;
+cargo fmt, clippy, and 125 Rust tests.
+
+**Owner confirmation.** The owner confirmed the deployed behavior on 2026-09-22: the
+multi-harness selector lists the canonical in-window inventory, Codex can be scoped directly,
+and the Claude latest-session panel shows measured context with no generic fallback. The
+deployed shape is the launchd-owned per-user tray (label `io.github.dpalfery.kyberdash`,
+crash-only `KeepAlive { SuccessfulExit = false }`) running the self-contained staged CLI
+(Node SEA, darwin-arm64, version 0.9.23, SHA-256
+`b8b911ff13de23e923a8487e63a43eed167da2967732f53d61e22e7ee65ceb11`) at
+`~/Library/Application Support/io.github.dpalfery.kyberdash/local-bin/kyberdash`.
+
+**Shipped model, as confirmed.** Static dot-folder refresh and live OTLP remain separate
+ingress adapters; both end in one shared projection over `~/.kyberdash/canon.db` through
+`projectCanonicalStore()` over `buildSessions()`. Live batches mark a serialized
+`CanonicalProjectionScheduler` dirty — single-flight, one trailing pass, failure retains the
+dirty work and retries on the next request, and shutdown drains in receiver-stop →
+writer-stop → projection-drain → store-close order. No surface derives sessions from raw
+records: `KyberBridge.listSessions()` reads only canonical derived sessions, the raw-records
+fallback having been deleted. `buildLatestSession()` reads the persisted payload
+(`getSessionPayload()`), so measurable sessions show measured latest-turn context and truly
+absent context keeps the honest fallback. `coverage.harnesses` is the window-only canonical
+derived-session inventory — the selector/navigation metadata of Requirement 8.8, carrying
+unscoped window counts and stable under harness selection — while findings, dimensions,
+latest session, and cost remain selected-scope.
+
+**Commit-message caveat.** Commit 5f2fe223's message cites the dash suite as 3545/3546 with
+the source-layout `kyber` failure. That was stale on arrival: two untracked debris trees
+(`dash/kyber/`, `dash/kyber-weave/dash/kyber/`, node_modules-only) were deleted the same day
+with explicit owner approval after a guard verified nothing tracked was removed, and the
+suite is 3546/3546 green at HEAD.
+
+**Report-only dispositions (known notes, no action).** The manual `kyberdash build` CLI
+command calls `buildSessions` directly rather than through `projectCanonicalStore`
+(byte-identical behavior; the projection entry is a pure delegation). The REST report's
+`coverage.storePath` renders relative where the CLI renders absolute; no requirement pins it.
+
+**Deferred work.** Stale `refresh_run` rows remained reproducible on the deployed build
+(rows at 03:34, 03:38, and 03:43 across 2026-09-21/22) and are recorded as separate deferred
+work in [docs/todo/stale-refresh-run-rows.md](../../todo/stale-refresh-run-rows.md); they are
+not on the report data path and are not claimed fixed by the projection work. The originating
+todo, [docs/todo/menu-bar-fix.md](../../todo/menu-bar-fix.md), is closed as completed by this
+plan.
+
+**Documentation closeout.** `docs/dash/architecture.md` and `docs/dash/runbook.md` now
+describe the shared projection, the derived-session report contract, and the deployed tray;
+context-surfaces requirements 8.8 and 11.11 and design D2 were clarified (wording only) so
+the windowed navigation inventory is explicit; and the stale `dash/kyber/**` layout
+references in those two canonical docs were corrected to the unified `dash/src/**` tree,
+matching the debris cleanup above. The canonical-projection section of this plan is the
+executed pass; the earlier T1–T19 corrective passes and the superseded selector-only proposal
+remain as recorded history.
+
+**Mechanical archival step.** The closeout session ran without a shell tool, so one physical
+step remains for the orchestrator: move this file to `docs/archive/plans/`, set its
+frontmatter to `id: archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring` and
+`status: archived` with the body header **Status:** Archived / **Archive Date:** 2026-09-22
+(the convention of the other archived plans), repoint its relative links one level deeper
+(`../../…`), and switch this plan's row in the plan index to the `../archive/plans/…` link.
+Until that move, the file stays here and the index's archived register points at it.
