@@ -1,8 +1,8 @@
 # Bootstrap Templates
 
-Minimal skeletons for a new documentation architecture. Fill in the bracketed parts from the actual repo — don't invent owners, dates, or components you haven't verified.
+Minimal skeletons for a new documentation architecture. Headings name each file's location under **<docs-root>**; inside a skeleton, `[docs-root]` is the chosen root written out literally. Fill in the bracketed parts from the actual repo — don't invent owners, dates, or components you haven't verified.
 
-## 6-Docs/README.md
+## <docs-root>/README.md
 
 ```markdown
 # [Project] Documentation
@@ -23,7 +23,7 @@ Canonical home for detailed [Project] documentation. Start with system docs, the
 - [Archived material](archive/) — historical only, never current guidance.
 ```
 
-## 6-Docs/system/architecture.md
+## <docs-root>/system/architecture.md
 
 ```markdown
 # [Project] Architecture
@@ -35,15 +35,15 @@ Canonical home for detailed [Project] documentation. Start with system docs, the
 [Core subsystems and their interactions]
 ```
 
-## 6-Docs/documentation-standard.md
+## <docs-root>/documentation-standard.md
 
 ```markdown
 # [Project] Documentation Standard
 
 ## Locations
 - A component README at its source root: purpose, boundaries, links to detailed docs.
-- Detailed docs live in `6-Docs/<component>/`.
-- Plans are working documents in `6-Docs/plans/`; superseded material moves to `6-Docs/archive/`.
+- Detailed docs live in `[docs-root]/<component>/`.
+- Plans are working documents in `[docs-root]/plans/`; superseded material moves to `[docs-root]/archive/`.
 
 ## Required content per component
 - `onboarding.md` — setup and debug path.
@@ -57,7 +57,7 @@ Do not create a second canonical document for a topic. Link to the established s
 `Draft → Ready → In progress → Blocked → Review required → Completed/Superseded → Archived`. A plan is archived only after its acceptance criteria and documentation impact have been verified.
 ```
 
-## 6-Docs/catalog.md
+## <docs-root>/catalog.md
 
 ```markdown
 # [Project] Component Catalog
@@ -74,20 +74,21 @@ Do not create a second canonical document for a topic. Link to the established s
 
 Agents and skills should look up these facts by name rather than hardcoding them:
 
-- **Documentation Index:** `6-Docs/README.md`
-- **Documentation Standard:** `6-Docs/documentation-standard.md`
-- **Component Catalog:** `6-Docs/catalog.md`
-- **Plan Index:** `6-Docs/plans/README.md`
+- **<docs-root>**: `[docs-root]`
+- **<documentation-index>**: `[docs-root]/README.md`
+- **<documentation-standard>**: `[docs-root]/documentation-standard.md`
+- **<component-catalog>**: `[docs-root]/catalog.md`
+- **<plan-index>**: `[docs-root]/plans/README.md`
 
-Skills SHALL reference these paths by the property name above (e.g. "the path declared as **Plan Index** in root AGENTS.md") rather than embedding a relative link that traverses out of the skill's own directory.
+Skills SHALL reference these paths by the property name above (e.g. "the path declared as **<plan-index>** in root AGENTS.md") rather than embedding a relative link that traverses out of the skill's own directory.
 ```
 
-## 6-Docs/plans/README.md
+## <docs-root>/plans/README.md
 
 ```markdown
 # Plan Index
 
-Authoritative inventory for `6-Docs/plans/`. Read before opening a plan. Open a plan only when relevant and listed as `Draft`, `Ready`, `In progress`, or `Blocked`.
+Authoritative inventory for `[docs-root]/plans/`. Read before opening a plan. Open a plan only when relevant and listed as `Draft`, `Ready`, `In progress`, or `Blocked`.
 
 ## Active
 | Plan | Status | Goal |

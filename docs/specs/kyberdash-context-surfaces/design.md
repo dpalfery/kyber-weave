@@ -568,9 +568,9 @@ flowchart LR
 - a definition of done
 
 The brief tells the agent to read the repository's `AGENTS.md` first and gives the spec path
-explicitly: `docs/specs/kyberdash-context-surfaces/`. That matters because Squad's canonical
-instructions still hard-code `6-Docs` in places (see the
-[squad-hardcoded-docs-root todo](../../todo/squad-hardcoded-docs-root.md)).
+explicitly: `docs/specs/kyberdash-context-surfaces/`. That matters because a harness may still
+carry Squad instructions installed before `6-Docs` gave way to a resolvable docs root (see the
+[archived squad-hardcoded-docs-root todo](../../archive/todo/squad-hardcoded-docs-root.md)).
 
 **Running the delegates.** The flags below were checked against the CLIs installed on this
 machine: `cursor-agent` 2026.09.02 and `agy` 1.2.2.

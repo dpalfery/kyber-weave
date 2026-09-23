@@ -1,14 +1,26 @@
 ---
-id: todo/squad-hardcoded-docs-root
+id: archive/todo/squad-hardcoded-docs-root
 title: Replace the hardcoded 6-Docs path with a resolvable docs-root across Kyber-Squad's canonical instructions
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-31
-status: draft
+last-reviewed: 2026-09-23
+status: superseded
 ---
 
 # Replace the hardcoded 6-Docs path with a resolvable docs-root across Kyber-Squad's canonical instructions
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+Completed. The two `second-brain` files now resolve paths through **<docs-root>** in the Config Reg,
+following the precedent the product-owner slice set: an authoring-time placeholder, with no renderer
+substitution. When bootstrapping a repo that has no registry, the skill agrees the root with the user
+and declares it as **<docs-root>**, and its registry template now uses the property names Squad's
+canonical instructions resolve. `grep -rn "6-Docs" products/kyber-squad/agents/ products/kyber-squad/skills/`
+returns only illustrative `e.g.` examples.
+
+---
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the precedent already is. It does not sequence tasks or commit to an
