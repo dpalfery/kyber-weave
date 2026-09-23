@@ -662,9 +662,10 @@ start until A2 has landed, to avoid a concurrent-edit race on the same file (§1
 **Objective:** Harvest durable facts from this plan into canonical docs (already done in C5;
 this task verifies nothing was missed), sync `docs/plans/README.md`'s Active/Archived tables,
 and archive this plan per the standard lifecycle. Archiving the two source todos
-(`black-hawk-hotel-todo.md`, `antigravity-native-agents.md`) and the C0 evidence document is the
-conductor's post-Ready promotion step, not this task (defect 5) — G2 confirms that step ran, it
-does not perform it.
+(`black-hawk-hotel-todo.md`, `antigravity-native-agents.md`) is the conductor's post-Ready promotion
+step, not this task (defect 5) — G2 confirms that step ran, it does not perform it (the C0 evidence
+document remains live at `docs/todo/antigravity-capability-verification-evidence.md` with status current
+because the follow-up todo depends on it).
 
 ---
 
