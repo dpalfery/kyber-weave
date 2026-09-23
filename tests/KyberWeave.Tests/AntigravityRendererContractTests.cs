@@ -735,8 +735,120 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 Assert.False(
                     tools.Contains("run_command", StringComparer.Ordinal),
                     $"Documentation agent '{agent.Name}' must not have run_command tool");
+                Assert.True(
+                    tools.Contains("write_to_file", StringComparer.Ordinal),
+                    $"Documentation agent '{agent.Name}' must have write_to_file tool");
             }
         }
+    }
+
+    [Fact]
+    public async Task RenderAsync_Antigravity_Native_EnableWriteToolsAssertedPerCapabilityProfile()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Antigravity],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        HashSet<string> expectedTrueProfiles = ["documentation", "investigator", "reviewer", "worker", "publishing-worker"];
+        HashSet<string> expectedFalseProfiles = ["architect", "orchestrator", "product-planning", "read-only"];
+
+        List<SquadAgent> trueAgents = [];
+        List<SquadAgent> falseAgents = [];
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+                                        writeDecision == SquadPermissionDecision.Allow;
+            bool processExecuteAllow = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
+                                       execDecision == SquadPermissionDecision.Allow;
+            bool expectedEnableWrite = filesystemWriteAllow || processExecuteAllow;
+
+            SquadDeploymentFile agentFile = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
+            YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
+            string enableWriteTools = RequireScalar(frontmatter, "enable_write_tools");
+
+            if (expectedEnableWrite)
+            {
+                trueAgents.Add(agent);
+                Assert.True(
+                    expectedTrueProfiles.Contains(agent.CapabilityProfile),
+                    $"Agent '{agent.Name}' with profile '{agent.CapabilityProfile}' has enableWriteTools true but profile was not in expectedTrueProfiles");
+                Assert.Equal("true", enableWriteTools);
+            }
+            else
+            {
+                falseAgents.Add(agent);
+                Assert.True(
+                    expectedFalseProfiles.Contains(agent.CapabilityProfile),
+                    $"Agent '{agent.Name}' with profile '{agent.CapabilityProfile}' has enableWriteTools false but profile was not in expectedFalseProfiles");
+                Assert.Equal("false", enableWriteTools);
+            }
+        }
+
+        Assert.NotEmpty(trueAgents);
+        Assert.NotEmpty(falseAgents);
+    }
+
+    [Fact]
+    public async Task RenderAsync_Antigravity_Native_WriteToFileToolAssertedPerCapabilityProfile()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadRendererRegistry registry = new([new AntigravityRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Antigravity],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        HashSet<string> expectedWriteToFileProfiles = ["documentation", "worker", "publishing-worker"];
+
+        List<SquadAgent> writeAgents = [];
+        List<SquadAgent> nonWriteAgents = [];
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+                                        writeDecision == SquadPermissionDecision.Allow;
+
+            SquadDeploymentFile agentFile = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
+            YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
+            YamlNode? toolsNode = OptionalScalar(frontmatter, "tools");
+
+            string[] tools = toolsNode is YamlSequenceNode toolsSeq
+                ? toolsSeq.Children.OfType<YamlScalarNode>().Select(n => n.Value ?? string.Empty).ToArray()
+                : [];
+
+            if (filesystemWriteAllow)
+            {
+                writeAgents.Add(agent);
+                Assert.True(
+                    expectedWriteToFileProfiles.Contains(agent.CapabilityProfile),
+                    $"Agent '{agent.Name}' with profile '{agent.CapabilityProfile}' has filesystem.write: allow but profile was not in expectedWriteToFileProfiles");
+                Assert.Contains("write_to_file", tools);
+            }
+            else
+            {
+                nonWriteAgents.Add(agent);
+                Assert.DoesNotContain("write_to_file", tools);
+            }
+        }
+
+        Assert.NotEmpty(writeAgents);
+        Assert.NotEmpty(nonWriteAgents);
     }
 
     [Fact]

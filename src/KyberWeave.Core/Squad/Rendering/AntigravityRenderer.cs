@@ -258,9 +258,12 @@ public sealed class AntigravityRenderer : ISquadRenderer
             frontmatter.Add("tools", toolsSeq);
         }
 
-        // enable_write_tools: true when filesystem.write is allowed (even if narrowed)
-        bool enableWriteTools = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
-                                writeDecision == SquadPermissionDecision.Allow;
+        // enable_write_tools: true when filesystem.write or process.execute is allowed (ADR 0022 section 4, D4)
+        bool filesystemWriteAllow = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision writeDecision) &&
+                                    writeDecision == SquadPermissionDecision.Allow;
+        bool processExecuteAllow = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision execDecision) &&
+                                   execDecision == SquadPermissionDecision.Allow;
+        bool enableWriteTools = filesystemWriteAllow || processExecuteAllow;
         frontmatter.Add("enable_write_tools", enableWriteTools ? "true" : "false");
 
         // enable_subagent_tools: true when delegates-to is non-empty
@@ -340,16 +343,16 @@ public sealed class AntigravityRenderer : ISquadRenderer
 
         if (filesystemWriteAllow && !processExecuteAllow)
         {
-            // filesystem.write allowed, process.execute not: emit write tools (but withheld ones per D12)
-            // tools.Add("write_to_file");  // D12: withheld
+            // filesystem.write allowed, process.execute not: emit write tools (replace tools withheld per D12)
+            tools.Add("write_to_file");
             // tools.Add("replace_file_content");  // D12: withheld
             // tools.Add("multi_replace_file_content");  // D12: withheld
         }
         else if (filesystemWriteAllow && processExecuteAllow)
         {
-            // Both allowed: emit execute tool only (write tools withheld per D12)
+            // Both allowed: emit execute and write tools (replace tools withheld per D12)
             tools.Add("run_command");
-            // tools.Add("write_to_file");  // D12: withheld
+            tools.Add("write_to_file");
             // tools.Add("replace_file_content");  // D12: withheld
             // tools.Add("multi_replace_file_content");  // D12: withheld
         }
