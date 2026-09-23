@@ -5,10 +5,16 @@ doc-type: todo
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-21
-status: draft
+status: superseded
 ---
 
 # Antigravity has native agents, but the Squad renderer still lowers roles to skills
+
+**Superseded by:** [2026-09-21-pi-thinking-and-antigravity-native-agents](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (Draft)
+
+Task C of the Black Hawk Hotel handover (reclassify Antigravity from fallback role-skill lowering to a native per-agent target) is now tracked by that plan.
+
+---
 
 This is **context for planning the work, not a plan**. It records what the harness actually
 does, so the renderer can be written without guessing.

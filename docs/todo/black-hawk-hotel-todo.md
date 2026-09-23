@@ -5,10 +5,16 @@ doc-type: todo
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-21
-status: draft
+status: superseded
 ---
 
 # Black Hawk Hotel — handover of in-flight harness fidelity work
+
+**Superseded by:** [2026-09-21-pi-thinking-and-antigravity-native-agents](../plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md) (Draft)
+
+Tasks A and C from this handover (emit `thinking` for Pi, and reclassify Antigravity from fallback role-skill lowering to a native per-agent target) are now tracked by that plan.
+
+---
 
 This is a **handover, not a plan**. It records what was delivered, what was found but not
 built, and what the next agent needs in order to start cold. Three tasks are open; task C is
