@@ -2,43 +2,53 @@ schema: kyber-squad.model-profiles/v1
 profiles:
   deep-planning:
     default: inherit
+    antigravity: pro
     claude: opus
     codex: gpt-5.6-sol
     copilot: GPT-5.6 Sol (copilot)
     cursor: gpt-5.6-sol[context=272k,reasoning=high,fast=false]
     kilo: glm5.3
     opencode: zai-coding-plan/glm-5.3
-    pi: zai/glm-5.3
+    pi: zai/glm-5.3[thinking=high]
+    zcode: glm-5.3
   fast:
     default: inherit
+    antigravity: flash
     claude: haiku
     codex: gpt-5.6-luna
     copilot: MAI-Code-1.1-Flash (copilot)
     cursor: composer-2.5[]
     kilo: spark1.3 contributor
     opencode: opencode/muse-spark-1.3-contributor-free
-    pi: opencode/muse-spark-1.3-contributor-free
+    pi: opencode/muse-spark-1.3-contributor-free[thinking=low]
+    zcode: glm-5.3-flash
   general:
     default: inherit
+    antigravity: flash
     claude: haiku
     codex: gpt-5.6-terra
     copilot: Grok 4.6 (copilot)
     cursor: grok-4.6[]
     kilo: muse-spark1.3 contributor
     opencode: opencode/muse-spark-1.3-contributor-free
-    pi: opencode/muse-spark-1.3-contributor-free
+    pi: opencode/muse-spark-1.3-contributor-free[thinking=medium]
+    zcode: glm-5.3-flash
   orchestration:
     default: inherit
+    antigravity: flash
     claude: haiku
     kilo: inherit
     opencode: opencode/big-pickle
     pi: inherit
+    zcode: glm-5.3-flash
   reviewer:
     default: inherit
+    antigravity: pro
     claude: sonnet
     codex: gpt-5.6-terra
     copilot: Kimi K2.7 Code (copilot)
     cursor: kimi-k2.7-code[]
     kilo: kimi k2.7 code
     opencode: opencode-go/kimi-k2.7-code
-    pi: opencode-go/kimi-k2.7-code
+    pi: opencode-go/kimi-k2.7-code[thinking=high]
+    zcode: glm-5.3-flash

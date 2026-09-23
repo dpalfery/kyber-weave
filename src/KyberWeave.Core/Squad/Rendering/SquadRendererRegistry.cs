@@ -163,7 +163,8 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             string token = SquadTargetCatalog.GetToken(target);
             bool isNative = target is SquadTarget.Codex or SquadTarget.Cursor or SquadTarget.Claude or
                             SquadTarget.Copilot or SquadTarget.OpenCode or SquadTarget.Kilo or
-                            SquadTarget.Factory or SquadTarget.Pi;
+                            SquadTarget.Factory or SquadTarget.Pi or SquadTarget.ZCode or
+                            SquadTarget.Antigravity;
 
             List<SquadDeploymentFile> targetFiles = files
                 .Where(f => string.Equals(f.Target, token, StringComparison.Ordinal))
@@ -182,22 +183,16 @@ public sealed class SquadRendererRegistry : ISquadRenderer
 
                 foreach (string sharedIdentity in sharedIdentities)
                 {
-                    List<SquadDeploymentFile> sharedIdentityFiles = targetFiles.Where(f =>
-                        f.RelativePath.EndsWith($"/{sharedIdentity}.toml", StringComparison.Ordinal) ||
-                        f.RelativePath.EndsWith($"/{sharedIdentity}.md", StringComparison.Ordinal) ||
-                        f.RelativePath.EndsWith($"/{sharedIdentity}.agent.md", StringComparison.Ordinal) ||
+                    // Native targets can emit both agent and skill files for the same shared identity
+                    // (Native Both pattern: separate namespaces). Only check for duplicate files within
+                    // the same projection type (multiple agents or multiple skills), not across types.
+                    List<SquadDeploymentFile> skillFiles = targetFiles.Where(f =>
                         f.RelativePath.Contains($"/{sharedIdentity}/SKILL.md", StringComparison.Ordinal)).ToList();
 
-                    if (sharedIdentityFiles.Count > 1)
+                    if (skillFiles.Count > 1)
                     {
                         throw new SquadRenderValidationException(
-                            $"Duplicate projection detected for '{sharedIdentity}' on native target '{token}'.");
-                    }
-
-                    if (sharedIdentityFiles.Any(f => f.RelativePath.Contains("/skills/", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        throw new SquadRenderValidationException(
-                            $"Native target '{token}' emitted skill for shared agent '{sharedIdentity}', violating single-projection rule.");
+                            $"Duplicate skill projection detected for '{sharedIdentity}' on native target '{token}'.");
                     }
                 }
             }
@@ -381,11 +376,11 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.OpenCode => $".opencode/agents/{agent.Name}.md",
             SquadTarget.Kilo => $".kilo/agents/{agent.Name}.md",
             SquadTarget.Factory => $".factory/droids/{agent.Name}.md",
-            SquadTarget.Antigravity =>
-                $".agents/skills/{ResolveFallbackOutputIdentity(agent.Name, skillNames, sharedIdentities)}/SKILL.md",
+            SquadTarget.Antigravity => $".agents/agents/{agent.Name}/agent.md",
             SquadTarget.Warp =>
                 $".warp/skills/{ResolveFallbackOutputIdentity(agent.Name, skillNames, sharedIdentities)}/SKILL.md",
             SquadTarget.Pi => ResolvePiAgentOutputPath(agent, fallbackProfiles),
+            SquadTarget.ZCode => ResolveZCodeAgentOutputPath(agent, fallbackProfiles),
             _ => null
         };
 
@@ -407,6 +402,32 @@ public sealed class SquadRendererRegistry : ISquadRenderer
                 : null;
     }
 
+    /// <remarks>
+    /// ZCode is the second native target whose output path depends on
+    /// <see cref="SquadAgent.Invocation"/>, and the only one that lowers a primary agent onto
+    /// a primitive that is neither an agent nor a skill. A subagent-invocation agent claims
+    /// <c>.zcode/agents/&lt;name&gt;.md</c>; a primary-invocation agent claims
+    /// <c>.zcode/commands/&lt;name&gt;.md</c> when its fallback profile's
+    /// <c>no-primary-agent</c> value is <c>skill</c>, because ZCode has no primary-agent
+    /// primitive but does have a project-scoped slash command (see
+    /// <see cref="ZCodeRenderer"/>). <c>omit</c> claims no output path, matching the renderer
+    /// emitting nothing.
+    /// </remarks>
+    private static string? ResolveZCodeAgentOutputPath(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadFallbackProfile> fallbackProfiles)
+    {
+        if (agent.Invocation == SquadInvocation.Subagent)
+        {
+            return $".zcode/agents/{agent.Name}.md";
+        }
+
+        return fallbackProfiles.TryGetValue(agent.Fallback, out SquadFallbackProfile? profile) &&
+            string.Equals(profile.NoPrimaryAgent, "skill", StringComparison.Ordinal)
+                ? $".zcode/commands/{agent.Name}.md"
+                : null;
+    }
+
     private static string? SkillOutputPath(
         SquadTarget target,
         string name,
@@ -422,6 +443,7 @@ public sealed class SquadRendererRegistry : ISquadRenderer
             SquadTarget.Antigravity => $".agents/skills/{name}/SKILL.md",
             SquadTarget.Warp => $".warp/skills/{name}/SKILL.md",
             SquadTarget.Pi when !sharedIdentities.Contains(name) => $".pi/skills/{name}/SKILL.md",
+            SquadTarget.ZCode when !sharedIdentities.Contains(name) => $".zcode/skills/{name}/SKILL.md",
             _ => null
         };
 

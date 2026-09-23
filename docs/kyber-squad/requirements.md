@@ -4,10 +4,11 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-16
+last-reviewed: 2026-09-23
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
+  - adr/0022-antigravity-native-agents
 ---
 
 # Kyber-Squad requirements and degradation contract
@@ -22,7 +23,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 |---|---|
 | **KS-001** | **Canonical Source Governance**: Maintain exactly 21 canonical agent instruction bodies and 24 canonical skill identities under `products/kyber-squad/`. The skill tree retains 64 supplemental resources, for 88 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, all retained until the skill-resource content-preserving migration is accepted. Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A Copilot-only internal capability profile may validate exact target tool membership but must not replace or widen the shared capability profile or metadata. |
-| **KS-003** | **Deterministic Target Resolution**: Resolve deployment targets from explicit CLI flags, saved repository configuration, existing receipts (for update/uninstall), or strong filesystem markers. The `all` keyword expands strictly to the approved 10-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `pi`, `warp`, `factory`). |
+| **KS-003** | **Deterministic Target Resolution**: Resolve deployment targets from explicit CLI flags, saved repository configuration, existing receipts (for update/uninstall), or strong filesystem markers. The `all` keyword expands strictly to the approved 11-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `pi`, `warp`, `factory`, `zcode`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. |
 | **KS-005** | **Version Lockstep**: Enforce exact version equality across the CLI, Squad release asset, and MCP server. Verify all release assets against published SHA-256 checksums without installing external dependencies as side effects. |
 | **KS-006** | **Dual Distribution Packaging**: Provide `squad pack` to build an APM distribution zip containing all agents with their owned resources, all skills with their resources, and MCP configurations, plus an adjunct Agent Plugins v1 artifact exposing the complete recursive portable skill tree and MCP surfaces only — never agents or agent-owned resources. Every rendered role embeds its canonical instruction digest. |
@@ -36,8 +37,8 @@ This document defines the formal requirement specifications (**KS-001** through 
 Harnesses differ in their native capabilities (e.g. support for primary agents, subagent spawning, interactive confirmation prompts, and tool filtering). When a target harness cannot natively execute a canonical capability, Kyber-Squad degrades safely according to explicit rules.
 
 The product currently has seven agent/skill intersections, all distinct-body collisions, and no
-shared identities. Fallback targets preserve each of those skills and emit the matching agent as
-`role-<name>`. `conductor` has an unoccupied skill identity and therefore lowers to a same-name
+shared identities. Fallback targets (Warp) preserve each of those skills and emit the matching agent as
+`role-<name>`. `conductor` has an unoccupied skill identity and on Warp lowers to a same-name
 role skill.
 
 ### Degradation Taxonomy
@@ -46,11 +47,12 @@ Every non-native translation emits a structured degradation record in `squad.rec
 
 | Code | Meaning | Example |
 |---|---|---|
-| `lowered` | An agent role was projected to a role-skill because the target lacks a native agent primitive or primary agent role. | `architect` lowered to skill `architect` on Antigravity. |
+| `lowered` | An agent role was projected to a role-skill because the target lacks a native agent primitive or primary agent role. | `architect` lowered to skill `architect` on Warp, or `conductor` lowered to a skill on Pi or slash command on ZCode. |
 | `safety-narrowed` | An interactive confirmation requirement (`ask`) was narrowed to `deny` because the target cannot prompt the user. | A capability requiring `ask` narrowed to `deny` on non-interactive harnesses. |
 | `omitted` | An agent or skill was omitted because a required security or execution constraint cannot be enforced by the target. | A role with unenforceable `deny` constraints omitted to prevent unauthorized execution. |
 | `workspace-binding-required` | An MCP server configuration in an Agent Plugins package requires host-specific repository path bindings. | Client loads portable skills but requires manual MCP workspace binding. |
 | `permission-not-expressible` | A non-deny capability decision cannot be expressed in the target's native permission model without inventing an unverified mapping. | Factory records this for non-deny `network.publish` and `delegate` (no documented tool / `Task` withheld from subagents) and for `mcpServers: []` so parent MCP is not inherited. |
+| `capability-not-isolable` | A capability grant encompasses an unenforceable security boundary: when `process.execute: allow` and `filesystem.write` is `ask` or `deny` on a target whose shell tool can write files through redirection, the withheld write-tool names are unreachable but the underlying write capability remains accessible. The degradation record's Details names the target, the granted shell tool(s), and the withheld write-tool names. See [plan D11](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md#3-approved-decisions-owner-dpalfery-2026-09-21) for complete tool mappings. | Claude: `Bash`/`PowerShell` vs. `Edit`/`Write`/`NotebookEdit`; Pi: `bash` vs. `edit`/`write`; ZCode: `Bash` vs. `Edit`/`Write`; Factory: `Execute` vs. `Create`/`Edit`/`ApplyPatch`; OpenCode: `bash` vs. `edit`; Antigravity: `run_command` vs. `write_to_file`/`replace_file_content`/`multi_replace_file_content`. On each target, the withheld write tools do not appear in the rendered agent's `tools:` frontmatter key, while the degradation record's Details identifies both the granted shell tool(s) and the withheld write-tool names. |
 
 ---
 
@@ -62,15 +64,16 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Cursor** | Native `.cursor/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **Claude** | Native `.claude/agents` | Implemented and registered | Supported | Not lowered | Native execution |
 | **GitHub Copilot** | Native instructions/agents | Implemented and registered | Supported | Not lowered | Native execution |
-| **OpenCode** | Native `.opencode/agents` | Implemented and registered | Supported | Not lowered | Native execution |
+| **OpenCode** | Native `.opencode/agents` | Implemented and registered | Supported | Not lowered | Native execution; every documented permission key is pinned explicitly, because an omitted key inherits OpenCode's default-allow rather than being withheld |
 | **Kilo** | Native `.kilo/agents` | Implemented and registered | Supported | Not lowered | Native execution |
-| **Antigravity** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Safety-narrowed |
+| **Antigravity** | Native `.agents/agents` (directory per agent) | Implemented and registered | Supported (`enable_subagent_tools: true`, `invoke_subagent`) | Not lowered (native conductor with `mainAgent: true`) | Native execution via tool allowlist (`tools:`) and execution switches (`enable_write_tools`); safety-narrowed; capability-not-isolable for shell-implies-write; permission-not-expressible for unenforceable delegates-to roster |
 | **Pi** | Native `.pi/agents` + lowered conductor | Implemented and registered | Supported (via `@tintinweb/pi-subagents` extension) | Lowered (primary agent only) | Native execution + safety-narrowed |
 | **Warp** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Harness default; permission-not-expressible for non-deny decisions |
 | **Factory Droids** | Native `.factory/droids` | Implemented and registered | Supported | Not lowered | Explicit tools array (allow-only documented IDs); safety-narrowed on ask; permission-not-expressible for unmapped `network.publish`/`delegate` and `mcpServers: []` |
+| **ZCode** | Native `.zcode/agents` + conductor lowered to `.zcode/commands` | Implemented and registered | Supported (project and global scope) | Lowered (primary agent only, to a slash command) | Native execution + safety-narrowed; always a non-empty tool list because `tools: []` is ZCode's inherit-everything signal; permission-not-expressible for `network.publish`, the unenforceable `delegate` roster, and MCP withheld from the pure orchestrator. MCP is granted to every other agent by enumerated tool name from `toolchain.yml`, and `squad doctor` fails a ZCode install that does not declare those servers |
 
-The ten rows are the declared target roster. All ten targets (`copilot`, `cursor`, `claude`, `codex`,
-`antigravity`, `opencode`, `kilo`, `pi`, `factory`, and `warp`) have implemented and registered renderers.
+The eleven rows are the declared target roster. All eleven targets (`copilot`, `cursor`, `claude`, `codex`,
+`antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, and `zcode`) have implemented and registered renderers.
 
 ---
 

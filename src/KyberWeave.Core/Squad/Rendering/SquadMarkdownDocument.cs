@@ -26,7 +26,26 @@ public static class SquadMarkdownDocument
         ArgumentNullException.ThrowIfNull(frontmatter);
         ArgumentNullException.ThrowIfNull(body);
 
-        string yaml = serializer.Serialize(frontmatter);
+        return Compose(serializer.Serialize(frontmatter), body);
+    }
+
+    /// <summary>
+    /// Composes a document from frontmatter a renderer has already emitted itself, rather
+    /// than from a serialized dictionary.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ZCodeRenderer"/> is the one caller: ZCode's frontmatter reader is a
+    /// hand-rolled line parser, not a YAML parser, so the emitted scalar form has to match
+    /// ZCode's own writer rather than whatever a general-purpose serializer produces. The
+    /// fencing, CRLF normalization, and trailing-newline guarantees are the reason this
+    /// helper exists, and they are exactly what that renderer still needs to share.
+    /// </remarks>
+    public static string Compose(string frontmatterYaml, string body)
+    {
+        ArgumentNullException.ThrowIfNull(frontmatterYaml);
+        ArgumentNullException.ThrowIfNull(body);
+
+        string yaml = frontmatterYaml;
         StringBuilder builder = new();
         builder.Append("---\n");
         builder.Append(yaml);
