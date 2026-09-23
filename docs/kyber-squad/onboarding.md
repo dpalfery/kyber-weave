@@ -77,7 +77,7 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Strong markers only**: Detection activates a target only when its designated directory or specific configuration file is present.
 - **Negative fixtures**: Generic files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, generic `.github/` directories, and `.agents/skills/` are negative fixtures that **never** activate a target.
 - **Antigravity**: Requires explicit `--target antigravity` or configuration entry; `.agents/` will not auto-activate it.
-- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 10 targets.
+- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 11 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Update and uninstall**: Always consume the recorded target roster from the existing deployment receipt and never perform re-detection.
 
@@ -175,6 +175,8 @@ and `doctor`.
 | `kilo` | `$XDG_CONFIG_HOME/kilo` → `~/.config/kilo` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
 | `pi` | `$PI_CODING_AGENT_DIR` → `~/.pi/agent` | `agents/<name>.md`, `skills/<name>/SKILL.md` |
 | `factory` | `~/.factory` (no override) | `droids/<name>.md`, `skills/<name>/SKILL.md` |
+| `warp` | `~/.warp` (no override) | `skills/<name>/SKILL.md` |
+| `zcode` | `$ZCODE_STORAGE_DIR` → `~/.zcode/cli/config.json` `storage.dir` → `~/.zcode` | `agents/<name>.md`, `commands/<name>.md`, `skills/<name>/SKILL.md` |
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
 `.agents/skills/…` / `.github/…`) prefix under the project root.

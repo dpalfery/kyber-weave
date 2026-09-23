@@ -657,6 +657,25 @@ public sealed class ZCodeRendererContractTests : IDisposable
     }
 
     [Fact]
+    public async Task RenderAsync_ZCode_RewritesResourceLinksWithFragmentOrQuery()
+    {
+        using ZCodeResourceLinkFragmentFixture fixture = ZCodeResourceLinkFragmentFixture.Create();
+        SquadRenderResult result = await RenderZCodeAsync(fixture.ProductRoot);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile principal = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".zcode/agents/{ZCodeResourceLinkFragmentFixture.AgentName}.md");
+        string body = DocumentText(principal);
+
+        Assert.Contains("](../skills/architect/references/intake-assessment.md#overview)", body, StringComparison.Ordinal);
+        Assert.Contains("](../skills/architect/references/plan-authoring.md?version=2)", body, StringComparison.Ordinal);
+        Assert.Contains("](../skills/architect/references/test-first-contract.md#summary?v=1)", body, StringComparison.Ordinal);
+        Assert.Contains("](../skills/architect%2Freferences%2Fstandard-verification.md#details)", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RenderAsync_ZCode_SkillResourcesStayBesideTheirSkill()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -1168,3 +1187,40 @@ internal static class ZCodeFixtureFiles
         }
     }
 }
+
+/// <summary>
+/// Copies the canonical corpus and augments an agent's instruction body with resource links
+/// that include URL fragments, query parameters, or percent-encoded characters, verifying
+/// that resource-link rewriting matches and preserves fragments/queries on relocated resources.
+/// </summary>
+internal sealed class ZCodeResourceLinkFragmentFixture : IDisposable
+{
+    internal const string AgentName = "architect";
+
+    private readonly TempDirectory _temp = new();
+
+    private ZCodeResourceLinkFragmentFixture() => ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+
+    internal string ProductRoot { get; }
+
+    internal static ZCodeResourceLinkFragmentFixture Create()
+    {
+        ZCodeResourceLinkFragmentFixture fixture = new();
+        ZCodeFixtureFiles.CopyCanonicalCorpus(fixture.ProductRoot);
+
+        string agentFile = Path.Combine(fixture.ProductRoot, "agents", $"{AgentName}.md");
+        string content = File.ReadAllText(agentFile);
+
+        string augmented = content + "\n\n" +
+            "Fragment test: [intake](architect/references/intake-assessment.md#overview)\n" +
+            "Query test: [plan](architect/references/plan-authoring.md?version=2)\n" +
+            "Fragment and query test: [contract](architect/references/test-first-contract.md#summary?v=1)\n" +
+            "Encoded test: [standard](architect%2Freferences%2Fstandard-verification.md#details)\n";
+
+        File.WriteAllText(agentFile, augmented, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return fixture;
+    }
+
+    public void Dispose() => _temp.Dispose();
+}
+

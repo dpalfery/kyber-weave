@@ -237,10 +237,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         ISquadRenderer renderer = _renderer ?? SquadCommandComposition.ResolveRenderer();
-        ISquadGlobalRootResolver globalRoots = _globalRoots
-            ?? new SquadGlobalRoots(
-                Environment.GetEnvironmentVariable,
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
         List<SquadUnmanagedPathCollision> collisions = [];
         bool invalidGlobalRoot = false;
