@@ -5,7 +5,11 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Update;
+using KyberWeave.Cli.Rendering;
+using Spectre.Console;
 using Spectre.Console.Cli;
+
+ConsoleWidth.EnsureUsable(AnsiConsole.Console);
 
 CommandApp app = new CommandApp();
 app.Configure(config =>
