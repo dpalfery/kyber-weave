@@ -239,14 +239,24 @@ kyber_weave_semver_compare() {
         }'
 }
 
+# kyber_weave_is_release_version <v> -> exit 0 when <v> has the shape of a SemVer
+# release version (MAJOR.MINOR.PATCH, optional -prerelease and +build), exit 1
+# otherwise. GitHub permits tags such as v9.0.0/preview that are not versions; one
+# must never be installed, nor outrank a real release because its core parses high.
+kyber_weave_is_release_version() {
+    printf '%s\n' "$1" \
+        | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+}
+
 # kyber_weave_highest_version -> reads one version per line on stdin and prints the
-# highest by kyber_weave_semver_compare; prints nothing and returns 1 for no input.
+# highest by kyber_weave_semver_compare; prints nothing and returns 1 when no line is
+# a release version. Lines that are not (kyber_weave_is_release_version) are skipped.
 # The Releases API lists newest-created first, which is not version order, so a
 # release published out of sequence must not shadow a higher one.
 kyber_weave_highest_version() {
     highest=""
     while IFS= read -r candidate; do
-        [ -n "$candidate" ] || continue
+        kyber_weave_is_release_version "$candidate" || continue
         if [ -z "$highest" ] \
             || [ "$(kyber_weave_semver_compare "$candidate" "$highest")" -gt 0 ]; then
             highest="$candidate"
@@ -257,24 +267,29 @@ kyber_weave_highest_version() {
 
 # kyber_weave_newest_prerelease <releases-api-url> <fetch-fn> -> prints the highest
 # non-draft pre-release tag, without its leading 'v', across every page of the Releases
-# API; prints nothing and returns 1 when there is none. <fetch-fn> is called with one
-# page URL and prints that page's JSON: the installer passes fetch_stdout, the test
-# harness a stub. A short page is the last one, and the ten-page cap bounds a server
-# that ignores paging.
+# API; prints nothing and returns 1 when there is none or when any page fails to fetch.
+# <fetch-fn> is called with one page URL and prints that page's JSON: the installer
+# passes fetch_stdout, the test harness a stub. Tags are collected from every page
+# before one is chosen, so a failed later page cannot leave an incomplete scan that
+# looks like an answer. A short page is the last one, and the ten-page cap bounds a
+# server that ignores paging.
 kyber_weave_newest_prerelease() {
     page=1
+    tags=""
     while :; do
-        body="$("$2" "$1?per_page=100&page=$page")" || break
-        printf '%s' "$body" \
+        body="$("$2" "$1?per_page=100&page=$page")" || return 1
+        tags="${tags}
+$(printf '%s' "$body" \
             | tr -d '\r\n' \
             | tr '}' '\n' \
             | grep -v '"draft"[[:space:]]*:[[:space:]]*true' \
             | grep '"prerelease"[[:space:]]*:[[:space:]]*true' \
-            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p'
+            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p')"
         [ "$(printf '%s' "$body" | grep -o '"tag_name"' | wc -l | tr -d ' ')" -ge 100 ] || break
         [ "$page" -lt 10 ] || break
         page=$((page + 1))
-    done | kyber_weave_highest_version
+    done
+    printf '%s\n' "$tags" | kyber_weave_highest_version
 }
 
 # kyber_weave_release_has_kyberdash <version>

@@ -155,6 +155,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains("non-HTTPS", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>The stable path asks GitHub for its latest release and never lists releases.</summary>
     [Fact]
     public void RunLatestStableUsesReleasesLatestAndReplacesBothBinaries()
     {
@@ -179,6 +180,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.DoesNotContain(handler.Uris, IsReleasesListRequest);
     }
 
+    /// <summary>A draft is never installed, however high its version.</summary>
     [Fact]
     public void RunReleaseCandidateSkipsDraftsAndUsesReleasesList()
     {
@@ -202,6 +204,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.DoesNotContain(GitHubReleaseClient.LatestApi.AbsoluteUri, handler.Uris, StringComparer.Ordinal);
     }
 
+    /// <summary>A pinned version needs no release lookup at all.</summary>
     [Fact]
     public void RunPinnedVersionSkipsApiAndStripsVPrefix()
     {
@@ -901,6 +904,7 @@ public sealed class UpdateCommandTests : IDisposable
     private static string Sha(byte[] bytes) =>
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
+    /// <summary>True for any page of the Releases list, but not for <c>releases/latest</c>.</summary>
     private static bool IsReleasesListRequest(string uri) =>
         uri.StartsWith(GitHubReleaseClient.ReleasesApi.AbsoluteUri + "?", StringComparison.Ordinal);
 

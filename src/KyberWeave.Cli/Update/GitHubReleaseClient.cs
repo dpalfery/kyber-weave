@@ -138,6 +138,7 @@ internal sealed class GitHubReleaseClient : IDisposable
     internal static Uri ReleasesPage(Uri releasesApi, int page) =>
         new($"{releasesApi.AbsoluteUri}?per_page={ReleasesPerPage}&page={page}");
 
+    /// <summary>Fetches and parses one page of the Releases list; a bad page fails the scan.</summary>
     private GitHubRelease[] ReadReleasesPage(int page)
     {
         string json = GetString(ReleasesPage(_releasesApi, page), "the GitHub Releases list");
