@@ -538,6 +538,18 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// channel is fixed while a live forwarding writer exists. The binder run itself
     /// renders a parse error that is discarded with its writer.
     /// </summary>
+    /// <remarks>
+    /// Deliberately ungated. The runtime executes a module initializer exactly once,
+    /// before any other code in the module runs or any of its static state is accessed,
+    /// and blocks every other thread's first access to the module until it completes —
+    /// a strictly stronger serialization than <see cref="ProcessConsoleCapture"/>'s
+    /// gate, which lives in this same module and so could not be reached before this
+    /// method finishes anyway. The gate is also the wrong tool here:
+    /// <see cref="ProcessConsoleCapture.Run{T}(Func{T})"/> restores
+    /// <see cref="AnsiConsole.Console"/> to its entry value on exit, which would write
+    /// the pre-binding default console back over the process-lifetime binding these
+    /// swaps exist to establish.
+    /// </remarks>
     [ModuleInitializer]
     internal static void BindSharedRenderConsole()
     {
