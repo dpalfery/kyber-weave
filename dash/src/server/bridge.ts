@@ -1408,21 +1408,13 @@ export class KyberBridge {
   /** Count every quarantine row without applying the inspector's default page limit. */
   getQuarantineCount(): number {
     if (this.store) {
-      try {
-        return this.store.countQuarantine()
-      } catch {
-        return 0
-      }
+      return this.store.countQuarantine()
     }
     if (!this.hasTable(this.canonDb, 'quarantine')) return 0
-    try {
-      const row = this.canonDb!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
-        | { n?: number }
-        | undefined
-      return Number(row?.n) || 0
-    } catch {
-      return 0
-    }
+    const row = this.canonDb!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
+      | { n?: number }
+      | undefined
+    return Number(row?.n) || 0
   }
 
   /**
@@ -1486,11 +1478,7 @@ export class KyberBridge {
   /** Count every problem row without applying the inspector's default page limit. */
   getProblemCount(): number {
     if (this.store) {
-      try {
-        return this.store.countProblems()
-      } catch {
-        return 0
-      }
+      return this.store.countProblems()
     }
     const table = this.hasTable(this.canonDb, 'problem')
       ? 'problem'
@@ -1498,14 +1486,10 @@ export class KyberBridge {
         ? 'problems'
         : null
     if (table === null) return 0
-    try {
-      const row = this.canonDb!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
-        | { n?: number }
-        | undefined
-      return Number(row?.n) || 0
-    } catch {
-      return 0
-    }
+    const row = this.canonDb!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
+      | { n?: number }
+      | undefined
+    return Number(row?.n) || 0
   }
 
   /**

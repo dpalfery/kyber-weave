@@ -107,8 +107,8 @@ export function renderText(report: ContextReport, options?: { color?: boolean })
         push(`    ${row.name.padEnd(16)} ${detection}${sessions}`)
       }
     }
-    push(`  Quarantine: ${coverage.quarantineCount}`)
-    push(`  Problems:   ${coverage.problemCount}`)
+    push(`  Quarantine: ${coverage.quarantineCount === null ? 'unavailable' : coverage.quarantineCount}`)
+    push(`  Problems:   ${coverage.problemCount === null ? 'unavailable' : coverage.problemCount}`)
     for (const hint of coverage.hints) {
       push(`  ${c.yellow(hint)}`)
     }

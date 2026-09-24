@@ -103,6 +103,7 @@ const MEASURABLE_CONTEXT = {
   context: {
     measurable: true,
     contextLimit: 200_000,
+    contextLimitSource: 'reported',
     flaggedTurns: [9],
     turns: [
       {

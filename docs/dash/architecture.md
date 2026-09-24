@@ -291,14 +291,15 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 11;
+schema is a version-controlled constant executed on construction, currently at version 13;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
 `session`, `run`, `execution`, `token_cache`, `quarantine`, `pending_logs`,
 `quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
-`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, and `record_provenance`.
-Schema 11 adds the last two additively ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md));
+`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, and `refresh_run`.
+Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
+schema 12 added `refresh_run`, and schema 13 introduced `problem_key` with unique indexing.
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).

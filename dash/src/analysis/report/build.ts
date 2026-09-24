@@ -272,12 +272,18 @@ function buildCoverage(
     hints.push(`Last successful refresh was ${refresh.lastSuccessAt}. Run \`kyberdash dash refresh\`.`)
   }
 
+  const quarantineCount = safely(() => bridge.getQuarantineCount(), null)
+  const problemCount = safely(() => bridge.getProblemCount(), null)
+  if (quarantineCount === null || problemCount === null) {
+    hints.push('Database count query failed; quarantine or problem totals are unavailable.')
+  }
+
   return {
     storePath,
     refresh,
     harnesses,
-    quarantineCount: safely(() => bridge.getQuarantineCount(), 0),
-    problemCount: safely(() => bridge.getProblemCount(), 0),
+    quarantineCount,
+    problemCount,
     hints,
   }
 }
@@ -330,16 +336,27 @@ function buildLatestSession(
     cacheInvalidation: false,
   })
 
+  const windowUnavailableReason =
+    context === null
+      ? 'harness exported no message structure for this session'
+      : context.contextLimit === undefined
+        ? context.unavailableReason
+        : context.contextLimitSource === 'default'
+          ? 'source reported no context window'
+          : undefined
+
   const latestTurn = context === null ? unmeasured('harness exported no message structure for this session') : {
     index: context.turn.index,
     pressure:
-      context.turn.pressure === undefined
-        ? unmeasurable<number>(context.unavailableReason)
-        : measured(context.turn.pressure),
+      windowUnavailableReason !== undefined
+        ? unmeasurable<number>(windowUnavailableReason)
+        : context.turn.pressure === undefined
+          ? unmeasurable<number>(context.unavailableReason)
+          : measured(context.turn.pressure),
     contextWindow:
-      context.contextLimit === undefined
-        ? unmeasurable<number>(context.unavailableReason)
-        : measured(context.contextLimit, 'tokens'),
+      windowUnavailableReason !== undefined
+        ? unmeasurable<number>(windowUnavailableReason)
+        : measured(context.contextLimit!, 'tokens'),
     buckets: Object.fromEntries(
       BUCKET_KEYS.map((key) => {
         const value = context.turn.buckets?.[key]
@@ -378,6 +395,7 @@ function buildLatestSession(
 
 type LatestContext = {
   contextLimit?: number
+  contextLimitSource?: 'reported' | 'default'
   measurable: boolean
   unavailableReason: string
   bucketReasons: Partial<Record<BucketKey, string>>
@@ -402,15 +420,20 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
   const payloadTurn = asObject(payloadTurns[payloadTurns.length - 1])
   const last = asObject(context.last)
   const lastBuckets = asObject(last?.buckets)
+  const rawLimitSource = context.contextLimitSource
+  const contextLimitSource =
+    rawLimitSource === 'reported' || rawLimitSource === 'default' ? rawLimitSource : undefined
   const contextLimit = finiteNumber(context.contextLimit)
   const reportedInput = finiteNumber(last?.reported_input)
   const turnIndex = finiteNumber(turn?.index) ?? finiteNumber(payloadTurn?.index) ?? 0
   const turnPressure = finiteNumber(turn?.pressure)
   const pressure =
-    turnPressure ??
-    (reportedInput !== undefined && contextLimit !== undefined && contextLimit > 0
-      ? reportedInput / contextLimit
-      : undefined)
+    contextLimitSource === 'default'
+      ? undefined
+      : turnPressure ??
+        (reportedInput !== undefined && contextLimit !== undefined && contextLimit > 0
+          ? reportedInput / contextLimit
+          : undefined)
 
   const bucketReasons: Partial<Record<BucketKey, string>> = {}
   for (const key of BUCKET_KEYS) {
@@ -442,6 +465,7 @@ function extractContext(payload: { context?: unknown; turns?: unknown[] } | unde
 
   return {
     contextLimit: contextLimit !== undefined && contextLimit > 0 ? contextLimit : undefined,
+    contextLimitSource,
     measurable: context.measurable === true,
     unavailableReason,
     bucketReasons,

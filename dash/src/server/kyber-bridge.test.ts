@@ -769,4 +769,30 @@ describe('KyberBridge: DB-backed report facts', () => {
       }
     }
   })
+
+  it('surfaces errors from getProblemCount and getQuarantineCount when queries fail', () => {
+    const brokenStore = {
+      countQuarantine: () => {
+        throw new Error('store quarantine count error')
+      },
+      countProblems: () => {
+        throw new Error('store problem count error')
+      },
+    } as unknown as CanonStore
+
+    const bridge = new KyberBridge({ store: brokenStore })
+    expect(() => bridge.getQuarantineCount()).toThrow('store quarantine count error')
+    expect(() => bridge.getProblemCount()).toThrow('store problem count error')
+  })
+
+  it('returns exact zero when problem and quarantine tables are clean', () => {
+    const cleanStore = {
+      countQuarantine: () => 0,
+      countProblems: () => 0,
+    } as unknown as CanonStore
+
+    const bridge = new KyberBridge({ store: cleanStore })
+    expect(bridge.getQuarantineCount()).toBe(0)
+    expect(bridge.getProblemCount()).toBe(0)
+  })
 })

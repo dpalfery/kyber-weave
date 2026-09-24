@@ -4,7 +4,7 @@ title: refresh_run rows stay running forever after their refresh process dies
 doc-type: todo
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-24
 status: draft
 ---
 
@@ -53,3 +53,10 @@ misrepresent refresh activity without any session data being wrong.
   wherever `refresh_run` rows are recorded and where the terminal transition belongs.
 - `dash/src/refresh/lock.ts` — the dead-owner takeover precedent a read-side reclamation
   would follow.
+
+## Resolution
+
+Resolved by PR #117: `store.reconcileDeadRefreshRuns(importedAtUtc)` runs automatically
+before each refresh cycle begins in `refreshOrchestrator`. It inspects every `running` row in
+`refresh_run`, probes whether the recorded PID is still alive, treats runs older than 15
+minutes as timed out, and transitions orphaned runs to `failure` with an audit summary.

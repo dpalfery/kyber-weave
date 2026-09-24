@@ -219,8 +219,7 @@ the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
 - **Quit** through the tray stops it and both children; an abnormal tray exit produces a
   fresh launchd-started tray whose children rebind the same loopback ports.
 
-Known deferred issue: `refresh_run` rows can stay `running` after their refresh process dies.
-It is diagnostic-only today and not on the report data path — see
+Automatic reconciliation: `refresh_run` rows left in `running` after their refresh process dies or times out (older than 15 minutes) are automatically reconciled to `failure` with an audit summary before subsequent refreshes start — see
 [the todo](../todo/stale-refresh-run-rows.md).
 
 ---

@@ -17,7 +17,7 @@ import { ingestBatch } from '../canon/ingest.js'
 import { CanonStore } from '../canon/store.js'
 import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js'
 import { observedNamespaces } from '../canon/adapters/quarantine.js'
-import { isExcludedHarnessIdentity } from '../canon/measurability.js'
+import { EXCLUDED_HARNESS_IDENTITIES, isExcludedHarnessIdentity } from '../canon/measurability.js'
 import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
 import type { OtlpSpan } from '../otel/receiver.js'
 
@@ -207,8 +207,12 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
     if (report.traces % progressEvery === 0) options.onProgress?.(report.traces, traceIds.length)
   }
 
-  for (const record of store.listAll()) {
-    if (record.harness === 'gemini' || isExcludedHarnessIdentity(record.harness)) {
+  const excludedHarnesses = [...EXCLUDED_HARNESS_IDENTITIES]
+  const EXCLUSION_BATCH_SIZE = 500
+  for (;;) {
+    const batch = store.listRecordsByHarness(excludedHarnesses, EXCLUSION_BATCH_SIZE)
+    if (batch.length === 0) break
+    for (const record of batch) {
       const rawAttrs =
         record.raw !== null && typeof record.raw === 'object'
           ? (record.raw as Record<string, unknown>)

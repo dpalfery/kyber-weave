@@ -369,10 +369,12 @@ export function buildSessionRow(
   // Same rule the finding detector uses (`contextLimitOf`): first turn record
   // to name a window wins, default otherwise, so a session row and a
   // compaction finding built from the same records can never disagree.
-  const contextLimit = contextLimitOf(records).contextLimit
+  const window = contextLimitOf(records)
+  const contextLimit = window.contextLimit
   const measurability = mergeMeasurability(records)
   const context = analyzeContext(contextTurns, {
     contextLimit,
+    contextLimitSource: window.contextLimitSource,
     countTokens,
     ...(measurability !== undefined ? { measurability } : {}),
   })
@@ -447,6 +449,7 @@ export function buildSessionRow(
   })
   const contextShape = {
     ...serializeContext(context),
+    contextLimitSource: window.contextLimitSource,
     first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
     last: contextBucket(
       analyzedTurns[analyzedTurns.length - 1],

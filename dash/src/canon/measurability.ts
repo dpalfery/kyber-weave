@@ -132,7 +132,7 @@ function availabilityOf(value: MetricAvailability | undefined): string | undefin
  */
 export const GEMINI_SELECTOR_LABEL = 'Gemini'
 
-const EXCLUDED_HARNESS_IDENTITIES = new Set(['gemini'])
+export const EXCLUDED_HARNESS_IDENTITIES = new Set(['gemini'])
 
 /** True when `harness` must not appear as a stored session/run/rollup harness id. */
 export function isExcludedHarnessIdentity(harness: string): boolean {

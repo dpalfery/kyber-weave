@@ -85,13 +85,15 @@ function bridgeOf(parts: {
   rollups?: HarnessRollupRow[]
   payload?: unknown
   records?: Array<{ sessionId: string; cost: { basis: string; status: string; value?: number } }>
+  quarantineCount?: () => number
+  problemCount?: () => number
 }): KyberBridge {
   const stub: BridgeStub = {
     listSessions: () => parts.sessions ?? [],
     listFindings: () => parts.findings ?? [],
     listHarnessRollups: () => parts.rollups ?? [],
-    getQuarantineCount: () => 0,
-    getProblemCount: () => 0,
+    getQuarantineCount: parts.quarantineCount ?? (() => 0),
+    getProblemCount: parts.problemCount ?? (() => 0),
     getRefreshState: () => ({ lastSuccessAt: null, lastFailure: null, inProgress: null }),
     getSessionCostContributions: (sessionIds: readonly string[]) =>
       (parts.records ?? [])
@@ -165,6 +167,7 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
     context: {
       measurable: true,
       contextLimit: 200_000,
+      contextLimitSource: 'reported',
       flaggedTurns: [2],
       turns: [
         { index: 1, pressure: 0.2, buckets: {}, residual: { tokens: 0 }, toolDefinitionsByServer: {} },
@@ -269,6 +272,7 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
             reason: 'declared_not_measurable',
             turns: 1,
             contextLimit: 200_000,
+            contextLimitSource: 'reported',
             last: {
               reported_input: 40_000,
               buckets: {
@@ -308,6 +312,29 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
       expect(figure.value).not.toBe(0)
       expect(isUnmeasurable(figure) && figure.reason).toContain('source')
     }
+  })
+
+  it('marks context window and pressure as unmeasurable when window was defaulted', () => {
+    const report = build(
+      bridgeOf({
+        sessions: [session({ turn_count: 1, total_input: 40_000 })],
+        payload: {
+          summary: { turn_count: 1, total_input: 40_000 },
+          turns: [{ index: 0, input: 40_000 }],
+          context: {
+            measurable: true,
+            contextLimit: 200_000,
+            contextLimitSource: 'default',
+            turns: [{ index: 1, pressure: 0.2, buckets: {} }],
+          },
+        },
+      }),
+    )
+    const turn = report.latestSession!.latestTurn
+    expect(isUnmeasurable(turn.contextWindow)).toBe(true)
+    expect(turn.contextWindow).toMatchObject({ reason: 'source reported no context window' })
+    expect(isUnmeasurable(turn.pressure)).toBe(true)
+    expect(turn.pressure).toMatchObject({ reason: 'source reported no context window' })
   })
 
   it('is null when no session is in scope, rather than an empty shell', () => {
@@ -569,5 +596,23 @@ describe('sections and document shape', () => {
     expect(report.schemaVersion).toBe(1)
     expect(report.findings).toEqual([])
     expect(report.latestSession).toBeNull()
+  })
+
+  it('surfaces null and an explanatory hint when count queries fail rather than faking zero', () => {
+    const report = build(
+      bridgeOf({
+        quarantineCount: () => {
+          throw new Error('sqlite locked')
+        },
+        problemCount: () => {
+          throw new Error('disk failure')
+        },
+      }),
+    )
+    expect(report.coverage!.quarantineCount).toBeNull()
+    expect(report.coverage!.problemCount).toBeNull()
+    expect(report.coverage!.hints).toContain(
+      'Database count query failed; quarantine or problem totals are unavailable.',
+    )
   })
 })

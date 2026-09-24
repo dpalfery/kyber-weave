@@ -2155,6 +2155,19 @@ export class CanonStore {
   }
 
   /**
+   * Bounded batch of records matching the given harness names (case-insensitive).
+   * Used for exclusion remediation sweeps without loading the full history into memory.
+   */
+  listRecordsByHarness(harnesses: readonly string[], limit = 500): import('./types.js').CanonicalRecord[] {
+    if (harnesses.length === 0 || limit <= 0) return []
+    const placeholders = harnesses.map(() => 'LOWER(harness) = ?').join(' OR ')
+    const rows = this.db
+      .prepare(`SELECT * FROM records WHERE ${placeholders} ORDER BY span_id LIMIT ?`)
+      .all(...harnesses.map((h) => h.trim().toLowerCase()), limit) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
+  /**
    * Cost facts for selected sessions without inflating or reading raw payloads.
    * The report needs only the indexed session key and the small cost block;
    * selecting full records here would decompress each record's raw span.

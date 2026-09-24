@@ -827,4 +827,25 @@ describe('source checkpoint and provenance', () => {
     expect(plan).toContain('records_by_harness_session_time')
     expect(plan).not.toMatch(/SCAN records/)
   })
+
+  it('lists records by harness in bounded batches with case-insensitivity', () => {
+    const store = new CanonStore(':memory:')
+    for (let i = 0; i < 5; i++) {
+      store.upsert(record({ spanId: `gemini-${i}`, harness: i % 2 === 0 ? 'gemini' : 'Gemini' }))
+    }
+    store.upsert(record({ spanId: 'other-1', harness: 'copilot' }))
+
+    const batch1 = store.listRecordsByHarness(['gemini'], 2)
+    expect(batch1).toHaveLength(2)
+    expect(batch1.every((r) => r.harness.toLowerCase() === 'gemini')).toBe(true)
+
+    const allGemini = store.listRecordsByHarness(['gemini'], 10)
+    expect(allGemini).toHaveLength(5)
+    expect(allGemini.every((r) => r.harness.toLowerCase() === 'gemini')).toBe(true)
+
+    const empty = store.listRecordsByHarness(['unknown'], 10)
+    expect(empty).toHaveLength(0)
+
+    store.close()
+  })
 })
