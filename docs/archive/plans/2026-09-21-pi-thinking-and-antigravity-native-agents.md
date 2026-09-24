@@ -778,7 +778,7 @@ Per the execution contract, commit and push wait for `code-reviewer` to return `
 - In Claude Code the conductor has to be the main thread: subagents cannot spawn subagents, so
   the `conductor` agent's `Agent(...)` roster only applies under `claude --agent conductor`.
 - `architect` and `product-owner` render with no Write, Edit, or Bash
-  ([ask-narrowing todo](../../todo/claude-renderer-ask-narrowing.md)). The pattern used throughout:
+  ([ask-narrowing todo](../todo/claude-renderer-ask-narrowing.md)). The pattern used throughout:
   the architect returns full content or exact OLD/NEW pairs, `docs-dev` applies them, and the
   conductor byte-compares the result against an independently computed copy with `cmp`, then runs
   `docs validate .` and `docs drift .`. The byte-compare caught two silent `docs-dev`

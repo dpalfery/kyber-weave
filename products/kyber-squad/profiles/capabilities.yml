@@ -16,11 +16,11 @@ profiles:
     permissions:
       filesystem.read: allow
       filesystem.search: allow
-      # The lattice has no path scoping. The body writes only a plan under <docs-root>/plans/
-      # plus that plan's row in the plan index; ask rather than allow so a target that cannot
-      # express ask narrows to deny instead of opening the whole tree. Source edits stay
-      # instruction-denied either way.
-      filesystem.write: ask
+      # The lattice has no path scoping, so the plan, spec, and todo boundary is
+      # instruction-only: the body names those three directories and denies everything else.
+      # allow rather than ask because ask narrowed to deny on Claude, Pi, and ZCode, which
+      # left this headless planner unable to save the plan it exists to write.
+      filesystem.write: allow
       # docs validate and docs drift are the only commands this role runs: writing a plan
       # under docs/ is a corpus edit, and a corpus edit that is not re-validated leaves the
       # zero-findings claim false. ask rather than allow because the grant is those two
@@ -41,7 +41,7 @@ profiles:
   # imported Hotshot architect contract as an exact tool allow-list without an ask state.
   # Agents reference it through copilot-capability-profile; validation rejects assigning it
   # as a shared capability-profile, so Claude, Cursor, Codex, and other targets retain the
-  # architect profile's ask semantics.
+  # architect profile's process.execute: ask semantics.
   architect-copilot:
     target: copilot
     permissions:
@@ -88,7 +88,9 @@ profiles:
     permissions:
       filesystem.read: allow
       filesystem.search: allow
-      filesystem.write: ask
+      # Same reasoning as architect: instruction-scoped to plan, spec, and todo documents,
+      # because ask narrowed to deny on Claude, Pi, and ZCode and the spec could not be saved.
+      filesystem.write: allow
       process.execute: deny
       network.read: allow
       network.publish: deny

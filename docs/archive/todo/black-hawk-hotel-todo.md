@@ -213,7 +213,7 @@ Go struct tags, and the built-in `agy-customizations` skill.
 - [Renderer coverage](kyber-squad-renderer-coverage.md) — the eleven-target roster this work
   sits inside
 - [ZCode plugin packaging](../../todo/zcode-plugin-packaging.md) — the other open ZCode decision
-- [Claude/Pi ask-narrowing](../../todo/claude-renderer-ask-narrowing.md) — the `ask` lowering that makes
+- [Claude/Pi ask-narrowing](claude-renderer-ask-narrowing.md) — the `ask` lowering that makes
   `architect` and `product-owner` unable to save their own plans on those harnesses; related in
   spirit to task B
 - [Antigravity native agents](antigravity-native-agents.md) — the full verified spec for
