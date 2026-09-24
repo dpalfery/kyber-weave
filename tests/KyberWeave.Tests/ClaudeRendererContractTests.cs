@@ -484,6 +484,33 @@ public sealed class ClaudeRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Pins the Claude model of the primary agent by value. The corpus test only checks that
+    /// the renderer echoes <c>models.yml</c>, so a wrong tier there still passes it. On
+    /// <c>haiku</c> the conductor answered from its own reads instead of delegating to
+    /// <c>architect</c>, then reached for the Skill tool where the Agent tool was needed.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ConductorRunsOnSonnet()
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".claude/agents/conductor.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            "conductor");
+        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", "conductor"));
+    }
+
     [Fact]
     public async Task RenderAsync_IsDeterministic()
     {

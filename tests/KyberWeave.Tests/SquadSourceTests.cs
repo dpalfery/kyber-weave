@@ -109,7 +109,7 @@ public sealed class SquadSourceTests
     [InlineData("reviewer", "kilo", "kimi k2.7 code")]
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
     [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
-    [InlineData("orchestration", "claude", "haiku")]
+    [InlineData("orchestration", "claude", "sonnet")]
     [InlineData("orchestration", "kilo", "inherit")]
     [InlineData("orchestration", "opencode", "opencode/big-pickle")]
     [InlineData("orchestration", "pi", "inherit")]
