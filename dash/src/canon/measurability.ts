@@ -218,6 +218,30 @@ export function groupByCanonicalHarness<T extends { harness: string }>(items: re
   return groups
 }
 
+/**
+ * The id a derived session or execution takes for one canonical harness's
+ * share of a session key: the bare key when the key has one canonical harness,
+ * `${harness}:${key}` when it has several, so the shares do not collide on one
+ * row. `buildSessions`, `buildRuns` and the compaction-hazard detector all mint
+ * through here, and `harnessSessionKey` inverts it, so the id a row is written
+ * under and the rule that gathers its records back cannot drift apart.
+ */
+export function harnessSessionId(harness: string, key: string, harnessCount: number): string {
+  return harnessCount > 1 ? `${harness}:${key}` : key
+}
+
+/**
+ * The session key a harness-qualified id was minted from, or `undefined` when
+ * the id carries no prefix for `harness`. The harness has to be supplied —
+ * from the execution or session row — rather than read off the id: native
+ * session ids can themselves contain a colon, so splitting on one would turn a
+ * bare key into a harness that does not exist and a key no record carries.
+ */
+export function harnessSessionKey(sessionId: string, harness: string): string | undefined {
+  const prefix = `${harness}:`
+  return sessionId.startsWith(prefix) && sessionId.length > prefix.length ? sessionId.slice(prefix.length) : undefined
+}
+
 /** The measurability map a file-sourced record declares for its provider. */
 export function measurabilityFor(
   provider: string,

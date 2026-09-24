@@ -10,7 +10,7 @@
 // or session parentage exists; otherwise it is reported as not_measurable with
 // an explicit explanation.
 
-import { groupByCanonicalHarness, isFileSource, measurabilityFor } from './measurability.js'
+import { groupByCanonicalHarness, harnessSessionId, isFileSource, measurabilityFor } from './measurability.js'
 import { deriveOutcome, type OutcomeBlock } from './outcome.js'
 import { CanonStore } from './store.js'
 import { notMeasurable } from './types.js'
@@ -418,7 +418,7 @@ export async function buildRuns(
       const agentName = records.map((r) => rawAttribute(r, AGENT_NAME_KEYS)).find(Boolean) ?? null
 
       const explicitRunId = records.map((r) => rawAttribute(r, RUN_ID_ATTRIBUTE_KEYS)).find(Boolean)
-      const sessionId = grouped.size > 1 ? `${harness}:${sessionKey.key}` : sessionKey.key
+      const sessionId = harnessSessionId(harness, sessionKey.key, grouped.size)
 
       candidates.push({
         executionId: sessionId,
@@ -634,8 +634,8 @@ export async function buildRuns(
   for (const { run, executions } of plannedRuns) {
     // Outcome derivation reads content, parts and raw, so the full records are
     // loaded here — one run at a time — and released before the next run.
-    const outcomeRecords = executions.flatMap((e) =>
-      store.recordsForSession(e.sessionId ?? e.executionId),
+    const outcomeRecords = executions.flatMap(
+      (e) => store.recordsForDerivedSession(e.sessionId ?? e.executionId, e.harness).records,
     )
     store.upsertRun({ ...run, outcome: deriveOutcome(outcomeRecords) })
     builtRunIds.add(run.runId)

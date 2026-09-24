@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   GEMINI_SELECTOR_LABEL,
   cacheAvailability,
+  harnessSessionId,
+  harnessSessionKey,
   isExcludedHarnessIdentity,
   normalizeHarnessName,
   prefixAvailability,
@@ -226,5 +228,51 @@ describe('T6 session stamp uses the split canonical id', () => {
     const row = buildSessionRow('s1', [record('a1', 'cursor-agent', 's1')], approximateO200kBase)
     expect(row.harness).toBe('cursor-agent')
     expect((row.payload as { harness: string }).harness).toBe('cursor-agent')
+  })
+})
+
+describe('harness-qualified session ids', () => {
+  it('qualifies a key only when it spans several harnesses, and inverts only its own prefix', () => {
+    expect(harnessSessionId('cursor', 'sess-1', 1)).toBe('sess-1')
+    expect(harnessSessionId('cursor', 'sess-1', 2)).toBe('cursor:sess-1')
+    expect(harnessSessionKey('cursor:sess-1', 'cursor')).toBe('sess-1')
+    // A native key with a colon of its own is not a prefix for another harness.
+    expect(harnessSessionKey('workspace:sess-1', 'cursor')).toBeUndefined()
+    expect(harnessSessionKey('cursor:', 'cursor')).toBeUndefined()
+  })
+
+  it('gathers one canonical harness share of a split key, whatever raw name its records arrived under', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      record('split-vs', 'copilot-chat', 'k-split'),
+      record('split-cur', 'cursor', 'k-split', { timestamp: '2026-09-03T10:01:00.000Z' }),
+      record('split-gem', 'gemini', 'k-split', { timestamp: '2026-09-03T10:02:00.000Z' }),
+    ])
+
+    await buildSessions(store)
+    expect(store.builtSessionIds().sort()).toEqual(['copilot-vscode:k-split', 'cursor:k-split'])
+
+    const share = store.recordsForDerivedSession('copilot-vscode:k-split', 'copilot-vscode')
+    expect(share.key).toBe('k-split')
+    expect(share.records.map((r) => r.spanId)).toEqual(['split-vs'])
+    expect(store.recordsForDerivedSession('cursor:k-split', 'cursor').records.map((r) => r.spanId)).toEqual([
+      'split-cur',
+    ])
+    // A raw provider name finds the canonical share it belongs to.
+    expect(store.recordsForDerivedSession('copilot-vscode:k-split', 'copilot-chat').records.map((r) => r.spanId)).toEqual([
+      'split-vs',
+    ])
+    store.close()
+  })
+
+  it('reads a bare key verbatim even when it contains a colon', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertMany([record('colon-1', 'cursor', 'cursor:native-id')])
+
+    const share = store.recordsForDerivedSession('cursor:native-id', 'cursor')
+    expect(share.key).toBe('cursor:native-id')
+    expect(share.records.map((r) => r.spanId)).toEqual(['colon-1'])
+    expect(store.recordsForDerivedSession('unknown-key', 'cursor')).toEqual({ key: 'unknown-key', records: [] })
+    store.close()
   })
 })

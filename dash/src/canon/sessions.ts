@@ -17,7 +17,7 @@ import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
 import { contextLimitOf } from './context-window.js'
-import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
+import { groupByCanonicalHarness, harnessSessionId, normalizeHarnessName } from './measurability.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
@@ -301,7 +301,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         report.skipped += 1
         continue
       }
-      const sessionId = grouped.size > 1 ? `${harness}:${key.key}` : key.key
+      const sessionId = harnessSessionId(harness, key.key, grouped.size)
       store.upsertSession(buildSessionRow(sessionId, records, countTokens))
       built.add(sessionId)
       report.built += 1

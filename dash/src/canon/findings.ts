@@ -36,8 +36,16 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
 
   for (const run of store.listRuns()) {
     const records: CanonicalRecord[] = []
+    // Runs are grouped per harness, so a run holds one harness's share of a
+    // split key and the detector cannot see the key's other harnesses in what
+    // it is handed. The keys the builders split are passed alongside, or the
+    // detector would name its finding after a bare key no session row carries.
+    const harnessQualifiedKeys = new Set<string>()
     for (const execution of store.listExecutions(run.runId)) {
-      records.push(...store.recordsForSession(execution.sessionId ?? execution.executionId))
+      const sessionId = execution.sessionId ?? execution.executionId
+      const share = store.recordsForDerivedSession(sessionId, execution.harness)
+      records.push(...share.records)
+      if (share.key !== sessionId) harnessQualifiedKeys.add(share.key)
     }
     if (records.length === 0) continue
 
@@ -47,6 +55,7 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
       runId: run.runId,
       records,
       ...(run.outcome === undefined ? {} : { outcome: run.outcome }),
+      ...(harnessQualifiedKeys.size === 0 ? {} : { harnessQualifiedKeys }),
     })
 
     for (const finding of findings) {

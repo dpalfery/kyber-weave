@@ -13,7 +13,7 @@
 
 import { normalizeWhitespace, hashNormalized } from './signals.js'
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
-import { canonicalHarnessId, normalizeHarnessName } from '../canon/measurability.js'
+import { canonicalHarnessId, harnessSessionId, normalizeHarnessName } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
 
@@ -903,6 +903,12 @@ export type CompactionHazardInput = {
   turns?: readonly { spanId?: string; turnIndex?: number; inputTokens?: number }[]
   contextLimit?: number
   outcome?: OutcomeBlock
+  /**
+   * Session keys the builders split across several canonical harnesses, when
+   * `records` holds only some of those harnesses' shares — a run is grouped
+   * per harness, so it never holds them all. See `harnessSessionId`.
+   */
+  harnessQualifiedKeys?: ReadonlySet<string>
 }
 
 /**
@@ -986,11 +992,13 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     harnesses.add(harness)
     harnessesByKey.set(key, harnesses)
   }
+  // The records alone undercount a key's harnesses when the caller handed over
+  // one harness's share of it; a key in `harnessQualifiedKeys` was split by the
+  // builders, so it spans at least two whatever the records show.
   const groupIdOf = (record: CanonicalRecord): string => {
     const key = baseKeyOf(record)
-    return (harnessesByKey.get(key)?.size ?? 1) > 1
-      ? `${normalizeHarnessName(record.harness)}:${key}`
-      : key
+    const harnessCount = input.harnessQualifiedKeys?.has(key) === true ? 2 : (harnessesByKey.get(key)?.size ?? 1)
+    return harnessSessionId(normalizeHarnessName(record.harness), key, harnessCount)
   }
 
   for (let i = 0; i < turnRecords.length; i++) {
@@ -1330,6 +1338,8 @@ export type DetectFindingsInput = {
   records?: readonly CanonicalRecord[]
   outcome?: OutcomeBlock
   contextLimit?: number
+  /** Passed to the compaction-hazard detector; see `CompactionHazardInput`. */
+  harnessQualifiedKeys?: ReadonlySet<string>
   // Granular detector overrides
   dormantToolSchema?: DormantToolSchemaInput
   duplicateToolCall?: DuplicateToolCallInput
@@ -1385,6 +1395,7 @@ export function detectFindings(input: DetectFindingsInput): Finding[] {
     records: input.records,
     contextLimit: input.contextLimit,
     outcome: input.outcome,
+    harnessQualifiedKeys: input.harnessQualifiedKeys,
   }))
 
   // 6. Unbounded delegation
