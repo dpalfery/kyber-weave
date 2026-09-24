@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using System.Threading;
 using KyberWeave.Core.Squad.Deployment;
@@ -17,6 +18,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly SquadStateStore? _stateStore;
     private readonly ISquadReleaseSource? _releaseSource;
     private readonly ISquadRenderer? _renderer;
+    private readonly bool? _isInteractive;
+    private readonly Func<string, bool>? _readAnswer;
 
     /// <summary>Creates a new install command using default dependencies.</summary>
     public SquadInstallCommand()
@@ -24,16 +27,26 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
     }
 
     /// <summary>Creates a new install command using injectable dependencies.</summary>
+    /// <remarks>
+    /// <paramref name="isInteractive"/> and <paramref name="readAnswer"/> default to null
+    /// because optional parameter values must be compile-time constants; Execute resolves
+    /// them to <see cref="SquadCommandComposition.IsInteractiveConsole"/> and real console
+    /// input, so an unparameterized run behaves exactly like the default collaborators.
+    /// </remarks>
     internal SquadInstallCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
         ISquadReleaseSource? releaseSource = null,
-        ISquadRenderer? renderer = null)
+        ISquadRenderer? renderer = null,
+        bool? isInteractive = null,
+        Func<string, bool>? readAnswer = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
         _releaseSource = releaseSource;
         _renderer = renderer;
+        _isInteractive = isInteractive;
+        _readAnswer = readAnswer;
     }
 
     /// <inheritdoc />
@@ -42,11 +55,14 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        string targetRoot = SquadCommandComposition.ResolveTargetRoot(settings.Path);
 
-        // Validate explicit targets and exclusions; invalid tokens return exit code 2
+        // Coalesce the positional path with --path and validate explicit targets and
+        // exclusions; invalid client input returns exit code 2 before any resolution
+        string? effectivePath;
         try
         {
+            effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
+
             if (settings.Targets.Length > 0)
                 _ = SquadTargetCatalog.Parse(settings.Targets);
 
@@ -58,6 +74,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
             return 2;
         }
+
+        string targetRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
 
         // Load configuration if present
         KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(targetRoot);
@@ -107,6 +125,21 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             Exclusions: settings.Exclusions,
             Adopt: settings.Adopt,
             DryRun: settings.DryRun);
+
+        // The confirmation is the last gate before the lifecycle call — the only
+        // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
+        // a dry-run's output already names the root, so it never prompts (N4).
+        if (!settings.DryRun && !SquadTargetRootConfirmation.Confirm(
+                targetRoot,
+                scope,
+                "install",
+                isInteractive: _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                yes: settings.Yes,
+                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+        {
+            AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
+            return 2;
+        }
 
         try
         {

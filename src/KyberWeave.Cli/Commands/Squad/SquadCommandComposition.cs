@@ -122,6 +122,39 @@ internal static class SquadCommandComposition
             globalRoots: resolvedGlobalRoots);
     }
 
+    /// <summary>
+    /// Coalesces the positional path argument with the <c>--path</c> option into the one
+    /// effective target path. The option wins when the positional is absent or at its
+    /// <c>"."</c> default; the positional passes through when no option was supplied;
+    /// supplying both a non-default positional and the option is a conflict.
+    /// </summary>
+    /// <remarks>
+    /// Spectre.Console.Cli cannot carry a <c>[CommandArgument]</c> and a
+    /// <c>[CommandOption]</c> on one property, so <c>--path</c> binds a separate nullable
+    /// <c>PathOption</c> and this is the single seam where the two forms meet. The conflict
+    /// throws <see cref="ArgumentException"/> so it flows through the commands' existing
+    /// client-input catch into the exit-2 convention, and its hint names both forms so the
+    /// operator can pick one.
+    /// </remarks>
+    public static string? CoalesceTargetPath(string? positional, string? option)
+    {
+        if (string.IsNullOrWhiteSpace(option))
+        {
+            return positional;
+        }
+
+        bool positionalIsDefault =
+            string.IsNullOrWhiteSpace(positional) || string.Equals(positional, ".", StringComparison.Ordinal);
+        if (positionalIsDefault)
+        {
+            return option;
+        }
+
+        throw new ArgumentException(
+            $"The deployment root was supplied twice: as the positional '{positional}' and as the option '--path {option}'. " +
+            "Supply either the positional path or --path <PATH>, not both.");
+    }
+
     /// <summary>Resolves the target root directory path.</summary>
     public static string ResolveTargetRoot(string? path) =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path);
