@@ -5,10 +5,15 @@ doc-type: todo
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-08-16
-status: draft
+status: superseded
 ---
 
 # squad commands' positional path argument can silently target the wrong directory
+
+> [!NOTE]
+> **Superseded by implementation plan:** This todo has been superseded by plan
+> [docs/plans/2026-09-23-squad-path-argument-safety.md](../plans/2026-09-23-squad-path-argument-safety.md),
+> which made `--path` explicit, enabled CLI-wide strict parsing, and added the resolved-root confirmation.
 
 This is **context for planning the work, not a plan** — what was observed, what needs
 verifying, and where the seam is. It does not sequence tasks or commit to an implementation.
