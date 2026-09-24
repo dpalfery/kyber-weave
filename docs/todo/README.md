@@ -62,6 +62,8 @@ verification gaps, then content migration and hygiene.
 | 14 | [canon-test-fixture-consolidation.md](canon-test-fixture-consolidation.md) | KyberDash | `findings.test.ts` and `sessions.test.ts` duplicate the `CanonicalRecord` fixture helpers `tokens` and `turn`; test hygiene, no behaviour is wrong. |
 | 15 | [shell-implies-write-live-verification-other-targets.md](shell-implies-write-live-verification-other-targets.md) | KyberSquad | `capability-not-isolable` on Claude, Pi, ZCode, Factory and OpenCode rests on code inspection; live verification would confirm it and could unlock withheld Antigravity tools. |
 | 16 | [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | Packaging Squad as a ZCode plugin trades per-file receipt ownership for per-unit enablement — a deployment-model decision, not remaining ZCode work. |
+| 17 | [kyberdash-windows-code-signing.md](kyberdash-windows-code-signing.md) | Distribution | The Windows tray installer ships without Authenticode signing, so SmartScreen warns; needs a certificate and a signing step. |
+| 18 | [kyberdash-linux-tray.md](kyberdash-linux-tray.md) | KyberDash | The tray ships for macOS and Windows only; `kyberdash menubar` on Linux exits 1. |
 
 ### Closed
 
@@ -73,8 +75,8 @@ Archived under [`archive/todo/`](../archive/todo/). Kept for provenance, never c
 | [kyber-squad-renderer-coverage.md](../archive/todo/kyber-squad-renderer-coverage.md) | KyberSquad | superseded | Kyber-Squad renderer target coverage (complete: all eleven targets have renderers; the CLI gaps have their own todos). |
 | [factory.md](../archive/todo/factory.md) | KyberSquad | superseded | Add a native Factory (factory-droids) renderer to Kyber-Squad (superseded by [plan](../archive/plans/2026-09-14-factory-native-renderer.md)). |
 | [menu-bar-fix.md](../archive/todo/menu-bar-fix.md) | KyberDash | superseded | The tray popover hung on its loading state and the status glyph was blank — delivered by the [menu-bar runtime wiring plan](../archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md); owner confirmed the deployed popover, selector, and glyph 2026-09-22. |
-| [kilo.md](../archive/todo/kilo.md) | KyberSquad | superseded | Add a native Kilo renderer to Kyber-Squad (completed via [plan](../plans/2026-09-14-kilo-native-renderer.md)). |
-| [opencode.md](../archive/todo/opencode.md) | KyberSquad | superseded | Add a native OpenCode renderer to Kyber-Squad (superseded by [plan](../plans/2026-09-14-opencode-native-renderer.md)). |
+| [kilo.md](../archive/todo/kilo.md) | KyberSquad | superseded | Add a native Kilo renderer to Kyber-Squad (completed via [plan](../archive/plans/2026-09-14-kilo-native-renderer.md)). |
+| [opencode.md](../archive/todo/opencode.md) | KyberSquad | superseded | Add a native OpenCode renderer to Kyber-Squad (superseded by [plan](../archive/plans/2026-09-14-opencode-native-renderer.md)). |
 | [squad-hardcoded-docs-root.md](../archive/todo/squad-hardcoded-docs-root.md) | KyberSquad | superseded | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions (completed: `second-brain` now resolves **<docs-root>** through the Config Reg). |
 | [harness-specific-instruction-inserts.md](../archive/todo/harness-specific-instruction-inserts.md) | KyberSquad | superseded | Harness-conditional blocks in canonical agent instructions (motivating case gone: the unified conductor makes every role headless on every harness). |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |

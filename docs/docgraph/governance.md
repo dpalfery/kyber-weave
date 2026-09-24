@@ -47,6 +47,7 @@ Needs no code index. Exits non-zero on any error.
 | `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
 | `KW-DOC-LIFECYCLE-001` | A `plan` document sits in the plans folder but the plan index does not reach it |
 | `KW-DOC-LIFECYCLE-002` | A `todo` document sits in the todo folder but the todo index does not reach it |
+| `KW-DOC-LIFECYCLE-003` | A plan or specification is still open when `--merge-ready` is given |
 
 The two `KW-CONFIG-REG` rules fire only once a repository has adopted the registry — its
 `AGENTS.md` carries the generated block, or it declared `config-reg` entries. A corpus that
@@ -62,6 +63,14 @@ through its own README. Only links between documents inside the folder count —
 page linking a plan or todo does not list it. Each index is a registry property (`plan-index`
 and `todo-index`); a corpus without one reports nothing. Fix it by linking the document from
 its index, or by archiving it.
+
+`KW-DOC-LIFECYCLE-003` (Error, opt-in) is the merge gate. A plan or specification sits in its
+active folder only while it is being built, and the change that finishes it archives it — so
+a merge that still carries one either merges unfinished work or leaves finished work looking
+live. Open work is correct on a branch, so the rule runs only under
+`docs validate --merge-ready`, which pull-request CI passes. Each plan file, and each folder
+under the plans or specs folder, is one finding however many documents it holds. The folders
+are those of the `plan-index` and `specification-index` registry properties.
 
 `KW-DOC-SPEC-004` and `-006` carry a **nearest-match hint** computed by edit distance,
 offered only when the distance is plausibly a typo rather than a different word. A

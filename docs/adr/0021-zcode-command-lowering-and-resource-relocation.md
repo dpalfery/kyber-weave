@@ -169,5 +169,5 @@ on ZCode the explicit empty list widens just as far.
 - [ADR 0019](0019-pi-native-subagents-and-primary-lowering.md) — the primary-agent lowering
   precedent this record follows in outcome and departs from in mechanism
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — §8 rendering
-- [The ZCode harness plan](../plans/2026-09-21-zcode-harness-target.md) — the verified
+- [The ZCode harness plan](../archive/plans/2026-09-21-zcode-harness-target.md) — the verified
   source-of-truth table behind these decisions

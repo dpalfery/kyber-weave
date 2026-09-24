@@ -511,7 +511,7 @@ public sealed class ManagedGlossaryTests
             docs-analysis:
               glossary-path: docs/glossary.md
             """);
-        DocsSettings settings = new DocsSettings { Path = repository.Root, Format = "json" };
+        DocsValidateSettings settings = new DocsValidateSettings { Path = repository.Root, Format = "json" };
 
         int exitCode = ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings)).Result;
 

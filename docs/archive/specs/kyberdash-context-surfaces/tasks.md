@@ -1,10 +1,10 @@
 ---
-id: specs/kyberdash-context-surfaces/tasks
+id: archive/specs/kyberdash-context-surfaces/tasks
 title: KyberDash context surfaces tasks
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-18
+last-reviewed: 2026-09-24
 component: KyberDash
 ---
 
@@ -58,7 +58,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
 
 ## Tasks
 
-- [ ] 1. Remove the soft-fork machinery
+- [x] 1. Remove the soft-fork machinery
 - [x] 1.1 Retire the merge-boundary rules and vendored-path exclusions
   - Stream A.
   - Delete `tests/KyberWeave.Tests/MergeBoundaryTests.cs`. Remove the merge-zone import rule
@@ -85,7 +85,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - `docs validate` and `docs drift` report zero findings.
   - _Requirements: 1.3, 1.4, 1.7, 1.8, 1.9, 1.10, 13.3_
 
-- [ ] 2. Prune upstream-only features
+- [x] 2. Prune upstream-only features
 - [x] 2.1 Add the reachability check
   - Stream A.
   - Write `dash/scripts/unreachable.mjs`. It walks the import graph (TypeScript
@@ -142,7 +142,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     consumed provider was kept.
   - _Requirements: 2.3, 2.6, 2.7, 2.8, 7.6_
 
-- [ ] 3. Restructure into one tree
+- [x] 3. Restructure into one tree
 - [x] 3.1 Move to the target layout
   - Stream A.
   - Move `dash/kyber/**` and the retained `dash/src/**` into the layout in the design's
@@ -155,7 +155,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Fix any newly gated findings rather than baselining them.
   - _Requirements: 3.1, 3.2, 4.1, 4.4, 4.5_
 
-- [ ] 4. Adopt the KyberDash identity
+- [x] 4. Adopt the KyberDash identity
 - [x] 4.1 Rename the package, variables, directories and strings
   - Stream A.
   - Write the tests first:
@@ -176,7 +176,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     `THIRD_PARTY_NOTICES.md` in every `kyberdash` archive.
   - _Requirements: 1.5, 1.6_
 
-- [ ] 5. Engine contracts
+- [x] 5. Engine contracts
 - [x] 5.1 Define the `ContextReport` contract
   - Stream B.
   - Create `dash/src/analysis/report/types.ts` with `ContextReport`, `Measured<T>`,
@@ -279,7 +279,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     the same seeded store and scope, and asserts deep equality ignoring `generatedAt`.
   - _Requirements: 11.14_
 
-- [ ] 7. Web deep links
+- [x] 7. Web deep links
 - [x] 7.1 URL router
   - Stream D.
   - Write round-trip tests (spine location → path → location) for every pattern in
@@ -309,7 +309,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Add a test that the built CSS still defines every token the components reference.
   - _Requirements: 8.12_
 
-- [ ] 8. Tray
+- [x] 8. Tray
 - [x] 8.1 Scaffold the Tauri app and its CI
   - Stream E.
   - Create `dash/tray/` with a Tauri 2 crate in `src-tauri` and a React/Vite UI in `ui`.
@@ -411,7 +411,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
     `dash/web/src/kyber.css` and the report types with type-only imports.
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.8, 8.9, 8.10, 8.11, 8.12, 14.1, 14.2, 14.3, 14.4_
 
-- [ ] 9. Distribution
+- [x] 9. Distribution
 - [x] 9.1 Tray installer in `kyberdash menubar`
   - Stream F.
   - With a local HTTP origin (`KYBER_WEAVE_RELEASE_ORIGIN`) and an injected verifier, test:
@@ -443,9 +443,9 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Implement, run `./scripts/update-loop.sh`, and record the loop's inability to build the
     tray in the `kyberdash-local-release-loop` todo.
   - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.6, 15.7_
-- [ ] 9.4 `build-tray` release job
+- [x] 9.4 `build-tray` release job
   - Stream F. Needs the secrets from the
-    [signing todo](../../todo/macos-developer-id-signing.md).
+    [signing todo](../../../todo/macos-developer-id-signing.md).
   - Add the matrix job under `environment: release`:
     - A secrets-presence step fails the macOS legs first.
     - Import into a temporary keychain, write the `.p8`, run `tauri build --target …`.
@@ -457,9 +457,12 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Extend `ReleaseTests.cs` to assert the job's asset names, the presence check and the SHA
     pins.
   - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.9_
+  - Evidence (2026-09-24): the `build-tray` job in `release.yml`, covered by
+    `ReleaseTests.cs`; release run 44 (`v0.1.7-rc.13`) built all three targets, passed the
+    secrets check, and verified signature, team and notarization before publishing.
 
-- [ ] 10. Documentation and decisions
-- [ ] 10.1 ADR 0021, the KyberDash docs and the deferred-work todos
+- [x] 10. Documentation and decisions
+- [x] 10.1 ADR 0021, the KyberDash docs and the deferred-work todos
   - Stream G, after streams B to F merge.
   - Write ADR 0021. It covers the single report model, Rust-side HTTP, the refresh lock with
     exit 3, and the tray's ownership of the server, refresh and receiver. It supersedes only
@@ -469,9 +472,19 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - Add the Linux-tray and Windows-code-signing todos.
   - `docs validate` and `docs drift` report zero findings.
   - _Requirements: 10.9, 13.1, 13.2, 13.3, 13.4_
+  - Evidence (2026-09-24): the record is
+    [ADR 0023](../../../adr/0023-kyberdash-report-model-and-tray-ownership.md) — 0021 went to
+    the ZCode record first. `docs/dash/*` describe the three surfaces including the Windows
+    tray and deep links; the catalog row is updated; the todos are
+    [kyberdash-linux-tray](../../../todo/kyberdash-linux-tray.md) and
+    [kyberdash-windows-code-signing](../../../todo/kyberdash-windows-code-signing.md).
 
-- [ ] 11. Specification closeout
+- [x] 11. Specification closeout
   - Assign to `docs-dev`. Verify every requirement against implementation evidence,
     migrate the specification's durable content into canonical documentation, update
     the specification index, then archive `kyberdash-context-surfaces/`.
   - _Requirements: all_
+  - Evidence (2026-09-24): every one of the 124 acceptance criteria is claimed by at least one
+    task above, and every task is complete; the nine criteria owned by 9.4 and 10.1 were
+    re-verified against `release.yml`, the release run, and the documents named there. The
+    durable decisions live in ADR 0020 and ADR 0023 and in `docs/dash/`. Archived 2026-09-24.

@@ -451,10 +451,12 @@ jobs:
           sarif_file: kyber-weave-sarif
           category: kyber-weave-skills
 
+      # --merge-ready adds KW-DOC-LIFECYCLE-003: a plan or specification still open fails
+      # the build. Open work is correct on a branch while it is built, never in a merge.
       - name: Docs validate
         run: >
           dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} --
-          docs validate . --format table
+          docs validate . --merge-ready --format table
 
       # docs drift needs a host-owned CodeGraph index (.codegraph/codegraph.db).
       # Kyber-Weave does not create that index; without a CI indexer/cache the gate would

@@ -19,7 +19,7 @@ status: superseded
 
 > [!NOTE]
 > **Superseded by implementation plan:** This todo has been superseded by active plan
-> [docs/plans/2026-09-14-opencode-native-renderer.md](../../plans/2026-09-14-opencode-native-renderer.md),
+> [docs/plans/2026-09-14-opencode-native-renderer.md](../plans/2026-09-14-opencode-native-renderer.md),
 > which defines the architecture decisions and task breakdown for implementing `OpenCodeRenderer`.
 
 This is **context for planning the work, not a plan** — it states what is known, what is

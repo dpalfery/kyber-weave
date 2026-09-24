@@ -86,7 +86,8 @@ app.Configure(config =>
 
         docs.AddCommand<DocsValidateCommand>("validate")
             .WithDescription("Check documentation frontmatter against the ontology schema (KW-DOC-SPEC-*).")
-            .WithExample("docs", "validate", ".");
+            .WithExample("docs", "validate", ".")
+            .WithExample("docs", "validate", ".", "--merge-ready");
 
         docs.AddCommand<DocsDriftCommand>("drift")
             .WithDescription("Resolve documented code references against the CodeGraph index (KW-DOC-DRIFT-*).")
