@@ -1,14 +1,21 @@
 ---
-id: todo/docs-validate-todo-index-gap
+id: archive/todo/docs-validate-todo-index-gap
 title: docs validate does not require todo files to be listed in the todo index
 doc-type: todo
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-24
 status: superseded
 ---
 
 # docs validate does not require todo files to be listed in the todo index
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-24
+
+Fixed by `KW-DOC-LIFECYCLE-002` (`TodoInventoryValidator`) in PR #106. Kept as the provenance of the rule.
+
+---
 
 This is a **bug record for a documentation gate, not a design** — what the gate did before
 the fix, the live instance, and the asymmetry with plans. The resolution is recorded below;
@@ -17,9 +24,9 @@ the narrative is kept as the provenance of the rule.
 ## Why this exists
 
 Raised by the user on 2026-09-23, during the delivery of the
-[KyberDash compaction-hazard window plan](../archive/plans/2026-09-23-kyberdash-compaction-hazard-window.md):
+[KyberDash compaction-hazard window plan](../plans/2026-09-23-kyberdash-compaction-hazard-window.md):
 `docs validate` passes with zero findings even when a todo file sits under `docs/todo/`
-without a row in the todo inventory of [`README.md`](README.md). The gate that is supposed to
+without a row in the todo inventory of [`README.md`](../../todo/README.md). The gate that is supposed to
 keep the governed corpus consistent does not notice one of its own artifacts going unlisted.
 
 ## What is known
