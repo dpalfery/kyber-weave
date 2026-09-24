@@ -30,14 +30,12 @@ internal sealed class SelfUpdater : IDisposable
     /// First release whose <c>build-tray</c> job publishes the tray installers.
     /// </summary>
     /// <remarks>
-    /// Provisional: no release has published them yet, so this names the release
-    /// the job is expected to ship in rather than one observed in the wild.
-    /// Confirm it against the first release whose <c>build-tray</c> job succeeds
-    /// and correct it if that lands under a different tag — the floor exists so
-    /// an update resolving an older release does not delegate to a tray that
+    /// Confirmed against release v0.1.7-rc.13 where the <c>build-tray</c> job
+    /// first published the macOS and Windows tray installers. The floor exists
+    /// so an update resolving an older release does not delegate to a tray that
     /// release never carried.
     /// </remarks>
-    private const string TrayMinVersion = "0.10.0";
+    private const string TrayMinVersion = "0.1.7-rc.13";
 
     /// <summary>Where <c>kyberdash menubar</c> records what it installed.</summary>
     private const string TrayRecordFile = "tray.json";
@@ -235,7 +233,7 @@ internal sealed class SelfUpdater : IDisposable
         // After the binaries are in place, so the tray installer that runs is the
         // new one and it resolves the release this update just installed.
         if (ShouldUpdateTray(options, version, windows))
-            UpdateTray(windows);
+            UpdateTray(windows, version);
 
         string installed = Path.Combine(
             _host.InstallDirectory,
@@ -292,21 +290,21 @@ internal sealed class SelfUpdater : IDisposable
         return true;
     }
 
-    private void UpdateTray(bool windows)
+    private void UpdateTray(bool windows, string version)
     {
         string kyberdash = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
 
         _log("updating the KyberDash tray…");
-        int exitCode = _runProcess(kyberdash, ["menubar", "--update"]);
+        int exitCode = _runProcess(kyberdash, ["menubar", "--update", "--version", version]);
         if (exitCode != 0)
         {
             // Named, so the user can tell a tray failure from a CLI one. The
             // binaries are already committed, so this does not roll anything
             // back — it reports that one step of the update did not finish.
             throw new SelfUpdateException(
-                $"the KyberDash tray step failed: `{kyberdash} menubar --update` exited {exitCode}.");
+                $"the KyberDash tray step failed: `{kyberdash} menubar --update --version {version}` exited {exitCode}.");
         }
         _log("updated the KyberDash tray");
     }

@@ -649,7 +649,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(0, outcome.ExitCode);
         (string File, IReadOnlyList<string> Args) call = Assert.Single(spawned);
         Assert.Equal(Path.Combine(_install.Path, "kyberdash"), call.File);
-        Assert.Equal(["menubar", "--update"], call.Args);
+        Assert.Equal(["menubar", "--update", "--version", "0.10.0"], call.Args);
         Assert.Contains(log, line => line.Contains("updated the KyberDash tray", StringComparison.Ordinal));
     }
 
@@ -689,7 +689,7 @@ public sealed class UpdateCommandTests : IDisposable
     // --no-kyberdash: the tray installer is that binary.
     [InlineData(false, true, "0.10.0", true, "--no-kyberdash")]
     // A release that predates the tray.
-    [InlineData(false, false, "0.9.23", true, "predates the KyberDash tray")]
+    [InlineData(false, false, "0.1.7-rc.12", true, "predates the KyberDash tray")]
     // Nothing recorded: update replaces, it does not add.
     [InlineData(false, false, "0.10.0", false, "no tray install recorded")]
     public void RunSkipsTheTrayWithAReason(
@@ -724,7 +724,16 @@ public sealed class UpdateCommandTests : IDisposable
         SelfUpdateOptions options,
         Func<string, string?>? env = null)
     {
-        using SelfUpdater updater = new SelfUpdater(handler, host, _ => { }, env ?? (_ => null));
+        using SelfUpdater updater = new SelfUpdater(
+            handler,
+            host,
+            _ => { },
+            env ?? (name => name switch
+            {
+                "HOME" => _install.Path,
+                "USERPROFILE" => _install.Path,
+                _ => null,
+            }));
         return updater.Run(options);
     }
 

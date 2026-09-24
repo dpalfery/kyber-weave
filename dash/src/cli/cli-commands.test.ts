@@ -59,9 +59,9 @@ describe('menubar', () => {
     expect(result.stderr).toMatch(/checksums:|platform:/)
   })
 
-  it('takes --force and --update', () => {
+  it('takes --force, --update, and --version', () => {
     const menubar = buildProgram().commands.find(command => command.name() === 'menubar')!
     const flags = menubar.options.map(option => option.long).sort()
-    expect(flags).toEqual(['--force', '--update'])
+    expect(flags).toEqual(['--force', '--update', '--version'])
   })
 })

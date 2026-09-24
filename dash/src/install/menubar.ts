@@ -83,16 +83,17 @@ export async function installTray(
     return existing
   }
 
-  const origin = releaseOrigin(deps.version, deps.env)
+  const version = options.version ?? deps.version
+  const origin = releaseOrigin(version, deps.env)
   const artifact = trayArtifactName(deps.platform, deps.arch)
 
   const payload = await download(deps, origin, artifact)
   const staging = await deps.fs.mkdtemp('kyberdash-tray-')
 
   if (deps.platform === 'darwin') {
-    return installMacos(deps, { payload, staging, artifact, existing })
+    return installMacos(deps, { payload, staging, artifact, existing, version })
   }
-  return installWindows(deps, { payload, staging, artifact })
+  return installWindows(deps, { payload, staging, artifact, version })
 }
 
 /**
@@ -153,6 +154,7 @@ type MacosInstall = {
   staging: string
   artifact: string
   existing: TrayRecord | null
+  version?: string
 }
 
 async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<TrayRecord> {
@@ -198,7 +200,7 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
     throw new InstallError('install', describe(error))
   }
 
-  const record = await recordInstall(deps, target)
+  const record = await recordInstall(deps, target, plan.version)
 
   try {
     // The relaunch is part of the install: a tray that is installed but not
@@ -216,7 +218,7 @@ async function installMacos(deps: InstallDeps, plan: MacosInstall): Promise<Tray
 
 async function installWindows(
   deps: InstallDeps,
-  plan: { payload: Uint8Array; staging: string; artifact: string },
+  plan: { payload: Uint8Array; staging: string; artifact: string; version?: string },
 ): Promise<TrayRecord> {
   const installer = join(plan.staging, plan.artifact)
   await deps.fs.writeFile(installer, plan.payload)
@@ -236,7 +238,7 @@ async function installWindows(
     'KyberDash',
     'kyberdash-tray.exe',
   )
-  const record = await recordInstall(deps, target)
+  const record = await recordInstall(deps, target, plan.version)
   await launch(deps, target)
   return record
 }
@@ -299,10 +301,10 @@ async function restore(
   }
 }
 
-async function recordInstall(deps: InstallDeps, target: string): Promise<TrayRecord> {
+async function recordInstall(deps: InstallDeps, target: string, version?: string): Promise<TrayRecord> {
   const record: TrayRecord = {
     path: target,
-    version: deps.version,
+    version: version ?? deps.version,
     installedAt: deps.now().toISOString(),
     platform: deps.platform,
     // R12.11 / R6.6: the tray resolves the CLI from here before falling back to

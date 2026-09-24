@@ -85,11 +85,12 @@ export function buildProgram(): Command {
     .description('Install and launch the KyberDash tray on macOS and Windows')
     .option('--force', 'Reinstall even if a copy is already installed')
     .option('--update', 'Update an existing install; do nothing if there is none')
-    .action(async (opts: { force?: boolean; update?: boolean }) => {
+    .option('--version <version>', 'Release version to install (defaults to the running CLI version)')
+    .action(async (opts: { force?: boolean; update?: boolean; version?: string }) => {
       const { installTray } = await import('../install/menubar.js')
       const { nodeInstallDeps } = await import('../install/node-deps.js')
       try {
-        await installTray(nodeInstallDeps(), { force: opts.force, update: opts.update })
+        await installTray(nodeInstallDeps(), { force: opts.force, update: opts.update, version: opts.version })
       } catch (err) {
         // The step is already in the message (R15.6); the exit code is what a
         // caller such as the self-updater branches on.
