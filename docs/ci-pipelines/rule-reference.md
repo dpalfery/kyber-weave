@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-24
 ---
 
 # Rule reference
@@ -20,7 +20,7 @@ baselines — see [CI Pipelines architecture](architecture.md) for why they neve
 | Id | Severity | Meaning |
 |---|---|---|
 | `KW-DOC-SPEC-001` | Error | No frontmatter block, or unparseable YAML |
-| `KW-DOC-SPEC-002` | Error | `doc-type`, `status`, or `last-reviewed` outside its vocabulary or format |
+| `KW-DOC-SPEC-002` | Error | `doc-type`, `status`, `last-reviewed`, or an undeclared `technology` outside its vocabulary or format |
 | `KW-DOC-SPEC-003` | Error | Required key missing or empty for this doc-type |
 | `KW-DOC-SPEC-004` | Error | `component` or `owner` absent from the catalog |
 | `KW-DOC-SPEC-005` | Error | `source-root` path does not exist |
