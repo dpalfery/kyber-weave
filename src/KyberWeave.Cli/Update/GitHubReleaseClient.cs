@@ -17,6 +17,12 @@ internal sealed class GitHubReleaseClient : IDisposable
     internal const string Owner = "dpalfery";
     internal const string Repo = "kyber-weave";
 
+    /// <summary>The largest page the Releases API serves.</summary>
+    internal const int ReleasesPerPage = 100;
+
+    /// <summary>How many Releases pages the newest-release scan reads at most.</summary>
+    internal const int MaxReleasePages = 10;
+
     internal static readonly Uri ApiRoot = new("https://api.github.com/");
 
     internal static readonly Uri LatestApi =
@@ -84,29 +90,67 @@ internal sealed class GitHubReleaseClient : IDisposable
         return ReleaseVersion.Normalize(payload.TagName);
     }
 
+    /// <summary>
+    /// The highest-versioned non-draft release across every page of the Releases list,
+    /// stable or pre-release — what <c>kyber-weave update --release-candidate</c> installs.
+    /// </summary>
+    /// <remarks>
+    /// GitHub lists releases newest-created first, which is not version order: a release
+    /// published out of sequence would otherwise shadow a higher one, so every page is read
+    /// and the SemVer maximum taken. A short page is the last one, and
+    /// <see cref="MaxReleasePages"/> bounds a server that ignores paging. A tag that is not a
+    /// release version is skipped rather than allowed to abort the update.
+    /// </remarks>
     internal string ResolveNewestListed()
     {
-        string json = GetString(_releasesApi, "the GitHub Releases list");
-        GitHubRelease[] payload;
+        string? newest = null;
+        for (int page = 1; page <= MaxReleasePages; page++)
+        {
+            GitHubRelease[] payload = ReadReleasesPage(page);
+            foreach (GitHubRelease release in payload)
+            {
+                if (release.Draft || string.IsNullOrWhiteSpace(release.TagName))
+                    continue;
+
+                string version;
+                try
+                {
+                    version = ReleaseVersion.Normalize(release.TagName);
+                }
+                catch (SelfUpdateException)
+                {
+                    continue;
+                }
+
+                if (newest is null || ReleaseVersion.Compare(version, newest) > 0)
+                    newest = version;
+            }
+
+            if (payload.Length < ReleasesPerPage)
+                break;
+        }
+
+        return newest
+            ?? throw new SelfUpdateException("could not resolve the latest release. Pass a version explicitly.");
+    }
+
+    /// <summary>One page of the Releases list, at <see cref="ReleasesPerPage"/> entries per page.</summary>
+    internal static Uri ReleasesPage(Uri releasesApi, int page) =>
+        new($"{releasesApi.AbsoluteUri}?per_page={ReleasesPerPage}&page={page}");
+
+    /// <summary>Fetches and parses one page of the Releases list; a bad page fails the scan.</summary>
+    private GitHubRelease[] ReadReleasesPage(int page)
+    {
+        string json = GetString(ReleasesPage(_releasesApi, page), "the GitHub Releases list");
         try
         {
-            payload = JsonSerializer.Deserialize<GitHubRelease[]>(json, JsonOptions)
+            return JsonSerializer.Deserialize<GitHubRelease[]>(json, JsonOptions)
                 ?? throw new SelfUpdateException("GitHub Releases list was empty.");
         }
         catch (JsonException ex)
         {
             throw new SelfUpdateException("could not parse the GitHub Releases list.", ex);
         }
-
-        foreach (GitHubRelease release in payload)
-        {
-            if (release.Draft || string.IsNullOrWhiteSpace(release.TagName))
-                continue;
-
-            return ReleaseVersion.Normalize(release.TagName);
-        }
-
-        throw new SelfUpdateException("could not resolve the latest release. Pass a version explicitly.");
     }
 
     internal string DownloadChecksums(string tag)

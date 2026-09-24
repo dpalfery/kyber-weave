@@ -375,7 +375,7 @@ and dies with a message when `--no-kyberdash` is also given (12.7).
   - After the build it asserts `spctl` acceptance, `stapler validate` and the team id before
     zipping.
   - Assets join `SHA256SUMS.txt`. Release notes carry the Windows SmartScreen line (12.4).
-  - Secret names follow [the signing todo](../../todo/macos-developer-id-signing.md). Every
+  - Secret names follow [the signing todo](../../archive/todo/macos-developer-id-signing.md). Every
     action is pinned to a commit SHA checked against its repository at authoring time (12.9).
 - **CI.** New jobs cover `dash/web` and the `dash/tray/ui` React code (typecheck, lint,
   test), and `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test` for the
