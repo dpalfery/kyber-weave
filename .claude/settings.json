@@ -7,6 +7,11 @@
           {
             "type": "command",
             "command": "[ \"$CLAUDE_CODE_REMOTE\" = true ] && [ ! -d \"$CLAUDE_PROJECT_DIR/.codegraph\" ] && command -v codegraph >/dev/null && codegraph init -y \"$CLAUDE_PROJECT_DIR\" >/dev/null 2>&1; exit 0"
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/cloud-session-setup.sh\"",
+            "timeout": 300
           }
         ]
       }
