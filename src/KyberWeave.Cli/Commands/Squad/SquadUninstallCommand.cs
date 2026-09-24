@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using System.Threading;
 using Spectre.Console;
@@ -13,6 +14,8 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     private readonly ISquadUserPaths? _userPaths;
     private readonly SquadStateStore? _stateStore;
     private readonly SquadLifecycleService? _lifecycleService;
+    private readonly bool? _isInteractive;
+    private readonly Func<string, bool>? _readAnswer;
 
     /// <summary>Creates a new uninstall command using default user paths.</summary>
     public SquadUninstallCommand()
@@ -20,14 +23,24 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     }
 
     /// <summary>Creates a new uninstall command using injectable dependencies.</summary>
+    /// <remarks>
+    /// <paramref name="isInteractive"/> and <paramref name="readAnswer"/> default to null
+    /// because optional parameter values must be compile-time constants; Execute resolves
+    /// them to <see cref="SquadCommandComposition.IsInteractiveConsole"/> and real console
+    /// input, so an unparameterized run behaves exactly like the default collaborators.
+    /// </remarks>
     internal SquadUninstallCommand(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
-        SquadLifecycleService? lifecycleService = null)
+        SquadLifecycleService? lifecycleService = null,
+        bool? isInteractive = null,
+        Func<string, bool>? readAnswer = null)
     {
         _userPaths = userPaths;
         _stateStore = stateStore;
         _lifecycleService = lifecycleService;
+        _isInteractive = isInteractive;
+        _readAnswer = readAnswer;
     }
 
     /// <inheritdoc />
@@ -36,7 +49,21 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        string targetRoot = SquadCommandComposition.ResolveTargetRoot(settings.Path);
+
+        // Coalesce the positional path with --path; invalid client input returns exit
+        // code 2 before any resolution or work
+        string? effectivePath;
+        try
+        {
+            effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
+        }
+        catch (ArgumentException ex)
+        {
+            SquadCommandComposition.WriteClientInputError(ex.Message);
+            return 2;
+        }
+
+        string targetRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
 
         SquadLifecycleService lifecycleService = _lifecycleService ?? SquadCommandComposition.CreateLifecycleService(
@@ -47,6 +74,31 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             TargetRoot: targetRoot,
             Scope: scope,
             DryRun: settings.DryRun);
+
+        // Uninstall has no --target option: its targets are the receipt's. A --global
+        // receipt's files live beneath each target's own physical global root, not beneath
+        // targetRoot — the state anchor — so the roots the lifecycle will write are
+        // derived from the same receipt and named in the confirmation.
+        IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
+            scope == SquadDeploymentScope.Global
+                ? SquadCommandComposition.ResolveUninstallGlobalTargetRoots(stateStore, targetRoot)
+                : null;
+
+        // The confirmation is the last gate before the lifecycle call — the only
+        // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
+        // a dry-run's output already names the root, so it never prompts (N4).
+        if (!settings.DryRun && !SquadTargetRootConfirmation.Confirm(
+                targetRoot,
+                scope,
+                "uninstall",
+                isInteractive: _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                yes: settings.Yes,
+                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                globalTargetRoots: globalTargetRoots))
+        {
+            AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
+            return 2;
+        }
 
         try
         {

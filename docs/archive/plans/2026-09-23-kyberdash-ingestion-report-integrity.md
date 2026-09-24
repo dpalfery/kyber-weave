@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-23-kyberdash-ingestion-report-integrity
+id: archive/plans/2026-09-23-kyberdash-ingestion-report-integrity
 title: Restore KyberDash ingestion and report integrity across harnesses
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-09-24
 component: KyberDash
@@ -10,7 +10,9 @@ component: KyberDash
 
 # Restore KyberDash ingestion and report integrity across harnesses
 
-**Status:** Complete  
+**Status:** Archived  
+**Archive Date:** 2026-09-24  
+**Completion:** Complete — council position APPROVE; all tasks T0–T14 verified; 256/256 Vitest passed (3,586 tests); 2,067 .NET tests passed; schema v13 migration, problem deduplication, and SEA deployment verified.  
 **Date:** 2026-09-23  
 **Development mode:** test-first  
 **Approved:** 2026-09-23  

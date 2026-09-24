@@ -44,7 +44,7 @@ Three things changed:
   vendored ESM dependencies was solved without touching upstream code, so mergeability is not
   buying a release capability either.
 
-The KyberDash context surfaces specification (`docs/specs/kyberdash-context-surfaces/`)
+The KyberDash context surfaces specification (`docs/archive/specs/kyberdash-context-surfaces/`)
 therefore takes the current code as a one-time fork.
 
 ## Decision

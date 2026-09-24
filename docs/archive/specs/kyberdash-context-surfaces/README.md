@@ -1,13 +1,20 @@
 ---
-id: specs/kyberdash-context-surfaces/index
+id: archive/specs/kyberdash-context-surfaces/index
 title: KyberDash context surfaces specification
 doc-type: index
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-18
+last-reviewed: 2026-09-24
 ---
 
 # KyberDash context surfaces specification
+
+**Status:** Archived
+**Archive Date:** 2026-09-24
+
+Delivered and closed out 2026-09-24: every acceptance criterion traces to a completed task (see [tasks](tasks.md) 11). The durable decisions live in [ADR 0020](../../../adr/0020-kyberdash-one-time-fork.md), [ADR 0023](../../../adr/0023-kyberdash-report-model-and-tray-ownership.md), and [`docs/dash/`](../../../dash/README.md).
+
+---
 
 End KyberDash's soft-fork relationship with `getagentseal/codeburn`, delete the inherited
 features that are not about context, and rebuild the glanceable surfaces around context
@@ -72,4 +79,4 @@ an assumption hidden in the design.
 
 ## Status
 
-**Draft**: requirements, design and tasks await approval. Stream A starts once they are approved.
+**Archived** 2026-09-24: requirements, design and tasks were approved and delivered, and the closeout (tasks 11) traces every acceptance criterion to a completed task.

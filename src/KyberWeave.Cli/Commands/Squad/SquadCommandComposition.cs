@@ -18,6 +18,26 @@ internal static class SquadCommandComposition
     public static bool IsInteractiveConsole() =>
         !Console.IsInputRedirected && AnsiConsole.Profile.Capabilities.Interactive;
 
+    /// <summary>
+    /// Writes the exit-2 client-input error line without console folding. The hint names
+    /// the operator's paths verbatim, and a redirected console folds at 80 columns,
+    /// splitting a long path across lines — corrupting the one thing the hint exists
+    /// for: a copy-pastable name for each of the conflicting forms.
+    /// </summary>
+    public static void WriteClientInputError(string message)
+    {
+        int originalWidth = AnsiConsole.Profile.Width;
+        AnsiConsole.Profile.Width = int.MaxValue;
+        try
+        {
+            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(message)}[/]");
+        }
+        finally
+        {
+            AnsiConsole.Profile.Width = originalWidth;
+        }
+    }
+
     /// <summary>Resolves the state store using the specified or default user paths.</summary>
     public static SquadStateStore ResolveStateStore(ISquadUserPaths? userPaths = null) =>
         new(userPaths ?? SquadUserPaths.Instance);
@@ -32,6 +52,87 @@ internal static class SquadCommandComposition
         Environment.GetEnvironmentVariable,
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ReadFileTextOrNull);
+
+    /// <summary>
+    /// Resolves each selected target's physical global root — the directory a
+    /// <c>--global</c> lifecycle actually writes — through the same resolver (and
+    /// therefore the same override environment variables, <c>CODEX_HOME</c>,
+    /// <c>CLAUDE_CONFIG_DIR</c>, …) the lifecycle's plan resolves with moments later.
+    /// </summary>
+    /// <remarks>
+    /// A target whose root cannot be resolved — no verified per-user directory, or an
+    /// override naming a relative path — is skipped rather than thrown: the confirmation
+    /// gate must still name the roots that would genuinely change, and the lifecycle call
+    /// after it remains the step that reports an unresolvable root as a failure.
+    /// </remarks>
+    public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveGlobalTargetRoots(
+        IReadOnlyList<SquadTarget> targets)
+    {
+        ISquadGlobalRootResolver globalRoots = ResolveGlobalRoots();
+        List<(SquadTarget Target, string GlobalRoot)> resolved = [];
+        foreach (SquadTarget target in targets)
+        {
+            try
+            {
+                resolved.Add((target, globalRoots.ResolveGlobalRoot(target)));
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // No verified per-user directory for this target: nothing can be named,
+                // and the lifecycle call after the gate still fails the run for it.
+            }
+            catch (ArgumentException)
+            {
+                // The target's override resolves to a relative path: same treatment.
+            }
+        }
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// Derives the per-target global roots a <c>--global</c> uninstall will write from the
+    /// deployment receipt: uninstall has no <c>--target</c> option, so the receipt's owned
+    /// files are the authoritative target list, and the lifecycle resolves each through
+    /// <see cref="ISquadGlobalRootResolver.ResolveGlobalRoot"/> at plan time.
+    /// </summary>
+    /// <remarks>
+    /// Every failure mode degrades to "no per-target roots to name" rather than throwing:
+    /// an absent receipt means nothing will be uninstalled, and a corrupt receipt or an
+    /// unknown target token is surfaced by the lifecycle call after the gate, which reads
+    /// the same state and fails under the command's exit-1 convention.
+    /// </remarks>
+    public static IReadOnlyList<(SquadTarget Target, string GlobalRoot)> ResolveUninstallGlobalTargetRoots(
+        SquadStateStore stateStore,
+        string targetRoot)
+    {
+        SquadReceipt? receipt;
+        try
+        {
+            receipt = stateStore.ReadReceipt(targetRoot, SquadDeploymentScope.Global);
+        }
+        catch (InvalidDataException)
+        {
+            return [];
+        }
+
+        if (receipt is null)
+        {
+            return [];
+        }
+
+        IReadOnlyList<SquadTarget> targets;
+        try
+        {
+            targets = SquadTargetCatalog.Parse(receipt.Files.Select(file => file.Target).Distinct());
+        }
+        catch (ArgumentException)
+        {
+            return [];
+        }
+
+        return ResolveGlobalTargetRoots(targets);
+    }
 
     /// <summary>
     /// The file-reading port <see cref="SquadGlobalRoots"/> uses for the one target whose
@@ -120,6 +221,39 @@ internal static class SquadCommandComposition
             timeProvider: timeProvider,
             observer: observer,
             globalRoots: resolvedGlobalRoots);
+    }
+
+    /// <summary>
+    /// Coalesces the positional path argument with the <c>--path</c> option into the one
+    /// effective target path. The option wins when the positional is absent or at its
+    /// <c>"."</c> default; the positional passes through when no option was supplied;
+    /// supplying both a non-default positional and the option is a conflict.
+    /// </summary>
+    /// <remarks>
+    /// Spectre.Console.Cli cannot carry a <c>[CommandArgument]</c> and a
+    /// <c>[CommandOption]</c> on one property, so <c>--path</c> binds a separate nullable
+    /// <c>PathOption</c> and this is the single seam where the two forms meet. The conflict
+    /// throws <see cref="ArgumentException"/> so it flows through the commands' existing
+    /// client-input catch into the exit-2 convention, and its hint names both forms so the
+    /// operator can pick one.
+    /// </remarks>
+    public static string? CoalesceTargetPath(string? positional, string? option)
+    {
+        if (string.IsNullOrWhiteSpace(option))
+        {
+            return positional;
+        }
+
+        bool positionalIsDefault =
+            string.IsNullOrWhiteSpace(positional) || string.Equals(positional, ".", StringComparison.Ordinal);
+        if (positionalIsDefault)
+        {
+            return option;
+        }
+
+        throw new ArgumentException(
+            $"The deployment root was supplied twice: as the positional '{positional}' and as the option '--path {option}'. " +
+            "Supply either the positional path or --path <PATH>, not both.");
     }
 
     /// <summary>Resolves the target root directory path.</summary>
