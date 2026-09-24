@@ -60,7 +60,7 @@ public sealed class CopilotRendererTests
         Assert.Equal("architect", agent.CapabilityProfile);
         Assert.Equal("architect-copilot", agent.CopilotCapabilityProfile);
         Assert.Equal(
-            SquadPermissionDecision.Ask,
+            SquadPermissionDecision.Allow,
             source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["filesystem.write"]);
         Assert.Equal(
             SquadPermissionDecision.Ask,
