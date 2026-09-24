@@ -4,7 +4,8 @@
 #
 # A cloud session starts from a fresh clone. This repository's committed Squad deployment is
 # the Copilot one under .github/, so without this script a Claude session has no kyber-weave
-# binaries, no kyber-weave MCP server, and none of the Squad agents or skills.
+# binaries, no kyber-weave MCP server, none of the Squad agents or skills, and no .NET SDK to
+# run the gates in AGENTS.md.
 #
 # It runs from two places, both cloud-only:
 #   - the SessionStart hook in .claude/settings.json, on every start and resume, so a session
@@ -45,10 +46,25 @@ INSTALLER="$(cd "$(dirname "$0")" && pwd)/install.sh"
 cd "$HOME" || exit 0
 
 report() {
-    echo "$1"
-    echo "$1" >&3
+    echo "$1; $DOTNET_NOTE"
+    echo "$1; $DOTNET_NOTE" >&3
     exit 0
 }
+
+# The repository's gates need the .NET SDK, which the cloud image does not ship. Ubuntu's own
+# archive carries dotnet-sdk-10.0 (a 10.0.1xx band that global.json's latestFeature roll-forward
+# accepts); dotnet-install.sh is no option because the session proxy denies
+# builds.dotnet.microsoft.com, where every Microsoft download link redirects.
+if ! command -v dotnet >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -y dotnet-sdk-10.0 \
+        || { apt-get update && apt-get install -y dotnet-sdk-10.0; } \
+        || echo "dotnet-sdk-10.0 install failed"
+fi
+DOTNET_NOTE="no .NET SDK"
+if command -v dotnet >/dev/null 2>&1; then
+    DOTNET_NOTE=".NET SDK $(dotnet --version 2>/dev/null)"
+fi
 
 # Highest pre-release by version, not the first one GitHub lists: list order is what let a
 # mistyped tag shadow the real release (docs/todo/mistyped-release-tag.md).
