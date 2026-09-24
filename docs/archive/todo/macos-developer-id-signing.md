@@ -32,7 +32,7 @@ The team now has an Apple Developer account, team id **`J2UNNQ466J`**. Two piece
 depend on it:
 
 1. **The KyberDash tray.** The
-   [KyberDash context surfaces specification](../../specs/kyberdash-context-surfaces/requirements.md)
+   [KyberDash context surfaces specification](../specs/kyberdash-context-surfaces/requirements.md)
    requires a macOS tray signed with this team's Developer ID, notarized and stapled. Its
    release job must *fail* when the credentials are absent (Requirements 12.2–12.3), so that
    job cannot pass until part A below is done.

@@ -18,7 +18,7 @@ dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill validate .apm/skills/kyber-weave-docs
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill lint .apm/skills/kyber-weave-docs --min-desc-score 70
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm/skills/kyber-weave-docs --fail-on critical
-dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .
+dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 ```
 

@@ -10,9 +10,13 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Schema tier: frontmatter conformance. Needs no code index.</summary>
-public sealed class DocsValidateCommand : Command<DocsSettings>
+public sealed class DocsValidateCommand : Command<DocsValidateSettings>
 {
-    protected override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs every frontmatter and inventory validator, and the open-work gate when
+    /// <see cref="DocsValidateSettings.MergeReady"/> is set. Exits 1 on any error.
+    /// </summary>
+    protected override int Execute(CommandContext context, DocsValidateSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
@@ -26,6 +30,8 @@ public sealed class DocsValidateCommand : Command<DocsSettings>
         report.AddRange(new ConfigRegValidator(settings.Path, config.WithOntology(ontology)).Validate().Items);
         report.AddRange(new PlanInventoryValidator(config.WithOntology(ontology)).Validate(set).Items);
         report.AddRange(new TodoInventoryValidator(config.WithOntology(ontology)).Validate(set).Items);
+        if (settings.MergeReady)
+            report.AddRange(new OpenWorkValidator(config.WithOntology(ontology)).Validate(set).Items);
         try
         {
             report.AddRange(new ManagedGlossaryService(
@@ -47,5 +53,6 @@ public sealed class DocsValidateCommand : Command<DocsSettings>
         return report.HasErrors ? 1 : 0;
     }
 
-    public int Execute(CommandContext context, DocsSettings settings) => Execute(context, settings, CancellationToken.None);
+    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
+    public int Execute(CommandContext context, DocsValidateSettings settings) => Execute(context, settings, CancellationToken.None);
 }

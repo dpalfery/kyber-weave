@@ -1,16 +1,18 @@
 ---
-id: plans/2026-09-14-kilo-native-renderer
+id: archive/plans/2026-09-14-kilo-native-renderer
 title: Add a native Kilo renderer to Kyber-Squad
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-24
 component: KyberSquad
 ---
 
 # Add a native Kilo renderer to Kyber-Squad
 
-**Status:** Ready  
+**Status:** Archived
+**Archive Date:** 2026-09-24
+**Closeout:** Delivered by #93 (`KiloRenderer`); archived 2026-09-24 when the open-work gate found it still marked Ready.
 **Date:** 2026-09-14  
 **Goal:** Implement and register an `ISquadRenderer` for `SquadTarget.Kilo` (`kilo`) so `kyber-weave squad install --target kilo` succeeds with native Kilo agent and skill layouts, verified against repository safety and rendering invariants.
 
