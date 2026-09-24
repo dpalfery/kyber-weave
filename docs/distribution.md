@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-24
 ---
 
 # Distribution and release flow
@@ -222,22 +222,24 @@ cannot be proven by the release that contains it — only by updating away from 
 predates it. Tag-and-wait cycles get this wrong silently: the release ships, the same failure
 reappears, and the fix looks broken when it was simply never the code that ran.
 
-Changes to the self-updater, `install.sh`, or the Squad release path must run the local release
-loop. It publishes the working tree as a stand-in Release, serves it from loopback, and drives a
-real self-update and `squad install` against published single-file binaries. Nothing reaches
-github.com:
+Changes to the self-updater, `install.sh`, the Squad release path, or how `kyberdash` is built
+or updated must run the local release loop. It publishes the working tree as a stand-in
+Release, serves it from loopback, and drives a real self-update, a `squad install`, and the
+KyberDash cases against published single-file binaries. Nothing reaches github.com. The
+KyberDash build downloads Node from nodejs.org once, then reuses the cached copy:
 
 ```bash
-./scripts/update-loop.sh                  # publish, serve, self-update, squad install
+./scripts/update-loop.sh                  # publish, serve, self-update, squad install, KyberDash
 ./scripts/update-loop.sh --keep           # leave the sandbox in place to inspect
 ./scripts/update-loop.sh --from <git-ref> # update away from an older build
+./scripts/update-loop.sh --no-kyberdash   # skip the kyberdash build and the cases that need it
 ```
 
 Three pieces are usable separately:
 
 | Script | Does |
 |---|---|
-| [`scripts/release-local.sh`](../scripts/release-local.sh) | Publishes one RID with `release.yml`'s exact flags into `.local-release/v<version>/`, plus Squad archives and `SHA256SUMS.txt`. |
+| [`scripts/release-local.sh`](../scripts/release-local.sh) | Publishes one RID with `release.yml`'s exact flags into `.local-release/v<version>/`, plus Squad archives, the `kyberdash` single-executable, and `SHA256SUMS.txt`. |
 | [`scripts/local-release-server.py`](../scripts/local-release-server.py) | Serves that tree as the GitHub Releases endpoints the CLI reads. Loopback only. |
 | [`scripts/update-loop.sh`](../scripts/update-loop.sh) | Drives the two together and asserts the outcome. |
 
@@ -250,6 +252,38 @@ the type; `ReleaseOriginTests` pins them, and widening them needs a reason you c
 Run against a **published single-file binary**, never `dotnet run`. The failure this exists
 to catch — a running image replacing itself and then failing to load an assembly it had not
 yet touched — does not exist in any other shape.
+
+### KyberDash in the loop
+
+`release-local.sh` builds `kyberdash-<node-rid>.tar.gz` for this machine the way the
+`build-kyberdash` job does: an ESM bundle behind the CommonJS shim, injected into a prebuilt
+Node from nodejs.org, and ad-hoc signed on macOS. The job is the authority.
+`ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` fails when the fuse, the postject
+version, or Node's version in `dash/.nvmrc` disagrees with it. The build needs `node` and
+`npm` on `PATH`. A failed build fails the loop; `--no-kyberdash` is the explicit opt-out.
+
+Each case starts from a fresh copy of a staged build, with its own `HOME`, so the tray
+record the updater reads is a fixture and never this machine's:
+
+| Case | Asserts |
+|---|---|
+| `kyberdash-replaced` | An installed `kyberdash` is replaced, and the new one answers `--version`. |
+| `kyberdash-opt-out` | `--no-kyberdash` updates the CLI and leaves `kyberdash` and the tray alone. |
+| `tray-opt-out` | `--no-menubar` replaces `kyberdash` and leaves the tray alone. |
+| `tray-delegated` | With a `tray.json`, the update runs the new `kyberdash menubar --update`, and that step's failure fails the update by name. |
+| `kyberdash-floor` | A release below the KyberDash floor, which carries no `kyberdash` archive, still updates the CLI and MCP. It needs no build, so it runs under `--no-kyberdash` too. |
+
+The main self-update also asserts that an absent `kyberdash` stays absent.
+
+The tray step cannot succeed in the loop. Linux has no tray, and the local release carries
+no tray installer. So `tray-delegated` proves that the step ran and failed by name, not
+that a tray was installed. Its first run found the tray step had never run at all: the root
+`--version` swallowed the updater's `menubar --update --version <v>`, so `kyberdash`
+printed its version and exited 0.
+
+Two things stay out of reach. The `install.sh` side waits on the script gaining an origin
+override; the [install-sh-local-origin todo](todo/install-sh-local-origin.md) tracks both.
+Cross-RID builds are the other: the Node that makes the blob has to run here.
 
 ## Continuous integration security
 

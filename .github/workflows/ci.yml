@@ -210,10 +210,23 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      # Publishes two single-file builds, serves them from loopback, and drives a real
-      # self-update followed by a real Squad install. publish-smoke proves a published
-      # binary starts; this proves one can replace itself and still work afterwards,
-      # which is the failure mode that shipped in 0.1.6-rc.5 through rc.7.
+      # The loop builds the kyberdash single-executable the way release.yml does, which
+      # needs npm for the bundle. The SEA itself is made from a Node that release-local.sh
+      # downloads from nodejs.org at the version in dash/.nvmrc; this setup only has to
+      # run npm and tsup, so it reads the same file.
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: dash/.nvmrc
+          cache: npm
+          cache-dependency-path: dash/package-lock.json
+
+      # Publishes two single-file builds and a kyberdash, serves them from loopback, and
+      # drives a real self-update followed by a real Squad install, then the KyberDash
+      # cases. publish-smoke proves a published binary starts; this proves one can
+      # replace itself and still work afterwards, which is the failure mode that shipped
+      # in 0.1.6-rc.5 through rc.7. The KyberDash cases are what the install path
+      # shipped without, when a release with no kyberdash archive installed nothing.
       - name: Run the update loop
         run: ./scripts/update-loop.sh
 

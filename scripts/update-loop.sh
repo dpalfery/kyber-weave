@@ -19,11 +19,17 @@
 # the default for exactly that reason; use `--from <ref>` once the ref you want to test
 # from carries the override.
 #
+# The KyberDash cases then run against the same release: an installed kyberdash is
+# replaced, `--no-kyberdash` and `--no-menubar` are honoured, a recorded tray makes the
+# update run the new `kyberdash menubar --update`, and a release below the KyberDash
+# floor, which carries no kyberdash archive, still updates the CLI and MCP.
+#
 # Options:
 #   --from <source>   working (default) | installed | <git ref>
 #   --to <version>    version to publish and update to (default: 99.0.0-local)
 #   --rid <rid>       target RID (default: this machine's)
 #   --skip-squad      run only the self-update half
+#   --no-kyberdash    skip the KyberDash build and every case that needs it
 #   --keep            leave the sandbox and release tree in place for inspection
 #   --reuse           skip publishing if the release tree already has this version
 
@@ -34,8 +40,13 @@ FROM="working"
 TO_VERSION="99.0.0-local"
 RID=""
 SKIP_SQUAD=""
+NO_KYBERDASH=""
 KEEP=""
 REUSE=""
+
+# Below every KyberDash floor, as every release before 0.1.7-rc.9 was, so its release
+# carries no kyberdash archive — the case the floor exists for.
+FLOOR_VERSION="0.0.1-loopfrom"
 
 die() { printf '\033[31mupdate-loop: error: %s\033[0m\n' "$1" >&2; exit 1; }
 log() { printf '\033[36mupdate-loop:\033[0m %s\n' "$1" >&2; }
@@ -50,9 +61,10 @@ while [ $# -gt 0 ]; do
         --to)   [ $# -ge 2 ] || die "--to needs a value"; TO_VERSION="${2#v}"; shift 2 ;;
         --rid)  [ $# -ge 2 ] || die "--rid needs a value"; RID="$2"; shift 2 ;;
         --skip-squad) SKIP_SQUAD=1; shift ;;
+        --no-kyberdash) NO_KYBERDASH=1; shift ;;
         --keep) KEEP=1; shift ;;
         --reuse) REUSE=1; shift ;;
-        -h|--help) sed -n '2,23p' "$0" >&2; exit 0 ;;
+        -h|--help) sed -n '2,34p' "$0" >&2; exit 0 ;;
         *) die "unknown option: $1" ;;
     esac
 done
@@ -75,9 +87,29 @@ if [ -z "$RID" ]; then
     RID="${os_part}-${arch_part}"
 fi
 
+# The installer's own helpers, so the floor and the RID mapping asserted here are the
+# ones install.sh uses rather than a copy of them. install.sh parses its arguments before
+# library mode returns, so the helper call is set aside and the arguments cleared first.
+installer() {
+    (
+        helper=("$@")
+        set --
+        # shellcheck source=scripts/install.sh
+        KYBER_WEAVE_INSTALL_LIB=1 . "${REPO_ROOT}/scripts/install.sh"
+        "${helper[@]}"
+    )
+}
+
+KYBERDASH_RID="$(installer kyber_weave_kyberdash_rid "$RID")"
+if [ -z "$NO_KYBERDASH" ] && ! installer kyber_weave_release_has_kyberdash "$TO_VERSION"; then
+    die "--to ${TO_VERSION} is below the KyberDash floor, so its release would carry no kyberdash; pass a later --to, or --no-kyberdash"
+fi
+
 RELEASE_TREE="${REPO_ROOT}/.local-release"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/kw-loop-XXXXXX")"
 BIN="${SANDBOX}/bin"
+FROM_BIN="${SANDBOX}/from"
+TO_BIN="${SANDBOX}/to"
 SERVER_PID=""
 
 cleanup() {
@@ -91,18 +123,20 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$BIN"
+mkdir -p "$BIN" "$FROM_BIN" "$TO_BIN" "${SANDBOX}/home"
 
 # ------------------------------------------------------------------ publish "to"
 
 TO_TAG="v${TO_VERSION}"
-if [ -n "$REUSE" ] && [ -f "${RELEASE_TREE}/${TO_TAG}/SHA256SUMS.txt" ]; then
+KYBERDASH_ARCHIVE="kyberdash-${KYBERDASH_RID}.tar.gz"
+if [ -n "$REUSE" ] && [ -f "${RELEASE_TREE}/${TO_TAG}/SHA256SUMS.txt" ] \
+    && { [ -n "$NO_KYBERDASH" ] || [ -f "${RELEASE_TREE}/${TO_TAG}/${KYBERDASH_ARCHIVE}" ]; }; then
     log "reusing existing release tree for ${TO_TAG}"
 else
     log "publishing ${TO_TAG} from the working tree"
     "${REPO_ROOT}/scripts/release-local.sh" \
         --version "$TO_VERSION" --out "$RELEASE_TREE" --rid "$RID" \
-        ${SKIP_SQUAD:+--no-squad}
+        ${SKIP_SQUAD:+--no-squad} ${NO_KYBERDASH:+--no-kyberdash}
 fi
 
 # ------------------------------------------------------------------ stage "from"
@@ -123,38 +157,49 @@ stage_from_directory() {
 
 stage_from_release_tree() {
     tag="$1"
+    target="$2"
     for binary in kyber-weave kyber-weave-mcp; do
         archive="${RELEASE_TREE}/${tag}/${binary}-${RID}.tar.gz"
         [ -f "$archive" ] || die "missing ${archive}"
-        tar -C "$BIN" -xzf "$archive"
+        tar -C "$target" -xzf "$archive"
     done
-    chmod 755 "${BIN}"/kyber-weave*
-    xattr -d com.apple.quarantine "${BIN}"/kyber-weave* 2>/dev/null || true
+    chmod 755 "${target}"/kyber-weave*
+    xattr -d com.apple.quarantine "${target}"/kyber-weave* 2>/dev/null || true
 }
 
+# The "from" release doubles as the below-floor release, so it is built without
+# KyberDash whichever source it comes from.
 case "$FROM" in
     installed)
         install_dir="${KYBER_WEAVE_INSTALL_DIR:-${HOME}/.local/bin}"
         log "staging 'from' binaries from ${install_dir}"
         log "note: this only works if the installed build honours KYBER_WEAVE_RELEASE_ORIGIN"
         stage_from_directory "$install_dir"
+        log "publishing v${FLOOR_VERSION}, below the KyberDash floor, from the working tree"
+        "${REPO_ROOT}/scripts/release-local.sh" \
+            --version "$FLOOR_VERSION" --out "$RELEASE_TREE" --rid "$RID" --no-squad --no-kyberdash
         ;;
     working)
         log "staging 'from' binaries from the working tree (same code as 'to')"
-        FROM_VERSION="0.0.1-loopfrom"
+        FROM_VERSION="$FLOOR_VERSION"
         "${REPO_ROOT}/scripts/release-local.sh" \
-            --version "$FROM_VERSION" --out "$RELEASE_TREE" --rid "$RID" --no-squad
-        stage_from_release_tree "v${FROM_VERSION}"
+            --version "$FROM_VERSION" --out "$RELEASE_TREE" --rid "$RID" --no-squad --no-kyberdash
+        stage_from_release_tree "v${FROM_VERSION}" "$BIN"
         ;;
     *)
         log "staging 'from' binaries built at ${FROM}"
-        FROM_VERSION="0.0.1-loopfrom"
+        FROM_VERSION="$FLOOR_VERSION"
         "${REPO_ROOT}/scripts/release-local.sh" \
             --version "$FROM_VERSION" --out "$RELEASE_TREE" --rid "$RID" \
-            --ref "$FROM" --no-squad
-        stage_from_release_tree "v${FROM_VERSION}"
+            --ref "$FROM" --no-squad --no-kyberdash
+        stage_from_release_tree "v${FROM_VERSION}" "$BIN"
         ;;
 esac
+
+# Kept pristine: the self-update below replaces what is in $BIN, and every KyberDash
+# case starts again from these.
+cp -p "${BIN}"/kyber-weave* "$FROM_BIN/"
+stage_from_release_tree "$TO_TAG" "$TO_BIN"
 
 FROM_REPORTED="$("${BIN}/kyber-weave" --version 2>&1 || true)"
 log "from: ${FROM_REPORTED}  ->  to: kyber-weave ${TO_VERSION}"
@@ -252,9 +297,11 @@ log "serving ${RELEASE_TREE} at ${ORIGIN} (ready in ${SERVER_READY_SECONDS}s of 
 
 # ------------------------------------------------------------------ self-update
 
+# Every update runs under a HOME inside the sandbox. The updater reads the tray record
+# from $HOME/.kyberdash, and on a machine with a real tray the loop must not drive it.
 log "running: kyber-weave update ${TO_VERSION}"
 set +e
-UPDATE_OUT="$("${BIN}/kyber-weave" update "$TO_VERSION" 2>&1)"
+UPDATE_OUT="$(HOME="${SANDBOX}/home" "${BIN}/kyber-weave" update "$TO_VERSION" 2>&1)"
 UPDATE_CODE=$?
 set -e
 printf '%s\n' "$UPDATE_OUT" | sed 's/^/    /' >&2
@@ -283,6 +330,13 @@ if [ "$MCP_AFTER" = "kyber-weave-mcp ${TO_VERSION}" ]; then
     pass "MCP reports ${TO_VERSION} after update"
 else
     fail "MCP reports '${MCP_AFTER}', expected 'kyber-weave-mcp ${TO_VERSION}'"
+fi
+
+# Update replaces what is installed; it never adds a kyberdash nobody installed.
+if [ -e "${BIN}/kyberdash" ]; then
+    fail "update created a kyberdash that was not installed"
+else
+    pass "an absent kyberdash stays absent"
 fi
 
 # A binary that survived the swap can still be missing assemblies it had not loaded
@@ -329,6 +383,140 @@ if [ -z "$SKIP_SQUAD" ]; then
         fail "squad install deployed no files"
     fi
 fi
+
+# -------------------------------------------------------------------- KyberDash
+
+# Each case starts from a fresh copy of a staged build, with its own bin directory and
+# HOME, and runs one real update against the same local release. The "older kyberdash"
+# a case installs is a stub that reports a version no release carries, so a replaced
+# binary and an untouched one can be told apart by asking each for its version.
+STUB_KYBERDASH_VERSION="0.0.1-stub"
+case "$(uname -s)" in
+    Darwin) TRAY_PLATFORM=darwin ;;
+    *) TRAY_PLATFORM=linux ;;
+esac
+
+begin_case() {
+    CASE_NAME="$1"
+    CASE_BIN="${SANDBOX}/cases/${CASE_NAME}/bin"
+    CASE_HOME="${SANDBOX}/cases/${CASE_NAME}/home"
+    mkdir -p "$CASE_BIN" "$CASE_HOME"
+    cp -p "$2"/kyber-weave* "$CASE_BIN/"
+}
+
+install_stub_kyberdash() {
+    printf '#!/bin/sh\necho %s\n' "$STUB_KYBERDASH_VERSION" > "${CASE_BIN}/kyberdash"
+    chmod 755 "${CASE_BIN}/kyberdash"
+}
+
+# The record `kyberdash menubar` writes (dash/src/install/menubar.ts). Its paths point
+# into the case directory, so no step of a tray update can reach outside the sandbox.
+record_tray() {
+    mkdir -p "${CASE_HOME}/.kyberdash"
+    cat > "${CASE_HOME}/.kyberdash/tray.json" <<EOF
+{
+  "path": "${CASE_HOME}/Applications/KyberDash.app",
+  "version": "${STUB_KYBERDASH_VERSION}",
+  "installedAt": "2026-01-01T00:00:00.000Z",
+  "platform": "${TRAY_PLATFORM}",
+  "kyberdashPath": "${CASE_BIN}/kyberdash"
+}
+EOF
+}
+
+update_case() {
+    log "${CASE_NAME}: kyber-weave update $*"
+    set +e
+    CASE_OUT="$(HOME="$CASE_HOME" "${CASE_BIN}/kyber-weave" update "$@" 2>&1)"
+    CASE_CODE=$?
+    set -e
+    printf '%s\n' "$CASE_OUT" | sed 's/^/    /' >&2
+}
+
+expect_exit_zero() {
+    if [ "$CASE_CODE" -eq 0 ]; then
+        pass "${CASE_NAME}: update exited 0"
+    else
+        fail "${CASE_NAME}: update exited ${CASE_CODE}"
+    fi
+}
+
+expect_logged() {
+    if printf '%s' "$CASE_OUT" | grep -qF -- "$1"; then
+        pass "${CASE_NAME}: $2"
+    else
+        fail "${CASE_NAME}: $2 (the output has no '$1')"
+    fi
+}
+
+expect_reports() {
+    reported="$("${CASE_BIN}/$1" --version 2>&1 || echo "<crashed>")"
+    if [ "$reported" = "$2" ]; then
+        pass "${CASE_NAME}: $3"
+    else
+        fail "${CASE_NAME}: $3 ($1 reports '${reported}', expected '$2')"
+    fi
+}
+
+if [ -n "$NO_KYBERDASH" ]; then
+    log "--no-kyberdash given; skipping the cases that need a kyberdash release asset"
+else
+    begin_case kyberdash-replaced "$FROM_BIN"
+    install_stub_kyberdash
+    update_case "$TO_VERSION"
+    expect_exit_zero
+    expect_reports kyberdash "$TO_VERSION" "an installed kyberdash is replaced and answers --version"
+    expect_logged "no tray install recorded" "without a tray record, the tray is left alone"
+
+    begin_case kyberdash-opt-out "$FROM_BIN"
+    install_stub_kyberdash
+    record_tray
+    update_case "$TO_VERSION" --no-kyberdash
+    expect_exit_zero
+    expect_reports kyber-weave "kyber-weave ${TO_VERSION}" "--no-kyberdash still updates the CLI"
+    expect_reports kyberdash "$STUB_KYBERDASH_VERSION" "--no-kyberdash leaves kyberdash alone"
+    expect_logged "--no-kyberdash given; leaving the KyberDash tray unchanged" "--no-kyberdash leaves the tray alone"
+
+    begin_case tray-opt-out "$FROM_BIN"
+    install_stub_kyberdash
+    record_tray
+    update_case "$TO_VERSION" --no-menubar
+    expect_exit_zero
+    expect_reports kyberdash "$TO_VERSION" "--no-menubar still replaces kyberdash"
+    expect_logged "--no-menubar given; leaving the KyberDash tray unchanged" "--no-menubar leaves the tray alone"
+
+    # The tray step cannot succeed here: there is no tray to install on Linux, and on
+    # macOS the release has no tray archive. What it must do is run the new kyberdash's
+    # `menubar --update` and report a failure by name. The kyberdash's own error is the
+    # evidence the subcommand ran: when the root `--version` swallowed the updater's
+    # `--version <v>`, kyberdash printed its version, exited 0, and the update reported
+    # a tray update that never happened.
+    begin_case tray-delegated "$FROM_BIN"
+    install_stub_kyberdash
+    record_tray
+    update_case "$TO_VERSION"
+    if [ "$CASE_CODE" -ne 0 ]; then
+        pass "${CASE_NAME}: a failed tray step fails the update"
+    else
+        fail "${CASE_NAME}: update exited 0 although the tray could not be updated"
+    fi
+    expect_logged "the KyberDash tray step failed" "the failure names the tray step"
+    expect_logged "kyberdash menubar:" "the release's kyberdash ran menubar --update"
+    expect_reports kyberdash "$TO_VERSION" "binaries stay committed when the tray step fails"
+fi
+
+# The regression test for a release with no kyberdash archive, which needs no KyberDash
+# build: the updater must not ask for the archive, so the CLI and MCP still update.
+begin_case kyberdash-floor "$TO_BIN"
+install_stub_kyberdash
+record_tray
+update_case "$FLOOR_VERSION"
+expect_exit_zero
+expect_reports kyber-weave "kyber-weave ${FLOOR_VERSION}" "a release without kyberdash still updates the CLI"
+expect_reports kyber-weave-mcp "kyber-weave-mcp ${FLOOR_VERSION}" "a release without kyberdash still updates the MCP"
+expect_reports kyberdash "$STUB_KYBERDASH_VERSION" "kyberdash is left alone below the floor"
+expect_logged "predates KyberDash" "the kyberdash skip is logged"
+expect_logged "predates the KyberDash tray" "the tray skip is logged"
 
 # ----------------------------------------------------------------------- verdict
 

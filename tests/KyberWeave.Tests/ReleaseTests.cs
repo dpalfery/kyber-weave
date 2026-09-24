@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
 using Xunit;
 using Xunit.Sdk;
@@ -574,6 +575,59 @@ public sealed class ReleaseTests
         }
 
         Assert.Contains("J2UNNQ466J", workflow, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The local release loop builds kyberdash from a copy of the <c>build-kyberdash</c>
+    /// job's steps, because the job cannot run off a runner. The job stays the authority,
+    /// so the values a copy could drift on are read from it here. A drifted copy would pass
+    /// the loop with a binary the release never ships.
+    /// </summary>
+    [Fact]
+    public void LocalKyberDashBuildMatchesTheReleaseJob()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
+        // The job runs to the next two-space-indented key, which is the next job.
+        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
+        string job = next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+        string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
+
+        // release-local.sh reads its Node version from dash/.nvmrc rather than repeating it.
+        Match nodeVersion = Regex.Match(job, "NODE_VERSION: \"([^\"]+)\"");
+        Assert.True(nodeVersion.Success, "build-kyberdash no longer pins NODE_VERSION.");
+        string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim().TrimStart('v');
+        Assert.True(
+            nodeVersion.Groups[1].Value == nvmrc,
+            $"build-kyberdash builds on Node {nodeVersion.Groups[1].Value} but dash/.nvmrc, which the local build reads, says {nvmrc}.");
+
+        Match fuse = Regex.Match(job, @"--sentinel-fuse (NODE_SEA_FUSE_[0-9a-f]+)");
+        Match postject = Regex.Match(job, @"(postject@[0-9A-Za-z.-]+)");
+        Assert.True(fuse.Success, "build-kyberdash no longer names a sentinel fuse.");
+        Assert.True(postject.Success, "build-kyberdash no longer pins a postject version.");
+
+        string[] shared =
+        [
+            fuse.Groups[1].Value,
+            postject.Groups[1].Value,
+            "--macho-segment-name NODE_SEA",
+            "tsup --config tsup.sea.config.ts",
+            "src/sea-shim.cjs",
+            "\"useSnapshot\": false",
+            "\"disableExperimentalSEAWarning\": true",
+            "\"main.js\":",
+            "\"package.json\":",
+            "codesign --sign - --force",
+            "THIRD_PARTY_NOTICES.md",
+        ];
+        foreach (string value in shared)
+        {
+            Assert.True(job.Contains(value, StringComparison.Ordinal), $"build-kyberdash no longer contains {value}; update this list with the job.");
+            Assert.True(
+                local.Contains(value, StringComparison.Ordinal),
+                $"scripts/release-local.sh does not use {value}, which build-kyberdash does. Make the same change there.");
+        }
     }
 
     /// <summary>

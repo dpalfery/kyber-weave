@@ -34,8 +34,10 @@ zero whether or not it finds anything; the report lands at `artifacts/inspectcod
 the `static-analysis-triage` review lens attributes its findings to the diff. See the
 `resharper-clt` skill for how to read it.
 
-Touching the self-updater, `install.sh`, or the Squad release path also means running the
-local release loop documented in [distribution](docs/distribution.md#verifying-a-release-locally):
+Touching the self-updater, `install.sh`, the Squad release path, or how `kyberdash` is built
+or updated also means running the local release loop documented in
+[distribution](docs/distribution.md#verifying-a-release-locally). It builds `kyberdash` too,
+so it needs `node` and `npm` on `PATH`:
 
 ```bash
 ./scripts/update-loop.sh
@@ -60,10 +62,11 @@ npm --prefix dash/tray/ui run test
 cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test
 ```
 
-`npm --prefix dash run lint` already covers `dash/tray/ui`. The loop does not build
-`kyberdash` either, so the install and update path for that binary
-cannot be verified offline today — see
-[the todo](docs/todo/kyberdash-local-release-loop.md) before assuming a green loop covered it.
+`npm --prefix dash run lint` already covers `dash/tray/ui`. The loop builds `kyberdash` and
+drives its update path, including the hand-off to `kyberdash menubar --update`. It installs
+no tray and does not run `install.sh`. See
+[what it covers](docs/distribution.md#kyberdash-in-the-loop) before assuming a green loop
+covered either.
 
 ## Exploration order
 
