@@ -1,14 +1,26 @@
 ---
-id: todo/squad-hardcoded-docs-root
+id: archive/todo/squad-hardcoded-docs-root
 title: Replace the hardcoded 6-Docs path with a resolvable docs-root across Kyber-Squad's canonical instructions
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-31
-status: draft
+last-reviewed: 2026-09-23
+status: superseded
 ---
 
 # Replace the hardcoded 6-Docs path with a resolvable docs-root across Kyber-Squad's canonical instructions
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-23
+
+Completed. The two `second-brain` files now resolve paths through **<docs-root>** in the Config Reg,
+following the precedent the product-owner slice set: an authoring-time placeholder, with no renderer
+substitution. When bootstrapping a repo that has no registry, the skill agrees the root with the user
+and declares it as **<docs-root>**, and its registry template now uses the property names Squad's
+canonical instructions resolve. `grep -rn "6-Docs" products/kyber-squad/agents/ products/kyber-squad/skills/`
+returns only illustrative `e.g.` examples.
+
+---
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the precedent already is. It does not sequence tasks or commit to an
@@ -30,7 +42,7 @@ directory. There is no per-deployment substitution for those retained literals.
 ## What is known
 
 - One canonical skill already does this correctly:
-  [`products/kyber-squad/skills/app-docs-standard/SKILL.md`](../../products/kyber-squad/skills/app-docs-standard/SKILL.md)
+  [`products/kyber-squad/skills/app-docs-standard/SKILL.md`](../../../products/kyber-squad/skills/app-docs-standard/SKILL.md)
   reads: *"Locate the repository's documentation root from the configured
   `ontology.docs-root` (e.g. `docs/` or `6-Docs/`)"* and then uses `<docs-root>` as a
   placeholder for the rest of its instructions (`<docs-root>/catalog.md`, etc.). This is the
@@ -60,7 +72,7 @@ directory. There is no per-deployment substitution for those retained literals.
   source bodies could keep the literal placeholder text `<docs-root>` (as
   `app-docs-standard` already does) and every reader — human or agent — resolves it
   contextually, or the render pipeline (`CopilotRenderer` and future renderers, see
-  [architecture.md §8](../kyber-squad/architecture.md#8-rendering)) could substitute a
+  [architecture.md §8](../../kyber-squad/architecture.md#8-rendering)) could substitute a
   resolved value into the rendered per-harness output. The former needs no code change, only
   a documentation-content edit across the remaining directive sites; the latter is a real renderer feature that
   doesn't exist today.

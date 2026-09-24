@@ -72,7 +72,8 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] EvolvedSkillIdentities =
     [
         "bug-crusher",
-        "product-owner"
+        "product-owner",
+        "second-brain"        // hardcoded 6-Docs replaced with <docs-root> (todo squad-hardcoded-docs-root)
     ];
 
     private static readonly string[] RetiredAgentIdentities =
