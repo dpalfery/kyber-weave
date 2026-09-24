@@ -4,8 +4,8 @@
 #
 # A cloud session starts from a fresh clone. This repository's committed Squad deployment is
 # the Copilot one under .github/, so without this script a Claude session has no kyber-weave
-# binaries, no kyber-weave MCP server, none of the Squad agents or skills, and no .NET SDK to
-# run the gates in AGENTS.md.
+# binaries, no kyber-weave MCP server, none of the Squad agents or skills, and neither the .NET
+# SDK nor the sqlite3 CLI that the gates in AGENTS.md need.
 #
 # It runs from two places, both cloud-only:
 #   - the SessionStart hook in .claude/settings.json, on every start and resume, so a session
@@ -39,6 +39,7 @@ echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) cloud-session-setup"
 
 # Spectre.Console renders progress glyphs instead of text on a non-interactive terminal.
 export TERM=dumb NO_COLOR=1 COLUMNS=200
+export DEBIAN_FRONTEND=noninteractive
 
 # squad reads products/kyber-squad when run from this repository's root, and the release's own
 # pack anywhere else. Deploy the release candidate's content, not whatever the clone holds.
@@ -56,7 +57,6 @@ report() {
 # accepts); dotnet-install.sh is no option because the session proxy denies
 # builds.dotnet.microsoft.com, where every Microsoft download link redirects.
 if ! command -v dotnet >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
     apt-get install -y dotnet-sdk-10.0 \
         || { apt-get update && apt-get install -y dotnet-sdk-10.0; } \
         || echo "dotnet-sdk-10.0 install failed"
@@ -64,6 +64,19 @@ fi
 DOTNET_NOTE="no .NET SDK"
 if command -v dotnet >/dev/null 2>&1; then
     DOTNET_NOTE=".NET SDK $(dotnet --version 2>/dev/null)"
+fi
+
+# The CodeGraph adapter and the analysis-persistence tests shell out to the sqlite3 CLI (the
+# deliberate trade in AGENTS.md); without it 29 tests fail on a machine CI never sees.
+if ! command -v sqlite3 >/dev/null 2>&1; then
+    apt-get install -y sqlite3 || echo "sqlite3 install failed"
+fi
+
+# The session shell reports TERM=linux, under which Spectre.Console treats captured output as a
+# live terminal and 48 CLI tests read back an empty string; TERM=dumb matches CI. Only the
+# SessionStart hook gets CLAUDE_ENV_FILE, whose exports apply to the session's later commands.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    echo 'export TERM=dumb' >>"$CLAUDE_ENV_FILE"
 fi
 
 # Highest pre-release by version, not the first one GitHub lists: list order is what let a
