@@ -445,7 +445,7 @@ agy -p --dangerously-skip-permissions "<brief> Follow the conductor and react-de
   - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.6, 15.7_
 - [ ] 9.4 `build-tray` release job
   - Stream F. Needs the secrets from the
-    [signing todo](../../todo/macos-developer-id-signing.md).
+    [signing todo](../../archive/todo/macos-developer-id-signing.md).
   - Add the matrix job under `environment: release`:
     - A secrets-presence step fails the macOS legs first.
     - Import into a temporary keychain, write the `.p8`, run `tauri build --target …`.

@@ -239,6 +239,22 @@ kyber_weave_semver_compare() {
         }'
 }
 
+# kyber_weave_highest_version -> reads one version per line on stdin and prints the
+# highest by kyber_weave_semver_compare; prints nothing and returns 1 for no input.
+# The Releases API lists newest-created first, which is not version order, so a
+# release published out of sequence must not shadow a higher one.
+kyber_weave_highest_version() {
+    highest=""
+    while IFS= read -r candidate; do
+        [ -n "$candidate" ] || continue
+        if [ -z "$highest" ] \
+            || [ "$(kyber_weave_semver_compare "$candidate" "$highest")" -gt 0 ]; then
+            highest="$candidate"
+        fi
+    done
+    [ -n "$highest" ] && printf '%s\n' "$highest"
+}
+
 # kyber_weave_release_has_kyberdash <version>
 #   exit 0 — the release publishes kyberdash-<rid> assets
 #   exit 1 — the release predates KyberDash and has none
@@ -400,7 +416,7 @@ resolve_latest_version() {
             | grep -v '"draft"[[:space:]]*:[[:space:]]*true' \
             | grep '"prerelease"[[:space:]]*:[[:space:]]*true' \
             | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
-            | head -n 1
+            | kyber_weave_highest_version
     else
         # Parse "tag_name": "v0.1.0" without requiring jq.
         fetch_stdout "$LATEST_API" \

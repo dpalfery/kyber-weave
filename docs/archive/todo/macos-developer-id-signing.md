@@ -1,14 +1,21 @@
 ---
-id: todo/macos-developer-id-signing
+id: archive/todo/macos-developer-id-signing
 title: Sign and notarize the macOS binaries with the team Developer ID
 doc-type: todo
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-18
-status: draft
+last-reviewed: 2026-09-24
+status: superseded
 ---
 
 # Sign and notarize the macOS binaries with the team Developer ID
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-24
+
+Closed by the owner on 2026-09-24. Part A is done: `0.1.7-rc.13` shipped the macOS tray signed with Developer ID `J2UNNQ466J`, notarized, and verified by the release job. Part B — Developer ID signing for the CLI binaries (`kyber-weave`, `kyber-weave-mcp`, `kyberdash`) — was not pursued; those binaries still ship ad-hoc signed, and `install.sh` still strips quarantine.
+
+---
 
 This is **context for planning the work, not a plan**. It records what is known, what needs
 deciding, and where the work connects to other work. It does not sequence tasks.
@@ -25,7 +32,7 @@ The team now has an Apple Developer account, team id **`J2UNNQ466J`**. Two piece
 depend on it:
 
 1. **The KyberDash tray.** The
-   [KyberDash context surfaces specification](../specs/kyberdash-context-surfaces/requirements.md)
+   [KyberDash context surfaces specification](../../specs/kyberdash-context-surfaces/requirements.md)
    requires a macOS tray signed with this team's Developer ID, notarized and stapled. Its
    release job must *fail* when the credentials are absent (Requirements 12.2–12.3), so that
    job cannot pass until part A below is done.
@@ -122,7 +129,7 @@ What needs deciding:
   (the ad-hoc `codesign` step), and the future tray job.
 - `scripts/install.sh` — quarantine handling and any team-id verification.
 - `src/KyberWeave.Cli/Update/` — the self-updater, if it gains signature checks. Changing it
-  triggers the local release loop in [distribution](../distribution.md#verifying-a-release-locally).
-- [`kyberdash-local-release-loop`](kyberdash-local-release-loop.md) — the loop cannot build
+  triggers the local release loop in [distribution](../../distribution.md#verifying-a-release-locally).
+- [`kyberdash-local-release-loop`](../../todo/kyberdash-local-release-loop.md) — the loop cannot build
   `kyberdash`, and cannot sign anything with a Developer ID either, so signed paths are
   verifiable only in a real release run.

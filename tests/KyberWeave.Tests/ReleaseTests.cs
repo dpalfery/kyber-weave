@@ -154,6 +154,38 @@ public sealed class ReleaseTests
     }
 
     [Theory]
+    // The Releases API lists newest-created first; creation order must not win.
+    [InlineData("0.1.7-rc.9\n0.1.7-rc.10\n0.1.6-rc.8\n", "0.1.7-rc.10")]
+    [InlineData("0.1.7-rc.2\n0.1.8-rc.1\n", "0.1.8-rc.1")]
+    [InlineData("0.1.7-rc.1\n", "0.1.7-rc.1")]
+    public void HighestVersionPicksSemVerMaximumNotFirstListed(string listed, string expected)
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, listed);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expected, result.StandardOutput.Trim());
+    }
+
+    [Fact]
+    public void HighestVersionFailsOnEmptyInput()
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Equal(string.Empty, result.StandardOutput.Trim());
+    }
+
+    [Theory]
     // Every published release below the floor, including the rc line the floor
     // sits on, resolves to "skip".
     [InlineData("0.1.1", false)]

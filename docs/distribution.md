@@ -33,7 +33,8 @@ It installs `kyber-weave`, `kyber-weave-mcp`, and — from releases that publish
 Once those binaries are on PATH, `kyber-weave update` reads the same Release assets and
 checksums and replaces the running CLI, the sibling MCP, and an installed `kyberdash` in
 place. `--release-candidate` is the CLI name for the script's `--prerelease` behaviour
-(newest non-draft tag from the Releases list). A positional version pins a tag without
+(the highest-versioned non-draft tag in the Releases list, by SemVer precedence rather than
+GitHub's creation order). A positional version pins a tag without
 colliding with global `kyber-weave --version`.
 
 The script is served from the **default branch**, not versioned with a release. It only

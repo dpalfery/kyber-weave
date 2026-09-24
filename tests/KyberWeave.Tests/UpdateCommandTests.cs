@@ -219,6 +219,32 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.DoesNotContain(GitHubReleaseClient.ReleasesApi.AbsoluteUri, handler.Uris, StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// GitHub lists releases newest-created first. Taking the first entry let a release
+    /// published out of sequence decide what <c>--release-candidate</c> installs; ordinal
+    /// comparison would also pick <c>rc.9</c> over <c>rc.10</c>.
+    /// </summary>
+    [Fact]
+    public void RunReleaseCandidateTakesHighestVersionNotFirstListed()
+    {
+        using MapHandler handler = MapRelease("0.1.7-rc.10", "osx-arm64", windows: false);
+        handler.MapJson(
+            GitHubReleaseClient.ReleasesApi.AbsoluteUri,
+            """
+            [
+              {"tag_name":"v0.1.7-rc.9","draft":false,"prerelease":true},
+              {"tag_name":"v0.1.7-rc.10","draft":false,"prerelease":true},
+              {"tag_name":"v0.1.6","draft":false,"prerelease":false}
+            ]
+            """);
+        SelfUpdateHost host = CreateHost("0.1.6", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains("0.1.7-rc.10", outcome.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void RunReleaseCandidateWithVersionFailsWithoutHttp()
     {

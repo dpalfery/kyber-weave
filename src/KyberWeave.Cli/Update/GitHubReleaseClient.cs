@@ -98,15 +98,21 @@ internal sealed class GitHubReleaseClient : IDisposable
             throw new SelfUpdateException("could not parse the GitHub Releases list.", ex);
         }
 
+        // GitHub lists releases newest-created first, which is not version order: a release
+        // published out of sequence would otherwise shadow a higher one. Take the highest.
+        string? newest = null;
         foreach (GitHubRelease release in payload)
         {
             if (release.Draft || string.IsNullOrWhiteSpace(release.TagName))
                 continue;
 
-            return ReleaseVersion.Normalize(release.TagName);
+            string version = ReleaseVersion.Normalize(release.TagName);
+            if (newest is null || ReleaseVersion.Compare(version, newest) > 0)
+                newest = version;
         }
 
-        throw new SelfUpdateException("could not resolve the latest release. Pass a version explicitly.");
+        return newest
+            ?? throw new SelfUpdateException("could not resolve the latest release. Pass a version explicitly.");
     }
 
     internal string DownloadChecksums(string tag)
