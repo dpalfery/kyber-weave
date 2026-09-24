@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
@@ -24,17 +25,29 @@ internal static class SquadCommandComposition
     /// splitting a long path across lines — corrupting the one thing the hint exists
     /// for: a copy-pastable name for each of the conflicting forms.
     /// </summary>
-    public static void WriteClientInputError(string message)
+    public static void WriteClientInputError(string message) =>
+        WriteUnfolded(() => AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(message)}[/]"));
+
+    /// <summary>
+    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
+    /// </summary>
+    /// <remarks>
+    /// A console with no detectable width — no TTY, as in a container or a CI shell — reports
+    /// 0 from <c>Profile.Width</c>, and Spectre's setter rejects 0. Restoring it verbatim threw
+    /// from the <c>finally</c> and replaced the command's own output and exit code with an
+    /// unhandled exception, so such a console is restored to <see cref="ConsoleWidth.Default"/>.
+    /// </remarks>
+    internal static void WriteUnfolded(Action write)
     {
         int originalWidth = AnsiConsole.Profile.Width;
         AnsiConsole.Profile.Width = int.MaxValue;
         try
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(message)}[/]");
+            write();
         }
         finally
         {
-            AnsiConsole.Profile.Width = originalWidth;
+            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
         }
     }
 

@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console;
@@ -981,13 +982,20 @@ public sealed class SquadPathSafetyTests : IDisposable
     {
         public static readonly ForwardingWriter Writer = new();
 
-        public static readonly IAnsiConsole Console = AnsiConsole.Create(new AnsiConsoleSettings
+        public static readonly IAnsiConsole Console = CreateConsole();
+
+        private static IAnsiConsole CreateConsole()
         {
-            Ansi = AnsiSupport.No,
-            ColorSystem = ColorSystemSupport.NoColors,
-            Interactive = InteractionSupport.No,
-            Out = new AnsiConsoleOutput(Writer)
-        });
+            IAnsiConsole console = AnsiConsole.Create(new AnsiConsoleSettings
+            {
+                Ansi = AnsiSupport.No,
+                ColorSystem = ColorSystemSupport.NoColors,
+                Interactive = InteractionSupport.No,
+                Out = new AnsiConsoleOutput(Writer)
+            });
+            ConsoleWidth.EnsureUsable(console);
+            return console;
+        }
     }
 
     /// <summary>

@@ -8,7 +8,6 @@ using System.Text;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Update;
 using Xunit;
-using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -422,31 +421,38 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void RunReadOnlyInstallDirectoryIsRefused()
     {
-        if (OperatingSystem.IsWindows())
-            throw SkipException.ForSkip("Read-only POSIX file mode permissions are not supported on Windows.");
-
-        if (GetEffectiveUserId() == 0)
-            throw SkipException.ForSkip("Executing as root bypasses read-only POSIX directory permissions.");
-
+        // Driven through the probe seam rather than POSIX mode bits: root and Windows both
+        // write through a read-only mode, so a mode-based test could never run there.
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
-        File.SetUnixFileMode(
-            _install.Path,
-            UnixFileMode.UserRead | UnixFileMode.UserExecute);
-        try
-        {
-            using MapHandler handler = new MapHandler();
-            SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions());
-            Assert.Equal(1, outcome.ExitCode);
-            Assert.Contains("write permission", outcome.Message, StringComparison.Ordinal);
-        }
-        finally
-        {
-            File.SetUnixFileMode(
-                _install.Path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-                | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
-                | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        }
+        List<string> probed = [];
+        using MapHandler handler = new MapHandler();
+
+        SelfUpdateOutcome outcome = Run(
+            handler,
+            host,
+            new SelfUpdateOptions(),
+            canWriteDirectory: directory =>
+            {
+                probed.Add(directory);
+                return false;
+            });
+
+        Assert.Equal(1, outcome.ExitCode);
+        Assert.Contains("write permission", outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(host.InstallDirectory, Assert.Single(probed));
+    }
+
+    [Fact]
+    public void CanWriteDirectoryReportsAWritableDirectoryAndLeavesNoProbeBehind()
+    {
+        Assert.True(SelfUpdater.CanWriteDirectory(_install.Path));
+        Assert.Empty(Directory.GetFiles(_install.Path, ".kyber-weave-update-*"));
+    }
+
+    [Fact]
+    public void CanWriteDirectoryReportsFalseWhenTheProbeCannotBeCreated()
+    {
+        Assert.False(SelfUpdater.CanWriteDirectory(Path.Combine(_install.Path, "missing")));
     }
 
     [Fact]
@@ -580,10 +586,6 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
         Assert.Equal("new-mcp", File.ReadAllText(Path.Combine(_install.Path, "kyber-weave-mcp")));
     }
-
-    [DllImport("libc", EntryPoint = "geteuid")]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static extern uint GetEffectiveUserId();
 
     // ---- KyberDash: installed beside the CLI, updated with it ----
 
@@ -800,7 +802,8 @@ public sealed class UpdateCommandTests : IDisposable
         HttpMessageHandler handler,
         SelfUpdateHost host,
         SelfUpdateOptions options,
-        Func<string, string?>? env = null)
+        Func<string, string?>? env = null,
+        Func<string, bool>? canWriteDirectory = null)
     {
         using SelfUpdater updater = new SelfUpdater(
             handler,
@@ -811,7 +814,8 @@ public sealed class UpdateCommandTests : IDisposable
                 "HOME" => _install.Path,
                 "USERPROFILE" => _install.Path,
                 _ => null,
-            }));
+            }),
+            canWriteDirectory: canWriteDirectory);
         return updater.Run(options);
     }
 

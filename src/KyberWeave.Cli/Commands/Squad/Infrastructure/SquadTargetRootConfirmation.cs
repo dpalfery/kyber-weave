@@ -70,9 +70,7 @@ public static class SquadTargetRootConfirmation
         // the lines exist for — a copy-pastable, log-greppable path. The width is
         // restored immediately; rendering is single-threaded here (a CLI run, and the
         // tests serialize their console captures), so nothing renders inside the window.
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
-        try
+        SquadCommandComposition.WriteUnfolded(() =>
         {
             AnsiConsole.MarkupLine(
                 $"[bold]kyber-weave squad {Markup.Escape(verb)}[/]: target root [bold]{Markup.Escape(root)}[/] ({scopeWord} scope).");
@@ -84,11 +82,7 @@ public static class SquadTargetRootConfirmation
                         $"  [bold]{Markup.Escape(SquadTargetCatalog.GetToken(target))}[/] writes beneath [bold]{Markup.Escape(globalRoot)}[/].");
                 }
             }
-        }
-        finally
-        {
-            AnsiConsole.Profile.Width = originalWidth;
-        }
+        });
 
         // Exactly one prompt, and only for a human at an interactive console who did not
         // pass --yes; every other mode proceeds without touching the answer seam (N1/N2).

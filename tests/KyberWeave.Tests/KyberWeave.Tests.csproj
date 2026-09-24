@@ -16,10 +16,18 @@
          makes a failing test name readable. Scoped to this project so the rule stays
          armed across src/. -->
     <NoWarn>$(NoWarn);CA1707</NoWarn>
+
+    <!-- xUnit1051 (194 sites): xunit v3 asks every call that accepts a CancellationToken
+         to pass TestContext.Current.CancellationToken, so a cancelled run stops sooner.
+         The suite moved to v3 for its native dynamic skip, which v2 reported as a failure;
+         threading the token through every call is a responsiveness change, not a defect
+         fix, and no test here relies on cancellation. -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,7 +36,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
-    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
   </ItemGroup>
 

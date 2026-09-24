@@ -751,8 +751,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        HashSet<string> expectedTrueProfiles = ["documentation", "investigator", "reviewer", "worker", "publishing-worker"];
-        HashSet<string> expectedFalseProfiles = ["architect", "orchestrator", "product-planning", "read-only"];
+        HashSet<string> expectedTrueProfiles = ["architect", "documentation", "investigator", "product-planning", "reviewer", "worker", "publishing-worker"];
+        HashSet<string> expectedFalseProfiles = ["orchestrator", "read-only"];
 
         List<SquadAgent> trueAgents = [];
         List<SquadAgent> falseAgents = [];
@@ -807,7 +807,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        HashSet<string> expectedWriteToFileProfiles = ["documentation", "worker", "publishing-worker"];
+        HashSet<string> expectedWriteToFileProfiles = ["architect", "documentation", "product-planning", "worker", "publishing-worker"];
 
         List<SquadAgent> writeAgents = [];
         List<SquadAgent> nonWriteAgents = [];

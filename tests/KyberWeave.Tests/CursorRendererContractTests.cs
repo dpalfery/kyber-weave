@@ -186,9 +186,9 @@ public sealed class CursorRendererContractTests
 
         // Concrete lowerings verification against loaded profiles
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
-        Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Ask, architectProfile.Permissions["process.execute"]);
-        AssertReadOnly(result, "architect", expectedReadOnly: true);
+        AssertReadOnly(result, "architect", expectedReadOnly: false);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);

@@ -1,14 +1,24 @@
 ---
-id: todo/claude-renderer-ask-narrowing
+id: archive/todo/claude-renderer-ask-narrowing
 title: Claude and Pi renderers leave architect and product-owner unable to persist their artifacts
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-14
-status: draft
+last-reviewed: 2026-09-24
+status: superseded
 ---
 
 # Claude and Pi renderers leave architect and product-owner unable to persist their artifacts
+
+> [!NOTE]
+> **Closed 2026-09-24 without a renderer change.** The owner chose the simple fix:
+> `architect` and `product-planning` now hold `filesystem.write: allow` in
+> `products/kyber-squad/profiles/capabilities.yml`. The plan, spec and todo boundary is
+> instruction-only, stated in both agent bodies. Every target, Claude, Pi and ZCode
+> included, now renders the write tools. A path-scoped lattice and hook-based guards were
+> considered and rejected as over-engineering. On ZCode and Pi a guard that fails to run
+> lets the write through, so it bought little over the instruction. `architect` keeps
+> `process.execute: ask`.
 
 This is **context for planning the work, not a plan** — it states what is known, what is
 assumed and unverified, and where the seam is. It does not sequence tasks or commit to an
@@ -17,7 +27,7 @@ implementation.
 ## Why this exists
 
 Found on 2026-09-14 while running the conductor flow in Claude Code against
-[pi.md](../archive/todo/pi.md). `squad install --target claude` rendered an `architect` subagent with no
+[pi.md](pi.md). `squad install --target claude` rendered an `architect` subagent with no
 `Edit`, `Write`, or `Bash`. The conductor's plan path requires `architect` to save a Draft plan
 under the directory named by **<plan-index>** and re-run `docs validate` and `docs drift`.
 The rendered agent can do neither, so the plan path stops at its first write.
@@ -48,7 +58,7 @@ The rendered agent can do neither, so the plan path stops at its first write.
 
 ## What is assumed and needs verification, not trusted as-is
 
-- **Whether withholding is still the right default.** [requirements.md](../kyber-squad/requirements.md)
+- **Whether withholding is still the right default.** [requirements.md](../../kyber-squad/requirements.md)
   defines `safety-narrowed` as "the target cannot prompt the user". Claude Code can prompt: a
   subagent's listed tools go through the parent session's permission mode. The real risk is a
   parent running `acceptEdits` or `bypassPermissions`, where a listed `Write` becomes a silent
@@ -69,8 +79,8 @@ The rendered agent can do neither, so the plan path stops at its first write.
   lattice itself so every target benefits.
 - If hooks are the mechanism: the renderer emits `hooks:` frontmatter and the guard script, and
   `SquadRendererRegistry` output identities include the script.
-- The Claude row of the degradation table in [requirements.md](../kyber-squad/requirements.md)
-  and the lattice section of [architecture.md](../kyber-squad/architecture.md).
+- The Claude row of the degradation table in [requirements.md](../../kyber-squad/requirements.md)
+  and the lattice section of [architecture.md](../../kyber-squad/architecture.md).
 
 ## Local workaround in use
 
