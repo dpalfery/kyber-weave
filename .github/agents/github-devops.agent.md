@@ -1,8 +1,8 @@
 ---
 name: github-devops
-description: 'CI/CD ownership: GitHub Actions workflows, Docker build configuration, environment secrets, and branch protection. Use for build, pipeline, or deployment configuration. Does not provision cloud infrastructure or investigate live cloud resource state.'
-model: Grok 4.5 (copilot)
-tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, web, todo]
+description: 'Owns CI/CD: GitHub Actions workflows, Docker build configuration, environment secrets, branch protection. Use when the change is under .github/workflows or in a Dockerfile, or when a build or deployment pipeline is failing. Do not use when the change provisions Azure resources rather than the pipeline that deploys to them.'
+model: Grok 4.6 (copilot)
+tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, edit]
 user-invocable: false
 metadata:
   capability-profile: publishing-worker

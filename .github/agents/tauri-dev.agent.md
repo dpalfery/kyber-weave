@@ -1,8 +1,8 @@
 ---
 name: tauri-dev
-description: 'Rust/Tauri v2 desktop core implementation: commands, the IPC contract, state, async, sidecar integration, and the capabilities/security model. Use for Tauri backend (Rust) work. Does not build the web/WebView UI — defines the IPC contract for the frontend to consume.'
-model: Grok 4.5 (copilot)
-tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]
+description: 'Implements the Rust/Tauri v2 desktop core: commands, the IPC contract, state, async, sidecar integration, and the capabilities/security model. Use when the change is under src-tauri or in a .rs file of a Tauri app. Do not use when the change is the WebView UI that consumes the IPC contract rather than the native core.'
+model: Grok 4.6 (copilot)
+tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]
 user-invocable: false
 metadata:
   capability-profile: worker

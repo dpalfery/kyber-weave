@@ -1,8 +1,8 @@
 ---
 name: azure-reader
-description: Read-only investigation of live Azure resource state via Azure MCP tools; gathers configuration and runtime facts for debugging, planning, and architecture. Use to learn how Azure is configured or behaving. Does not create or modify infrastructure, or run deployments.
-model: Grok 4.5 (copilot)
-tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]
+description: 'Reads live Azure resource state: configuration, runtime facts, diagnostics. Use when a plan, diagnosis, or review depends on how a deployed Azure resource is actually configured or behaving. Read-only, provisions and deploys nothing.'
+model: MAI-Code-1.1-Flash (copilot)
+tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]
 user-invocable: false
 metadata:
   capability-profile: read-only

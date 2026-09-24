@@ -1,8 +1,8 @@
 ---
 name: research-agent
-description: 'Finds, verifies, and summarizes authoritative external technical information — vendor docs, RFCs, SDK/library specifications. Use to verify an external-technology claim before it drives a decision. Read-only: does not edit files, run commands, or investigate cloud resource state.'
-model: GPT-5.6 Luna (copilot)
-tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]
+description: 'Finds and verifies authoritative external technical facts: vendor docs, RFCs, SDK and library specs. Use when a claim about a third-party technology or version must be confirmed before it drives a decision. Read-only, edits no files and runs no commands.'
+model: MAI-Code-1.1-Flash (copilot)
+tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]
 user-invocable: false
 metadata:
   capability-profile: read-only
