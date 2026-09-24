@@ -111,10 +111,12 @@ fi
 # path — and fails every --global command — when ~/.config does not exist yet.
 mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}"
 
-# install creates the global receipt and refuses once one exists; update then refreshes it to
-# this binary's release. squad status is no probe for that: it exits non-zero when installed.
-"$CLI" squad install --global --target claude </dev/null \
-    || "$CLI" squad update --global --target claude --replace-managed </dev/null
+# update refreshes an existing global deployment to this binary's release and keeps local edits
+# to managed files, so a hand fix to a deployed agent survives the next start or resume. It
+# fails when no deployment exists yet, and install then creates one. squad status is no probe
+# for that: it exits non-zero even when installed.
+"$CLI" squad update --global --target claude </dev/null \
+    || "$CLI" squad install --global --target claude </dev/null
 SQUAD=$?
 
 if [ "$SQUAD" -ne 0 ]; then
