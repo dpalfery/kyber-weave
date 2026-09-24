@@ -171,6 +171,45 @@ public sealed class ReleaseTests
         Assert.Equal(expected, result.StandardOutput.Trim());
     }
 
+    /// <summary>
+    /// The Releases API pages at 100. A pre-release on a later page must still win, and
+    /// drafts and stable releases must not, wherever they sit.
+    /// </summary>
+    [Fact]
+    public void NewestPrereleaseReadsEveryPageAndSkipsDraftsAndStableReleases()
+    {
+        SkipOnWindows();
+
+        const string stub = """
+            stub() {
+                case "$1" in
+                    *page=1)
+                        i=1
+                        printf '['
+                        while [ "$i" -le 100 ]; do
+                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
+                            if [ "$i" -lt 100 ]; then printf ','; fi
+                            i=$((i + 1))
+                        done
+                        printf ']' ;;
+                    *page=2)
+                        printf '[{"tag_name":"v0.3.0-rc.1","draft":true,"prerelease":true},'
+                        printf '{"tag_name":"v0.3.0","draft":false,"prerelease":false},'
+                        printf '{"tag_name":"v0.2.0-rc.1","draft":false,"prerelease":true}]' ;;
+                    *) printf '[]' ;;
+                esac
+            }
+            """;
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"\n" + stub +
+            "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("0.2.0-rc.1", result.StandardOutput.Trim());
+    }
+
     [Fact]
     public void HighestVersionFailsOnEmptyInput()
     {

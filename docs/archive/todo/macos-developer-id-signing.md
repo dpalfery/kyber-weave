@@ -60,7 +60,7 @@ What has to exist:
 Tauri 2's bundler reads a fixed set of environment variable names, so the job passes each
 secret through under the name the bundler expects. The secrets themselves are named for what
 they hold, which is not the same thing — the table below is what the `release` environment
-actually contains, not a suggestion:
+contained on 2026-09-18, before closure (the four `no` rows were added afterwards):
 
 | Secret | Environment variable | Holds | Exists? |
 |---|---|---|---|
@@ -71,7 +71,8 @@ actually contains, not a suggestion:
 | `APPLE_API_ISSUER` | `APPLE_API_ISSUER` | The Issuer ID shown above the keys table | no |
 | `APPLE_API_KEY_P8` | `APPLE_API_KEY_P8` | The `.p8` contents; the job writes it to a file and sets `APPLE_API_KEY_PATH` to that file | no |
 
-**What is left.** The Developer ID certificate is done — the two `APPLE_DEVELOPER_ID_P12_*`
+**What is left** *(snapshot as of 2026-09-18, before closure — the key was created and
+`0.1.7-rc.13` shipped the tray notarized; see the note at the top)*. The Developer ID certificate is done — the two `APPLE_DEVELOPER_ID_P12_*`
 secrets were added on 2026-09-18, so the tray can be *signed* today. The four rows marked
 `no` are all the App Store Connect API key, which has not been created yet, so the tray
 cannot be *notarized*: `build-tray` fails its presence check and that is the correct

@@ -255,6 +255,28 @@ kyber_weave_highest_version() {
     [ -n "$highest" ] && printf '%s\n' "$highest"
 }
 
+# kyber_weave_newest_prerelease <releases-api-url> <fetch-fn> -> prints the highest
+# non-draft pre-release tag, without its leading 'v', across every page of the Releases
+# API; prints nothing and returns 1 when there is none. <fetch-fn> is called with one
+# page URL and prints that page's JSON: the installer passes fetch_stdout, the test
+# harness a stub. A short page is the last one, and the ten-page cap bounds a server
+# that ignores paging.
+kyber_weave_newest_prerelease() {
+    page=1
+    while :; do
+        body="$("$2" "$1?per_page=100&page=$page")" || break
+        printf '%s' "$body" \
+            | tr -d '\r\n' \
+            | tr '}' '\n' \
+            | grep -v '"draft"[[:space:]]*:[[:space:]]*true' \
+            | grep '"prerelease"[[:space:]]*:[[:space:]]*true' \
+            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p'
+        [ "$(printf '%s' "$body" | grep -o '"tag_name"' | wc -l | tr -d ' ')" -ge 100 ] || break
+        [ "$page" -lt 10 ] || break
+        page=$((page + 1))
+    done | kyber_weave_highest_version
+}
+
 # kyber_weave_release_has_kyberdash <version>
 #   exit 0 — the release publishes kyberdash-<rid> assets
 #   exit 1 — the release predates KyberDash and has none
@@ -408,15 +430,11 @@ fetch_stdout() {
     fi
 }
 
+# resolve_latest_version -> prints the version to install when none was pinned: the
+# highest pre-release under --prerelease, otherwise GitHub's latest stable release.
 resolve_latest_version() {
     if [ "$PRERELEASE" = "1" ]; then
-        fetch_stdout "$RELEASES_API" \
-            | tr -d '\r\n' \
-            | tr '}' '\n' \
-            | grep -v '"draft"[[:space:]]*:[[:space:]]*true' \
-            | grep '"prerelease"[[:space:]]*:[[:space:]]*true' \
-            | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' \
-            | kyber_weave_highest_version
+        kyber_weave_newest_prerelease "$RELEASES_API" fetch_stdout
     else
         # Parse "tag_name": "v0.1.0" without requiring jq.
         fetch_stdout "$LATEST_API" \
