@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-24
 ---
 
 # Kyber-Weave Plan Inventory
@@ -19,6 +19,7 @@ Every plan document under `docs/plans/` must be reachable from this inventory, d
 |---|---|---|---|---|
 | [2026-09-14-kilo-native-renderer.md](2026-09-14-kilo-native-renderer.md) | Ready | 2026-09-14 | | Implement and register an ISquadRenderer for SquadTarget.Kilo (kilo) with native Kilo agent and skill layouts. |
 | [2026-09-21-zcode-harness-target.md](2026-09-21-zcode-harness-target.md) | Ready | 2026-09-21 | | Declare `zcode` as a Kyber-Squad target and register a ZCodeRenderer with native subagents, native skills, and the conductor lowered to a slash command. |
+| [2026-09-24-planner-persistence-target-envelopes.md](2026-09-24-planner-persistence-target-envelopes.md) | Draft | 2026-09-24 | test-first | Let `architect` and `product-owner` save their plans and specs on Claude, Pi and ZCode by generalising the Copilot-only capability envelope to per-target envelopes, and route documentation validation and drift checks to `docs-dev`. Factory, OpenCode, Antigravity and Copilot's `product-owner` keep today's narrowing, pinned by tests, with follow-up todos. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
