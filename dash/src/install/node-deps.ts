@@ -111,8 +111,9 @@ export function nodeInstallDeps(overrides: Partial<InstallDeps> = {}): InstallDe
     platform,
     arch: process.arch,
     version: kyberdashVersion(),
-    // `process.execPath` is node itself; argv[1] is the CLI the tray must find.
-    kyberdashPath: process.argv[1] ?? process.execPath,
+    // `process.execPath` is node itself when running from source, or the SEA binary
+    // when bundled. Use resolveKyberdashPath so the compiled executable path is preserved.
+    kyberdashPath: resolveKyberdashPath(),
     configDir: getConfigDir(),
     homeDir: process.env['HOME'] ?? process.env['USERPROFILE'] ?? '',
     env: process.env,
@@ -131,6 +132,15 @@ export function nodeInstallDeps(overrides: Partial<InstallDeps> = {}): InstallDe
     log: (message: string) => process.stderr.write(`${message}\n`),
     ...overrides,
   }
+}
+
+function resolveKyberdashPath(): string {
+  const isSea =
+    typeof (process as { isSea?: () => boolean }).isSea === 'function'
+      ? (process as { isSea?: () => boolean }).isSea?.()
+      : false
+  if (isSea) return process.execPath
+  return process.argv[1] ?? process.execPath
 }
 
 /** The running CLI's version, which is the release the tray comes from (R12.5). */

@@ -93,6 +93,7 @@ export type TrayRecord = {
 export type InstallOptions = {
   force?: boolean
   update?: boolean
+  version?: string
 }
 
 /**

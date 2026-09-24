@@ -370,6 +370,31 @@ describe('kyberdash menubar --update', () => {
     await expect(installTray(h.deps, { update: true })).resolves.not.toBeNull()
     expect(h.logs.join('\n')).toContain('did not confirm the quit')
   })
+
+  it('installs the explicit version when requested', async () => {
+    const h = harness()
+    const customVersion = '0.1.7-rc.13'
+    const record = await installTray(h.deps, { version: customVersion })
+
+    expect(record?.version).toBe(customVersion)
+    expect(h.deps.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(trayArtifactName('darwin', 'arm64')),
+    )
+  })
+
+  it('updates with the explicit version when requested', async () => {
+    const h = harness()
+    h.files.set(installedApp(), '<old app bundle>')
+    h.files.set(
+      trayRecordPath('/Users/dev/.kyberdash'),
+      JSON.stringify({ path: installedApp(), version: '0.9.1', kyberdashPath: '/x' }),
+    )
+
+    const customVersion = '0.1.7-rc.13'
+    const record = await installTray(h.deps, { update: true, version: customVersion })
+
+    expect(record?.version).toBe(customVersion)
+  })
 })
 
 describe('kyberdash menubar on Windows', () => {
