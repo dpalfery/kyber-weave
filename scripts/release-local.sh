@@ -187,12 +187,15 @@ quietly() {
 }
 
 # Downloads into the cache under a temporary name, so an interrupted transfer never
-# leaves a truncated file where the next run would trust it.
+# leaves a truncated file where the next run would trust it. Retried, because CI runs this
+# on every pull request, and one dropped connection to nodejs.org should not fail the
+# merge gate.
 fetch_cached() {
     url="$1"
     target="$2"
     [ -f "$target" ] && return 0
-    curl -fsSL -o "${target}.part" "$url" || die "could not download ${url}"
+    curl -fsSL --retry 3 --retry-delay 2 --retry-connrefused -o "${target}.part" "$url" \
+        || die "could not download ${url}"
     mv "${target}.part" "$target"
 }
 
@@ -222,17 +225,24 @@ build_kyberdash() {
     fetch_cached "${base}/SHASUMS256.txt" "${cache}/SHASUMS256.txt"
     fetch_cached "${base}/${tarball}" "${cache}/${tarball}"
 
+    # Neither cached file is trusted after a failure, so both are removed either way. The
+    # messages differ because the fixes do: a mismatch is a bad download that a rerun
+    # replaces, and a missing entry means the name asked for does not exist.
     expected="$(awk -v name="$tarball" '$2 == name { print $1 }' "${cache}/SHASUMS256.txt")"
     actual="$($SHA_CMD "${cache}/${tarball}" | awk '{ print $1 }')"
-    if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    if [ -z "$expected" ]; then
         rm -f "${cache}/${tarball}" "${cache}/SHASUMS256.txt"
-        die "${tarball} does not match nodejs.org's SHASUMS256.txt; the cached copy was removed, so rerun"
+        die "nodejs.org's SHASUMS256.txt for v${node_version} lists no ${tarball}; check the version in dash/.nvmrc"
+    fi
+    if [ "$expected" != "$actual" ]; then
+        rm -f "${cache}/${tarball}" "${cache}/SHASUMS256.txt"
+        die "${tarball} failed its checksum (expected ${expected}, got ${actual}); the cached copy was removed, so rerun"
     fi
 
     tar -xJf "${cache}/${tarball}" -C "${stage}/node" --strip-components=1
     node_bin="${stage}/node/bin/node"
-    "$node_bin" --version >/dev/null 2>&1 \
-        || die "the Node for ${kyberdash_rid} does not run on this machine; pass --no-kyberdash"
+    node_error="$("$node_bin" --version 2>&1)" \
+        || die "the Node for ${kyberdash_rid} does not run on this machine (${node_error}); pass --no-kyberdash"
 
     # `npm version` rewrites the manifest and lockfile, which a worktree build throws
     # away with the worktree and a working-tree build must put back.

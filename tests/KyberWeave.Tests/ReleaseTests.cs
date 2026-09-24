@@ -602,8 +602,8 @@ public sealed class ReleaseTests
             nodeVersion.Groups[1].Value == nvmrc,
             $"build-kyberdash builds on Node {nodeVersion.Groups[1].Value} but dash/.nvmrc, which the local build reads, says {nvmrc}.");
 
-        Match fuse = Regex.Match(job, @"--sentinel-fuse (NODE_SEA_FUSE_[0-9a-f]+)");
-        Match postject = Regex.Match(job, @"(postject@[0-9A-Za-z.-]+)");
+        Match fuse = Regex.Match(job, "--sentinel-fuse (NODE_SEA_FUSE_[0-9a-f]+)");
+        Match postject = Regex.Match(job, "(postject@[0-9A-Za-z.-]+)");
         Assert.True(fuse.Success, "build-kyberdash no longer names a sentinel fuse.");
         Assert.True(postject.Success, "build-kyberdash no longer pins a postject version.");
 

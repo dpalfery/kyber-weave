@@ -272,6 +272,8 @@ record the updater reads is a fixture and never this machine's:
 | `tray-opt-out` | `--no-menubar` replaces `kyberdash` and leaves the tray alone. |
 | `tray-delegated` | With a `tray.json`, the update runs the new `kyberdash menubar --update`, and that step's failure fails the update by name. |
 | `kyberdash-floor` | A release below the KyberDash floor, which carries no `kyberdash` archive, still updates the CLI and MCP. It needs no build, so it runs under `--no-kyberdash` too. |
+| `recovery-manifest` | When the build fails after `npm version` has stamped `dash/package.json`, the manifest and its lockfile come back byte for byte. A stand-in `npx` forces the failure. |
+| `recovery-cache` | A cached Node download that does not match its `SHASUMS256.txt` fails the build and is removed, not trusted by the next run. |
 
 The main self-update also asserts that an absent `kyberdash` stays absent.
 

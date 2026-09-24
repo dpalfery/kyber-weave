@@ -22,7 +22,9 @@
 # The KyberDash cases then run against the same release: an installed kyberdash is
 # replaced, `--no-kyberdash` and `--no-menubar` are honoured, a recorded tray makes the
 # update run the new `kyberdash menubar --update`, and a release below the KyberDash
-# floor, which carries no kyberdash archive, still updates the CLI and MCP.
+# floor, which carries no kyberdash archive, still updates the CLI and MCP. Last, the
+# recovery cases make release-local.sh's KyberDash build fail on purpose, and check that
+# it puts dash/package.json back and throws away a bad cached Node download.
 #
 # Options:
 #   --from <source>   working (default) | installed | <git ref>
@@ -64,7 +66,7 @@ while [ $# -gt 0 ]; do
         --no-kyberdash) NO_KYBERDASH=1; shift ;;
         --keep) KEEP=1; shift ;;
         --reuse) REUSE=1; shift ;;
-        -h|--help) sed -n '2,34p' "$0" >&2; exit 0 ;;
+        -h|--help) sed -n '2,36p' "$0" >&2; exit 0 ;;
         *) die "unknown option: $1" ;;
     esac
 done
@@ -517,6 +519,79 @@ expect_reports kyber-weave-mcp "kyber-weave-mcp ${FLOOR_VERSION}" "a release wit
 expect_reports kyberdash "$STUB_KYBERDASH_VERSION" "kyberdash is left alone below the floor"
 expect_logged "predates KyberDash" "the kyberdash skip is logged"
 expect_logged "predates the KyberDash tray" "the tray skip is logged"
+
+# ------------------------------------------------------- release-local.sh recovery
+
+# The failure paths of release-local.sh's KyberDash build, which a passing publish never
+# reaches. Both fail inside that build, before anything is published, so each costs
+# seconds. Each writes to its own --out under the sandbox, never to the release tree.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{ print $1 }'
+    else
+        shasum -a 256 "$1" | awk '{ print $1 }'
+    fi
+}
+
+release_local_case() {
+    out="$1"
+    shift
+    log "${CASE_NAME}: release-local.sh --out ${out}"
+    set +e
+    CASE_OUT="$("$@" "${REPO_ROOT}/scripts/release-local.sh" \
+        --version 0.0.0-recovery --out "$out" --rid "$RID" --no-squad 2>&1)"
+    CASE_CODE=$?
+    set -e
+    printf '%s\n' "$CASE_OUT" | sed 's/^/    /' >&2
+    if [ "$CASE_CODE" -ne 0 ]; then
+        pass "${CASE_NAME}: the failed build fails release-local.sh"
+    else
+        fail "${CASE_NAME}: release-local.sh exited 0 although its build was made to fail"
+    fi
+}
+
+if [ -z "$NO_KYBERDASH" ]; then
+    # `npm version` has already stamped dash/package.json when tsup runs, so a tsup
+    # failure is the case where the manifest is left dirty unless the exit trap restores
+    # it. A stand-in npx that always fails forces exactly that. The Node download the
+    # publish above cached is copied in, so the case needs no network.
+    CASE_NAME="recovery-manifest"
+    recovery="${SANDBOX}/recovery"
+    mkdir -p "${recovery}/fake-bin" "${recovery}/manifest/.cache"
+    printf '#!/bin/sh\necho "npx: failing on purpose for the recovery case" >&2\nexit 1\n' \
+        > "${recovery}/fake-bin/npx"
+    chmod 755 "${recovery}/fake-bin/npx"
+    if [ -d "${RELEASE_TREE}/.cache" ]; then
+        cp -R "${RELEASE_TREE}/.cache/." "${recovery}/manifest/.cache/"
+    fi
+    manifest_before="$(sha256_of "${REPO_ROOT}/dash/package.json") $(sha256_of "${REPO_ROOT}/dash/package-lock.json")"
+    release_local_case "${recovery}/manifest" env PATH="${recovery}/fake-bin:${PATH}"
+    expect_logged "failed: npx tsup" "the failing step is named"
+    manifest_after="$(sha256_of "${REPO_ROOT}/dash/package.json") $(sha256_of "${REPO_ROOT}/dash/package-lock.json")"
+    if [ "$manifest_after" = "$manifest_before" ]; then
+        pass "${CASE_NAME}: dash/package.json and its lockfile are restored"
+    else
+        fail "${CASE_NAME}: dash/package.json or its lockfile was left changed"
+    fi
+
+    # A cached download that does not match its manifest must be thrown away, not
+    # trusted by the next run. Both files are seeded, so this needs no network either.
+    CASE_NAME="recovery-cache"
+    node_version="$(tr -d '[:space:]' < "${REPO_ROOT}/dash/.nvmrc")"
+    node_version="${node_version#v}"
+    seeded="${recovery}/cache/.cache/node-v${node_version}"
+    node_tarball="node-v${node_version}-${KYBERDASH_RID}.tar.xz"
+    mkdir -p "$seeded"
+    printf 'not a Node release\n' > "${seeded}/${node_tarball}"
+    printf '%064d  %s\n' 0 "$node_tarball" > "${seeded}/SHASUMS256.txt"
+    release_local_case "${recovery}/cache" env
+    expect_logged "failed its checksum" "the checksum failure is named"
+    if [ ! -e "${seeded}/${node_tarball}" ] && [ ! -e "${seeded}/SHASUMS256.txt" ]; then
+        pass "${CASE_NAME}: the mismatched download and its manifest are removed"
+    else
+        fail "${CASE_NAME}: a mismatched download was left in the cache"
+    fi
+fi
 
 # ----------------------------------------------------------------------- verdict
 

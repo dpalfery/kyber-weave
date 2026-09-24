@@ -193,6 +193,10 @@ jobs:
     name: Self-update and Squad install loop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: build-test
+    # The loop runs npm-resolved code (npm ci, tsup, postject) to build kyberdash, so it
+    # gets no more than it needs: without this it would inherit security-events: write.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
