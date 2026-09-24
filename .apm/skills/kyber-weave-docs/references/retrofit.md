@@ -56,13 +56,19 @@ current guidance. Promote to `current` only when a human has confirmed that file
 | `requirements`, `prd`, `user-stories` | `requirements` |
 | `plan`, `roadmap`, `proposal` | `plan` |
 | `spec`, `rfc` | `spec` |
-| `policy`, `standard`, `convention` | `rule` or `governance` |
-| `README.md` at a directory root | `index` |
-| anything else | `reference` |
+| `standards/<technology>/` | `coding-standard` — wins over the `standard` and directory-root `README.md` rows |
+| `todo/` | `todo` |
+| `policy`, `standard`, `convention` | `rule` or `governance`, except a file under `standards/<technology>/` |
+| `README.md` at a directory root | `index`, except `standards/<technology>/README.md` |
+| anything else that is reference material | `reference` |
 
-`reference` is the correct fallback. It requires no extra keys and carries no ranking
-penalty, so a wrong guess there is recoverable. Guessing `architecture` is not — it
-demands `component` and drags in the pairing invariant.
+`reference` requires no extra keys, so a wrong guess there is recoverable when the
+document really is reference material. It is the wrong type for a coding standard or
+a todo: both validate, and neither is then found as what it is. A path under
+`standards/<technology>/` is `coding-standard` even when the file is `README.md`.
+The word `standard` in that path is not the `rule` heuristic. Guessing
+`architecture` is also not recoverable — it demands `component` and drags in the
+pairing invariant.
 
 ## 3. Validate and iterate
 
