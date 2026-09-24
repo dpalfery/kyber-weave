@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -18,7 +19,8 @@ namespace KyberWeave.Tests;
 /// T4/T5 must implement: the long-only <c>--path</c> option binding onto the separate
 /// <c>PathOption</c> property under a strict-configured CommandApp, the
 /// positional/option coalescing and conflict rule, the injectable target-root
-/// confirmation matrix, and the decline/non-interactive wiring in the mutating command.
+/// confirmation matrix, and the decline/non-interactive wiring in each mutating
+/// command (install, update, and uninstall).
 /// Authored before the seams exist: every compile failure against
 /// <c>PathOption</c>, <c>CoalesceTargetPath</c>, <c>SquadTargetRootConfirmation</c>, and
 /// the optional <c>isInteractive</c>/<c>readAnswer</c> constructor parameters is the
@@ -249,90 +251,206 @@ public sealed class SquadPathSafetyTests : IDisposable
 
     #region Command wiring contract (§6 T3 row d): confirmation before mutation
 
-    [Fact]
-    public void Install_WhenInteractiveConfirmationDeclined_ExitsTwoWithoutWritingAnything()
+    [Theory]
+    [InlineData("install")]
+    [InlineData("update")]
+    [InlineData("uninstall")]
+    public void MutatingVerb_WhenInteractiveConfirmationDeclined_ExitsTwoWithoutWritingAnything(string verb)
     {
-        // N3: a decline is aborted-before-side-effects client input — exit 2 with the
+        // N3 wiring, pinned per mutating command because the gate is wired separately in
+        // each: a decline is aborted-before-side-effects client input — exit 2 with the
         // decline message, and the lifecycle call (the only side-effecting step) must
-        // never have been reached: zero release requests, zero filesystem writes.
-        string targetDir = Path.Combine(_temp.Path, "decline-target");
+        // never have been reached: zero release requests, zero filesystem writes. Update
+        // sits behind a receipt prerequisite, so its zero-writes proof is the seeded tree
+        // being left byte-for-byte unchanged rather than the directory being absent.
+        string targetDir = Path.Combine(_temp.Path, $"decline-{verb}-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "decline-user"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"decline-{verb}-user"));
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadStateStore stateStore = new(userPaths);
+        if (verb == "update")
+        {
+            SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
+                (".codex/agents/architect.toml", "name = \"architect\"\n"));
+        }
 
-        SquadInstallCommand command = new(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: true,
-            readAnswer: _ => false);
+        string[] filesBefore = Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories);
 
-        (int ExitCode, string Output) execution = Capture(() => command.Execute(
-            null!,
-            new SquadInstallSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = false,
-                DryRun = false,
-                Adopt = false
-            }));
+        (int ExitCode, string Output) execution = Capture(() => verb switch
+        {
+            "install" => new SquadInstallCommand(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                releaseSource: releaseSource,
+                renderer: renderer,
+                isInteractive: true,
+                readAnswer: _ => false).Execute(
+                null!,
+                new SquadInstallSettings
+                {
+                    Path = targetDir,
+                    Targets = ["codex"],
+                    Global = false,
+                    DryRun = false,
+                    Adopt = false
+                }),
+            "update" => new SquadUpdateCommand(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                releaseSource: releaseSource,
+                renderer: renderer,
+                isInteractive: true,
+                readAnswer: _ => false).Execute(
+                null!,
+                new SquadUpdateSettings
+                {
+                    Path = targetDir,
+                    Targets = ["codex"],
+                    Global = false,
+                    DryRun = false
+                }),
+            _ => new SquadUninstallCommand(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                lifecycleService: new SquadLifecycleService(releaseSource, renderer, stateStore),
+                isInteractive: true,
+                readAnswer: _ => false).Execute(
+                null!,
+                new SquadUninstallSettings
+                {
+                    Path = targetDir,
+                    Global = false,
+                    DryRun = false
+                })
+        });
 
         Assert.Equal(2, execution.ExitCode);
-        Assert.Contains("Declined. No changes were made.", Normalize(execution.Output), StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        string normalized = Normalize(execution.Output);
+        Assert.Contains("Declined. No changes were made.", normalized, StringComparison.Ordinal);
+        Assert.Contains($"squad {verb}", normalized, StringComparison.Ordinal);
+        string[] filesAfter = Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories);
+        if (verb == "update")
+        {
+            Assert.Equal(filesBefore, filesAfter);
+        }
+        else
+        {
+            Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        }
+
         Assert.Empty(releaseSource.Requests);
     }
 
-    [Fact]
-    public void Install_WhenNonInteractive_ProceedsWithoutPromptingAndEchoesTheAbsoluteRoot()
+    [Theory]
+    [InlineData("install")]
+    [InlineData("update")]
+    [InlineData("uninstall")]
+    public void MutatingVerb_WhenNonInteractive_ProceedsWithoutPromptingAndEchoesTheAbsoluteRoot(string verb)
     {
-        // N1 wiring: a non-interactive mutating run echoes the resolved absolute root
-        // and scope, then proceeds to a successful install without any prompt. The
-        // scope word is asserted because the pre-existing success line does not name
-        // it — its presence is what proves the N4 echo happened.
-        string targetDir = Path.Combine(_temp.Path, "echo-root-target");
+        // N1 wiring, pinned per mutating command because the gate is wired separately in
+        // each: a non-interactive mutating run echoes the resolved absolute root and
+        // scope, then proceeds to a successful mutation without any prompt. The scope
+        // word is asserted because the pre-existing success line does not name it — its
+        // presence is what proves the N4 echo happened. Update and uninstall cannot
+        // reach their gates without an existing deployment, so those rows seed one.
+        string targetDir = Path.Combine(_temp.Path, $"echo-root-{verb}-target");
         Directory.CreateDirectory(targetDir);
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "echo-root-user"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"echo-root-{verb}-user"));
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadStateStore stateStore = new(userPaths);
+        if (verb is "update" or "uninstall")
+        {
+            SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
+                verb == "update"
+                    ? (".codex/agents/architect.toml", "name = \"architect\"\n")
+                    : ("agents/architect.md", "You are architect.\nPlan first.\n"));
+        }
+
         int promptCount = 0;
 
-        SquadInstallCommand command = new(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false,
-            readAnswer: _ =>
-            {
-                promptCount++;
-                return true;
-            });
+        (int ExitCode, string Output) execution = Capture(() => verb switch
+        {
+            "install" => new SquadInstallCommand(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                releaseSource: releaseSource,
+                renderer: renderer,
+                isInteractive: false,
+                readAnswer: _ =>
+                {
+                    promptCount++;
+                    return true;
+                }).Execute(
+                null!,
+                new SquadInstallSettings
+                {
+                    Path = targetDir,
+                    Targets = ["codex"],
+                    Global = false,
+                    DryRun = false,
+                    Adopt = false
+                }),
+            "update" => new SquadUpdateCommand(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                releaseSource: releaseSource,
+                renderer: renderer,
+                isInteractive: false,
+                readAnswer: _ =>
+                {
+                    promptCount++;
+                    return true;
+                }).Execute(
+                null!,
+                new SquadUpdateSettings
+                {
+                    Path = targetDir,
+                    Targets = ["codex"],
+                    Global = false,
+                    DryRun = false,
+                    ReplaceManaged = true
+                }),
+            _ => new SquadUninstallCommand(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                lifecycleService: new SquadLifecycleService(releaseSource, renderer, stateStore),
+                isInteractive: false,
+                readAnswer: _ =>
+                {
+                    promptCount++;
+                    return true;
+                }).Execute(
+                null!,
+                new SquadUninstallSettings
+                {
+                    Path = targetDir,
+                    Global = false,
+                    DryRun = false
+                })
+        });
 
-        (int ExitCode, string Output) execution = Capture(() => command.Execute(
-            null!,
-            new SquadInstallSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = false,
-                DryRun = false,
-                Adopt = false
-            }));
+        string successfulMutation = verb switch
+        {
+            "install" => "Successfully installed",
+            "update" => "Successfully updated",
+            _ => "Successfully uninstalled"
+        };
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Equal(0, promptCount);
         string normalized = Normalize(execution.Output);
         Assert.Contains(Path.GetFullPath(targetDir), normalized, StringComparison.Ordinal);
         Assert.Contains("project", normalized, StringComparison.OrdinalIgnoreCase);
-        Assert.True(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        Assert.Contains($"squad {verb}", normalized, StringComparison.Ordinal);
+        Assert.Contains(successfulMutation, normalized, StringComparison.Ordinal);
+        if (verb == "install")
+        {
+            Assert.True(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        }
     }
 
     #endregion
@@ -391,6 +509,58 @@ public sealed class SquadPathSafetyTests : IDisposable
     private static string Normalize(string output) => string.Join(
         ' ',
         output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>
+    /// Seeds an existing project-scope deployment — deployed file, ownership receipt, and
+    /// lock — after the fixture pattern SquadCliCommandTests uses, so the update and
+    /// uninstall wiring tests satisfy the receipt prerequisites that sit before their
+    /// confirmation gates.
+    /// </summary>
+    private static void SeedDeployment(
+        string targetRoot,
+        SquadDeploymentScope scope,
+        SquadStateStore stateStore,
+        params (string RelativePath, string Content)[] files)
+    {
+        string receiptPath = stateStore.ResolveReceiptPath(targetRoot, scope);
+        string lockPath = stateStore.ResolveLockPath(targetRoot, scope);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+
+        List<SquadOwnedFile> ownedFiles = [];
+        foreach ((string relativePath, string content) in files)
+        {
+            string fullPath = Path.Combine(targetRoot, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            File.WriteAllBytes(fullPath, bytes);
+            string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            ownedFiles.Add(new SquadOwnedFile(relativePath, sha256, "codex", Adopted: false));
+        }
+
+        SquadReceipt receipt = new(
+            Schema: "kyber-squad.receipt/v1",
+            Scope: scope,
+            TargetRoot: ".",
+            InstalledAtUtc: DateTimeOffset.UtcNow,
+            Degradations: [],
+            Files: ownedFiles);
+
+        SquadLock squadLock = new(
+            Schema: "kyber-squad.lock/v1",
+            SquadVersion: "1.2.3",
+            CliVersion: "1.2.3",
+            McpVersion: "1.2.3",
+            Bundle: "full",
+            Targets: ["codex"],
+            Exclusions: [],
+            Translation: "best-effort",
+            BundleDigest: "a".PadRight(64, '0'),
+            AssetDigest: "b".PadRight(64, '0'),
+            Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+
+        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
+        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+    }
 
     /// <summary>
     /// Stub over the real settings type that records the instance the parser bound, so
