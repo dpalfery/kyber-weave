@@ -1174,6 +1174,10 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("WithExample(\"squad\", \"status\"", program, StringComparison.Ordinal);
         Assert.Contains("WithExample(\"squad\", \"doctor\"", program, StringComparison.Ordinal);
         Assert.Contains("WithExample(\"squad\", \"pack\"", program, StringComparison.Ordinal);
+
+        // Strict parsing is the CLI-wide guard against silently discarded unknown
+        // options (the squad --path incident): Program.cs must enable it explicitly.
+        Assert.Contains("UseStrictParsing", program, StringComparison.Ordinal);
     }
 
     #endregion

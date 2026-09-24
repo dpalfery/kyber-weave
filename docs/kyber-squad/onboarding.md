@@ -29,19 +29,19 @@ All squad operations are grouped under the `squad` branch:
 
 ```bash
 # Install squad into project (or global) scope
-kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt]
+kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes]
 
 # Update an existing squad deployment
-kyber-weave squad update [path] [--global] [--dry-run] [--replace-managed]
+kyber-weave squad update [path] [--global] [--dry-run] [--replace-managed] [--path <PATH>] [--yes]
 
 # Uninstall squad deployment
-kyber-weave squad uninstall [path] [--global] [--dry-run]
+kyber-weave squad uninstall [path] [--global] [--dry-run] [--path <PATH>] [--yes]
 
 # Inspect installation health, version, and file drift
-kyber-weave squad status [path] [--global]
+kyber-weave squad status [path] [--global] [--path <PATH>]
 
 # Validate toolchain prerequisites and runtime health
-kyber-weave squad doctor [path] [--global]
+kyber-weave squad doctor [path] [--global] [--path <PATH>]
 
 # Build release packages (repository maintainer only)
 kyber-weave squad pack --format <apm|plugins|all> --out <directory>
@@ -79,6 +79,8 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Antigravity**: Requires explicit `--target antigravity` or configuration entry; `.agents/` will not auto-activate it.
 - **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 11 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
+- **Target-root echo and confirmation**: Every mutating run (`install`, `update`, `uninstall` without `--dry-run`) prints the resolved absolute target root and its scope (project/global) before any write. An interactive console is then asked to confirm; declining prints `Declined. No changes were made.` and exits with **exit code 2**. `--yes` skips the prompt for automation attached to a terminal; non-interactive consoles (scripts, CI, captured output) echo the root and proceed without prompting.
+- **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms.
 - **Update and uninstall**: Always consume the recorded target roster from the existing deployment receipt and never perform re-detection.
 
 ### Pi notes
@@ -216,6 +218,12 @@ To deploy specific targets or exclude certain harnesses:
 kyber-weave squad install --target claude,cursor --exclude warp
 ```
 
+To install into a directory other than the current one, name the deployment root with `--path` (a non-default positional `[path]` together with `--path` is rejected):
+
+```bash
+kyber-weave squad install --path /path/to/project --target claude,cursor
+```
+
 ### Adopting Existing Files
 
 If a project already contains agent or skill files that match canonical Squad content byte-for-byte, `squad install` normally treats pre-existing unmanaged files as a conflict. Use `--adopt` to claim exact-match files into Squad ownership:
@@ -260,6 +268,12 @@ Remove all managed files and deployment state:
 
 ```bash
 kyber-weave squad uninstall
+```
+
+For scripted runs attached to a terminal, `--yes` skips the confirmation prompt:
+
+```bash
+kyber-weave squad uninstall --yes
 ```
 
 Locally modified files are preserved during uninstallation unless explicitly cleaned up by the operator. If no receipt exists, uninstall is a clean no-op.
@@ -309,7 +323,7 @@ leaves them untouched; a human will refresh them after a fresh Kyber-Weave relea
 |---|---|
 | `0` | Success, healthy/clean status, or successful dry run. |
 | `1` | Configuration error, prerequisite failure, file drift, dirty state, or transactional failure. |
-| `2` | Invalid CLI arguments, unrecognized target/format token, or target resolution required in non-interactive mode. |
+| `2` | Invalid CLI arguments, unrecognized target/format token, declined write confirmation, or target resolution required in non-interactive mode. |
 
 ---
 

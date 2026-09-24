@@ -37,7 +37,21 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
-        string targetRoot = SquadCommandComposition.ResolveTargetRoot(settings.Path);
+
+        // Coalesce the positional path with --path; invalid client input returns exit
+        // code 2 before any resolution or work
+        string? effectivePath;
+        try
+        {
+            effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
+        }
+        catch (ArgumentException ex)
+        {
+            SquadCommandComposition.WriteClientInputError(ex.Message);
+            return 2;
+        }
+
+        string targetRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
         ISquadGlobalRootResolver globalRoots = _globalRoots ?? SquadCommandComposition.ResolveGlobalRoots();
 
