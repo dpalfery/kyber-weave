@@ -3,6 +3,7 @@ using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
 
+/// <summary>Settings for <c>docs validate</c>: the shared docs settings plus the merge gate.</summary>
 public sealed class DocsValidateSettings : DocsSettings
 {
     /// <summary>

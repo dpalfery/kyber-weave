@@ -23,6 +23,12 @@ namespace KyberWeave.Core.Docs.Validation;
 /// the <c>plan-index</c> and <c>specification-index</c> registry properties, and the
 /// indexes themselves are never open work.
 /// </para>
+/// <para>
+/// An entry is open work only when it holds a document of that inventory's type — a
+/// <c>plan</c>, or a <c>spec</c> or <c>requirements</c> document. Location alone is not
+/// enough: a host may point an index at a shared folder, and the catalog beside it is not
+/// a plan.
+/// </para>
 /// </remarks>
 public sealed class OpenWorkValidator
 {
@@ -31,20 +37,22 @@ public sealed class OpenWorkValidator
 
     private const string FolderIndexName = "README.md";
 
-    private static readonly (string Property, string Kind, string ArchiveFolder)[] Inventories =
+    private static readonly (string Property, string Kind, string ArchiveFolder, DocType[] WorkTypes)[] Inventories =
     [
-        (ConfigRegConfig.PlanIndexProperty, "Plan", "plans"),
-        (ConfigRegConfig.SpecificationIndexProperty, "Specification", "specs")
+        (ConfigRegConfig.PlanIndexProperty, "Plan", "plans", [DocType.Plan]),
+        (ConfigRegConfig.SpecificationIndexProperty, "Specification", "specs", [DocType.Spec, DocType.Requirements])
     ];
 
     private readonly KyberWeaveConfig _config;
 
+    /// <summary>Creates the validator over the registry and ontology in <paramref name="config"/>.</summary>
     public OpenWorkValidator(KyberWeaveConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;
     }
 
+    /// <summary>One error per plan or specification still open in its active folder.</summary>
     public DiagnosticReport Validate(DocumentSet set)
     {
         ArgumentNullException.ThrowIfNull(set);
@@ -52,7 +60,7 @@ public sealed class OpenWorkValidator
         DiagnosticReport report = new DiagnosticReport();
         IReadOnlyList<ConfigRegEntry> registry = _config.ConfigReg.Resolve(_config.Ontology);
 
-        foreach ((string property, string kind, string archiveFolder) in Inventories)
+        foreach ((string property, string kind, string archiveFolder, DocType[] workTypes) in Inventories)
         {
             string? indexPath = registry
                 .FirstOrDefault(e => string.Equals(e.Name, property, StringComparison.Ordinal))
@@ -61,7 +69,7 @@ public sealed class OpenWorkValidator
                 continue;
 
             string folder = Path.GetDirectoryName(indexPath)?.Replace('\\', '/') ?? string.Empty;
-            foreach (IGrouping<string, DocumentModel> work in OpenEntries(set, folder, indexPath))
+            foreach (IGrouping<string, DocumentModel> work in OpenEntries(set, folder, indexPath, workTypes))
             {
                 DocumentModel first = work.FirstOrDefault(d => d.RelativePath.EndsWith(
                     "/" + FolderIndexName, StringComparison.OrdinalIgnoreCase)) ?? work.First();
@@ -80,20 +88,24 @@ public sealed class OpenWorkValidator
     }
 
     /// <summary>
-    /// Live documents inside <paramref name="folder"/>, grouped by the entry directly below it:
-    /// a plan file, or a folder holding one piece of work.
+    /// Live documents inside <paramref name="folder"/>, grouped by the entry directly below it
+    /// — a plan file, or a folder holding one piece of work — keeping only entries that hold a
+    /// document of one of <paramref name="workTypes"/>.
     /// </summary>
     private static IEnumerable<IGrouping<string, DocumentModel>> OpenEntries(
         DocumentSet set,
         string folder,
-        string indexPath) =>
+        string indexPath,
+        DocType[] workTypes) =>
         set.Documents
             .Where(d => InventoryReachability.IsWithin(d.RelativePath, folder)
                 && !InventoryReachability.IsArchived(d.RelativePath)
                 && !DocsRootPath.PathComparer.Equals(d.RelativePath, indexPath))
             .OrderBy(d => d.RelativePath, StringComparer.Ordinal)
-            .GroupBy(d => EntryBelow(d.RelativePath, folder), StringComparer.Ordinal);
+            .GroupBy(d => EntryBelow(d.RelativePath, folder), StringComparer.Ordinal)
+            .Where(entry => entry.Any(d => workTypes.Contains(d.DocType)));
 
+    /// <summary>The first path segment of <paramref name="relativePath"/> below <paramref name="folder"/>.</summary>
     private static string EntryBelow(string relativePath, string folder)
     {
         string below = folder.Length == 0 ? relativePath : relativePath[(folder.Length + 1)..];

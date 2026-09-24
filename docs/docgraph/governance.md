@@ -70,7 +70,9 @@ a merge that still carries one either merges unfinished work or leaves finished 
 live. Open work is correct on a branch, so the rule runs only under
 `docs validate --merge-ready`, which pull-request CI passes. Each plan file, and each folder
 under the plans or specs folder, is one finding however many documents it holds. The folders
-are those of the `plan-index` and `specification-index` registry properties.
+are those of the `plan-index` and `specification-index` registry properties, and an entry
+counts only when it holds a `plan`, `spec` or `requirements` document, so an index pointed at
+a shared folder does not flag its neighbours.
 
 `KW-DOC-SPEC-004` and `-006` carry a **nearest-match hint** computed by edit distance,
 offered only when the distance is plausibly a typo rather than a different word. A

@@ -79,4 +79,4 @@ an assumption hidden in the design.
 
 ## Status
 
-**Draft**: requirements, design and tasks await approval. Stream A starts once they are approved.
+**Archived** 2026-09-24: requirements, design and tasks were approved and delivered, and the closeout (tasks 11) traces every acceptance criterion to a completed task.

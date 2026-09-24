@@ -12,6 +12,10 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Schema tier: frontmatter conformance. Needs no code index.</summary>
 public sealed class DocsValidateCommand : Command<DocsValidateSettings>
 {
+    /// <summary>
+    /// Runs every frontmatter and inventory validator, and the open-work gate when
+    /// <see cref="DocsValidateSettings.MergeReady"/> is set. Exits 1 on any error.
+    /// </summary>
     protected override int Execute(CommandContext context, DocsValidateSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
@@ -49,5 +53,6 @@ public sealed class DocsValidateCommand : Command<DocsValidateSettings>
         return report.HasErrors ? 1 : 0;
     }
 
+    /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, DocsValidateSettings settings) => Execute(context, settings, CancellationToken.None);
 }

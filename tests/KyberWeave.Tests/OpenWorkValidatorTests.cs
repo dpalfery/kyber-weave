@@ -16,6 +16,7 @@ public sealed class OpenWorkValidatorTests
     private const string PlanIndex = "6-Docs/plans/README.md";
     private const string SpecIndex = "6-Docs/specs/README.md";
 
+    /// <summary>An inventory index document with no entries.</summary>
     private static string Index(string id) =>
         $"""
         ---
@@ -32,6 +33,7 @@ public sealed class OpenWorkValidatorTests
         None.
         """;
 
+    /// <summary>A draft work document of <paramref name="docType"/>.</summary>
     private static string Work(string id, string docType) =>
         $"""
         ---
@@ -47,9 +49,11 @@ public sealed class OpenWorkValidatorTests
         # {id}
         """;
 
+    /// <summary>Runs the validator over the fixture with the product-default registry.</summary>
     private static DiagnosticReport Validate(DocFixture fixture) =>
         new OpenWorkValidator(KyberWeaveConfig.ProductDefaults).Validate(fixture.Load());
 
+    /// <summary>Lists each finding's code and file, for assertion messages.</summary>
     private static string Describe(DiagnosticReport report) =>
         string.Join("; ", report.Items.Select(i => $"{i.Code} {i.FilePath}"));
 
@@ -94,6 +98,7 @@ public sealed class OpenWorkValidatorTests
         Assert.Equal("6-Docs/specs/tray/README.md", finding.FilePath);
     }
 
+    /// <summary>An empty inventory is the closed state, not open work.</summary>
     [Fact]
     public void TheIndexesAloneAreNotOpenWork()
     {
@@ -106,6 +111,7 @@ public sealed class OpenWorkValidatorTests
         Assert.True(report.Items.Count == 0, Describe(report));
     }
 
+    /// <summary>Archiving is how work closes, so archived plans and specifications pass.</summary>
     [Fact]
     public void ArchivedPlansAndSpecificationsAreClosed()
     {
@@ -118,6 +124,28 @@ public sealed class OpenWorkValidatorTests
         DiagnosticReport report = Validate(fixture);
 
         Assert.True(report.Items.Count == 0, Describe(report));
+    }
+
+    /// <summary>
+    /// A host may point <c>plan-index</c> at a shared folder. The catalog and reference pages
+    /// beside the index are not plans, so only the plan document is open work.
+    /// </summary>
+    [Fact]
+    public void AnIndexInASharedFolderReportsOnlyPlanDocuments()
+    {
+        KyberWeaveConfig rootPlanIndex = KyberWeaveConfig.ProductDefaults.WithConfigReg(new ConfigRegConfig
+        {
+            Additions = [new ConfigRegEntry(ConfigRegConfig.PlanIndexProperty, "6-Docs/README.md")]
+        });
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/README.md", Index("index"))
+            .Write("6-Docs/guide.md", Work("guide", "reference"))
+            .Write("6-Docs/2026-09-14-kilo.md", Work("2026-09-14-kilo", "plan"));
+
+        DiagnosticReport report = new OpenWorkValidator(rootPlanIndex).Validate(fixture.Load());
+
+        Diagnostic finding = Assert.Single(report.Items);
+        Assert.Equal("6-Docs/2026-09-14-kilo.md", finding.FilePath);
     }
 
     /// <summary>

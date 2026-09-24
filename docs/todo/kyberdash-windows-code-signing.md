@@ -18,12 +18,14 @@ and the release notes carry the SmartScreen warning `release.yml` writes (Requir
 
 - Requirement 12.4 already covers both states: signed when a certificate is configured,
   the SmartScreen note when it is not. Only the certificate and the signing step are missing.
-- An EV certificate clears SmartScreen reputation immediately; a standard OV certificate
-  builds reputation over downloads.
+- No certificate clears SmartScreen on its own: EV-, OV- and Azure Artifact Signing-signed
+  files all show a warning until the publisher builds reputation over downloads. EV lost its
+  instant bypass in 2024.
 
 ## What needs deciding
 
-- Which certificate (EV, OV, or Azure Trusted Signing) and where its secret lives — the
+- Which certificate (Azure Artifact Signing, formerly Trusted Signing, or an OV
+  certificate) and where its secret lives — the
   `release` environment, like the macOS signing secrets.
 - Whether the CLI binaries (`kyber-weave`, `kyber-weave-mcp`, `kyberdash`) are signed in the
   same step.
