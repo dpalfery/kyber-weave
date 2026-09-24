@@ -155,6 +155,7 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains("non-HTTPS", ex.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>The stable path asks GitHub for its latest release and never lists releases.</summary>
     [Fact]
     public void RunLatestStableUsesReleasesLatestAndReplacesBothBinaries()
     {
@@ -176,18 +177,16 @@ public sealed class UpdateCommandTests : IDisposable
             GitHubReleaseClient.LatestApi.AbsoluteUri,
             handler.Uris,
             StringComparer.Ordinal);
-        Assert.DoesNotContain(
-            GitHubReleaseClient.ReleasesApi.AbsoluteUri,
-            handler.Uris,
-            StringComparer.Ordinal);
+        Assert.DoesNotContain(handler.Uris, IsReleasesListRequest);
     }
 
+    /// <summary>A draft is never installed, however high its version.</summary>
     [Fact]
     public void RunReleaseCandidateSkipsDraftsAndUsesReleasesList()
     {
         using MapHandler handler = MapRelease("0.2.0-rc.1", "osx-arm64", windows: false);
         handler.MapJson(
-            GitHubReleaseClient.ReleasesApi.AbsoluteUri,
+            GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri,
             """
             [
               {"tag_name":"v0.9.0-rc.9","draft":true,"prerelease":true},
@@ -201,10 +200,11 @@ public sealed class UpdateCommandTests : IDisposable
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains("0.2.0-rc.1", outcome.Message, StringComparison.Ordinal);
-        Assert.Contains(GitHubReleaseClient.ReleasesApi.AbsoluteUri, handler.Uris, StringComparer.Ordinal);
+        Assert.Contains(GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri, handler.Uris, StringComparer.Ordinal);
         Assert.DoesNotContain(GitHubReleaseClient.LatestApi.AbsoluteUri, handler.Uris, StringComparer.Ordinal);
     }
 
+    /// <summary>A pinned version needs no release lookup at all.</summary>
     [Fact]
     public void RunPinnedVersionSkipsApiAndStripsVPrefix()
     {
@@ -216,7 +216,85 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
         Assert.DoesNotContain(GitHubReleaseClient.LatestApi.AbsoluteUri, handler.Uris, StringComparer.Ordinal);
-        Assert.DoesNotContain(GitHubReleaseClient.ReleasesApi.AbsoluteUri, handler.Uris, StringComparer.Ordinal);
+        Assert.DoesNotContain(handler.Uris, IsReleasesListRequest);
+    }
+
+    /// <summary>
+    /// GitHub lists releases newest-created first. Taking the first entry let a release
+    /// published out of sequence decide what <c>--release-candidate</c> installs; ordinal
+    /// comparison would also pick <c>rc.9</c> over <c>rc.10</c>.
+    /// </summary>
+    [Fact]
+    public void RunReleaseCandidateTakesHighestVersionNotFirstListed()
+    {
+        using MapHandler handler = MapRelease("0.1.7-rc.10", "osx-arm64", windows: false);
+        handler.MapJson(
+            GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri,
+            """
+            [
+              {"tag_name":"v0.1.7-rc.9","draft":false,"prerelease":true},
+              {"tag_name":"v0.1.7-rc.10","draft":false,"prerelease":true},
+              {"tag_name":"v0.1.6","draft":false,"prerelease":false}
+            ]
+            """);
+        SelfUpdateHost host = CreateHost("0.1.6", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains("0.1.7-rc.10", outcome.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// GitHub serves the Releases list a page at a time. A higher release on a later page
+    /// must still win, so a full page means the next one is read too.
+    /// </summary>
+    [Fact]
+    public void RunReleaseCandidateReadsEveryReleasesPage()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        string fullPage = "[" + string.Join(
+            ",",
+            Enumerable.Range(1, GitHubReleaseClient.ReleasesPerPage)
+                .Select(n => $$"""{"tag_name":"v0.1.{{n}}","draft":false,"prerelease":false}""")) + "]";
+        handler.MapJson(GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri, fullPage);
+        handler.MapJson(
+            GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 2).AbsoluteUri,
+            """[{"tag_name":"v0.2.0","draft":false,"prerelease":false}]""");
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains("0.2.0", outcome.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 3).AbsoluteUri,
+            handler.Uris,
+            StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// GitHub permits tags that are not release versions, such as <c>v0.1.0/hotfix</c>.
+    /// One of those must not abort resolving the releases that are.
+    /// </summary>
+    [Fact]
+    public void RunReleaseCandidateSkipsTagsThatAreNotReleaseVersions()
+    {
+        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        handler.MapJson(
+            GitHubReleaseClient.ReleasesPage(GitHubReleaseClient.ReleasesApi, 1).AbsoluteUri,
+            """
+            [
+              {"tag_name":"v0.2.0","draft":false,"prerelease":false},
+              {"tag_name":"v0.1.0/hotfix","draft":false,"prerelease":false}
+            ]
+            """);
+        SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
+
+        SelfUpdateOutcome outcome = Run(handler, host, new SelfUpdateOptions(null, ReleaseCandidate: true, NoMcp: false));
+
+        Assert.Equal(0, outcome.ExitCode);
+        Assert.Contains("0.2.0", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -825,6 +903,10 @@ public sealed class UpdateCommandTests : IDisposable
         Justification = "SHA256SUMS.txt and the digests it is compared against are lowercase hex by sha256sum convention; ToUpperInvariant would not match the published format.")]
     private static string Sha(byte[] bytes) =>
         Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+    /// <summary>True for any page of the Releases list, but not for <c>releases/latest</c>.</summary>
+    private static bool IsReleasesListRequest(string uri) =>
+        uri.StartsWith(GitHubReleaseClient.ReleasesApi.AbsoluteUri + "?", StringComparison.Ordinal);
 
     private sealed class MapHandler : HttpMessageHandler
     {
