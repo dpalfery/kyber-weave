@@ -261,9 +261,12 @@ jobs:
         # bundle cannot be CommonJS. It is emitted as ESM and loaded by
         # src/sea-shim.cjs; tsup.sea.config.ts carries the reasoning.
         working-directory: dash
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           npm ci --no-audit --no-fund
+          npm version "${RELEASE_VERSION}" --no-git-tag-version --allow-same-version
           npx tsup --config tsup.sea.config.ts
           test -f dist-sea/main.js || { echo "tsup did not emit dist-sea/main.js" >&2; exit 1; }
 
