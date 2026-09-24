@@ -548,13 +548,10 @@ async function warmClaudeSpecialPath(
   mkdirSync(cacheDir, { recursive: true })
   const previous = process.env['KYBERDASH_CACHE_DIR']
   process.env['KYBERDASH_CACHE_DIR'] = cacheDir
-  const { acquireCacheRefreshLock } = await import('./lock.js')
-  const lock = await acquireCacheRefreshLock({ directory: cacheDir })
   try {
     const { parseAllSessions } = await import('../ingest/parser.js')
     await parseAllSessions(dateRange, providerFilter)
   } finally {
-    if (lock.outcome === 'acquired') await lock.handle.release()
     if (previous === undefined) delete process.env['KYBERDASH_CACHE_DIR']
     else process.env['KYBERDASH_CACHE_DIR'] = previous
   }

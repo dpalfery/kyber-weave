@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-24
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -392,6 +392,17 @@ edit existing hooks as part of this setup.
   rustc --version # Must be >= 1.80.0
   ```
 - On macOS, ensure Xcode command line tools are installed: `xcode-select --install`.
+
+### 4. Stale Refresh Runs and Dead PID Reconciliation
+- **Symptom**: Report footer displays `inProgress: pid X since <timestamp>` indefinitely or a refresh fails to acquire lock.
+- **Remediation**: KyberDash automatically reconciles runs whose PID is dead or whose elapsed duration exceeds 15 minutes before starting each refresh. To inspect runs directly:
+  ```bash
+  sqlite3 ~/.kyberdash/canon.db "SELECT id, status, pid, started_at, completed_at, summary FROM refresh_run ORDER BY started_at DESC LIMIT 5;"
+  ```
+
+### 5. Store Schema Migration and Problem Deduplication
+- **Details**: Schema v13 enforces stable `problem_key` uniqueness on `problems`, collapsing historical duplicates idempotently on database open.
+- **Backup**: Always verify and retain pre-migration backups (e.g. `~/.kyberdash/canon.db.backup-*`).
 
 ---
 

@@ -1131,18 +1131,28 @@ export class CanonStore {
    * Mark interrupted runs failed before a new refresh starts. An inaccessible
    * PID is treated as alive; only a PID known to be absent is reconciled.
    */
-  reconcileDeadRefreshRuns(completedAt = new Date().toISOString()): number {
+  reconcileDeadRefreshRuns(
+    completedAt = new Date().toISOString(),
+    maxAgeMs = 15 * 60 * 1000,
+  ): number {
     const running = this.db
-      .prepare("SELECT id, pid FROM refresh_run WHERE status = 'running'")
-      .all() as Array<{ id: string; pid: number }>
+      .prepare("SELECT id, pid, started_at FROM refresh_run WHERE status = 'running'")
+      .all() as Array<{ id: string; pid: number; started_at: string }>
     const finish = this.db.prepare(
       "UPDATE refresh_run SET completed_at = ?, status = 'failure', summary = ? WHERE id = ? AND status = 'running'",
     )
     let reconciled = 0
+    const nowMs = Date.parse(completedAt)
     for (const row of running) {
       const pid = Number(row.pid)
-      if (refreshProcessIsAlive(pid)) continue
-      const summary = `Refresh process ${pid} is no longer running (dead process); marked failed during reconciliation.`
+      const isAlive = refreshProcessIsAlive(pid)
+      const startedMs = Date.parse(row.started_at)
+      const ageMs = Number.isFinite(nowMs) && Number.isFinite(startedMs) ? nowMs - startedMs : 0
+      const isStale = ageMs > maxAgeMs
+      if (isAlive && !isStale) continue
+      const summary = !isAlive
+        ? `Refresh process ${pid} is no longer running (dead process); marked failed during reconciliation.`
+        : `Refresh process ${pid} exceeded maximum run duration (${Math.round(ageMs / 1000)}s); marked failed during reconciliation.`
       const result = finish.run(completedAt, summary, row.id)
       reconciled += Number(result.changes)
     }
@@ -1170,7 +1180,14 @@ export class CanonStore {
     const row = this.db
       .prepare('SELECT * FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1')
       .get(status) as Record<string, unknown> | undefined
-    return row === undefined ? undefined : toRefreshRunRow(row)
+    if (row === undefined) return undefined
+    const parsed = toRefreshRunRow(row)
+    if (status === 'running') {
+      const isAlive = refreshProcessIsAlive(parsed.pid)
+      const isRecent = Date.now() - Date.parse(parsed.startedAt) < 15 * 60 * 1000
+      if (!isAlive || !isRecent) return undefined
+    }
+    return parsed
   }
 
   listRefreshRuns(limit = 20): RefreshRunRow[] {

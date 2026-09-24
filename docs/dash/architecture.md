@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-24
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -277,11 +277,15 @@ separates `no_rate` from `not_billed` from `out_of_scope` (R5.4, R5.5), and tier
 selects context tiers by measured input size (R5.6). The scoping failure this prevents — a
 table pricing a harness it does not name — is in the [rationale](../reference/kyberdash-rationale.md).
 
-### `Measurability`
+### `Measurability` and honest unobservability
 
 Each source declares per-metric availability independent of value (R10.1). A metric a source
-cannot report renders as "not measurable", never as zero — rendering an unreported metric as
-`0` would make the harness that reports least look most efficient.
+cannot report renders as "not measurable" (`null` with a machine- and human-readable `reason`),
+never as zero — rendering an unreported metric as `0` would make the harness that reports least look
+most efficient. Content readers (such as `CopilotVsCodeReader` and `CursorReader`) map native evidence
+into input-side `ReaderTurn` snapshots without attributing current response text to input context or
+inventing unobserved prefix history. Where total tokens and context window are known, pressure is
+measured independently from whether individual composition buckets are available.
 
 ### Store
 
@@ -332,8 +336,10 @@ explicitly recorded in `grouping_basis` as `derived` with the specific rule name
 are never silently presented as reported fact. Rebuilding via `kyber build` re-projects both
 tables deterministically from retained records.
 
-`KyberBridge` (`dash/src/server/bridge.ts`) reads `canon.db` and serves the derived sessions,
-runs, harness rollups, findings, and unclipped content. That is the single-store end state in
+`KyberBridge` (`dash/src/server/bridge.ts`) reads `canon.db` through public, DB-backed
+queries (`countProblems()`, `getRefreshState()`, `getSessionCostContributions()`, `getQuarantineCount()`) 
+and serves the derived sessions, runs, harness rollups, findings, and unclipped content without private-store
+casts. That is the single-store end state in
 [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md): production code never opens a
 Python `sessions.db`, and `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy session.
 `dash/src/server/kyber-bridge.test.ts` proves those environment variables are ignored for

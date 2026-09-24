@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
+import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
   decompressRaw,
@@ -1529,6 +1530,12 @@ export class KyberBridge {
             }
           | undefined
         if (row === undefined) return undefined
+        if (status === 'running') {
+          const pid = Number(row.pid)
+          const isAlive = refreshProcessIsAlive(pid)
+          const isRecent = Date.now() - Date.parse(row.started_at) < 15 * 60 * 1000
+          if (!isAlive || !isRecent) return undefined
+        }
         return {
           startedAt: row.started_at,
           completedAt: row.completed_at,

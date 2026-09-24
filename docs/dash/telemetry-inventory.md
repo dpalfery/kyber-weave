@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-13
+last-reviewed: 2026-09-24
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -40,13 +40,14 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 
 | Harness/source | Verified collection outcome | Availability or gate |
 |---|---|---|
-| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. Canonical records must not use harness `gemini`. | Tool names are available; per-server schemas remain source-dependent. |
-| Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. A live canonical session (`08551cf5-b064-4095-9552-8a9a0a0f78d2`) renders the ASAD dashboard. | The observed per-server schema result was 0 of 81; this is an availability outcome, not a zero-valued schema measurement. |
+| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. Canonical records must not use harness `gemini`; legacy gemini records are quarantined as `excluded_harness`. | Tool names are available; per-server schemas remain source-dependent. |
+| Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
+| Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `CopilotVsCodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
 | Claude Code | Enhanced-telemetry counters and dot-folder conversation/tool-result content can enter canonical records. | System prompts and tool schemas from raw API-body logs require the owner to enable `OTEL_LOG_RAW_API_BODIES=1`; that has not been assumed or configured here. |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
-| Cursor | `codeburn kyber cursor-hook` emits deterministic OTLP traces from hook JSONL with stable turn identity, supplied counters, and ordered tools. | Synthetic and CLI-post verification passed. Live collection requires the owner to register the command and execute a Cursor turn; existing hooks must not be changed by this work. |
+| Cursor | `CursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured; unobserved historical buckets explicit `null` with reason. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. | Owner enablement is required before collection can be verified. |
 | Kilo Code | The surveyed empty local store and undocumented OTel surface are represented as not collectable with a reason. | No zero-valued data is fabricated. |
 

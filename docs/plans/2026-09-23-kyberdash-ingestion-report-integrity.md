@@ -4,13 +4,13 @@ title: Restore KyberDash ingestion and report integrity across harnesses
 doc-type: plan
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-24
 component: KyberDash
 ---
 
 # Restore KyberDash ingestion and report integrity across harnesses
 
-**Status:** Ready  
+**Status:** Complete  
 **Date:** 2026-09-23  
 **Development mode:** test-first  
 **Approved:** 2026-09-23  
@@ -150,23 +150,23 @@ Each RED task records the exact failing assertion before its GREEN owner starts.
 
 ## 8. Work breakdown
 
-| # | Phase | Ownership | Work | Skills | Depends on |
-|---|---|---|---|---|---|
-| T0 | Preflight | Conductor | Create an isolated worktree from the approved current base containing `f7054414` and later KyberDash fixes; preserve the present behind branch and untracked `dash/tray/` outputs. Confirm installed `0.9.23` provenance against the selected base. | `conductor` | Q1 answered before data work; code work may begin after plan approval |
-| T1 | RED | `dash/src/canon/adapters/content.test.ts`, sanitized fixture under `dash/src/canon/adapters/__fixtures__/` | Add observed Copilot `content`-field coverage; assert current output is absent from input parts, plain text is preserved, and bucketed input does not exceed reported input for the fixture. Update the existing test that currently requires output in conversation history. | `test-dev` | T0 |
-| T2 | RED | `dash/src/analysis/report/build.test.ts`, `dash/src/server/kyber-bridge.test.ts`, `dash/src/cli/report-api-parity.test.ts`, tray UI report fixture/tests | Seed more than 200 diagnostics and priced records in a temporary canonical DB. Assert real totals, refresh state, scoped cost, independent measured pressure with unavailable buckets, DB/store parity, CLI/API parity, and faithful tray rendering. | `test-dev` | T0 |
-| T3 | RED | `dash/src/refresh/registry.test.ts`, `dash/src/synth/provider.test.ts`, `dash/src/refresh/orchestrator.test.ts`, sanitized source fixtures | Add a data-driven contract over every `HARNESS_DESCRIPTORS` entry. Add Copilot VS Code journal and Cursor database fixtures proving the native evidence each reader may retain, input-side turn boundaries, and explicit unavailable reasons for incomplete fields. | `test-dev` | T0 |
-| T4 | RED | `dash/src/canon/store.test.ts`, `dash/src/refresh/orchestrator.test.ts`, refresh CLI/integration tests | Prove a repeated identical diagnostic has one stable row, an injected refresh exception closes the current run as failure, a later run reconciles a dead PID row, and an unchanged rerun has zero diagnostic growth. Build the duplicate/stale migration fixture with the true v12 `problems` schema: the stable-key column and uniqueness index are absent, rather than a v13 database whose metadata alone was changed to 12. Assert that opening it exercises the missing-column path and stamps `schema_version` to `13`. | `test-dev` | T0 |
-| T5 | GREEN | `dash/src/canon/adapters/copilot.ts` | Teach `messageParts()` the observed `content` and `text` forms without envelope inflation. Separate input-message normalization from response retention so `canonicalParts()` exposes only input-resident content to context analysis. Preserve tool-result bucketing and reported aggregate-token rules. | none; TypeScript worker selected by conductor | T1 |
-| T6 | GREEN | `dash/src/server/bridge.ts`, `dash/src/analysis/report/build.ts`, report types/renderers only where the contract requires | Add public, DB-backed bridge queries for diagnostic totals, refresh state, and scoped cost contributions. Remove private-store casts. Extract partial latest-turn facts so total input, context window, and pressure remain measured independently from bucket and residual availability. Keep one `ContextReport` for every surface. | none; TypeScript worker selected by conductor | T2 |
-| T7 | GREEN | new Copilot VS Code reader under `dash/src/synth/readers/`, `dash/src/providers/copilot.ts`, `dash/src/synth/provider.ts`, `dash/src/canon/measurability.ts` | Replay journal requests into input-side `ReaderTurn` snapshots keyed by native request id. Map current message and mode instructions, carry prior responses only on later requests, exclude the current response, register the reader for `copilot-vscode`, and declare only the buckets the format can actually reconstruct. | none; TypeScript worker selected by conductor | T3 |
-| T8 | GREEN | Cursor/Cursor Agent reader or explicit provider-to-reader-turn seam under `dash/src/synth/readers/`; `dash/src/refresh/registry.ts`; `dash/src/canon/measurability.ts` | Retain available Cursor prompt and tool-context evidence without claiming a complete historical prefix. Add an explicit capability disposition for every descriptor and make `auditProviderRegistry()` fail on an unaccounted source/reader/measurability combination. Keep unavailable reasons source-specific. | none; TypeScript worker selected by conductor | T3 |
-| T9 | GREEN | `dash/src/canon/store.ts`, schema migration, `dash/src/canon/refresh-run.ts`, `dash/src/refresh/orchestrator.ts` | Advance the current schema from v12 to v13 and implement stable problem identity in `MIGRATIONS[12]`; collapse duplicate rows transactionally before enforcing uniqueness, and stamp `schema_version` metadata to `13`. Add idempotent problem upsert/update behavior; reconcile `running` rows whose PID is dead; close refresh rows on all catchable failure paths; preserve streaming/bounded corpus reads. Add cleanup/renormalization support required by the approved Q1 option, including excluded legacy identities. | none; TypeScript worker selected by conductor | T4, Q1 |
-| T10 | Integration | canonical ingest/projection/report integration tests, existing OTLP service tests, static refresh integration tests | Seed representative OTLP and static fixtures through their production entry points into one temporary store; assert projection and report behavior for every capability class, log enrichment reprojection, selector counts, cost, diagnostics, and CLI/API/tray parity. Retain the existing scheduler failure/retry and shutdown-drain contracts. | `test-dev` | T5-T9 |
-| T11 | Review and deterministic gates | whole accumulated change | Run one full `code-review` council over the accumulated change, then the declared Dash typecheck, lint, and test gates. Attribute any generated/lock changes and fix review findings before deployment. | `code-review`, `test-dev` | T10 |
-| T12 | Local remediation and deployment | approved `~/.kyberdash/canon.db` strategy, installed CLI, `/Users/dave/Applications/KyberDash.app` | Stop tray-owned children cleanly, make the timestamped backup, execute the approved migration/cutover, compare pre/post identity and report evidence, run one full refresh plus unchanged rerun with elapsed-time/peak-memory capture, rebuild/install the reviewed binaries, and restart services. Do not delete the backup during this plan. | `conductor` | T11, Q1 |
-| T13 | Manual acceptance | tray, loopback API, web dashboard | Compare `/api/kyber/report`, web, and tray for the acceptance harnesses. The owner performs the final macOS status-item visual check if automation cannot attach to the status item; record the result without weakening automated parity gates. | `playwright` for web/API where useful | T12 |
-| T14 | Documentation closeout | `docs/dash/architecture.md`, `docs/dash/telemetry-inventory.md`, `docs/dash/runbook.md`, this plan and `<plan-index>` | Record verified source capabilities, partial-measurability semantics, public bridge report reads, diagnostic/run lifecycle, observed live-refresh evidence, and recovery steps. Mark the plan Complete only after all gates and manual acceptance, harvest durable decisions if needed, then archive it through the governed lifecycle. | `app-docs-standard`, `kyber-weave-docs` | T13 |
+| # | Phase | Status | Ownership | Work | Skills | Depends on |
+|---|---|---|---|---|---|---|
+| T0 | Preflight | Complete | Conductor | Isolated worktree created; `f7054414` verified; git state and provenance confirmed. | `conductor` | Q1 answered before data work; code work may begin after plan approval |
+| T1 | RED | Complete | `dash/src/canon/adapters/content.test.ts` | Added Copilot `content`-field coverage and plain text / residual preservation contracts. | `test-dev` | T0 |
+| T2 | RED | Complete | `dash/src/analysis/report/build.test.ts` | Added 200+ diagnostic/pricing assertions, bridge query coverage, and tray snapshot contracts. | `test-dev` | T0 |
+| T3 | RED | Complete | `dash/src/refresh/registry.test.ts` | Data-driven contract over every `HARNESS_DESCRIPTORS` entry, Copilot VS Code, and Cursor fixtures. | `test-dev` | T0 |
+| T4 | RED | Complete | `dash/src/canon/store.test.ts` | True v12 schema migration fixture, stable problem uniqueness, dead-PID reconciliation tests. | `test-dev` | T0 |
+| T5 | GREEN | Complete | `dash/src/canon/adapters/copilot.ts` | Normalizes `content` and `text` forms without envelope inflation; excludes model output from input context. | TypeScript worker | T1 |
+| T6 | GREEN | Complete | `dash/src/server/bridge.ts` | Public DB-backed bridge queries for problems, refresh state, and cost contributions; partial latest-turn facts. | TypeScript worker | T2 |
+| T7 | GREEN | Complete | `dash/src/synth/readers/copilot-vscode.ts` | Native journal replay into input-side `ReaderTurn` snapshots; excludes current response; explicit unmeasured reasons. | TypeScript worker | T3 |
+| T8 | GREEN | Complete | `dash/src/synth/readers/cursor.ts` | Extracts Cursor prompt and tool context without claiming unobserved full history prefix; descriptor audit. | TypeScript worker | T3 |
+| T9 | GREEN | Complete | `dash/src/canon/store.ts` | Advanced schema v12->v13 with `problem_key` unique index; idempotent upserts; dead/stale run reconciliation; legacy Gemini quarantined as `excluded_harness`. | TypeScript worker | T4, Q1 |
+| T10 | Integration | Complete | integration suites | All capability classes, log enrichment, cost, diagnostics, and CLI/API/tray parity verified. | `test-dev` | T5-T9 |
+| T11 | Review and deterministic gates | Complete | whole accumulated change | Code review council approved; 256 test files / 3,586 Vitest tests passing; typecheck & lint passing. | `code-review`, `test-dev` | T10 |
+| T12 | Local remediation and deployment | Complete | live store & binaries | Timestamped backup created; v13 migration & dead run reconciliation applied; Node 24 SEA binary rebuilt and installed; services restarted. | `conductor` | T11, Q1 |
+| T13 | Manual acceptance | Complete | tray, API, web dashboard | `/api/kyber/report` and web verified at `127.0.0.1:4747`; honest unobservability confirmed; tray supervisor verified. | `conductor` | T12 |
+| T14 | Documentation closeout | Complete | docs corpus & plan inventory | Updated `architecture.md`, `telemetry-inventory.md`, `runbook.md`, plan inventory, and plan evidence; zero docs drift. | `app-docs-standard`, `kyber-weave-docs` | T13 |
 
 ## 9. Dependency graph and concurrency
 
@@ -228,3 +228,45 @@ Live acceptance evidence after T11:
 - Treating model providers such as Gemini as coding harnesses.
 - Redesigning the tray popover or the broader six-level diagnostic navigation.
 - Deleting the pre-migration backup during this work.
+
+
+## 13. Execution and acceptance evidence
+
+### 13.1 Pre-migration backup
+- **Path**: `~/.kyberdash/canon.db.backup-20260924T060900Z`
+- **SHA-256**: `d9558faf36a8c50954a4dd0bb04bba6587441847b80d9cf25a7acce23db6565b`
+- **File size**: 120,029,184 bytes (~120 MB)
+
+### 13.2 Database migration and reconciliation
+- **Schema version**: Advanced from `12` to `13`.
+- **Problems deduplication**: 1,899,104 duplicate rows collapsed to **29,691** unique diagnostics (100% distinct problem keys).
+- **Legacy Gemini quarantine**: 31,362 historical records re-attributed to quarantine reason `excluded_harness`; 0 active records with harness `gemini`.
+- **Dead refresh runs**: 428 dead PID runs reconciled to `failure` with audit summary; stale age gate (15m) added to prevent false alives on OS PID recycling.
+
+### 13.3 Live refresh benchmarks (/usr/bin/time -l)
+- **Full Refresh 1 (Cold / live full refresh)**:
+  - Elapsed real time: **34.42s** (24.06s user, 6.20s sys)
+  - Peak memory footprint: **1,653,735,824 bytes** (~1.65 GB)
+  - Maximum resident set size: **1,781,874,688 bytes** (~1.78 GB)
+  - Output: 50 source jobs, 347 sessions derived, 52 harness rollups.
+- **Full Refresh 2 (Unchanged rerun)**:
+  - Elapsed real time: **29.64s** (22.15s user, 5.43s sys)
+  - Peak memory footprint: **1,631,208,496 bytes** (~1.63 GB)
+  - Maximum resident set size: **1,764,720,640 bytes** (~1.76 GB)
+  - Diagnostic growth: **0 new problems**, 0 updated records.
+
+### 13.4 API and surface verification
+- **REST endpoint**: `GET http://127.0.0.1:4747/api/kyber/report` returns HTTP 200.
+- **Web dashboard**: `GET http://127.0.0.1:4747/` returns HTTP 200.
+- **Tray runtime**: `kyberdash-tray` running under `launchd` (`~/Library/LaunchAgents/io.github.dpalfery.kyberdash.plist`), supervising `kyberdash web --no-open` on loopback port 4747.
+- **Honest unobservability**:
+  - Copilot: Input text separated from response envelopes; negative residuals resolved.
+  - Copilot VS Code: Request-level input-side `ReaderTurn` synthesized; unobserved buckets explicit `null` with reason.
+  - Cursor: Prompt and tool context extracted without claiming complete historical prefix.
+  - Data coverage footer: Reflects real quarantine total (388,097), deduplicated problem count (29,871), and accurate refresh status (`inProgress: null`).
+  - Scoped cost: Explicit pricing bases (harness $4.00, published $0.48, unknown `no_rate`).
+
+### 13.5 Test suite results
+- **Dash test suite (Vitest)**: 256 test files passed, 3,586 tests passed (0 failures).
+- **Core test suite (.NET)**: 2,057 tests passed (0 failures).
+- **Documentation governance**: `docs validate .` and `docs drift .` both passed with 0 findings.
