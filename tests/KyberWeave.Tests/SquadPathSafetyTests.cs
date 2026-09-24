@@ -343,28 +343,43 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// Runs the stub command through a fresh strict-configured CommandApp and returns
     /// its exit code together with whatever Spectre rendered.
     /// </summary>
+    /// <remarks>
+    /// Both swaps below touch process-global console state, so the body is routed
+    /// through <see cref="ProcessConsoleCapture.Run{T}(Func{T})"/> — the same
+    /// serialization gate every other capture in the suite uses. Ungated, a concurrent
+    /// capture rebinding <see cref="AnsiConsole.Console"/> mid-run would either pull
+    /// this run's renders into its own writer (empty capture) or have its own capture
+    /// contaminated by the forwarding writer. The shared-console binding stays intact:
+    /// the callback re-pins the static to <see cref="SharedRenderConsole.Console"/> so
+    /// every render keeps flowing through the forwarding-writer channel, and
+    /// <see cref="BindSharedRenderConsole"/> still performs the one-time binding at
+    /// assembly load before any test runs.
+    /// </remarks>
     private static (int ExitCode, string Output) RunThroughStrictApp(string[] arguments)
     {
-        using StringWriter writer = new();
-        ForwardingWriter.Current = writer;
-        AnsiConsole.Console = SharedRenderConsole.Console;
-        try
+        return Capture(() =>
         {
-            SquadAppRegistrar registrar = new();
-            CommandApp app = new(registrar);
-            app.Configure(config =>
+            using StringWriter writer = new();
+            ForwardingWriter.Current = writer;
+            AnsiConsole.Console = SharedRenderConsole.Console;
+            try
             {
-                config.SetApplicationName("kyber-weave");
-                config.UseStrictParsing();
-                config.AddCommand<PathBindingStubCommand>("install");
-            });
+                SquadAppRegistrar registrar = new();
+                CommandApp app = new(registrar);
+                app.Configure(config =>
+                {
+                    config.SetApplicationName("kyber-weave");
+                    config.UseStrictParsing();
+                    config.AddCommand<PathBindingStubCommand>("install");
+                });
 
-            return (app.Run(arguments), writer.ToString());
-        }
-        finally
-        {
-            ForwardingWriter.Current = null;
-        }
+                return (app.Run(arguments), writer.ToString());
+            }
+            finally
+            {
+                ForwardingWriter.Current = null;
+            }
+        }).Result;
     }
 
     private static (T Result, string Output) Capture<T>(Func<T> execute)
@@ -490,7 +505,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                     .Where(elementType.IsAssignableFrom)
                     .Select(implementation => Activator.CreateInstance(implementation))
                     .Where(resolved => resolved is not null)
-                    .Select(resolved => (object)resolved!)
+                    .Select(resolved => resolved!)
                     .ToList();
                 Array typed = Array.CreateInstance(elementType, built.Count);
                 for (int index = 0; index < built.Count; index++)
