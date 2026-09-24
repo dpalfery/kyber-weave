@@ -30,6 +30,24 @@ export type RefreshRunRow = {
   summary: string | null
 }
 
+/**
+ * Check whether a recorded refresh process still exists. Permission errors mean
+ * the process exists but cannot be signalled; only a missing/invalid PID is dead.
+ */
+export function refreshProcessIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code: unknown }).code)
+        : ''
+    return code !== 'ESRCH' && code !== 'EINVAL'
+  }
+}
+
 export const REFRESH_RUN_SQL = `
 -- Refresh run log (spec: kyberdash-context-surfaces, R10.3-R10.5).
 CREATE TABLE IF NOT EXISTS refresh_run (

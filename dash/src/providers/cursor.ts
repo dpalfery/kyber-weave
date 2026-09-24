@@ -534,34 +534,53 @@ type AgentStream = {
   contextChars: number
   assistantChars: number
   model: string | null
+  userContent: string[]
+  instructionContent: string[]
+  toolResultContent: string[]
+  assistantContent: string[]
 }
 
 function newAgentStream(): AgentStream {
-  return { tools: [], bash: [], userChars: 0, contextChars: 0, assistantChars: 0, model: null }
+  return {
+    tools: [],
+    bash: [],
+    userChars: 0,
+    contextChars: 0,
+    assistantChars: 0,
+    model: null,
+    userContent: [],
+    instructionContent: [],
+    toolResultContent: [],
+    assistantContent: [],
+  }
 }
 
-// agentKv rows store content as a plain string or a block array; count only
-// the text inside blocks so the JSON envelope and non-text parts are not
-// billed as prompt characters.
-function contentTextLength(raw: string): number {
+// agentKv rows store content as a plain string or a block array. Keep the text
+// blocks themselves for the content reader, and derive the existing token
+// estimates from those same values so counting and display share one parse.
+function contentTextValues(raw: string): string[] {
   const trimmed = raw.trimStart()
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
     try {
       const parsed = JSON.parse(trimmed) as unknown
       const blocks = Array.isArray(parsed) ? parsed : [parsed]
-      let len = 0
+      const texts: string[] = []
       for (const block of blocks) {
         if (block == null || typeof block !== 'object') continue
         const b = block as { text?: unknown; content?: unknown }
-        if (typeof b.text === 'string') len += b.text.length
-        else if (typeof b.content === 'string') len += b.content.length
+        if (typeof b.text === 'string') texts.push(b.text)
+        else if (typeof b.content === 'string') texts.push(b.content)
       }
-      return len
+      return texts
     } catch {
-      return raw.length
+      return [raw]
     }
   }
-  return raw.length
+  return raw === '' ? [] : [raw]
+}
+
+function contentTextLength(raw: string): number {
+  return contentTextValues(raw).reduce((total, text) => total + text.length, 0)
 }
 
 // Cursor logs the agent's stream (prompt, injected context, tool calls, reply
@@ -570,19 +589,26 @@ function contentTextLength(raw: string): number {
 // its conversation. Requests with no matching bubble are kept separately:
 // they are real sessions (background runs, older builds) that would otherwise
 // vanish from totals.
+type AgentStreamLoad = {
+  byComposer: Map<string, AgentStream>
+  unjoined: Map<string, AgentStream>
+  byRequest: Map<string, AgentStream>
+}
+
 function loadAgentStreams(
   db: SqliteDatabase,
   requestToComposer: Map<string, string>,
-): { byComposer: Map<string, AgentStream>; unjoined: Map<string, AgentStream> } {
+): AgentStreamLoad {
   const byComposer = new Map<string, AgentStream>()
   const unjoined = new Map<string, AgentStream>()
+  const byRequest = new Map<string, AgentStream>()
 
   let rows: AgentKvRow[]
   try {
     rows = db.query<AgentKvRow>(AGENTKV_QUERY)
   } catch (err) {
     rethrowBusy(err)
-    return { byComposer, unjoined }
+    return { byComposer, unjoined, byRequest }
   }
 
   const bucketFor = (requestId: string): AgentStream => {
@@ -595,6 +621,14 @@ function loadAgentStreams(
     map.set(key, fresh)
     return fresh
   }
+  const requestBucketFor = (requestId: string): AgentStream => {
+    const existing = byRequest.get(requestId)
+    if (existing) return existing
+    const fresh = newAgentStream()
+    byRequest.set(requestId, fresh)
+    return fresh
+  }
+  const bucketsFor = (requestId: string): AgentStream[] => [bucketFor(requestId), requestBucketFor(requestId)]
 
   // Only the turn-opening (user) agentKv row carries the requestId; rows that
   // follow inherit it. Rows written BEFORE their request's id appears (the
@@ -604,36 +638,61 @@ function loadAgentStreams(
   let currentRequestId: string | null = null
   let pendingUserChars = 0
   let pendingContextChars = 0
+  const pendingUserContent: string[] = []
+  const pendingInstructionContent: string[] = []
   for (const row of rows) {
     if (row.request_id) {
       currentRequestId = row.request_id
       if (pendingUserChars > 0 || pendingContextChars > 0) {
-        const bucket = bucketFor(currentRequestId)
-        bucket.userChars += pendingUserChars
-        bucket.contextChars += pendingContextChars
+        for (const bucket of bucketsFor(currentRequestId)) {
+          bucket.userChars += pendingUserChars
+          bucket.contextChars += pendingContextChars
+          bucket.userContent.push(...pendingUserContent)
+          bucket.instructionContent.push(...pendingInstructionContent)
+        }
         pendingUserChars = 0
         pendingContextChars = 0
+        pendingUserContent.length = 0
+        pendingInstructionContent.length = 0
       }
     }
     if (row.model && currentRequestId) {
-      const bucket = bucketFor(currentRequestId)
-      if (!bucket.model) bucket.model = row.model
+      for (const bucket of bucketsFor(currentRequestId)) {
+        if (!bucket.model) bucket.model = row.model
+      }
     }
     if (!row.content) continue
 
     if (row.role === 'system') {
-      pendingContextChars += contentTextLength(blobToText(row.content))
+      const texts = contentTextValues(blobToText(row.content))
+      pendingContextChars += texts.reduce((total, text) => total + text.length, 0)
+      pendingInstructionContent.push(...texts)
       currentRequestId = null
       continue
     }
     if (row.role === 'user') {
-      const len = contentTextLength(blobToText(row.content))
-      if (currentRequestId) bucketFor(currentRequestId).userChars += len
-      else pendingUserChars += len
+      const texts = contentTextValues(blobToText(row.content))
+      const len = texts.reduce((total, text) => total + text.length, 0)
+      if (currentRequestId) {
+        for (const bucket of bucketsFor(currentRequestId)) {
+          bucket.userChars += len
+          bucket.userContent.push(...texts)
+        }
+      } else {
+        pendingUserChars += len
+        pendingUserContent.push(...texts)
+      }
       continue
     }
     if (row.role === 'tool') {
-      if (currentRequestId) bucketFor(currentRequestId).contextChars += contentTextLength(blobToText(row.content))
+      if (currentRequestId) {
+        const texts = contentTextValues(blobToText(row.content))
+        const len = texts.reduce((total, text) => total + text.length, 0)
+        for (const bucket of bucketsFor(currentRequestId)) {
+          bucket.contextChars += len
+          bucket.toolResultContent.push(...texts)
+        }
+      }
       continue
     }
     if (row.role !== 'assistant' || !currentRequestId) continue
@@ -645,20 +704,25 @@ function loadAgentStreams(
       continue
     }
     if (!Array.isArray(content)) continue
-    const bucket = bucketFor(currentRequestId)
+    const buckets = bucketsFor(currentRequestId)
     for (const block of content as Array<{ type?: string; text?: unknown; toolName?: unknown; args?: { command?: unknown } }>) {
       if (block == null || typeof block !== 'object') continue
-      if (typeof block.text === 'string') bucket.assistantChars += block.text.length
+      if (typeof block.text === 'string') {
+        for (const bucket of buckets) {
+          bucket.assistantChars += block.text.length
+          bucket.assistantContent.push(block.text)
+        }
+      }
       if (block.type !== 'tool-call' || typeof block.toolName !== 'string' || !block.toolName) continue
       // Cursor's terminal tool is 'Shell'; emit the canonical 'Bash' so the
       // cross-provider tool and command breakdowns merge.
-      bucket.tools.push(block.toolName === 'Shell' ? 'Bash' : block.toolName)
+      for (const bucket of buckets) bucket.tools.push(block.toolName === 'Shell' ? 'Bash' : block.toolName)
       if (block.toolName === 'Shell' && typeof block.args?.command === 'string') {
-        bucket.bash.push(...extractBashCommands(block.args.command))
+        for (const bucket of buckets) bucket.bash.push(...extractBashCommands(block.args.command))
       }
     }
   }
-  return { byComposer, unjoined }
+  return { byComposer, unjoined, byRequest }
 }
 
 // What drives a conversation's input figure, decided once per conversation so

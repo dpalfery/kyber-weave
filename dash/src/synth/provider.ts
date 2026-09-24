@@ -34,6 +34,7 @@ export type { ParsedProviderCall, Provider, SessionSource } from '../providers/t
 import type { CanonicalRecord, Problem } from '../canon/types.js'
 import { claudeReader } from './readers/claude.js'
 import { copilotCliReader, loadCopilotCliCalls } from './readers/copilot.js'
+import { copilotVscodeReader } from './readers/copilot-vscode.js'
 import { loadClaudeCalls } from './readers/claude.js'
 import { codexReader } from './readers/codex.js'
 import { kiloReader } from './readers/kilo.js'
@@ -110,6 +111,7 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['kilo-vscode-legacy', kiloReader],
   ['copilot', copilotCliReader],
   ['copilot-cli', copilotCliReader],
+  ['copilot-vscode', copilotVscodeReader],
   ['pi', piReader],
 ])
 
@@ -156,8 +158,19 @@ function matchingTurns(
   calls: readonly ParsedProviderCall[],
   turns: readonly ReaderTurn[],
 ): Array<ReaderTurn | undefined> {
+  const turnsById = new Map<string, ReaderTurn>()
+  for (const turn of turns) {
+    if (turn.nativeRecordId !== undefined && !turnsById.has(turn.nativeRecordId)) {
+      turnsById.set(turn.nativeRecordId, turn)
+    }
+  }
+  const hasNativeIds = turnsById.size > 0
+
   return calls.map((call, index) => {
-    const turn = turns[index]
+    const positional = turns[index]
+    const turn = call.turnId === undefined
+      ? positional
+      : turnsById.get(call.turnId) ?? (hasNativeIds ? undefined : positional)
     if (turn === undefined) return undefined
     if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined
     if (turn.nativeRecordId !== undefined && call.turnId !== undefined && turn.nativeRecordId !== call.turnId) {
@@ -226,7 +239,12 @@ function envelopesFor(
     sourceKey: load.sourceKey ?? `${harnessId}:${call.sessionId}`,
     nativeSessionId: call.sessionId,
     nativeRecordId: call.turnId,
-    call,
+    // The shared Copilot parser labels every surface `copilot`; preserve the
+    // specific VS Code identity on synthesized records so source-level
+    // measurability describes the chat-session journal we actually read.
+    call: identity === 'copilot-vscode' && call.provider === 'copilot'
+      ? { ...call, provider: identity }
+      : call,
     ...(turns?.[index] !== undefined ? { readerTurn: turns[index] } : {}),
   }))
 }

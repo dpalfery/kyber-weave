@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { SessionSource } from '../providers/types.js'
 import { getAllProviders } from '../providers/index.js'
+import { PROVIDER_READERS } from '../synth/provider.js'
+import { READER_UNMEASURABLE } from '../canon/measurability.js'
 
 import {
   HARNESS_DESCRIPTORS,
@@ -122,6 +124,57 @@ function source(partial: Partial<SessionSource> & Pick<SessionSource, 'path' | '
 }
 
 describe('HarnessSourceRegistry', () => {
+  it('keeps an explicit content capability disposition for every harness descriptor', () => {
+    const expectedHarnessIds = [...REQUIRED_HARNESS_IDS, ...REMAINING_HARNESS_IDS]
+    const existingReaderHarnessIds = new Set([
+      'claude-cli',
+      'claude-desktop',
+      'claude-unclassified',
+      'codex-cli',
+      'codex-desktop',
+      'codex-unclassified',
+      'copilot-cli',
+      'kilo-shared-runtime',
+      'kilo-vscode-legacy',
+      'opencode',
+      'pi',
+    ])
+    const capabilityByHarness = new Map(expectedHarnessIds.map((harnessId) => [harnessId, {
+      reader: existingReaderHarnessIds.has(harnessId),
+      unavailable: [] as string[],
+    }]))
+
+    // These static sources preserve native request evidence and therefore
+    // must not silently fall through to the file-source all-unavailable
+    // declaration. The source-specific unavailable buckets stay explicit.
+    capabilityByHarness.set('copilot-vscode', {
+      reader: true,
+      unavailable: ['system_prompt', 'tool_definitions', 'tool_result_content'],
+    })
+    capabilityByHarness.set('cursor', {
+      reader: true,
+      unavailable: ['conversation_history', 'system_prompt', 'tool_definitions'],
+    })
+    capabilityByHarness.set('cursor-agent', {
+      reader: true,
+      unavailable: ['conversation_history', 'system_prompt', 'tool_definitions'],
+    })
+
+    expect([...capabilityByHarness.keys()].sort()).toEqual(
+      HARNESS_DESCRIPTORS.map((descriptor) => descriptor.harnessId).sort(),
+    )
+
+    for (const descriptor of HARNESS_DESCRIPTORS) {
+      const expected = capabilityByHarness.get(descriptor.harnessId)
+      expect(expected, `missing capability disposition for ${descriptor.harnessId}`).toBeDefined()
+      expect(PROVIDER_READERS.has(descriptor.harnessId), descriptor.harnessId)
+        .toBe(expected?.reader)
+      if (expected?.unavailable.length === 0) continue
+      expect(READER_UNMEASURABLE.get(descriptor.harnessId), descriptor.harnessId)
+        .toEqual(expect.arrayContaining(expected.unavailable))
+    }
+  })
+
   it('declares a disposition for every inventory provider name', () => {
     expect(Object.keys(PROVIDER_DISPOSITIONS).sort()).toEqual([...INVENTORY_PROVIDER_NAMES].sort())
   })

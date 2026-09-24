@@ -1,0 +1,58 @@
+{
+  "sessionId": "cursor-static-session",
+  "requestId": "cursor-request-1",
+  "contextWindow": 128000,
+  "rows": [
+    {
+      "key": "bubbleId:cursor-static-session:prompt",
+      "value": {
+        "type": 1,
+        "text": "current Cursor request",
+        "createdAt": "2026-09-22T10:03:00.000Z",
+        "requestId": "cursor-request-1",
+        "tokenCount": { "inputTokens": 240, "outputTokens": 0 },
+        "modelInfo": { "modelName": "gpt-5" }
+      }
+    },
+    {
+      "key": "bubbleId:cursor-static-session:reply",
+      "value": {
+        "type": 2,
+        "text": "current Cursor response",
+        "createdAt": "2026-09-22T10:03:01.000Z",
+        "requestId": "cursor-request-1",
+        "tokenCount": { "inputTokens": 240, "outputTokens": 60 },
+        "modelInfo": { "modelName": "gpt-5" }
+      }
+    },
+    {
+      "key": "composerData:cursor-static-session",
+      "value": {
+        "createdAt": 1780087380000,
+        "promptTokenBreakdown": { "totalUsedTokens": 240 }
+      }
+    },
+    {
+      "key": "agentKv:blob:cursor-request-1-system",
+      "value": {
+        "role": "system",
+        "content": [{ "type": "text", "text": "Cursor tool context retained for this request" }]
+      }
+    },
+    {
+      "key": "agentKv:blob:cursor-request-1-user",
+      "value": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "current Cursor request" }],
+        "providerOptions": { "cursor": { "requestId": "cursor-request-1", "modelName": "gpt-5" } }
+      }
+    },
+    {
+      "key": "agentKv:blob:cursor-request-1-tool",
+      "value": {
+        "role": "tool",
+        "content": [{ "type": "text", "text": "tool context that Cursor preserved" }]
+      }
+    }
+  ]
+}

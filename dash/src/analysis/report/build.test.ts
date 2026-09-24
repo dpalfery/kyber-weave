@@ -90,14 +90,24 @@ function bridgeOf(parts: {
     listSessions: () => parts.sessions ?? [],
     listFindings: () => parts.findings ?? [],
     listHarnessRollups: () => parts.rollups ?? [],
+    getQuarantineCount: () => 0,
+    getProblemCount: () => 0,
+    getRefreshState: () => ({ lastSuccessAt: null, lastFailure: null, inProgress: null }),
+    getSessionCostContributions: (sessionIds: readonly string[]) =>
+      (parts.records ?? [])
+        .filter((record) => sessionIds.includes(record.sessionId))
+        .map((record) => ({
+          sessionId: record.sessionId,
+          basis: record.cost.basis,
+          status: record.cost.status,
+          ...(typeof record.cost.value === 'number' ? { value: record.cost.value } : {}),
+        })),
     getQuarantine: () => [],
     getProblems: () => [],
     getSessionContent: (sessionId: string) => ({ sessionId, parts: [] }),
     getSessionPayload: () => parts.payload ?? null,
   }
-  // The cost section reads priced records off the bridge's private store seam;
-  // without records the section reports absence, which is also a valid answer.
-  return { ...stub, store: { listAll: () => parts.records ?? [] } } as unknown as KyberBridge
+  return stub as unknown as KyberBridge
 }
 
 const build = (bridge: KyberBridge, scope: ReportScope = { days: 7 }, options = {}) =>
@@ -240,6 +250,64 @@ describe('latest session (R8.2-R8.4, R11.7)', () => {
     const turn = report.latestSession!.latestTurn
     expect(isUnmeasurable(turn.pressure)).toBe(true)
     expect(turn.pressure).toMatchObject({ reason: 'harness exported no message structure for this session' })
+  })
+
+  it('keeps measured pressure and context window when composition buckets are unavailable', () => {
+    const report = build(
+      bridgeOf({
+        sessions: [
+          session({
+            turn_count: 1,
+            total_input: 40_000,
+          }),
+        ],
+        payload: {
+          summary: { turn_count: 1, total_input: 40_000 },
+          turns: [{ index: 0, input: 40_000 }],
+          context: {
+            measurable: false,
+            reason: 'declared_not_measurable',
+            turns: 1,
+            contextLimit: 200_000,
+            last: {
+              reported_input: 40_000,
+              buckets: {
+                system_prompt: {
+                  availability: 'not_measurable',
+                  reason: 'source preserves token totals but not message structure',
+                },
+                tool_definitions: {
+                  availability: 'not_measurable',
+                  reason: 'source preserves token totals but not message structure',
+                },
+                instruction_context: {
+                  availability: 'not_measurable',
+                  reason: 'source preserves token totals but not message structure',
+                },
+                conversation_history: {
+                  availability: 'not_measurable',
+                  reason: 'source preserves token totals but not message structure',
+                },
+                tool_result_content: {
+                  availability: 'not_measurable',
+                  reason: 'source preserves token totals but not message structure',
+                },
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const turn = report.latestSession!.latestTurn
+    expect(turn.pressure).toEqual({ value: 0.2 })
+    expect(turn.contextWindow).toEqual({ value: 200_000, unit: 'tokens' })
+    expect(turn.index).toBe(0)
+    for (const figure of [...Object.values(turn.buckets), turn.residual]) {
+      expect(isUnmeasurable(figure)).toBe(true)
+      expect(figure.value).not.toBe(0)
+      expect(isUnmeasurable(figure) && figure.reason).toContain('source')
+    }
   })
 
   it('is null when no session is in scope, rather than an empty shell', () => {

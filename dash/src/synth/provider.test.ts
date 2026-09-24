@@ -15,12 +15,15 @@
 // present store with a problem.
 
 import { afterAll, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 
 import type { ParsedProviderCall } from '../providers/types.js'
+import { copilot } from '../providers/copilot.js'
+import { createCursorProvider } from '../providers/cursor.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
 import { Synthesizer } from './synth.js'
 import { PROVIDER_PARSE_ERROR, ingestProviders } from './provider.js'
@@ -98,6 +101,47 @@ function claudeTranscript(): string {
     }),
   ].join('\n'))
   return filePath
+}
+
+function fixturePath(name: string): string {
+  return fileURLToPath(new URL(`../refresh/fixtures/${name}`, import.meta.url))
+}
+
+async function parsedCalls(
+  provider: { createSessionParser: (source: {
+    path: string
+    project: string
+    provider: string
+    sourceType?: 'chatsession' | 'jsonl' | 'session-store' | 'transcript' | 'otel' | 'jetbrains'
+  }, seenKeys: Set<string>) => { parse: () => AsyncGenerator<ParsedProviderCall> } },
+  source: {
+    path: string
+    project: string
+    provider: string
+    sourceType?: 'chatsession' | 'jsonl' | 'session-store' | 'transcript' | 'otel' | 'jetbrains'
+  },
+): Promise<ParsedProviderCall[]> {
+  const calls: ParsedProviderCall[] = []
+  for await (const entry of provider.createSessionParser(source, new Set()).parse()) calls.push(entry)
+  return calls
+}
+
+function cursorEvidenceDb(): string {
+  const root = mkdtempSync(join(tmpdir(), 'kyber-cursor-evidence-'))
+  tempRoots.push(root)
+  const dbPath = join(root, 'state.vscdb')
+  const fixture = JSON.parse(readFileSync(fixturePath('cursor-partial-evidence.json'), 'utf8')) as {
+    rows: Array<{ key: string; value: Record<string, unknown> }>
+  }
+  const db = new DatabaseSync(dbPath)
+  try {
+    db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+    for (const row of fixture.rows) insert.run(row.key, JSON.stringify(row.value))
+  } finally {
+    db.close()
+  }
+  return dbPath
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +359,97 @@ describe('D6 Copilot CLI SQLite integration', () => {
   })
 })
 
+describe('T3 static source capability readers', () => {
+  it('replays Copilot VS Code requests as input-side snapshots', async () => {
+    const filePath = fixturePath('copilot-vscode-request.jsonl')
+    const source = {
+      path: filePath,
+      project: 'fixture-project',
+      provider: 'copilot',
+      sourceType: 'chatsession' as const,
+    }
+    const calls = await parsedCalls(copilot, source)
+
+    expect(calls).toHaveLength(2)
+    expect(calls.map((entry) => entry.userMessage)).toEqual(['first request', 'second request'])
+
+    const result = await ingestProviders(['copilot-vscode'], () => ({
+      calls,
+      filePath,
+      harnessId: 'copilot-vscode',
+      sourceKey: 'copilot-vscode:vscode-static-session',
+    }))
+
+    expect(result.problems).toEqual([])
+    expect(result.records).toHaveLength(2)
+    const first = result.records[0]!
+    const second = result.records[1]!
+
+    expect(first.tokens.reportedInput).toBe(180)
+    expect(first.content.conversation_history).toContain('first request')
+    expect(first.content.instruction_context).toContain('agent mode')
+    expect(first.content.conversation_history).not.toContain('first response')
+    expect(second.content.conversation_history).toContain('first response')
+    expect(second.content.conversation_history).toContain('second request')
+    expect(second.content.conversation_history).not.toContain('second response')
+    expect(first.measurability?.system_prompt).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/VS Code|chat session/i),
+    })
+    expect(first.measurability?.tool_definitions).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/VS Code|chat session/i),
+    })
+    expect(first.measurability?.tool_result_content).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/VS Code|chat session|tool-result/i),
+    })
+  })
+
+  it('retains Cursor prompt/context evidence while naming incomplete history', async () => {
+    const dbPath = cursorEvidenceDb()
+    const cursor = createCursorProvider(dbPath)
+    const source = { path: dbPath, project: 'fixture-project', provider: 'cursor' }
+    const nativeCalls = await parsedCalls(cursor, source)
+
+    expect(nativeCalls.some((entry) => entry.userMessage.includes('current Cursor request'))).toBe(true)
+    expect(nativeCalls.some((entry) => entry.inputTokens === 240)).toBe(true)
+
+    const result = await ingestProviders(['cursor'], () => ({
+      calls: [call({
+        provider: 'cursor',
+        model: 'gpt-5',
+        inputTokens: 240,
+        outputTokens: 60,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        cachedInputTokens: 0,
+        userMessage: 'current Cursor request',
+        sessionId: 'cursor-static-session',
+        turnId: 'cursor-request-1',
+        deduplicationKey: 'cursor:cursor-static-session:cursor-request-1',
+      })],
+      filePath: dbPath,
+      harnessId: 'cursor',
+      sourceKey: 'cursor:cursor-static-session',
+    }))
+
+    expect(result.problems).toEqual([])
+    const record = result.records[0]!
+    expect(record.tokens.reportedInput).toBe(240)
+    expect(record.raw).toMatchObject({ contextWindow: 128000 })
+    expect(record.content.instruction_context).toContain('Cursor tool context')
+    expect(record.measurability?.conversation_history).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/Cursor|cursor/i),
+    })
+    expect(record.measurability?.tool_definitions).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/Cursor|cursor/i),
+    })
+  })
+})
+
 describe('T4 — source-unit ingest seam', () => {
   it('names the harness and source unit on a parse problem, not only the provider', async () => {
     const unit = '/home/dev/.gemini/antigravity-cli/session.pb'
@@ -349,4 +484,3 @@ describe('T4 — source-unit ingest seam', () => {
     expect(result.records[0]?.content.conversation_history).toBe('reader-provided conversation')
   })
 })
-

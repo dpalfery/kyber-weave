@@ -22,7 +22,14 @@ import type { HarnessRollupRow } from '../canon/types.js'
 import type { Finding } from '../analysis/findings.js'
 import { buildContextReport } from '../analysis/report/build.js'
 import type { ContextReport, ReportSection } from '../analysis/report/types.js'
-import type { KyberBridge, SessionSummary } from '../server/bridge.js'
+import type {
+  KyberBridge,
+  ProblemRow,
+  QuarantineRow,
+  RefreshState,
+  SessionCostContribution,
+  SessionSummary,
+} from '../server/bridge.js'
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'analysis', 'report', 'fixtures')
 
@@ -124,6 +131,10 @@ type Parts = {
   refresh?: Partial<Record<'success' | 'failure' | 'running', {
     startedAt: string; completedAt: string | null; pid: number; summary: string | null
   }>>
+  quarantine?: QuarantineRow[]
+  problems?: ProblemRow[]
+  quarantineCount?: number
+  problemCount?: number
 }
 
 function bridgeOf(parts: Parts): KyberBridge {
@@ -131,8 +142,27 @@ function bridgeOf(parts: Parts): KyberBridge {
     listSessions: () => parts.sessions ?? [],
     listFindings: () => parts.findings ?? [],
     listHarnessRollups: () => parts.rollups ?? [],
-    getQuarantine: () => [],
-    getProblems: () => [],
+    getQuarantine: () => parts.quarantine ?? [],
+    getProblems: () => parts.problems ?? [],
+    getQuarantineCount: () => parts.quarantineCount ?? parts.quarantine?.length ?? 0,
+    getProblemCount: () => parts.problemCount ?? parts.problems?.length ?? 0,
+    getRefreshState: (): RefreshState => {
+      const success = parts.refresh?.success
+      const failure = parts.refresh?.failure
+      const running = parts.refresh?.running
+      return {
+        lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
+        lastFailure:
+          failure === undefined
+            ? null
+            : { at: failure.completedAt ?? failure.startedAt, summary: failure.summary ?? 'refresh failed' },
+        inProgress: running === undefined ? null : { pid: running.pid, since: running.startedAt },
+      }
+    },
+    getSessionCostContributions: (sessionIds: readonly string[]): SessionCostContribution[] => {
+      const allowed = new Set(sessionIds)
+      return (parts.costs ?? []).filter((cost) => allowed.has(cost.sessionId))
+    },
     // The derived context a latest-turn measurement needs lives in the
     // persisted payload behind `getSessionPayload()` (R8.2); the content read
     // is the unclipped `{ sessionId, parts }` view and never carries context.

@@ -362,6 +362,75 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
     expect(store.getProblems('span-absent')).toEqual([])
   })
 
+  it('keeps one stable diagnostic row when the same problem is recorded again', () => {
+    const store = new CanonStore(':memory:')
+    const first = {
+      spanId: 'span-duplicate',
+      severity: 'error' as const,
+      code: 'TOKEN_SUM_MISMATCH',
+      message: 'reported input does not reconcile',
+      location: 'source.jsonl#turn-1',
+    }
+    const revised = {
+      ...first,
+      severity: 'warning' as const,
+      message: 'reported input was corrected by the source parser',
+    }
+
+    store.recordProblem(first)
+    store.recordProblem(revised)
+
+    expect(store.getProblems('span-duplicate')).toEqual([revised])
+    store.close()
+  })
+
+  it('migrates duplicate legacy diagnostics into one stable row transactionally', () => {
+    const path = tempStorePath()
+    const initial = new CanonStore(path)
+    initial.close()
+
+    // Construct a true v12 problems table: no problem_key column, no unique index
+    const legacy = new DatabaseSync(path)
+    legacy.exec('DROP TABLE IF EXISTS problems')
+    legacy.exec(`CREATE TABLE problems (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      span_id TEXT,
+      severity TEXT NOT NULL,
+      code TEXT NOT NULL,
+      message TEXT NOT NULL,
+      location TEXT
+    )`)
+    legacy.prepare('UPDATE metadata SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION - 1), 'schema_version')
+    legacy.prepare(
+      'INSERT INTO problems (span_id, severity, code, message, location) VALUES (?, ?, ?, ?, ?)',
+    ).run('span-legacy', 'error', 'PROVIDER_PARSE_ERROR', 'old parse message', 'legacy.jsonl#1')
+    legacy.prepare(
+      'INSERT INTO problems (span_id, severity, code, message, location) VALUES (?, ?, ?, ?, ?)',
+    ).run('span-legacy', 'warning', 'PROVIDER_PARSE_ERROR', 'latest parse message', 'legacy.jsonl#1')
+    legacy.close()
+
+    // Opening the store executes migration 12: adds problem_key, deduplicates, and creates unique index
+    const migrated = new CanonStore(path)
+    expect(migrated.getProblems('span-legacy')).toEqual([{
+      spanId: 'span-legacy',
+      severity: 'warning',
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'latest parse message',
+      location: 'legacy.jsonl#1',
+    }])
+
+    // Verify migration 12 added the problem_key column and created the unique index
+    const verifyDb = new DatabaseSync(path)
+    const columns = verifyDb.prepare('PRAGMA table_info(problems)').all() as Array<{ name: string }>
+    expect(columns.some((col) => col.name === 'problem_key')).toBe(true)
+
+    const indexes = verifyDb.prepare('PRAGMA index_list(problems)').all() as Array<{ name: string; unique: number }>
+    expect(indexes.some((idx) => idx.name === 'problems_by_identity' && idx.unique === 1)).toBe(true)
+    verifyDb.close()
+
+    migrated.close()
+  })
+
   it('appends one ingest log row per ingest run', () => {
     const store = new CanonStore(':memory:')
     store.logIngest('pi:agent-7f3', 30)
@@ -759,4 +828,3 @@ describe('source checkpoint and provenance', () => {
     expect(plan).not.toMatch(/SCAN records/)
   })
 })
-

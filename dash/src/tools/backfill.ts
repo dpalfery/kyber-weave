@@ -16,6 +16,8 @@
 import { ingestBatch } from '../canon/ingest.js'
 import { CanonStore } from '../canon/store.js'
 import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js'
+import { observedNamespaces } from '../canon/adapters/quarantine.js'
+import { isExcludedHarnessIdentity } from '../canon/measurability.js'
 import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
 import type { OtlpSpan } from '../otel/receiver.js'
 
@@ -153,21 +155,35 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
     if (grouped.length > 0) ingestBatch(grouped.map(toOtlpSpan), store)
     for (const record of explicitGemini) {
       const repaired = store.get(record.spanId)
-      if (repaired !== undefined && repaired.harness !== 'gemini') {
-        // A retained row with explicit vendor identity must not inherit a
-        // competing sibling's harness from the historical trace vote.
-        store.setAttribution(record.spanId, {
-          harness: 'gemini',
-          source: repaired.source,
-          op: repaired.op,
-          tokens: repaired.tokens,
-        })
+      if (
+        repaired !== undefined &&
+        (repaired.harness === 'gemini' || isExcludedHarnessIdentity(repaired.harness))
+      ) {
+        // Acceptance criterion 13: legacy Gemini records are quarantined as
+        // excluded harnesses rather than re-attributed to an excluded provider.
+        store.quarantineAndDelete(
+          record.spanId,
+          observedNamespaces(record.raw as Record<string, unknown>),
+          'excluded_harness',
+        )
+        if (record.traceId) store.deleteSession(record.traceId)
+        if (record.sessionId) store.deleteSession(record.sessionId)
       }
     }
     for (const before of withRaw) {
       const after = store.get(before.spanId)
       if (after === undefined) {
         if (store.getQuarantine(before.spanId)?.reason === 'unclaimed') report.unclaimed += 1
+        continue
+      }
+      if (after.harness === 'gemini' || isExcludedHarnessIdentity(after.harness)) {
+        store.quarantineAndDelete(
+          before.spanId,
+          observedNamespaces(before.raw as Record<string, unknown>),
+          'excluded_harness',
+        )
+        if (before.traceId) store.deleteSession(before.traceId)
+        if (before.sessionId) store.deleteSession(before.sessionId)
         continue
       }
       if (
@@ -189,6 +205,18 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
     }
 
     if (report.traces % progressEvery === 0) options.onProgress?.(report.traces, traceIds.length)
+  }
+
+  for (const record of store.listAll()) {
+    if (record.harness === 'gemini' || isExcludedHarnessIdentity(record.harness)) {
+      const rawAttrs =
+        record.raw !== null && typeof record.raw === 'object'
+          ? (record.raw as Record<string, unknown>)
+          : {}
+      store.quarantineAndDelete(record.spanId, observedNamespaces(rawAttrs), 'excluded_harness')
+      if (record.traceId) store.deleteSession(record.traceId)
+      if (record.sessionId) store.deleteSession(record.sessionId)
+    }
   }
 
   options.onProgress?.(report.traces, traceIds.length)

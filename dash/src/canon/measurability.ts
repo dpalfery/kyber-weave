@@ -97,6 +97,7 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['kilo', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['kilo-code', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['copilot', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  ['copilot-vscode', ['schema_cost', 'system_prompt', 'tool_definitions', 'tool_result_content']],
   ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
 ])
 
@@ -237,6 +238,12 @@ export function measurabilityFor(
           ? provider === 'gemini'
             ? 'Gemini session files do not export a cache-creation counter.'
             : 'Antigravity conversation stores do not export a cache-creation counter.'
+          : metric === 'system_prompt' && provider === 'copilot-vscode'
+            ? 'VS Code Copilot chat-session files do not store the runtime system prompt.'
+            : metric === 'tool_definitions' && provider === 'copilot-vscode'
+              ? 'VS Code Copilot chat-session files do not store tool-definition schemas.'
+              : metric === 'tool_result_content' && provider === 'copilot-vscode'
+                ? 'VS Code Copilot chat-session files do not preserve tool-result content.'
           : metric === 'system_prompt' &&
               (provider === 'claude' ||
                 provider === 'claude-code' ||
@@ -851,5 +858,4 @@ export function harnessDimensionAvailability(harness: string, dimension: string)
 
   return 'measured'
 }
-
 
