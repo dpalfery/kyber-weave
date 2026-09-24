@@ -489,6 +489,50 @@ const PROVIDER_IDENTITY_HARNESS = new Map<string, HarnessId>(
     .map(entry => [entry.providerName, entry.harnessId]),
 )
 
+export type HarnessContentCapability = {
+  reader: boolean
+  unavailable: readonly string[]
+}
+
+const READER_HARNESS_IDS = new Set([
+  'claude-cli',
+  'claude-desktop',
+  'claude-unclassified',
+  'codex-cli',
+  'codex-desktop',
+  'codex-unclassified',
+  'copilot-cli',
+  'copilot-vscode',
+  'cursor',
+  'cursor-agent',
+  'kilo-shared-runtime',
+  'kilo-vscode-legacy',
+  'opencode',
+  'pi',
+])
+
+export const HARNESS_CONTENT_CAPABILITIES: ReadonlyMap<string, HarnessContentCapability> = new Map([
+  ...HARNESS_DESCRIPTORS.map((d): [string, HarnessContentCapability] => [
+    d.harnessId,
+    {
+      reader: READER_HARNESS_IDS.has(d.harnessId),
+      unavailable: [] as string[],
+    },
+  ]),
+  ['copilot-vscode', {
+    reader: true,
+    unavailable: ['system_prompt', 'tool_definitions', 'tool_result_content'],
+  }],
+  ['cursor', {
+    reader: true,
+    unavailable: ['conversation_history', 'system_prompt', 'tool_definitions'],
+  }],
+  ['cursor-agent', {
+    reader: true,
+    unavailable: ['conversation_history', 'system_prompt', 'tool_definitions'],
+  }],
+])
+
 export function descriptorFor(harnessId: string): HarnessSourceDescriptor | undefined {
   return DESCRIPTORS_BY_ID.get(harnessId)
 }
@@ -501,6 +545,11 @@ export function auditProviderRegistry(providers: readonly { name: string }[]): v
     throw new Error(
       `Harness-source registry has no job, excluded-with-reason, or alias-of disposition for: ${unaccounted.join(', ')}`,
     )
+  }
+  for (const descriptor of HARNESS_DESCRIPTORS) {
+    if (!HARNESS_CONTENT_CAPABILITIES.has(descriptor.harnessId)) {
+      throw new Error(`Harness descriptor '${descriptor.harnessId}' has no content capability disposition`)
+    }
   }
 }
 

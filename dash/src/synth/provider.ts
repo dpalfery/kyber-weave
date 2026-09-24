@@ -39,6 +39,7 @@ import { loadClaudeCalls } from './readers/claude.js'
 import { codexReader } from './readers/codex.js'
 import { kiloReader } from './readers/kilo.js'
 import { opencodeReader } from './readers/opencode.js'
+import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
 import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import { isExcludedHarness, Synthesizer } from './synth.js'
@@ -112,6 +113,8 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['copilot', copilotCliReader],
   ['copilot-cli', copilotCliReader],
   ['copilot-vscode', copilotVscodeReader],
+  ['cursor', cursorReader],
+  ['cursor-agent', cursorReader],
   ['pi', piReader],
 ])
 

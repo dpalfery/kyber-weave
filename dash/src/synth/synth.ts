@@ -352,6 +352,7 @@ export function synthesizeCall(
     ? call
     : {
         ...call,
+        ...(readerTurn.contextWindow !== undefined ? { contextWindow: readerTurn.contextWindow } : {}),
         ...(readerTurn.terminationReason !== undefined ? { terminationReason: readerTurn.terminationReason } : {}),
         ...(readerTurn.exitCode !== undefined ? { exitCode: readerTurn.exitCode } : {}),
         ...(readerTurn.isCorrection !== undefined ? { isCorrection: readerTurn.isCorrection, correctionRule: readerTurn.correctionRule } : {}),

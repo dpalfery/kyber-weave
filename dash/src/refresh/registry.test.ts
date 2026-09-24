@@ -139,10 +139,12 @@ describe('HarnessSourceRegistry', () => {
       'opencode',
       'pi',
     ])
-    const capabilityByHarness = new Map(expectedHarnessIds.map((harnessId) => [harnessId, {
-      reader: existingReaderHarnessIds.has(harnessId),
-      unavailable: [] as string[],
-    }]))
+    const capabilityByHarness = new Map<string, { reader: boolean; unavailable: string[] }>(
+      expectedHarnessIds.map((harnessId) => [harnessId, {
+        reader: existingReaderHarnessIds.has(harnessId),
+        unavailable: [] as string[],
+      }]),
+    )
 
     // These static sources preserve native request evidence and therefore
     // must not silently fall through to the file-source all-unavailable
@@ -169,7 +171,7 @@ describe('HarnessSourceRegistry', () => {
       expect(expected, `missing capability disposition for ${descriptor.harnessId}`).toBeDefined()
       expect(PROVIDER_READERS.has(descriptor.harnessId), descriptor.harnessId)
         .toBe(expected?.reader)
-      if (expected?.unavailable.length === 0) continue
+      if (expected === undefined || expected.unavailable.length === 0) continue
       expect(READER_UNMEASURABLE.get(descriptor.harnessId), descriptor.harnessId)
         .toEqual(expect.arrayContaining(expected.unavailable))
     }

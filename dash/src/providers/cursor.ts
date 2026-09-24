@@ -251,7 +251,7 @@ function loadWorkspaceMap(workspaceStorageDir: string): WorkspaceMapping {
 /// literal newline between the `task-call_` and `fc_` halves. Those rows
 /// are not standalone composers and would otherwise inflate the orphan
 /// project's session count.
-function parseComposerIdFromKey(key: string | undefined): string | null {
+export function parseComposerIdFromKey(key: string | undefined): string | null {
   if (!key) return null
   const firstColon = key.indexOf(':')
   if (firstColon < 0) return null
@@ -276,7 +276,7 @@ function encodeSourcePath(dbPath: string, workspaceTag: string): string {
   return `${dbPath}${WORKSPACE_SEP}${workspaceTag}`
 }
 
-function decodeSourcePath(sourcePath: string): { dbPath: string; workspaceTag: string } {
+export function decodeSourcePath(sourcePath: string): { dbPath: string; workspaceTag: string } {
   const idx = sourcePath.indexOf(WORKSPACE_SEP)
   // Backwards-compat: a bare DB path with no workspace tag means "give me
   // every call from this DB". Older cached SessionSource entries and any
@@ -527,7 +527,7 @@ function loadComposerMeta(db: SqliteDatabase): Map<string, ComposerMeta> {
   return map
 }
 
-type AgentStream = {
+export type AgentStream = {
   tools: string[]
   bash: string[]
   userChars: number
@@ -579,10 +579,6 @@ function contentTextValues(raw: string): string[] {
   return raw === '' ? [] : [raw]
 }
 
-function contentTextLength(raw: string): number {
-  return contentTextValues(raw).reduce((total, text) => total + text.length, 0)
-}
-
 // Cursor logs the agent's stream (prompt, injected context, tool calls, reply
 // deltas) in agentKv blobs keyed by requestId. Bubbles carry the same
 // requestId, so the map built from the scanned bubbles joins each request to
@@ -595,7 +591,7 @@ type AgentStreamLoad = {
   byRequest: Map<string, AgentStream>
 }
 
-function loadAgentStreams(
+export function loadAgentStreams(
   db: SqliteDatabase,
   requestToComposer: Map<string, string>,
 ): AgentStreamLoad {
@@ -928,6 +924,7 @@ function parseBubbles(
         deduplicationKey: dedupKey,
         userMessage: userText,
         sessionId: conversationId,
+        ...(row.request_id ? { turnId: row.request_id } : {}),
       })
     } catch {
       skipped++
@@ -1000,6 +997,7 @@ function parseBubbles(
       deduplicationKey: dedupKey,
       userMessage: '',
       sessionId: requestId,
+      turnId: requestId,
     })
   }
 
