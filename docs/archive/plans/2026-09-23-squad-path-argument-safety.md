@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-23-squad-path-argument-safety
+id: archive/plans/2026-09-23-squad-path-argument-safety
 title: Make squad target-root selection explicit and confirmed
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-23
@@ -11,7 +11,9 @@ development-mode: test-first
 
 # Make squad target-root selection explicit and confirmed
 
-**Status:** Ready
+**Status:** Archived  
+**Archive Date:** 2026-09-24  
+**Completion:** Complete — council position APPROVE-quality; the engine token is REQUEST_CHANGES solely on the environmental docs-drift gate (CI verifies drift at PR time); 14/15 gates PASS, full suite deterministic; delivered via PR #113 on 2026-09-24. See §11 Review.  
 **Date:** 2026-09-23
 **Development mode:** test-first (user accepted the default via the conductor, 2026-09-23)
 **Goal:** Make it impossible for a squad mutating command to write to a silently-guessed
@@ -262,7 +264,9 @@ Per repository `AGENTS.md`, on this branch:
 
 Review via the repo's review path after T5: `review gates .` green plus the
 `code-review` skill over the diff, with `static-analysis-triage` attributing
-InspectCode findings. Review verdict recorded here before closeout.
+InspectCode findings.
+
+Council verdict 2026-09-24: engine token REQUEST_CHANGES solely on the environmental docs-drift gate (KW-DOC-DRIFT-001, no local CodeGraph index — host-owned tool; CI verifies at PR time); council position: APPROVE-quality, merge conditional on CI's drift run. Gate evidence: 14/15 gates PASS (artifacts/gates.json, post-remediation refresh), full suite 2078/0 deterministic across repeated runs, InspectCode findings triaged — none attributable defects on this branch.
 
 ## 12. Docs-dev closeout
 
@@ -278,5 +282,5 @@ InspectCode findings. Review verdict recorded here before closeout.
 ## Related
 
 - [Todo: squad path argument safety](../todo/squad-path-argument-safety.md)
-- [Kyber-Squad architecture](../kyber-squad/architecture.md) · [onboarding](../kyber-squad/onboarding.md)
-- [Plan: ZCode harness target](2026-09-21-zcode-harness-target.md) — plan-convention reference
+- [Kyber-Squad architecture](../../kyber-squad/architecture.md) · [onboarding](../../kyber-squad/onboarding.md)
+- [Plan: ZCode harness target](../../plans/2026-09-21-zcode-harness-target.md) — plan-convention reference

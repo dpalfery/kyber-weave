@@ -1,5 +1,5 @@
 ---
-id: todo/squad-path-argument-safety
+id: archive/todo/squad-path-argument-safety
 title: squad commands' positional path argument can silently target the wrong directory
 doc-type: todo
 component: KyberSquad
