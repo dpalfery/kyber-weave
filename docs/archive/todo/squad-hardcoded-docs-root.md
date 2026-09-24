@@ -42,7 +42,7 @@ directory. There is no per-deployment substitution for those retained literals.
 ## What is known
 
 - One canonical skill already does this correctly:
-  [`products/kyber-squad/skills/app-docs-standard/SKILL.md`](../../products/kyber-squad/skills/app-docs-standard/SKILL.md)
+  [`products/kyber-squad/skills/app-docs-standard/SKILL.md`](../../../products/kyber-squad/skills/app-docs-standard/SKILL.md)
   reads: *"Locate the repository's documentation root from the configured
   `ontology.docs-root` (e.g. `docs/` or `6-Docs/`)"* and then uses `<docs-root>` as a
   placeholder for the rest of its instructions (`<docs-root>/catalog.md`, etc.). This is the
@@ -72,7 +72,7 @@ directory. There is no per-deployment substitution for those retained literals.
   source bodies could keep the literal placeholder text `<docs-root>` (as
   `app-docs-standard` already does) and every reader — human or agent — resolves it
   contextually, or the render pipeline (`CopilotRenderer` and future renderers, see
-  [architecture.md §8](../kyber-squad/architecture.md#8-rendering)) could substitute a
+  [architecture.md §8](../../kyber-squad/architecture.md#8-rendering)) could substitute a
   resolved value into the rendered per-harness output. The former needs no code change, only
   a documentation-content edit across the remaining directive sites; the latter is a real renderer feature that
   doesn't exist today.

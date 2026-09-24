@@ -40,7 +40,7 @@ Each layer answers a different question. An agent or human should be able to wal
 
 1. Confirm the repo's stack and existing conventions — don't impose an unrelated structure on top of what's already there.
 2. Create `<docs-root>/README.md` (index), `<docs-root>/system/architecture.md` (architecture), `<docs-root>/documentation-standard.md` (rules), and `<docs-root>/catalog.md` (one row for the first component) from `references/templates.md`.
-3. Add or extend root `AGENTS.md`/`CLAUDE.md` with a short config-registry table, starting with **<docs-root>** — even 3-4 entries is a fine start.
+3. Add or extend root `AGENTS.md` with a short config-registry table, starting with **<docs-root>** — even 3-4 entries is a fine start. Put it in `AGENTS.md` even when the repo's root policy lives in `CLAUDE.md`: that is where Squad's skills resolve the registry, so a `CLAUDE.md` should point to it rather than hold it.
 4. Create `<docs-root>/adr/` and `<docs-root>/plans/` (with a `README.md` plan index) even if empty — the structure signals where things go.
 5. Report what you created and what the user should fill in next (owner names, first ADR, first cataloged component). Don't invent content you can't verify from the repo.
 

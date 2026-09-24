@@ -67,7 +67,7 @@ Do not create a second canonical document for a topic. Link to the established s
 | [Component] | [Application/Service/Library] | `[path]` | [README](../[path]/README.md) | [docs](component-folder/) | [owner] | [YYYY-MM-DD] | Current |
 ```
 
-## Config registry (add to root AGENTS.md / CLAUDE.md)
+## Config registry (add to root AGENTS.md)
 
 ```markdown
 ## Config Registry
