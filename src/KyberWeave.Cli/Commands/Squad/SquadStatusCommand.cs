@@ -47,7 +47,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
         catch (ArgumentException ex)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            SquadCommandComposition.WriteClientInputError(ex.Message);
             return 2;
         }
 

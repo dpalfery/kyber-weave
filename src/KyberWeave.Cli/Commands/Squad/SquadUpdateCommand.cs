@@ -72,7 +72,7 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
         catch (ArgumentException ex)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            SquadCommandComposition.WriteClientInputError(ex.Message);
             return 2;
         }
 
@@ -144,6 +144,14 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             ReplaceManaged: settings.ReplaceManaged,
             DryRun: settings.DryRun);
 
+        // A --global run writes beneath each selected target's own physical global root,
+        // not beneath targetRoot — the state anchor. Resolve the roots the way the
+        // lifecycle's plan will, so the confirmation names the real destinations.
+        IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
+            scope == SquadDeploymentScope.Global
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets)
+                : null;
+
         // The confirmation is the last gate before the lifecycle call — the only
         // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
         // a dry-run's output already names the root, so it never prompts (N4).
@@ -153,7 +161,8 @@ public sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 "update",
                 isInteractive: _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 yes: settings.Yes,
-                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                globalTargetRoots: globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;

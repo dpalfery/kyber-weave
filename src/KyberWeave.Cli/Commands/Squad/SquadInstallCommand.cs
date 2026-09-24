@@ -71,7 +71,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         }
         catch (ArgumentException ex)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            SquadCommandComposition.WriteClientInputError(ex.Message);
             return 2;
         }
 
@@ -112,6 +112,15 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
         }
 
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
+
+        // A --global run writes beneath each selected target's own physical global root,
+        // not beneath targetRoot — the state anchor. Resolve the roots the way the
+        // lifecycle's plan will, so the confirmation names the real destinations.
+        IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
+            scope == SquadDeploymentScope.Global
+                ? SquadCommandComposition.ResolveGlobalTargetRoots(decision.Targets)
+                : null;
+
         SquadLifecycleService lifecycleService = SquadCommandComposition.CreateLifecycleService(
             userPaths: _userPaths,
             stateStore: stateStore,
@@ -135,7 +144,8 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 "install",
                 isInteractive: _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 yes: settings.Yes,
-                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                globalTargetRoots: globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;

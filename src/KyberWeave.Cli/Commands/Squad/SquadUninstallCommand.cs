@@ -59,7 +59,7 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         }
         catch (ArgumentException ex)
         {
-            AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(ex.Message)}[/]");
+            SquadCommandComposition.WriteClientInputError(ex.Message);
             return 2;
         }
 
@@ -75,6 +75,15 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             Scope: scope,
             DryRun: settings.DryRun);
 
+        // Uninstall has no --target option: its targets are the receipt's. A --global
+        // receipt's files live beneath each target's own physical global root, not beneath
+        // targetRoot — the state anchor — so the roots the lifecycle will write are
+        // derived from the same receipt and named in the confirmation.
+        IReadOnlyList<(SquadTarget Target, string GlobalRoot)>? globalTargetRoots =
+            scope == SquadDeploymentScope.Global
+                ? SquadCommandComposition.ResolveUninstallGlobalTargetRoots(stateStore, targetRoot)
+                : null;
+
         // The confirmation is the last gate before the lifecycle call — the only
         // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
         // a dry-run's output already names the root, so it never prompts (N4).
@@ -84,7 +93,8 @@ public sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                 "uninstall",
                 isInteractive: _isInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 yes: settings.Yes,
-                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+                readAnswer: _readAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                globalTargetRoots: globalTargetRoots))
         {
             AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
