@@ -105,9 +105,10 @@ should lead with explicit trigger framing and negative boundaries:
   explicit trigger condition (`"Use when..."`, `"Invoke when..."`, `"Trigger when..."`).
 - **Lint rule `KW-AGENT-LINT-001`**: Emits an Info finding when an agent description scores
   below 50 on the [DescriptionScorer rubric](skills.md#descriptionscorer-rubric).
-- **Review exchange**: Agent descriptions can be exported alongside skills via
-  `kyber-weave skill review export` for LLM/agent-assisted semantic trigger review.
-  Candidate ids are `{Harness}:{RoleName}` so a role present in multiple harnesses is
+- **Review exchange**: Agent descriptions can be exported alongside skills through the
+  `SkillReviewExchange` Core seam for LLM/agent-assisted semantic trigger review — a CLI
+  verb for it does not exist yet (`docs review export` exports documentation candidates
+  only). Candidate ids are `{Harness}:{RoleName}` so a role present in multiple harnesses is
   not collapsed.
 
 ## Capability profiles

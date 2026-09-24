@@ -13,6 +13,11 @@ app.Configure(config =>
     config.SetApplicationName("kyber-weave");
     config.SetApplicationVersion($"kyber-weave {GetVersion()}");
 
+    // Unrecognized options must hard-error rather than be silently discarded: relaxed
+    // parsing accepted `squad install --path <dir>` verbatim, dropped the flag, and
+    // deployed into the current directory (docs/plans/2026-09-23-squad-path-argument-safety.md).
+    config.UseStrictParsing();
+
     // Every artifact that shapes agent behaviour is governed the same way, so the three
     // branches are deliberately symmetric: one per artifact class.
 
@@ -132,19 +137,25 @@ app.Configure(config =>
             .WithDescription("Deploy canonical agents and skills to coding harness directories.")
             .WithExample("squad", "install", ".")
             .WithExample("squad", "install", "--target", "codex,cursor")
-            .WithExample("squad", "install", "--global");
+            .WithExample("squad", "install", "--global")
+            .WithExample("squad", "install", "--path", "./deploy")
+            .WithExample("squad", "install", "--target", "codex,cursor", "--yes");
 
         squad.AddCommand<SquadUpdateCommand>("update")
             .WithDescription("Update an existing Squad deployment while preserving managed local edits.")
             .WithExample("squad", "update", ".")
             .WithExample("squad", "update", "--replace-managed")
-            .WithExample("squad", "update", "--global");
+            .WithExample("squad", "update", "--global")
+            .WithExample("squad", "update", "--path", "./deploy")
+            .WithExample("squad", "update", "--replace-managed", "--yes");
 
         squad.AddCommand<SquadUninstallCommand>("uninstall")
             .WithDescription("Remove deployed files and state recorded in the ownership receipt.")
             .WithExample("squad", "uninstall", ".")
             .WithExample("squad", "uninstall", "--dry-run")
-            .WithExample("squad", "uninstall", "--global");
+            .WithExample("squad", "uninstall", "--global")
+            .WithExample("squad", "uninstall", "--path", "./deploy")
+            .WithExample("squad", "uninstall", "--yes");
 
         squad.AddCommand<SquadStatusCommand>("status")
             .WithDescription("Verify deployed files and report local drift against the ownership receipt.")
