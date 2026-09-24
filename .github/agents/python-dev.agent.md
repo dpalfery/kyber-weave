@@ -1,8 +1,8 @@
 ---
 name: python-dev
-description: 'Python implementation: modules, typing, packaging, and local environment configuration. Use for Python code. Does not author test suites, own CI/CD, or write Dockerfiles.'
-model: GPT-5.6 Luna (copilot)
-tools: [vscode, execute, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', edit, search, todo]
+description: 'Implements Python: modules, typing, packaging, local environment configuration. Use when the change is in a non-test .py file, pyproject.toml, or a requirements file. Do not use when the deliverable is a test suite or a build pipeline rather than application code.'
+model: MAI-Code-1.1-Flash (copilot)
+tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]
 user-invocable: false
 metadata:
   capability-profile: worker

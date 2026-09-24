@@ -1,8 +1,8 @@
 ---
 name: review-triage
-description: 'Attributes machine-produced output — analyzer diagnostics, manifest and lock diffs — to the change under review and reports it by rule or package identifier. Use when code-reviewer runs a triage lens whose input is a tool artifact rather than source code. Do NOT use for lenses that judge code: correctness, security, design, and test adequacy go to review-lens.'
-model: GPT-5.6 Luna (copilot)
-tools: [vscode, read, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, todo]
+description: Attributes machine-produced output (analyzer diagnostics, manifest and lock diffs) to the change under review and reports it by rule or package identifier. Use when code-reviewer runs a lens whose input is a tool artifact rather than source code.
+model: Kimi K2.7 Code (copilot)
+tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web]
 user-invocable: false
 metadata:
   capability-profile: read-only
