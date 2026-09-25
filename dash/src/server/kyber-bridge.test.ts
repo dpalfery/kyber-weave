@@ -809,6 +809,36 @@ describe('KyberBridge: DB-backed report facts', () => {
     }
   })
 
+  it('lists distinct-location diagnostics separately, matching the problem count', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-problems-db-'))
+    const dbPath = join(directory, 'canon.db')
+    const store = new CanonStore(dbPath)
+    try {
+      for (const location of ['file-a.ts', 'file-b.ts']) {
+        store.recordProblem({
+          spanId: 'span-shared',
+          severity: 'warning',
+          code: 'FIXTURE_PROBLEM',
+          message: `problem at ${location}`,
+          location,
+        })
+      }
+      const bridge = new KyberBridge({ canonPath: dbPath })
+      try {
+        expect(bridge.getProblems()).toHaveLength(2)
+        expect(bridge.getProblemCount()).toBe(2)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        store.close()
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    }
+  })
+
   it('surfaces errors from getProblemCount and getQuarantineCount when queries fail', () => {
     const brokenStore = {
       countQuarantine: () => {

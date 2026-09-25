@@ -36,6 +36,7 @@ import {
   type SourceCheckpointRow,
 } from './source-state.js'
 import {
+  REFRESH_MAX_AGE_MS,
   REFRESH_RUN_SQL,
   refreshProcessIsAlive,
   type RefreshRunRow,
@@ -1147,7 +1148,7 @@ export class CanonStore {
    */
   reconcileDeadRefreshRuns(
     completedAt = new Date().toISOString(),
-    maxAgeMs = 15 * 60 * 1000,
+    maxAgeMs = REFRESH_MAX_AGE_MS,
   ): number {
     const running = this.db
       .prepare("SELECT id, pid, started_at FROM refresh_run WHERE status = 'running'")
@@ -1196,11 +1197,9 @@ export class CanonStore {
       .get(status) as Record<string, unknown> | undefined
     if (row === undefined) return undefined
     const parsed = toRefreshRunRow(row)
-    if (status === 'running') {
-      const isAlive = refreshProcessIsAlive(parsed.pid)
-      const isRecent = Date.now() - Date.parse(parsed.startedAt) < 15 * 60 * 1000
-      if (!isAlive || !isRecent) return undefined
-    }
+    // Liveness only: a long refresh still holds the lock and stays visible. Age is
+    // reconciliation's concern, not the footer's.
+    if (status === 'running' && !refreshProcessIsAlive(parsed.pid)) return undefined
     return parsed
   }
 

@@ -313,6 +313,39 @@ describe('refreshHarnessSources', () => {
     }
   })
 
+  it('shares one in-flight Claude warm across concurrent Claude descriptors', async () => {
+    const store = temporaryStore()
+    try {
+      let warms = 0
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      const entered: string[] = []
+
+      const refresh = refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('claude-cli', 'claude-desktop', 'claude-unclassified'),
+        jobConcurrency: 3,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => {
+          warms += 1
+          await gate
+        },
+        iterateNativeUnits: async (harnessId, deps) => {
+          entered.push(harnessId)
+          if (entered.length === 3) release()
+          await deps.parseAllSessions?.(deps.dateRange, 'claude')
+          return []
+        },
+      })
+
+      await refresh
+      expect(entered).toHaveLength(3)
+      expect(warms).toBe(1)
+    } finally {
+      store.close()
+    }
+  })
+
   it('does not cancel a healthy job when a sibling harness fails', async () => {
     const store = temporaryStore()
     const started: string[] = []

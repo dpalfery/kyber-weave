@@ -18,6 +18,9 @@ export type RefreshRunStatus = 'running' | 'success' | 'failure'
 
 export const REFRESH_TRIGGERS: readonly RefreshTrigger[] = ['cli', 'tray', 'scheduled']
 
+/** A running row older than this is reconciled as failed before the next refresh starts. */
+export const REFRESH_MAX_AGE_MS = 15 * 60 * 1000
+
 export type RefreshRunRow = {
   id: string
   startedAt: string

@@ -291,6 +291,24 @@ describe('CanonStore batch ingest (R2.5)', () => {
   })
 })
 
+describe('CanonStore refresh runs', () => {
+  it('keeps a live refresh visible past the reconciliation age limit', () => {
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'long-refresh',
+        startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        pid: process.pid,
+        trigger: 'cli',
+      })
+
+      expect(store.latestRefreshRun('running')).toMatchObject({ id: 'long-refresh', pid: process.pid })
+    } finally {
+      store.close()
+    }
+  })
+})
+
 describe('CanonStore quarantine, problems, and ingest log', () => {
   it('holds a quarantined span with its namespaces and reason', () => {
     const store = new CanonStore(':memory:')

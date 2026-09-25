@@ -95,8 +95,10 @@ export async function refreshHarnessSources(
     auditProviderRegistry(providers)
 
     const otlpSpansByKey = indexOtlpSpans(store)
-    const parseAllSessions = dependencies.parseAllSessions
-      ?? ((range, filter) => warmClaudeSpecialPath(range, filter, dependencies.claudeCacheDir))
+    const parseAllSessions = singleFlightParse(
+      dependencies.parseAllSessions
+        ?? ((range, filter) => warmClaudeSpecialPath(range, filter, dependencies.claudeCacheDir)),
+    )
 
     const settled = await runJobsSettled(descriptors, concurrency, async (descriptor) =>
       runHarnessJob({
@@ -540,6 +542,25 @@ function otlpRecordsFor(
     if (group !== undefined) spanIds.push(...group)
   }
   return store.recordsBySpanIds(spanIds)
+}
+
+type ParseAllSessions = NonNullable<SourceReaderDependencies['parseAllSessions']>
+
+/**
+ * Share one in-flight warm per (range, filter). The Claude descriptors run concurrently
+ * under the job pool, and parallel warms would interleave session-cache saves and the
+ * KYBERDASH_CACHE_DIR swap.
+ */
+function singleFlightParse(parse: ParseAllSessions): ParseAllSessions {
+  const inFlight = new Map<string, Promise<unknown>>()
+  return (range, filter) => {
+    const key = JSON.stringify([range?.start.toISOString(), range?.end.toISOString(), filter])
+    const existing = inFlight.get(key)
+    if (existing !== undefined) return existing
+    const pending = parse(range, filter).finally(() => inFlight.delete(key))
+    inFlight.set(key, pending)
+    return pending
+  }
 }
 
 async function warmClaudeSpecialPath(

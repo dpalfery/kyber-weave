@@ -1450,7 +1450,7 @@ export class KyberBridge {
         }
 
         for (const r of rows) {
-          const key = r.span_id ? `span:${r.span_id}:${r.code}` : `id:${r.id}`
+          const key = r.span_id ? `span:${r.span_id}:${r.code}:${r.location ?? ''}` : `id:${r.id}`
           if (seenKeys.has(key)) continue
           seenKeys.add(key)
           results.push({
@@ -1514,12 +1514,7 @@ export class KyberBridge {
             }
           | undefined
         if (row === undefined) return undefined
-        if (status === 'running') {
-          const pid = Number(row.pid)
-          const isAlive = refreshProcessIsAlive(pid)
-          const isRecent = Date.now() - Date.parse(row.started_at) < 15 * 60 * 1000
-          if (!isAlive || !isRecent) return undefined
-        }
+        if (status === 'running' && !refreshProcessIsAlive(Number(row.pid))) return undefined
         return {
           startedAt: row.started_at,
           completedAt: row.completed_at,
