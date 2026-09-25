@@ -819,9 +819,13 @@ describe('KyberBridge: DB-backed report facts', () => {
       },
     } as unknown as CanonStore
 
-    const bridge = new KyberBridge({ store: brokenStore })
-    expect(() => bridge.getQuarantineCount()).toThrow('store quarantine count error')
-    expect(() => bridge.getProblemCount()).toThrow('store problem count error')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: brokenStore })
+    try {
+      expect(() => bridge.getQuarantineCount()).toThrow('store quarantine count error')
+      expect(() => bridge.getProblemCount()).toThrow('store problem count error')
+    } finally {
+      bridge.close()
+    }
   })
 
   it('returns exact zero when problem and quarantine tables are clean', () => {
@@ -830,8 +834,12 @@ describe('KyberBridge: DB-backed report facts', () => {
       countProblems: () => 0,
     } as unknown as CanonStore
 
-    const bridge = new KyberBridge({ store: cleanStore })
-    expect(bridge.getQuarantineCount()).toBe(0)
-    expect(bridge.getProblemCount()).toBe(0)
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: cleanStore })
+    try {
+      expect(bridge.getQuarantineCount()).toBe(0)
+      expect(bridge.getProblemCount()).toBe(0)
+    } finally {
+      bridge.close()
+    }
   })
 })
