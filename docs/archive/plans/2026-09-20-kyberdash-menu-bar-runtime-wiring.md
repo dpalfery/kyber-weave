@@ -5,7 +5,7 @@ doc-type: plan
 status: archived
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-25
 development-mode: test-first
 ---
 
@@ -949,7 +949,7 @@ command calls `buildSessions` directly rather than through `projectCanonicalStor
 
 **Deferred work.** Stale `refresh_run` rows remained reproducible on the deployed build
 (rows at 03:34, 03:38, and 03:43 across 2026-09-21/22) and are recorded as separate deferred
-work in [docs/todo/stale-refresh-run-rows.md](../../todo/stale-refresh-run-rows.md); they are
+work in [docs/archive/todo/stale-refresh-run-rows.md](../todo/stale-refresh-run-rows.md); they are
 not on the report data path and are not claimed fixed by the projection work. The originating
 todo, [docs/todo/menu-bar-fix.md](../todo/menu-bar-fix.md), is closed as completed by this
 plan.

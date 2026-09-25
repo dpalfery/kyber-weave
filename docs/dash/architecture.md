@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-24
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -277,24 +277,29 @@ separates `no_rate` from `not_billed` from `out_of_scope` (R5.4, R5.5), and tier
 selects context tiers by measured input size (R5.6). The scoping failure this prevents — a
 table pricing a harness it does not name — is in the [rationale](../reference/kyberdash-rationale.md).
 
-### `Measurability`
+### `Measurability` and honest unobservability
 
 Each source declares per-metric availability independent of value (R10.1). A metric a source
-cannot report renders as "not measurable", never as zero — rendering an unreported metric as
-`0` would make the harness that reports least look most efficient.
+cannot report renders as "not measurable" (`null` with a machine- and human-readable `reason`),
+never as zero — rendering an unreported metric as `0` would make the harness that reports least look
+most efficient. Content readers (such as `copilotVscodeReader` and `cursorReader`) map native evidence
+into input-side `ReaderTurn` snapshots without attributing current response text to input context or
+inventing unobserved prefix history. Where total tokens and context window are known, pressure is
+measured independently from whether individual composition buckets are available.
 
 ### Store
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 11;
+schema is a version-controlled constant executed on construction, currently at version 13;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
 `session`, `run`, `execution`, `token_cache`, `quarantine`, `pending_logs`,
 `quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
-`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, and `record_provenance`.
-Schema 11 adds the last two additively ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md));
+`harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, and `refresh_run`.
+Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
+schema 12 added `refresh_run`, and schema 13 introduced `problem_key` with unique indexing.
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
@@ -332,8 +337,10 @@ explicitly recorded in `grouping_basis` as `derived` with the specific rule name
 are never silently presented as reported fact. Rebuilding via `kyber build` re-projects both
 tables deterministically from retained records.
 
-`KyberBridge` (`dash/src/server/bridge.ts`) reads `canon.db` and serves the derived sessions,
-runs, harness rollups, findings, and unclipped content. That is the single-store end state in
+`KyberBridge` (`dash/src/server/bridge.ts`) reads `canon.db` through public, DB-backed
+queries (`getProblemCount()`, `getRefreshState()`, `getSessionCostContributions()`, `getQuarantineCount()`) 
+and serves the derived sessions, runs, harness rollups, findings, and unclipped content without private-store
+casts. That is the single-store end state in
 [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md): production code never opens a
 Python `sessions.db`, and `AGENTDASH_DB` / `KYBER_DB` cannot expose a legacy session.
 `dash/src/server/kyber-bridge.test.ts` proves those environment variables are ignored for

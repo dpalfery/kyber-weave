@@ -15,13 +15,18 @@
 // present store with a problem.
 
 import { afterAll, describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 
 import type { ParsedProviderCall } from '../providers/types.js'
+import { copilot } from '../providers/copilot.js'
+import { createCursorProvider } from '../providers/cursor.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
+import { contextLimitOf } from '../canon/context-window.js'
+import { CanonStore } from '../canon/store.js'
 import { Synthesizer } from './synth.js'
 import { PROVIDER_PARSE_ERROR, ingestProviders } from './provider.js'
 
@@ -98,6 +103,47 @@ function claudeTranscript(): string {
     }),
   ].join('\n'))
   return filePath
+}
+
+function fixturePath(name: string): string {
+  return fileURLToPath(new URL(`../refresh/fixtures/${name}`, import.meta.url))
+}
+
+async function parsedCalls(
+  provider: { createSessionParser: (source: {
+    path: string
+    project: string
+    provider: string
+    sourceType?: 'chatsession' | 'jsonl' | 'session-store' | 'transcript' | 'otel' | 'jetbrains'
+  }, seenKeys: Set<string>) => { parse: () => AsyncGenerator<ParsedProviderCall> } },
+  source: {
+    path: string
+    project: string
+    provider: string
+    sourceType?: 'chatsession' | 'jsonl' | 'session-store' | 'transcript' | 'otel' | 'jetbrains'
+  },
+): Promise<ParsedProviderCall[]> {
+  const calls: ParsedProviderCall[] = []
+  for await (const entry of provider.createSessionParser(source, new Set()).parse()) calls.push(entry)
+  return calls
+}
+
+function cursorEvidenceDb(): string {
+  const root = mkdtempSync(join(tmpdir(), 'kyber-cursor-evidence-'))
+  tempRoots.push(root)
+  const dbPath = join(root, 'state.vscdb')
+  const fixture = JSON.parse(readFileSync(fixturePath('cursor-partial-evidence.json'), 'utf8')) as {
+    rows: Array<{ key: string; value: Record<string, unknown> }>
+  }
+  const db = new DatabaseSync(dbPath)
+  try {
+    db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+    const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+    for (const row of fixture.rows) insert.run(row.key, JSON.stringify(row.value))
+  } finally {
+    db.close()
+  }
+  return dbPath
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +361,232 @@ describe('D6 Copilot CLI SQLite integration', () => {
   })
 })
 
+describe('T3 static source capability readers', () => {
+  it('replays Copilot VS Code requests as input-side snapshots', async () => {
+    const filePath = fixturePath('copilot-vscode-request.jsonl')
+    const source = {
+      path: filePath,
+      project: 'fixture-project',
+      provider: 'copilot',
+      sourceType: 'chatsession' as const,
+    }
+    const calls = await parsedCalls(copilot, source)
+
+    expect(calls).toHaveLength(2)
+    expect(calls.map((entry) => entry.userMessage)).toEqual(['first request', 'second request'])
+
+    const result = await ingestProviders(['copilot-vscode'], () => ({
+      calls,
+      filePath,
+      harnessId: 'copilot-vscode',
+      sourceKey: 'copilot-vscode:vscode-static-session',
+    }))
+
+    expect(result.problems).toEqual([])
+    expect(result.records).toHaveLength(2)
+    const first = result.records[0]!
+    const second = result.records[1]!
+
+    expect(first.tokens.reportedInput).toBe(180)
+    expect(first.content.conversation_history).toContain('first request')
+    expect(first.content.instruction_context).toContain('agent mode')
+    expect(first.content.conversation_history).not.toContain('first response')
+    expect(second.content.conversation_history).toContain('first response')
+    expect(second.content.conversation_history).toContain('second request')
+    expect(second.content.conversation_history).not.toContain('second response')
+    expect(first.measurability?.system_prompt).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/VS Code|chat session/i),
+    })
+    expect(first.measurability?.tool_definitions).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/VS Code|chat session/i),
+    })
+    expect(first.measurability?.tool_result_content).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/VS Code|chat session|tool-result/i),
+    })
+  })
+
+  it('retains reconstructed input snapshots for ID-less requests when sibling request has native requestId', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-copilot-idless-'))
+    const filePath = join(root, 'session.jsonl')
+    try {
+      const line1 = JSON.stringify({
+        kind: 0,
+        v: { sessionId: 'vscode-mixed-ids-session', creationDate: '2026-09-22T10:00:00.000Z', requests: [] },
+      })
+      const line2 = JSON.stringify({
+        kind: 2,
+        k: ['requests'],
+        v: [
+          {
+            // ID-less request
+            timestamp: '2026-09-22T10:01:00.000Z',
+            modelId: 'copilot/gpt-5',
+            message: { text: 'id-less request text' },
+            result: { metadata: { promptTokens: 100, outputTokens: 20, resolvedModel: 'gpt-5' } },
+            response: { text: 'id-less response text' },
+          },
+          {
+            // Sibling request with native requestId
+            requestId: 'explicit-native-id',
+            timestamp: '2026-09-22T10:02:00.000Z',
+            modelId: 'copilot/gpt-5',
+            message: { text: 'sibling request text' },
+            result: { metadata: { promptTokens: 150, outputTokens: 25, resolvedModel: 'gpt-5' } },
+            response: { text: 'sibling response text' },
+          },
+        ],
+      })
+      writeFileSync(filePath, `${line1}\n${line2}\n`)
+
+      const source = {
+        path: filePath,
+        project: 'fixture-project',
+        provider: 'copilot',
+        sourceType: 'chatsession' as const,
+      }
+      const calls = await parsedCalls(copilot, source)
+      expect(calls).toHaveLength(2)
+      expect(calls[0]!.turnId).toBe('request-0')
+      expect(calls[1]!.turnId).toBe('explicit-native-id')
+
+      const result = await ingestProviders(['copilot-vscode'], () => ({
+        calls,
+        filePath,
+        harnessId: 'copilot-vscode',
+        sourceKey: 'copilot-vscode:vscode-mixed-ids-session',
+      }))
+
+      expect(result.problems).toEqual([])
+      expect(result.records).toHaveLength(2)
+      const first = result.records[0]!
+      const second = result.records[1]!
+
+      // First (ID-less) request MUST retain its reconstructed input snapshot
+      expect(first.content.conversation_history).toContain('id-less request text')
+      expect(first.spanId).toContain(':request-0')
+
+      // Second request also matches correctly
+      expect(second.content.conversation_history).toContain('sibling request text')
+      expect(second.spanId).toContain(':explicit-native-id')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('retains Cursor prompt/context evidence while naming incomplete history', async () => {
+    const dbPath = cursorEvidenceDb()
+    const cursor = createCursorProvider(dbPath)
+    const source = { path: dbPath, project: 'fixture-project', provider: 'cursor' }
+    const nativeCalls = await parsedCalls(cursor, source)
+
+    expect(nativeCalls.some((entry) => entry.userMessage.includes('current Cursor request'))).toBe(true)
+    expect(nativeCalls.some((entry) => entry.inputTokens === 240)).toBe(true)
+
+    const result = await ingestProviders(['cursor'], () => ({
+      calls: [call({
+        provider: 'cursor',
+        model: 'gpt-5',
+        inputTokens: 240,
+        outputTokens: 60,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        cachedInputTokens: 0,
+        userMessage: 'current Cursor request',
+        sessionId: 'cursor-static-session',
+        turnId: 'cursor-request-1',
+        deduplicationKey: 'cursor:cursor-static-session:cursor-request-1',
+      })],
+      filePath: dbPath,
+      harnessId: 'cursor',
+      sourceKey: 'cursor:cursor-static-session',
+    }))
+
+    expect(result.problems).toEqual([])
+    const record = result.records[0]!
+    expect(record.tokens.reportedInput).toBe(240)
+    expect(record.raw).not.toHaveProperty('contextWindow')
+    expect(contextLimitOf([record]).contextLimitSource).toBe('default')
+    expect(record.content.instruction_context).toContain('Cursor tool context')
+    expect(record.measurability?.conversation_history).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/Cursor|cursor/i),
+    })
+    expect(record.measurability?.tool_definitions).toMatchObject({
+      availability: 'not_measurable',
+      reason: expect.stringMatching(/Cursor|cursor/i),
+    })
+  })
+
+  it('ingests Cursor bubbles with distinct span identities per request', async () => {
+    const dbPath = cursorEvidenceDb()
+    const cursor = createCursorProvider(dbPath)
+    const source = { path: dbPath, project: 'fixture-project', provider: 'cursor' }
+    const calls = await parsedCalls(cursor, source)
+    const prompt = calls.find((entry) => entry.deduplicationKey.endsWith(':prompt'))
+    const reply = calls.find((entry) => entry.deduplicationKey.endsWith(':reply'))
+    expect(prompt?.turnId).toBe('cursor-request-1')
+    expect(reply?.turnId).toBeUndefined()
+
+    const result = await ingestProviders(['cursor'], () => ({
+      calls,
+      filePath: dbPath,
+      harnessId: 'cursor',
+      sourceKey: 'cursor:cursor-static-session',
+    }))
+    expect(result.problems).toEqual([])
+    expect(result.records).toHaveLength(calls.length)
+    expect(new Set(result.records.map((record) => record.spanId)).size).toBe(calls.length)
+    const promptIndex = calls.findIndex((entry) => entry.deduplicationKey.endsWith(':prompt'))
+    expect(result.records[promptIndex]?.tokens.reportedInput).toBe(240)
+
+    // Existing stores contain digest identities from before turnId was used
+    // for reader matching. A refresh must replace those rows, not add copies.
+    const legacy = await ingestProviders(['cursor'], () => ({
+      calls: calls.map((entry) => ({ ...entry, turnId: undefined })),
+      filePath: dbPath,
+      harnessId: 'cursor',
+      sourceKey: 'cursor:cursor-static-session',
+    }))
+    expect(result.records.map((record) => record.spanId)).toEqual(legacy.records.map((record) => record.spanId))
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany(legacy.records)
+      store.upsertMany(result.records)
+      expect(store.listAll()).toHaveLength(calls.length)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not positionally pair an unidentified Cursor call with a native request turn', async () => {
+    const dbPath = cursorEvidenceDb()
+    const unidentified = call({
+      provider: 'cursor',
+      sessionId: 'cursor-static-session',
+      turnId: undefined,
+      deduplicationKey: 'cursor:bubble:unidentified',
+    })
+    const identified = call({
+      provider: 'cursor',
+      sessionId: 'cursor-static-session',
+      turnId: 'cursor-request-1',
+      deduplicationKey: 'cursor:bubble:identified',
+    })
+    const result = await ingestProviders(['cursor'], () => ({
+      calls: [unidentified, identified],
+      filePath: dbPath,
+      harnessId: 'cursor',
+    }))
+
+    expect(result.records).toHaveLength(2)
+    expect(result.records[0]?.content.instruction_context).toBeUndefined()
+    expect(result.records[1]?.content.instruction_context).toContain('Cursor tool context')
+  })
+})
+
 describe('T4 — source-unit ingest seam', () => {
   it('names the harness and source unit on a parse problem, not only the provider', async () => {
     const unit = '/home/dev/.gemini/antigravity-cli/session.pb'
@@ -349,4 +621,3 @@ describe('T4 — source-unit ingest seam', () => {
     expect(result.records[0]?.content.conversation_history).toBe('reader-provided conversation')
   })
 })
-

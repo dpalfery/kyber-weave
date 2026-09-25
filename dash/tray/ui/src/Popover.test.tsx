@@ -15,6 +15,7 @@ import empty from '../../../src/analysis/report/fixtures/empty.json' with { type
 import full from '../../../src/analysis/report/fixtures/full.json' with { type: 'json' }
 import mixedBasisCost from '../../../src/analysis/report/fixtures/mixed-basis-cost.json' with { type: 'json' }
 import noFindings from '../../../src/analysis/report/fixtures/no-findings.json' with { type: 'json' }
+import partialMeasurability from './__fixtures__/partial-measurability.json' with { type: 'json' }
 import stale from '../../../src/analysis/report/fixtures/stale.json' with { type: 'json' }
 import unmeasurablePressure from '../../../src/analysis/report/fixtures/unmeasurable-pressure.json' with { type: 'json' }
 import type { ContextReport } from '../../../src/analysis/report/types.ts'
@@ -29,6 +30,7 @@ const FIXTURES: Record<string, ContextReport> = {
   stale: stale as unknown as ContextReport,
   'unmeasurable-pressure': unmeasurablePressure as unknown as ContextReport,
   'no-findings': noFindings as unknown as ContextReport,
+  'partial-measurability': partialMeasurability as unknown as ContextReport,
   'mixed-basis-cost': mixedBasisCost as unknown as ContextReport,
 }
 
@@ -338,6 +340,18 @@ describe('Popover content rules', () => {
       expect(html).toContain(`— (${pressure.reason})`)
     }
     expect(html).not.toMatch(/session-pressure[^>]*>\s*<span[^>]*>0%/)
+  })
+
+  it('renders measured pressure and real health totals beside unavailable composition', () => {
+    const report = FIXTURES['partial-measurability']
+    const html = render(viewState({ report }))
+
+    expect(html).toContain('25%')
+    expect(html).toContain('128,000 tokens')
+    expect(html).toContain('— (Cursor preserves token totals without a complete message prefix)')
+    expect(html).toContain('251 quarantined · 307 problems')
+    expect(html).toContain('harness: 62.5 USD')
+    expect(html).toContain('published: 1 USD')
   })
 })
 

@@ -289,6 +289,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   const countTokens = counter.count
   const report: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0, rollups: 0, findings: 0 }
   const built = new Set<string>()
+  const identities = store.sessionIdentities()
 
   for (const key of store.sessionKeys()) {
     const grouped = groupByCanonicalHarness(store.recordsForSession(key.key))
@@ -301,7 +302,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         report.skipped += 1
         continue
       }
-      const sessionId = grouped.size > 1 ? `${harness}:${key.key}` : key.key
+      const sessionId = identities.claim(key.key, harness)
       store.upsertSession(buildSessionRow(sessionId, records, countTokens))
       built.add(sessionId)
       report.built += 1
@@ -369,10 +370,12 @@ export function buildSessionRow(
   // Same rule the finding detector uses (`contextLimitOf`): first turn record
   // to name a window wins, default otherwise, so a session row and a
   // compaction finding built from the same records can never disagree.
-  const contextLimit = contextLimitOf(records).contextLimit
+  const window = contextLimitOf(records)
+  const contextLimit = window.contextLimit
   const measurability = mergeMeasurability(records)
   const context = analyzeContext(contextTurns, {
     contextLimit,
+    contextLimitSource: window.contextLimitSource,
     countTokens,
     ...(measurability !== undefined ? { measurability } : {}),
   })
@@ -441,12 +444,34 @@ export function buildSessionRow(
       return unavailable === undefined ? [] : [[bucket, unavailable]]
     }),
   )
+  const unavailableCanonicalBuckets = Object.fromEntries(
+    Object.entries(contextBucketDeclarations).flatMap(([bucket, canonical]) =>
+      unavailableBuckets[bucket] === undefined ? [] : [[canonical, unavailableBuckets[bucket]]],
+    ),
+  )
+  const unavailableContextBuckets = { ...unavailableCanonicalBuckets, ...unavailableBuckets }
+  // A session-wide declaration merges every record's, so it must not erase a count
+  // this turn observed; it only stands in for a bucket the turn has at zero.
+  const unavailableOverlay = (buckets: Record<string, number>) =>
+    Object.fromEntries(
+      Object.entries(contextBucketDeclarations).flatMap(([bucket, canonical]) => {
+        const unavailable = unavailableBuckets[bucket]
+        return unavailable !== undefined && !buckets[canonical]
+          ? [[canonical, unavailable], [bucket, unavailable]]
+          : []
+      }),
+    )
   const contextBucket = (turn: (typeof analyzedTurns)[number] | undefined, reportedInput: number): AsadContextBucket => ({
-    buckets: turn?.buckets ?? (Object.keys(unavailableBuckets).length > 0 ? unavailableBuckets : {}),
+    buckets: turn?.buckets
+      ? { ...turn.buckets, ...unavailableOverlay(turn.buckets) }
+      : Object.keys(unavailableContextBuckets).length > 0
+        ? unavailableContextBuckets
+        : {},
     reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
   })
   const contextShape = {
     ...serializeContext(context),
+    contextLimitSource: window.contextLimitSource,
     first: contextBucket(analyzedTurns[0], measuredTurns[0]?.tokens.reportedInput ?? 0),
     last: contextBucket(
       analyzedTurns[analyzedTurns.length - 1],

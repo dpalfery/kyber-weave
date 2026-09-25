@@ -4,7 +4,7 @@ title: Todos
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-09-25
 ---
 
 # Todos
@@ -57,6 +57,9 @@ Archived under [`archive/todo/`](../archive/todo/). Kept for provenance, never c
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
+| [agent-spec-broken-reference-rule.md](../archive/todo/agent-spec-broken-reference-rule.md) | ContextHygiene | superseded | KW-AGENT-SPEC-004 was documented but never emitted (fixed: AgentSpecValidator now raises it for unresolved file references; delivered by [plan](../archive/plans/2026-09-24-agent-spec-broken-reference-rule.md)). |
+| [stale-refresh-run-rows.md](../archive/todo/stale-refresh-run-rows.md) | KyberDash | superseded | Dead-PID and timed-out `refresh_run` rows are reconciled to failure before the next refresh (fixed in PR #117). |
+| [canon-multi-harness-session-gather.md](../archive/todo/canon-multi-harness-session-gather.md) | KyberDash | superseded | Sessions whose canonical key spans several harnesses got a `${harness}:${key}` id the record gather never matched, so they contributed no findings or run outcomes (fixed: one `SessionIdentities` table assigns every share a collision-free id, and `recordsForShare` gathers by key plus canonical harness). |
 | [kyberdash-local-release-loop.md](../archive/todo/kyberdash-local-release-loop.md) | Distribution | superseded | The local release loop built no `kyberdash`, so its update path was unverifiable offline (fixed: the loop builds the single-executable for the host RID and runs the update, opt-out, below-floor and tray-delegation cases; the `install.sh` half moved to [install-sh-local-origin](install-sh-local-origin.md)). |
 | [claude-renderer-ask-narrowing.md](../archive/todo/claude-renderer-ask-narrowing.md) | KyberSquad | superseded | Claude, Pi and ZCode turned `ask` into deny, so `architect` and `product-owner` could not save their plans and specs (fixed: both profiles now hold `filesystem.write: allow`, with the plan, spec and todo boundary instruction-only). |
 | [embeddings-endpoint-loopback-check.md](../archive/todo/embeddings-endpoint-loopback-check.md) | DocGraph | superseded | A non-loopback HTTPS embeddings endpoint was accepted where the test asserts rejection (fixed: the loader now requires loopback resolution). |
