@@ -131,6 +131,24 @@ function toOtlpSpan(record: CanonicalRecord): OtlpSpan {
  * The raw payload is the evidence and the store kept it, so this is a pure
  * re-derivation: the vote runs per trace, exactly as it does on ingest.
  */
+function deleteDerivedSessions(
+  store: CanonStore,
+  record: { traceId?: string | null; sessionId?: string | null; harness?: string },
+): void {
+  const rawIds = [record.traceId, record.sessionId].filter(
+    (id): id is string => typeof id === 'string' && id !== '',
+  )
+  for (const rawId of rawIds) {
+    store.deleteSession(rawId)
+    if (record.harness) {
+      store.deleteSession(`${record.harness}:${rawId}`)
+    }
+    for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
+      store.deleteSession(`${excluded}:${rawId}`)
+    }
+  }
+}
+
 export function renormalizeRecords(store: CanonStore, options: BackfillOptions = {}): RenormalizeReport {
   const traceIds = store.traceIds()
   const progressEvery = options.progressEvery ?? 200
@@ -166,8 +184,7 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
           observedNamespaces(record.raw as Record<string, unknown>),
           'excluded_harness',
         )
-        if (record.traceId) store.deleteSession(record.traceId)
-        if (record.sessionId) store.deleteSession(record.sessionId)
+        deleteDerivedSessions(store, record)
       }
     }
     for (const before of withRaw) {
@@ -182,8 +199,7 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
           observedNamespaces(before.raw as Record<string, unknown>),
           'excluded_harness',
         )
-        if (before.traceId) store.deleteSession(before.traceId)
-        if (before.sessionId) store.deleteSession(before.sessionId)
+        deleteDerivedSessions(store, before)
         continue
       }
       if (
@@ -218,9 +234,11 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
           ? (record.raw as Record<string, unknown>)
           : {}
       store.quarantineAndDelete(record.spanId, observedNamespaces(rawAttrs), 'excluded_harness')
-      if (record.traceId) store.deleteSession(record.traceId)
-      if (record.sessionId) store.deleteSession(record.sessionId)
+      deleteDerivedSessions(store, record)
     }
+  }
+  for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
+    store.deleteSessionsByHarness(excluded)
   }
 
   options.onProgress?.(report.traces, traceIds.length)

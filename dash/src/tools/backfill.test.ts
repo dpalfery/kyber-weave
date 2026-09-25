@@ -120,4 +120,60 @@ describe('renormalizeRecords — retained raw evidence', () => {
     expect(store.getSessionPayload(traceId)).toBeUndefined()
     store.close()
   })
+
+  it('removes mixed-harness Gemini projected sessions (${harness}:${rawId}) during renormalization', async () => {
+    const store = new CanonStore(':memory:')
+    const traceId = 'mixed-trace-with-gemini'
+    const geminiSpan = 'gemini-span-1'
+    const claudeSpan = 'claude-span-1'
+
+    store.upsert(staleRecord({
+      spanId: geminiSpan,
+      traceId,
+      harness: 'gemini',
+      raw: {
+        'gen_ai.system': 'gemini',
+        'gen_ai.usage.input_tokens': 5,
+        'gen_ai.usage.output_tokens': 2,
+        'gen_ai.prompt': 'gemini turn in mixed trace',
+      },
+    }))
+
+    store.upsert(staleRecord({
+      spanId: claudeSpan,
+      traceId,
+      harness: 'claude',
+      raw: {
+        'anthropic.model': 'claude-3-5-sonnet',
+        'gen_ai.system': 'anthropic',
+      },
+    }))
+
+    // Seed historical session projections. In historical stores where mixed traces
+    // were projected, session IDs took the form `${harness}:${rawId}`.
+    store.upsertSession({
+      sessionId: `gemini:${traceId}`,
+      harness: 'gemini',
+      payload: { sessionId: `gemini:${traceId}`, harness: 'gemini' },
+    })
+    store.upsertSession({
+      sessionId: `claude:${traceId}`,
+      harness: 'claude',
+      payload: { sessionId: `claude:${traceId}`, harness: 'claude' },
+    })
+    expect(store.getSessionPayload(`gemini:${traceId}`)).toBeDefined()
+    expect(store.getSessionPayload(`claude:${traceId}`)).toBeDefined()
+
+    renormalizeRecords(store)
+
+    // The mixed Gemini projected session MUST be removed during renormalization
+    expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
+    expect(store.getSessionPayload(traceId)).toBeUndefined()
+
+    // And rebuilding projections cleanly re-projects the remaining Claude record without Gemini
+    await buildSessions(store)
+    expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
+    expect(store.listSessions().some((s) => s.harness === 'gemini')).toBe(false)
+    store.close()
+  })
 })
