@@ -1,14 +1,17 @@
 ---
-id: todo/stale-refresh-run-rows
+id: archive/todo/stale-refresh-run-rows
 title: refresh_run rows stay running forever after their refresh process dies
 doc-type: todo
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-24
-status: draft
+last-reviewed: 2026-09-25
+status: superseded
 ---
 
 # refresh_run rows stay running forever after their refresh process dies
+
+> [!NOTE]
+> **Closed by PR #117.** Dead-PID and timed-out runs are reconciled before the next refresh.
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the seam is. It does not sequence tasks or commit to an implementation.
@@ -27,7 +30,7 @@ rows are stuck.
   of observation (2026-09-21 and 2026-09-22).
 - It is **not on the report data path**: reports read canonical derived sessions, not
   `refresh_run` rows. The canonical-projection correction executed by the
-  [menu-bar runtime wiring plan](../archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md)
+  [menu-bar runtime wiring plan](../plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md)
   neither caused this nor fixed it, and it must not be counted as evidence for or against
   that plan.
 - It is distinct from the zero-wait `refresh.lock` dead-owner takeover (T10–T11 in the same

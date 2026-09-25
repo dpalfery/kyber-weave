@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-09-25
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -220,7 +220,7 @@ the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
   fresh launchd-started tray whose children rebind the same loopback ports.
 
 Automatic reconciliation: `refresh_run` rows left in `running` after their refresh process dies or times out (older than 15 minutes) are automatically reconciled to `failure` with an audit summary before subsequent refreshes start — see
-[the todo](../todo/stale-refresh-run-rows.md).
+[the closed todo](../archive/todo/stale-refresh-run-rows.md).
 
 ---
 
