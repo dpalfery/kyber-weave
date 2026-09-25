@@ -142,7 +142,7 @@ edited on its merits, under the repository's gates.
 
 The former `dash/kyber/**` tree was folded into `dash/src/**`, and the Electron desktop app,
 the inherited Windows tray, the macOS menu-bar bundle, and the Ink TUI were deleted as the
-[context-surfaces specification](../specs/kyberdash-context-surfaces/README.md) delivered;
+[context-surfaces specification](../archive/specs/kyberdash-context-surfaces/README.md) delivered;
 the table above is the whole layout.
 
 ## Ingest layer
@@ -567,7 +567,11 @@ as a monochrome template image (`icons/tray-template.svg`/`.png`).
 On macOS the tray runs as a per-user launchd agent (label `io.github.dpalfery.kyberdash`)
 that starts at login and restarts only after an unsuccessful exit
 (`KeepAlive { SuccessfulExit = false }`); an intentional **Quit** stops collection and is not
-restarted. The [runbook](runbook.md) documents running and deploying it.
+restarted. On Windows the tray ships as an NSIS installer and starts at login through a
+per-user `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value
+(`dash/tray/src-tauri/src/autostart.rs`). The [runbook](runbook.md) documents running and
+deploying it. [ADR 0023](../adr/0023-kyberdash-report-model-and-tray-ownership.md) records the
+report model, Rust-side HTTP, and the tray's ownership of the server, refresh and receiver.
 
 ### Report parity
 

@@ -45,6 +45,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 |---|---|---|
 | `KW-DOC-LIFECYCLE-001` | Error | A `plan` document in the plans folder that the plan index does not reach by links inside that folder |
 | `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
+| `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 
 ### Drift — `docs drift`
 

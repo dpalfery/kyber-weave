@@ -1,14 +1,21 @@
 ---
-id: todo/mistyped-release-tag
+id: archive/todo/mistyped-release-tag
 title: The v1.0.6-rc.6 tag outranks every real release
 doc-type: todo
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-16
-status: draft
+last-reviewed: 2026-09-24
+status: superseded
 ---
 
 # The v1.0.6-rc.6 tag outranks every real release
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-24
+
+The `v1.0.6-rc.6` tag and its Release are deleted. Dispatch releases now mint their version from the existing tags (`scripts/next-release-version.sh`, #88), which ignores a mistyped higher major. Both "newest" resolvers — `GitHubReleaseClient.ResolveNewestListed` and `install.sh --prerelease` via `kyber_weave_highest_version` — now take the highest SemVer instead of GitHub's creation order. No monotonicity guard was added to the tag-push path: tag pushes are reserved for deliberate minor and major cuts.
+
+---
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the seam is. It does not sequence tasks or commit to an implementation.

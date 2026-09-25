@@ -20,7 +20,7 @@ status: superseded
 > [!NOTE]
 > **Status: Completed**  
 > This todo has been completed and superseded by implementation plan
-> [docs/plans/2026-09-14-kilo-native-renderer.md](../../plans/2026-09-14-kilo-native-renderer.md).
+> [docs/archive/plans/2026-09-14-kilo-native-renderer.md](../plans/2026-09-14-kilo-native-renderer.md).
 >
 > **Implementation summary:**
 > - **Core Renderer:** [`KiloRenderer.cs`](../../../src/KyberWeave.Core/Squad/Rendering/KiloRenderer.cs) implements `ISquadRenderer` for `SquadTarget.Kilo`, projecting 21 native agents to `.kilo/agents/<name>.md` and 24 skills to `.kilo/skills/<name>/SKILL.md` along with linked resource closures (113 files total). On native targets like Kilo, agents and skills have separate directory structures (`.kilo/agents/` and `.kilo/skills/`), so all 21 agents and all 24 skills (plus 68 resources = 113 files) are emitted. `shared-identities` in `fallbacks.yml` is empty (`[]`), so no skills are suppressed (the 7 corpus collisions only trigger `role-` prefixes on fallback targets where agents are lowered into skills).

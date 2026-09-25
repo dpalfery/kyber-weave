@@ -84,7 +84,7 @@ further out of reach than `kyberdash` is. The `build-kyberdash` job needs Node a
 `build-tray` needs a Rust toolchain, `tauri build`, and — on macOS — a Developer ID
 certificate, an App Store Connect key and a notarization round trip. The last of those cannot
 run on a developer machine at all without the team's signing secrets, and
-[the signing todo](macos-developer-id-signing.md) is where that dependency lives.
+[the signing todo](../archive/todo/macos-developer-id-signing.md) is where that dependency lives.
 
 So the loop can never verify the whole tray path locally. What it *can* reach is the part that
 does not need a tray to exist:

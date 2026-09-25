@@ -12,6 +12,11 @@ public sealed class SquadInstallSettings : CommandSettings
     [Description("The deployment root directory. Defaults to the current directory.")]
     public string Path { get; set; } = ".";
 
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
+
     /// <summary>Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, all.</summary>
     [CommandOption("-t|--target <TARGETS>")]
     [Description("Harness target(s) to deploy: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, all.")]
@@ -42,6 +47,11 @@ public sealed class SquadInstallSettings : CommandSettings
     [CommandOption("--adopt")]
     [Description("Adopt pre-existing unmanaged files whose SHA-256 matches generated content exactly.")]
     public bool Adopt { get; set; }
+
+    /// <summary>Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.</summary>
+    [CommandOption("--yes")]
+    [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
+    public bool Yes { get; set; }
 }
 
 /// <summary>Settings for the <c>squad update</c> command.</summary>
@@ -51,6 +61,11 @@ public sealed class SquadUpdateSettings : CommandSettings
     [CommandArgument(0, "[path]")]
     [Description("The deployment root directory. Defaults to the current directory.")]
     public string Path { get; set; } = ".";
+
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
 
     /// <summary>Target the per-user global deployment directory rather than the local project.</summary>
     [CommandOption("-g|--global")]
@@ -82,6 +97,11 @@ public sealed class SquadUpdateSettings : CommandSettings
     [CommandOption("--replace-managed")]
     [Description("Overwrite locally edited receipt-owned files with canonical updates.")]
     public bool ReplaceManaged { get; set; }
+
+    /// <summary>Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.</summary>
+    [CommandOption("--yes")]
+    [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
+    public bool Yes { get; set; }
 }
 
 /// <summary>Settings for the <c>squad uninstall</c> command.</summary>
@@ -92,6 +112,11 @@ public sealed class SquadUninstallSettings : CommandSettings
     [Description("The deployment root directory. Defaults to the current directory.")]
     public string Path { get; set; } = ".";
 
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
+
     /// <summary>Target the per-user global deployment directory rather than the local project.</summary>
     [CommandOption("-g|--global")]
     [Description("Target the per-user global deployment directory rather than the local project.")]
@@ -101,6 +126,11 @@ public sealed class SquadUninstallSettings : CommandSettings
     [CommandOption("--dry-run")]
     [Description("Preview the files to be removed without making filesystem changes.")]
     public bool DryRun { get; set; }
+
+    /// <summary>Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.</summary>
+    [CommandOption("--yes")]
+    [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
+    public bool Yes { get; set; }
 }
 
 /// <summary>Settings for the <c>squad status</c> command.</summary>
@@ -110,6 +140,11 @@ public sealed class SquadStatusSettings : CommandSettings
     [CommandArgument(0, "[path]")]
     [Description("The deployment root directory. Defaults to the current directory.")]
     public string Path { get; set; } = ".";
+
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
 
     /// <summary>Inspect the per-user global deployment state rather than the local project.</summary>
     [CommandOption("-g|--global")]
@@ -124,6 +159,11 @@ public sealed class SquadDoctorSettings : CommandSettings
     [CommandArgument(0, "[path]")]
     [Description("The deployment root directory to inspect. Defaults to the current directory.")]
     public string Path { get; set; } = ".";
+
+    /// <summary>The deployment root directory, overriding the positional path when supplied.</summary>
+    [CommandOption("--path <PATH>")]
+    [Description("The deployment root directory, overriding the positional path when supplied.")]
+    public string? PathOption { get; set; }
 
     /// <summary>Inspect the per-user global deployment state rather than the local project.</summary>
     [CommandOption("-g|--global")]

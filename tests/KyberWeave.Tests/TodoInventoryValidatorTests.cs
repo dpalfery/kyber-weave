@@ -192,7 +192,7 @@ public sealed class TodoInventoryValidatorTests
         using DocFixture fixture = new DocFixture().WithCatalog()
             .Write(TodoIndex, Index("None."))
             .Write("6-Docs/todo/spike-cleanup.md", Todo("todo/spike-cleanup"));
-        DocsSettings settings = new DocsSettings { Path = fixture.Root, Format = "json" };
+        DocsValidateSettings settings = new DocsValidateSettings { Path = fixture.Root, Format = "json" };
 
         CapturedConsoleExecution<int> execution =
             ProcessConsoleCapture.Run(() => new DocsValidateCommand().Execute(null!, settings));

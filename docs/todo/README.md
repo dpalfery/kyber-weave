@@ -46,22 +46,20 @@ verification gaps, then content migration and hygiene.
 
 | # | Todo | Component | Description |
 |---|---|---|---|
-| 1 | [claude-renderer-ask-narrowing.md](claude-renderer-ask-narrowing.md) | KyberSquad | Claude, Pi and ZCode narrow `ask` to deny, so the rendered `architect` and `product-owner` cannot save their plans and specs on those harnesses — the conductor's plan and spec paths stop at their first write. |
-| 2 | [squad-path-argument-safety.md](squad-path-argument-safety.md) | KyberSquad | `squad` commands take the path positionally; a plausible `--path <dir>` silently installs into the current directory instead. |
-| 3 | [canon-multi-harness-session-gather.md](canon-multi-harness-session-gather.md) | KyberDash | Sessions whose canonical key spans several harnesses get a `${harness}:${key}` id that the record gather never matches, so they silently contribute no findings or run outcomes. |
-| 4 | [kyberdash-local-release-loop.md](kyberdash-local-release-loop.md) | Distribution | The local release loop builds no `kyberdash` or tray, so their install and update paths are unverifiable offline. `TrayMinVersion` is still the provisional `0.10.0`, but the tray first shipped in `0.1.7-rc.13`, so `kyber-weave update` skips tray updates. |
-| 5 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | The authoring skill's doc-type list lacks `todo` and `coding-standard`, so agents label a coding standard `reference`. |
-| 6 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
-| 7 | [mistyped-release-tag.md](mistyped-release-tag.md) | Distribution | The `v1.0.6-rc.6` tag is gone, but release resolution still trusts GitHub's list order instead of the highest version, and the release workflow has no monotonicity guard. |
-| 8 | [macos-developer-id-signing.md](macos-developer-id-signing.md) | Distribution | Part A is done — `0.1.7-rc.13` shipped the macOS tray signed and notarized. Part B remains: the CLI binaries ship ad-hoc signed and `install.sh` strips quarantine. |
-| 9 | [portable-artifacts-carry-project-standards.md](portable-artifacts-carry-project-standards.md) | KyberSquad | Remove project-specific coding standards embedded in the canonical agents and the seven code-review references; `squad install` does not deploy the standards templates. |
-| 10 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | Add a `--version` flag to `squad install` and `squad update`. |
-| 11 | [stale-refresh-run-rows.md](stale-refresh-run-rows.md) | KyberDash | `refresh_run` rows stay `running` forever after their refresh process dies; diagnostic-only, not on the report data path. |
-| 12 | [agent-spec-broken-reference-rule.md](agent-spec-broken-reference-rule.md) | ContextHygiene | `KW-AGENT-SPEC-004` is documented as "Broken file reference" but never raised — implement the check or withdraw the row. |
-| 13 | [migrate-skill-resources-into-standards.md](migrate-skill-resources-into-standards.md) | KyberSquad | Migrate retained skill-resource knowledge content-by-content into standards, governed documentation, or another verified durable home. |
-| 14 | [canon-test-fixture-consolidation.md](canon-test-fixture-consolidation.md) | KyberDash | `findings.test.ts` and `sessions.test.ts` duplicate the `CanonicalRecord` fixture helpers `tokens` and `turn`; test hygiene, no behaviour is wrong. |
-| 15 | [shell-implies-write-live-verification-other-targets.md](shell-implies-write-live-verification-other-targets.md) | KyberSquad | `capability-not-isolable` on Claude, Pi, ZCode, Factory and OpenCode rests on code inspection; live verification would confirm it and could unlock withheld Antigravity tools. |
-| 16 | [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | Packaging Squad as a ZCode plugin trades per-file receipt ownership for per-unit enablement — a deployment-model decision, not remaining ZCode work. |
+| 1 | [canon-multi-harness-session-gather.md](canon-multi-harness-session-gather.md) | KyberDash | Sessions whose canonical key spans several harnesses get a `${harness}:${key}` id that the record gather never matches, so they silently contribute no findings or run outcomes. |
+| 2 | [kyberdash-local-release-loop.md](kyberdash-local-release-loop.md) | Distribution | The local release loop builds no `kyberdash` or tray, so their install and update paths are unverifiable offline. |
+| 3 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | The authoring skill's doc-type list lacks `todo` and `coding-standard`, so agents label a coding standard `reference`. |
+| 4 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
+| 5 | [portable-artifacts-carry-project-standards.md](portable-artifacts-carry-project-standards.md) | KyberSquad | Remove project-specific coding standards embedded in the canonical agents and the seven code-review references; `squad install` does not deploy the standards templates. |
+| 6 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | Add a `--version` flag to `squad install` and `squad update`. |
+| 7 | [stale-refresh-run-rows.md](stale-refresh-run-rows.md) | KyberDash | `refresh_run` rows stay `running` forever after their refresh process dies; diagnostic-only, not on the report data path. |
+| 8 | [agent-spec-broken-reference-rule.md](agent-spec-broken-reference-rule.md) | ContextHygiene | `KW-AGENT-SPEC-004` is documented as "Broken file reference" but never raised — implement the check or withdraw the row. |
+| 9 | [migrate-skill-resources-into-standards.md](migrate-skill-resources-into-standards.md) | KyberSquad | Migrate retained skill-resource knowledge content-by-content into standards, governed documentation, or another verified durable home. |
+| 10 | [canon-test-fixture-consolidation.md](canon-test-fixture-consolidation.md) | KyberDash | `findings.test.ts` and `sessions.test.ts` duplicate the `CanonicalRecord` fixture helpers `tokens` and `turn`; test hygiene, no behaviour is wrong. |
+| 11 | [shell-implies-write-live-verification-other-targets.md](shell-implies-write-live-verification-other-targets.md) | KyberSquad | `capability-not-isolable` on Claude, Pi, ZCode, Factory and OpenCode rests on code inspection; live verification would confirm it and could unlock withheld Antigravity tools. |
+| 12 | [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | Packaging Squad as a ZCode plugin trades per-file receipt ownership for per-unit enablement — a deployment-model decision, not remaining ZCode work. |
+| 13 | [kyberdash-windows-code-signing.md](kyberdash-windows-code-signing.md) | Distribution | The Windows tray installer ships without Authenticode signing, so SmartScreen warns; needs a certificate and a signing step. |
+| 14 | [kyberdash-linux-tray.md](kyberdash-linux-tray.md) | KyberDash | The tray ships for macOS and Windows only; `kyberdash menubar` on Linux exits 1. |
 
 ### Closed
 
@@ -69,13 +67,15 @@ Archived under [`archive/todo/`](../archive/todo/). Kept for provenance, never c
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
+| [claude-renderer-ask-narrowing.md](../archive/todo/claude-renderer-ask-narrowing.md) | KyberSquad | superseded | Claude, Pi and ZCode turned `ask` into deny, so `architect` and `product-owner` could not save their plans and specs (fixed: both profiles now hold `filesystem.write: allow`, with the plan, spec and todo boundary instruction-only). |
 | [embeddings-endpoint-loopback-check.md](../archive/todo/embeddings-endpoint-loopback-check.md) | DocGraph | superseded | A non-loopback HTTPS embeddings endpoint was accepted where the test asserts rejection (fixed: the loader now requires loopback resolution). |
 | [kyber-squad-renderer-coverage.md](../archive/todo/kyber-squad-renderer-coverage.md) | KyberSquad | superseded | Kyber-Squad renderer target coverage (complete: all eleven targets have renderers; the CLI gaps have their own todos). |
 | [factory.md](../archive/todo/factory.md) | KyberSquad | superseded | Add a native Factory (factory-droids) renderer to Kyber-Squad (superseded by [plan](../archive/plans/2026-09-14-factory-native-renderer.md)). |
 | [menu-bar-fix.md](../archive/todo/menu-bar-fix.md) | KyberDash | superseded | The tray popover hung on its loading state and the status glyph was blank — delivered by the [menu-bar runtime wiring plan](../archive/plans/2026-09-20-kyberdash-menu-bar-runtime-wiring.md); owner confirmed the deployed popover, selector, and glyph 2026-09-22. |
-| [kilo.md](../archive/todo/kilo.md) | KyberSquad | superseded | Add a native Kilo renderer to Kyber-Squad (completed via [plan](../plans/2026-09-14-kilo-native-renderer.md)). |
-| [opencode.md](../archive/todo/opencode.md) | KyberSquad | superseded | Add a native OpenCode renderer to Kyber-Squad (superseded by [plan](../plans/2026-09-14-opencode-native-renderer.md)). |
+| [kilo.md](../archive/todo/kilo.md) | KyberSquad | superseded | Add a native Kilo renderer to Kyber-Squad (completed via [plan](../archive/plans/2026-09-14-kilo-native-renderer.md)). |
+| [opencode.md](../archive/todo/opencode.md) | KyberSquad | superseded | Add a native OpenCode renderer to Kyber-Squad (superseded by [plan](../archive/plans/2026-09-14-opencode-native-renderer.md)). |
 | [squad-hardcoded-docs-root.md](../archive/todo/squad-hardcoded-docs-root.md) | KyberSquad | superseded | Replace the hardcoded `6-Docs` path with a resolvable docs-root across Kyber-Squad's canonical instructions (completed: `second-brain` now resolves **<docs-root>** through the Config Reg). |
+| [squad-path-argument-safety.md](../archive/todo/squad-path-argument-safety.md) | KyberSquad | superseded | `squad` commands' positional path argument could silently target the wrong directory (superseded by [plan](../archive/plans/2026-09-23-squad-path-argument-safety.md); delivered via PR #113). |
 | [harness-specific-instruction-inserts.md](../archive/todo/harness-specific-instruction-inserts.md) | KyberSquad | superseded | Harness-conditional blocks in canonical agent instructions (motivating case gone: the unified conductor makes every role headless on every harness). |
 | [warp.md](../archive/todo/warp.md) | KyberSquad | superseded | Add a native Warp renderer to Kyber-Squad (superseded by WarpRenderer implementation). |
 | [black-hawk-hotel-todo.md](../archive/todo/black-hawk-hotel-todo.md) | KyberSquad | superseded | Handover of in-flight harness fidelity work: emit `thinking` for Pi, and reclassify Antigravity from fallback role-skills to its native agent primitive (superseded by [plan](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md)). |
@@ -85,3 +85,5 @@ Archived under [`archive/todo/`](../archive/todo/). Kept for provenance, never c
 | [pi.md](../archive/todo/pi.md) | KyberSquad | superseded | Add Pi as a Kyber-Squad harness target (delivered: `PiRenderer`). |
 | [claude-code.md](../archive/todo/claude-code.md) | KyberSquad | archived | Add a native Claude Code renderer to Kyber-Squad (delivered: `ClaudeRenderer`). |
 | [analyzer-debt-ca1307-1308-1716.md](../archive/todo/analyzer-debt-ca1307-1308-1716.md) | CI Pipelines | archived | Fix pre-existing CA analyzer debt. |
+| [mistyped-release-tag.md](../archive/todo/mistyped-release-tag.md) | Distribution | superseded | The mistyped `v1.0.6-rc.6` tag outranked every real release (fixed: tag deleted, dispatch mints versions from existing tags, and both resolvers take the highest SemVer). |
+| [macos-developer-id-signing.md](../archive/todo/macos-developer-id-signing.md) | Distribution | superseded | Developer ID signing and notarization (closed: the macOS tray ships signed and notarized from `0.1.7-rc.13`; CLI binary signing not pursued). |

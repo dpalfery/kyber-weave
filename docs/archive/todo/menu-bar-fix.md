@@ -78,7 +78,7 @@ that the tray worked; neither is.
   `TrayIconBuilder` with `.icon_as_template(true)`. macOS template images must be black and
   transparent; a full-colour PNG flattened to a filled silhouette, which was the blank square
   on screen. There was no monochrome template asset in [`icons/`](../../../dash/tray/src-tauri/icons).
-- **Task 8.9 is marked complete.** [`tasks.md:393`](../../specs/kyberdash-context-surfaces/tasks.md:393),
+- **Task 8.9 is marked complete.** [`tasks.md:393`](../specs/kyberdash-context-surfaces/tasks.md:393),
   "IPC surface and opening views", is `[x]`. Its acceptance is written entirely as tests of
   the helper functions — `get_view_state` carrying the design's `ViewState`, `open_view`
   refusing unmatched paths — every one of which passes against `ipc.rs` without a command
@@ -153,7 +153,7 @@ and live visual proof remain governed by the plan and are not claimed closed her
   event subscription, and action rejection feedback.
 - [`dash/tray/src-tauri/icons/`](../../../dash/tray/src-tauri/icons) — where a template asset
   would live.
-- [`docs/specs/kyberdash-context-surfaces/tasks.md`](../../specs/kyberdash-context-surfaces/tasks.md) —
+- [`docs/specs/kyberdash-context-surfaces/tasks.md`](../specs/kyberdash-context-surfaces/tasks.md) —
   task 8.9, and whatever the audit above concludes about its neighbours.
 
 ## How to verify

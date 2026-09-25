@@ -13,7 +13,7 @@ last-reviewed: 2026-09-22
 
 Modern AI coding agents operate through complex, multi-turn execution loops: invoking local tools, delegating tasks across specialized subagents, and ingesting repository context. Without dedicated observability, agent workflows remain opaque black boxes: developers cannot see where token budgets are wasted, which tool calls introduce latency bottlenecks, or when context windows approach saturation thresholds.
 
-**KyberDash** delivers observability through a CLI report, a web dashboard, and the shipped macOS Tauri tray. Its canonical `canon.db` store accepts OTLP traces and logs plus supported local session sources, and every reporting surface reads one shared projection of that store. Session APIs read that store only; the retired Python pipeline's `sessions.db` is not a production path.
+**KyberDash** delivers observability through a CLI report, a web dashboard, and a Tauri tray for macOS and Windows. Its canonical `canon.db` store accepts OTLP traces and logs plus supported local session sources, and every reporting surface reads one shared projection of that store. Session APIs read that store only; the retired Python pipeline's `sessions.db` is not a production path.
 
 ---
 
@@ -32,7 +32,7 @@ Refining agent instructions and skill definitions has historically been guesswor
 
 ### 4. Surfaces Where the Developer Already Works
 Observability belongs where the developer already works:
-- **KyberDash Tray (`dash/tray/`)**: The macOS menu-bar tray — a live popover over the canonical report, the refresh cadence, and the optional OTLP receiver, owned by a per-user launchd agent.
+- **KyberDash Tray (`dash/tray/`)**: The macOS menu-bar and Windows system-tray app — a live popover over the canonical report, the refresh cadence, and the optional OTLP receiver. A per-user launchd agent starts it on macOS; a per-user `Run` registry value starts it on Windows.
 - **Web Dashboard (`dash/web/`)**: Standalone browser application for progressive-disclosure diagnostics, run comparison, and context inspection.
 
 ---
