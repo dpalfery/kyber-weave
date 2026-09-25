@@ -9,8 +9,8 @@ last-reviewed: 2026-09-24
 
 # Telemetry inventory — verified harness signal and content availability
 
-This inventory records implemented collection behavior and the remaining runtime gates as
-of 2026-09-13. It does not treat an absent source as a zero: unavailable dimensions are
+This inventory records implemented collection behavior and the remaining runtime gates.
+It does not treat an absent source as a zero: unavailable dimensions are
 serialized as `not_measurable` with a source-specific reason.
 
 Local-history ingest is `dash refresh` ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)):
@@ -106,8 +106,8 @@ Absent signals are never rendered as zero spend or zero cache hit rate.
 
 **[VERIFIED]** The Sessions rail uses the ASAD session dashboard and canonical session
 payload. The six views consume the payload directly: overview, per-turn token spend,
-context composition, tool/schema cost, timeline, and cost/token accounting. Fixture and
-live rendering evidence exist for the Copilot session above.
+context composition, tool/schema cost, timeline, and cost/token accounting. The Copilot Chat
+row above records collection and normalization evidence. Live session rendering remains unverified here.
 
 **[NOT LIVE-VERIFIED]** The full-content drawer has fixture coverage, but was not exercised
 against a live session. The dashboard presents unavailability reasons instead of
