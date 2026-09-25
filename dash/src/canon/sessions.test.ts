@@ -293,6 +293,10 @@ describe('buildSessionRow', () => {
       availability: 'not_measurable' as const,
       reason: 'Copilot VS Code does not persist system prompts.',
     }
+    const unavailableToolResult = {
+      availability: 'not_measurable' as const,
+      reason: 'Copilot VS Code does not persist tool result content.',
+    }
     const record = turn(
       'copilot-partially-measurable',
       [{ part: 'conversation_history', text: 'user turn', tokens: 150 }],
@@ -300,7 +304,7 @@ describe('buildSessionRow', () => {
         source: 'copilot-vscode',
         harness: 'copilot-vscode',
         tokens: tokens({ freshInput: 150, reportedInput: 150 }),
-        measurability: { system_prompt: unavailableSystem },
+        measurability: { system_prompt: unavailableSystem, tool_result_content: unavailableToolResult },
       },
     )
 
@@ -313,6 +317,8 @@ describe('buildSessionRow', () => {
     expect(unavailableReason(payload.context.first.buckets['system_prompt'], 'system_prompt')).toContain(
       'Copilot VS Code',
     )
+    expect(payload.context.first.buckets['tool_result_content']).toEqual(unavailableToolResult)
+    expect(payload.context.last.buckets['tool_result_content']).toEqual(unavailableToolResult)
   })
 })
 

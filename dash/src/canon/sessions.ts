@@ -444,11 +444,17 @@ export function buildSessionRow(
       return unavailable === undefined ? [] : [[bucket, unavailable]]
     }),
   )
+  const unavailableCanonicalBuckets = Object.fromEntries(
+    Object.entries(contextBucketDeclarations).flatMap(([bucket, canonical]) =>
+      unavailableBuckets[bucket] === undefined ? [] : [[canonical, unavailableBuckets[bucket]]],
+    ),
+  )
+  const unavailableContextBuckets = { ...unavailableCanonicalBuckets, ...unavailableBuckets }
   const contextBucket = (turn: (typeof analyzedTurns)[number] | undefined, reportedInput: number): AsadContextBucket => ({
     buckets: turn?.buckets
-      ? { ...turn.buckets, ...unavailableBuckets }
-      : Object.keys(unavailableBuckets).length > 0
-        ? unavailableBuckets
+      ? { ...turn.buckets, ...unavailableContextBuckets }
+      : Object.keys(unavailableContextBuckets).length > 0
+        ? unavailableContextBuckets
         : {},
     reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
   })
