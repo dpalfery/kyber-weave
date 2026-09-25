@@ -98,7 +98,7 @@ same-name role skills.
 
 Reference deduplication follows the agent directory's filesystem case rules, so differently cased paths remain separate when the filesystem distinguishes them.
 
-**Hint text**: When a reference does not resolve, the check attempts to find the nearest existing file or directory using Levenshtein distance (threshold ≤ 3 edits), searching the referenced subdirectory and, when empty, one level above the agent. Candidate suggestions are relative to the agent directory. When the subdirectory is missing or cannot be enumerated, fallback text directs the author to check spelling relative to the agent definition directory.
+**Hint text**: When a reference does not resolve, the check attempts to find the nearest existing file or directory using Levenshtein distance (threshold ≤ 3 edits), searching only the referenced subdirectory, so suggestions never point outside the agent directory. Candidate suggestions are relative to the agent directory. When the subdirectory is missing, empty, or cannot be enumerated, fallback text directs the author to check spelling relative to the agent definition directory.
 
 ## Parity and drift — `KW-AGENT-SYNC-*`, `KW-AGENT-LINT-*`
 

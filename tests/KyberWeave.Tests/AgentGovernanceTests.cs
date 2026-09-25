@@ -581,4 +581,28 @@ public class AgentSpecValidatorTests
             d => d.Code == AgentSpecValidator.RuleBrokenFileReference);
         Assert.Contains("Relative file path does not exist", diagnostic.Hint, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void EmptyReferenceDirectoryNeverSuggestsPathOutsideAgentDirectory()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string agentDir = Path.Combine(tempDir.Path, "agent");
+        Directory.CreateDirectory(Path.Combine(agentDir, "references"));
+        File.WriteAllText(Path.Combine(tempDir.Path, "guide.md"), "# Guide");
+
+        AgentModel agent = new AgentModel
+        {
+            RoleName = "test-agent",
+            Harness = HarnessKind.Claude,
+            FilePath = Path.Combine(agentDir, "agent.md"),
+            DirectoryPath = agentDir,
+            Description = "Use when working with references.",
+            InstructionsBody = "See `references/guide.md`."
+        };
+
+        Diagnostic diagnostic = Assert.Single(AgentSpecValidator.Validate(agent).Items,
+            d => d.Code == AgentSpecValidator.RuleBrokenFileReference);
+        Assert.DoesNotContain("..", diagnostic.Hint, StringComparison.Ordinal);
+        Assert.Contains("Relative file path does not exist", diagnostic.Hint, StringComparison.Ordinal);
+    }
 }

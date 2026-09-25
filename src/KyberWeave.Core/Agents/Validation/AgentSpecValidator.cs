@@ -97,7 +97,7 @@ public static partial class AgentSpecValidator
         {
             if (!exists)
             {
-                string resolvedPath = Path.GetFullPath(Path.Combine(agent.DirectoryPath, reference));
+                string resolvedPath = DescribeResolvedPath(agent.DirectoryPath, reference);
                 string hintText = hint ?? "Relative file path does not exist. Check the path spelling relative to the agent definition directory.";
 
                 report.Add(new Diagnostic(
@@ -108,6 +108,21 @@ public static partial class AgentSpecValidator
                     agent.FilePath,
                     hintText));
             }
+        }
+    }
+
+    /// <summary>
+    /// Resolves a reference for the diagnostic message, falling back to the reference itself when it cannot be resolved.
+    /// </summary>
+    private static string DescribeResolvedPath(string directoryPath, string reference)
+    {
+        try
+        {
+            return Path.GetFullPath(Path.Combine(directoryPath, reference));
+        }
+        catch (Exception exception) when (exception is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            return reference;
         }
     }
 
@@ -299,8 +314,8 @@ public static partial class AgentSpecValidator
     /// Finds the nearest existing file or directory match to a broken reference using edit distance.
     /// </summary>
     /// <remarks>
-    /// Searches the referenced directory and one level above the agent if the directory has no
-    /// entries. Returns the best match or null if none found.
+    /// Searches only the referenced directory, so every suggestion stays inside the agent directory.
+    /// Returns the best match or null if none found.
     /// Uses Levenshtein distance to compute similarity.
     /// </remarks>
     private static string? FindNearestMatch(string directoryPath, string brokenReference)
@@ -328,20 +343,6 @@ public static partial class AgentSpecValidator
                 string fileName = Path.GetFileName(file);
                 int distance = LevenshteinDistance(referenceName, fileName);
                 candidates.Add((Path.GetRelativePath(directoryPath, file), distance));
-            }
-
-            if (candidates.Count == 0)
-            {
-                string? parentDir = Directory.GetParent(directoryPath)?.FullName;
-                if (parentDir is { } && Directory.Exists(parentDir))
-                {
-                    foreach (string file in Directory.EnumerateFileSystemEntries(parentDir))
-                    {
-                        string fileName = Path.GetFileName(file);
-                        int distance = LevenshteinDistance(referenceName, fileName);
-                        candidates.Add((Path.GetRelativePath(directoryPath, file), distance));
-                    }
-                }
             }
         }
         catch (IOException)
