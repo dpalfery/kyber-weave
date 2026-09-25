@@ -48,17 +48,8 @@ verification gaps, then content migration and hygiene.
 |---|---|---|---|
 | 1 | [canon-multi-harness-session-gather.md](canon-multi-harness-session-gather.md) | KyberDash | Sessions whose canonical key spans several harnesses get a `${harness}:${key}` id that the record gather never matches, so they silently contribute no findings or run outcomes. |
 | 2 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | The authoring skill's doc-type list lacks `todo` and `coding-standard`, so agents label a coding standard `reference`. |
-| 3 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
-| 4 | [portable-artifacts-carry-project-standards.md](portable-artifacts-carry-project-standards.md) | KyberSquad | Remove project-specific coding standards embedded in the canonical agents and the seven code-review references; `squad install` does not deploy the standards templates. |
-| 5 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | Add a `--version` flag to `squad install` and `squad update`. |
-| 6 | [stale-refresh-run-rows.md](stale-refresh-run-rows.md) | KyberDash | `refresh_run` rows stay `running` forever after their refresh process dies; diagnostic-only, not on the report data path. |
-| 7 | [agent-spec-broken-reference-rule.md](agent-spec-broken-reference-rule.md) | ContextHygiene | `KW-AGENT-SPEC-004` is documented as "Broken file reference" but never raised — implement the check or withdraw the row. |
-| 8 | [migrate-skill-resources-into-standards.md](migrate-skill-resources-into-standards.md) | KyberSquad | Migrate retained skill-resource knowledge content-by-content into standards, governed documentation, or another verified durable home. |
-| 9 | [canon-test-fixture-consolidation.md](canon-test-fixture-consolidation.md) | KyberDash | `findings.test.ts` and `sessions.test.ts` duplicate the `CanonicalRecord` fixture helpers `tokens` and `turn`; test hygiene, no behaviour is wrong. |
-| 10 | [shell-implies-write-live-verification-other-targets.md](shell-implies-write-live-verification-other-targets.md) | KyberSquad | `capability-not-isolable` on Claude, Pi, ZCode, Factory and OpenCode rests on code inspection; live verification would confirm it and could unlock withheld Antigravity tools. |
-| 11 | [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | Packaging Squad as a ZCode plugin trades per-file receipt ownership for per-unit enablement — a deployment-model decision, not remaining ZCode work. |
-| 12 | [kyberdash-windows-code-signing.md](kyberdash-windows-code-signing.md) | Distribution | The Windows tray installer ships without Authenticode signing, so SmartScreen warns; needs a certificate and a signing step. |
-| 13 | [kyberdash-linux-tray.md](kyberdash-linux-tray.md) | KyberDash | The tray ships for macOS and Windows only; `kyberdash menubar` on Linux exits 1. |
+| 3 | [stale-refresh-run-rows.md](stale-refresh-run-rows.md) | KyberDash | `refresh_run` rows stay `running` forever after their refresh process dies; diagnostic-only, not on the report data path. |
+| 4 | [agent-spec-broken-reference-rule.md](agent-spec-broken-reference-rule.md) | ContextHygiene | `KW-AGENT-SPEC-004` is documented as "Broken file reference" but never raised — implement the check or withdraw the row. |
 
 ### Closed
 
