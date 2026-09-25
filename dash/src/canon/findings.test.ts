@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { buildFindings } from './findings.js'
 import { buildRuns } from './runs.js'
+import { buildSessions } from './sessions.js'
 import { CanonStore } from './store.js'
 import type { CanonicalRecord, ContentPart } from './types.js'
 
@@ -288,6 +289,43 @@ describe('buildFindings over a session key that spans several harnesses', () => 
     for (const run of runs) {
       expect(run.outcome?.statusReason, `run ${run.runId} (${run.harness})`).not.toBe(EMPTY_OUTCOME_REASON)
     }
+    store.close()
+  })
+
+  it('keeps a split share apart from a native session whose own key reads like its id', async () => {
+    // `antigravity:sess-x` is a native key of its own here, and `sess-x` is
+    // split across antigravity and copilot-cli. Minting the split share as
+    // `antigravity:sess-x` would land both on one session and execution row
+    // (both tables replace on their id), and the gather could not tell which
+    // records the id meant.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      ...multiHarnessRecords('sess-x'),
+      turn('native-1', [], {
+        sessionId: 'antigravity:sess-x',
+        timestamp: '2026-09-05T10:00:00.000Z',
+        tokens: tokens({ freshInput: 10_000, reportedInput: 10_000 }),
+        raw: { 'gen_ai.request.max_context_tokens': 200_000 },
+      }),
+    ])
+
+    await buildSessions(store)
+
+    const sessionIds = store.builtSessionIds().sort()
+    expect(sessionIds).toHaveLength(3)
+    expect(sessionIds).toContain('antigravity:sess-x')
+    expect(sessionIds).toContain('copilot-cli:sess-x')
+    const executionIds = store.listExecutions().map((execution) => execution.executionId).sort()
+    expect(executionIds).toEqual(sessionIds)
+
+    const hazards = persistedCompactionHazards(store)
+    expect(hazards).toHaveLength(1)
+    const hazard = hazards[0]!
+    // The hazard is the split share's, named after the row that share built —
+    // not the native session's id, and not measured over its records.
+    expect(hazard.sessionId).not.toBe('antigravity:sess-x')
+    expect(sessionIds).toContain(hazard.sessionId)
+    expect(hazard.evidenceLinks.map((link) => link.spanId).sort()).toEqual(['m-ag-1', 'm-ag-2'])
     store.close()
   })
 

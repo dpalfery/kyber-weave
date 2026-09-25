@@ -33,19 +33,16 @@ export type BuildFindingsReport = {
 export function buildFindings(store: CanonStore): BuildFindingsReport {
   const report: BuildFindingsReport = { runsExamined: 0, findingsBuilt: 0, pruned: 0 }
   const builtIds = new Set<string>()
+  const identities = store.sessionIdentities()
 
   for (const run of store.listRuns()) {
     const records: CanonicalRecord[] = []
-    // Runs are grouped per harness, so a run holds one harness's share of a
-    // split key and the detector cannot see the key's other harnesses in what
-    // it is handed. The keys the builders split are passed alongside, or the
-    // detector would name its finding after a bare key no session row carries.
-    const harnessQualifiedKeys = new Set<string>()
     for (const execution of store.listExecutions(run.runId)) {
       const sessionId = execution.sessionId ?? execution.executionId
-      const share = store.recordsForDerivedSession(sessionId, execution.harness)
-      records.push(...share.records)
-      if (share.key !== sessionId) harnessQualifiedKeys.add(share.key)
+      const share = identities.shareOf(sessionId)
+      records.push(
+        ...(share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)),
+      )
     }
     if (records.length === 0) continue
 
@@ -55,7 +52,10 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
       runId: run.runId,
       records,
       ...(run.outcome === undefined ? {} : { outcome: run.outcome }),
-      ...(harnessQualifiedKeys.size === 0 ? {} : { harnessQualifiedKeys }),
+      // Runs are grouped per harness, so a run holds one share of a split key
+      // and its records alone cannot say the key was split, nor which id the
+      // share was given. The detector names its sessions from the same table.
+      sessionIdentities: identities,
     })
 
     for (const finding of findings) {

@@ -58,23 +58,28 @@ defect as a todo the same day.
 
 Decided and delivered in PR #121:
 
-- **Gather semantics: key plus canonical harness, through one shared rule.** `harnessSessionId`
-  in `dash/src/canon/measurability.ts` is now the only place the `${harness}:${key}` id is
-  minted — by `buildSessions`, `buildRuns` and the compaction-hazard detector — and
-  `harnessSessionKey` beside it inverts it. `CanonStore.recordsForDerivedSession(sessionId,
-  harness)` gathers one harness's share of a key: it tries the id verbatim, then the key the
-  prefix was minted from, and keeps only records whose canonical harness matches, so a share
-  never absorbs its sibling's records.
-- **The harness comes from the execution row, never from parsing the id.** Native session ids
-  can contain a colon, so splitting on the first one would misread a bare key as a harness and
-  lose its records.
+- **Gather semantics: key plus canonical harness, through one identity table.**
+  `SessionIdentities` in `dash/src/canon/measurability.ts` assigns the persisted id of every
+  canonical-harness share of every session key. `CanonStore.sessionIdentities()` builds it
+  from the corpus, and `buildSessions`, `buildRuns` and `buildFindings` all take their ids from
+  it. `CanonStore.recordsForShare(key, harness)` gathers one share: the key's records whose
+  canonical harness matches, so a share never absorbs its sibling's records.
+- **Ids stay as they were, and cannot collide.** A single-harness key keeps the key as its id,
+  and a split share is `${harness}:${key}`. The table is built over the whole corpus, so a
+  split share whose id a native key already holds is re-prefixed with its harness until it is
+  free. The `session` and `execution` tables replace on their id, so two sessions sharing one
+  would silently lose a row. Raised by CodeRabbit on PR #121.
+- **An id is looked up, never parsed.** The share an execution stands for comes from the
+  table: native session ids can contain a colon, and a re-prefixed id no longer has the
+  shape a parser would expect.
 - **Run outcomes share the fix.** `buildRuns` derives each run's outcome through the same
   gather.
-- **The detector is told which keys were split.** Runs are grouped per harness, so a run never
-  holds every share of a key and the detector cannot see from its records that the key was
-  split. `buildFindings` passes those keys as `harnessQualifiedKeys`, so the compaction hazard
-  names the `${harness}:${key}` session row that exists.
-- **Coverage:** `dash/src/canon/findings.test.ts` covers the store gather through
-  `buildRuns` and `buildFindings` to the persisted hazard and each share's run outcome, plus a
-  single-harness key containing a colon. `dash/src/canon/split-identity.test.ts` pins the id
-  rule and the gather across raw-harness aliases and an excluded Gemini record.
+- **The detector names sessions from the same table.** Runs are grouped per harness, so a run
+  holds one share of a split key and its records cannot show the split or the id the share was
+  given. `buildFindings` passes the table to `detectFindings`, so a compaction hazard names the
+  session row that exists.
+- **Coverage:** `dash/src/canon/findings.test.ts` covers the store gather through `buildRuns`
+  and `buildFindings` to the persisted hazard and each share's run outcome, a split share next
+  to a native key that reads like its id, and a single-harness key containing a colon.
+  `dash/src/canon/split-identity.test.ts` pins the identity table: native keys, qualification,
+  re-prefixing, order independence, raw-harness aliases, and an excluded Gemini record.

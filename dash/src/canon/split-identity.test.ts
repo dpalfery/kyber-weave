@@ -3,8 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   GEMINI_SELECTOR_LABEL,
   cacheAvailability,
-  harnessSessionId,
-  harnessSessionKey,
+  SessionIdentities,
   isExcludedHarnessIdentity,
   normalizeHarnessName,
   prefixAvailability,
@@ -231,48 +230,80 @@ describe('T6 session stamp uses the split canonical id', () => {
   })
 })
 
-describe('harness-qualified session ids', () => {
-  it('qualifies a key only when it spans several harnesses, and inverts only its own prefix', () => {
-    expect(harnessSessionId('cursor', 'sess-1', 1)).toBe('sess-1')
-    expect(harnessSessionId('cursor', 'sess-1', 2)).toBe('cursor:sess-1')
-    expect(harnessSessionKey('cursor:sess-1', 'cursor')).toBe('sess-1')
-    // A native key with a colon of its own is not a prefix for another harness.
-    expect(harnessSessionKey('workspace:sess-1', 'cursor')).toBeUndefined()
-    expect(harnessSessionKey('cursor:', 'cursor')).toBeUndefined()
+describe('session identities', () => {
+  it('keeps a single-harness key as its id and qualifies each share of a split key', () => {
+    const identities = new SessionIdentities([
+      { key: 'solo', harness: 'cursor' },
+      { key: 'split', harness: 'cursor' },
+      { key: 'split', harness: 'copilot-chat' },
+    ])
+
+    expect(identities.idFor('solo', 'cursor')).toBe('solo')
+    expect(identities.idFor('split', 'cursor')).toBe('cursor:split')
+    // Shares are keyed by canonical harness, whatever raw name the record arrived under.
+    expect(identities.idFor('split', 'copilot-chat')).toBe('copilot-vscode:split')
+    expect(identities.shareOf('copilot-vscode:split')).toEqual({ key: 'split', harness: 'copilot-vscode' })
+    expect(identities.shareOf('split')).toBeUndefined()
   })
 
-  it('gathers one canonical harness share of a split key, whatever raw name its records arrived under', async () => {
+  it('re-prefixes a split share whose id a native key already holds, and maps each id back', () => {
+    const identities = new SessionIdentities([
+      { key: 'cursor:k', harness: 'cursor' },
+      { key: 'k', harness: 'cursor' },
+      { key: 'k', harness: 'copilot-cli' },
+    ])
+
+    expect(identities.idFor('cursor:k', 'cursor')).toBe('cursor:k')
+    expect(identities.idFor('k', 'cursor')).toBe('cursor:cursor:k')
+    expect(identities.idFor('k', 'copilot-cli')).toBe('copilot-cli:k')
+    expect(identities.shareOf('cursor:k')).toEqual({ key: 'cursor:k', harness: 'cursor' })
+    expect(identities.shareOf('cursor:cursor:k')).toEqual({ key: 'k', harness: 'cursor' })
+  })
+
+  it('mints the same ids whatever order the pairs arrive in', () => {
+    const pairs = [
+      { key: 'cursor:k', harness: 'cursor' },
+      { key: 'k', harness: 'cursor' },
+      { key: 'k', harness: 'copilot-cli' },
+      { key: 'j', harness: 'cursor' },
+      { key: 'j', harness: 'aider' },
+    ]
+    const forward = new SessionIdentities(pairs)
+    const reverse = new SessionIdentities([...pairs].reverse())
+    for (const { key, harness } of pairs) {
+      expect(reverse.idFor(key, harness)).toBe(forward.idFor(key, harness))
+    }
+  })
+
+  it('gives an excluded identity no share, and mints a late share clear of the key it joins', () => {
+    const identities = new SessionIdentities([
+      { key: 'k', harness: 'cursor' },
+      { key: 'k', harness: 'gemini' },
+    ])
+
+    expect(identities.idFor('k', 'cursor')).toBe('k')
+    expect(identities.idFor('k', 'gemini')).toBeUndefined()
+    // A share the table never saw (a record ingested after it was built) must
+    // not take the bare key its sibling already owns.
+    expect(identities.claim('k', 'aider')).toBe('aider:k')
+    expect(identities.shareOf('aider:k')).toEqual({ key: 'k', harness: 'aider' })
+  })
+
+  it('builds each split share from its own records under the id the table assigns', async () => {
     const store = new CanonStore(':memory:')
     store.upsertMany([
       record('split-vs', 'copilot-chat', 'k-split'),
       record('split-cur', 'cursor', 'k-split', { timestamp: '2026-09-03T10:01:00.000Z' }),
       record('split-gem', 'gemini', 'k-split', { timestamp: '2026-09-03T10:02:00.000Z' }),
+      record('native-cur', 'cursor', 'cursor:k-split', { timestamp: '2026-09-03T10:03:00.000Z' }),
     ])
 
     await buildSessions(store)
-    expect(store.builtSessionIds().sort()).toEqual(['copilot-vscode:k-split', 'cursor:k-split'])
 
-    const share = store.recordsForDerivedSession('copilot-vscode:k-split', 'copilot-vscode')
-    expect(share.key).toBe('k-split')
-    expect(share.records.map((r) => r.spanId)).toEqual(['split-vs'])
-    expect(store.recordsForDerivedSession('cursor:k-split', 'cursor').records.map((r) => r.spanId)).toEqual([
-      'split-cur',
-    ])
-    // A raw provider name finds the canonical share it belongs to.
-    expect(store.recordsForDerivedSession('copilot-vscode:k-split', 'copilot-chat').records.map((r) => r.spanId)).toEqual([
-      'split-vs',
-    ])
-    store.close()
-  })
-
-  it('reads a bare key verbatim even when it contains a colon', () => {
-    const store = new CanonStore(':memory:')
-    store.upsertMany([record('colon-1', 'cursor', 'cursor:native-id')])
-
-    const share = store.recordsForDerivedSession('cursor:native-id', 'cursor')
-    expect(share.key).toBe('cursor:native-id')
-    expect(share.records.map((r) => r.spanId)).toEqual(['colon-1'])
-    expect(store.recordsForDerivedSession('unknown-key', 'cursor')).toEqual({ key: 'unknown-key', records: [] })
+    expect(store.builtSessionIds().sort()).toEqual(['copilot-vscode:k-split', 'cursor:cursor:k-split', 'cursor:k-split'])
+    expect(store.recordsForShare('k-split', 'copilot-chat').map((r) => r.spanId)).toEqual(['split-vs'])
+    expect(store.recordsForShare('k-split', 'cursor').map((r) => r.spanId)).toEqual(['split-cur'])
+    expect(store.recordsForShare('cursor:k-split', 'cursor').map((r) => r.spanId)).toEqual(['native-cur'])
     store.close()
   })
 })

@@ -13,7 +13,7 @@
 // deflate-compressed rather than stored verbatim (R12.4) — the measured cost
 // of not doing so is 2.9 GB for 37,623 records, roughly 78 KB per span.
 
-import { FILE_SOURCE_PREFIX, canonicalHarnessId, harnessSessionKey, normalizeHarnessName } from './measurability.js'
+import { FILE_SOURCE_PREFIX, SessionIdentities, canonicalHarnessId, normalizeHarnessName } from './measurability.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createRequire } from 'node:module'
@@ -1528,30 +1528,30 @@ export class CanonStore {
   }
 
   /**
-   * The records behind one derived session or execution id — one canonical
-   * harness's share of a session key — and the key they are stored under.
-   *
-   * A key whose records span several canonical harnesses is split into one
-   * row per harness, each named `${harness}:${key}` (`harnessSessionId`). That
-   * id is no record's key, so handing it to `recordsForSession` returned
-   * nothing, and every consumer that gathered by execution — findings, run
-   * outcomes — silently skipped the session. The share is recovered here from
-   * the harness the row already carries, never by parsing the id, and the id
-   * is tried verbatim first: a native key may contain a colon of its own. Both
-   * forms are filtered to the one harness so a share never absorbs its
-   * sibling's records, the same grouping `groupByCanonicalHarness` built the
-   * row from. The harness is normalized first, so a raw provider name finds
-   * the canonical share it belongs to.
+   * The persisted id of every canonical-harness share of every session key in
+   * the store. `buildSessions`, `buildRuns` and `buildFindings` each take it
+   * from here, so a session row, its execution and its findings agree on one
+   * id even when a native key reads like a split share's id.
    */
-  recordsForDerivedSession(sessionId: string, harness: string): { key: string; records: CanonicalRecord[] } {
+  sessionIdentities(): SessionIdentities {
+    const pairs = this.db
+      .prepare(
+        `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+         FROM records
+         WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+      )
+      .all() as { key: string; harness: string }[]
+    return new SessionIdentities(pairs)
+  }
+
+  /**
+   * One canonical harness's share of a session key, in timestamp order: the
+   * records a split share's row was built from, without its sibling's. The
+   * harness is normalized first, so a raw provider name finds its share.
+   */
+  recordsForShare(key: string, harness: string): CanonicalRecord[] {
     const canonical = normalizeHarnessName(harness)
-    const ofHarness = (records: readonly CanonicalRecord[]) =>
-      records.filter((record) => canonicalHarnessId(record.harness) === canonical)
-    const verbatim = ofHarness(this.recordsForSession(sessionId))
-    if (verbatim.length > 0) return { key: sessionId, records: verbatim }
-    const key = harnessSessionKey(sessionId, canonical)
-    if (key === undefined) return { key: sessionId, records: [] }
-    return { key, records: ofHarness(this.recordsForSession(key)) }
+    return this.recordsForSession(key).filter((record) => canonicalHarnessId(record.harness) === canonical)
   }
 
   /**
