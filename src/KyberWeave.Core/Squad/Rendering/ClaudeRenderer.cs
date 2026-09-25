@@ -488,7 +488,7 @@ public sealed class ClaudeRenderer : ISquadRenderer
         // Primary agents always declare every capability decision in permission-not-expressible,
         // so the entry point and subagent descriptions both state what is not enforced.
         notExpressibleDetails.Add(
-            $"Capability decisions ({DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}).");
+            $"Capability decisions ({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}).");
 
         if (isSkillMode)
         {
@@ -653,39 +653,6 @@ public sealed class ClaudeRenderer : ISquadRenderer
             yield return notIsolable;
         }
     }
-
-    /// <summary>
-    /// Reports every vocabulary capability's resolved decision for a primary agent's
-    /// permission-not-expressible entry-point clause, defaulting an undeclared capability to
-    /// <see cref="SquadPermissionDecision.Deny"/> the same way an absent permission entry
-    /// behaves elsewhere in this pipeline.
-    /// </summary>
-    private static string DescribeCapabilityDecisions(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
-    {
-        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile);
-
-        return string.Join(
-            "; ",
-            capabilityVocabulary.Select(capability =>
-            {
-                SquadPermissionDecision decision = profile is not null &&
-                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision resolved)
-                        ? resolved
-                        : SquadPermissionDecision.Deny;
-                return $"{capability}: {DescribeDecision(decision)}";
-            }));
-    }
-
-    private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
-    {
-        SquadPermissionDecision.Allow => "allow",
-        SquadPermissionDecision.Ask => "ask",
-        SquadPermissionDecision.Deny => "deny",
-        _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown permission decision.")
-    };
 
     /// <summary>
     /// Strongly-typed sequence wrapper to direct YamlDotNet serialization through

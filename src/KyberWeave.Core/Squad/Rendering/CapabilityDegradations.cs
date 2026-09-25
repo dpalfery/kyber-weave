@@ -81,6 +81,35 @@ internal static class CapabilityDegradations
                 $"Write access remains reachable through shell redirection despite withholding write tools ({writeTools}).");
     }
 
+    /// <summary>
+    /// Reports every vocabulary capability's resolved decision (per the
+    /// <c>permission-not-expressible</c> contract), defaulting an undeclared capability to
+    /// <see cref="SquadPermissionDecision.Deny"/> the same way an absent permission entry
+    /// behaves elsewhere in this pipeline.
+    /// </summary>
+    internal static string DescribeCapabilityDecisions(
+        SquadAgent agent,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> capabilityVocabulary)
+    {
+        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile);
+
+        return string.Join(
+            "; ",
+            capabilityVocabulary.Select(capability =>
+            {
+                SquadPermissionDecision decision = profile is not null &&
+                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision resolved)
+                        ? resolved
+                        : SquadPermissionDecision.Deny;
+                return $"{capability}: {DescribeDecision(decision)}";
+            }));
+    }
+
+    // An undefined decision describes as the non-broadening `deny`, matching the lattice rule
+    // that an unresolvable grant grants nothing. The default arm is reachable only through an
+    // undefined cast, which the loader never produces, so this does not affect byte-identical
+    // Details output across any renderer.
     private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
     {
         SquadPermissionDecision.Allow => "allow",
