@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-25
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -169,6 +169,59 @@ delegation that `architect` and `code-reviewer` need. Lowering it to a top-level
 depth 0, where the extension's `Agent` tool is available, and its specialists' nested rosters
 still work.
 
+### Native Branch: Claude with a Primary-Agent Entry-Point Skill
+
+Claude is a native agent target that projects subagents natively to `.claude/agents/<name>.md` and
+has a real primary-agent primitive only through `claude --agent <name>` or the `agent` setting —
+the only modes where Claude Code enforces the agent's `tools` allow-list, `Agent(roster)` roster,
+and model. A primary-invocation agent rendered as a subagent would run nested, where the roster
+is ignored and the Agent tool may be unavailable (spawn depth 1 in cloud sessions).
+
+When a primary agent's fallback profile declares `no-primary-agent: skill`, Claude renders **both**
+the subagent at `.claude/agents/<name>.md` (kept for enforced invocation) **and** an entry-point
+skill at `.claude/skills/<name>/SKILL.md`, invoked as `/<name>` in the main conversation. The skill
+is byte-identical to the subagent body and carries exactly three frontmatter keys: `name`,
+`description` (collapsed to one line), and `license: MIT`. Its resources project beside it as with
+other skills.
+
+The skill's description stays in Claude's context, so Claude may auto-load `/<name>` into the main
+conversation without the user typing it. The degradation records account for this unenforced
+entry point: its details state that the session's tools, permission mode, MCP servers and model
+apply to the skill, and that `claude --agent <name>` is the enforced alternative. The subagent
+file is kept unchanged, and resources project to both principals.
+
+Claude is the first native target where a single agent emits two distinct principals (subagent and
+entry-point skill). Under `no-primary-agent: omit`, no entry-point skill is emitted and the agent's
+records remain unchanged.
+
+**Fail-closed on canonical skill collision.** If a canonical skill occupies the entry-point
+identity, the render fails with a `SquadRenderValidationException` rather than resolving the
+collision through role-prefixing. This is a design choice specific to Claude: the subagent and
+skill resolve to different values in Claude's own scope-precedence rules (skills: personal over
+project; agents: project over user), so collision is theoretically possible and is treated as
+exceptional.
+
+**Rejected alternatives:**
+- Legacy `.claude/commands/conductor.md` command: Claude Code registers files under
+  `.claude/commands/<subdir>/` as `<subdir>:<name>` commands, so resources would become phantom
+  commands, requiring ZCode-style relocation and link rewriting ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)).
+  A skill directory takes supporting files natively, and a skill wins over a same-named command.
+- Skill with `context: fork` and `agent: conductor`: runs an isolated subagent that does not see
+  conversation history, runs in the background by default, and recreates the nested-subagent
+  failure (no Agent tool at depth 1).
+- Setting `"agent": "conductor"` in `.claude/settings.json`: makes every session a conductor
+  session, but Squad does not own settings files.
+- Replacing the subagent with the skill: drops the only enforced form (`claude --agent conductor`)
+  and breaks existing `@agent-conductor` use.
+- Unconditional renderer rule for every primary agent: Claude would become the only target that
+  ignores the declared `no-primary-agent` value, with no off switch in source.
+- A new dedicated profile key: it is a schema change when the existing key already declares the
+  intent.
+- Emitting `model`, `allowed-tools` or `disallowed-tools` on the skill: all three last only for
+  the invoking turn and cannot hold the orchestration profile.
+- Hook-based enforcement from the skill: skill hooks stay registered for the rest of the session,
+  which outlives the conductor's use.
+
 ---
 
 ## 4. State, Identity, and Locking Model
@@ -277,9 +330,9 @@ and validates.
   renderer fails the whole request — install and update are all-or-nothing across the
   requested target set, never a partial render of the targets that happen to be covered.
 - **Dispatch**: each supported target's canonical source goes to the `ISquadRenderer` that
-  owns it — `ClaudeRenderer` for `.claude/agents/*.md` and `.claude/skills/*/SKILL.md`,
-  `CopilotRenderer` for `.github/agents/*.agent.md` and `.github/skills/*/SKILL.md`,
-  `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
+  owns it — `ClaudeRenderer` for `.claude/agents/*.md` and a primary-agent entry-point skill at
+  `.claude/skills/conductor/SKILL.md`, `CopilotRenderer` for `.github/agents/*.agent.md` and
+  `.github/skills/*/SKILL.md`, `CursorRenderer` for `.cursor/agents/*.md` and `.cursor/skills/*/SKILL.md`,
   `CodexRenderer` for `.codex/agents/*.toml` and `.codex/skills/*/SKILL.md`,
   `AntigravityRenderer` for native per-agent directory emission to `.agents/agents/*/agent.md` and canonical skills to `.agents/skills/*/SKILL.md` ([ADR 0022](../adr/0022-antigravity-native-agents.md)),
   `OpenCodeRenderer` for `.opencode/agents/*.md` and `.opencode/skills/*/SKILL.md`,
@@ -291,7 +344,7 @@ and validates.
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
-| `claude` | `ClaudeRenderer` | `.claude/agents/<name>.md` | `.claude/skills/<name>/SKILL.md` | Native |
+| `claude` | `ClaudeRenderer` | `.claude/agents/<name>.md`; primary agent also at `.claude/skills/<name>/SKILL.md` | `.claude/skills/<name>/SKILL.md` | Native |
 | `copilot` | `CopilotRenderer` | `.github/agents/<name>.agent.md` | `.github/skills/<name>/SKILL.md` | Native |
 | `cursor` | `CursorRenderer` | `.cursor/agents/<name>.md` | `.cursor/skills/<name>/SKILL.md` | Native |
 | `codex` | `CodexRenderer` | `.codex/agents/<name>.toml` | `.codex/skills/<name>/SKILL.md` | Native |
@@ -331,13 +384,14 @@ and validates.
 - **MCP grants differ per target, and `zcode` is the one that enumerates.** `ClaudeRenderer`
   grants three MCP server wildcards (`mcp__codegraph__*`, `mcp__kyber-weave__*`,
   `mcp__context7__*`) to any agent allowed to read the filesystem except the pure orchestrator.
-  ZCode registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits
-  the fully qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s
-  `required-mcp-tools`. Those names are hard requirements in ZCode, so `squad doctor` fails a
-  ZCode install that does not declare the servers — see
-  [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md). The roster lives
-  in canonical source because it is an external contract that drifts, and because the renderer
-  and the doctor check must read the same list.
+  The pure-orchestrator MCP withholding applies to the subagent file only; an entry-point skill
+  invoked as `/<name>` in the main conversation inherits the session's MCP servers. ZCode
+  registers MCP tools by exact name and expands no wildcard, so `ZCodeRenderer` emits the fully
+  qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
+  Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
+  not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+  The roster lives in canonical source because it is an external contract that drifts, and because
+  the renderer and the doctor check must read the same list.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both
   `.zcode/agents/` and `.zcode/commands/` recursively, so a closure beside its principal would
   register as phantom agents and commands rather than as resources. `ZCodeRenderer` therefore
@@ -373,7 +427,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`) are implemented and registered. All eleven declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`) are implemented and registered. All eleven declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
