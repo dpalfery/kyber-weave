@@ -172,7 +172,7 @@ function matchingTurns(
   return calls.map((call, index) => {
     const positional = turns[index]
     const turn = call.turnId === undefined
-      ? positional
+      ? (hasNativeIds ? undefined : positional)
       : turnsById.get(call.turnId) ?? (hasNativeIds ? undefined : positional)
     if (turn === undefined) return undefined
     if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined

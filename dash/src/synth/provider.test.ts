@@ -516,6 +516,53 @@ describe('T3 static source capability readers', () => {
       reason: expect.stringMatching(/Cursor|cursor/i),
     })
   })
+
+  it('ingests Cursor bubbles with distinct span identities per request', async () => {
+    const dbPath = cursorEvidenceDb()
+    const cursor = createCursorProvider(dbPath)
+    const source = { path: dbPath, project: 'fixture-project', provider: 'cursor' }
+    const calls = await parsedCalls(cursor, source)
+    const prompt = calls.find((entry) => entry.deduplicationKey.endsWith(':prompt'))
+    const reply = calls.find((entry) => entry.deduplicationKey.endsWith(':reply'))
+    expect(prompt?.turnId).toBe('cursor-request-1')
+    expect(reply?.turnId).toBeUndefined()
+
+    const result = await ingestProviders(['cursor'], () => ({
+      calls,
+      filePath: dbPath,
+      harnessId: 'cursor',
+      sourceKey: 'cursor:cursor-static-session',
+    }))
+    expect(result.problems).toEqual([])
+    expect(result.records).toHaveLength(calls.length)
+    expect(new Set(result.records.map((record) => record.spanId)).size).toBe(calls.length)
+    expect(result.records.find((record) => record.spanId.endsWith(':cursor-request-1'))?.tokens.reportedInput).toBe(240)
+  })
+
+  it('does not positionally pair an unidentified Cursor call with a native request turn', async () => {
+    const dbPath = cursorEvidenceDb()
+    const unidentified = call({
+      provider: 'cursor',
+      sessionId: 'cursor-static-session',
+      turnId: undefined,
+      deduplicationKey: 'cursor:bubble:unidentified',
+    })
+    const identified = call({
+      provider: 'cursor',
+      sessionId: 'cursor-static-session',
+      turnId: 'cursor-request-1',
+      deduplicationKey: 'cursor:bubble:identified',
+    })
+    const result = await ingestProviders(['cursor'], () => ({
+      calls: [unidentified, identified],
+      filePath: dbPath,
+      harnessId: 'cursor',
+    }))
+
+    expect(result.records).toHaveLength(2)
+    expect(result.records[0]?.content.instruction_context).toBeUndefined()
+    expect(result.records[1]?.content.instruction_context).toContain('Cursor tool context')
+  })
 })
 
 describe('T4 — source-unit ingest seam', () => {

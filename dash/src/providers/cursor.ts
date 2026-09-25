@@ -952,7 +952,9 @@ function parseBubbles(
         deduplicationKey: dedupKey,
         userMessage: userText,
         sessionId: conversationId,
-        ...(row.request_id ? { turnId: row.request_id } : {}),
+        // One request has several bubbles. Only its prompt bubble names the
+        // request so later bubbles keep distinct synthesized record identities.
+        ...(row.request_id && row.bubble_type === 1 ? { turnId: row.request_id } : {}),
       })
     } catch {
       skipped++
