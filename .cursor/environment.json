@@ -1,0 +1,30 @@
+{
+  "name": "Kyber-Weave",
+  "install": "bash .cursor/cloud-agent-install.sh",
+  "mcpServerAllowlist": [
+    {
+      "name": "kyber-weave",
+      "command": "kyber-weave-mcp"
+    },
+    {
+      "name": "codegraph",
+      "command": "codegraph"
+    },
+    {
+      "name": "azure-mcp",
+      "command": "azmcp"
+    },
+    {
+      "name": "github",
+      "command": "github-mcp-server"
+    },
+    {
+      "name": "context7",
+      "serverUrl": "https://mcp.context7.com/mcp"
+    },
+    {
+      "name": "microsoft-learn",
+      "serverUrl": "https://learn.microsoft.com/api/mcp"
+    }
+  ]
+}
