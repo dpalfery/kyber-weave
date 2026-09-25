@@ -192,6 +192,89 @@ public class AgentGovernanceTests
     }
 
     [Fact]
+    public void ValidateWhenMarkdownLinkReferencesNonexistentFileEmitsKwAgentSpec004()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-agent-spec-004-md-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            AgentModel agent = new AgentModel
+            {
+                RoleName = "broken-link-agent",
+                Harness = HarnessKind.Claude,
+                FilePath = Path.Combine(tempDir, "broken-link-agent.md"),
+                DirectoryPath = tempDir,
+                Description = "Follow [guide](docs/missing.md) before continuing.",
+                InstructionsBody = "Do useful work."
+            };
+
+            DiagnosticReport report = AgentSpecValidator.Validate(agent);
+            Assert.Contains(report.Items, d => d is { Code: AgentSpecValidator.RuleBrokenFileReference, Severity: Severity.Error });
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ValidateWhenInlineLinkReferencesNonexistentFileEmitsKwAgentSpec004()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-agent-spec-004-inline-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            AgentModel agent = new AgentModel
+            {
+                RoleName = "broken-inline-agent",
+                Harness = HarnessKind.Cursor,
+                FilePath = Path.Combine(tempDir, "broken-inline-agent.md"),
+                DirectoryPath = tempDir,
+                Description = "Use when writing code.",
+                InstructionsBody = "Read `references/missing.md` before making changes."
+            };
+
+            DiagnosticReport report = AgentSpecValidator.Validate(agent);
+            Assert.Contains(report.Items, d => d is { Code: AgentSpecValidator.RuleBrokenFileReference, Severity: Severity.Error });
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ValidateWhenFileReferenceResolvesSuccessfullyEmitsNoKwAgentSpec004()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "kw-agent-spec-004-valid-" + Guid.NewGuid().ToString("N"));
+        string referencesDir = Path.Combine(tempDir, "references");
+        Directory.CreateDirectory(referencesDir);
+        File.WriteAllText(Path.Combine(referencesDir, "existing.md"), "existing");
+
+        try
+        {
+            AgentModel agent = new AgentModel
+            {
+                RoleName = "valid-agent",
+                Harness = HarnessKind.Codex,
+                FilePath = Path.Combine(tempDir, "valid-agent.md"),
+                DirectoryPath = tempDir,
+                Description = "Use when planning work.",
+                InstructionsBody = "See `references/existing.md` for the details."
+            };
+
+            DiagnosticReport report = AgentSpecValidator.Validate(agent);
+            Assert.DoesNotContain(report.Items, d => d.Code == AgentSpecValidator.RuleBrokenFileReference);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AgentLoaderDiscoversDotHarnessAgentsByConvention()
     {
         string root = Path.Combine(Path.GetTempPath(), "kw-agent-loader-" + Guid.NewGuid().ToString("N"));
