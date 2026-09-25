@@ -70,9 +70,11 @@ established id breaks every reference to it.
 not match the folder the file sits in.
 
 Clear a misplaced key by dropping it, or by making the document a `coding-standard`
-when that is what it is. Clear a folder mismatch by moving the file to
-`<docs-root>/standards/<technology>/README.md`, or by changing the key to the
-folder's name. The folder name, the key, and `ontology.technologies` are one value.
+when that is what it is and the file is already the registry target,
+`<docs-root>/standards/<technology>/README.md`. A folder mismatch on that file is
+cleared by changing the key to the folder's name. A file anywhere else is cleared
+by moving it there; changing its key does not make the registry resolve it. The
+folder name, the key, and `ontology.technologies` are one value.
 
 ## Drift — `docs drift`
 

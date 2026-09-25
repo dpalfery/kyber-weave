@@ -56,19 +56,19 @@ current guidance. Promote to `current` only when a human has confirmed that file
 | `requirements`, `prd`, `user-stories` | `requirements` |
 | `plan`, `roadmap`, `proposal` | `plan` |
 | `spec`, `rfc` | `spec` |
-| `standards/<technology>/` | `coding-standard` — wins over the `standard` and directory-root `README.md` rows |
+| `standards/<technology>/README.md` | `coding-standard` — the registry target; wins over the `standard` and directory-root `README.md` rows |
 | `todo/` | `todo` |
-| `policy`, `standard`, `convention` | `rule` or `governance`, except a file under `standards/<technology>/` |
+| `policy`, `standard`, `convention` | `rule` or `governance`, except `standards/<technology>/README.md` |
 | `README.md` at a directory root | `index`, except `standards/<technology>/README.md` |
 | anything else that is reference material | `reference` |
 
 `reference` requires no extra keys, so a wrong guess there is recoverable when the
 document really is reference material. It is the wrong type for a coding standard or
-a todo: both validate, and neither is then found as what it is. A path under
-`standards/<technology>/` is `coding-standard` even when the file is `README.md`.
-The word `standard` in that path is not the `rule` heuristic. Guessing
-`architecture` is also not recoverable — it demands `component` and drags in the
-pairing invariant.
+a todo: both validate, and neither is then found as what it is. The coding standard
+is `standards/<technology>/README.md`, the file the registry property points at.
+Another file in that directory is not the standard; classify it on its own. The word
+`standard` on that README is not the `rule` heuristic. Guessing `architecture` is
+also not recoverable — it demands `component` and drags in the pairing invariant.
 
 ## 3. Validate and iterate
 

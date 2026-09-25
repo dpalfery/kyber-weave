@@ -33,8 +33,9 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
     {
         string retrofit = File.ReadAllText(Path.Combine(SkillRoot, "references", "retrofit.md"));
 
-        Assert.Contains("`standards/<technology>/` | `coding-standard`", retrofit, StringComparison.Ordinal);
+        Assert.Contains("`standards/<technology>/README.md` | `coding-standard`", retrofit, StringComparison.Ordinal);
         Assert.Contains("`todo/` | `todo`", retrofit, StringComparison.Ordinal);
+        Assert.DoesNotContain("`standards/<technology>/` | `coding-standard`", retrofit, StringComparison.Ordinal);
         Assert.DoesNotContain("is the correct fallback", retrofit, StringComparison.Ordinal);
     }
 
@@ -45,5 +46,8 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
 
         Assert.Contains("### `KW-DOC-SPEC-007`", rules, StringComparison.Ordinal);
         Assert.Contains("ontology.technologies", rules, StringComparison.Ordinal);
+        Assert.Contains("standards/<technology>/README.md", rules, StringComparison.Ordinal);
+        Assert.Contains("changing the key to the folder's name", rules, StringComparison.Ordinal);
+        Assert.Contains("A file anywhere else is cleared", rules, StringComparison.Ordinal);
     }
 }
