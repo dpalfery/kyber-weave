@@ -416,7 +416,8 @@ edit existing hooks as part of this setup.
   ```
 
 ### 5. Store Schema Migration and Problem Deduplication
-- **Details**: Schema v13 enforces stable `problem_key` uniqueness on `problems`, collapsing historical duplicates idempotently on database open.
+
+- **Details**: Schema v13 added a unique `problem_key` on `problems` and collapsed historical duplicates on database open. Schema v14 rekeys that identity by span, code, and location, so diagnostics at distinct locations stay separate.
 - **Backup**: Always verify and retain pre-migration backups (e.g. `~/.kyberdash/canon.db.backup-*`).
 
 ---
