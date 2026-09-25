@@ -97,6 +97,9 @@ export const READER_UNMEASURABLE: ReadonlyMap<string, readonly string[]> = new M
   ['kilo', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['kilo-code', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
   ['copilot', ['schema_cost', ...CANONICAL_CONTENT_KEYS]],
+  ['copilot-vscode', ['schema_cost', 'system_prompt', 'tool_definitions', 'tool_result_content']],
+  ['cursor', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
+  ['cursor-agent', ['schema_cost', 'conversation_history', 'system_prompt', 'tool_definitions']],
   ['pi', ['schema_cost', 'system_prompt', 'instruction_context', 'tool_definitions', 'tool_result_content']],
 ])
 
@@ -129,7 +132,7 @@ function availabilityOf(value: MetricAvailability | undefined): string | undefin
  */
 export const GEMINI_SELECTOR_LABEL = 'Gemini'
 
-const EXCLUDED_HARNESS_IDENTITIES = new Set(['gemini'])
+export const EXCLUDED_HARNESS_IDENTITIES = new Set(['gemini'])
 
 /** True when `harness` must not appear as a stored session/run/rollup harness id. */
 export function isExcludedHarnessIdentity(harness: string): boolean {
@@ -321,6 +324,18 @@ export function measurabilityFor(
           ? provider === 'gemini'
             ? 'Gemini session files do not export a cache-creation counter.'
             : 'Antigravity conversation stores do not export a cache-creation counter.'
+          : metric === 'system_prompt' && provider === 'copilot-vscode'
+            ? 'VS Code Copilot chat-session files do not store the runtime system prompt.'
+            : metric === 'tool_definitions' && provider === 'copilot-vscode'
+              ? 'VS Code Copilot chat-session files do not store tool-definition schemas.'
+              : metric === 'tool_result_content' && provider === 'copilot-vscode'
+                ? 'VS Code Copilot chat-session files do not preserve tool-result content.'
+          : metric === 'conversation_history' && (provider === 'cursor' || provider === 'cursor-agent' || surveyFamily(provider) === 'cursor')
+            ? 'Cursor storage does not retain a complete historical conversation prefix.'
+          : metric === 'system_prompt' && (provider === 'cursor' || provider === 'cursor-agent' || surveyFamily(provider) === 'cursor')
+            ? 'Cursor storage does not record the static system prompt.'
+          : metric === 'tool_definitions' && (provider === 'cursor' || provider === 'cursor-agent' || surveyFamily(provider) === 'cursor')
+            ? 'Cursor hook telemetry does not export tool definition schemas.'
           : metric === 'system_prompt' &&
               (provider === 'claude' ||
                 provider === 'claude-code' ||
@@ -935,5 +950,4 @@ export function harnessDimensionAvailability(harness: string, dimension: string)
 
   return 'measured'
 }
-
 

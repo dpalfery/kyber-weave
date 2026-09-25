@@ -17,6 +17,7 @@ import type { Server } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { CanonStore } from '../canon/store.js'
+import type { CanonicalRecord } from '../canon/types.js'
 import { runWebDashboard } from './web.js'
 import { KyberBridge } from '../server/bridge.js'
 
@@ -247,6 +248,161 @@ describe('report JSON and GET /api/kyber/report (R11.14)', () => {
     expect(response.status).toBe(200)
     const apiReport = (await response.json()) as Record<string, unknown>
 
+    expect(comparable(cliReport)).toEqual(comparable(apiReport))
+  })
+
+  it('keeps DB-backed diagnostics, refresh state, and scoped cost complete on both surfaces', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'kyberdash-report-parity-health-'))
+    homes.push(home)
+    const db = join(home, 'canon.db')
+    const sessionId = 'sess-health'
+    const store = new CanonStore(db)
+    store.upsertSession({
+      sessionId,
+      harness: 'cursor',
+      repo: 'kyber-weave',
+      started: '2026-09-19T10:00:00.000Z',
+      ended: '2026-09-19T11:00:00.000Z',
+      payload: {
+        summary: { turn_count: 1, total_input: 1_000, total_output: 20 },
+        context: {
+          measurable: true,
+          contextLimit: 200_000,
+          turns: [{
+            index: 1,
+            pressure: 0.005,
+            buckets: {
+              system_prompt: 500,
+              tool_definitions: 200,
+              instruction_context: 100,
+              conversation_history: 150,
+              tool_result_content: 50,
+            },
+            residual: { tokens: 0 },
+            toolDefinitionsByServer: {},
+          }],
+        },
+      },
+    })
+
+    const records: CanonicalRecord[] = Array.from({ length: 205 }, (_, index) => ({
+      spanId: `health-priced-${index}`,
+      traceId: `health-trace-${index}`,
+      parentSpanId: null,
+      source: 'synthetic',
+      harness: 'cursor',
+      sessionId,
+      name: `health record ${index}`,
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: `2026-09-19T10:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      durationMs: 10,
+      status: 'ok',
+      tokens: {
+        freshInput: 10,
+        cacheRead: 0,
+        cacheCreation: 0,
+        output: 2,
+        reportedInput: 10,
+        reportedOutput: 2,
+      },
+      content: {},
+      cost: { basis: 'harness', status: 'priced', value: 0.25, currency: 'USD' },
+    }))
+    records.push({
+      ...records[0]!,
+      spanId: 'health-published-1',
+      traceId: 'health-published-trace-1',
+      cost: { basis: 'published', status: 'priced', value: 0.25, currency: 'USD' },
+    })
+    records.push({
+      ...records[0]!,
+      spanId: 'health-published-2',
+      traceId: 'health-published-trace-2',
+      cost: { basis: 'published', status: 'priced', value: 0.75, currency: 'USD' },
+    })
+    store.upsertMany(records)
+
+    for (let index = 0; index < 251; index += 1) {
+      store.quarantine(`health-quarantine-${index}`, ['synthetic'], 'fixture quarantine')
+    }
+    for (let index = 0; index < 307; index += 1) {
+      store.recordProblem({
+        spanId: `health-problem-${index}`,
+        severity: 'warning',
+        code: 'FIXTURE_PROBLEM',
+        message: 'fixture problem',
+        location: `health-fixture-${index}`,
+      })
+    }
+    store.startRefreshRun({
+      id: 'health-refresh-success',
+      startedAt: '2026-09-19T10:30:00.000Z',
+      pid: process.pid,
+      trigger: 'cli',
+    })
+    store.completeRefreshRun(
+      'health-refresh-success',
+      'success',
+      '2026-09-19T10:45:00.000Z',
+      'fixture refresh succeeded',
+    )
+    store.startRefreshRun({
+      id: 'health-refresh-failure',
+      startedAt: '2026-09-19T11:30:00.000Z',
+      pid: process.pid,
+      trigger: 'scheduled',
+    })
+    store.completeRefreshRun(
+      'health-refresh-failure',
+      'failure',
+      '2026-09-19T11:45:00.000Z',
+      'fixture refresh failed',
+    )
+    store.close()
+
+    const cli = spawnSync(
+      process.execPath,
+      ['--import', 'tsx', 'src/launcher.ts', 'report', '--format', 'json', '--db', db, '--days', '7'],
+      {
+        cwd: new URL('../..', import.meta.url),
+        env: { ...process.env, HOME: home, TZ: 'UTC' },
+        encoding: 'utf-8',
+        timeout: 30_000,
+      },
+    )
+    expect(cli.status, cli.stderr).toBe(0)
+    const cliReport = JSON.parse(cli.stdout) as Record<string, unknown>
+
+    const bridge = new KyberBridge({ canonPath: db })
+    bridges.push(bridge)
+    const server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+    servers.push(server)
+    const port = (server.address() as AddressInfo).port
+    const response = await fetch(`http://127.0.0.1:${port}/api/kyber/report?days=7`)
+    expect(response.status).toBe(200)
+    const apiReport = (await response.json()) as Record<string, unknown>
+
+    const expectedCoverage = {
+      quarantineCount: 251,
+      problemCount: 307,
+      refresh: {
+        lastSuccessAt: '2026-09-19T10:45:00.000Z',
+        lastFailure: {
+          at: '2026-09-19T11:45:00.000Z',
+          summary: 'fixture refresh failed',
+        },
+        inProgress: null,
+      },
+    }
+    const expectedCost = [
+      { basis: 'harness', amountUsd: { value: 51.25, unit: 'USD' } },
+      { basis: 'published', amountUsd: { value: 1, unit: 'USD' } },
+    ]
+    expect(cliReport.coverage).toMatchObject(expectedCoverage)
+    expect(apiReport.coverage).toMatchObject(expectedCoverage)
+    expect(cliReport.cost).toEqual(expectedCost)
+    expect(apiReport.cost).toEqual(expectedCost)
     expect(comparable(cliReport)).toEqual(comparable(apiReport))
   })
 })

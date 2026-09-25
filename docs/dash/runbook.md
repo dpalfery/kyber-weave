@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-25
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -219,9 +219,8 @@ the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
 - **Quit** through the tray stops it and both children; an abnormal tray exit produces a
   fresh launchd-started tray whose children rebind the same loopback ports.
 
-Known deferred issue: `refresh_run` rows can stay `running` after their refresh process dies.
-It is diagnostic-only today and not on the report data path — see
-[the todo](../todo/stale-refresh-run-rows.md).
+Automatic reconciliation: `refresh_run` rows left in `running` after their refresh process dies or times out (older than 15 minutes) are automatically reconciled to `failure` with an audit summary before subsequent refreshes start — see
+[the closed todo](../archive/todo/stale-refresh-run-rows.md).
 
 ---
 
@@ -407,6 +406,19 @@ edit existing hooks as part of this setup.
   rustc --version # Must be >= 1.80.0
   ```
 - On macOS, ensure Xcode command line tools are installed: `xcode-select --install`.
+
+### 4. Stale Refresh Runs and Dead PID Reconciliation
+
+- **Symptom**: Report footer displays `inProgress: pid X since <timestamp>` indefinitely.
+- **Remediation**: KyberDash automatically reconciles runs whose PID is dead or whose elapsed duration exceeds 15 minutes before starting each refresh. To inspect runs directly:
+  ```bash
+  sqlite3 ~/.kyberdash/canon.db "SELECT id, status, pid, started_at, completed_at, summary FROM refresh_run ORDER BY started_at DESC LIMIT 5;"
+  ```
+
+### 5. Store Schema Migration and Problem Deduplication
+
+- **Details**: Schema v13 added a unique `problem_key` on `problems` and collapsed historical duplicates on database open. Schema v14 rekeys that identity by span, code, and location, so diagnostics at distinct locations stay separate.
+- **Backup**: Always verify and retain pre-migration backups (e.g. `~/.kyberdash/canon.db.backup-*`).
 
 ---
 

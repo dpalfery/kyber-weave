@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import type { ParsedProviderCall, Provider, SessionSource } from '../synth/provider.js'
 import { PROVIDER_PARSE_ERROR } from '../synth/provider.js'
@@ -148,6 +149,71 @@ function unit(harnessId: string, name: string, parsed: ParsedProviderCall[]): Na
 }
 
 describe('refreshHarnessSources', () => {
+  it('carries static Copilot VS Code input evidence through the canonical refresh path', async () => {
+    const store = temporaryStore()
+    try {
+      const fixturePath = fileURLToPath(new URL('./fixtures/copilot-vscode-request.jsonl', import.meta.url))
+      const session: SessionSource = {
+        path: fixturePath,
+        project: 'fixture-project',
+        provider: 'copilot-vscode',
+        sourceType: 'chatsession',
+      }
+      const parsed = {
+        ...call('copilot-vscode', 'vscode-static-session'),
+        // Preserve record within the 14-day retention limit when commandStartedAt is 2026-09-23
+        timestamp: '2026-09-22T10:01:00.000Z',
+        inputTokens: 180,
+        outputTokens: 30,
+        userMessage: 'first request',
+        turnId: 'request-1',
+        deduplicationKey: 'copilot-vscode:vscode-static-session:request-1',
+      }
+      const nativeUnit: NativeUnit = {
+        harnessId: 'copilot-vscode',
+        sourceKey: 'copilot-vscode:vscode-static-session',
+        source: session,
+        status: 'new',
+        revision: {
+          fingerprint: { dev: 1, ino: 1, mtimeMs: 1, sizeBytes: 1 },
+          token: '1:1:1:1',
+        },
+        envelopes: [{
+          harnessId: 'copilot-vscode',
+          sourceKey: 'copilot-vscode:vscode-static-session',
+          source: session,
+          nativeSessionId: parsed.sessionId,
+          nativeRecordId: parsed.turnId,
+          timestamp: parsed.timestamp,
+          call: parsed,
+          revisionToken: '1:1:1:1',
+        }],
+        problems: [],
+      }
+
+      const report = await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('copilot-vscode'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-23T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        iterateNativeUnits: async () => [nativeUnit],
+      })
+
+      expect(report.rows[0]).toMatchObject({ harnessId: 'copilot-vscode', status: 'ok', created: 1 })
+      const record = store.listAll()[0]!
+      expect(record.content.conversation_history).toContain('first request')
+      expect(record.content.instruction_context).toContain('agent mode')
+      expect(record.content.conversation_history).not.toContain('first response')
+      expect(record.measurability?.tool_definitions).toMatchObject({
+        availability: 'not_measurable',
+        reason: expect.stringMatching(/VS Code|chat session/i),
+      })
+    } finally {
+      store.close()
+    }
+  })
+
   it('persists split harness jobs, records a parse failure, and still derives the healthy harness', async () => {
     const store = temporaryStore()
     try {
@@ -189,6 +255,92 @@ describe('refreshHarnessSources', () => {
       expect(store.getHarnessRollup('antigravity')).toMatchObject({ harness: 'antigravity', sampleCount: 1 })
       expect(store.getHarnessRollup('gemini')).toBeUndefined()
       expect(formatRefreshReport(report)).not.toMatch(/\/native\//)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('closes the refresh run as failure when provider discovery throws', async () => {
+    const store = temporaryStore()
+    try {
+      await expect(refreshHarnessSources(store, {
+        getAllProviders: async () => {
+          throw new Error('provider discovery failed')
+        },
+        descriptors: [],
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })).rejects.toThrow('provider discovery failed')
+
+      expect(store.listRefreshRuns()).toEqual([expect.objectContaining({
+        status: 'failure',
+        completedAt: expect.any(String),
+        summary: expect.stringContaining('provider discovery failed'),
+      })])
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reconciles a dead running refresh row before the next refresh starts', async () => {
+    const store = temporaryStore()
+    try {
+      store.startRefreshRun({
+        id: 'dead-refresh',
+        startedAt: '2026-09-11T23:00:00.000Z',
+        pid: 2_000_000_000,
+        trigger: 'cli',
+      })
+
+      await refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: [],
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+      })
+
+      expect(store.listRefreshRuns()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'dead-refresh',
+          status: 'failure',
+          completedAt: expect.any(String),
+          summary: expect.stringMatching(/dead|abandon|interrupt|no longer running|reconciliation/i),
+        }),
+      ]))
+      expect(store.latestRefreshRun('running')).toBeUndefined()
+    } finally {
+      store.close()
+    }
+  })
+
+  it('shares one in-flight Claude warm across concurrent Claude descriptors', async () => {
+    const store = temporaryStore()
+    try {
+      let warms = 0
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      const entered: string[] = []
+
+      const refresh = refreshHarnessSources(store, {
+        getAllProviders: async () => [],
+        descriptors: descriptors('claude-cli', 'claude-desktop', 'claude-unclassified'),
+        jobConcurrency: 3,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => {
+          warms += 1
+          await gate
+        },
+        iterateNativeUnits: async (harnessId, deps) => {
+          entered.push(harnessId)
+          if (entered.length === 3) release()
+          await deps.parseAllSessions?.(deps.dateRange, 'claude')
+          return []
+        },
+      })
+
+      await refresh
+      expect(entered).toHaveLength(3)
+      expect(warms).toBe(1)
     } finally {
       store.close()
     }
@@ -248,6 +400,39 @@ describe('refreshHarnessSources', () => {
       expect(first.rows[0]).toMatchObject({ status: 'ok', created: 1, updated: 0 })
       expect(second.rows[0]).toMatchObject({ status: 'unchanged', created: 0, updated: 0 })
       expect(store.listAll()).toHaveLength(1)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('does not grow diagnostic rows when the same invalid source is processed again', async () => {
+    const store = temporaryStore()
+    try {
+      const dependencies = {
+        getAllProviders: async () => [],
+        descriptors: descriptors('pi'),
+        jobConcurrency: 1,
+        commandStartedAt: new Date('2026-09-12T00:00:00.000Z'),
+        parseAllSessions: async () => undefined,
+        ingestProviders: async () => ({ records: [], problems: [] }),
+        iterateNativeUnits: async (): Promise<NativeUnit[]> => [{
+          ...unit('pi', 'invalid-session', []),
+          problems: [{
+            code: 'MISSING_TIMESTAMP',
+            message: 'native record has no timestamp',
+          }],
+        }],
+      }
+
+      const first = await refreshHarnessSources(store, dependencies)
+      const problemsAfterFirst = store.getProblems()
+      const second = await refreshHarnessSources(store, dependencies)
+
+      expect(first.rows[0]?.status).toBe('partial')
+      expect(first.rows[0]?.problems).toBeGreaterThan(0)
+      expect(second.rows[0]?.status).toBe('partial')
+      expect(second.rows[0]?.problems).toBe(first.rows[0]?.problems)
+      expect(store.getProblems()).toEqual(problemsAfterFirst)
     } finally {
       store.close()
     }

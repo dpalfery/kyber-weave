@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
+import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
   decompressRaw,
@@ -15,6 +16,7 @@ import {
   toRunRow,
   toHarnessRollupRow,
   toExecutionRow,
+  problemIdentity,
   type FindingDbRow,
   type PredictionDbRow,
   type RunDbRow,
@@ -96,6 +98,21 @@ export type SessionSummary = {
   cost_usd: number | null
   models: string[]
   problems: number
+}
+
+/** Cost facts needed by the shared report, read without loading raw span payloads. */
+export type SessionCostContribution = {
+  sessionId: string
+  basis: string
+  status: string
+  value?: number
+}
+
+/** Refresh health from the canonical refresh log. */
+export type RefreshState = {
+  lastSuccessAt: string | null
+  lastFailure: { at: string; summary: string } | null
+  inProgress: { pid: number; since: string } | null
 }
 
 export type QuarantineRow = {
@@ -1389,9 +1406,21 @@ export class KyberBridge {
     return results
   }
 
+  /** Count every quarantine row without applying the inspector's default page limit. */
+  getQuarantineCount(): number {
+    if (this.store) {
+      return this.store.countQuarantine()
+    }
+    if (!this.hasTable(this.canonDb, 'quarantine')) return 0
+    const row = this.canonDb!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
+      | { n?: number }
+      | undefined
+    return Number(row?.n) || 0
+  }
+
   /**
    * Return recorded validation errors, token reconciliation mismatches, and anomalies.
-   * Reads canonical diagnostics, deduplicated by span_id/id.
+   * Reads canonical diagnostics, deduplicated by the store's problem identity.
    */
   getProblems(limit = 200): ProblemRow[] {
     const results: ProblemRow[] = []
@@ -1422,7 +1451,7 @@ export class KyberBridge {
         }
 
         for (const r of rows) {
-          const key = r.span_id ? `span:${r.span_id}:${r.code}` : `id:${r.id}`
+          const key = problemIdentity(r.span_id ?? null, r.code, r.location ?? null, r.id)
           if (seenKeys.has(key)) continue
           seenKeys.add(key)
           results.push({
@@ -1445,6 +1474,118 @@ export class KyberBridge {
       return results.slice(0, Math.floor(limit))
     }
     return results
+  }
+
+  /** Count every problem row without applying the inspector's default page limit. */
+  getProblemCount(): number {
+    if (this.store) {
+      return this.store.countProblems()
+    }
+    const table = this.hasTable(this.canonDb, 'problem')
+      ? 'problem'
+      : this.hasTable(this.canonDb, 'problems')
+        ? 'problems'
+        : null
+    if (table === null) return 0
+    const row = this.canonDb!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
+      | { n?: number }
+      | undefined
+    return Number(row?.n) || 0
+  }
+
+  /**
+   * Refresh facts for the shared report. Each status is queried independently so
+   * a later failure does not hide the last successful refresh.
+   */
+  getRefreshState(): RefreshState {
+    const latest = (status: 'success' | 'failure' | 'running') => {
+      try {
+        if (this.store) return this.store.latestRefreshRun(status)
+        if (!this.hasTable(this.canonDb, 'refresh_run')) return undefined
+        const row = this.canonDb!
+          .prepare(
+            'SELECT started_at, completed_at, pid, summary FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
+          )
+          .get(status) as
+          | {
+              started_at: string
+              completed_at: string | null
+              pid: number
+              summary: string | null
+            }
+          | undefined
+        if (row === undefined) return undefined
+        if (status === 'running' && !refreshProcessIsAlive(Number(row.pid))) return undefined
+        return {
+          startedAt: row.started_at,
+          completedAt: row.completed_at,
+          pid: Number(row.pid),
+          summary: row.summary,
+        }
+      } catch {
+        return undefined
+      }
+    }
+
+    const success = latest('success')
+    const failure = latest('failure')
+    const running = latest('running')
+    return {
+      lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
+      lastFailure:
+        failure === undefined
+          ? null
+          : { at: failure.completedAt ?? failure.startedAt, summary: failure.summary ?? 'refresh failed' },
+      inProgress: running === undefined ? null : { pid: running.pid, since: running.startedAt },
+    }
+  }
+
+  /**
+   * Cost contributions for the selected sessions. The query reads only the
+   * session key and cost block; raw span payloads are never decompressed.
+   */
+  getSessionCostContributions(sessionIds: readonly string[]): SessionCostContribution[] {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    if (uniqueIds.length === 0) return []
+    if (this.store) {
+      return this.store.costContributionsForSessions(uniqueIds)
+    }
+    if (!this.hasTable(this.canonDb, 'records')) {
+      throw new Error('canonical records table is unavailable for cost lookup')
+    }
+
+    const contributions: SessionCostContribution[] = []
+    const chunkSize = 900
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.canonDb!
+        .prepare(
+          `SELECT COALESCE(session_id, trace_id) AS session_key, cost_json
+           FROM records WHERE COALESCE(session_id, trace_id) IN (${placeholders})`,
+        )
+        .all(...chunk) as Array<{ session_key: unknown; cost_json: unknown }>
+      for (const row of rows) {
+        if (typeof row.session_key !== 'string') continue
+        let cost: unknown
+        try {
+          cost = JSON.parse(String(row.cost_json))
+        } catch {
+          continue
+        }
+        if (typeof cost !== 'object' || cost === null) continue
+        const block = cost as { basis?: unknown; status?: unknown; value?: unknown }
+        contributions.push({
+          sessionId: row.session_key,
+          basis: String(block.basis ?? 'unknown'),
+          status: String(block.status ?? 'no_rate'),
+          ...(typeof block.value === 'number' && Number.isFinite(block.value)
+            ? { value: block.value }
+            : {}),
+        })
+      }
+    }
+    return contributions
   }
 
   /**

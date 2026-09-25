@@ -116,8 +116,8 @@ export type ReportCoverage = {
     sessionsInWindow: number
     measurability: Record<string, 'measurable' | { reason: string }>
   }>
-  quarantineCount: number
-  problemCount: number
+  quarantineCount: number | null
+  problemCount: number | null
   /** Commands that remedy what the section reports, e.g. `kyberdash dash refresh` (R11.4). */
   hints: string[]
 }

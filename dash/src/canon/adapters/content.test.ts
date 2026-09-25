@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import antigravitySpan from './__fixtures__/antigravity-span.json' with { type: 'json' }
+import copilotSpan from './__fixtures__/copilot-span.json' with { type: 'json' }
+import { analyzeContext } from '../../analysis/context.js'
 import { parseClaudeApiRequestBody } from './claude-code.js'
 import { canonicalContent, canonicalParts } from './copilot.js'
 import { contentFromParts, type ContentPart } from '../types.js'
@@ -18,6 +20,7 @@ import { contentFromParts, type ContentPart } from '../types.js'
 // of error; one whose keys came off the wire can.
 
 const attributes = antigravitySpan as Record<string, unknown>
+const observedCopilotAttributes = copilotSpan as Record<string, unknown>
 const bucketsOf = (parts: readonly ContentPart[]) =>
   parts.reduce<Record<string, number>>((acc, part) => {
     acc[part.part] = (acc[part.part] ?? 0) + 1
@@ -129,19 +132,60 @@ describe('canonicalParts — attribution and absence', () => {
   })
 
   it('maps observed Copilot response and tool-result keys', () => {
-    expect(
-      canonicalParts({
-        'gen_ai.output.messages': JSON.stringify([
-          { role: 'assistant', parts: [{ type: 'text', text: 'synthetic response' }] },
-        ]),
-        'gen_ai.tool.call.result': 'synthetic tool result',
-      }),
-    ).toEqual(
+    const parts = canonicalParts({
+      'gen_ai.output.messages': JSON.stringify([
+        { role: 'assistant', parts: [{ type: 'text', text: 'synthetic response' }] },
+      ]),
+      'gen_ai.tool.call.result': 'synthetic tool result',
+    })
+
+    expect(parts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ part: 'conversation_history', text: 'synthetic response' }),
         expect.objectContaining({ part: 'tool_result_content', text: 'synthetic tool result' }),
       ]),
     )
+    expect(parts.some((part) => part.text.includes('synthetic response'))).toBe(false)
+  })
+})
+
+describe('canonicalParts — observed Copilot content shape', () => {
+  type ObservedMessagePart = { type: string; content: string }
+  type ObservedMessage = { role: string; parts: ObservedMessagePart[] }
+
+  const inputMessages = JSON.parse(
+    observedCopilotAttributes['gen_ai.input.messages'] as string,
+  ) as ObservedMessage[]
+  const outputMessages = JSON.parse(
+    observedCopilotAttributes['gen_ai.output.messages'] as string,
+  ) as ObservedMessage[]
+  const inputText = inputMessages[0]!.parts[0]!.content
+  const outputText = outputMessages[0]!.parts[0]!.content
+
+  it('preserves observed content text without serializing the part envelope', () => {
+    const parts = canonicalParts(observedCopilotAttributes)
+
+    expect(parts.some((part) => part.part === 'conversation_history' && part.text === inputText)).toBe(true)
+    expect(parts.some((part) => part.text === JSON.stringify(inputMessages[0]!.parts[0]!))).toBe(false)
+  })
+
+  it('excludes the producing response from the same turn input history', () => {
+    const parts = canonicalParts(observedCopilotAttributes)
+
+    expect(parts.some((part) => part.text.includes(outputText))).toBe(false)
+  })
+
+  it('keeps bucketed input at or below the observed reported input', () => {
+    const reportedInput = observedCopilotAttributes['gen_ai.usage.input_tokens'] as number
+    const analysis = analyzeContext(
+      [{ parts: canonicalParts(observedCopilotAttributes), inputTokens: reportedInput, freshInput: reportedInput }],
+      { contextLimit: 200_000, countTokens: (text) => Math.ceil(text.length / 4) },
+    )
+
+    expect(analysis.measurable).toBe(true)
+    if (!analysis.measurable) return
+
+    expect(analysis.turns[0]?.bucketedTokens).toBeLessThanOrEqual(reportedInput)
+    expect(analysis.turns[0]?.residual.tokens).toBeGreaterThanOrEqual(0)
   })
 })
 

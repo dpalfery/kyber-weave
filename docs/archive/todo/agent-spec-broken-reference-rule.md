@@ -1,19 +1,24 @@
 ---
-id: todo/agent-spec-broken-reference-rule
+id: archive/todo/agent-spec-broken-reference-rule
 title: KW-AGENT-SPEC-004 is documented but never emitted
 doc-type: todo
-status: current
+status: superseded
 component: ContextHygiene
 owner: dpalfery
-last-reviewed: 2026-08-22
+last-reviewed: 2026-09-24
 ---
 
 # KW-AGENT-SPEC-004 is documented but never emitted
 
-Found 2026-08-22 while clearing the analyzer backlog in
-[the duplication-lenses plan](../archive/plans/2026-08-21-duplication-and-prior-art-lenses.md).
+> [!NOTE]
+> **Delivered by archived plan:** This todo has been superseded by and delivered through the archived plan
+> [../plans/2026-09-24-agent-spec-broken-reference-rule.md](../plans/2026-09-24-agent-spec-broken-reference-rule.md).
+> KW-AGENT-SPEC-004 is now implemented in `AgentSpecValidator.ValidateBrokenFileReferences`.
 
-[`rule-reference.md`](../ci-pipelines/rule-reference.md) documents `KW-AGENT-SPEC-004` as
+Found 2026-08-22 while clearing the analyzer backlog in
+[the duplication-lenses plan](../plans/2026-08-21-duplication-and-prior-art-lenses.md).
+
+[`rule-reference.md`](../../ci-pipelines/rule-reference.md) documents `KW-AGENT-SPEC-004` as
 "Broken file reference". `AgentSpecValidator` declared a `RuleBrokenReference` constant for it
 and never used it: nothing in the validator checks references, and no diagnostic with that id
 is ever raised. The rule reference therefore describes a validation the product does not

@@ -50,7 +50,7 @@ describe('renormalizeRecords — retained raw evidence', () => {
         content: { conversation_history: 'synthetic retained context' },
         parts: retainedParts,
         raw: {
-          'gen_ai.system': 'gemini',
+          'copilot_chat.turn.id': 'turn-retained',
           'gen_ai.usage.input_tokens': 5,
           'gen_ai.usage.output_tokens': 2,
           'gen_ai.prompt': 'synthetic retained context',
@@ -73,7 +73,7 @@ describe('renormalizeRecords — retained raw evidence', () => {
     renormalizeRecords(store)
     const rebuild = await buildSessions(store)
 
-    expect(store.get(RETAINED_SPAN)?.harness).toBe('gemini')
+    expect(store.get(RETAINED_SPAN)?.harness).toBe('copilot')
     expect(store.get(RETAINED_SPAN)?.content).toEqual({ conversation_history: 'synthetic retained context' })
     expect(store.get(RETAINED_SPAN)?.parts).toEqual(retainedParts)
     expect(store.get(NOISE_SPAN)).toBeUndefined()
@@ -82,13 +82,98 @@ describe('renormalizeRecords — retained raw evidence', () => {
       namespaces: ['gen_ai'],
       reason: 'non-model span',
     })
-    // Noise is gone, and the retained span is now harness `gemini`. Gemini is a
-    // model identity, not a stored session/run harness (ADR 0016), so the
-    // copilot-misattributed session built before reclassify is pruned too.
-    expect(rebuild.pruned).toBe(2)
+    // Noise is gone, and the retained span is now attributed from its Copilot
+    // evidence. The copilot-misattributed session built before reclassify is
+    // pruned and rebuilt from canonical records.
+    expect(rebuild.pruned).toBe(1)
     expect(store.getSessionPayload(NOISE_TRACE)).toBeUndefined()
-    expect(store.getSessionPayload(RETAINED_TRACE)).toBeUndefined()
+    expect(store.getSessionPayload(RETAINED_TRACE)).toBeDefined()
 
+    store.close()
+  })
+
+  it('removes a legacy excluded Gemini harness identity during renormalization', async () => {
+    const store = new CanonStore(':memory:')
+    const spanId = 'legacy-gemini-span'
+    const traceId = 'legacy-gemini-trace'
+    store.upsert(staleRecord({
+      spanId,
+      traceId,
+      harness: 'gemini',
+      raw: {
+        'gen_ai.system': 'gemini',
+        'gen_ai.usage.input_tokens': 5,
+        'gen_ai.usage.output_tokens': 2,
+        'gen_ai.prompt': 'synthetic excluded-model content',
+      },
+    }))
+
+    await buildSessions(store)
+    renormalizeRecords(store)
+
+    expect(store.get(spanId)).toBeUndefined()
+    expect(store.listAll().every((record) => record.harness !== 'gemini')).toBe(true)
+    expect(store.getQuarantine(spanId)).toEqual(expect.objectContaining({
+      spanId,
+      reason: expect.stringMatching(/excluded|unclaimed/i),
+    }))
+    expect(store.getSessionPayload(traceId)).toBeUndefined()
+    store.close()
+  })
+
+  it('removes mixed-harness Gemini projected sessions (${harness}:${rawId}) during renormalization', async () => {
+    const store = new CanonStore(':memory:')
+    const traceId = 'mixed-trace-with-gemini'
+    const geminiSpan = 'gemini-span-1'
+    const claudeSpan = 'claude-span-1'
+
+    store.upsert(staleRecord({
+      spanId: geminiSpan,
+      traceId,
+      harness: 'gemini',
+      raw: {
+        'gen_ai.system': 'gemini',
+        'gen_ai.usage.input_tokens': 5,
+        'gen_ai.usage.output_tokens': 2,
+        'gen_ai.prompt': 'gemini turn in mixed trace',
+      },
+    }))
+
+    store.upsert(staleRecord({
+      spanId: claudeSpan,
+      traceId,
+      harness: 'claude',
+      raw: {
+        'anthropic.model': 'claude-3-5-sonnet',
+        'gen_ai.system': 'anthropic',
+      },
+    }))
+
+    // Seed historical session projections. In historical stores where mixed traces
+    // were projected, session IDs took the form `${harness}:${rawId}`.
+    store.upsertSession({
+      sessionId: `gemini:${traceId}`,
+      harness: 'gemini',
+      payload: { sessionId: `gemini:${traceId}`, harness: 'gemini' },
+    })
+    store.upsertSession({
+      sessionId: `claude:${traceId}`,
+      harness: 'claude',
+      payload: { sessionId: `claude:${traceId}`, harness: 'claude' },
+    })
+    expect(store.getSessionPayload(`gemini:${traceId}`)).toBeDefined()
+    expect(store.getSessionPayload(`claude:${traceId}`)).toBeDefined()
+
+    renormalizeRecords(store)
+
+    // The mixed Gemini projected session MUST be removed during renormalization
+    expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
+    expect(store.getSessionPayload(traceId)).toBeUndefined()
+
+    // And rebuilding projections cleanly re-projects the remaining Claude record without Gemini
+    await buildSessions(store)
+    expect(store.getSessionPayload(`gemini:${traceId}`)).toBeUndefined()
+    expect(store.listSessions().some((s) => s.harness === 'gemini')).toBe(false)
     store.close()
   })
 })

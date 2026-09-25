@@ -18,6 +18,9 @@ export type RefreshRunStatus = 'running' | 'success' | 'failure'
 
 export const REFRESH_TRIGGERS: readonly RefreshTrigger[] = ['cli', 'tray', 'scheduled']
 
+/** A running row older than this is reconciled as failed before the next refresh starts. */
+export const REFRESH_MAX_AGE_MS = 15 * 60 * 1000
+
 export type RefreshRunRow = {
   id: string
   startedAt: string
@@ -28,6 +31,24 @@ export type RefreshRunRow = {
   trigger: RefreshTrigger
   /** One line: what the run did, or why it failed. */
   summary: string | null
+}
+
+/**
+ * Check whether a recorded refresh process still exists. Permission errors mean
+ * the process exists but cannot be signalled; only a missing/invalid PID is dead.
+ */
+export function refreshProcessIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code: unknown }).code)
+        : ''
+    return code !== 'ESRCH' && code !== 'EINVAL'
+  }
 }
 
 export const REFRESH_RUN_SQL = `
