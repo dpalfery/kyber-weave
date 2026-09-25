@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { SessionSource } from '../providers/types.js'
 import { getAllProviders } from '../providers/index.js'
@@ -9,6 +9,7 @@ import { READER_UNMEASURABLE } from '../canon/measurability.js'
 
 import {
   HARNESS_DESCRIPTORS,
+  HARNESS_CONTENT_CAPABILITIES,
   PROVIDER_DISPOSITIONS,
   auditProviderRegistry,
   classifySessionSource,
@@ -171,6 +172,8 @@ describe('HarnessSourceRegistry', () => {
       expect(expected, `missing capability disposition for ${descriptor.harnessId}`).toBeDefined()
       expect(PROVIDER_READERS.has(descriptor.harnessId), descriptor.harnessId)
         .toBe(expected?.reader)
+      expect(HARNESS_CONTENT_CAPABILITIES.get(descriptor.harnessId)?.unavailable, descriptor.harnessId)
+        .toEqual(READER_UNMEASURABLE.get(descriptor.harnessId) ?? [])
       if (expected === undefined || expected.unavailable.length === 0) continue
       expect(READER_UNMEASURABLE.get(descriptor.harnessId), descriptor.harnessId)
         .toEqual(expect.arrayContaining(expected.unavailable))
@@ -194,6 +197,15 @@ describe('HarnessSourceRegistry', () => {
 
   it('fails the audit when an unknown provider is registered', () => {
     expect(() => auditProviderRegistry([{ name: 'brand-new-local-bot' }])).toThrow(/brand-new-local-bot/)
+  })
+
+  it('fails the audit when a declared reader is missing from the live reader registry', () => {
+    const hasReader = vi.spyOn(PROVIDER_READERS, 'has').mockReturnValue(false)
+    try {
+      expect(() => auditProviderRegistry([])).toThrow(/reader capability mismatch/)
+    } finally {
+      hasReader.mockRestore()
+    }
   })
 
   it('excludes Gemini and Vercel Gateway with reasons and never emits Gemini as a harness id', () => {

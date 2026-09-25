@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 
 import { getAllProviders } from '../providers/index.js'
 import type { SessionSource } from '../providers/types.js'
+import { READER_UNMEASURABLE } from '../canon/measurability.js'
+import { PROVIDER_READERS } from '../synth/provider.js'
 
 import type {
   ClassificationInput,
@@ -511,27 +513,15 @@ const READER_HARNESS_IDS = new Set([
   'pi',
 ])
 
-export const HARNESS_CONTENT_CAPABILITIES: ReadonlyMap<string, HarnessContentCapability> = new Map([
-  ...HARNESS_DESCRIPTORS.map((d): [string, HarnessContentCapability] => [
+export const HARNESS_CONTENT_CAPABILITIES: ReadonlyMap<string, HarnessContentCapability> = new Map(
+  HARNESS_DESCRIPTORS.map((d): [string, HarnessContentCapability] => [
     d.harnessId,
     {
       reader: READER_HARNESS_IDS.has(d.harnessId),
-      unavailable: [] as string[],
+      unavailable: READER_UNMEASURABLE.get(d.harnessId) ?? [],
     },
   ]),
-  ['copilot-vscode', {
-    reader: true,
-    unavailable: ['system_prompt', 'tool_definitions', 'tool_result_content'],
-  }],
-  ['cursor', {
-    reader: true,
-    unavailable: ['conversation_history', 'system_prompt', 'tool_definitions'],
-  }],
-  ['cursor-agent', {
-    reader: true,
-    unavailable: ['conversation_history', 'system_prompt', 'tool_definitions'],
-  }],
-])
+)
 
 export function descriptorFor(harnessId: string): HarnessSourceDescriptor | undefined {
   return DESCRIPTORS_BY_ID.get(harnessId)
@@ -547,8 +537,12 @@ export function auditProviderRegistry(providers: readonly { name: string }[]): v
     )
   }
   for (const descriptor of HARNESS_DESCRIPTORS) {
-    if (!HARNESS_CONTENT_CAPABILITIES.has(descriptor.harnessId)) {
+    const capability = HARNESS_CONTENT_CAPABILITIES.get(descriptor.harnessId)
+    if (capability === undefined) {
       throw new Error(`Harness descriptor '${descriptor.harnessId}' has no content capability disposition`)
+    }
+    if (capability.reader !== PROVIDER_READERS.has(descriptor.harnessId)) {
+      throw new Error(`Harness descriptor '${descriptor.harnessId}' reader capability mismatch`)
     }
   }
 }
