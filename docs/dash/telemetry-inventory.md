@@ -47,7 +47,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 | Claude Code | Enhanced-telemetry counters and dot-folder conversation/tool-result content can enter canonical records. | System prompts and tool schemas from raw API-body logs require the owner to enable `OTEL_LOG_RAW_API_BODIES=1`; that has not been assumed or configured here. |
 | Codex | Dot-folder ingestion supplies the system prompt, instructions, conversation, tool results, and context window contained in rollout data. | Availability is limited to fields the source actually supplies. |
 | pi | Reader support is implemented and respects OTLP/file source precedence. | No current live collection claim is made. |
-| Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured; unobserved historical buckets explicit `null` with reason. |
+| Cursor | `cursorReader` extracts available user prompt, instructions, and tool context from SQLite storage without claiming an unobserved complete historical prefix. `cursor-hook` emits deterministic OTLP traces. | Window and pressure measured only when the bubble stores `contextWindow`; otherwise not measurable with reason. Unobserved historical buckets explicit `null` with reason. |
 | OpenCode | Its current disabled OTel configuration is represented as not collectable with a reason. | Owner enablement is required before collection can be verified. |
 | Kilo Code | The surveyed empty local store and undocumented OTel surface are represented as not collectable with a reason. | No zero-valued data is fabricated. |
 

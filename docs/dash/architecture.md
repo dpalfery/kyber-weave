@@ -338,7 +338,7 @@ are never silently presented as reported fact. Rebuilding via `kyber build` re-p
 tables deterministically from retained records.
 
 `KyberBridge` (`dash/src/server/bridge.ts`) reads `canon.db` through public, DB-backed
-queries (`countProblems()`, `getRefreshState()`, `getSessionCostContributions()`, `getQuarantineCount()`) 
+queries (`getProblemCount()`, `getRefreshState()`, `getSessionCostContributions()`, `getQuarantineCount()`) 
 and serves the derived sessions, runs, harness rollups, findings, and unclipped content without private-store
 casts. That is the single-store end state in
 [ADR 0008](../adr/0008-kyberdash-single-canonical-store.md): production code never opens a
