@@ -809,24 +809,27 @@ describe('KyberBridge: DB-backed report facts', () => {
     }
   })
 
-  it('lists distinct-location diagnostics separately, matching the problem count', () => {
+  it('lists distinct-identity diagnostics separately, matching the problem count', () => {
     const directory = mkdtempSync(join(tmpdir(), 'kyber-problems-db-'))
     const dbPath = join(directory, 'canon.db')
     const store = new CanonStore(dbPath)
     try {
-      for (const location of ['file-a.ts', 'file-b.ts']) {
-        store.recordProblem({
-          spanId: 'span-shared',
-          severity: 'warning',
-          code: 'FIXTURE_PROBLEM',
-          message: `problem at ${location}`,
-          location,
-        })
+      // Distinct locations, empty versus absent location, and delimiters inside ids.
+      const identities: Array<{ spanId: string; code: string; location?: string }> = [
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM', location: 'file-a.ts' },
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM', location: 'file-b.ts' },
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM', location: '' },
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM' },
+        { spanId: 'a:b', code: 'c' },
+        { spanId: 'a', code: 'b:c' },
+      ]
+      for (const identity of identities) {
+        store.recordProblem({ ...identity, severity: 'warning', message: 'fixture problem' })
       }
       const bridge = new KyberBridge({ canonPath: dbPath })
       try {
-        expect(bridge.getProblems()).toHaveLength(2)
-        expect(bridge.getProblemCount()).toBe(2)
+        expect(bridge.getProblems()).toHaveLength(identities.length)
+        expect(bridge.getProblemCount()).toBe(identities.length)
       } finally {
         bridge.close()
       }

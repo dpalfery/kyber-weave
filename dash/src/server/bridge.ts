@@ -16,6 +16,7 @@ import {
   toRunRow,
   toHarnessRollupRow,
   toExecutionRow,
+  problemIdentity,
   type FindingDbRow,
   type PredictionDbRow,
   type RunDbRow,
@@ -1419,7 +1420,7 @@ export class KyberBridge {
 
   /**
    * Return recorded validation errors, token reconciliation mismatches, and anomalies.
-   * Reads canonical diagnostics, deduplicated by span_id/id.
+   * Reads canonical diagnostics, deduplicated by the store's problem identity.
    */
   getProblems(limit = 200): ProblemRow[] {
     const results: ProblemRow[] = []
@@ -1450,7 +1451,7 @@ export class KyberBridge {
         }
 
         for (const r of rows) {
-          const key = r.span_id ? `span:${r.span_id}:${r.code}:${r.location ?? ''}` : `id:${r.id}`
+          const key = problemIdentity(r.span_id ?? null, r.code, r.location ?? null, r.id)
           if (seenKeys.has(key)) continue
           seenKeys.add(key)
           results.push({

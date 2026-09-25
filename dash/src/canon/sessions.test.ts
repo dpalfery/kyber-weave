@@ -320,6 +320,38 @@ describe('buildSessionRow', () => {
     expect(payload.context.first.buckets['tool_result_content']).toEqual(unavailableToolResult)
     expect(payload.context.last.buckets['tool_result_content']).toEqual(unavailableToolResult)
   })
+
+  it('keeps an observed bucket count over a session-wide unavailable declaration', () => {
+    const unavailableToolResult = {
+      availability: 'not_measurable' as const,
+      reason: 'Earlier request did not persist tool result content.',
+    }
+    const earlier = turn(
+      'mixed-earlier',
+      [{ part: 'conversation_history', text: 'user turn', tokens: 150 }],
+      {
+        tokens: tokens({ freshInput: 150, reportedInput: 150 }),
+        measurability: { tool_result_content: unavailableToolResult },
+      },
+    )
+    const later = turn(
+      'mixed-later',
+      [
+        { part: 'conversation_history', text: 'user turn', tokens: 150 },
+        { part: 'tool_result_content', text: 'tool output', tokens: 40 },
+      ],
+      {
+        timestamp: '2026-09-03T10:05:00.000Z',
+        tokens: tokens({ freshInput: 190, reportedInput: 190 }),
+      },
+    )
+
+    const row = buildSessionRow('sess-mixed', [earlier, later], approximateO200kBase)
+    const payload = JSON.parse(JSON.stringify(row.payload)) as SessionPayloadView
+
+    expect(payload.context.first.buckets['tool_result_content']).toEqual(unavailableToolResult)
+    expect(payload.context.last.buckets['tool_result_content']).toBe(40)
+  })
 })
 
 describe('buildSessions', () => {

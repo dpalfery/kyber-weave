@@ -450,9 +450,20 @@ export function buildSessionRow(
     ),
   )
   const unavailableContextBuckets = { ...unavailableCanonicalBuckets, ...unavailableBuckets }
+  // A session-wide declaration merges every record's, so it must not erase a count
+  // this turn observed; it only stands in for a bucket the turn has at zero.
+  const unavailableOverlay = (buckets: Record<string, number>) =>
+    Object.fromEntries(
+      Object.entries(contextBucketDeclarations).flatMap(([bucket, canonical]) => {
+        const unavailable = unavailableBuckets[bucket]
+        return unavailable !== undefined && !buckets[canonical]
+          ? [[canonical, unavailable], [bucket, unavailable]]
+          : []
+      }),
+    )
   const contextBucket = (turn: (typeof analyzedTurns)[number] | undefined, reportedInput: number): AsadContextBucket => ({
     buckets: turn?.buckets
-      ? { ...turn.buckets, ...unavailableContextBuckets }
+      ? { ...turn.buckets, ...unavailableOverlay(turn.buckets) }
       : Object.keys(unavailableContextBuckets).length > 0
         ? unavailableContextBuckets
         : {},

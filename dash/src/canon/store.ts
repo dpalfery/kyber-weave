@@ -481,11 +481,11 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
 }
 
 /** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
-function problemIdentity(
+export function problemIdentity(
   spanId: string | null,
   code: string,
   location: string | null,
-  legacyId?: number,
+  legacyId?: number | string,
 ): string {
   if (spanId === null) return JSON.stringify(['legacy-row', legacyId])
   return JSON.stringify(['span-problem', spanId, code, location])
