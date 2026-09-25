@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 
 import type { ContentPart } from '../../canon/types.js'
-import { isSqliteAvailable, openDatabase } from '../../ingest/sqlite.js'
+import { blobToText, isSqliteAvailable, openDatabase } from '../../ingest/sqlite.js'
 import {
   decodeSourcePath,
   getCursorComposerFilter,
@@ -214,7 +214,7 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       bubble_key: string
       request_id: string | null
       model: string | null
-      text: string | null
+      text: Uint8Array | string | null
       bubble_type: number | null
       context_window: number | null
     }
@@ -226,7 +226,7 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
           key as bubble_key,
           json_extract(value, '$.requestId') as request_id,
           json_extract(value, '$.modelInfo.modelName') as model,
-          json_extract(value, '$.text') as text,
+          CAST(json_extract(value, '$.text') AS BLOB) as text,
           json_extract(value, '$.type') as bubble_type,
           json_extract(value, '$.contextWindow') as context_window
         FROM cursorDiskKV
@@ -254,7 +254,10 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
         bubbleModel.set(row.request_id, row.model)
       }
       if (row.request_id && row.bubble_type === 1 && row.text) {
-        bubbleUserText.set(row.request_id, row.text)
+        const text = blobToText(row.text)
+        if (text) {
+          bubbleUserText.set(row.request_id, text)
+        }
       }
     }
 

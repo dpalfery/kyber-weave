@@ -221,4 +221,39 @@ describe('cursorReader', () => {
       rmSync(userDir, { recursive: true, force: true })
     }
   })
+
+  it('safely decodes bubble text containing truncated invalid UTF-8 without aborting', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-cursor-utf8-test-'))
+    const dbPath = join(root, 'state.vscdb')
+    const db = new DatabaseSync(dbPath)
+    try {
+      db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)')
+      const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+
+      // Craft a JSON buffer containing an invalid UTF-8 byte sequence in "text"
+      const prefix = Buffer.from('{"type":1,"requestId":"req-bad-utf8","text":"hello ')
+      const badByte = Buffer.from([0xff, 0xfe])
+      const suffix = Buffer.from(' world"}')
+      const value = Buffer.concat([prefix, badByte, suffix])
+
+      insert.run('bubbleId:comp-bad:b1', value)
+    } finally {
+      db.close()
+    }
+
+    try {
+      const turns: ReaderTurn[] = []
+      for await (const turn of cursorReader.read(dbPath)) {
+        turns.push(turn)
+      }
+      expect(turns).toHaveLength(1)
+      expect(turns[0]!.nativeRecordId).toBe('req-bad-utf8')
+      const historyPart = turns[0]!.parts.find((p) => p.part === 'conversation_history')
+      expect(historyPart).toBeDefined()
+      expect(historyPart!.text).toContain('hello')
+      expect(historyPart!.text).toContain('world')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
