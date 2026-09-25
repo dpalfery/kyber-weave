@@ -547,6 +547,19 @@ describe('cost (R8.9, R14.2, R5.4, R5.5)', () => {
     expect(row!.amountUsd.value).not.toBe(0)
   })
 
+  it('marks cost unavailable when the contribution query fails', () => {
+    const bridge = bridgeOf({ sessions: [session()] })
+    bridge.getSessionCostContributions = () => {
+      throw new Error('cost query failed in store')
+    }
+
+    const [row] = build(bridge).cost ?? []
+    expect(row?.basis).toBe('unknown')
+    expect(row && isUnmeasurable(row.amountUsd)).toBe(true)
+    expect(row?.amountUsd.value).toBeNull()
+    expect(row && isUnmeasurable(row.amountUsd) && row.amountUsd.reason).toBe('cost query failed')
+  })
+
   it('is the last key in the document, so no surface can lead with it', () => {
     const report = build(bridgeOf({ sessions: [session()] }))
     expect(Object.keys(report).at(-1)).toBe('cost')

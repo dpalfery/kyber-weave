@@ -1552,47 +1552,41 @@ export class KyberBridge {
     const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
     if (uniqueIds.length === 0) return []
     if (this.store) {
-      try {
-        return this.store.costContributionsForSessions(uniqueIds)
-      } catch {
-        return []
-      }
+      return this.store.costContributionsForSessions(uniqueIds)
     }
-    if (!this.hasTable(this.canonDb, 'records')) return []
+    if (!this.hasTable(this.canonDb, 'records')) {
+      throw new Error('canonical records table is unavailable for cost lookup')
+    }
 
     const contributions: SessionCostContribution[] = []
     const chunkSize = 900
     for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
       const chunk = uniqueIds.slice(offset, offset + chunkSize)
       const placeholders = chunk.map(() => '?').join(', ')
-      try {
-        const rows = this.canonDb!
-          .prepare(
-            `SELECT COALESCE(session_id, trace_id) AS session_key, cost_json
-             FROM records WHERE COALESCE(session_id, trace_id) IN (${placeholders})`,
-          )
-          .all(...chunk) as Array<{ session_key: unknown; cost_json: unknown }>
-        for (const row of rows) {
-          if (typeof row.session_key !== 'string') continue
-          let cost: unknown
-          try {
-            cost = JSON.parse(String(row.cost_json))
-          } catch {
-            continue
-          }
-          if (typeof cost !== 'object' || cost === null) continue
-          const block = cost as { basis?: unknown; status?: unknown; value?: unknown }
-          contributions.push({
-            sessionId: row.session_key,
-            basis: String(block.basis ?? 'unknown'),
-            status: String(block.status ?? 'no_rate'),
-            ...(typeof block.value === 'number' && Number.isFinite(block.value)
-              ? { value: block.value }
-              : {}),
-          })
+      const rows = this.canonDb!
+        .prepare(
+          `SELECT COALESCE(session_id, trace_id) AS session_key, cost_json
+           FROM records WHERE COALESCE(session_id, trace_id) IN (${placeholders})`,
+        )
+        .all(...chunk) as Array<{ session_key: unknown; cost_json: unknown }>
+      for (const row of rows) {
+        if (typeof row.session_key !== 'string') continue
+        let cost: unknown
+        try {
+          cost = JSON.parse(String(row.cost_json))
+        } catch {
+          continue
         }
-      } catch {
-        // One unreadable cost chunk does not make the rest of the report fail.
+        if (typeof cost !== 'object' || cost === null) continue
+        const block = cost as { basis?: unknown; status?: unknown; value?: unknown }
+        contributions.push({
+          sessionId: row.session_key,
+          basis: String(block.basis ?? 'unknown'),
+          status: String(block.status ?? 'no_rate'),
+          ...(typeof block.value === 'number' && Number.isFinite(block.value)
+            ? { value: block.value }
+            : {}),
+        })
       }
     }
     return contributions

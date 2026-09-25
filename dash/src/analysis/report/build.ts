@@ -202,8 +202,12 @@ export function costByBasis(contributions: readonly CostContribution[]): ReportC
  * would be the blending this section exists to prevent. Without a store to read, the
  * section reports that it could not be computed rather than falling back to the blend.
  */
-function readCostContributions(bridge: KyberBridge, sessionIds: ReadonlySet<string>): CostContribution[] {
-  return safely(() => bridge.getSessionCostContributions([...sessionIds]), [])
+function readCost(bridge: KyberBridge, sessionIds: ReadonlySet<string>): ReportCost {
+  try {
+    return costByBasis(bridge.getSessionCostContributions([...sessionIds]))
+  } catch {
+    return [{ basis: 'unknown', amountUsd: unmeasurable<number>('cost query failed') }]
+  }
 }
 
 /**
@@ -583,9 +587,7 @@ export function buildContextReport(
 
   // Last, always (R14.2).
   if (sections.has('cost')) {
-    report.cost = costByBasis(
-      readCostContributions(bridge, new Set(scoped.map((session) => session.session_id))),
-    )
+    report.cost = readCost(bridge, new Set(scoped.map((session) => session.session_id)))
   }
 
   return report

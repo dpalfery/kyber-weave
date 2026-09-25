@@ -623,6 +623,45 @@ describe('KyberBridge: canonical-store comparison', () => {
 })
 
 describe('KyberBridge: DB-backed report facts', () => {
+  it('propagates injected-store cost lookup failures', () => {
+    const brokenStore = {
+      costContributionsForSessions: () => {
+        throw new Error('store cost lookup failed')
+      },
+    } as unknown as CanonStore
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: brokenStore })
+    try {
+      expect(() => bridge.getSessionCostContributions(['session-1'])).toThrow('store cost lookup failed')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('propagates a later cost chunk failure instead of returning a partial total', () => {
+    let costQueries = 0
+    const db = {
+      exec: () => {},
+      prepare: (sql: string) => {
+        if (sql.includes('sqlite_master')) return { get: () => ({}) }
+        if (sql.includes('cost_json')) {
+          costQueries += 1
+          if (costQueries === 2) throw new Error('second cost chunk failed')
+          return { all: () => [{ session_key: 'session-0', cost_json: '{"basis":"published","status":"priced","value":2}' }] }
+        }
+        throw new Error(`unexpected query: ${sql}`)
+      },
+      close: () => {},
+    } as unknown as import('node:sqlite').DatabaseSync
+    const bridge = new KyberBridge({ canonDb: db })
+    const ids = Array.from({ length: 901 }, (_, index) => `session-${index}`)
+    try {
+      expect(() => bridge.getSessionCostContributions(ids)).toThrow('second cost chunk failed')
+      expect(costQueries).toBe(2)
+    } finally {
+      bridge.close()
+    }
+  })
+
   it('reports uncapped diagnostics, refresh state, and scoped priced cost from canon.db', () => {
     const directory = mkdtempSync(join(tmpdir(), 'kyber-report-db-'))
     const dbPath = join(directory, 'canon.db')
