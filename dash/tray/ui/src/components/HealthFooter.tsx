@@ -52,7 +52,7 @@ export function HealthFooter({ report, refresh, receiver, now }: Props) {
       </p>
 
       <p className="health-footer__line" data-testid="store-counts">
-        {coverage?.quarantineCount ?? 0} quarantined · {coverage?.problemCount ?? 0} problems
+        {coverage?.quarantineCount ?? '—'} quarantined · {coverage?.problemCount ?? '—'} problems
       </p>
 
       {cost.length > 0 && (

@@ -23,6 +23,7 @@ export const DEFAULT_CONTEXT_LIMIT = 200_000
 
 /** Attributes a harness may report its context window under. */
 export const CONTEXT_LIMIT_KEYS = [
+  'contextWindow',
   'gen_ai.request.max_context_tokens',
   'gen_ai.request.context_window',
   'model_context_window',

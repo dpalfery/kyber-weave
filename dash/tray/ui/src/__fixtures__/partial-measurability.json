@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-19T12:00:00.000Z",
+  "kyberdashVersion": "1.0.0",
+  "scope": {
+    "days": 7,
+    "harness": "cursor"
+  },
+  "coverage": {
+    "storePath": "canon.db",
+    "refresh": {
+      "lastSuccessAt": "2026-09-19T10:45:00.000Z",
+      "lastFailure": {
+        "at": "2026-09-19T11:45:00.000Z",
+        "summary": "refresh retained the last successful projection"
+      },
+      "inProgress": null
+    },
+    "harnesses": [
+      {
+        "harness": "cursor",
+        "name": "cursor",
+        "sessionsInWindow": 101,
+        "measurability": {
+          "system_prompt": {
+            "reason": "Cursor does not preserve system prompt boundaries"
+          },
+          "tool_definitions": {
+            "reason": "Cursor does not preserve tool definition boundaries"
+          },
+          "instruction_context": {
+            "reason": "Cursor does not preserve instruction boundaries"
+          },
+          "conversation_history": {
+            "reason": "Cursor preserves token totals without a complete message prefix"
+          },
+          "tool_result_content": {
+            "reason": "Cursor does not preserve tool result boundaries"
+          }
+        }
+      }
+    ],
+    "quarantineCount": 251,
+    "problemCount": 307,
+    "hints": []
+  },
+  "findings": [],
+  "harnesses": [],
+  "latestSession": {
+    "sessionId": "sess-cursor-partial",
+    "harness": "cursor",
+    "project": "kyber-weave",
+    "lastActivityAt": "2026-09-19T11:00:00.000Z",
+    "turnCount": 1,
+    "view": "session/sess-cursor-partial",
+    "latestTurn": {
+      "index": 1,
+      "pressure": {
+        "value": 0.25
+      },
+      "contextWindow": {
+        "value": 128000,
+        "unit": "tokens"
+      },
+      "buckets": {
+        "system_prompt": {
+          "value": null,
+          "reason": "Cursor does not preserve system prompt boundaries"
+        },
+        "tool_definitions": {
+          "value": null,
+          "reason": "Cursor does not preserve tool definition boundaries"
+        },
+        "instruction_context": {
+          "value": null,
+          "reason": "Cursor does not preserve instruction boundaries"
+        },
+        "conversation_history": {
+          "value": null,
+          "reason": "Cursor preserves token totals without a complete message prefix"
+        },
+        "tool_result_content": {
+          "value": null,
+          "reason": "Cursor does not preserve tool result boundaries"
+        }
+      },
+      "residual": {
+        "value": null,
+        "reason": "Cursor does not expose bucket boundaries"
+      },
+      "cacheInvalidation": false
+    },
+    "toolDefinitionSources": [],
+    "cacheInvalidationTurns": []
+  },
+  "cost": [
+    {
+      "basis": "harness",
+      "amountUsd": {
+        "value": 62.5,
+        "unit": "USD"
+      }
+    },
+    {
+      "basis": "published",
+      "amountUsd": {
+        "value": 1,
+        "unit": "USD"
+      }
+    }
+  ]
+}

@@ -10,6 +10,7 @@ import {
 } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
 import type { CanonicalRecord } from '../canon/types.js'
+import { buildContextReport } from '../analysis/report/build.js'
 
 const _require = createRequire(import.meta.url)
 const { DatabaseSync } = _require('node:sqlite') as {
@@ -617,6 +618,261 @@ describe('KyberBridge: canonical-store comparison', () => {
       store.close()
       if (previousAgentdashDb === undefined) delete process.env.AGENTDASH_DB
       else process.env.AGENTDASH_DB = previousAgentdashDb
+    }
+  })
+})
+
+describe('KyberBridge: DB-backed report facts', () => {
+  it('propagates injected-store cost lookup failures', () => {
+    const brokenStore = {
+      costContributionsForSessions: () => {
+        throw new Error('store cost lookup failed')
+      },
+    } as unknown as CanonStore
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: brokenStore })
+    try {
+      expect(() => bridge.getSessionCostContributions(['session-1'])).toThrow('store cost lookup failed')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('propagates a later cost chunk failure instead of returning a partial total', () => {
+    let costQueries = 0
+    const db = {
+      exec: () => {},
+      prepare: (sql: string) => {
+        if (sql.includes('sqlite_master')) return { get: () => ({}) }
+        if (sql.includes('cost_json')) {
+          costQueries += 1
+          if (costQueries === 2) throw new Error('second cost chunk failed')
+          return { all: () => [{ session_key: 'session-0', cost_json: '{"basis":"published","status":"priced","value":2}' }] }
+        }
+        throw new Error(`unexpected query: ${sql}`)
+      },
+      close: () => {},
+    } as unknown as import('node:sqlite').DatabaseSync
+    const bridge = new KyberBridge({ canonDb: db })
+    const ids = Array.from({ length: 901 }, (_, index) => `session-${index}`)
+    try {
+      expect(() => bridge.getSessionCostContributions(ids)).toThrow('second cost chunk failed')
+      expect(costQueries).toBe(2)
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('reports uncapped diagnostics, refresh state, and scoped priced cost from canon.db', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-report-db-'))
+    const dbPath = join(directory, 'canon.db')
+    const store = new CanonStore(dbPath)
+    const sessionId = 'sess-report-db'
+    const now = new Date('2026-09-19T12:00:00.000Z')
+
+    try {
+      store.upsertSession({
+        sessionId,
+        harness: 'cursor',
+        repo: 'kyber-weave',
+        started: '2026-09-19T10:00:00.000Z',
+        ended: '2026-09-19T11:00:00.000Z',
+        payload: {
+          summary: { turn_count: 1, total_input: 1_000, total_output: 20 },
+          context: {
+            measurable: true,
+            contextLimit: 200_000,
+            turns: [{
+              index: 1,
+              pressure: 0.005,
+              buckets: {
+                system_prompt: 500,
+                tool_definitions: 200,
+                instruction_context: 100,
+                conversation_history: 150,
+                tool_result_content: 50,
+              },
+              residual: { tokens: 0 },
+              toolDefinitionsByServer: {},
+            }],
+          },
+        },
+      })
+
+      const records: CanonicalRecord[] = Array.from({ length: 250 }, (_, index) => ({
+        spanId: `priced-harness-${index}`,
+        traceId: `trace-${index}`,
+        parentSpanId: null,
+        source: 'synthetic',
+        harness: 'cursor',
+        sessionId,
+        name: `priced record ${index}`,
+        op: 'llm.invoke',
+        kind: 'client',
+        timestamp: `2026-09-19T10:${String(index % 60).padStart(2, '0')}:00.000Z`,
+        durationMs: 10,
+        status: 'ok',
+        tokens: {
+          freshInput: 10,
+          cacheRead: 0,
+          cacheCreation: 0,
+          output: 2,
+          reportedInput: 10,
+          reportedOutput: 2,
+        },
+        content: {},
+        cost: { basis: 'harness', status: 'priced', value: 0.25, currency: 'USD' },
+      }))
+      records.push({
+        ...records[0]!,
+        spanId: 'priced-published-1',
+        traceId: 'trace-published-1',
+        cost: { basis: 'published', status: 'priced', value: 0.25, currency: 'USD' },
+      })
+      records.push({
+        ...records[0]!,
+        spanId: 'priced-published-2',
+        traceId: 'trace-published-2',
+        cost: { basis: 'published', status: 'priced', value: 0.75, currency: 'USD' },
+      })
+      store.upsertMany(records)
+
+      for (let index = 0; index < 251; index += 1) {
+        store.quarantine(`quarantined-${index}`, ['synthetic'], 'fixture quarantine')
+      }
+      for (let index = 0; index < 307; index += 1) {
+        store.recordProblem({
+          spanId: `problem-${index}`,
+          severity: 'warning',
+          code: 'FIXTURE_PROBLEM',
+          message: 'fixture problem',
+          location: `fixture-${index}`,
+        })
+      }
+
+      store.startRefreshRun({
+        id: 'refresh-success',
+        startedAt: '2026-09-19T10:30:00.000Z',
+        pid: process.pid,
+        trigger: 'cli',
+      })
+      store.completeRefreshRun(
+        'refresh-success',
+        'success',
+        '2026-09-19T10:45:00.000Z',
+        'fixture refresh succeeded',
+      )
+      store.startRefreshRun({
+        id: 'refresh-failure',
+        startedAt: '2026-09-19T11:30:00.000Z',
+        pid: process.pid,
+        trigger: 'scheduled',
+      })
+      store.completeRefreshRun(
+        'refresh-failure',
+        'failure',
+        '2026-09-19T11:45:00.000Z',
+        'fixture refresh failed',
+      )
+      const dbBridge = new KyberBridge({ canonPath: dbPath })
+      const injectedBridge = new KyberBridge({ canonPath: dbPath, store })
+      try {
+        const dbReport = buildContextReport(dbBridge, { days: 7 }, { now, storePath: dbPath })
+        const injectedReport = buildContextReport(injectedBridge, { days: 7 }, { now, storePath: dbPath })
+
+        expect(dbReport).toEqual(injectedReport)
+        expect(dbReport.coverage).toMatchObject({
+          quarantineCount: 251,
+          problemCount: 307,
+          refresh: {
+            lastSuccessAt: '2026-09-19T10:45:00.000Z',
+            lastFailure: {
+              at: '2026-09-19T11:45:00.000Z',
+              summary: 'fixture refresh failed',
+            },
+            inProgress: null,
+          },
+        })
+        expect(dbReport.cost).toEqual([
+          { basis: 'harness', amountUsd: { value: 62.5, unit: 'USD' } },
+          { basis: 'published', amountUsd: { value: 1, unit: 'USD' } },
+        ])
+      } finally {
+        dbBridge.close()
+        injectedBridge.close()
+      }
+    } finally {
+      try {
+        store.close()
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('lists distinct-identity diagnostics separately, matching the problem count', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kyber-problems-db-'))
+    const dbPath = join(directory, 'canon.db')
+    const store = new CanonStore(dbPath)
+    try {
+      // Distinct locations, empty versus absent location, and delimiters inside ids.
+      const identities: Array<{ spanId: string; code: string; location?: string }> = [
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM', location: 'file-a.ts' },
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM', location: 'file-b.ts' },
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM', location: '' },
+        { spanId: 'span-shared', code: 'FIXTURE_PROBLEM' },
+        { spanId: 'a:b', code: 'c' },
+        { spanId: 'a', code: 'b:c' },
+      ]
+      for (const identity of identities) {
+        store.recordProblem({ ...identity, severity: 'warning', message: 'fixture problem' })
+      }
+      const bridge = new KyberBridge({ canonPath: dbPath })
+      try {
+        expect(bridge.getProblems()).toHaveLength(identities.length)
+        expect(bridge.getProblemCount()).toBe(identities.length)
+      } finally {
+        bridge.close()
+      }
+    } finally {
+      try {
+        store.close()
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('surfaces errors from getProblemCount and getQuarantineCount when queries fail', () => {
+    const brokenStore = {
+      countQuarantine: () => {
+        throw new Error('store quarantine count error')
+      },
+      countProblems: () => {
+        throw new Error('store problem count error')
+      },
+    } as unknown as CanonStore
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: brokenStore })
+    try {
+      expect(() => bridge.getQuarantineCount()).toThrow('store quarantine count error')
+      expect(() => bridge.getProblemCount()).toThrow('store problem count error')
+    } finally {
+      bridge.close()
+    }
+  })
+
+  it('returns exact zero when problem and quarantine tables are clean', () => {
+    const cleanStore = {
+      countQuarantine: () => 0,
+      countProblems: () => 0,
+    } as unknown as CanonStore
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: cleanStore })
+    try {
+      expect(bridge.getQuarantineCount()).toBe(0)
+      expect(bridge.getProblemCount()).toBe(0)
+    } finally {
+      bridge.close()
     }
   })
 })

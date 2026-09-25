@@ -16,6 +16,8 @@
 import { ingestBatch } from '../canon/ingest.js'
 import { CanonStore } from '../canon/store.js'
 import { canonicalParts, canonicalSessionId } from '../canon/adapters/copilot.js'
+import { observedNamespaces } from '../canon/adapters/quarantine.js'
+import { EXCLUDED_HARNESS_IDENTITIES, isExcludedHarnessIdentity } from '../canon/measurability.js'
 import { contentFromParts, type CanonicalRecord } from '../canon/types.js'
 import type { OtlpSpan } from '../otel/receiver.js'
 
@@ -129,6 +131,24 @@ function toOtlpSpan(record: CanonicalRecord): OtlpSpan {
  * The raw payload is the evidence and the store kept it, so this is a pure
  * re-derivation: the vote runs per trace, exactly as it does on ingest.
  */
+function deleteDerivedSessions(
+  store: CanonStore,
+  record: { traceId?: string | null; sessionId?: string | null; harness?: string },
+): void {
+  const rawIds = [record.traceId, record.sessionId].filter(
+    (id): id is string => typeof id === 'string' && id !== '',
+  )
+  for (const rawId of rawIds) {
+    store.deleteSession(rawId)
+    if (record.harness) {
+      store.deleteSession(`${record.harness}:${rawId}`)
+    }
+    for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
+      store.deleteSession(`${excluded}:${rawId}`)
+    }
+  }
+}
+
 export function renormalizeRecords(store: CanonStore, options: BackfillOptions = {}): RenormalizeReport {
   const traceIds = store.traceIds()
   const progressEvery = options.progressEvery ?? 200
@@ -153,21 +173,33 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
     if (grouped.length > 0) ingestBatch(grouped.map(toOtlpSpan), store)
     for (const record of explicitGemini) {
       const repaired = store.get(record.spanId)
-      if (repaired !== undefined && repaired.harness !== 'gemini') {
-        // A retained row with explicit vendor identity must not inherit a
-        // competing sibling's harness from the historical trace vote.
-        store.setAttribution(record.spanId, {
-          harness: 'gemini',
-          source: repaired.source,
-          op: repaired.op,
-          tokens: repaired.tokens,
-        })
+      if (
+        repaired !== undefined &&
+        (repaired.harness === 'gemini' || isExcludedHarnessIdentity(repaired.harness))
+      ) {
+        // Acceptance criterion 13: legacy Gemini records are quarantined as
+        // excluded harnesses rather than re-attributed to an excluded provider.
+        store.quarantineAndDelete(
+          record.spanId,
+          observedNamespaces(record.raw as Record<string, unknown>),
+          'excluded_harness',
+        )
+        deleteDerivedSessions(store, record)
       }
     }
     for (const before of withRaw) {
       const after = store.get(before.spanId)
       if (after === undefined) {
         if (store.getQuarantine(before.spanId)?.reason === 'unclaimed') report.unclaimed += 1
+        continue
+      }
+      if (after.harness === 'gemini' || isExcludedHarnessIdentity(after.harness)) {
+        store.quarantineAndDelete(
+          before.spanId,
+          observedNamespaces(before.raw as Record<string, unknown>),
+          'excluded_harness',
+        )
+        deleteDerivedSessions(store, before)
         continue
       }
       if (
@@ -189,6 +221,24 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
     }
 
     if (report.traces % progressEvery === 0) options.onProgress?.(report.traces, traceIds.length)
+  }
+
+  const excludedHarnesses = [...EXCLUDED_HARNESS_IDENTITIES]
+  const EXCLUSION_BATCH_SIZE = 500
+  for (;;) {
+    const batch = store.listRecordsByHarness(excludedHarnesses, EXCLUSION_BATCH_SIZE)
+    if (batch.length === 0) break
+    for (const record of batch) {
+      const rawAttrs =
+        record.raw !== null && typeof record.raw === 'object'
+          ? (record.raw as Record<string, unknown>)
+          : {}
+      store.quarantineAndDelete(record.spanId, observedNamespaces(rawAttrs), 'excluded_harness')
+      deleteDerivedSessions(store, record)
+    }
+  }
+  for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
+    store.deleteSessionsByHarness(excluded)
   }
 
   options.onProgress?.(report.traces, traceIds.length)

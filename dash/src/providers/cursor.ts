@@ -53,7 +53,7 @@ const modelDisplayNames: Record<string, string> = {
   'cursor-auto': 'Cursor (auto)',
 }
 
-type BubbleRow = {
+export type BubbleRow = {
   bubble_key: string
   input_tokens: number | null
   output_tokens: number | null
@@ -63,6 +63,7 @@ type BubbleRow = {
   user_text: Uint8Array | string | null
   text_length: number | null
   bubble_type: number | null
+  context_window: number | null
   code_blocks: Uint8Array | string | null
   /// Only populated on the paged scan path (BUBBLE_QUERY_PAGE) used for very
   /// large databases; undefined on the un-paged BUBBLE_QUERY_SINCE path.
@@ -251,7 +252,7 @@ function loadWorkspaceMap(workspaceStorageDir: string): WorkspaceMapping {
 /// literal newline between the `task-call_` and `fc_` halves. Those rows
 /// are not standalone composers and would otherwise inflate the orphan
 /// project's session count.
-function parseComposerIdFromKey(key: string | undefined): string | null {
+export function parseComposerIdFromKey(key: string | undefined): string | null {
   if (!key) return null
   const firstColon = key.indexOf(':')
   if (firstColon < 0) return null
@@ -276,7 +277,7 @@ function encodeSourcePath(dbPath: string, workspaceTag: string): string {
   return `${dbPath}${WORKSPACE_SEP}${workspaceTag}`
 }
 
-function decodeSourcePath(sourcePath: string): { dbPath: string; workspaceTag: string } {
+export function decodeSourcePath(sourcePath: string): { dbPath: string; workspaceTag: string } {
   const idx = sourcePath.indexOf(WORKSPACE_SEP)
   // Backwards-compat: a bare DB path with no workspace tag means "give me
   // every call from this DB". Older cached SessionSource entries and any
@@ -286,6 +287,31 @@ function decodeSourcePath(sourcePath: string): { dbPath: string; workspaceTag: s
     dbPath: sourcePath.slice(0, idx),
     workspaceTag: sourcePath.slice(idx + WORKSPACE_SEP.length),
   }
+}
+
+export function getCursorComposerFilter(
+  dbPath: string,
+  workspaceTag: string,
+): { composerFilter: Set<string> | null; filterMode: 'include' | 'exclude' } {
+  let composerFilter: Set<string> | null = null
+  let filterMode: 'include' | 'exclude' = 'include'
+  if (workspaceTag !== '__all__') {
+    const wsMap = loadWorkspaceMap(getCursorWorkspaceStorageDir(dbPath))
+    if (workspaceTag === ORPHAN_TAG) {
+      // Orphan source: every composer that is mapped to SOME workspace
+      // is excluded here, so unmapped composers (and any non-UUID
+      // sub-composer ids that slip through) land in this bucket.
+      composerFilter = new Set(wsMap.composerToWorkspace.keys())
+      filterMode = 'exclude'
+    } else {
+      composerFilter = new Set()
+      for (const [composerId, folder] of wsMap.composerToWorkspace) {
+        if (folder === workspaceTag) composerFilter.add(composerId)
+      }
+      filterMode = 'include'
+    }
+  }
+  return { composerFilter, filterMode }
 }
 
 type CodeBlock = { languageId?: string }
@@ -328,6 +354,7 @@ const BUBBLE_QUERY_BASE = `
     CAST(substr(json_extract(value, '$.text'), 1, 500) AS BLOB) as user_text,
     length(json_extract(value, '$.text')) as text_length,
     json_extract(value, '$.type') as bubble_type,
+    json_extract(value, '$.contextWindow') as context_window,
     CAST(json_extract(value, '$.codeBlocks') AS BLOB) as code_blocks
   FROM cursorDiskKV
   WHERE key LIKE 'bubbleId:%'
@@ -385,6 +412,7 @@ const BUBBLE_QUERY_PAGE = `
     CAST(substr(json_extract(value, '$.text'), 1, 500) AS BLOB) as user_text,
     length(json_extract(value, '$.text')) as text_length,
     json_extract(value, '$.type') as bubble_type,
+    json_extract(value, '$.contextWindow') as context_window,
     CAST(json_extract(value, '$.codeBlocks') AS BLOB) as code_blocks
   FROM cursorDiskKV
   WHERE key LIKE 'bubbleId:%' AND ROWID < ?
@@ -456,6 +484,7 @@ function scanBubblesPaged(
   db: SqliteDatabase,
   timeFloor: string,
   budget: number,
+  timeCeiling?: string,
 ): { rows: BubbleRow[]; truncated: boolean } {
   const BATCH = 25_000
   const collected: BubbleRow[] = []
@@ -473,8 +502,10 @@ function scanBubblesPaged(
     if (batch.length === 0) break
 
     for (const row of batch) {
-      if (collected.length >= budget) { truncated = true; break paging }
-      if (row.created_at != null && row.created_at > timeFloor) collected.push(row)
+      if (row.created_at != null && row.created_at > timeFloor && (timeCeiling === undefined || row.created_at <= timeCeiling)) {
+        if (collected.length >= budget) { truncated = true; break paging }
+        collected.push(row)
+      }
     }
 
     const oldest = batch[batch.length - 1]!
@@ -489,6 +520,28 @@ function scanBubblesPaged(
   // Restore ROWID-ascending order to match the un-paged query's row ordering.
   collected.sort((a, b) => (a.rid ?? 0) - (b.rid ?? 0))
   return { rows: collected, truncated }
+}
+
+/** One bounded bubble projection shared by the provider and content reader. */
+export function loadCursorBubbles(
+  db: SqliteDatabase,
+  timeFloor: string,
+  timeCeiling?: string,
+): { rows: BubbleRow[]; total: number; maxBubbles: number; truncated: boolean } {
+  const maxBubbles = Number(process.env['KYBERDASH_CURSOR_MAX_BUBBLES']) || 250_000
+  const countRows = db.query<{ cnt: number }>(
+    "SELECT COUNT(*) as cnt FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+  )
+  const total = countRows[0]?.cnt ?? 0
+  const scan = total > maxBubbles
+    ? scanBubblesPaged(db, timeFloor, maxBubbles, timeCeiling)
+    : {
+      rows: timeCeiling === undefined
+        ? db.query<BubbleRow>(BUBBLE_QUERY_SINCE, [timeFloor])
+        : db.query<BubbleRow>(`${BUBBLE_QUERY_SINCE_HEAD} AND json_extract(value, '$.createdAt') <= ?${BUBBLE_QUERY_SINCE_TAIL}`, [timeFloor, timeCeiling]),
+      truncated: false,
+    }
+  return { ...scan, total, maxBubbles }
 }
 
 // Cursor leaves the per-bubble tokenCount at {0,0} on current builds. The only
@@ -527,41 +580,53 @@ function loadComposerMeta(db: SqliteDatabase): Map<string, ComposerMeta> {
   return map
 }
 
-type AgentStream = {
+export type AgentStream = {
   tools: string[]
   bash: string[]
   userChars: number
   contextChars: number
   assistantChars: number
   model: string | null
+  userContent: string[]
+  instructionContent: string[]
+  toolResultContent: string[]
 }
 
 function newAgentStream(): AgentStream {
-  return { tools: [], bash: [], userChars: 0, contextChars: 0, assistantChars: 0, model: null }
+  return {
+    tools: [],
+    bash: [],
+    userChars: 0,
+    contextChars: 0,
+    assistantChars: 0,
+    model: null,
+    userContent: [],
+    instructionContent: [],
+    toolResultContent: [],
+  }
 }
 
-// agentKv rows store content as a plain string or a block array; count only
-// the text inside blocks so the JSON envelope and non-text parts are not
-// billed as prompt characters.
-function contentTextLength(raw: string): number {
+// agentKv rows store content as a plain string or a block array. Derive token
+// estimates from text values; only the content reader retains those values.
+function contentTextValues(raw: string): string[] {
   const trimmed = raw.trimStart()
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
     try {
       const parsed = JSON.parse(trimmed) as unknown
       const blocks = Array.isArray(parsed) ? parsed : [parsed]
-      let len = 0
+      const texts: string[] = []
       for (const block of blocks) {
         if (block == null || typeof block !== 'object') continue
         const b = block as { text?: unknown; content?: unknown }
-        if (typeof b.text === 'string') len += b.text.length
-        else if (typeof b.content === 'string') len += b.content.length
+        if (typeof b.text === 'string') texts.push(b.text)
+        else if (typeof b.content === 'string') texts.push(b.content)
       }
-      return len
+      return texts
     } catch {
-      return raw.length
+      return [raw]
     }
   }
-  return raw.length
+  return raw === '' ? [] : [raw]
 }
 
 // Cursor logs the agent's stream (prompt, injected context, tool calls, reply
@@ -570,19 +635,28 @@ function contentTextLength(raw: string): number {
 // its conversation. Requests with no matching bubble are kept separately:
 // they are real sessions (background runs, older builds) that would otherwise
 // vanish from totals.
-function loadAgentStreams(
+type AgentStreamLoad = {
+  byComposer: Map<string, AgentStream>
+  unjoined: Map<string, AgentStream>
+  byRequest: Map<string, AgentStream>
+}
+
+export function loadAgentStreams(
   db: SqliteDatabase,
   requestToComposer: Map<string, string>,
-): { byComposer: Map<string, AgentStream>; unjoined: Map<string, AgentStream> } {
+  options: { retainContent?: boolean } = {},
+): AgentStreamLoad {
+  const retainContent = options.retainContent === true
   const byComposer = new Map<string, AgentStream>()
   const unjoined = new Map<string, AgentStream>()
+  const byRequest = new Map<string, AgentStream>()
 
   let rows: AgentKvRow[]
   try {
     rows = db.query<AgentKvRow>(AGENTKV_QUERY)
   } catch (err) {
     rethrowBusy(err)
-    return { byComposer, unjoined }
+    return { byComposer, unjoined, byRequest }
   }
 
   const bucketFor = (requestId: string): AgentStream => {
@@ -595,6 +669,16 @@ function loadAgentStreams(
     map.set(key, fresh)
     return fresh
   }
+  const requestBucketFor = (requestId: string): AgentStream => {
+    const existing = byRequest.get(requestId)
+    if (existing) return existing
+    const fresh = newAgentStream()
+    byRequest.set(requestId, fresh)
+    return fresh
+  }
+  const bucketsFor = (requestId: string): AgentStream[] => retainContent
+    ? [bucketFor(requestId), requestBucketFor(requestId)]
+    : [bucketFor(requestId)]
 
   // Only the turn-opening (user) agentKv row carries the requestId; rows that
   // follow inherit it. Rows written BEFORE their request's id appears (the
@@ -604,36 +688,64 @@ function loadAgentStreams(
   let currentRequestId: string | null = null
   let pendingUserChars = 0
   let pendingContextChars = 0
+  const pendingUserContent: string[] = []
+  const pendingInstructionContent: string[] = []
   for (const row of rows) {
     if (row.request_id) {
       currentRequestId = row.request_id
       if (pendingUserChars > 0 || pendingContextChars > 0) {
-        const bucket = bucketFor(currentRequestId)
-        bucket.userChars += pendingUserChars
-        bucket.contextChars += pendingContextChars
+        for (const bucket of bucketsFor(currentRequestId)) {
+          bucket.userChars += pendingUserChars
+          bucket.contextChars += pendingContextChars
+        }
+        if (retainContent) {
+          const requestBucket = requestBucketFor(currentRequestId)
+          requestBucket.userContent.push(...pendingUserContent)
+          requestBucket.instructionContent.push(...pendingInstructionContent)
+        }
         pendingUserChars = 0
         pendingContextChars = 0
+        pendingUserContent.length = 0
+        pendingInstructionContent.length = 0
       }
     }
     if (row.model && currentRequestId) {
-      const bucket = bucketFor(currentRequestId)
-      if (!bucket.model) bucket.model = row.model
+      for (const bucket of bucketsFor(currentRequestId)) {
+        if (!bucket.model) bucket.model = row.model
+      }
     }
     if (!row.content) continue
 
     if (row.role === 'system') {
-      pendingContextChars += contentTextLength(blobToText(row.content))
+      const texts = contentTextValues(blobToText(row.content))
+      pendingContextChars += texts.reduce((total, text) => total + text.length, 0)
+      if (retainContent) pendingInstructionContent.push(...texts)
       currentRequestId = null
       continue
     }
     if (row.role === 'user') {
-      const len = contentTextLength(blobToText(row.content))
-      if (currentRequestId) bucketFor(currentRequestId).userChars += len
-      else pendingUserChars += len
+      const texts = contentTextValues(blobToText(row.content))
+      const len = texts.reduce((total, text) => total + text.length, 0)
+      if (currentRequestId) {
+        for (const bucket of bucketsFor(currentRequestId)) {
+          bucket.userChars += len
+        }
+        if (retainContent) requestBucketFor(currentRequestId).userContent.push(...texts)
+      } else {
+        pendingUserChars += len
+        if (retainContent) pendingUserContent.push(...texts)
+      }
       continue
     }
     if (row.role === 'tool') {
-      if (currentRequestId) bucketFor(currentRequestId).contextChars += contentTextLength(blobToText(row.content))
+      if (currentRequestId) {
+        const texts = contentTextValues(blobToText(row.content))
+        const len = texts.reduce((total, text) => total + text.length, 0)
+        for (const bucket of bucketsFor(currentRequestId)) {
+          bucket.contextChars += len
+        }
+        if (retainContent) requestBucketFor(currentRequestId).toolResultContent.push(...texts)
+      }
       continue
     }
     if (row.role !== 'assistant' || !currentRequestId) continue
@@ -645,20 +757,24 @@ function loadAgentStreams(
       continue
     }
     if (!Array.isArray(content)) continue
-    const bucket = bucketFor(currentRequestId)
+    const buckets = bucketsFor(currentRequestId)
     for (const block of content as Array<{ type?: string; text?: unknown; toolName?: unknown; args?: { command?: unknown } }>) {
       if (block == null || typeof block !== 'object') continue
-      if (typeof block.text === 'string') bucket.assistantChars += block.text.length
+      if (typeof block.text === 'string') {
+        for (const bucket of buckets) {
+          bucket.assistantChars += block.text.length
+        }
+      }
       if (block.type !== 'tool-call' || typeof block.toolName !== 'string' || !block.toolName) continue
       // Cursor's terminal tool is 'Shell'; emit the canonical 'Bash' so the
       // cross-provider tool and command breakdowns merge.
-      bucket.tools.push(block.toolName === 'Shell' ? 'Bash' : block.toolName)
+      for (const bucket of buckets) bucket.tools.push(block.toolName === 'Shell' ? 'Bash' : block.toolName)
       if (block.toolName === 'Shell' && typeof block.args?.command === 'string') {
-        bucket.bash.push(...extractBashCommands(block.args.command))
+        for (const bucket of buckets) bucket.bash.push(...extractBashCommands(block.args.command))
       }
     }
   }
-  return { byComposer, unjoined }
+  return { byComposer, unjoined, byRequest }
 }
 
 // What drives a conversation's input figure, decided once per conversation so
@@ -698,33 +814,16 @@ function parseBubbles(
   // comfortably. Instead, for large DBs we page the requested window
   // (ROWID-descending, stopping past the window floor) and only fall back to a
   // hard budget — warning — when the in-range scan genuinely exceeds it.
-  // Override the budget in tests via KYBERDASH_CURSOR_MAX_BUBBLES.
-  const MAX_BUBBLES = Number(process.env['KYBERDASH_CURSOR_MAX_BUBBLES']) || 250_000
-
-  let total = 0
-  try {
-    const countRows = db.query<{ cnt: number }>(
-      "SELECT COUNT(*) as cnt FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-    )
-    total = countRows[0]?.cnt ?? 0
-  } catch (err) {
-    rethrowBusy(err)
-  }
-
   let rows: BubbleRow[]
   try {
-    if (total > MAX_BUBBLES) {
-      const scan = scanBubblesPaged(db, timeFloor, MAX_BUBBLES)
-      rows = scan.rows
-      if (scan.truncated) {
-        process.stderr.write(
-          `kyberdash: Cursor database has ${total.toLocaleString()} bubbles and the ` +
-          `requested range exceeds the ${MAX_BUBBLES.toLocaleString()}-bubble scan budget; ` +
-          `the oldest sessions in range may be missing from this report.\n`
-        )
-      }
-    } else {
-      rows = db.query<BubbleRow>(BUBBLE_QUERY_SINCE, [timeFloor])
+    const scan = loadCursorBubbles(db, timeFloor)
+    rows = scan.rows
+    if (scan.truncated) {
+      process.stderr.write(
+        `kyberdash: Cursor database has ${scan.total.toLocaleString()} bubbles and the ` +
+        `requested range exceeds the ${scan.maxBubbles.toLocaleString()}-bubble scan budget; ` +
+        `the oldest sessions in range may be missing from this report.\n`
+      )
     }
   } catch (err) {
     rethrowBusy(err)
@@ -864,6 +963,9 @@ function parseBubbles(
         deduplicationKey: dedupKey,
         userMessage: userText,
         sessionId: conversationId,
+        // One request has several bubbles. Only its prompt bubble names the
+        // request so later bubbles keep distinct synthesized record identities.
+        ...(row.request_id && row.bubble_type === 1 ? { turnId: row.request_id } : {}),
       })
     } catch {
       skipped++
@@ -936,6 +1038,7 @@ function parseBubbles(
       deduplicationKey: dedupKey,
       userMessage: '',
       sessionId: requestId,
+      turnId: requestId,
     })
   }
 
@@ -968,24 +1071,7 @@ function createParser(
       // only once per CLI run regardless of how many projects the user has.
       // `composerFilter` holds the set of composers EITHER allowed (workspace
       // source) or denied (orphan source); `filterMode` says which.
-      let composerFilter: Set<string> | null = null
-      let filterMode: 'include' | 'exclude' = 'include'
-      if (workspaceTag !== '__all__') {
-        const wsMap = loadWorkspaceMap(getCursorWorkspaceStorageDir(dbPath))
-        if (workspaceTag === ORPHAN_TAG) {
-          // Orphan source: every composer that is mapped to SOME workspace
-          // is excluded here, so unmapped composers (and any non-UUID
-          // sub-composer ids that slip through) land in this bucket.
-          composerFilter = new Set(wsMap.composerToWorkspace.keys())
-          filterMode = 'exclude'
-        } else {
-          composerFilter = new Set()
-          for (const [composerId, folder] of wsMap.composerToWorkspace) {
-            if (folder === workspaceTag) composerFilter.add(composerId)
-          }
-          filterMode = 'include'
-        }
-      }
+      const { composerFilter, filterMode } = getCursorComposerFilter(dbPath, workspaceTag)
 
       // Cache is keyed on the bare DB path so multiple workspace-scoped
       // sources reuse one parsed bubble set per CLI run. Filtering happens

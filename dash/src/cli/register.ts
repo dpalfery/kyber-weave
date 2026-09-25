@@ -128,9 +128,11 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .option('--db <path>', 'Custom path for canon.db SQLite database')
     .action(async (opts: { db?: string }) => {
       const { renormalizeRecords } = await import('../tools/backfill.js')
+      const { buildSessions } = await import('../canon/sessions.js')
       const store = new CanonStore(resolveDbPath(opts.db))
       try {
         const report = renormalizeRecords(store)
+        await buildSessions(store)
         console.log(`Traces:        ${report.traces}`)
         console.log(`Reattributed:  ${report.reattributed}`)
         console.log(`Unchanged:     ${report.unchanged}`)

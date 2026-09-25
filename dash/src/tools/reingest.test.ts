@@ -357,12 +357,12 @@ describe('reingestFromExports — rebuilding the corpus from existing exports (R
     await reingestFromExports(EXPORTS, store)
 
     // span_id is the primary key: the corpus is unchanged, and so is its
-    // digest. Quarantine replaces its entry; the append-only problem log
-    // records the re-surfaced rejection again, as any re-ingest would.
+    // digest. Quarantine replaces its entry; under v13 idempotency, re-ingesting
+    // the same problematic record results in 1 diagnostic row rather than 2.
     expect(store.count()).toBe(4)
     expect(computeDigest(corpusOf(store))).toEqual(first)
     expect(store.listQuarantine()).toHaveLength(1)
-    expect(store.getProblems()).toHaveLength(2)
+    expect(store.getProblems()).toHaveLength(1)
 
     store.close()
   })
