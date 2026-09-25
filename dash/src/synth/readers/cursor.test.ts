@@ -55,7 +55,7 @@ describe('cursorReader', () => {
     expect(turns).toHaveLength(2)
     expect(turns[0]!.sessionId).toBe('cursor-virtual-1')
     expect(turns[0]!.nativeRecordId).toBe('cursor-turn-1')
-    expect(turns[0]!.contextWindow).toBe(128000)
+    expect(turns[0]!.contextWindow).toBeUndefined()
     expect(turns[1]!.nativeRecordId).toBe('cursor-older')
   })
 
@@ -84,7 +84,7 @@ describe('cursorReader', () => {
       const turn = turns[0]!
       expect(turn.sessionId).toBe('cursor-static-session')
       expect(turn.nativeRecordId).toBe('cursor-request-1')
-      expect(turn.contextWindow).toBe(128000)
+      expect(turn.contextWindow).toBeUndefined()
 
       const instructionPart = turn.parts.find((p) => p.part === 'instruction_context')
       expect(instructionPart?.text).toBe('Cursor tool context retained for this request')
@@ -278,7 +278,7 @@ describe('cursorReader', () => {
         }),
       )
 
-      // GPT-4o bubble has no explicit contextWindow; must resolve to 128000, NOT 200000
+      // GPT-4o bubble has no explicit contextWindow; a model name is not window evidence.
       insert.run(
         'bubbleId:comp-multi:b2',
         JSON.stringify({
@@ -289,7 +289,7 @@ describe('cursorReader', () => {
         }),
       )
 
-      // Gemini bubble has no explicit contextWindow; must resolve to 1000000, NOT 200000
+      // Gemini bubble has no explicit contextWindow either.
       insert.run(
         'bubbleId:comp-multi:b3',
         JSON.stringify({
@@ -297,6 +297,17 @@ describe('cursorReader', () => {
           requestId: 'req-gemini',
           text: 'gemini query',
           modelInfo: { modelName: 'gemini-1.5-pro' },
+        }),
+      )
+
+      // Another Claude request must not borrow the first request's window.
+      insert.run(
+        'bubbleId:comp-multi:b4',
+        JSON.stringify({
+          type: 1,
+          requestId: 'req-claude-other',
+          text: 'another claude query',
+          modelInfo: { modelName: 'claude-3-5-sonnet' },
         }),
       )
     } finally {
@@ -308,7 +319,7 @@ describe('cursorReader', () => {
       for await (const turn of cursorReader.read(dbPath)) {
         turns.push(turn)
       }
-      expect(turns).toHaveLength(3)
+      expect(turns).toHaveLength(4)
 
       const claudeTurn = turns.find((t) => t.nativeRecordId === 'req-claude')
       expect(claudeTurn).toBeDefined()
@@ -316,11 +327,14 @@ describe('cursorReader', () => {
 
       const gptTurn = turns.find((t) => t.nativeRecordId === 'req-gpt')
       expect(gptTurn).toBeDefined()
-      expect(gptTurn!.contextWindow).toBe(128000)
+      expect(gptTurn!.contextWindow).toBeUndefined()
 
       const geminiTurn = turns.find((t) => t.nativeRecordId === 'req-gemini')
       expect(geminiTurn).toBeDefined()
-      expect(geminiTurn!.contextWindow).toBe(1000000)
+      expect(geminiTurn!.contextWindow).toBeUndefined()
+
+      const otherClaudeTurn = turns.find((t) => t.nativeRecordId === 'req-claude-other')
+      expect(otherClaudeTurn?.contextWindow).toBeUndefined()
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
