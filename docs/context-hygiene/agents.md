@@ -84,7 +84,7 @@ same-name role skills.
 
 **Reference patterns**:
 - **Markdown links**: `[text](path/to/file)` — extracted from `LinkInline` AST nodes via Markdig parser
-- **Inline backtick paths**: `` `relative/path/to/file` `` — matching the pattern `@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)"`, scoped to conventional subdirectories (`scripts/`, `references/`, `assets/`)
+- **Inline backtick paths**: `` `relative/path/to/file` `` — the entire parsed inline-code span must match `@"\A(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)\z"`, scoped to conventional subdirectories (`scripts/`, `references/`, `assets/`)
 
 **Excluded patterns** (not treated as file references):
 - HTTP/HTTPS URLs: `http://`, `https://`
@@ -92,11 +92,13 @@ same-name role skills.
 - Mailto links: `mailto:`
 - Path traversal attempts: containing `..`
 - Config Reg tokens: `<property-name>` (e.g., `<docs-root>`, `<plan-index>`)
-- Absolute filesystem paths: `/absolute/path`
+- Absolute filesystem paths: `/absolute/path`, Windows drive paths, and UNC paths
 
 **Resolution**: Relative to the agent's `DirectoryPath` (the folder containing the agent definition file). Paths beginning with `./` are normalized before resolution. If the agent has no directory path, the check is skipped.
 
-**Hint text**: When a reference does not resolve, the check attempts to find the nearest existing file or directory using Levenshtein distance (threshold ≤ 3 edits), searching the agent's directory and one level up. Candidate suggestions appear in the diagnostic hint; fallback text directs the author to check spelling relative to the agent definition directory.
+Reference deduplication follows the agent directory's filesystem case rules, so differently cased paths remain separate when the filesystem distinguishes them.
+
+**Hint text**: When a reference does not resolve, the check attempts to find the nearest existing file or directory using Levenshtein distance (threshold ≤ 3 edits), searching the referenced subdirectory and, when empty, one level above the agent. Candidate suggestions are relative to the agent directory. When the subdirectory is missing or cannot be enumerated, fallback text directs the author to check spelling relative to the agent definition directory.
 
 ## Parity and drift — `KW-AGENT-SYNC-*`, `KW-AGENT-LINT-*`
 

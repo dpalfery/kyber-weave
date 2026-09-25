@@ -19,8 +19,8 @@ public static partial class AgentSpecValidator
 
     /// <remarks>
     /// Inline path regex matches backtick paths under scripts/, references/, or assets/ directories.
-    /// Pattern: negative lookbehind to avoid partial matches, then optional './' prefix, then the
-    /// directory and path with alphanumeric/dash/slash characters.
+    /// Pattern: the entire code span contains an optional './' prefix, then the directory and
+    /// path with alphanumeric/dash/slash characters.
     /// </remarks>
     private static readonly Regex InlinePathRegex = InlinePathPattern();
 
@@ -78,7 +78,7 @@ public static partial class AgentSpecValidator
             return;
         }
 
-        Dictionary<string, (string source, bool exists, string? hint)> references = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, (string source, bool exists, string? hint)> references = new(GetPathComparer(agent.DirectoryPath));
 
         // Extract references from description
         if (!string.IsNullOrWhiteSpace(agent.Description))
@@ -112,6 +112,72 @@ public static partial class AgentSpecValidator
     }
 
     /// <summary>
+    /// Uses an existing directory entry to probe case lookup without writing to the agent directory.
+    /// </summary>
+    private static StringComparer GetPathComparer(string directoryPath)
+    {
+        try
+        {
+            DirectoryInfo? directory = new DirectoryInfo(Path.GetFullPath(directoryPath));
+            while (directory is not null)
+            {
+                if (Directory.Exists(directory.FullName))
+                {
+                    string[] entries = Directory.EnumerateFileSystemEntries(directory.FullName).ToArray();
+                    foreach (string entry in entries)
+                    {
+                        if (!File.Exists(entry) && !Directory.Exists(entry))
+                        {
+                            continue;
+                        }
+
+                        string name = Path.GetFileName(entry);
+                        int letterIndex = 0;
+                        while (letterIndex < name.Length && !char.IsAsciiLetter(name[letterIndex]))
+                        {
+                            letterIndex++;
+                        }
+
+                        if (letterIndex == name.Length)
+                        {
+                            continue;
+                        }
+
+                        char[] alternateName = name.ToCharArray();
+                        alternateName[letterIndex] = char.IsUpper(alternateName[letterIndex])
+                            ? char.ToLowerInvariant(alternateName[letterIndex])
+                            : char.ToUpperInvariant(alternateName[letterIndex]);
+                        string alternate = new string(alternateName);
+                        string alternatePath = Path.Combine(directory.FullName, alternate);
+
+                        if (!File.Exists(alternatePath) && !Directory.Exists(alternatePath))
+                        {
+                            return StringComparer.Ordinal;
+                        }
+
+                        return entries.Any(candidate =>
+                            string.Equals(Path.GetFileName(candidate), alternate, StringComparison.Ordinal))
+                            ? StringComparer.Ordinal
+                            : StringComparer.OrdinalIgnoreCase;
+                    }
+                }
+
+                directory = directory.Parent;
+            }
+        }
+        catch (IOException)
+        {
+            // Keep validating when the filesystem cannot be probed.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Keep validating when the filesystem cannot be probed.
+        }
+
+        return OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    }
+
+    /// <summary>
     /// Extracts file references from Markdown text, including markdown links and inline backtick paths.
     /// </summary>
     private static void ExtractReferencesFromText(string text, string directoryPath, Dictionary<string, (string source, bool exists, string? hint)> references)
@@ -127,11 +193,14 @@ public static partial class AgentSpecValidator
             }
         }
 
-        // Extract inline paths matching the regex pattern
-        foreach (Match match in InlinePathRegex.Matches(text))
+        // Only complete inline-code spans can name a path.
+        foreach (CodeInline code in document.Descendants<CodeInline>())
         {
-            string path = match.Groups["path"].Value;
-            ConsiderReference(path, directoryPath, references);
+            Match match = InlinePathRegex.Match(code.Content);
+            if (match.Success)
+            {
+                ConsiderReference(match.Groups["path"].Value, directoryPath, references);
+            }
         }
     }
 
@@ -146,10 +215,10 @@ public static partial class AgentSpecValidator
         }
 
         // Skip URLs, anchors, mailto:, and config tokens
-        if (target.StartsWith("http://", StringComparison.Ordinal) ||
-            target.StartsWith("https://", StringComparison.Ordinal) ||
+        if (target.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            target.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
             target.StartsWith('#') ||
-            target.StartsWith("mailto:", StringComparison.Ordinal) ||
+            target.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase) ||
             target.StartsWith('<') && target.EndsWith('>'))
         {
             return;
@@ -181,7 +250,10 @@ public static partial class AgentSpecValidator
         }
 
         // Skip absolute paths
-        if (Path.IsPathRooted(normalized))
+        if (Path.IsPathRooted(normalized) ||
+            normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':' ||
+            normalized.StartsWith('\\') ||
+            normalized.StartsWith("//", StringComparison.Ordinal))
         {
             return;
         }
@@ -227,7 +299,8 @@ public static partial class AgentSpecValidator
     /// Finds the nearest existing file or directory match to a broken reference using edit distance.
     /// </summary>
     /// <remarks>
-    /// Searches the agent's directory and one level up. Returns the best match or null if none found.
+    /// Searches the referenced directory and one level above the agent if the directory has no
+    /// entries. Returns the best match or null if none found.
     /// Uses Levenshtein distance to compute similarity.
     /// </remarks>
     private static string? FindNearestMatch(string directoryPath, string brokenReference)
@@ -240,30 +313,44 @@ public static partial class AgentSpecValidator
 
         List<(string path, int distance)> candidates = new();
 
-        // Search agent's directory
-        if (Directory.Exists(directoryPath))
+        try
         {
-            foreach (string file in Directory.EnumerateFileSystemEntries(directoryPath))
+            string? relativeDirectory = Path.GetDirectoryName(brokenReference);
+            string searchDirectory = Path.GetFullPath(Path.Combine(directoryPath, relativeDirectory ?? string.Empty));
+
+            if (!Directory.Exists(searchDirectory))
+            {
+                return null;
+            }
+
+            foreach (string file in Directory.EnumerateFileSystemEntries(searchDirectory))
             {
                 string fileName = Path.GetFileName(file);
                 int distance = LevenshteinDistance(referenceName, fileName);
-                candidates.Add((fileName, distance));
+                candidates.Add((Path.GetRelativePath(directoryPath, file), distance));
             }
-        }
 
-        // Search one level up if no close matches locally
-        if (candidates.Count == 0 && !string.IsNullOrWhiteSpace(directoryPath))
-        {
-            string? parentDir = Directory.GetParent(directoryPath)?.FullName;
-            if (parentDir is { } && Directory.Exists(parentDir))
+            if (candidates.Count == 0)
             {
-                foreach (string file in Directory.EnumerateFileSystemEntries(parentDir))
+                string? parentDir = Directory.GetParent(directoryPath)?.FullName;
+                if (parentDir is { } && Directory.Exists(parentDir))
                 {
-                    string fileName = Path.GetFileName(file);
-                    int distance = LevenshteinDistance(referenceName, fileName);
-                    candidates.Add((fileName, distance));
+                    foreach (string file in Directory.EnumerateFileSystemEntries(parentDir))
+                    {
+                        string fileName = Path.GetFileName(file);
+                        int distance = LevenshteinDistance(referenceName, fileName);
+                        candidates.Add((Path.GetRelativePath(directoryPath, file), distance));
+                    }
                 }
             }
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
         }
 
         // Return best match if distance is reasonable (≤ 3 edits)
@@ -272,7 +359,7 @@ public static partial class AgentSpecValidator
             var best = candidates.OrderBy(c => c.distance).FirstOrDefault();
             if (best.distance <= 3)
             {
-                return $"Nearest match: '{best.path}' in the agent's directory.";
+                return $"Nearest match: '{best.path}' relative to the agent's directory.";
             }
         }
 
@@ -312,6 +399,6 @@ public static partial class AgentSpecValidator
         return row[b.Length];
     }
 
-    [GeneratedRegex(@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)", RegexOptions.Compiled)]
+    [GeneratedRegex(@"\A(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)\z", RegexOptions.Compiled)]
     private static partial Regex InlinePathPattern();
 }
