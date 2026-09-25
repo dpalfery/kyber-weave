@@ -19,7 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Development Mode | Goal |
 |---|---|---|---|---|
-| [2026-09-24-agent-spec-broken-reference-rule.md](2026-09-24-agent-spec-broken-reference-rule.md) | Draft | 2026-09-24 | test-first | Implement KW-AGENT-SPEC-004 broken file reference check in AgentSpecValidator.Validate, and audit all KW-AGENT-SPEC-* and KW-AGENT-SEC-* ids to ensure every rule is emitted. |
+| [2026-09-24-agent-spec-broken-reference-rule.md](2026-09-24-agent-spec-broken-reference-rule.md) | current | 2026-09-24 | test-first | Implement KW-AGENT-SPEC-004 broken file reference check in AgentSpecValidator.Validate, and audit all KW-AGENT-SPEC-* and KW-AGENT-SEC-* ids to ensure every rule is emitted. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

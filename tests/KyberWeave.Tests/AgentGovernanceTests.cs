@@ -371,4 +371,95 @@ public class AgentSpecValidatorTests
 
         Assert.Contains(report.Items, d => d is { Code: AgentSpecValidator.RuleMissingInstructions, Severity: Severity.Error });
     }
+
+    [Fact]
+    public void ValidateWhenMarkdownLinkReferencesNonexistentFileEmitsKwAgentSpec004()
+    {
+        TempDirectory tempDir = new TempDirectory();
+
+        try
+        {
+            string agentDirPath = tempDir.Path;
+
+            AgentModel agent = new AgentModel
+            {
+                RoleName = "test-agent",
+                Harness = HarnessKind.Claude,
+                FilePath = Path.Combine(agentDirPath, "agent.md"),
+                DirectoryPath = agentDirPath,
+                Description = "Use this agent to do work. See [guide](docs/missing.md) for details.",
+                InstructionsBody = "You are a helpful agent."
+            };
+
+            DiagnosticReport report = AgentSpecValidator.Validate(agent);
+
+            Assert.Contains(report.Items, d => d is { Code: "KW-AGENT-SPEC-004", Severity: Severity.Error });
+        }
+        finally
+        {
+            tempDir.Dispose();
+        }
+    }
+
+    [Fact]
+    public void ValidateWhenInlineLinkReferencesNonexistentFileEmitsKwAgentSpec004()
+    {
+        TempDirectory tempDir = new TempDirectory();
+
+        try
+        {
+            string agentDirPath = tempDir.Path;
+
+            AgentModel agent = new AgentModel
+            {
+                RoleName = "test-agent",
+                Harness = HarnessKind.Claude,
+                FilePath = Path.Combine(agentDirPath, "agent.md"),
+                DirectoryPath = agentDirPath,
+                Description = "Use when setting up configurations.",
+                InstructionsBody = "Instructions: Check the configuration in `references/missing.md` before proceeding."
+            };
+
+            DiagnosticReport report = AgentSpecValidator.Validate(agent);
+
+            Assert.Contains(report.Items, d => d is { Code: "KW-AGENT-SPEC-004", Severity: Severity.Error });
+        }
+        finally
+        {
+            tempDir.Dispose();
+        }
+    }
+
+    [Fact]
+    public void ValidateWhenFileReferenceResolvesSuccessfullyEmitsNoKwAgentSpec004()
+    {
+        TempDirectory tempDir = new TempDirectory();
+
+        try
+        {
+            string agentDirPath = tempDir.Path;
+            string referencesDir = Path.Combine(agentDirPath, "references");
+            Directory.CreateDirectory(referencesDir);
+            string existingFile = Path.Combine(referencesDir, "existing.md");
+            File.WriteAllText(existingFile, "# Reference\n\nThis is an existing file.");
+
+            AgentModel agent = new AgentModel
+            {
+                RoleName = "test-agent",
+                Harness = HarnessKind.Claude,
+                FilePath = Path.Combine(agentDirPath, "agent.md"),
+                DirectoryPath = agentDirPath,
+                Description = "Use when working with references.",
+                InstructionsBody = "Instructions: See `references/existing.md` for details."
+            };
+
+            DiagnosticReport report = AgentSpecValidator.Validate(agent);
+
+            Assert.DoesNotContain(report.Items, d => d.Code == "KW-AGENT-SPEC-004");
+        }
+        finally
+        {
+            tempDir.Dispose();
+        }
+    }
 }

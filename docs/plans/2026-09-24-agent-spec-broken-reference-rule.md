@@ -2,7 +2,7 @@
 id: plans/agent-spec-broken-reference-rule
 title: Implement KW-AGENT-SPEC-004 (broken file reference) check
 doc-type: plan
-status: Draft
+status: current
 development-mode: test-first
 component: ContextHygiene
 owner: dpalfery
@@ -20,7 +20,7 @@ Implement the `KW-AGENT-SPEC-004` validation rule that is already documented in 
 
 **Finding source**: [todo/agent-spec-broken-reference-rule.md](../todo/agent-spec-broken-reference-rule.md), identified 2026-08-22.
 
-**Current state** (from worktree):
+**Current state** (verified 2026-09-24):
 - `AgentSpecValidator` class: [src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs](../../src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs:9)
 - Currently checks:
   - KW-AGENT-SPEC-001: Missing name
@@ -53,7 +53,7 @@ A file reference in an agent's instruction body or description is:
 
 4. **Resolution**: Relative to `AgentModel.DirectoryPath` (the folder containing the agent definition file). Paths beginning with `./` are normalized to strip the prefix before resolution.
 
-5. **Decision D1** (below): Scope of inline patterns — whether to extract arbitrary bare paths or restrict to conventional subdirectories like skill parser does (scripts/, references/, assets/).
+5. **Decision Q1 (Decided)**: Inline backtick paths are extracted only under `scripts/`, `references/`, `assets/` (decided by dpalfery, 2026-09-24).
 
 ## Severity and hint text
 
@@ -65,16 +65,24 @@ A file reference in an agent's instruction body or description is:
 
 ## Decisions
 
-**Q1: Inline path extraction scope** | user choice affecting spec
-- **A) Restrict to conventional subdirectories** (recommended) — Extract patterns like `scripts/script.sh`, `references/doc.md`, `assets/image.png`. Narrower, matches skill parser precedent, reduces false positives in prose.
-- **B) Extract all relative paths** — Use a broad regex that captures any `relative/path/with/slashes`. Higher recall but noisier; arbitrary prose containing path-like tokens triggers false warnings.
-- Recommendation: **A**. The skill parser's `@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)"` is proven, maintainable, and aligns with repository conventions for portable instruction artifacts. **This decision affects what diagnostics agents see.**
+### Q1: Inline path extraction scope — DECIDED
+- **Decision**: Restrict to conventional subdirectories (scripts/, references/, assets/).
+- **Rationale**: The skill parser's `@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)"` is proven, maintainable, and aligns with repository conventions for portable instruction artifacts. Reduces false positives in prose.
+- **Decided by**: dpalfery, 2026-09-24
 
 ## Decided (implementation details, no user visibility)
 
 **Nearest-match suggestion algorithm**: Compute from agent's directory tree (one level up search using edit distance or basename matching). Fast, bounded, no external dependency on CodeGraph. Lightweight and available always, consistent with the "file is missing" finding. _Rationale: Specification mirrors precedent from skill parser's suggestion behavior; local discovery is more actionable than repository-wide suggestions._
 
 **Test coverage for nearest-match suggestions**: Use temporary file fixtures in test setup (not real repository tree). Faster, isolated, repeatable; deterministic across branches and clones. _Rationale: Fixtures are sufficient to exercise the algorithm; real-tree tests would couple to filesystem state and degrade robustness._
+
+**CodeGraph indexing and docs drift gate**: CodeGraph indexing is always allowed; `docs drift` is a required gate locally and in review, with no skipping.
+
+## Approval
+
+**Plan approved for execution by the user, 2026-09-24.** ("do the work i asked")
+
+**2026-09-24: T1 criterion 1 corrected** — the negative guard test passes pre-GREEN by construction (the check does not exist yet, so no violation is raised); this is not a scope change but a correction of an unsatisfiable criterion. The test must not be weakened after GREEN1.
 
 ## Tasks
 
@@ -87,17 +95,17 @@ A file reference in an agent's instruction body or description is:
 **concurrency**: Independent; can run in parallel with other RED/GREEN pairs.
 
 **Acceptance criteria**:
-1. Three new test methods that all fail before GREEN1 is implemented:
-   - `ValidateWhenMarkdownLinkReferencesNonexistentFileEmitsKwAgentSpec004` — agent description contains `[guide](docs/missing.md)`; file does not exist; diagnostic raised with code `KW-AGENT-SPEC-004` and severity Error.
-   - `ValidateWhenInlineLinkReferencesNonexistentFileEmitsKwAgentSpec004` — agent instructions contain `` `references/missing.md` ``; file does not exist; diagnostic raised.
-   - `ValidateWhenFileReferenceResolvesSuccessfullyEmitsNoKwAgentSpec004` — agent instructions contain `` `references/existing.md` `` with the file physically present in the agent's directory; no diagnostic for code `KW-AGENT-SPEC-004`.
+1. Three new test methods with specific pre-GREEN failure behavior:
+   - `ValidateWhenMarkdownLinkReferencesNonexistentFileEmitsKwAgentSpec004` — agent description contains `[guide](docs/missing.md)`; file does not exist; diagnostic raised with code `KW-AGENT-SPEC-004` and severity Error. Fails before GREEN1.
+   - `ValidateWhenInlineLinkReferencesNonexistentFileEmitsKwAgentSpec004` — agent instructions contain `` `references/missing.md` ``; file does not exist; diagnostic raised. Fails before GREEN1.
+   - `ValidateWhenFileReferenceResolvesSuccessfullyEmitsNoKwAgentSpec004` — agent instructions contain `` `references/existing.md` `` with the file physically present in the agent's directory; no diagnostic for code `KW-AGENT-SPEC-004`. Passes before and after GREEN1; must not be weakened.
 2. Test fixtures: Create temporary agent definition and file structure for each test so the resolved path can be validated without relying on real repository files.
 3. Tests exercise both InstructionsBody and Description fields.
 
 **Test contract**:
-- Runner: `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~KyberWeave.Tests.AgentGovernanceTests.ValidateWhen.*Kw.*Spec004" -v normal`
-- Observable behavior: Three new tests FAIL with message like `"Expected diagnostic with code 'KW-AGENT-SPEC-004' but found none"` (or similar) before GREEN1.
-- After GREEN1, same runner command returns all tests PASS.
+- Runner: `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~KwAgentSpec004" -v normal`
+- Observable behavior: Before GREEN1, two positive tests FAIL with message like `"Expected diagnostic with code 'KW-AGENT-SPEC-004' but found none"` (RED evidence); the negative guard PASSES. After GREEN1, all three tests PASS.
+- The negative guard must not be weakened; it passes by construction before the check exists.
 
 ### GREEN1: Implement the broken file reference check (csharp-dev)
 
@@ -131,7 +139,7 @@ A file reference in an agent's instruction body or description is:
 - No new public types or interfaces required
 
 **Test contract**:
-- Runner: `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~KyberWeave.Tests.AgentGovernanceTests.ValidateWhen.*Kw.*Spec004" -v normal`
+- Runner: `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~KwAgentSpec004" -v normal`
 - Observable behavior: All three tests PASS; no new warnings introduced by implementation.
 
 ### T3: Audit all KW-AGENT-SPEC-* and KW-AGENT-SEC-* rule ids (docs-dev)
@@ -182,7 +190,7 @@ A file reference in an agent's instruction body or description is:
 After all tasks complete, verify the full gate list via AGENTS.md' declared gates (from kyber-weave.yml):
 
 ```bash
-cd /Users/dave/git/personal/kyber-weave/.claude/worktrees/agent-spec-broken-reference-rule
+cd /Users/dave/git/personal/kyber-weave
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- review gates . --out artifacts/gates.json
 ```
 
@@ -205,7 +213,13 @@ dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 
 Expected result: **All gates PASS** (exit code 0, zero errors, zero blocking failures).
 
-Note: CodeGraph index required for docs drift gate. See OPEN_QUESTIONS below.
+Final check after closeout completes:
+
+```bash
+dotnet run --project src/KyberWeave.Cli -c Release -- docs validate . --merge-ready
+```
+
+Expected result: Exit code 0 (plan is archived, so no KW-DOC-LIFECYCLE-003 findings). See [src/KyberWeave.Cli/Commands/Docs/DocsValidateSettings.cs:14](../../src/KyberWeave.Cli/Commands/Docs/DocsValidateSettings.cs:14) for the `--merge-ready` option definition.
 
 ## Closeout
 
@@ -213,7 +227,7 @@ After plan finalization and successful review:
 
 1. **docs-dev** archives this plan to [docs/archive/plans/2026-09-24-agent-spec-broken-reference-rule.md](../archive/plans/) (new file).
 2. **docs-dev** updates [docs/plans/README.md](../README.md) index: Move the plan row from Active to Archived, record completion date and any harvested ADRs (none anticipated for this implementation).
-3. **docs-dev** closes the todo: Move [docs/todo/agent-spec-broken-reference-rule.md](../todo/agent-spec-broken-reference-rule.md) to [docs/archive/todo/agent-spec-broken-reference-rule.md](../archive/todo/) and update [docs/todo/README.md](../todo/README.md) index.
+3. **docs-dev** closes the todo: Move [docs/todo/agent-spec-broken-reference-rule.md](../todo/agent-spec-broken-reference-rule.md) to [docs/archive/todo/agent-spec-broken-reference-rule.md](../archive/todo/) and update [docs/todo/README.md](../todo/README.md) index, moving the row from Open to Closed with status `superseded` and a link to the archived plan, per existing Closed rows.
 
 Durable facts to record in rule documentation (not the archived plan, which is read-only):
 - **Decision Q1 (inline path scope)**  recorded in [docs/context-hygiene/agents.md](../../docs/context-hygiene/agents.md) (reference section on instruction-body validation, where the check is documented)
@@ -234,25 +248,60 @@ Durable facts to record in rule documentation (not the archived plan, which is r
 
 **No file conflicts**: Each task writes to independent files.
 
-## Open Questions
-
-**CodeGraph index availability for docs drift gate**:
-The `docs drift` gate (declared in kyber-weave.yml, line 63–64) requires a CodeGraph index. Running it in this worktree returns:
-
-```
-KW-DOC-DRIFT-001 Critical: Drift cannot be verified: No CodeGraph index at /.codegraph/codegraph.db. 
-→ Run 'codegraph index' at the repository root (or restore the cached index in CI), 
-and ensure the 'sqlite3' CLI is on PATH.
-```
-
-Per [AGENTS.md](AGENTS.md), CodeGraph indexing is the user's decision. This plan assumes the user will either:
-- Create a `.codegraph/` index locally via `codegraph index` (cost: one-time setup), or
-- Restore the cached index from CI (cost: zero, requires cloning from origin)
-
-**Decision for user** (not blocking plan finalization): Will you create a CodeGraph index, or should this plan run verification without the drift gate? The plan's current Verification section assumes the index exists. If it does not, drift will fail and the verification will be incomplete.
 
 ## Notes
 
 - The unused `RuleBrokenReference` constant mentioned in the todo was already deleted on this branch; no cleanup needed.
 - The todo also noted `KW-AGENT-SEC-003` as an example of a dead constant in `AgentPromptScanner` — but the rule *is* emitted (from `InstructionSurfaceRuleCodes`), so only the duplicate constant was dead. T3 will verify this.
 - Decision Q1 (inline pattern scope) mirrors the skill parser's established convention, reducing future maintenance burden and aligning host expectations.
+
+## Rule-id audit (T3, 2026-09-24)
+
+**Summary**: All `KW-AGENT-SPEC-*` and `KW-AGENT-SEC-*` ids documented in `rule-reference.md` are properly emitted in code. No undocumented ids, no dead constants, no gaps.
+
+### Audit table
+
+| Id | Documented (rule-reference.md line) | Emitted by (file:line) | Status |
+|---|---|---|---|
+| KW-AGENT-SPEC-001 | 122 | AgentSpecValidator.cs:34 | emitted |
+| KW-AGENT-SPEC-002 | 123 | AgentSpecValidator.cs:42 | emitted |
+| KW-AGENT-SPEC-003 | 124 | AgentSpecValidator.cs:50 | emitted |
+| KW-AGENT-SPEC-004 | 125 | AgentSpecValidator.cs:104 | emitted |
+| KW-AGENT-SYNC-001 | 126 | AgentSyncLinter.cs:64 | emitted |
+| KW-AGENT-SYNC-002 | 127 | AgentSyncLinter.cs:85 | emitted |
+| KW-AGENT-LINT-001 | 128 | AgentSyncLinter.cs:122 | emitted |
+| KW-AGENT-LINT-002 | 129 | AgentSyncLinter.cs:100 | emitted |
+| KW-AGENT-SEC-001 | 133–136 | InstructionSurfaceScanner.cs:25, InstructionSurfaceRuleCodes.cs:55 | emitted |
+| KW-AGENT-SEC-002 | 133–136 | InstructionSurfaceScanner.cs:25, InstructionSurfaceRuleCodes.cs:56 | emitted |
+| KW-AGENT-SEC-003 | 133–136 | InstructionSurfaceScanner.cs:25, InstructionSurfaceRuleCodes.cs:57 | emitted |
+| KW-AGENT-SEC-004 | 133–136 | InstructionSurfaceScanner.cs:25, InstructionSurfaceRuleCodes.cs:58 | emitted |
+| KW-AGENT-SEC-005 | 133–136 | InstructionSurfaceScanner.cs:25, InstructionSurfaceRuleCodes.cs:59 | emitted |
+| KW-AGENT-SEC-006 | 133–136 | InstructionSurfaceScanner.cs:36, InstructionSurfaceRuleCodes.cs:62 | emitted |
+| KW-AGENT-SEC-007 | 133–136 | InstructionSurfaceScanner.cs:44, InstructionSurfaceRuleCodes.cs:63 | emitted |
+| KW-AGENT-SEC-008 | 133–136 | InstructionSurfaceScanner.cs:25, InstructionSurfaceRuleCodes.cs:60 | emitted |
+| KW-AGENT-SEC-020 | 133–136 | InstructionSurfaceScanner.cs:56, InstructionSurfaceRuleCodes.cs:67 | emitted |
+| KW-AGENT-SEC-021 | 133–136 | InstructionSurfaceScanner.cs:56, InstructionSurfaceRuleCodes.cs:68 | emitted |
+| KW-AGENT-SEC-022 | 133–136 | InstructionSurfaceScanner.cs:56, InstructionSurfaceRuleCodes.cs:69 | emitted |
+| KW-AGENT-SEC-023 | 133–136 | InstructionSurfaceScanner.cs:56, InstructionSurfaceRuleCodes.cs:70 | emitted |
+| KW-AGENT-SEC-024 | 133–136 | InstructionSurfaceScanner.cs:56, InstructionSurfaceRuleCodes.cs:71 | emitted |
+| KW-AGENT-SEC-025 | 133–136 | InstructionSurfaceScanner.cs:56, InstructionSurfaceRuleCodes.cs:72 | emitted |
+| KW-AGENT-SEC-030 | 133–136 | InstructionSurfaceScanner.cs:101, InstructionSurfaceRuleCodes.cs:74 | emitted |
+| KW-AGENT-SEC-031 | 133–136 | InstructionSurfaceScanner.cs:108, InstructionSurfaceRuleCodes.cs:75 | emitted |
+| KW-AGENT-SEC-032 | 133–136 | InstructionSurfaceScanner.cs:115, InstructionSurfaceRuleCodes.cs:76 | emitted |
+
+### Detailed findings
+
+#### Note on AgentPromptScanner constants
+
+`AgentPromptScanner.cs` declares two public constants (lines 15 and 18):
+- `RuleSafetyBypass = "KW-AGENT-SEC-001"` (line 15)
+- `RuleHardcodedSecret = "KW-AGENT-SEC-024"` (line 18)
+
+These are not emitter constants; they are reference/documentation constants. The actual emission happens in `InstructionSurfaceScanner.Scan*` methods via `InstructionSurfaceRuleCodes.ForAgents`. This pattern matches the skill-side `SkillScanner`, which also declares reference constants rather than emitting directly. The plan notes (line 255) mentioned a possible duplicate `KW-AGENT-SEC-003` constant in `AgentPromptScanner`, but no such constant is present in the current code — it may have been removed on this branch.
+
+#### Conclusion
+
+✓ All 25 documented agent rule ids are actively emitted in code.
+✓ No undocumented KW-AGENT-* ids found in code.
+✓ No dead/unused rule-id constants detected.
+✓ rule-reference.md is current.
