@@ -31,10 +31,10 @@ export default defineConfig({
     // 5s default under CI runner load; a hung test still fails at 30s.
     testTimeout: 30_000,
     // Collected only when a run passes --coverage, as the review suite's ts-test gate
-    // does, so the review has line evidence for dash/ and not only for .NET. The
-    // report lands beside the .NET one under artifacts/, and keeps vitest's
-    // cobertura-coverage.xml name deliberately: the gate runner reads only files named
-    // coverage.cobertura.xml, so this report cannot displace the .NET numbers.
+    // does, so the review has line evidence for dash/ and not only for .NET. The gate
+    // report lists this file under coverageReports. It keeps vitest's
+    // cobertura-coverage.xml name deliberately: the floor's figure comes only from files
+    // named coverage.cobertura.xml, so this report cannot displace the .NET numbers.
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}', 'web/src/**/*.{ts,tsx}'],

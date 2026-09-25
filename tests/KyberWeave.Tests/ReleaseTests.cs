@@ -586,7 +586,9 @@ public sealed class ReleaseTests
     [Fact]
     public void LocalKyberDashBuildMatchesTheReleaseJob()
     {
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        // Normalized because the job is found by LF-delimited keys, and `* text=auto` gives a
+        // Windows checkout CRLF.
+        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
         int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
         Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
         // The job runs to the next two-space-indented key, which is the next job.
