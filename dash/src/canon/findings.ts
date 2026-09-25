@@ -33,11 +33,16 @@ export type BuildFindingsReport = {
 export function buildFindings(store: CanonStore): BuildFindingsReport {
   const report: BuildFindingsReport = { runsExamined: 0, findingsBuilt: 0, pruned: 0 }
   const builtIds = new Set<string>()
+  const identities = store.sessionIdentities()
 
   for (const run of store.listRuns()) {
     const records: CanonicalRecord[] = []
     for (const execution of store.listExecutions(run.runId)) {
-      records.push(...store.recordsForSession(execution.sessionId ?? execution.executionId))
+      const sessionId = execution.sessionId ?? execution.executionId
+      const share = identities.shareOf(sessionId)
+      records.push(
+        ...(share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)),
+      )
     }
     if (records.length === 0) continue
 
@@ -47,6 +52,10 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
       runId: run.runId,
       records,
       ...(run.outcome === undefined ? {} : { outcome: run.outcome }),
+      // Runs are grouped per harness, so a run holds one share of a split key
+      // and its records alone cannot say the key was split, nor which id the
+      // share was given. The detector names its sessions from the same table.
+      sessionIdentities: identities,
     })
 
     for (const finding of findings) {

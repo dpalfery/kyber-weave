@@ -403,6 +403,7 @@ export async function buildRuns(
   const acceptDerived = options?.acceptDerivedGrouping !== false
 
   // 1. Gather all candidate executions from session keys
+  const identities = store.sessionIdentities()
   const candidates: ExecutionCandidate[] = []
   for (const sessionKey of store.sessionKeys()) {
     const grouped = groupByCanonicalHarness(store.recordsForSession(sessionKey.key))
@@ -418,7 +419,7 @@ export async function buildRuns(
       const agentName = records.map((r) => rawAttribute(r, AGENT_NAME_KEYS)).find(Boolean) ?? null
 
       const explicitRunId = records.map((r) => rawAttribute(r, RUN_ID_ATTRIBUTE_KEYS)).find(Boolean)
-      const sessionId = grouped.size > 1 ? `${harness}:${sessionKey.key}` : sessionKey.key
+      const sessionId = identities.claim(sessionKey.key, harness)
 
       candidates.push({
         executionId: sessionId,
@@ -634,9 +635,11 @@ export async function buildRuns(
   for (const { run, executions } of plannedRuns) {
     // Outcome derivation reads content, parts and raw, so the full records are
     // loaded here — one run at a time — and released before the next run.
-    const outcomeRecords = executions.flatMap((e) =>
-      store.recordsForSession(e.sessionId ?? e.executionId),
-    )
+    const outcomeRecords = executions.flatMap((e) => {
+      const sessionId = e.sessionId ?? e.executionId
+      const share = identities.shareOf(sessionId)
+      return share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
+    })
     store.upsertRun({ ...run, outcome: deriveOutcome(outcomeRecords) })
     builtRunIds.add(run.runId)
 
