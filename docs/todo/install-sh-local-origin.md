@@ -4,7 +4,7 @@ title: install.sh cannot be exercised by the local update loop
 doc-type: todo
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-09-24
 status: draft
 ---
 
@@ -69,3 +69,9 @@ distinct from `BinaryInstaller.Replace`. Neither has a local test.
   non-HTTPS URL — the existing `refusing non-HTTPS URL` path must stay reachable.
 - A corrupted asset in the local release tree makes `install.sh` fail on the checksum
   comparison rather than installing it, which is the assertion the current loop cannot make.
+- The install half of the
+  [KyberDash loop todo](../archive/todo/kyberdash-local-release-loop.md), which closed with
+  only its update half done. Against the loop's `v99.0.0-local`, which carries a kyberdash
+  archive, `install.sh` installs `kyberdash` beside the CLI, and the binary answers
+  `--version`. Against `v0.0.1-loopfrom`, which is below the floor, it installs the CLI and
+  MCP and logs the KyberDash skip, rather than the empty install that todo recorded.
