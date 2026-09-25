@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-25
 ---
 
 # Kyber-Weave Plan Inventory
@@ -19,7 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Development Mode | Goal |
 |---|---|---|---|---|
-| None | | | | |
+| [2026-09-25-claude-conductor-entry-point-skill.md](2026-09-25-claude-conductor-entry-point-skill.md) | Draft | 2026-09-25 | test-first | Under `squad install --target claude`, expose the primary-invocation `conductor` as a main-thread `/conductor` entry-point skill (`.claude/skills/conductor/SKILL.md`, references beside it), kept alongside the enforced `.claude/agents/conductor.md` and driven by the fallback profile's `no-primary-agent` (`skill` emits, `omit` keeps today's output, anything else fails closed). Open decisions: Q3-invocation, Q4-skill-keys, Q5-adr. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
