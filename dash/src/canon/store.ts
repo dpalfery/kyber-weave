@@ -13,7 +13,7 @@
 // deflate-compressed rather than stored verbatim (R12.4) — the measured cost
 // of not doing so is 2.9 GB for 37,623 records, roughly 78 KB per span.
 
-import { FILE_SOURCE_PREFIX, normalizeHarnessName } from './measurability.js'
+import { FILE_SOURCE_PREFIX, SessionIdentities, canonicalHarnessId, normalizeHarnessName } from './measurability.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createRequire } from 'node:module'
@@ -1525,6 +1525,33 @@ export class CanonStore {
       )
       .all(key) as RecordRow[]
     return rows.map(toRecord)
+  }
+
+  /**
+   * The persisted id of every canonical-harness share of every session key in
+   * the store. `buildSessions`, `buildRuns` and `buildFindings` each take it
+   * from here, so a session row, its execution and its findings agree on one
+   * id even when a native key reads like a split share's id.
+   */
+  sessionIdentities(): SessionIdentities {
+    const pairs = this.db
+      .prepare(
+        `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+         FROM records
+         WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+      )
+      .all() as { key: string; harness: string }[]
+    return new SessionIdentities(pairs)
+  }
+
+  /**
+   * One canonical harness's share of a session key, in timestamp order: the
+   * records a split share's row was built from, without its sibling's. The
+   * harness is normalized first, so a raw provider name finds its share.
+   */
+  recordsForShare(key: string, harness: string): CanonicalRecord[] {
+    const canonical = normalizeHarnessName(harness)
+    return this.recordsForSession(key).filter((record) => canonicalHarnessId(record.harness) === canonical)
   }
 
   /**

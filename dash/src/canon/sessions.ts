@@ -289,6 +289,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   const countTokens = counter.count
   const report: BuildSessionsReport = { built: 0, skipped: 0, pruned: 0, rollups: 0, findings: 0 }
   const built = new Set<string>()
+  const identities = store.sessionIdentities()
 
   for (const key of store.sessionKeys()) {
     const grouped = groupByCanonicalHarness(store.recordsForSession(key.key))
@@ -301,7 +302,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
         report.skipped += 1
         continue
       }
-      const sessionId = grouped.size > 1 ? `${harness}:${key.key}` : key.key
+      const sessionId = identities.claim(key.key, harness)
       store.upsertSession(buildSessionRow(sessionId, records, countTokens))
       built.add(sessionId)
       report.built += 1
