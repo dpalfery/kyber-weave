@@ -41,15 +41,10 @@ last-reviewed: YYYY-MM-DD
 
 ### Open
 
-Ranked by impact on the product: broken user-facing behaviour first, then release and
-verification gaps, then content migration and hygiene.
-
-| # | Todo | Component | Description |
-|---|---|---|---|
-| 1 | [canon-multi-harness-session-gather.md](canon-multi-harness-session-gather.md) | KyberDash | Sessions whose canonical key spans several harnesses get a `${harness}:${key}` id that the record gather never matches, so they silently contribute no findings or run outcomes. |
-| 2 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | The authoring skill's doc-type list lacks `todo` and `coding-standard`, so agents label a coding standard `reference`. |
-| 3 | [stale-refresh-run-rows.md](stale-refresh-run-rows.md) | KyberDash | `refresh_run` rows stay `running` forever after their refresh process dies; diagnostic-only, not on the report data path. |
-| 4 | [agent-spec-broken-reference-rule.md](agent-spec-broken-reference-rule.md) | ContextHygiene | `KW-AGENT-SPEC-004` is documented as "Broken file reference" but never raised — implement the check or withdraw the row. |
+No todo document remains in this folder. Nine that were still open moved to GitHub
+issues #125–#133. The four that those issues left listed here, because a pull request
+was still open, are closed below — including the skill-vocabulary todo this change
+archived.
 
 ### Closed
 
