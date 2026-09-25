@@ -84,6 +84,19 @@ public sealed class ClaudeRendererContractTests : IDisposable
     ];
 
     /// <summary>
+    /// The nested-roster sentence for the <c>permission-not-expressible</c> record in omit mode.
+    /// Declared independently of <see cref="ClaudeRenderer.BuildDegradationRecords"/> so a change
+    /// to either side has to be made deliberately in both. This sentence is constructed by
+    /// <see cref="ClaudeRenderer"/> at lines 617–620 (origin/main). When <c>delegate: allow</c>
+    /// and the agent's roster is non-empty, this text (with <c>&lt;Roster&gt;</c> replaced by the
+    /// comma-joined delegation list) is emitted in both skill and omit modes.
+    /// </summary>
+    private const string OmitModeNestedRosterSentenceTemplate =
+        "Claude Code ignores Agent(roster) parentheses when this definition " +
+        "runs as a nested subagent; the permitted delegation roster is not enforced " +
+        "for nested Task/Agent spawns. Roster: ";
+
+    /// <summary>
     /// Shared identities are read from the loaded fallback profile so the test follows the
     /// same generic single-projection contract as the renderer.
     /// </summary>
@@ -556,7 +569,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // Subagent file is present (Q1).
-        SquadDeploymentFile agentFile = Assert.Single(
+        Assert.Single(
             result.Files,
             f => f.RelativePath == $".claude/agents/{primaryAgent.Name}.md");
 
@@ -695,20 +708,20 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // Skill file is under skills/ without .claude prefix.
-        SquadDeploymentFile skillFile = Assert.Single(
+        Assert.Single(
             result.Files,
             f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
 
         // Resources are also under skills/ without .claude prefix.
         foreach (SquadResource resource in primaryAgent.Resources)
         {
-            SquadDeploymentFile resourceFile = Assert.Single(
+            Assert.Single(
                 result.Files,
                 f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
         }
 
         // Subagent file is under agents/ without .claude prefix.
-        SquadDeploymentFile agentFile = Assert.Single(
+        Assert.Single(
             result.Files,
             f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
 
@@ -789,14 +802,11 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 .Where(d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible")
                 .ToArray();
             Assert.Single(omitPermissionNotExpressible);
-            Assert.Contains(
-                "Roster:",
-                omitPermissionNotExpressible[0].Details,
-                StringComparison.Ordinal);
-            Assert.DoesNotContain(
-                $"/{primaryAgent.Name}",
-                omitPermissionNotExpressible[0].Details,
-                StringComparison.Ordinal);
+
+            // Omit mode has exactly today's permission-not-expressible record: the nested-roster
+            // sentence only, no entry-point sentence, no network.publish clause.
+            string expectedOmitDetails = OmitModeNestedRosterSentenceTemplate + string.Join(", ", primaryAgent.DelegatesTo) + ".";
+            Assert.Equal(expectedOmitDetails, omitPermissionNotExpressible[0].Details, StringComparer.Ordinal);
 
             // Omit mode has no role-skill-fallback.
             Assert.DoesNotContain(
