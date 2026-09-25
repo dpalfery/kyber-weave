@@ -332,11 +332,20 @@ function messageParts(
     }
     for (const piece of messageParts) {
       if (piece === null || typeof piece !== 'object') continue
-      const { type, text } = piece as { type?: unknown; text?: unknown }
+      const { type, text, content } = piece as {
+        type?: unknown
+        text?: unknown
+        content?: unknown
+      }
       const bucket = type === 'tool_result' ? 'tool_result_content' : 'conversation_history'
       parts.push({
         part: bucket,
-        text: typeof text === 'string' ? text : JSON.stringify(piece),
+        text:
+          typeof text === 'string'
+            ? text
+            : typeof content === 'string'
+              ? content
+              : JSON.stringify(piece),
         order: nextOrder(),
       })
     }
@@ -399,7 +408,6 @@ export function canonicalParts(attributes: Record<string, unknown>): ContentPart
 
   parts.push(...toolDefinitionParts(attributes, nextOrder))
   parts.push(...messageParts(attributes, INPUT_MESSAGE_KEYS, MESSAGE_TOKEN_KEYS, system !== undefined, nextOrder))
-  parts.push(...messageParts(attributes, OUTPUT_MESSAGE_KEYS, [], false, nextOrder))
 
   const toolResult = readText(attributes, TOOL_RESULT_KEYS)
   if (toolResult !== undefined) {
@@ -416,7 +424,11 @@ export function canonicalParts(attributes: Record<string, unknown>): ContentPart
   return parts
 }
 
-/** The flat per-bucket view of `canonicalParts`, for consumers that want it. */
+/**
+ * The flat per-bucket view of input-resident `canonicalParts`, for consumers
+ * that want it. Produced output messages remain in the raw span payload and
+ * are not input-context buckets.
+ */
 export function canonicalContent(attributes: Record<string, unknown>): CanonicalRecord['content'] {
   return contentFromParts(canonicalParts(attributes))
 }

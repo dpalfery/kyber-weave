@@ -13,7 +13,7 @@
 // deflate-compressed rather than stored verbatim (R12.4) — the measured cost
 // of not doing so is 2.9 GB for 37,623 records, roughly 78 KB per span.
 
-import { FILE_SOURCE_PREFIX, normalizeHarnessName } from './measurability.js'
+import { FILE_SOURCE_PREFIX, SessionIdentities, canonicalHarnessId, normalizeHarnessName } from './measurability.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createRequire } from 'node:module'
@@ -36,7 +36,9 @@ import {
   type SourceCheckpointRow,
 } from './source-state.js'
 import {
+  REFRESH_MAX_AGE_MS,
   REFRESH_RUN_SQL,
+  refreshProcessIsAlive,
   type RefreshRunRow,
   type RefreshRunStatus,
   type RefreshTrigger,
@@ -76,7 +78,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 12
+export const SCHEMA_VERSION = 14
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -213,11 +215,13 @@ CREATE TABLE IF NOT EXISTS enriched_logs (
 CREATE TABLE IF NOT EXISTS problems (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   span_id TEXT,
+  problem_key TEXT NOT NULL DEFAULT '',
   severity TEXT NOT NULL,
   code TEXT NOT NULL,
   message TEXT NOT NULL,
   location TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS problems_by_identity ON problems (problem_key);
 CREATE TABLE IF NOT EXISTS ingest_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source TEXT NOT NULL,
@@ -456,6 +460,53 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   11: (db) => {
     db.exec(REFRESH_RUN_SQL)
   },
+  // v12 -> v13: collapse repeated diagnostics by their stable (span, code, location)
+  // identity. Older rows have no key, so keep the newest row for each identity
+  // before enforcing uniqueness. Rows with no span identity remain distinct.
+  12: (db) => {
+    const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+    if (!table) return
+
+    const columns = db.prepare('PRAGMA table_info(problems)').all() as { name: string }[]
+    if (!columns.some((column) => column.name === 'problem_key')) {
+      db.exec("ALTER TABLE problems ADD COLUMN problem_key TEXT NOT NULL DEFAULT ''")
+    }
+
+    rekeyProblems(db)
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS problems_by_identity ON problems (problem_key)')
+  },
+  // v13 -> v14: existing stores used a span/code key, so rekey their surviving
+  // rows before a new diagnostic at a different location can be recorded.
+  13: (db) => rekeyProblems(db),
+}
+
+/** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
+export function problemIdentity(
+  spanId: string | null,
+  code: string,
+  location: string | null,
+  legacyId?: number | string,
+): string {
+  if (spanId === null) return JSON.stringify(['legacy-row', legacyId])
+  return JSON.stringify(['span-problem', spanId, code, location])
+}
+
+function rekeyProblems(db: Database): void {
+  const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+  if (!table) return
+  const rows = db
+    .prepare('SELECT id, span_id, code, location FROM problems ORDER BY id')
+    .all() as Array<{ id: number; span_id: string | null; code: string; location: string | null }>
+  const seen = new Map<string, number>()
+  const remove = db.prepare('DELETE FROM problems WHERE id = ?')
+  const setKey = db.prepare('UPDATE problems SET problem_key = ? WHERE id = ?')
+  for (const row of rows) {
+    const key = problemIdentity(row.span_id, row.code, row.location, row.id)
+    const earlier = seen.get(key)
+    if (earlier !== undefined) remove.run(earlier)
+    setKey.run(key, row.id)
+    seen.set(key, row.id)
+  }
 }
 
 export type {
@@ -1091,6 +1142,38 @@ export class CanonStore {
     return input.id
   }
 
+  /**
+   * Mark interrupted runs failed before a new refresh starts. An inaccessible
+   * PID is treated as alive; only a PID known to be absent is reconciled.
+   */
+  reconcileDeadRefreshRuns(
+    completedAt = new Date().toISOString(),
+    maxAgeMs = REFRESH_MAX_AGE_MS,
+  ): number {
+    const running = this.db
+      .prepare("SELECT id, pid, started_at FROM refresh_run WHERE status = 'running'")
+      .all() as Array<{ id: string; pid: number; started_at: string }>
+    const finish = this.db.prepare(
+      "UPDATE refresh_run SET completed_at = ?, status = 'failure', summary = ? WHERE id = ? AND status = 'running'",
+    )
+    let reconciled = 0
+    const nowMs = Date.parse(completedAt)
+    for (const row of running) {
+      const pid = Number(row.pid)
+      const isAlive = refreshProcessIsAlive(pid)
+      const startedMs = Date.parse(row.started_at)
+      const ageMs = Number.isFinite(nowMs) && Number.isFinite(startedMs) ? nowMs - startedMs : 0
+      const isStale = ageMs > maxAgeMs
+      if (isAlive && !isStale) continue
+      const summary = !isAlive
+        ? `Refresh process ${pid} is no longer running (dead process); marked failed during reconciliation.`
+        : `Refresh process ${pid} exceeded maximum run duration (${Math.round(ageMs / 1000)}s); marked failed during reconciliation.`
+      const result = finish.run(completedAt, summary, row.id)
+      reconciled += Number(result.changes)
+    }
+    return reconciled
+  }
+
   /** Close a refresh run. `summary` is one line: what it did, or why it failed (R10.5). */
   completeRefreshRun(
     id: string,
@@ -1112,7 +1195,12 @@ export class CanonStore {
     const row = this.db
       .prepare('SELECT * FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1')
       .get(status) as Record<string, unknown> | undefined
-    return row === undefined ? undefined : toRefreshRunRow(row)
+    if (row === undefined) return undefined
+    const parsed = toRefreshRunRow(row)
+    // Liveness only: a long refresh still holds the lock and stays visible. Age is
+    // reconciliation's concern, not the footer's.
+    if (status === 'running' && !refreshProcessIsAlive(parsed.pid)) return undefined
+    return parsed
   }
 
   listRefreshRuns(limit = 20): RefreshRunRow[] {
@@ -1528,6 +1616,33 @@ export class CanonStore {
   }
 
   /**
+   * The persisted id of every canonical-harness share of every session key in
+   * the store. `buildSessions`, `buildRuns` and `buildFindings` each take it
+   * from here, so a session row, its execution and its findings agree on one
+   * id even when a native key reads like a split share's id.
+   */
+  sessionIdentities(): SessionIdentities {
+    const pairs = this.db
+      .prepare(
+        `SELECT DISTINCT COALESCE(session_id, trace_id) AS key, harness
+         FROM records
+         WHERE COALESCE(session_id, trace_id) IS NOT NULL`,
+      )
+      .all() as { key: string; harness: string }[]
+    return new SessionIdentities(pairs)
+  }
+
+  /**
+   * One canonical harness's share of a session key, in timestamp order: the
+   * records a split share's row was built from, without its sibling's. The
+   * harness is normalized first, so a raw provider name finds its share.
+   */
+  recordsForShare(key: string, harness: string): CanonicalRecord[] {
+    const canonical = normalizeHarnessName(harness)
+    return this.recordsForSession(key).filter((record) => canonicalHarnessId(record.harness) === canonical)
+  }
+
+  /**
    * Store a derived session. These rows are a cache over `records`: dropping
    * them all and rebuilding loses nothing, which is why the payload is
    * replaced wholesale rather than merged.
@@ -1573,6 +1688,11 @@ export class CanonStore {
   /** Drop a derived session. Safe by construction: the row is a cache. */
   deleteSession(sessionId: string): void {
     this.db.prepare('DELETE FROM session WHERE session_id = ?').run(sessionId)
+  }
+
+  /** Drop derived sessions for a harness. */
+  deleteSessionsByHarness(harness: string): void {
+    this.db.prepare('DELETE FROM session WHERE harness = ?').run(harness)
   }
 
   /** Number of derived sessions currently built. */
@@ -2080,6 +2200,65 @@ export class CanonStore {
   }
 
   /**
+   * Bounded batch of records matching the given harness names (case-insensitive).
+   * Used for exclusion remediation sweeps without loading the full history into memory.
+   */
+  listRecordsByHarness(harnesses: readonly string[], limit = 500): import('./types.js').CanonicalRecord[] {
+    if (harnesses.length === 0 || limit <= 0) return []
+    const placeholders = harnesses.map(() => 'LOWER(harness) = ?').join(' OR ')
+    const rows = this.db
+      .prepare(`SELECT * FROM records WHERE ${placeholders} ORDER BY span_id LIMIT ?`)
+      .all(...harnesses.map((h) => h.trim().toLowerCase()), limit) as RecordRow[]
+    return rows.map(toRecord)
+  }
+
+  /**
+   * Cost facts for selected sessions without inflating or reading raw payloads.
+   * The report needs only the indexed session key and the small cost block;
+   * selecting full records here would decompress each record's raw span.
+   */
+  costContributionsForSessions(
+    sessionIds: readonly string[],
+  ): Array<{ sessionId: string; basis: string; status: string; value?: number }> {
+    const uniqueIds = [...new Set(sessionIds)].filter((id) => id.length > 0)
+    const contributions: Array<{ sessionId: string; basis: string; status: string; value?: number }> = []
+    const chunkSize = 900
+
+    for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      const chunk = uniqueIds.slice(offset, offset + chunkSize)
+      const placeholders = chunk.map(() => '?').join(', ')
+      const rows = this.db
+        .prepare(
+          `SELECT COALESCE(session_id, trace_id) AS session_key, cost_json
+           FROM records WHERE COALESCE(session_id, trace_id) IN (${placeholders})`,
+        )
+        .all(...chunk) as Array<{ session_key: unknown; cost_json: unknown }>
+
+      for (const row of rows) {
+        if (typeof row.session_key !== 'string') continue
+        let cost: unknown
+        try {
+          cost = JSON.parse(String(row.cost_json))
+        } catch {
+          continue
+        }
+        if (typeof cost !== 'object' || cost === null) continue
+        const block = cost as { basis?: unknown; status?: unknown; value?: unknown }
+        contributions.push({
+          sessionId: row.session_key,
+          basis: String(block.basis ?? 'unknown'),
+          status: String(block.status ?? 'no_rate'),
+          ...(typeof block.value === 'number' && Number.isFinite(block.value)
+            ? { value: block.value }
+            : {}),
+        })
+      }
+    }
+
+    return contributions
+  }
+
+  /**
    * Every record the OTLP path produced — those whose source is NOT in the
    * `codeburn/` file-source namespace.
    *
@@ -2169,13 +2348,33 @@ export class CanonStore {
     }))
   }
 
+  /** Total quarantined span count, without materializing the row list. */
+  countQuarantine(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as { n: number }).n
+  }
+
   /** Record a surfaced failure the system declines to guess about. */
   recordProblem(problem: SpanProblem): void {
+    const problemKey = problemIdentity(problem.spanId, problem.code, problem.location ?? null)
     this.db
       .prepare(
-        'INSERT INTO problems (span_id, severity, code, message, location) VALUES (?, ?, ?, ?, ?)',
+        `INSERT INTO problems (span_id, problem_key, severity, code, message, location)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(problem_key) DO UPDATE SET
+           span_id = excluded.span_id,
+           severity = excluded.severity,
+           code = excluded.code,
+           message = excluded.message,
+           location = excluded.location`,
       )
-      .run(problem.spanId, problem.severity, problem.code, problem.message, problem.location ?? null)
+      .run(
+        problem.spanId,
+        problemKey,
+        problem.severity,
+        problem.code,
+        problem.message,
+        problem.location ?? null,
+      )
   }
 
   /** Recorded problems, optionally narrowed to one span; ordered as written. */
@@ -2195,6 +2394,11 @@ export class CanonStore {
       message: text(row.message),
       location: row.location === null ? undefined : text(row.location),
     }))
+  }
+
+  /** Total recorded problem count, without loading problem details. */
+  countProblems(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM problems').get() as { n: number }).n
   }
 
   /** Append one ingest run to the audit log. */

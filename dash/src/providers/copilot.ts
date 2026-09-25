@@ -537,7 +537,12 @@ function applyChatJournalAppend(root: unknown, path: ChatJournalPathSegment[], i
   return workingRoot
 }
 
-function replayChatSessionJournal(content: string): unknown {
+/**
+ * Reconstruct VS Code's append/edit journal into its current chat-session
+ * object. The content reader and token parser share this boundary so they
+ * cannot interpret a journal revision differently.
+ */
+export function replayChatSessionJournal(content: string): unknown {
   let root: unknown = createReplayObject()
   const lines = content.split('\n').filter((l) => l.trim())
 
@@ -581,6 +586,22 @@ function numberOrZero(raw: unknown): number {
 
 function readString(raw: unknown): string {
   return typeof raw === 'string' ? raw : ''
+}
+
+/** Text Copilot VS Code persisted for one request's user message. */
+function chatSessionMessageText(raw: unknown): string {
+  if (typeof raw === 'string') return raw
+  if (!isRecord(raw)) return ''
+
+  const direct = readString(raw['text'])
+  if (direct !== '') return direct
+
+  const parts = raw['parts']
+  if (!Array.isArray(parts)) return ''
+  return parts
+    .flatMap((part) => isRecord(part) ? [readString(part['text'])] : [])
+    .filter((text) => text !== '')
+    .join('\n')
 }
 
 function modelFromChatSessionRequest(req: ChatSessionRequest, metadata: Record<string, unknown>): string {
@@ -1139,7 +1160,8 @@ function createChatSessionParser(
           timestamp,
           speed: 'standard' as const,
           deduplicationKey: dedupKey,
-          userMessage: '',
+          turnId: requestId,
+          userMessage: chatSessionMessageText(rawReq['message']),
         }
       }
     },

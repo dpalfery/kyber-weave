@@ -19,6 +19,7 @@ import {
   copyFixture,
   fixtureProvider,
   jsonlLoader,
+  parsedCall,
   sqliteLoader,
   writeCursorVirtualDb,
 } from './fixtures/integration-harness.js'
@@ -269,6 +270,42 @@ describe('dash refresh deterministic CLI acceptance', () => {
       expect(second.derived).toEqual(derived)
     } finally {
       world.store.close()
+    }
+  })
+
+  it('does not duplicate a source diagnostic when an unchanged invalid unit is refreshed again', async () => {
+    const root = tempRoot()
+    const store = new CanonStore(join(root, 'canon.db'))
+    const invalidSource = source(join(root, 'invalid.jsonl'), 'pi')
+    const invalidCall = {
+      ...parsedCall({
+        sessionId: 'invalid-session',
+        turnId: 'invalid-turn',
+        timestamp: 'not-a-timestamp',
+        model: 'test-model',
+      }, 'pi'),
+      timestamp: 'not-a-timestamp',
+    }
+    const provider = fixtureProvider('pi', [invalidSource], () => [invalidCall])
+    try {
+      const dependencies = {
+        getAllProviders: async () => [provider],
+        descriptors: descriptorsFor(['pi']),
+        jobConcurrency: 1,
+        commandStartedAt: COMMAND_STARTED_AT,
+        parseAllSessions: async () => undefined,
+        fingerprintFile: async () => null,
+        ingestProviders: async () => ({ records: [], problems: [] }),
+      }
+
+      await refreshHarnessSources(store, dependencies)
+      const problemsAfterFirst = store.getProblems()
+      expect(problemsAfterFirst.length).toBeGreaterThan(0)
+      await refreshHarnessSources(store, dependencies)
+
+      expect(store.getProblems()).toEqual(problemsAfterFirst)
+    } finally {
+      store.close()
     }
   })
 
