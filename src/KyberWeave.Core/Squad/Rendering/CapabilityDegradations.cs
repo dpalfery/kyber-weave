@@ -106,15 +106,15 @@ internal static class CapabilityDegradations
             }));
     }
 
-    // An undefined decision describes as the non-broadening `deny`, matching the lattice rule
-    // that an unresolvable grant grants nothing. The default arm is reachable only through an
-    // undefined cast, which the loader never produces, so this does not affect byte-identical
-    // Details output across any renderer.
+    // The switch expression covers all three enum values (Allow, Ask, Deny). An unknown decision
+    // is reachable only through an undefined cast, which the loader never produces in practice.
+    // If the enum ever grows, an unknown value must fail at render time rather than be silently
+    // misdescribed in a receipt, so the default arm throws to ensure correctness.
     private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
     {
         SquadPermissionDecision.Allow => "allow",
         SquadPermissionDecision.Ask => "ask",
         SquadPermissionDecision.Deny => "deny",
-        _ => "deny"
+        _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown permission decision.")
     };
 }
