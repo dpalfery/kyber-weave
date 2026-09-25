@@ -288,6 +288,31 @@ export function decodeSourcePath(sourcePath: string): { dbPath: string; workspac
   }
 }
 
+export function getCursorComposerFilter(
+  dbPath: string,
+  workspaceTag: string,
+): { composerFilter: Set<string> | null; filterMode: 'include' | 'exclude' } {
+  let composerFilter: Set<string> | null = null
+  let filterMode: 'include' | 'exclude' = 'include'
+  if (workspaceTag !== '__all__') {
+    const wsMap = loadWorkspaceMap(getCursorWorkspaceStorageDir(dbPath))
+    if (workspaceTag === ORPHAN_TAG) {
+      // Orphan source: every composer that is mapped to SOME workspace
+      // is excluded here, so unmapped composers (and any non-UUID
+      // sub-composer ids that slip through) land in this bucket.
+      composerFilter = new Set(wsMap.composerToWorkspace.keys())
+      filterMode = 'exclude'
+    } else {
+      composerFilter = new Set()
+      for (const [composerId, folder] of wsMap.composerToWorkspace) {
+        if (folder === workspaceTag) composerFilter.add(composerId)
+      }
+      filterMode = 'include'
+    }
+  }
+  return { composerFilter, filterMode }
+}
+
 type CodeBlock = { languageId?: string }
 
 function extractLanguages(codeBlocksJson: string | null): string[] {
@@ -1030,24 +1055,7 @@ function createParser(
       // only once per CLI run regardless of how many projects the user has.
       // `composerFilter` holds the set of composers EITHER allowed (workspace
       // source) or denied (orphan source); `filterMode` says which.
-      let composerFilter: Set<string> | null = null
-      let filterMode: 'include' | 'exclude' = 'include'
-      if (workspaceTag !== '__all__') {
-        const wsMap = loadWorkspaceMap(getCursorWorkspaceStorageDir(dbPath))
-        if (workspaceTag === ORPHAN_TAG) {
-          // Orphan source: every composer that is mapped to SOME workspace
-          // is excluded here, so unmapped composers (and any non-UUID
-          // sub-composer ids that slip through) land in this bucket.
-          composerFilter = new Set(wsMap.composerToWorkspace.keys())
-          filterMode = 'exclude'
-        } else {
-          composerFilter = new Set()
-          for (const [composerId, folder] of wsMap.composerToWorkspace) {
-            if (folder === workspaceTag) composerFilter.add(composerId)
-          }
-          filterMode = 'include'
-        }
-      }
+      const { composerFilter, filterMode } = getCursorComposerFilter(dbPath, workspaceTag)
 
       // Cache is keyed on the bare DB path so multiple workspace-scoped
       // sources reuse one parsed bubble set per CLI run. Filtering happens

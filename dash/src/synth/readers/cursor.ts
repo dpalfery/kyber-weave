@@ -11,6 +11,7 @@ import type { ContentPart } from '../../canon/types.js'
 import { isSqliteAvailable, openDatabase } from '../../ingest/sqlite.js'
 import {
   decodeSourcePath,
+  getCursorComposerFilter,
   loadAgentStreams,
   parseComposerIdFromKey,
 } from '../../providers/cursor.js'
@@ -172,13 +173,13 @@ function readFromJsonFile(filePath: string): ReaderTurn[] {
         if (text.trim() !== '') parts.push({ part: 'tool_result_content', text, order: order++ })
       }
 
-      const sessionId = requestToComposer.get(reqId) ?? rootSessionId
+      const sessionId = requestToComposer.get(reqId) ?? rootSessionId ?? reqId
       const model = requestToModel.get(reqId)
       const contextWindow = rootContextWindow ?? contextWindowForModel(model)
 
       turns.push({
         parts,
-        ...(sessionId ? { sessionId } : {}),
+        sessionId,
         nativeRecordId: reqId,
         ...(contextWindow !== undefined ? { contextWindow } : {}),
       })
@@ -190,8 +191,16 @@ function readFromJsonFile(filePath: string): ReaderTurn[] {
 }
 
 function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
-  const { dbPath } = decodeSourcePath(filePath)
+  const { dbPath, workspaceTag } = decodeSourcePath(filePath)
   if (!existsSync(dbPath) || !isSqliteAvailable()) return
+
+  const { composerFilter, filterMode } = getCursorComposerFilter(dbPath, workspaceTag)
+  const isComposerAllowed = (cid: string | null): boolean => {
+    if (!cid) return false
+    if (composerFilter === null) return true
+    const inSet = composerFilter.has(cid)
+    return filterMode === 'include' ? inSet : !inSet
+  }
 
   let db: ReturnType<typeof openDatabase>
   try {
@@ -234,8 +243,10 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
     let explicitContextWindow: number | undefined
 
     for (const row of bubbleRows) {
-      if (typeof row.context_window === 'number') explicitContextWindow = row.context_window
       const cid = parseComposerIdFromKey(row.bubble_key)
+      if (typeof row.context_window === 'number' && isComposerAllowed(cid)) {
+        explicitContextWindow = row.context_window
+      }
       if (cid && row.request_id) {
         requestToComposer.set(row.request_id, cid)
       }
@@ -247,7 +258,7 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       }
     }
 
-    if (explicitContextWindow === undefined) {
+    if (explicitContextWindow === undefined && composerFilter === null) {
       try {
         const rows = db.query<{ cw: number | null }>(`
           SELECT json_extract(value, '$.contextWindow') as cw
@@ -263,12 +274,19 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       }
     }
 
-    const { byComposer, byRequest } = loadAgentStreams(db, requestToComposer)
+    const { byComposer, unjoined, byRequest } = loadAgentStreams(db, requestToComposer)
 
-    const allRequestIds = new Set<string>([
-      ...requestToComposer.keys(),
-      ...byRequest.keys(),
-    ])
+    const allRequestIds: string[] = []
+    for (const [requestId, cid] of requestToComposer) {
+      if (isComposerAllowed(cid)) {
+        allRequestIds.push(requestId)
+      }
+    }
+    if (filterMode === 'exclude' || composerFilter === null) {
+      for (const requestId of unjoined.keys()) {
+        allRequestIds.push(requestId)
+      }
+    }
 
     for (const requestId of allRequestIds) {
       const stream = byRequest.get(requestId)
@@ -305,19 +323,21 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       }
 
       const composerId = requestToComposer.get(requestId)
+      const sessionId = composerId ?? requestId
       const model = stream?.model ?? bubbleModel.get(requestId)
       const contextWindow = explicitContextWindow ?? contextWindowForModel(model)
 
       yield {
         parts,
-        ...(composerId ? { sessionId: composerId } : {}),
+        sessionId,
         nativeRecordId: requestId,
         ...(contextWindow !== undefined ? { contextWindow } : {}),
       }
     }
 
-    if (allRequestIds.size === 0) {
+    if (allRequestIds.length === 0) {
       for (const [cid, stream] of byComposer) {
+        if (!isComposerAllowed(cid)) continue
         const parts: ContentPart[] = []
         let order = 0
         for (const text of stream.instructionContent) {
