@@ -77,7 +77,7 @@ import {
  * corpus is the expensive thing here and re-collecting it is not always
  * possible.
  */
-export const SCHEMA_VERSION = 13
+export const SCHEMA_VERSION = 14
 
 /**
  * Version of the diagnostic signal and finding detector suite (Decision D17).
@@ -459,7 +459,7 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
   11: (db) => {
     db.exec(REFRESH_RUN_SQL)
   },
-  // v12 -> v13: collapse repeated diagnostics by their stable (span, code)
+  // v12 -> v13: collapse repeated diagnostics by their stable (span, code, location)
   // identity. Older rows have no key, so keep the newest row for each identity
   // before enforcing uniqueness. Rows with no span identity remain distinct.
   12: (db) => {
@@ -471,27 +471,41 @@ export const MIGRATIONS: Record<number, (db: Database) => void> = {
       db.exec("ALTER TABLE problems ADD COLUMN problem_key TEXT NOT NULL DEFAULT ''")
     }
 
-    const rows = db
-      .prepare('SELECT id, span_id, code FROM problems ORDER BY id')
-      .all() as Array<{ id: number; span_id: string | null; code: string }>
-    const seen = new Map<string, number>()
-    const remove = db.prepare('DELETE FROM problems WHERE id = ?')
-    const setKey = db.prepare('UPDATE problems SET problem_key = ? WHERE id = ?')
-    for (const row of rows) {
-      const key = problemIdentity(row.span_id, row.code, row.id)
-      const earlier = seen.get(key)
-      if (earlier !== undefined) remove.run(earlier)
-      setKey.run(key, row.id)
-      seen.set(key, row.id)
-    }
+    rekeyProblems(db)
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS problems_by_identity ON problems (problem_key)')
   },
+  // v13 -> v14: existing stores used a span/code key, so rekey their surviving
+  // rows before a new diagnostic at a different location can be recorded.
+  13: (db) => rekeyProblems(db),
 }
 
-/** Stable per-span/code key; rows without a span keep their independent legacy identity. */
-function problemIdentity(spanId: string | null, code: string, legacyId?: number): string {
+/** Stable per-span/code/location key; rows without a span keep their independent legacy identity. */
+function problemIdentity(
+  spanId: string | null,
+  code: string,
+  location: string | null,
+  legacyId?: number,
+): string {
   if (spanId === null) return JSON.stringify(['legacy-row', legacyId])
-  return JSON.stringify(['span-problem', spanId, code])
+  return JSON.stringify(['span-problem', spanId, code, location])
+}
+
+function rekeyProblems(db: Database): void {
+  const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='problems'").get()
+  if (!table) return
+  const rows = db
+    .prepare('SELECT id, span_id, code, location FROM problems ORDER BY id')
+    .all() as Array<{ id: number; span_id: string | null; code: string; location: string | null }>
+  const seen = new Map<string, number>()
+  const remove = db.prepare('DELETE FROM problems WHERE id = ?')
+  const setKey = db.prepare('UPDATE problems SET problem_key = ? WHERE id = ?')
+  for (const row of rows) {
+    const key = problemIdentity(row.span_id, row.code, row.location, row.id)
+    const earlier = seen.get(key)
+    if (earlier !== undefined) remove.run(earlier)
+    setKey.run(key, row.id)
+    seen.set(key, row.id)
+  }
 }
 
 export type {
@@ -2317,7 +2331,7 @@ export class CanonStore {
 
   /** Record a surfaced failure the system declines to guess about. */
   recordProblem(problem: SpanProblem): void {
-    const problemKey = problemIdentity(problem.spanId, problem.code)
+    const problemKey = problemIdentity(problem.spanId, problem.code, problem.location ?? null)
     this.db
       .prepare(
         `INSERT INTO problems (span_id, problem_key, severity, code, message, location)

@@ -384,6 +384,24 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
     store.close()
   })
 
+  it('keeps diagnostics at distinct locations on the same span and code', () => {
+    const store = new CanonStore(':memory:')
+    const first = {
+      spanId: 'span-duplicate',
+      severity: 'error' as const,
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'first parse error',
+      location: 'source.jsonl#turn-1',
+    }
+    const second = { ...first, message: 'second parse error', location: 'source.jsonl#turn-2' }
+
+    store.recordProblem(first)
+    store.recordProblem(second)
+
+    expect(store.getProblems('span-duplicate')).toEqual([first, second])
+    store.close()
+  })
+
   it('migrates duplicate legacy diagnostics into one stable row transactionally', () => {
     const path = tempStorePath()
     const initial = new CanonStore(path)
@@ -400,13 +418,16 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
       message TEXT NOT NULL,
       location TEXT
     )`)
-    legacy.prepare('UPDATE metadata SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION - 1), 'schema_version')
+    legacy.prepare('UPDATE metadata SET value = ? WHERE key = ?').run('12', 'schema_version')
     legacy.prepare(
       'INSERT INTO problems (span_id, severity, code, message, location) VALUES (?, ?, ?, ?, ?)',
     ).run('span-legacy', 'error', 'PROVIDER_PARSE_ERROR', 'old parse message', 'legacy.jsonl#1')
     legacy.prepare(
       'INSERT INTO problems (span_id, severity, code, message, location) VALUES (?, ?, ?, ?, ?)',
     ).run('span-legacy', 'warning', 'PROVIDER_PARSE_ERROR', 'latest parse message', 'legacy.jsonl#1')
+    legacy.prepare(
+      'INSERT INTO problems (span_id, severity, code, message, location) VALUES (?, ?, ?, ?, ?)',
+    ).run('span-legacy', 'error', 'PROVIDER_PARSE_ERROR', 'other location', 'legacy.jsonl#2')
     legacy.close()
 
     // Opening the store executes migration 12: adds problem_key, deduplicates, and creates unique index
@@ -417,6 +438,12 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
       code: 'PROVIDER_PARSE_ERROR',
       message: 'latest parse message',
       location: 'legacy.jsonl#1',
+    }, {
+      spanId: 'span-legacy',
+      severity: 'error',
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'other location',
+      location: 'legacy.jsonl#2',
     }])
 
     // Verify migration 12 added the problem_key column and created the unique index
@@ -428,6 +455,56 @@ describe('CanonStore quarantine, problems, and ingest log', () => {
     expect(indexes.some((idx) => idx.name === 'problems_by_identity' && idx.unique === 1)).toBe(true)
     verifyDb.close()
 
+    migrated.close()
+  })
+
+  it('rekeys existing v13 diagnostics before recording a new location', () => {
+    const path = tempStorePath()
+    const initial = new CanonStore(path)
+    initial.recordProblem({
+      spanId: 'span-v13',
+      severity: 'error',
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'first parse error',
+      location: 'source.jsonl#turn-1',
+    })
+    initial.close()
+
+    const legacy = new DatabaseSync(path)
+    legacy.prepare('UPDATE problems SET problem_key = ?').run(
+      JSON.stringify(['span-problem', 'span-v13', 'PROVIDER_PARSE_ERROR']),
+    )
+    legacy.prepare("UPDATE metadata SET value = '13' WHERE key = 'schema_version'").run()
+    legacy.close()
+
+    const migrated = new CanonStore(path)
+    migrated.recordProblem({
+      spanId: 'span-v13',
+      severity: 'warning',
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'first parse error corrected',
+      location: 'source.jsonl#turn-1',
+    })
+    migrated.recordProblem({
+      spanId: 'span-v13',
+      severity: 'error',
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'second parse error',
+      location: 'source.jsonl#turn-2',
+    })
+    expect(migrated.getProblems('span-v13')).toEqual([{
+      spanId: 'span-v13',
+      severity: 'warning',
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'first parse error corrected',
+      location: 'source.jsonl#turn-1',
+    }, {
+      spanId: 'span-v13',
+      severity: 'error',
+      code: 'PROVIDER_PARSE_ERROR',
+      message: 'second parse error',
+      location: 'source.jsonl#turn-2',
+    }])
     migrated.close()
   })
 
