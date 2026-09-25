@@ -406,6 +406,74 @@ describe('T3 static source capability readers', () => {
     })
   })
 
+  it('retains reconstructed input snapshots for ID-less requests when sibling request has native requestId', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-copilot-idless-'))
+    const filePath = join(root, 'session.jsonl')
+    try {
+      const line1 = JSON.stringify({
+        kind: 0,
+        v: { sessionId: 'vscode-mixed-ids-session', creationDate: '2026-09-22T10:00:00.000Z', requests: [] },
+      })
+      const line2 = JSON.stringify({
+        kind: 2,
+        k: ['requests'],
+        v: [
+          {
+            // ID-less request
+            timestamp: '2026-09-22T10:01:00.000Z',
+            modelId: 'copilot/gpt-5',
+            message: { text: 'id-less request text' },
+            result: { metadata: { promptTokens: 100, outputTokens: 20, resolvedModel: 'gpt-5' } },
+            response: { text: 'id-less response text' },
+          },
+          {
+            // Sibling request with native requestId
+            requestId: 'explicit-native-id',
+            timestamp: '2026-09-22T10:02:00.000Z',
+            modelId: 'copilot/gpt-5',
+            message: { text: 'sibling request text' },
+            result: { metadata: { promptTokens: 150, outputTokens: 25, resolvedModel: 'gpt-5' } },
+            response: { text: 'sibling response text' },
+          },
+        ],
+      })
+      writeFileSync(filePath, `${line1}\n${line2}\n`)
+
+      const source = {
+        path: filePath,
+        project: 'fixture-project',
+        provider: 'copilot',
+        sourceType: 'chatsession' as const,
+      }
+      const calls = await parsedCalls(copilot, source)
+      expect(calls).toHaveLength(2)
+      expect(calls[0]!.turnId).toBe('request-0')
+      expect(calls[1]!.turnId).toBe('explicit-native-id')
+
+      const result = await ingestProviders(['copilot-vscode'], () => ({
+        calls,
+        filePath,
+        harnessId: 'copilot-vscode',
+        sourceKey: 'copilot-vscode:vscode-mixed-ids-session',
+      }))
+
+      expect(result.problems).toEqual([])
+      expect(result.records).toHaveLength(2)
+      const first = result.records[0]!
+      const second = result.records[1]!
+
+      // First (ID-less) request MUST retain its reconstructed input snapshot
+      expect(first.content.conversation_history).toContain('id-less request text')
+      expect(first.spanId).toContain(':request-0')
+
+      // Second request also matches correctly
+      expect(second.content.conversation_history).toContain('sibling request text')
+      expect(second.spanId).toContain(':explicit-native-id')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('retains Cursor prompt/context evidence while naming incomplete history', async () => {
     const dbPath = cursorEvidenceDb()
     const cursor = createCursorProvider(dbPath)

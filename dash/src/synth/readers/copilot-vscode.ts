@@ -74,15 +74,17 @@ export const copilotVscodeReader: ContentReader = {
     if (!isRecord(root) || !Array.isArray(root['requests'])) return
 
     const sessionId = recordText(root['sessionId'])
-    const requests = root['requests'].filter(isRecord)
+    const requests = Array.isArray(root['requests']) ? root['requests'] : []
 
     for (let index = 0; index < requests.length; index++) {
-      const current = requests[index]!
+      const current = requests[index]
+      if (!isRecord(current)) continue
       const parts: ContentPart[] = []
       let order = 0
 
       for (let previousIndex = 0; previousIndex < index; previousIndex++) {
-        const previous = requests[previousIndex]!
+        const previous = requests[previousIndex]
+        if (!isRecord(previous)) continue
         const previousMessage = messageText(previous)
         if (previousMessage !== undefined) {
           parts.push(part('conversation_history', previousMessage, order++))
@@ -103,11 +105,11 @@ export const copilotVscodeReader: ContentReader = {
         parts.push(part('instruction_context', instructions, order++))
       }
 
-      const nativeRecordId = requestId(current)
+      const nativeRecordId = requestId(current) ?? `request-${index}`
       yield {
         parts,
         ...(sessionId !== undefined ? { sessionId } : {}),
-        ...(nativeRecordId !== undefined ? { nativeRecordId } : {}),
+        nativeRecordId,
       }
     }
   },
