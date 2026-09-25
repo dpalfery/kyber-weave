@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Agents
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-24
 code-refs:
   - AgentLoader
   - AgentSpecValidator
@@ -77,6 +77,26 @@ same-name role skills.
 | `KW-AGENT-SPEC-002` | The agent has no description |
 | `KW-AGENT-SPEC-003` | The agent has no instructions |
 | `KW-AGENT-SPEC-004` | A referenced file does not resolve |
+
+### Instruction-body file reference validation — `KW-AGENT-SPEC-004`
+
+`AgentSpecValidator` scans both the agent's `description` and `instructions` fields for file references and raises `KW-AGENT-SPEC-004` (severity: Error) when a path does not resolve.
+
+**Reference patterns**:
+- **Markdown links**: `[text](path/to/file)` — extracted from `LinkInline` AST nodes via Markdig parser
+- **Inline backtick paths**: `` `relative/path/to/file` `` — matching the pattern `@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)"`, scoped to conventional subdirectories (`scripts/`, `references/`, `assets/`)
+
+**Excluded patterns** (not treated as file references):
+- HTTP/HTTPS URLs: `http://`, `https://`
+- Anchor-only links: starting with `#`
+- Mailto links: `mailto:`
+- Path traversal attempts: containing `..`
+- Config Reg tokens: `<property-name>` (e.g., `<docs-root>`, `<plan-index>`)
+- Absolute filesystem paths: `/absolute/path`
+
+**Resolution**: Relative to the agent's `DirectoryPath` (the folder containing the agent definition file). Paths beginning with `./` are normalized before resolution. If the agent has no directory path, the check is skipped.
+
+**Hint text**: When a reference does not resolve, the check attempts to find the nearest existing file or directory using Levenshtein distance (threshold ≤ 3 edits), searching the agent's directory and one level up. Candidate suggestions appear in the diagnostic hint; fallback text directs the author to check spelling relative to the agent definition directory.
 
 ## Parity and drift — `KW-AGENT-SYNC-*`, `KW-AGENT-LINT-*`
 

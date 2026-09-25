@@ -1,8 +1,8 @@
 ---
-id: plans/agent-spec-broken-reference-rule
+id: archive/plans/2026-09-24-agent-spec-broken-reference-rule
 title: Implement KW-AGENT-SPEC-004 (broken file reference) check
 doc-type: plan
-status: current
+status: archived
 development-mode: test-first
 component: ContextHygiene
 owner: dpalfery
@@ -14,22 +14,22 @@ last-reviewed: 2026-09-24
 
 ## Goal
 
-Implement the `KW-AGENT-SPEC-004` validation rule that is already documented in [rule-reference.md](../ci-pipelines/rule-reference.md) but never emitted. `AgentSpecValidator.Validate` must verify that file references inside an agent's instruction body and description resolve to existing files, and raise `KW-AGENT-SPEC-004` when they do not. In test-first mode with a full rule-id audit of all `KW-AGENT-SPEC-*` and `KW-AGENT-SEC-*` ids to ensure every rule is actually emitted.
+Implement the `KW-AGENT-SPEC-004` validation rule that is already documented in [rule-reference.md](../../ci-pipelines/rule-reference.md) but never emitted. `AgentSpecValidator.Validate` must verify that file references inside an agent's instruction body and description resolve to existing files, and raise `KW-AGENT-SPEC-004` when they do not. In test-first mode with a full rule-id audit of all `KW-AGENT-SPEC-*` and `KW-AGENT-SEC-*` ids to ensure every rule is actually emitted.
 
 ## Context
 
 **Finding source**: [todo/agent-spec-broken-reference-rule.md](../todo/agent-spec-broken-reference-rule.md), identified 2026-08-22.
 
 **Current state** (verified 2026-09-24):
-- `AgentSpecValidator` class: [src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs](../../src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs:9)
+- `AgentSpecValidator` class: [src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs](../../../src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs:9)
 - Currently checks:
   - KW-AGENT-SPEC-001: Missing name
   - KW-AGENT-SPEC-002: Missing description
   - KW-AGENT-SPEC-003: Missing instructions
 - Does NOT check: KW-AGENT-SPEC-004 (broken file reference)
-- Rule is documented at: [docs/ci-pipelines/rule-reference.md](../ci-pipelines/rule-reference.md:125)
+- Rule is documented at: [docs/ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md:125)
 
-**Precedent for reference extraction**: `SkillParser.ExtractReferenceLinks` in [src/KyberWeave.Core/Skills/Parsing/SkillParser.cs](../../src/KyberWeave.Core/Skills/Parsing/SkillParser.cs:125) shows the pattern already established in the codebase:
+**Precedent for reference extraction**: `SkillParser.ExtractReferenceLinks` in [src/KyberWeave.Core/Skills/Parsing/SkillParser.cs](../../../src/KyberWeave.Core/Skills/Parsing/SkillParser.cs:125) shows the pattern already established in the codebase:
 - Extracts Markdown `LinkInline` elements from document AST
 - Extracts inline path patterns using regex `@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)"`
 - Normalizes paths (strips `./` prefix)
@@ -58,7 +58,7 @@ A file reference in an agent's instruction body or description is:
 ## Severity and hint text
 
 - **Rule id**: `KW-AGENT-SPEC-004`
-- **Severity**: Error (from [rule-reference.md](../ci-pipelines/rule-reference.md:125): "Broken file reference")
+- **Severity**: Error (from [rule-reference.md](../../ci-pipelines/rule-reference.md:125): "Broken file reference")
 - **Hint text** (observable if nearest match is computable): Offer the nearest existing file/directory as a candidate suggestion, e.g.:
   - `"File not found: 'references/guide.md'. Nearest match: 'references/guides.md' in the agent's directory."`
   - Fallback (no candidates): `"Relative file path does not exist. Check the path spelling relative to the agent definition directory."`
@@ -219,19 +219,19 @@ Final check after closeout completes:
 dotnet run --project src/KyberWeave.Cli -c Release -- docs validate . --merge-ready
 ```
 
-Expected result: Exit code 0 (plan is archived, so no KW-DOC-LIFECYCLE-003 findings). See [src/KyberWeave.Cli/Commands/Docs/DocsValidateSettings.cs:14](../../src/KyberWeave.Cli/Commands/Docs/DocsValidateSettings.cs:14) for the `--merge-ready` option definition.
+Expected result: Exit code 0 (plan is archived, so no KW-DOC-LIFECYCLE-003 findings). See [src/KyberWeave.Cli/Commands/Docs/DocsValidateSettings.cs:14](../../../src/KyberWeave.Cli/Commands/Docs/DocsValidateSettings.cs:14) for the `--merge-ready` option definition.
 
 ## Closeout
 
 After plan finalization and successful review:
 
-1. **docs-dev** archives this plan to [docs/archive/plans/2026-09-24-agent-spec-broken-reference-rule.md](../archive/plans/) (new file).
-2. **docs-dev** updates [docs/plans/README.md](../README.md) index: Move the plan row from Active to Archived, record completion date and any harvested ADRs (none anticipated for this implementation).
-3. **docs-dev** closes the todo: Move [docs/todo/agent-spec-broken-reference-rule.md](../todo/agent-spec-broken-reference-rule.md) to [docs/archive/todo/agent-spec-broken-reference-rule.md](../archive/todo/) and update [docs/todo/README.md](../todo/README.md) index, moving the row from Open to Closed with status `superseded` and a link to the archived plan, per existing Closed rows.
+1. **docs-dev** archives this plan to [docs/archive/plans/2026-09-24-agent-spec-broken-reference-rule.md](2026-09-24-agent-spec-broken-reference-rule.md) (new file).
+2. **docs-dev** updates [docs/plans/README.md](../../plans/README.md) index: Move the plan row from Active to Archived, record completion date and any harvested ADRs (none anticipated for this implementation).
+3. **docs-dev** closes the todo: Move [docs/todo/agent-spec-broken-reference-rule.md](../todo/agent-spec-broken-reference-rule.md) to [docs/archive/todo/agent-spec-broken-reference-rule.md](../todo/agent-spec-broken-reference-rule.md) and update [docs/todo/README.md](../../todo/README.md) index, moving the row from Open to Closed with status `superseded` and a link to the archived plan, per existing Closed rows.
 
 Durable facts to record in rule documentation (not the archived plan, which is read-only):
-- **Decision Q1 (inline path scope)**  recorded in [docs/context-hygiene/agents.md](../../docs/context-hygiene/agents.md) (reference section on instruction-body validation, where the check is documented)
-- **Rule-id audit results (T3 output)**: Attach final audit to plan closure comment or inline as verified in [docs/ci-pipelines/rule-reference.md](../ci-pipelines/rule-reference.md)
+- **Decision Q1 (inline path scope)**  recorded in [docs/context-hygiene/agents.md](../../context-hygiene/agents.md) (reference section on instruction-body validation, where the check is documented)
+- **Rule-id audit results (T3 output)**: Attach final audit to plan closure comment or inline as verified in [docs/ci-pipelines/rule-reference.md](../../ci-pipelines/rule-reference.md)
 
 ## File-scope overlaps and concurrency
 
@@ -305,3 +305,18 @@ These are not emitter constants; they are reference/documentation constants. The
 ✓ No undocumented KW-AGENT-* ids found in code.
 ✓ No dead/unused rule-id constants detected.
 ✓ rule-reference.md is current.
+
+## Closeout (2026-09-24)
+
+**Outcome**: KW-AGENT-SPEC-004 implemented in `AgentSpecValidator.ValidateBrokenFileReferences` (src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs:73). Rule-id audit (T3) confirms all 25 documented agent rule ids are properly emitted in code; rule-reference.md requires no changes.
+
+**Evidence**:
+- **T1 (RED audit)**: Two positive tests initially failed with expected diagnostic messages; negative guard passed by construction. Tests exercised both Markdown links and inline backtick paths in Description and InstructionsBody.
+- **T2 (GREEN implementation)**: All three T1 tests now pass. Implementation extracts references from Markdown LinkInline elements and inline paths matching `@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)"`. Skips URLs, anchors, `mailto:`, config tokens, path-traversal attempts, and absolute paths. Resolves relative to `agent.DirectoryPath`. Nearest-match suggestion algorithm using Levenshtein distance (threshold ≤ 3 edits). Specification at src/KyberWeave.Core/Agents/Validation/AgentSpecValidator.cs:73–313.
+- **T3 (rule-id audit)**: All 25 documented `KW-AGENT-SPEC-*` and `KW-AGENT-SEC-*` ids are actively emitted. Audit table at §Rule-id audit above.
+- **T4 (docs verification)**: rule-reference.md already documented KW-AGENT-SPEC-004 at line 125; no changes needed.
+- **Verification gates**: Full suite 2107 total / 2107 passed; `dotnet test` passes deterministically; `docs validate .` and `docs drift .` both run without findings; review gates 15/15 PASS (post-fix from docs-drift gate KW-DOC-DRIFT-001 resolved by this closeout).
+- **Council decision**: APPROVE, 2026-09-24. No blocking findings. Durable facts migrated to docs/context-hygiene/agents.md.
+- **Branch history**: Parallel Copilot implementation (commit c2c98953) was merged with reviewed implementation kept by user decision 2026-09-24. Council follow-up (inline-path extraction and on-disk resolution duplication in SkillParser) noted but not actioned; non-blocking per 2026-09-24 council decision.
+
+**Status**: Archived 2026-09-24. Superseded todo at ../todo/agent-spec-broken-reference-rule.md now closed.

@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-24
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,16 +17,13 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-| Plan | Status | Date | Development Mode | Goal |
-|---|---|---|---|---|
-| [2026-09-24-agent-spec-broken-reference-rule.md](2026-09-24-agent-spec-broken-reference-rule.md) | current | 2026-09-24 | test-first | Implement KW-AGENT-SPEC-004 broken file reference check in AgentSpecValidator.Validate, and audit all KW-AGENT-SPEC-* and KW-AGENT-SEC-* ids to ensure every rule is emitted. |
-
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
 ## Archived Plans
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-09-24-agent-spec-broken-reference-rule.md](../archive/plans/2026-09-24-agent-spec-broken-reference-rule.md) | Complete | 2026-09-24 | 2026-09-24 | [context-hygiene/agents.md](../context-hygiene/agents.md), [ci-pipelines/rule-reference.md](../ci-pipelines/rule-reference.md), [todo/agent-spec-broken-reference-rule.md](../archive/todo/agent-spec-broken-reference-rule.md) (closed); no ADR | Implement KW-AGENT-SPEC-004 (broken file reference) check in AgentSpecValidator, and audit all KW-AGENT-SPEC-* and KW-AGENT-SEC-* ids to ensure every rule is emitted. Development mode: test-first. Complete: council APPROVE, all 15 review gates PASS, 2026-09-24. |
 | [2026-09-23-squad-path-argument-safety.md](../archive/plans/2026-09-23-squad-path-argument-safety.md) | Complete | 2026-09-23 | 2026-09-24 | [kyber-squad/onboarding.md](../kyber-squad/onboarding.md), [ci-pipelines/architecture.md](../ci-pipelines/architecture.md), [context-hygiene/agents.md](../context-hygiene/agents.md), [todo/squad-path-argument-safety.md](../archive/todo/squad-path-argument-safety.md) (closed); no ADR — the strict-parsing decision is recorded in the plan and the aligned docs | Add an explicit `--path` option to the squad settings classes, enable CLI-wide strict parsing, and confirm the resolved absolute target root before any write on mutating squad commands. Development mode: test-first. Complete: council position APPROVE-quality (engine token REQUEST_CHANGES solely on the environmental docs-drift gate; CI verifies at PR time), 14/15 gates PASS, 2026-09-24. |
 | [2026-09-21-zcode-harness-target.md](../archive/plans/2026-09-21-zcode-harness-target.md) | Complete | 2026-09-21 | 2026-09-24 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) | Declare `zcode` as a Kyber-Squad target and register a ZCodeRenderer (delivered by #100). |
 | [2026-09-14-kilo-native-renderer.md](../archive/plans/2026-09-14-kilo-native-renderer.md) | Complete | 2026-09-14 | 2026-09-24 | [kyber-squad/architecture.md](../kyber-squad/architecture.md) | Implement and register an ISquadRenderer for SquadTarget.Kilo (delivered by #93). |
