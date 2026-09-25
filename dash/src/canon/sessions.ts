@@ -444,7 +444,11 @@ export function buildSessionRow(
     }),
   )
   const contextBucket = (turn: (typeof analyzedTurns)[number] | undefined, reportedInput: number): AsadContextBucket => ({
-    buckets: turn?.buckets ?? (Object.keys(unavailableBuckets).length > 0 ? unavailableBuckets : {}),
+    buckets: turn?.buckets
+      ? { ...turn.buckets, ...unavailableBuckets }
+      : Object.keys(unavailableBuckets).length > 0
+        ? unavailableBuckets
+        : {},
     reported_input: unavailableFor(measurability, 'token_usage') ?? reportedInput,
   })
   const contextShape = {

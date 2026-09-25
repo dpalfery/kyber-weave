@@ -287,6 +287,33 @@ describe('buildSessionRow', () => {
     expect(JSON.stringify(payload)).not.toContain('"total_input":0')
     expect(JSON.stringify(payload)).not.toContain('"reported_input":0')
   })
+
+  it('preserves unavailable bucket reasons over measured turns in partially measurable sessions', () => {
+    const unavailableSystem = {
+      availability: 'not_measurable' as const,
+      reason: 'Copilot VS Code does not persist system prompts.',
+    }
+    const record = turn(
+      'copilot-partially-measurable',
+      [{ part: 'conversation_history', text: 'user turn', tokens: 150 }],
+      {
+        source: 'copilot-vscode',
+        harness: 'copilot-vscode',
+        tokens: tokens({ freshInput: 150, reportedInput: 150 }),
+        measurability: { system_prompt: unavailableSystem },
+      },
+    )
+
+    const row = buildSessionRow('sess-partial', [record], approximateO200kBase)
+    const payload = JSON.parse(JSON.stringify(row.payload)) as SessionPayloadView
+
+    // conversation_history should be measured tokens
+    expect(payload.context.first.buckets['conversation_history']).toBe(150)
+    // system_prompt must retain its unavailable reason, NOT 0
+    expect(unavailableReason(payload.context.first.buckets['system_prompt'], 'system_prompt')).toContain(
+      'Copilot VS Code',
+    )
+  })
 })
 
 describe('buildSessions', () => {
