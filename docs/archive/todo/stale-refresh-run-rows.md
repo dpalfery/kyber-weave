@@ -47,9 +47,6 @@ rows are stuck.
 - Pin whichever transition is chosen with a test, so a killed refresh cannot silently strand
   a row again.
 
-Impact today is diagnostic only: a stale `running` row can make a health or coverage footer
-misrepresent refresh activity without any session data being wrong.
-
 ## The code seam
 
 - `dash/src/refresh/orchestrator.ts` and the refresh pipeline under `dash/src/refresh/**` —
@@ -60,6 +57,7 @@ misrepresent refresh activity without any session data being wrong.
 ## Resolution
 
 Resolved by PR #117: `store.reconcileDeadRefreshRuns(importedAtUtc)` runs automatically
-before each refresh cycle begins in `refreshOrchestrator`. It inspects every `running` row in
+before each refresh cycle begins in `refreshHarnessSources`
+(`dash/src/refresh/orchestrator.ts`). It inspects every `running` row in
 `refresh_run`, probes whether the recorded PID is still alive, treats runs older than 15
 minutes as timed out, and transitions orphaned runs to `failure` with an audit summary.
