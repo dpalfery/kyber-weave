@@ -218,7 +218,7 @@ Live acceptance evidence after T11:
 | Static source exposes only a fragment, not a complete model prefix | Capability matrix separates retained inspector content from composition measurability; measured totals remain visible while incomplete buckets stay unavailable. |
 | Current output is useful transcript history for later turns | Readers keep it in their rolling state only after the producing turn, preserving later history without charging it to the current input. |
 | Existing store contains unique historical OTLP data | Both Q1 options take a timestamped backup; recommended in-place migration preserves canonical record identity and compares before/after counts before deployment. |
-| Diagnostic uniqueness hides a changed message | Stable identity updates the message/severity for the same span, code, and location rather than silently ignoring it. Migration retains an audit summary of collapsed rows. |
+| Diagnostic uniqueness hides a changed message | Stable identity updates the message/severity for the same span, code, and location rather than silently ignoring it. Migration keeps the newest row for each identity and deletes older duplicates without storing an audit summary; the pre-migration backup preserves the original rows. |
 | A process can be killed before `finally` executes | The next owner reconciles dead-PID runs and stale locks. Ordinary exceptions still close their own run in a catch/finally path. |
 | Fixing duplicate diagnostics does not fix the refresh termination cause | Live full-refresh completion, peak-memory evidence, and unchanged rerun are acceptance gates. Failure keeps the plan open and the backup/restoration path available. |
 | Behind worktree or generated tray output is mistaken for source | T0 uses an isolated current-base worktree. No implementation writes into the present untracked `dash/tray/` tree. |
@@ -241,7 +241,7 @@ Live acceptance evidence after T11:
 
 ### 13.2 Database migration and reconciliation
 - **Schema version**: Advanced from `12` to `13`.
-- **Problems deduplication**: 1,899,104 duplicate rows collapsed to **29,691** unique diagnostics (100% distinct problem keys).
+- **Problems deduplication**: 1,899,104 duplicate rows collapsed to **29,691** unique diagnostics immediately after migration (100% distinct problem keys). This is a post-migration snapshot, not the later API total.
 - **Legacy Gemini quarantine**: 31,362 historical records re-attributed to quarantine reason `excluded_harness`; 0 active records with harness `gemini`.
 - **Dead refresh runs**: 428 dead PID runs reconciled to `failure` with audit summary; stale age gate (15m) added to prevent false alives on OS PID recycling.
 
@@ -265,10 +265,10 @@ Live acceptance evidence after T11:
   - Copilot: Input text separated from response envelopes; negative residuals resolved.
   - Copilot VS Code: Request-level input-side `ReaderTurn` synthesized; unobserved buckets explicit `null` with reason.
   - Cursor: Prompt and tool context extracted without claiming complete historical prefix.
-  - Data coverage footer: Reflects real quarantine total (388,097), deduplicated problem count (29,871), and accurate refresh status (`inProgress: null`).
+  - Data coverage footer: Reflects real quarantine total (388,097), deduplicated problem count (29,871), and accurate refresh status (`inProgress: null`). This later API snapshot is 180 problems above the post-migration count; the 0-new-problems result above applies to the unchanged second refresh only.
   - Scoped cost: Explicit pricing bases (harness $4.00, published $0.48, unknown `no_rate`).
 
 ### 13.5 Test suite results
 - **Dash test suite (Vitest)**: 256 test files passed, 3,586 tests passed (0 failures).
-- **Core test suite (.NET)**: 2,057 tests passed (0 failures).
+- **Core test suite (.NET)**: 2,067 tests passed (0 failures).
 - **Documentation governance**: `docs validate .` and `docs drift .` both passed with 0 findings.
