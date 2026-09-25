@@ -256,4 +256,72 @@ describe('cursorReader', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  it('does not cross context windows across different models in the same database', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-cursor-multi-model-test-'))
+    const dbPath = join(root, 'state.vscdb')
+    const db = new DatabaseSync(dbPath)
+    try {
+      db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+      const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+
+      // Claude bubble has explicit contextWindow 200000
+      insert.run(
+        'bubbleId:comp-multi:b1',
+        JSON.stringify({
+          type: 1,
+          requestId: 'req-claude',
+          text: 'claude query',
+          modelInfo: { modelName: 'claude-3-5-sonnet' },
+          contextWindow: 200000,
+        }),
+      )
+
+      // GPT-4o bubble has no explicit contextWindow; must resolve to 128000, NOT 200000
+      insert.run(
+        'bubbleId:comp-multi:b2',
+        JSON.stringify({
+          type: 1,
+          requestId: 'req-gpt',
+          text: 'gpt query',
+          modelInfo: { modelName: 'gpt-4o' },
+        }),
+      )
+
+      // Gemini bubble has no explicit contextWindow; must resolve to 1000000, NOT 200000
+      insert.run(
+        'bubbleId:comp-multi:b3',
+        JSON.stringify({
+          type: 1,
+          requestId: 'req-gemini',
+          text: 'gemini query',
+          modelInfo: { modelName: 'gemini-1.5-pro' },
+        }),
+      )
+    } finally {
+      db.close()
+    }
+
+    try {
+      const turns: ReaderTurn[] = []
+      for await (const turn of cursorReader.read(dbPath)) {
+        turns.push(turn)
+      }
+      expect(turns).toHaveLength(3)
+
+      const claudeTurn = turns.find((t) => t.nativeRecordId === 'req-claude')
+      expect(claudeTurn).toBeDefined()
+      expect(claudeTurn!.contextWindow).toBe(200000)
+
+      const gptTurn = turns.find((t) => t.nativeRecordId === 'req-gpt')
+      expect(gptTurn).toBeDefined()
+      expect(gptTurn!.contextWindow).toBe(128000)
+
+      const geminiTurn = turns.find((t) => t.nativeRecordId === 'req-gemini')
+      expect(geminiTurn).toBeDefined()
+      expect(geminiTurn!.contextWindow).toBe(1000000)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
 })

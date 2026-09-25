@@ -68,6 +68,8 @@ function readFromJsonFile(filePath: string): ReaderTurn[] {
     const requestToComposer = new Map<string, string>()
     const requestToModel = new Map<string, string>()
     const bubbleUserText = new Map<string, string>()
+    const requestContextWindow = new Map<string, number>()
+    const modelContextWindow = new Map<string, number>()
 
     for (const r of rows) {
       if (r.key.startsWith('bubbleId:')) {
@@ -76,6 +78,15 @@ function readFromJsonFile(filePath: string): ReaderTurn[] {
         if (cid && reqId) requestToComposer.set(reqId, cid)
         if (reqId && isRecord(r.value['modelInfo']) && typeof r.value['modelInfo']['modelName'] === 'string') {
           requestToModel.set(reqId, r.value['modelInfo']['modelName'])
+        }
+        if (typeof r.value['contextWindow'] === 'number') {
+          if (reqId) {
+            requestContextWindow.set(reqId, r.value['contextWindow'])
+          }
+          const modelName = reqId ? requestToModel.get(reqId) : undefined
+          if (modelName) {
+            modelContextWindow.set(modelName, r.value['contextWindow'])
+          }
         }
         if (reqId && r.value['type'] === 1 && typeof r.value['text'] === 'string') {
           bubbleUserText.set(reqId, r.value['text'])
@@ -175,7 +186,10 @@ function readFromJsonFile(filePath: string): ReaderTurn[] {
 
       const sessionId = requestToComposer.get(reqId) ?? rootSessionId ?? reqId
       const model = requestToModel.get(reqId)
-      const contextWindow = rootContextWindow ?? contextWindowForModel(model)
+      const contextWindow = requestContextWindow.get(reqId)
+        ?? (model ? modelContextWindow.get(model) : undefined)
+        ?? contextWindowForModel(model)
+        ?? rootContextWindow
 
       turns.push({
         parts,
@@ -240,18 +254,24 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
     const requestToComposer = new Map<string, string>()
     const bubbleModel = new Map<string, string>()
     const bubbleUserText = new Map<string, string>()
-    let explicitContextWindow: number | undefined
+    const requestContextWindow = new Map<string, number>()
+    const modelContextWindow = new Map<string, number>()
 
     for (const row of bubbleRows) {
       const cid = parseComposerIdFromKey(row.bubble_key)
-      if (typeof row.context_window === 'number' && isComposerAllowed(cid)) {
-        explicitContextWindow = row.context_window
-      }
       if (cid && row.request_id) {
         requestToComposer.set(row.request_id, cid)
       }
       if (row.request_id && row.model) {
         bubbleModel.set(row.request_id, row.model)
+      }
+      if (typeof row.context_window === 'number') {
+        if (row.request_id) {
+          requestContextWindow.set(row.request_id, row.context_window)
+        }
+        if (row.model) {
+          modelContextWindow.set(row.model, row.context_window)
+        }
       }
       if (row.request_id && row.bubble_type === 1 && row.text) {
         const text = blobToText(row.text)
@@ -261,20 +281,21 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       }
     }
 
-    if (explicitContextWindow === undefined && composerFilter === null) {
-      try {
-        const rows = db.query<{ cw: number | null }>(`
-          SELECT json_extract(value, '$.contextWindow') as cw
-          FROM cursorDiskKV
-          WHERE json_extract(value, '$.contextWindow') IS NOT NULL
-          LIMIT 1
-        `)
-        if (rows.length > 0 && typeof rows[0]?.cw === 'number') {
-          explicitContextWindow = rows[0].cw
+    try {
+      const rows = db.query<{ model: string | null; cw: number | null }>(`
+        SELECT
+          json_extract(value, '$.modelInfo.modelName') as model,
+          json_extract(value, '$.contextWindow') as cw
+        FROM cursorDiskKV
+        WHERE json_extract(value, '$.contextWindow') IS NOT NULL
+      `)
+      for (const row of rows) {
+        if (row.model && typeof row.cw === 'number' && !modelContextWindow.has(row.model)) {
+          modelContextWindow.set(row.model, row.cw)
         }
-      } catch {
-        /* best-effort */
       }
+    } catch {
+      /* best-effort */
     }
 
     const { byComposer, unjoined, byRequest } = loadAgentStreams(db, requestToComposer)
@@ -328,7 +349,9 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       const composerId = requestToComposer.get(requestId)
       const sessionId = composerId ?? requestId
       const model = stream?.model ?? bubbleModel.get(requestId)
-      const contextWindow = explicitContextWindow ?? contextWindowForModel(model)
+      const contextWindow = requestContextWindow.get(requestId)
+        ?? (model ? modelContextWindow.get(model) : undefined)
+        ?? contextWindowForModel(model)
 
       yield {
         parts,
@@ -352,7 +375,8 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
         for (const text of stream.toolResultContent) {
           if (text.trim() !== '') parts.push({ part: 'tool_result_content', text, order: order++ })
         }
-        const contextWindow = explicitContextWindow ?? contextWindowForModel(stream.model)
+        const contextWindow = (stream.model ? modelContextWindow.get(stream.model) : undefined)
+          ?? contextWindowForModel(stream.model)
         yield {
           parts,
           sessionId: cid,
