@@ -54,7 +54,8 @@ public static class GateRunner
         return new GateReport(
             GateReport.CurrentSchema,
             results,
-            CoverageCollector.ReadNewest(workingDirectory, startedUtc));
+            CoverageCollector.ReadNewest(workingDirectory, startedUtc),
+            CoverageCollector.ReadAll(workingDirectory, startedUtc));
     }
 
     private static GateResult RunOne(ReviewGate gate, string workingDirectory)

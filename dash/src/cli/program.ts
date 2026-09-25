@@ -24,19 +24,40 @@ function assertProvider(value: string, command: string): void {
   process.exit(1)
 }
 
+// The options every command accepts, before or after its own name.
+function declareSharedOptions(command: Command): Command {
+  return command
+    .option('--verbose', 'print warnings to stderr on read failures and skipped files')
+    .option('--timezone <zone>', 'IANA timezone for date grouping (e.g. Asia/Tokyo, America/New_York)')
+}
+
+function descendants(command: Command): Command[] {
+  return command.commands.flatMap(child => [child, ...descendants(child)])
+}
+
 // Wrapped in a factory because commander option state is sticky across
 // parses: a long-lived process that builds many programs must not leak one
 // parse's flags into the next.
 export function buildProgram(): Command {
-  const program = new Command()
-    .name(resolveCliName())
-    .description('Context health reports and dashboards for AI coding sessions')
-    .version(version)
-    .option('--verbose', 'print warnings to stderr on read failures and skipped files')
-    .option('--timezone <zone>', 'IANA timezone for date grouping (e.g. Asia/Tokyo, America/New_York)')
+  // Positional options, set before any subcommand exists because each one
+  // copies the setting when it is created. Without them commander matches the
+  // root's options anywhere on the line, so the root's `--version` swallowed
+  // `menubar --update --version <v>`: it printed the CLI version and exited 0,
+  // and `kyber-weave update`, which runs exactly that line, reported a tray
+  // update that never ran.
+  const program = declareSharedOptions(
+    new Command()
+      .name(resolveCliName())
+      .description('Context health reports and dashboards for AI coding sessions')
+      .enablePositionalOptions()
+      .version(version),
+  )
 
-  program.hook('preAction', async (thisCommand) => {
-    const tz = thisCommand.opts<{ timezone?: string }>().timezone ?? process.env['KYBERDASH_TZ']
+  program.hook('preAction', async (_thisCommand, actionCommand) => {
+    // optsWithGlobals, because the shared options may have been given to the
+    // subcommand rather than to the root.
+    const shared = actionCommand.optsWithGlobals<{ timezone?: string; verbose?: boolean }>()
+    const tz = shared.timezone ?? process.env['KYBERDASH_TZ']
     if (tz) {
       try {
         Intl.DateTimeFormat(undefined, { timeZone: tz })
@@ -53,7 +74,7 @@ export function buildProgram(): Command {
     setFlatRateModels(config.flatRateModels ?? [])
     setFlatRateRemoved(config.flatRateModelsRemoved ?? [])
     setProxyPaths(config.proxyPaths ?? [])
-    if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
+    if (shared.verbose) {
       process.env['KYBERDASH_VERBOSE'] = '1'
     }
   })
@@ -117,6 +138,11 @@ export function buildProgram(): Command {
     })
 
   registerKyberCommands(program)
+
+  // Positional options stop the root reading `--verbose` and `--timezone`
+  // after a subcommand name, where they were always accepted. Declaring them
+  // on every command keeps `kyberdash report --verbose` working.
+  for (const command of descendants(program)) declareSharedOptions(command)
 
   return program
 }
