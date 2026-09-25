@@ -67,20 +67,13 @@ if command -v dotnet >/dev/null 2>&1; then
 fi
 
 # The CodeGraph adapter and the analysis-persistence tests shell out to the sqlite3 CLI (the
-# deliberate trade in AGENTS.md); without it 29 tests fail on a machine CI never sees.
+# deliberate trade in AGENTS.md); without it those tests fail here although CI passes them.
 if ! command -v sqlite3 >/dev/null 2>&1; then
     apt-get install -y sqlite3 || echo "sqlite3 install failed"
 fi
 
-# The session shell reports TERM=linux, under which Spectre.Console treats captured output as a
-# live terminal and 48 CLI tests read back an empty string; TERM=dumb matches CI. Only the
-# SessionStart hook gets CLAUDE_ENV_FILE, whose exports apply to the session's later commands.
-if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-    echo 'export TERM=dumb' >>"$CLAUDE_ENV_FILE"
-fi
-
 # Highest pre-release by version, not the first one GitHub lists: list order is what let a
-# mistyped tag shadow the real release (docs/todo/mistyped-release-tag.md).
+# mistyped tag shadow the real release (docs/archive/todo/mistyped-release-tag.md).
 latest_rc() {
     curl -fsSL --retry 3 "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=50" \
         | python3 -c '
