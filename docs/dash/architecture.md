@@ -282,7 +282,7 @@ table pricing a harness it does not name — is in the [rationale](../reference/
 Each source declares per-metric availability independent of value (R10.1). A metric a source
 cannot report renders as "not measurable" (`null` with a machine- and human-readable `reason`),
 never as zero — rendering an unreported metric as `0` would make the harness that reports least look
-most efficient. Content readers (such as `CopilotVsCodeReader` and `CursorReader`) map native evidence
+most efficient. Content readers (such as `copilotVscodeReader` and `cursorReader`) map native evidence
 into input-side `ReaderTurn` snapshots without attributing current response text to input context or
 inventing unobserved prefix history. Where total tokens and context window are known, pressure is
 measured independently from whether individual composition buckets are available.
