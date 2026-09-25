@@ -418,16 +418,13 @@ public sealed class SquadGlobalRootTests : IDisposable
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            string? primaryAgentName = source.Agents.FirstOrDefault(a => a.Invocation == SquadInvocation.Primary)?.Name;
-            if (primaryAgentName is not null)
-            {
-                Assert.Single(
-                    result.Receipt.Files,
-                    f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
-                Assert.Single(
-                    result.Receipt.Files,
-                    f => f.RelativePath == $"agents/{primaryAgentName}.md");
-            }
+            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"agents/{primaryAgentName}.md");
         }
 
         bool sawAgentFile = false;
@@ -823,16 +820,13 @@ public sealed class SquadGlobalRootTests : IDisposable
         {
             string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             SquadSource source = SquadSourceLoader.Load(productRoot);
-            string? primaryAgentName = source.Agents.FirstOrDefault(a => a.Invocation == SquadInvocation.Primary)?.Name;
-            if (primaryAgentName is not null)
-            {
-                Assert.Single(
-                    result.Receipt.Files,
-                    f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
-                Assert.Single(
-                    result.Receipt.Files,
-                    f => f.RelativePath == $"agents/{primaryAgentName}.md");
-            }
+            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"agents/{primaryAgentName}.md");
         }
 
         Assert.True(
