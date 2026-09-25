@@ -298,7 +298,9 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       /* best-effort */
     }
 
-    const { byComposer, unjoined, byRequest } = loadAgentStreams(db, requestToComposer)
+    const { byComposer, unjoined, byRequest } = loadAgentStreams(db, requestToComposer, {
+      retainContent: true,
+    })
 
     const allRequestIds: string[] = []
     for (const [requestId, cid] of requestToComposer) {

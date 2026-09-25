@@ -562,7 +562,6 @@ export type AgentStream = {
   userContent: string[]
   instructionContent: string[]
   toolResultContent: string[]
-  assistantContent: string[]
 }
 
 function newAgentStream(): AgentStream {
@@ -576,13 +575,11 @@ function newAgentStream(): AgentStream {
     userContent: [],
     instructionContent: [],
     toolResultContent: [],
-    assistantContent: [],
   }
 }
 
-// agentKv rows store content as a plain string or a block array. Keep the text
-// blocks themselves for the content reader, and derive the existing token
-// estimates from those same values so counting and display share one parse.
+// agentKv rows store content as a plain string or a block array. Derive token
+// estimates from text values; only the content reader retains those values.
 function contentTextValues(raw: string): string[] {
   const trimmed = raw.trimStart()
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
@@ -619,7 +616,9 @@ type AgentStreamLoad = {
 export function loadAgentStreams(
   db: SqliteDatabase,
   requestToComposer: Map<string, string>,
+  options: { retainContent?: boolean } = {},
 ): AgentStreamLoad {
+  const retainContent = options.retainContent === true
   const byComposer = new Map<string, AgentStream>()
   const unjoined = new Map<string, AgentStream>()
   const byRequest = new Map<string, AgentStream>()
@@ -649,7 +648,9 @@ export function loadAgentStreams(
     byRequest.set(requestId, fresh)
     return fresh
   }
-  const bucketsFor = (requestId: string): AgentStream[] => [bucketFor(requestId), requestBucketFor(requestId)]
+  const bucketsFor = (requestId: string): AgentStream[] => retainContent
+    ? [bucketFor(requestId), requestBucketFor(requestId)]
+    : [bucketFor(requestId)]
 
   // Only the turn-opening (user) agentKv row carries the requestId; rows that
   // follow inherit it. Rows written BEFORE their request's id appears (the
@@ -668,8 +669,11 @@ export function loadAgentStreams(
         for (const bucket of bucketsFor(currentRequestId)) {
           bucket.userChars += pendingUserChars
           bucket.contextChars += pendingContextChars
-          bucket.userContent.push(...pendingUserContent)
-          bucket.instructionContent.push(...pendingInstructionContent)
+        }
+        if (retainContent) {
+          const requestBucket = requestBucketFor(currentRequestId)
+          requestBucket.userContent.push(...pendingUserContent)
+          requestBucket.instructionContent.push(...pendingInstructionContent)
         }
         pendingUserChars = 0
         pendingContextChars = 0
@@ -687,7 +691,7 @@ export function loadAgentStreams(
     if (row.role === 'system') {
       const texts = contentTextValues(blobToText(row.content))
       pendingContextChars += texts.reduce((total, text) => total + text.length, 0)
-      pendingInstructionContent.push(...texts)
+      if (retainContent) pendingInstructionContent.push(...texts)
       currentRequestId = null
       continue
     }
@@ -697,11 +701,11 @@ export function loadAgentStreams(
       if (currentRequestId) {
         for (const bucket of bucketsFor(currentRequestId)) {
           bucket.userChars += len
-          bucket.userContent.push(...texts)
         }
+        if (retainContent) requestBucketFor(currentRequestId).userContent.push(...texts)
       } else {
         pendingUserChars += len
-        pendingUserContent.push(...texts)
+        if (retainContent) pendingUserContent.push(...texts)
       }
       continue
     }
@@ -711,8 +715,8 @@ export function loadAgentStreams(
         const len = texts.reduce((total, text) => total + text.length, 0)
         for (const bucket of bucketsFor(currentRequestId)) {
           bucket.contextChars += len
-          bucket.toolResultContent.push(...texts)
         }
+        if (retainContent) requestBucketFor(currentRequestId).toolResultContent.push(...texts)
       }
       continue
     }
@@ -731,7 +735,6 @@ export function loadAgentStreams(
       if (typeof block.text === 'string') {
         for (const bucket of buckets) {
           bucket.assistantChars += block.text.length
-          bucket.assistantContent.push(block.text)
         }
       }
       if (block.type !== 'tool-call' || typeof block.toolName !== 'string' || !block.toolName) continue

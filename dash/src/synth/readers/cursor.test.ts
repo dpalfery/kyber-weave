@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { clearCursorWorkspaceMapCache } from '../../providers/cursor.js'
+import { clearCursorWorkspaceMapCache, loadAgentStreams } from '../../providers/cursor.js'
+import { openDatabase } from '../../ingest/sqlite.js'
 import { cursorReader } from './cursor.js'
 import type { ContentReader, ReaderTurn } from './types.js'
 
@@ -320,6 +321,60 @@ describe('cursorReader', () => {
       const geminiTurn = turns.find((t) => t.nativeRecordId === 'req-gemini')
       expect(geminiTurn).toBeDefined()
       expect(geminiTurn!.contextWindow).toBe(1000000)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('Cursor agent stream retention', () => {
+  it('keeps text only for an opted-in request bucket while retaining provider counts', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-cursor-stream-test-'))
+    const dbPath = join(root, 'state.vscdb')
+    const db = new DatabaseSync(dbPath)
+    try {
+      db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+      const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+      insert.run('agentKv:blob:system', JSON.stringify({ role: 'system', content: 'instructions' }))
+      insert.run('agentKv:blob:user', JSON.stringify({
+        role: 'user',
+        content: 'prompt',
+        providerOptions: { cursor: { requestId: 'req-1' } },
+      }))
+      insert.run('agentKv:blob:tool', JSON.stringify({ role: 'tool', content: 'tool result' }))
+      insert.run('agentKv:blob:assistant', JSON.stringify({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'reply' }],
+      }))
+    } finally {
+      db.close()
+    }
+
+    try {
+      const readerDb = openDatabase(dbPath)
+      try {
+        const join = new Map([['req-1', 'comp-1']])
+        const provider = loadAgentStreams(readerDb, join)
+        const reader = loadAgentStreams(readerDb, join, { retainContent: true })
+
+        expect(provider.byComposer.get('comp-1')).toMatchObject({
+          userChars: 6,
+          contextChars: 23,
+          assistantChars: 5,
+          userContent: [],
+          instructionContent: [],
+          toolResultContent: [],
+        })
+        expect(provider.byRequest.size).toBe(0)
+        expect(reader.byComposer.get('comp-1')?.userContent).toEqual([])
+        expect(reader.byRequest.get('req-1')).toMatchObject({
+          userContent: ['prompt'],
+          instructionContent: ['instructions'],
+          toolResultContent: ['tool result'],
+        })
+      } finally {
+        readerDb.close()
+      }
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
