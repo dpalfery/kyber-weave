@@ -100,8 +100,15 @@ review:
     # dash CI invokes those under `test:locks` instead. Mirroring that
     # partition keeps the gate's exit code meaningful in CI exactly as it
     # is for a local `npm test`.
+    #
+    # --coverage writes Cobertura to artifacts/coverage-dash/cobertura-coverage.xml
+    # (dash/vitest.config.ts), so the test-adequacy lens has line evidence for
+    # dash/ changes as well as .NET ones. The gate report lists it under
+    # coverageReports. Its coverage field, the one a floor is checked against,
+    # stays the .NET suite's, because the runner picks that from files named
+    # coverage.cobertura.xml only.
     - id: ts-test
-      run: [npm, run, --prefix, dash, test]
+      run: [npm, run, --prefix, dash, test, --, --coverage]
       blocking: true
     # One severity, owned by dash/eslint.config.js: the recommended rules run
     # at error everywhere under dash/. The two-tier split that ran them as

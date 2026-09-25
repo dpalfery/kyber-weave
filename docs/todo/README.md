@@ -47,6 +47,7 @@ verification gaps, then content migration and hygiene.
 | # | Todo | Component | Description |
 |---|---|---|---|
 | 1 | [kyberdash-local-release-loop.md](kyberdash-local-release-loop.md) | Distribution | The local release loop builds no `kyberdash` or tray, so their install and update paths are unverifiable offline. |
+| 1 | [canon-multi-harness-session-gather.md](canon-multi-harness-session-gather.md) | KyberDash | Sessions whose canonical key spans several harnesses get a `${harness}:${key}` id that the record gather never matches, so they silently contribute no findings or run outcomes. |
 | 2 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | The authoring skill's doc-type list lacks `todo` and `coding-standard`, so agents label a coding standard `reference`. |
 | 3 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
 | 4 | [portable-artifacts-carry-project-standards.md](portable-artifacts-carry-project-standards.md) | KyberSquad | Remove project-specific coding standards embedded in the canonical agents and the seven code-review references; `squad install` does not deploy the standards templates. |
@@ -67,6 +68,7 @@ Archived under [`archive/todo/`](../archive/todo/). Kept for provenance, never c
 | Todo | Component | Status | Description |
 |---|---|---|---|
 | [canon-multi-harness-session-gather.md](../archive/todo/canon-multi-harness-session-gather.md) | KyberDash | superseded | Sessions whose canonical key spans several harnesses got a `${harness}:${key}` id the record gather never matched, so they contributed no findings or run outcomes (fixed: one `SessionIdentities` table assigns every share a collision-free id, and `recordsForShare` gathers by key plus canonical harness). |
+| [kyberdash-local-release-loop.md](../archive/todo/kyberdash-local-release-loop.md) | Distribution | superseded | The local release loop built no `kyberdash`, so its update path was unverifiable offline (fixed: the loop builds the single-executable for the host RID and runs the update, opt-out, below-floor and tray-delegation cases; the `install.sh` half moved to [install-sh-local-origin](install-sh-local-origin.md)). |
 | [claude-renderer-ask-narrowing.md](../archive/todo/claude-renderer-ask-narrowing.md) | KyberSquad | superseded | Claude, Pi and ZCode turned `ask` into deny, so `architect` and `product-owner` could not save their plans and specs (fixed: both profiles now hold `filesystem.write: allow`, with the plan, spec and todo boundary instruction-only). |
 | [embeddings-endpoint-loopback-check.md](../archive/todo/embeddings-endpoint-loopback-check.md) | DocGraph | superseded | A non-loopback HTTPS embeddings endpoint was accepted where the test asserts rejection (fixed: the loader now requires loopback resolution). |
 | [kyber-squad-renderer-coverage.md](../archive/todo/kyber-squad-renderer-coverage.md) | KyberSquad | superseded | Kyber-Squad renderer target coverage (complete: all eleven targets have renderers; the CLI gaps have their own todos). |

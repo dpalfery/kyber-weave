@@ -7,10 +7,16 @@ namespace KyberWeave.Core.Review;
 /// <param name="Schema">Format identifier, for readers that must tolerate later versions.</param>
 /// <param name="Gates">One entry per declared gate, in declaration order.</param>
 /// <param name="Coverage">Measured coverage, when a gate produced any.</param>
+/// <param name="CoverageReports">
+/// Every Cobertura report the run wrote, <see cref="Coverage"/>'s own included. A suite that
+/// tests more than one language writes one report each, and only one of them can be the
+/// figure a coverage floor is checked against; the rest are evidence a reviewer reads here.
+/// </param>
 public sealed record GateReport(
     string Schema,
     IReadOnlyList<GateResult> Gates,
-    CoverageResult? Coverage = null)
+    CoverageResult? Coverage = null,
+    IReadOnlyList<CoverageReport>? CoverageReports = null)
 {
     /// <summary>The current gate report format.</summary>
     public const string CurrentSchema = "kyber-weave.review-gates/v1";
