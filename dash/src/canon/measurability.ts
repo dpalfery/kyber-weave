@@ -218,6 +218,90 @@ export function groupByCanonicalHarness<T extends { harness: string }>(items: re
   return groups
 }
 
+/** One canonical harness's share of a session key. */
+export type SessionShare = { key: string; harness: string }
+
+/**
+ * The persisted id of every canonical-harness share of every session key —
+ * the id its `session` and `execution` rows are written under — and the share
+ * each id stands for.
+ *
+ * <remarks>
+ * A key with one canonical harness keeps the key itself as its id, which is
+ * every session's id before a split and what the dashboard links to. A key
+ * whose records span several canonical harnesses becomes one row per harness,
+ * so each share needs an id of its own: `${harness}:${key}`. That string is
+ * not reserved — a native session id can read exactly like it — and both
+ * tables replace on their id, so the two sessions would share a row. The ids
+ * are therefore assigned over the whole corpus at once: native keys first,
+ * then each split share, re-prefixed with its harness until the id is free.
+ * Split keys and harnesses are visited in sorted order, so the same records
+ * always mint the same ids.
+ *
+ * The share an id stands for is looked up here rather than parsed out of the
+ * id: a native key may contain a colon of its own, and a re-prefixed id no
+ * longer has the shape a parser would expect.
+ * </remarks>
+ */
+export class SessionIdentities {
+  private readonly ids = new Map<string, Map<string, string>>()
+  private readonly shares = new Map<string, SessionShare>()
+
+  /** `pairs` are raw (key, harness) pairs; excluded identities (Gemini) own no share. */
+  constructor(pairs: Iterable<{ key: string; harness: string }>) {
+    const harnessesByKey = new Map<string, Set<string>>()
+    for (const pair of pairs) {
+      const harness = canonicalHarnessId(pair.harness)
+      if (harness === null) continue
+      const harnesses = harnessesByKey.get(pair.key) ?? new Set<string>()
+      harnesses.add(harness)
+      harnessesByKey.set(pair.key, harnesses)
+    }
+    const split: Array<[string, string[]]> = []
+    for (const [key, harnesses] of harnessesByKey) {
+      if (harnesses.size === 1) this.assign(key, [...harnesses][0]!, key)
+      else split.push([key, [...harnesses].sort()])
+    }
+    split.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    for (const [key, harnesses] of split) {
+      for (const harness of harnesses) this.claim(key, harness)
+    }
+  }
+
+  /** The id this share was assigned, or undefined when the corpus had no such share. */
+  idFor(key: string, harness: string): string | undefined {
+    return this.ids.get(key)?.get(normalizeHarnessName(harness))
+  }
+
+  /**
+   * The id this share was assigned, minting a free one when the corpus had no
+   * such share — a record ingested after the table was built. A late share is
+   * minted as a split one: its key already has a share of its own, and taking
+   * the bare key would put both on one row.
+   */
+  claim(key: string, harness: string): string {
+    const canonical = normalizeHarnessName(harness)
+    const known = this.idFor(key, canonical)
+    if (known !== undefined) return known
+    let id = `${canonical}:${key}`
+    while (this.shares.has(id)) id = `${canonical}:${id}`
+    this.assign(key, canonical, id)
+    return id
+  }
+
+  /** The share a persisted session or execution id stands for. */
+  shareOf(id: string): SessionShare | undefined {
+    return this.shares.get(id)
+  }
+
+  private assign(key: string, harness: string, id: string): void {
+    const byHarness = this.ids.get(key) ?? new Map<string, string>()
+    byHarness.set(harness, id)
+    this.ids.set(key, byHarness)
+    this.shares.set(id, { key, harness })
+  }
+}
+
 /** The measurability map a file-sourced record declares for its provider. */
 export function measurabilityFor(
   provider: string,
