@@ -2,7 +2,7 @@
 id: plans/2026-09-25-claude-conductor-entry-point-skill
 title: Expose the Claude conductor as a /conductor entry-point skill
 doc-type: plan
-status: draft
+status: current
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-25
@@ -11,13 +11,17 @@ development-mode: test-first
 
 # Expose the Claude conductor as a /conductor entry-point skill
 
-**Status:** Draft
+**Status:** Ready
 **Date:** 2026-09-25
 **Development mode:** test-first (the default; the user confirmed it through the conductor, 2026-09-25)
 **Goal:** Under `squad install --target claude`, make the primary-invocation agent `conductor`
 invocable as `/conductor` in Claude Code. It runs in the main conversation, where the Agent
 tool is available. The existing `.claude/agents/conductor.md` subagent stays alongside it.
-**Approval:** Pending. The plan has open decisions (§4) and is not executable.
+**Approval:** The approve-and-execute gate passed on 2026-09-25, relayed by the parent session.
+The user approved execution in test-first mode with Q1-retain=A, Q2-mechanism=A,
+Q3-invocation=B, Q4-skill-keys=A and Q5-adr=B. The approval includes the RED waiver for T1 row
+(f) and the parent-session live verification (T6) that temporarily updates `~/.claude`. The Draft
+was committed at `76077f9`, with `docs validate` and `docs drift` reporting 0 findings.
 
 ---
 
@@ -283,8 +287,9 @@ Docs this change touches:
 
 ### 2.6 ADR numbering
 
-`docs/adr/0023-kyberdash-report-model-and-tray-ownership.md` already exists. The **next free
-number is 0024**, and nothing in the tree reserves it.
+`docs/adr/0023-kyberdash-report-model-and-tray-ownership.md` already exists. The next free
+number is 0024, and nothing in the tree reserves it. It goes unused: under Q5-B there is no ADR
+(§3).
 
 ### 2.7 Live-environment facts, for T6
 
@@ -318,8 +323,47 @@ They are not reopened.
   - `skill` emits the entry-point skill and keeps the agent;
   - `omit` gives today's output (agent only);
   - any other value fails closed.
+- **Q3-invocation = B** (2026-09-25, at the gate; not the architect's recommendation). Omit
+  `disable-model-invocation`. Claude may auto-load the skill when a request matches its
+  description, and the description stays in Claude's context.
+- **Q4-skill-keys = A** (2026-09-25, at the gate). The skill carries no `model`,
+  `allowed-tools` or `disallowed-tools`. The session model and permissions govern, and the
+  degradation records state the gaps.
+- **Q5-adr = B** (2026-09-25, at the gate; not the architect's recommendation). No ADR. The
+  rationale and rejected alternatives live in this section, in a new `architecture.md` §3
+  subsection, and in the `requirements.md` matrix.
+- **Execution approved** (2026-09-25): test-first. The approval includes the RED waiver for T1
+  row (f) and the parent-session live verification T6, which temporarily updates `~/.claude`.
 
-### Architect-settled technical design (under Q1 and Q2 and the technical-design mandate)
+§4 records the options and the architect's original recommendations for Q3 to Q5.
+
+### Rationale and rejected alternatives (recorded here because Q5-B chose no ADR)
+
+**What `no-primary-agent` means on Claude.** Claude has a real primary-agent primitive,
+`claude --agent <name>`, and only that mode enforces the tool list, `Agent(roster)` and the
+model. On Pi and ZCode, `no-primary-agent: skill` means "render as a skill or command instead
+of an agent". On Claude it means "*also* expose an entry point": the subagent file stays the
+enforced form, and the skill is the main-thread way to start the conductor from inside a
+session. `omit` means "no entry point", which is today's output.
+
+This makes Claude the first native target to emit two principal outputs for one agent. The
+render accepts, and states in `permission-not-expressible`, that the main-thread entry point
+does not enforce the orchestrator profile.
+
+**Rejected alternatives**
+
+| Alternative | Why rejected |
+|---|---|
+| A legacy command at `.claude/commands/conductor.md` | Claude Code registers files under `.claude/commands/<subdir>/` as `<subdir>:<name>` commands. The conductor's resources would become phantom commands, or would need ZCode-style relocation and link rewriting ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) §2). A skill directory takes supporting files natively, and a skill wins over a same-named command. |
+| A skill with `context: fork` and `agent: conductor` | This runs an isolated subagent that does not see the conversation history and runs in the background by default. It recreates the nested-subagent failure (no Agent tool at depth 1) and cannot relay decision gates to the user. |
+| Setting `"agent": "conductor"` in `.claude/settings.json` | It makes every session a conductor session, and Squad does not own settings files. |
+| Replacing the subagent with the skill (Q1-B) | It drops the only enforced form (`claude --agent conductor`), breaks existing `@agent-conductor` use, and `squad update` would delete the file. |
+| An unconditional renderer rule for every primary agent (Q2-B) | Claude would become the only target that ignores the declared `no-primary-agent` value, and there would be no off switch in source. |
+| A new dedicated profile key (Q2-C) | It is a schema change, when the existing key already declares the intent. |
+| Emitting `model`, `allowed-tools` or `disallowed-tools` on the skill (Q4-B/C) | All three last only for the invoking turn and so cannot hold the orchestration profile. `allowed-tools` pre-approves tools rather than restricting them. |
+| Hook-based enforcement from the skill | Skill hooks stay registered for the rest of the session, which outlives the conductor's use. Whether a hook can tell main-thread calls from subagent calls is unverified. |
+
+### Architect-settled technical design (under Q1 to Q4 and the technical-design mandate)
 
 Approval of this plan approves these.
 
@@ -339,13 +383,12 @@ Approval of this plan approves these.
   - Path: `{ResolvePrefixedDirectory(".claude/skills", scope)}/<name>/SKILL.md`. That is
     `.claude/skills/conductor/SKILL.md` in project scope and `skills/conductor/SKILL.md` in
     global scope.
-  - Frontmatter:
+  - Frontmatter is exactly three keys (Q3-B, Q4-A):
     - `name`;
     - `description`: the agent description collapsed to one line, as `RenderSkill` does;
-    - `license: MIT`;
-    - the keys selected by Q3 and Q4.
-  - Never emitted in any option: `allowed-tools`, `context`, `agent`, `hooks`,
-    `user-invocable`, `argument-hint`, `when_to_use`, `effort`.
+    - `license: MIT`.
+  - Never emitted: `disable-model-invocation`, `model`, `allowed-tools`, `disallowed-tools`,
+    `context`, `agent`, `hooks`, `user-invocable`, `argument-hint`, `when_to_use`, `effort`.
   - Body: the canonical `agent.InstructionBody`, verbatim. It is byte-identical to the agent
     file's body and no link is rewritten.
 - **N3 (resources).**
@@ -381,8 +424,7 @@ Approval of this plan approves these.
       - that the pure-orchestrator MCP withholding does not apply (only when the profile is
         `orchestrator`);
       - that the `delegates-to` roster is instruction-only there;
-      - that `claude --agent <name>` is the enforced alternative;
-      - plus Q4-dependent clauses.
+      - that `claude --agent <name>` is the enforced alternative.
   - No `Details` may contain the substring `widening` in any case (registry `:255-260`). Avoid
     `widen` in any form.
   - There must be at most one record per `(Target, CanonicalIdentity, Code)`.
@@ -406,21 +448,17 @@ Approval of this plan approves these.
 
 ---
 
-## 4. Decision ledger (Draft only)
+## 4. Decision record (resolved 2026-09-25)
 
-The user decides these at approval. None is approved; recommendations are not decisions.
+Every decision is answered; nothing is open. The user answered at the approve-and-execute
+gate, and the parent session relayed the answers. The options and the architect's original
+recommendations are kept for provenance.
 
-| Id | Question | Options | Recommendation | Depends on | Status |
-|---|---|---|---|---|---|
-| **Q3-invocation** | Should Claude be able to load the `/conductor` skill on its own? | **A:** emit `disable-model-invocation: true`. Only the user's `/conductor` starts it, and its description stays out of Claude's context. **B:** omit the key, so Claude may auto-load the skill when its description matches. | **A.** The description ("Primary orchestrator and default entry point: accepts a plan, specification, todo, or open request…") matches almost any request. Under B, Claude could turn the main thread into the conductor unasked. A also keeps the description out of context, and matches ADR 0021's "operator starts on purpose". | — | OPEN |
-| **Q4-skill-keys** | Which model and tool keys does the skill carry? | **A:** none of `model`, `allowed-tools` or `disallowed-tools`. The session model and permissions govern, and the degradation records state the gaps. **B:** emit the orchestration profile's Claude `model` (`sonnet` today). It applies only to the turn that invokes the skill, and the session model resumes at the next prompt. **C:** B plus `disallowed-tools` listing the built-in tools the profile withholds (`Grep, Glob, Edit, Write, NotebookEdit, Bash, PowerShell, WebFetch, WebSearch`). This narrows only the first turn, and its effect on subagents spawned in that turn is unverified. | **A.** B switches models between turn 1 and turn 2 of one workflow, which looks like enforcement but is not. C adds the risk that first-turn delegates are stripped of tools. The enforced model and tools are what `claude --agent conductor` provides. | — | OPEN |
-| **Q5-adr** | Record this as an ADR? | **A: ADR 0024** (next free; 0023 is taken). It covers the "also an entry point" meaning of `no-primary-agent` on a target that has a primary primitive; the first native target with two outputs for one agent; accepting an unenforced main-thread profile beside an enforcing alternative; and the rejected alternatives (legacy command, `context: fork`, the settings `agent` key, replacing the agent, an unconditional rule, a new profile key). T5 then writes the ADR and its index row; adds `decided-by` to `architecture.md`, `requirements.md` and `onboarding.md`; and adds Related back-links in ADRs 0019 and 0021 (Related section only; decision text untouched). **B: no ADR.** The rationale and alternatives go in this plan (§3) and a new `architecture.md` §3 subsection, plus the `requirements.md` matrix. This matches the "no ADR" choice made on 2026-09-23 for the squad path-safety plan. | **A.** Every earlier primary-agent classification has its own ADR (0019 Pi, 0021 ZCode, 0022 Antigravity). This one changes what a profile key means per target and constrains every future primary agent on Claude. B is viable if the user prefers one fewer document; the architecture subsection would then carry the alternatives list. | — | OPEN |
-
-Where the options are consumed:
-
-- Q3 and Q4 set the exact frontmatter key set and the `Details` clauses. The Test contract
-  (§6) pins them, so both must be answered before T1 starts.
-- Q5 only changes T5's file list.
+| Id | Question | Options | Architect recommendation | User decision |
+|---|---|---|---|---|
+| **Q3-invocation** | Should Claude be able to load the `/conductor` skill on its own? | **A:** emit `disable-model-invocation: true`. Only the user's `/conductor` starts it, and its description stays out of Claude's context. **B:** omit the key, so Claude may auto-load the skill when its description matches. | **A.** The description ("Primary orchestrator and default entry point: accepts a plan, specification, todo, or open request…") matches almost any request, so under B Claude could turn the main thread into the conductor unasked. A also keeps the description out of context, and matches ADR 0021's "operator starts on purpose". | **B** (the recommendation was not taken). The accepted consequence is in §10. Onboarding tells operators who want the entry point opt-in to use `permissions.deny: ["Skill(conductor)"]` or `claude --agent conductor`. |
+| **Q4-skill-keys** | Which model and tool keys does the skill carry? | **A:** none of `model`, `allowed-tools` or `disallowed-tools`. The session model and permissions govern, and the degradation records state the gaps. **B:** emit the orchestration profile's Claude `model` (`sonnet` today). It applies only to the turn that invokes the skill, and the session model resumes at the next prompt. **C:** B plus `disallowed-tools` listing the built-in tools the profile withholds (`Grep, Glob, Edit, Write, NotebookEdit, Bash, PowerShell, WebFetch, WebSearch`). This narrows only the first turn, and its effect on subagents spawned in that turn is unverified. | **A.** B switches models between turn 1 and turn 2 of one workflow, which looks like enforcement but is not. C adds the risk that first-turn delegates are stripped of tools. The enforced model and tools are what `claude --agent conductor` provides. | **A** (as recommended). |
+| **Q5-adr** | Record this as an ADR? | **A: ADR 0024** (next free; 0023 is taken), plus an index row, `decided-by` on the three Squad docs, and Related-only back-links in ADRs 0019 and 0021. **B: no ADR.** The rationale and alternatives go in this plan (§3), a new `architecture.md` §3 subsection, and the `requirements.md` matrix, matching the "no ADR" choice made on 2026-09-23 for the squad path-safety plan. | **A.** Every earlier primary-agent classification has its own ADR (0019 Pi, 0021 ZCode, 0022 Antigravity). This one changes what a profile key means per target and constrains every future primary agent on Claude. | **B** (the recommendation was not taken). §3 holds the rationale and rejected alternatives. T5 writes no ADR files and adds no `decided-by` or ADR back-links. |
 
 ---
 
@@ -434,9 +472,9 @@ Where the options are consumed:
 - Extracting `DescribeCapabilityDecisions` into `CapabilityDegradations`, with the Pi and ZCode
   call sites (N7).
 - `ClaudeRendererContractTests` and `SquadGlobalRootTests`.
-- `docs/kyber-squad/architecture.md`, `requirements.md` (including the §2.5 drift fixes) and
-  `onboarding.md` (a new "Claude notes" section).
-- ADR 0024, only if Q5-A.
+- `docs/kyber-squad/architecture.md` (a new §3 subsection carrying the rationale and rejected
+  alternatives), `requirements.md` (including the §2.5 drift fixes) and `onboarding.md` (a new
+  "Claude notes" section).
 - A live verification by the parent session.
 - `docs-dev` closeout.
 
@@ -450,7 +488,9 @@ Where the options are consumed:
   `claude-renderer-ask-narrowing` is already archived.
 - Other targets' primary-agent behaviour, beyond the byte-preserving N7 refactor.
 - The root `.github/` self-deployment.
-- Unrelated drift, reported only (see GAPS): `products/kyber-squad/README.md:8-11`
+- Any ADR, and any `decided-by` or ADR back-link edits (Q5-B).
+- Unrelated drift, reported to the user on 2026-09-25 and not fixed here:
+  `products/kyber-squad/README.md:8-11`
   ("ten harnesses / eight renderers") and `onboarding.md:35` (the `squad update` synopsis omits
   `--target/--exclude`).
 
@@ -467,11 +507,9 @@ Conventions for the rows:
 
 - `<name>` is the single primary agent, read from source (`conductor` today). No test hard-codes
   the name, the roster or the capability list.
-- **Key set (Q3/Q4)** means the exact frontmatter key set for the approved Q3 and Q4 options:
-  - always `{name, description, license}`;
-  - plus `disable-model-invocation` (value `true`) if Q3-A;
-  - plus `model` (the resolved Claude model of the agent's model profile) if Q4-B or C;
-  - plus `disallowed-tools` (the exact list) if Q4-C.
+- **Key set** means the entry-point skill's exact frontmatter key set, fixed by Q3-B and Q4-A:
+  exactly `{name, description, license}`. In particular, `disable-model-invocation`, `model`,
+  `allowed-tools` and `disallowed-tools` are all absent.
 
 **T1** — all rows in `ClaudeRendererContractTests.cs`
 
@@ -488,7 +526,8 @@ Conventions for the rows:
 
 - `.claude/agents/<name>.md` is present exactly once (Q1).
 - `.claude/skills/<name>/SKILL.md` is present exactly once, with:
-  - frontmatter equal to the **Key set (Q3/Q4)**;
+  - frontmatter keys equal to exactly `{name, description, license}` (the **Key set**; no
+    `disable-model-invocation`, `model`, `allowed-tools` or `disallowed-tools`);
   - `name` = `<name>`;
   - `description` = the one-line collapse of the agent description;
   - `license: MIT`;
@@ -507,9 +546,7 @@ Conventions for the rows:
   - `Roster:`;
   - `/<name>`;
   - `MCP`;
-  - `claude --agent <name>`;
-  - "turn" if Q4-B or C;
-  - `disallowed-tools` if Q4-C.
+  - `claude --agent <name>`.
 - No other codes for `<name>`.
 - Across every Claude record:
   - at most one record per (Target, CanonicalIdentity, Code);
@@ -537,7 +574,7 @@ Conventions for the rows:
 | T3 | None; it is the GREEN task. | Every T1 and T2 row green (f still green). `RenderAsync_Claude_ConductorRunsOnSonnet` green and unmodified. Full suite green. |
 | T4 | Guarded by the existing Pi, ZCode, Claude and `CapabilityDegradationsTests` suites, run unmodified. | Full suite green with no assertion edits. `review duplicates` reports no cluster for `DescribeCapabilityDecisions`. |
 | T5 | `docs validate .` and `docs drift .`, run by the parent session. | Zero findings. |
-| T6 | Manual live check in Claude Code (§7, T6). | Every T6 check recorded as pass or fail with evidence. |
+| T6 | Manual live check in Claude Code (§7, T6). | Checks (i) and (ii) recorded as pass or fail with evidence. Checks (iii) to (v) are observations, recorded as seen. |
 | T7 | The declared gate suite (§9). | All gates pass. The council verdict is recorded. |
 | T8 | `docs validate . --merge-ready` and `docs drift .`. | Zero findings. The plan is archived. |
 
@@ -568,7 +605,7 @@ and do not edit `PiRendererContractTests.cs`.
 **Acceptance:** RED run captured, with the failing assertions for (a) to (e) and the guard
 pass for (f).
 
-**Depends on:** Q3 and Q4 answered (a decision gate, not a task).
+**Depends on:** none. The Q3 and Q4 gate was satisfied on 2026-09-25.
 
 **Required skills:** `test-dev`.
 
@@ -631,23 +668,28 @@ Pi, ZCode and Claude private copies, together with Pi's and ZCode's private `Des
 
 ### T5: Documentation
 
-**Objective:** Align the governed docs with the shipped behaviour and the Q3, Q4 and Q5
-answers.
+**Objective:** Align the governed docs with the shipped behaviour and the approved Q3-B, Q4-A
+and Q5-B. There is no ADR: write no ADR files, and make no `decided-by` or ADR back-link edits.
 
 **`docs/kyber-squad/architecture.md`:**
 - Add a §3 subsection, "Native Branch: Claude with a Primary-Agent Entry-Point Skill", after
-  the Pi subsection at `:160-170`. It covers:
+  the Pi subsection at `:160-170`. Under Q5-B this subsection is the durable home of the
+  decision, so it carries the §3 rationale and the rejected-alternatives table in substance. It
+  covers:
   - why Claude keeps the agent (`claude --agent` enforces);
-  - what `no-primary-agent` means on Claude;
+  - what `no-primary-agent` means on Claude ("also an entry point", not "instead of");
   - the `omit` outcome;
   - the fail-closed collision;
   - resources beside both principals;
   - that Claude is the first native target with two outputs for one agent;
-  - under Q5-B, the rejected alternatives.
+  - that the skill carries only `name`, `description` and `license`, and can auto-load from
+    its description;
+  - the rejected alternatives: legacy command, `context: fork`, the settings `agent` key,
+    replacing the agent, an unconditional rule, a new profile key, turn-scoped
+    `model`/`allowed-tools`/`disallowed-tools`, and hooks.
 - Update the §8 dispatch line (`:280`), table row (`:294`), MCP bullet (`:331-333`, the
   orchestrator withholding applies to the subagent file only) and coverage line (`:376`).
-- Under Q5-A, add ADR 0024 to `decided-by` and Related.
-- Bump `last-reviewed`.
+- Bump `last-reviewed`. `decided-by` is unchanged.
 
 **`docs/kyber-squad/requirements.md`:**
 - Taxonomy (`:44-55`):
@@ -661,22 +703,32 @@ answers.
     (`role-skill-fallback`)";
   - permission model: an explicit tool allow-list; `safety-narrowed` on ask;
     `capability-not-isolable` for shell-implies-write; `permission-not-expressible` for
-    `network.publish`, the nested roster and the unenforced entry point.
-- Under Q5-A, `decided-by`.
-- Bump `last-reviewed`.
+    `network.publish`, the nested roster and the unenforced entry point, which can auto-load
+    from its description.
+- Bump `last-reviewed`. `decided-by` is unchanged.
 
 **`docs/kyber-squad/onboarding.md`:**
 - Update the `:60` row and the `:72-73` prose.
 - Add a new `### Claude notes` section before `### Pi notes`, covering:
   - (1) Three ways to run the conductor:
     - `/conductor <path or request>`: main thread; the profile is not enforced; the session's
-      tools, permission mode, MCP and model apply; under Q3-A, only the user can start it.
+      tools, permission mode, MCP and model apply.
     - `claude --agent conductor`: enforced tools, `Agent(roster)` and the `sonnet` model; CLI
       launch.
     - `@agent-conductor`: nested; the roster is ignored; discouraged.
-  - (2) Automatic delegation to the subagent copy cannot be switched off from frontmatter. Cite
+  - (2) Automatic loading (Q3-B). The skill's description is in Claude's context, so Claude can
+    load the conductor skill into the main conversation by itself when a request matches it,
+    without the user typing `/conductor`. For operators who want the entry point opt-in:
+    - add `"permissions": {"deny": ["Skill(conductor)"]}` to their own Claude settings. The
+      docs' exact-match rule stops Claude invoking the skill; whether it also blocks a
+      user-typed `/conductor` is undocumented, so state what T6 (v) observed.
+    - or start the enforced form with `claude --agent conductor`.
+
+    Either way it is a Claude Code setting, not a file Squad writes. Report what T6 (iii)
+    observed about auto-loading.
+  - (2b) Automatic delegation to the subagent copy cannot be switched off from frontmatter. Cite
     the documented operator setting `"permissions": {"deny": ["Agent(conductor)"]}` as Claude
-    Code behaviour, not a Squad-written file, and state whether T6 verified it.
+    Code behaviour, not a Squad-written file, and state whether T6 (iv) verified it.
   - (3) The scope-precedence asymmetry (skills: personal over project; agents: project over
     user) and its consequence for mixed global and project installs.
   - (4) Cloud sessions. `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` was observed on 2026-09-25.
@@ -686,22 +738,16 @@ answers.
   - (5) The global paths `~/.claude/skills/conductor/SKILL.md` and
     `~/.claude/agents/conductor.md`, with references beside each; live reload; and that
     `/conductor` appears only after `squad update` with a release that carries it.
-- Under Q5-A, `decided-by`.
-- Bump `last-reviewed`.
+- Bump `last-reviewed`. `decided-by` is unchanged.
 
-**Under Q5-A only:**
-- `docs/adr/0024-claude-primary-agent-entry-point-skill.md`, with Status, Context, Decision,
-  Alternatives Considered, Consequences and Related.
-- A `docs/adr/README.md` inventory row.
-- Related-section back-links in ADRs 0019 and 0021.
+**File scope:** the three `docs/kyber-squad/` files above only. No files under `docs/adr/`.
 
 **Acceptance:** zero `docs validate` and `docs drift` findings, run by the parent session. The
-wording matches the T3 `Details` and key set.
+wording matches the T3 `Details` and the three-key frontmatter.
 
 **Depends on:** T3, whose emitted keys and `Details` it consumes. It can run alongside T4 and T6.
 
-**Required skills:** `kyber-weave-docs`, `app-docs-standard`, and `architecture-decision-record`
-if Q5-A.
+**Required skills:** `kyber-weave-docs`, `app-docs-standard`.
 
 ### T6: Live verification (run by the parent session)
 
@@ -733,9 +779,14 @@ if Q5-A.
   - its first reference `Read` resolves under `~/.claude/skills/conductor/conductor/references/`;
   - `@agent-conductor` still offers and starts the subagent;
   - so the skill and the subagent coexist.
-- (iii) Under Q3-A, Claude does not start the skill on its own for a plain request.
-- (iv) Optional: with `Agent(conductor)` in a scratch settings deny, report whether
+- (iii) Observation (Q3-B). Send a request that matches the skill's description without typing
+  `/conductor`, for example "here is a plan, coordinate it". Record whether Claude auto-loads
+  the conductor skill into the main conversation, and what it did. Either outcome is recorded;
+  neither fails the task.
+- (iv) Optional observation: with `Agent(conductor)` in a scratch settings deny, record whether
   `@agent-conductor` is blocked.
+- (v) Optional observation: with `Skill(conductor)` in a scratch settings deny, record whether
+  Claude stops auto-loading the skill and whether a user-typed `/conductor` still runs.
 
 **Restore:** the next session start's `squad update --global` returns `~/.claude` to the
 published release. Until a release carries the skill, `/conductor` disappears again.
@@ -760,11 +811,13 @@ per task.
 
 **Objective:**
 - Record the T6 evidence in a §2 addendum.
-- Reconcile any onboarding claim that T6 changed (the `Agent(conductor)` deny, link
-  resolution).
-- Harvest into canonical docs (and ADR 0024 under Q5-A).
-- Move this plan to `docs/archive/plans/` and move its index row to Archived, with canonical
-  docs and ADR listed.
+- Reconcile any onboarding claim that T6 changed: auto-loading (iii), the `Agent(conductor)`
+  deny (iv), the `Skill(conductor)` deny (v), and link resolution.
+- Harvest into canonical docs. There is no ADR: `architecture.md` §3 carries the rationale and
+  rejected alternatives.
+- Move this plan to `docs/archive/plans/` and move its index row to Archived. List the
+  canonical docs and note "no ADR — the decision is recorded in plan §3 and `architecture.md`
+  §3".
 
 **Acceptance:** `docs validate . --merge-ready` and `docs drift .` report zero findings.
 
@@ -831,10 +884,18 @@ neither the self-updater, `install.sh`, the Squad release path, nor `kyberdash`.
 - **Scope asymmetry.** With both a global and a project install, `/conductor` and
   `@agent-conductor` can resolve to different versions. Onboarding documents it; Squad does not
   correct upstream precedence.
-- **Q3-B hijack.** The broad description could let Claude load the conductor unprompted.
-- **Q4-B model switch.** Turn 1 runs on `sonnet`, and later turns run on the session model.
-- **Q4-C tools stripped from delegates.** `disallowed-tools` might strip tools from subagents
-  spawned in the first turn. This is unverified.
+- **Auto-load (accepted under Q3-B).**
+  - The description ("…accepts a plan, specification, todo, or open request…") is always in
+    Claude's context and matches many requests. Claude may load the conductor into the main
+    conversation unprompted and start routing work to specialists.
+  - Every Squad Claude agent carries the `Skill` tool (`ClaudeRenderer.cs:57`). It is
+    unverified whether a subagent can also auto-load the conductor skill.
+  - Mitigations: the onboarding opt-in route (`permissions.deny: ["Skill(conductor)"]`, or
+    `claude --agent conductor`) and the T6 (iii)/(v) observations.
+  - The description also costs its length in context on every session.
+- **Session model governs `/conductor` (Q4-A).** The orchestration profile's `sonnet` pin
+  applies only to the subagent and `--agent` forms. `/conductor` runs on whatever model the
+  session uses.
 - **Depth 1 in cloud sessions.** `architect`, `product-owner` and `code-reviewer` (whose
   review-lens council depends on nesting) cannot delegate. This change does not fix that; it
   only moves the conductor to depth 0.
@@ -858,18 +919,17 @@ neither the self-updater, `install.sh`, the Squad release path, nor `kyberdash`.
 
 ## 12. Docs-dev closeout
 
-- This plan is registered in `docs/plans/README.md` (Active Plans) as Draft, with development
-  mode `test-first`.
-- **On finalize** (approval relayed by the conductor, with Q3, Q4 and Q5 answered):
-  - record the answers and approval provenance in §3;
-  - remove §4;
-  - body Status Draft → Ready;
-  - frontmatter `status: draft` → `current`;
-  - index Status → Ready;
-  - re-run both docs checks.
+- This plan is registered in `docs/plans/README.md` (Active Plans), with development mode
+  `test-first`.
+- **Finalized 2026-09-25.** The conductor relayed the approval.
+  - The answers and approval provenance are recorded in the header and §3.
+  - The Draft ledger became the resolved decision record in §4, which keeps the options and
+    recommendations for provenance.
+  - Body Status Draft → Ready; frontmatter `status: draft` → `current`; index Status → Ready.
+  - The parent session re-runs `docs validate .` and `docs drift .` on this edit.
 - **On completion (T8):**
   - record the T6 evidence;
-  - harvest into `docs/kyber-squad/` (and ADR 0024 under Q5-A);
+  - harvest into `docs/kyber-squad/`, with no ADR;
   - archive the plan and its index row.
   - No todo is created for the out-of-scope drift in §5 unless the user accepts one.
 
