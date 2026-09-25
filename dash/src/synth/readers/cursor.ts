@@ -5,16 +5,19 @@
 // (agentKv system blobs), and tool context (agentKv tool blobs) without
 // claiming a complete multi-turn conversation prefix.
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 
 import type { ContentPart } from '../../canon/types.js'
 import { blobToText, isSqliteAvailable, openDatabase } from '../../ingest/sqlite.js'
 import {
   decodeSourcePath,
+  getCursorTimeFloor,
   getCursorComposerFilter,
   loadAgentStreams,
+  loadCursorBubbles,
   parseComposerIdFromKey,
 } from '../../providers/cursor.js'
+import type { DateRange } from '../../types.js'
 import type { ContentReader, ReaderTurn } from './types.js'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -177,49 +180,38 @@ function readFromJsonFile(filePath: string): ReaderTurn[] {
   return []
 }
 
-function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
-  const { dbPath, workspaceTag } = decodeSourcePath(filePath)
-  if (!existsSync(dbPath) || !isSqliteAvailable()) return
+type CachedTurn = { composerId: string | null; turn: ReaderTurn }
+type CachedRead = { fingerprint: string; timeFloor: string; timeCeiling?: string; turns: CachedTurn[] }
+const sqliteReads = new Map<string, CachedRead>()
 
-  const { composerFilter, filterMode } = getCursorComposerFilter(dbPath, workspaceTag)
-  const isComposerAllowed = (cid: string | null): boolean => {
-    if (!cid) return false
-    if (composerFilter === null) return true
-    const inSet = composerFilter.has(cid)
-    return filterMode === 'include' ? inSet : !inSet
+function sqliteFingerprint(dbPath: string): string {
+  const db = statSync(dbPath)
+  let wal = ''
+  try {
+    const stat = statSync(`${dbPath}-wal`)
+    wal = `${stat.mtimeMs}:${stat.size}`
+  } catch {
+    // A database without a WAL is ordinary; the main file still fingerprints it.
   }
+  return `${db.mtimeMs}:${db.size}:${wal}`
+}
+
+function readFromSqlite(dbPath: string, timeFloor: string, timeCeiling?: string): CachedTurn[] | null {
+  if (!isSqliteAvailable()) return null
 
   let db: ReturnType<typeof openDatabase>
   try {
     db = openDatabase(dbPath)
   } catch {
-    return
+    return null
   }
 
   try {
-    type BubbleRow = {
-      bubble_key: string
-      request_id: string | null
-      text: Uint8Array | string | null
-      bubble_type: number | null
-      context_window: number | null
-    }
-
-    let bubbleRows: BubbleRow[] = []
+    let bubbleRows: ReturnType<typeof loadCursorBubbles>['rows']
     try {
-      bubbleRows = db.query<BubbleRow>(`
-        SELECT
-          key as bubble_key,
-          json_extract(value, '$.requestId') as request_id,
-          CAST(json_extract(value, '$.text') AS BLOB) as text,
-          json_extract(value, '$.type') as bubble_type,
-          json_extract(value, '$.contextWindow') as context_window
-        FROM cursorDiskKV
-        WHERE key LIKE 'bubbleId:%'
-        ORDER BY ROWID ASC
-      `)
+      bubbleRows = loadCursorBubbles(db, timeFloor, timeCeiling).rows
     } catch {
-      return
+      return null
     }
 
     const requestToComposer = new Map<string, string>()
@@ -234,30 +226,26 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       if (typeof row.context_window === 'number') {
         if (row.request_id) requestContextWindow.set(row.request_id, row.context_window)
       }
-      if (row.request_id && row.bubble_type === 1 && row.text) {
-        const text = blobToText(row.text)
+      if (row.request_id && row.bubble_type === 1 && row.user_text) {
+        const text = blobToText(row.user_text)
         if (text) {
           bubbleUserText.set(row.request_id, text)
         }
       }
     }
 
-    const { byComposer, unjoined, byRequest } = loadAgentStreams(db, requestToComposer, {
+    const { unjoined, byRequest } = loadAgentStreams(db, requestToComposer, {
       retainContent: true,
     })
 
-    const allRequestIds: string[] = []
-    for (const [requestId, cid] of requestToComposer) {
-      if (isComposerAllowed(cid)) {
-        allRequestIds.push(requestId)
-      }
-    }
-    if (filterMode === 'exclude' || composerFilter === null) {
-      for (const requestId of unjoined.keys()) {
-        allRequestIds.push(requestId)
-      }
+    const allRequestIds = [...requestToComposer.keys()]
+    // agentKv has no timestamp; the provider uses the database mtime as its
+    // bounded timestamp for stream-only requests, so the reader does too.
+    if (new Date(statSync(dbPath).mtimeMs).toISOString() > timeFloor) {
+      allRequestIds.push(...unjoined.keys())
     }
 
+    const turns: CachedTurn[] = []
     for (const requestId of allRequestIds) {
       const stream = byRequest.get(requestId)
       const parts: ContentPart[] = []
@@ -296,41 +284,24 @@ function* readFromSqlite(filePath: string): Generator<ReaderTurn> {
       const sessionId = composerId ?? requestId
       const contextWindow = requestContextWindow.get(requestId)
 
-      yield {
-        parts,
-        sessionId,
-        nativeRecordId: requestId,
-        ...(contextWindow !== undefined ? { contextWindow } : {}),
-      }
-    }
-
-    if (allRequestIds.length === 0) {
-      for (const [cid, stream] of byComposer) {
-        if (!isComposerAllowed(cid)) continue
-        const parts: ContentPart[] = []
-        let order = 0
-        for (const text of stream.instructionContent) {
-          if (text.trim() !== '') parts.push({ part: 'instruction_context', text, order: order++ })
-        }
-        for (const text of stream.userContent) {
-          if (text.trim() !== '') parts.push({ part: 'conversation_history', text, order: order++ })
-        }
-        for (const text of stream.toolResultContent) {
-          if (text.trim() !== '') parts.push({ part: 'tool_result_content', text, order: order++ })
-        }
-        yield {
+      turns.push({
+        composerId: composerId ?? null,
+        turn: {
           parts,
-          sessionId: cid,
-        }
-      }
+          sessionId,
+          nativeRecordId: requestId,
+          ...(contextWindow !== undefined ? { contextWindow } : {}),
+        },
+      })
     }
+    return turns
   } finally {
     db.close()
   }
 }
 
 export const cursorReader: ContentReader = {
-  async *read(filePath: string): AsyncGenerator<ReaderTurn> {
+  async *read(filePath: string, dateRange?: DateRange): AsyncGenerator<ReaderTurn> {
     if (filePath.endsWith('.json')) {
       for (const turn of readFromJsonFile(filePath)) {
         yield turn
@@ -338,7 +309,30 @@ export const cursorReader: ContentReader = {
       return
     }
 
-    for (const turn of readFromSqlite(filePath)) {
+    const { dbPath, workspaceTag } = decodeSourcePath(filePath)
+    if (!existsSync(dbPath)) return
+    const timeFloor = getCursorTimeFloor(dateRange)
+    const timeCeiling = dateRange?.end.toISOString()
+    const fingerprint = sqliteFingerprint(dbPath)
+    let cached = sqliteReads.get(dbPath)
+    if (cached?.fingerprint !== fingerprint || cached.timeFloor !== timeFloor || cached.timeCeiling !== timeCeiling) {
+      const turns = readFromSqlite(dbPath, timeFloor, timeCeiling)
+      if (turns === null) return
+      cached = { fingerprint, timeFloor, timeCeiling, turns }
+      // Cursor can write during our scan. A mixed snapshot is never reused.
+      if (sqliteFingerprint(dbPath) === fingerprint) {
+        sqliteReads.delete(dbPath)
+        sqliteReads.set(dbPath, cached)
+        if (sqliteReads.size > 2) sqliteReads.delete(sqliteReads.keys().next().value!)
+      }
+    }
+    const { composerFilter, filterMode } = getCursorComposerFilter(dbPath, workspaceTag)
+    for (const { composerId, turn } of cached.turns) {
+      if (composerFilter !== null) {
+        const inSet = composerId !== null && composerFilter.has(composerId)
+        if (filterMode === 'include' && !inSet) continue
+        if (filterMode === 'exclude' && inSet) continue
+      }
       yield turn
     }
   },

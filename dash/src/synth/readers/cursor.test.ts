@@ -232,7 +232,7 @@ describe('cursorReader', () => {
       const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
 
       // Craft a JSON buffer containing an invalid UTF-8 byte sequence in "text"
-      const prefix = Buffer.from('{"type":1,"requestId":"req-bad-utf8","text":"hello ')
+      const prefix = Buffer.from(`{"type":1,"requestId":"req-bad-utf8","createdAt":"${new Date().toISOString()}","text":"hello `)
       const badByte = Buffer.from([0xff, 0xfe])
       const suffix = Buffer.from(' world"}')
       const value = Buffer.concat([prefix, badByte, suffix])
@@ -265,12 +265,14 @@ describe('cursorReader', () => {
     try {
       db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
       const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+      const createdAt = new Date().toISOString()
 
       // Claude bubble has explicit contextWindow 200000
       insert.run(
         'bubbleId:comp-multi:b1',
         JSON.stringify({
           type: 1,
+          createdAt,
           requestId: 'req-claude',
           text: 'claude query',
           modelInfo: { modelName: 'claude-3-5-sonnet' },
@@ -283,6 +285,7 @@ describe('cursorReader', () => {
         'bubbleId:comp-multi:b2',
         JSON.stringify({
           type: 1,
+          createdAt,
           requestId: 'req-gpt',
           text: 'gpt query',
           modelInfo: { modelName: 'gpt-4o' },
@@ -294,6 +297,7 @@ describe('cursorReader', () => {
         'bubbleId:comp-multi:b3',
         JSON.stringify({
           type: 1,
+          createdAt,
           requestId: 'req-gemini',
           text: 'gemini query',
           modelInfo: { modelName: 'gemini-1.5-pro' },
@@ -305,6 +309,7 @@ describe('cursorReader', () => {
         'bubbleId:comp-multi:b4',
         JSON.stringify({
           type: 1,
+          createdAt,
           requestId: 'req-claude-other',
           text: 'another claude query',
           modelInfo: { modelName: 'claude-3-5-sonnet' },
@@ -336,6 +341,48 @@ describe('cursorReader', () => {
       const otherClaudeTurn = turns.find((t) => t.nativeRecordId === 'req-claude-other')
       expect(otherClaudeTurn?.contextWindow).toBeUndefined()
     } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('uses the refresh window and bounded bubble projection for SQLite turns', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-cursor-reader-window-test-'))
+    const dbPath = join(root, 'state.vscdb')
+    const previousBudget = process.env['KYBERDASH_CURSOR_MAX_BUBBLES']
+    process.env['KYBERDASH_CURSOR_MAX_BUBBLES'] = '3'
+    const now = new Date()
+    const db = new DatabaseSync(dbPath)
+    try {
+      db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+      const insert = db.prepare('INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)')
+      insert.run('bubbleId:comp-old:b0', JSON.stringify({ type: 1, requestId: 'old', text: 'old request', createdAt: '2020-01-01T00:00:00.000Z' }))
+      for (let index = 1; index <= 3; index++) {
+        insert.run(`bubbleId:comp-recent:b${index}`, JSON.stringify({
+          type: 1,
+          requestId: `recent-${index}`,
+          text: 'x'.repeat(600),
+          createdAt: now.toISOString(),
+        }))
+      }
+      insert.run('bubbleId:comp-future:b4', JSON.stringify({
+        type: 1,
+        requestId: 'future',
+        text: 'future request',
+        createdAt: new Date(now.getTime() + 7 * 86_400_000).toISOString(),
+      }))
+    } finally {
+      db.close()
+    }
+
+    try {
+      const turns: ReaderTurn[] = []
+      const dateRange = { start: new Date(now.getTime() - 86_400_000), end: new Date(now.getTime() + 86_400_000) }
+      for await (const turn of cursorReader.read(dbPath, dateRange)) turns.push(turn)
+      expect(turns.map((turn) => turn.nativeRecordId)).toEqual(['recent-1', 'recent-2', 'recent-3'])
+      expect(turns[0]?.parts[0]?.text).toHaveLength(500)
+    } finally {
+      if (previousBudget === undefined) delete process.env['KYBERDASH_CURSOR_MAX_BUBBLES']
+      else process.env['KYBERDASH_CURSOR_MAX_BUBBLES'] = previousBudget
       rmSync(root, { recursive: true, force: true })
     }
   })

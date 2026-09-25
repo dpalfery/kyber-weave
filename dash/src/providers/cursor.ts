@@ -53,7 +53,7 @@ const modelDisplayNames: Record<string, string> = {
   'cursor-auto': 'Cursor (auto)',
 }
 
-type BubbleRow = {
+export type BubbleRow = {
   bubble_key: string
   input_tokens: number | null
   output_tokens: number | null
@@ -63,6 +63,7 @@ type BubbleRow = {
   user_text: Uint8Array | string | null
   text_length: number | null
   bubble_type: number | null
+  context_window: number | null
   code_blocks: Uint8Array | string | null
   /// Only populated on the paged scan path (BUBBLE_QUERY_PAGE) used for very
   /// large databases; undefined on the un-paged BUBBLE_QUERY_SINCE path.
@@ -353,6 +354,7 @@ const BUBBLE_QUERY_BASE = `
     CAST(substr(json_extract(value, '$.text'), 1, 500) AS BLOB) as user_text,
     length(json_extract(value, '$.text')) as text_length,
     json_extract(value, '$.type') as bubble_type,
+    json_extract(value, '$.contextWindow') as context_window,
     CAST(json_extract(value, '$.codeBlocks') AS BLOB) as code_blocks
   FROM cursorDiskKV
   WHERE key LIKE 'bubbleId:%'
@@ -410,6 +412,7 @@ const BUBBLE_QUERY_PAGE = `
     CAST(substr(json_extract(value, '$.text'), 1, 500) AS BLOB) as user_text,
     length(json_extract(value, '$.text')) as text_length,
     json_extract(value, '$.type') as bubble_type,
+    json_extract(value, '$.contextWindow') as context_window,
     CAST(json_extract(value, '$.codeBlocks') AS BLOB) as code_blocks
   FROM cursorDiskKV
   WHERE key LIKE 'bubbleId:%' AND ROWID < ?
@@ -481,6 +484,7 @@ function scanBubblesPaged(
   db: SqliteDatabase,
   timeFloor: string,
   budget: number,
+  timeCeiling?: string,
 ): { rows: BubbleRow[]; truncated: boolean } {
   const BATCH = 25_000
   const collected: BubbleRow[] = []
@@ -498,8 +502,10 @@ function scanBubblesPaged(
     if (batch.length === 0) break
 
     for (const row of batch) {
-      if (collected.length >= budget) { truncated = true; break paging }
-      if (row.created_at != null && row.created_at > timeFloor) collected.push(row)
+      if (row.created_at != null && row.created_at > timeFloor && (timeCeiling === undefined || row.created_at <= timeCeiling)) {
+        if (collected.length >= budget) { truncated = true; break paging }
+        collected.push(row)
+      }
     }
 
     const oldest = batch[batch.length - 1]!
@@ -514,6 +520,28 @@ function scanBubblesPaged(
   // Restore ROWID-ascending order to match the un-paged query's row ordering.
   collected.sort((a, b) => (a.rid ?? 0) - (b.rid ?? 0))
   return { rows: collected, truncated }
+}
+
+/** One bounded bubble projection shared by the provider and content reader. */
+export function loadCursorBubbles(
+  db: SqliteDatabase,
+  timeFloor: string,
+  timeCeiling?: string,
+): { rows: BubbleRow[]; total: number; maxBubbles: number; truncated: boolean } {
+  const maxBubbles = Number(process.env['KYBERDASH_CURSOR_MAX_BUBBLES']) || 250_000
+  const countRows = db.query<{ cnt: number }>(
+    "SELECT COUNT(*) as cnt FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
+  )
+  const total = countRows[0]?.cnt ?? 0
+  const scan = total > maxBubbles
+    ? scanBubblesPaged(db, timeFloor, maxBubbles, timeCeiling)
+    : {
+      rows: timeCeiling === undefined
+        ? db.query<BubbleRow>(BUBBLE_QUERY_SINCE, [timeFloor])
+        : db.query<BubbleRow>(`${BUBBLE_QUERY_SINCE_HEAD} AND json_extract(value, '$.createdAt') <= ?${BUBBLE_QUERY_SINCE_TAIL}`, [timeFloor, timeCeiling]),
+      truncated: false,
+    }
+  return { ...scan, total, maxBubbles }
 }
 
 // Cursor leaves the per-bubble tokenCount at {0,0} on current builds. The only
@@ -786,33 +814,16 @@ function parseBubbles(
   // comfortably. Instead, for large DBs we page the requested window
   // (ROWID-descending, stopping past the window floor) and only fall back to a
   // hard budget — warning — when the in-range scan genuinely exceeds it.
-  // Override the budget in tests via KYBERDASH_CURSOR_MAX_BUBBLES.
-  const MAX_BUBBLES = Number(process.env['KYBERDASH_CURSOR_MAX_BUBBLES']) || 250_000
-
-  let total = 0
-  try {
-    const countRows = db.query<{ cnt: number }>(
-      "SELECT COUNT(*) as cnt FROM cursorDiskKV WHERE key LIKE 'bubbleId:%'"
-    )
-    total = countRows[0]?.cnt ?? 0
-  } catch (err) {
-    rethrowBusy(err)
-  }
-
   let rows: BubbleRow[]
   try {
-    if (total > MAX_BUBBLES) {
-      const scan = scanBubblesPaged(db, timeFloor, MAX_BUBBLES)
-      rows = scan.rows
-      if (scan.truncated) {
-        process.stderr.write(
-          `kyberdash: Cursor database has ${total.toLocaleString()} bubbles and the ` +
-          `requested range exceeds the ${MAX_BUBBLES.toLocaleString()}-bubble scan budget; ` +
-          `the oldest sessions in range may be missing from this report.\n`
-        )
-      }
-    } else {
-      rows = db.query<BubbleRow>(BUBBLE_QUERY_SINCE, [timeFloor])
+    const scan = loadCursorBubbles(db, timeFloor)
+    rows = scan.rows
+    if (scan.truncated) {
+      process.stderr.write(
+        `kyberdash: Cursor database has ${scan.total.toLocaleString()} bubbles and the ` +
+        `requested range exceeds the ${scan.maxBubbles.toLocaleString()}-bubble scan budget; ` +
+        `the oldest sessions in range may be missing from this report.\n`
+      )
     }
   } catch (err) {
     rethrowBusy(err)

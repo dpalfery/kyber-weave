@@ -274,7 +274,7 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       })
     }
 
-    const ingestResult = await ingestUnit(context.ingest, descriptor, unit)
+    const ingestResult = await ingestUnit(context.ingest, descriptor, unit, context.dateRange)
     for (const problem of ingestResult.problems) {
       store.recordProblem({
         ...problem,
@@ -342,10 +342,12 @@ async function ingestUnit(
   ingest: typeof productionIngestProviders,
   descriptor: HarnessSourceDescriptor,
   unit: NativeUnit,
+  dateRange: SourceReaderDependencies['dateRange'],
 ) {
   const loaded = await ingest([descriptor.harnessId], () => ({
     calls: unit.envelopes.map((envelope) => envelope.call),
     filePath: unit.source.path,
+    dateRange,
     harnessId: descriptor.harnessId,
     sourceKey: unit.sourceKey,
   }))

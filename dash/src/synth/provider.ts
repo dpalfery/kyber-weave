@@ -43,6 +43,7 @@ import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
 import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import { isExcludedHarness, Synthesizer } from './synth.js'
+import type { DateRange } from '../types.js'
 
 /** Problem code for a session store that exists but cannot be parsed (R1.3). */
 export const PROVIDER_PARSE_ERROR = 'PROVIDER_PARSE_ERROR'
@@ -73,6 +74,8 @@ export type ProviderLoad = {
   calls: ParsedProviderCall[]
   /** The same session file the registered reader must inspect. */
   filePath: string
+  /** Requested refresh window for readers that share a database among source units. */
+  dateRange?: DateRange
   /** Classified harness id for this source unit, when the job already knows it. */
   harnessId?: string
   /** Stable source-unit key for checkpoints and parse problems. */
@@ -146,7 +149,7 @@ function callsAndTurns(
   if (reader === undefined) return Promise.resolve([calls, undefined])
   return (async () => {
     const turns: ReaderTurn[] = []
-    for await (const turn of reader.read(load.filePath)) turns.push(turn)
+    for await (const turn of reader.read(load.filePath, load.dateRange)) turns.push(turn)
     return [calls, turns] as const
   })()
 }

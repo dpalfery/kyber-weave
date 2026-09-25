@@ -13,6 +13,7 @@
 
 import type { ContentPart } from '../../canon/types.js'
 import type { ParsedProviderCall } from '../../providers/types.js'
+import type { DateRange } from '../../types.js'
 
 /**
  * Provenance a refresh source unit carries onto a synthesized record.
@@ -69,5 +70,5 @@ export type ReaderTurn = {
  * once per turn. Implementors emit only buckets the file genuinely carries.
  */
 export interface ContentReader {
-  read(filePath: string): AsyncIterable<ReaderTurn>
+  read(filePath: string, dateRange?: DateRange): AsyncIterable<ReaderTurn>
 }
