@@ -1,10 +1,10 @@
 ---
-id: specs/kyberdash-context-surfaces/design
+id: archive/specs/kyberdash-context-surfaces/design
 title: KyberDash context surfaces design
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-24
 component: KyberDash
 ---
 
@@ -570,7 +570,7 @@ flowchart LR
 The brief tells the agent to read the repository's `AGENTS.md` first and gives the spec path
 explicitly: `docs/specs/kyberdash-context-surfaces/`. That matters because a harness may still
 carry Squad instructions installed before `6-Docs` gave way to a resolvable docs root (see the
-[archived squad-hardcoded-docs-root todo](../../archive/todo/squad-hardcoded-docs-root.md)).
+[archived squad-hardcoded-docs-root todo](../../todo/squad-hardcoded-docs-root.md)).
 
 **Running the delegates.** The flags below were checked against the CLIs installed on this
 machine: `cursor-agent` 2026.09.02 and `agy` 1.2.2.

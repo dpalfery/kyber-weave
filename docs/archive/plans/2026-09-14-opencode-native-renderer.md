@@ -1,16 +1,18 @@
 ---
-id: plans/2026-09-14-opencode-native-renderer
+id: archive/plans/2026-09-14-opencode-native-renderer
 title: Add a native OpenCode renderer to Kyber-Squad
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-24
 component: KyberSquad
 ---
 
 # Add a native OpenCode renderer to Kyber-Squad
 
-**Status:** Completed  
+**Status:** Archived
+**Archive Date:** 2026-09-24
+**Closeout:** Delivered by #90 (`OpenCodeRenderer`); archived 2026-09-24 — it was marked Completed but never moved.
 **Date:** 2026-09-14  
 **Goal:** Implement and register an `ISquadRenderer` for `SquadTarget.OpenCode` (`opencode`) so `kyber-weave squad install --target opencode` succeeds with native OpenCode agent and skill layouts, verified against OpenCode specifications and repository safety invariants.
 

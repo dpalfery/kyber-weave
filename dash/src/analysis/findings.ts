@@ -13,7 +13,7 @@
 
 import { normalizeWhitespace, hashNormalized } from './signals.js'
 import { contextLimitOf, DEFAULT_CONTEXT_LIMIT } from '../canon/context-window.js'
-import { canonicalHarnessId, normalizeHarnessName } from '../canon/measurability.js'
+import { canonicalHarnessId, normalizeHarnessName, type SessionIdentities } from '../canon/measurability.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import type { OutcomeBlock } from '../canon/outcome.js'
 
@@ -903,6 +903,12 @@ export type CompactionHazardInput = {
   turns?: readonly { spanId?: string; turnIndex?: number; inputTokens?: number }[]
   contextLimit?: number
   outcome?: OutcomeBlock
+  /**
+   * The ids the builders gave each session share (`CanonStore.sessionIdentities`).
+   * A run holds one harness's share of a split key, so its records alone cannot
+   * say the key was split or which id the share was given.
+   */
+  sessionIdentities?: SessionIdentities
 }
 
 /**
@@ -986,8 +992,13 @@ export function detectCompactionHazard(input: CompactionHazardInput): Finding[] 
     harnesses.add(harness)
     harnessesByKey.set(key, harnesses)
   }
+  // The builders' own id for the share wins when the caller supplies it: the
+  // records a run hands over are one share of a split key, and cannot show
+  // either the split or an id re-prefixed to stay clear of a native key.
   const groupIdOf = (record: CanonicalRecord): string => {
     const key = baseKeyOf(record)
+    const assigned = input.sessionIdentities?.idFor(key, record.harness)
+    if (assigned !== undefined) return assigned
     return (harnessesByKey.get(key)?.size ?? 1) > 1
       ? `${normalizeHarnessName(record.harness)}:${key}`
       : key
@@ -1330,6 +1341,8 @@ export type DetectFindingsInput = {
   records?: readonly CanonicalRecord[]
   outcome?: OutcomeBlock
   contextLimit?: number
+  /** Passed to the compaction-hazard detector; see `CompactionHazardInput`. */
+  sessionIdentities?: SessionIdentities
   // Granular detector overrides
   dormantToolSchema?: DormantToolSchemaInput
   duplicateToolCall?: DuplicateToolCallInput
@@ -1385,6 +1398,7 @@ export function detectFindings(input: DetectFindingsInput): Finding[] {
     records: input.records,
     contextLimit: input.contextLimit,
     outcome: input.outcome,
+    sessionIdentities: input.sessionIdentities,
   }))
 
   // 6. Unbounded delegation

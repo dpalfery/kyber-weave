@@ -19,7 +19,7 @@ KyberDash provides multi-surface observability and context tuning for agentic co
 First-party code under `dash/` since a one-time fork of CodeBurn
 ([ADR 0020](../adr/0020-kyberdash-one-time-fork.md)), it runs as **three local surfaces** today:
 
-1. [KyberDash Tray (`dash/tray/`)](#6-the-kyberdash-tray-dashtray) — the macOS menu-bar tray: a Tauri 2 shell whose popover renders the context report and which owns the refresh cadence and the optional OTLP receiver.
+1. [KyberDash Tray (`dash/tray/`)](#6-the-kyberdash-tray-dashtray) — the macOS and Windows tray: a Tauri 2 shell whose popover renders the context report and which owns the refresh cadence and the optional OTLP receiver.
 2. [Web Dashboard (`dash/web/`)](#web-dashboard-dashweb) — Standalone React browser interface served by the CLI over HTTP.
 3. [CLI engine (`dash/src/`)](#telemetry-ingest-canonical-store-and-cli-operations) — `kyberdash report`, `web`, `dash refresh`, `kyber otel`, and the store operations documented below.
 
@@ -45,7 +45,13 @@ appear in 0.1.7-rc.9, and the installer skips KyberDash on any release below tha
 Node SEA RID names, and how `kyber-weave update` treats an installed `kyberdash`.
 
 The released binary is the CLI engine — `kyberdash report`, `kyberdash web`, and
-`kyberdash kyber otel`. The tray is not packaged by it and is built from source below.
+`kyberdash kyber otel`. The tray ships as its own release asset from `0.1.7-rc.13`:
+`kyberdash menubar` installs it, after checking its SHA-256 and — on macOS — its code
+signature, team id and Gatekeeper acceptance (`install.sh --with-menubar` does the same on
+macOS). `kyber-weave update` updates an installed tray by delegating to
+`kyberdash menubar --update`, which quits the running tray, replaces it and relaunches it,
+restoring the previous app if any step fails. On Linux, `kyberdash menubar` exits 1: the tray
+ships for macOS and Windows only.
 
 ---
 
@@ -197,7 +203,9 @@ cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && ca
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
 `KYBERDASH_BIN` at it.
 
-Deployed shape (per-user, no administrator rights):
+Deployed shape (per-user, no administrator rights). On Windows the NSIS installer installs
+for the current user and a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value starts
+the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
 
 - The app lives at `~/Applications/KyberDash.app`; launchd owns it as the per-user agent
   `~/Library/LaunchAgents/io.github.dpalfery.kyberdash.plist` (label
@@ -266,6 +274,13 @@ To run the complete production bundle served directly by the KyberDash CLI engin
    - `KYBER_CANON_DB`: Path to the canonical store (default: `~/.kyberdash/canon.db`).
 
 #### Navigating the web dashboard
+
+Every view has its own URL, so a view can be bookmarked, shared, or opened directly.
+`dash/src/server/view-paths.json` lists them — `/`, `/harness/:harnessId`, `/run/:runId`,
+`/session/:sessionId`, `/session/:sessionId/turn/:turnIndex`, `/finding/:findingId`,
+`/compare?a=:runId&b=:runId`, `/quarantine`, `/problems` — and the web router
+(`dash/web/src/lib/router.ts`), `kyberdash web --view`, and the tray's open actions all read
+that one list. Browser back and forward restore the spine.
 
 Header tabs (`nav-tabs`) are four: **Context Doctor**, **Usage**, **Quarantine**, **Problems**.
 The sidebar is the diagnostic spine rail: **Context Doctor**, **Sessions**, **Compare**. Share

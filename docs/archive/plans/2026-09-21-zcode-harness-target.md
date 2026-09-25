@@ -1,16 +1,18 @@
 ---
-id: plans/2026-09-21-zcode-harness-target
+id: archive/plans/2026-09-21-zcode-harness-target
 title: Add ZCode as a Kyber-Squad harness target
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-21
+last-reviewed: 2026-09-24
 component: KyberSquad
 ---
 
 # Add ZCode as a Kyber-Squad harness target
 
-**Status:** Ready
+**Status:** Archived
+**Archive Date:** 2026-09-24
+**Closeout:** Delivered by #100 (`ZCodeRenderer`); archived 2026-09-24 when the open-work gate found it still marked Ready.
 **Date:** 2026-09-21
 **Goal:** Declare `zcode` as a Kyber-Squad target and register a `ZCodeRenderer` so
 `kyber-weave squad install --target zcode` and `--global --target zcode` both produce a
@@ -316,7 +318,7 @@ ADR 0021.
 different deployment model rather than remaining renderer work: a plugin is enabled as one
 unit instead of per-file, which is what Squad's receipt, drift detection, and transactional
 rollback are built on, and `loadPluginAgentProfiles` would namespace every agent
-`<plugin>:<agent>`. Recorded in [the todo](../todo/zcode-plugin-packaging.md) as a decision
+`<plugin>:<agent>`. Recorded in [the todo](../../todo/zcode-plugin-packaging.md) as a decision
 for the owner.
 
 Two things that first looked like scope are not. **Hooks** have no canonical source —
@@ -348,7 +350,7 @@ The declared gate suite (`kyber-weave review gates .`) plus:
 
 ## Related
 
-- [Kyber-Squad architecture](../kyber-squad/architecture.md) — §8 rendering
-- [ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md) — the primary-agent
+- [Kyber-Squad architecture](../../kyber-squad/architecture.md) — §8 rendering
+- [ADR 0019](../../adr/0019-pi-native-subagents-and-primary-lowering.md) — the primary-agent
   lowering precedent this plan follows and departs from
-- [Renderer coverage](../archive/todo/kyber-squad-renderer-coverage.md)
+- [Renderer coverage](../todo/kyber-squad-renderer-coverage.md)

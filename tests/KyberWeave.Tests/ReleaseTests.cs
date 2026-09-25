@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
 using Xunit;
 using Xunit.Sdk;
@@ -151,6 +152,119 @@ public sealed class ReleaseTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal(expected, result.StandardOutput.Trim());
+    }
+
+    /// <summary>
+    /// The Releases API lists newest-created first, so creation order must not win; and a
+    /// tag that is not a release version (<c>9.0.0/preview</c>) must never outrank one that
+    /// is, however high its core parses.
+    /// </summary>
+    [Theory]
+    [InlineData("0.1.7-rc.9\n0.1.7-rc.10\n0.1.6-rc.8\n", "0.1.7-rc.10")]
+    [InlineData("0.1.7-rc.2\n0.1.8-rc.1\n", "0.1.8-rc.1")]
+    [InlineData("0.1.7-rc.1\n", "0.1.7-rc.1")]
+    [InlineData("9.0.0/preview\n0.1.7-rc.13\nlatest\n", "0.1.7-rc.13")]
+    public void HighestVersionPicksSemVerMaximumNotFirstListed(string listed, string expected)
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, listed);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expected, result.StandardOutput.Trim());
+    }
+
+    /// <summary>
+    /// The Releases API pages at 100. A pre-release on a later page must still win, and
+    /// drafts, stable releases and tags that are not versions must not, wherever they sit.
+    /// </summary>
+    [Fact]
+    public void NewestPrereleaseReadsEveryPageAndSkipsDraftsAndStableReleases()
+    {
+        SkipOnWindows();
+
+        const string stub = """
+            stub() {
+                case "$1" in
+                    *page=1)
+                        i=1
+                        printf '['
+                        while [ "$i" -le 100 ]; do
+                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
+                            if [ "$i" -lt 100 ]; then printf ','; fi
+                            i=$((i + 1))
+                        done
+                        printf ']' ;;
+                    *page=2)
+                        printf '[{"tag_name":"v9.0.0/preview","draft":false,"prerelease":true},'
+                        printf '{"tag_name":"v0.3.0-rc.1","draft":true,"prerelease":true},'
+                        printf '{"tag_name":"v0.3.0","draft":false,"prerelease":false},'
+                        printf '{"tag_name":"v0.2.0-rc.1","draft":false,"prerelease":true}]' ;;
+                    *) printf '[]' ;;
+                esac
+            }
+            """;
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"\n" + stub +
+            "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("0.2.0-rc.1", result.StandardOutput.Trim());
+    }
+
+    /// <summary>
+    /// A failed later page must fail the whole scan: the first page alone is an incomplete
+    /// answer that would install a lower version than the one the missing page holds.
+    /// </summary>
+    [Fact]
+    public void NewestPrereleaseFailsWhenALaterPageCannotBeFetched()
+    {
+        SkipOnWindows();
+
+        const string stub = """
+            stub() {
+                case "$1" in
+                    *page=1)
+                        i=1
+                        printf '['
+                        while [ "$i" -le 100 ]; do
+                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
+                            if [ "$i" -lt 100 ]; then printf ','; fi
+                            i=$((i + 1))
+                        done
+                        printf ']' ;;
+                    *) return 22 ;;
+                esac
+            }
+            """;
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"\n" + stub +
+            "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Equal(string.Empty, result.StandardOutput.Trim());
+    }
+
+    /// <summary>Nothing to choose from is a failure, not an empty version.</summary>
+    [Fact]
+    public void HighestVersionFailsOnEmptyInput()
+    {
+        SkipOnWindows();
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; kyber_weave_highest_version");
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Equal(string.Empty, result.StandardOutput.Trim());
     }
 
     [Theory]
@@ -461,6 +575,61 @@ public sealed class ReleaseTests
         }
 
         Assert.Contains("J2UNNQ466J", workflow, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The local release loop builds kyberdash from a copy of the <c>build-kyberdash</c>
+    /// job's steps, because the job cannot run off a runner. The job stays the authority,
+    /// so the values a copy could drift on are read from it here. A drifted copy would pass
+    /// the loop with a binary the release never ships.
+    /// </summary>
+    [Fact]
+    public void LocalKyberDashBuildMatchesTheReleaseJob()
+    {
+        // Normalized because the job is found by LF-delimited keys, and `* text=auto` gives a
+        // Windows checkout CRLF.
+        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
+        // The job runs to the next two-space-indented key, which is the next job.
+        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
+        string job = next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+        string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
+
+        // release-local.sh reads its Node version from dash/.nvmrc rather than repeating it.
+        Match nodeVersion = Regex.Match(job, "NODE_VERSION: \"([^\"]+)\"");
+        Assert.True(nodeVersion.Success, "build-kyberdash no longer pins NODE_VERSION.");
+        string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim().TrimStart('v');
+        Assert.True(
+            nodeVersion.Groups[1].Value == nvmrc,
+            $"build-kyberdash builds on Node {nodeVersion.Groups[1].Value} but dash/.nvmrc, which the local build reads, says {nvmrc}.");
+
+        Match fuse = Regex.Match(job, "--sentinel-fuse (NODE_SEA_FUSE_[0-9a-f]+)");
+        Match postject = Regex.Match(job, "(postject@[0-9A-Za-z.-]+)");
+        Assert.True(fuse.Success, "build-kyberdash no longer names a sentinel fuse.");
+        Assert.True(postject.Success, "build-kyberdash no longer pins a postject version.");
+
+        string[] shared =
+        [
+            fuse.Groups[1].Value,
+            postject.Groups[1].Value,
+            "--macho-segment-name NODE_SEA",
+            "tsup --config tsup.sea.config.ts",
+            "src/sea-shim.cjs",
+            "\"useSnapshot\": false",
+            "\"disableExperimentalSEAWarning\": true",
+            "\"main.js\":",
+            "\"package.json\":",
+            "codesign --sign - --force",
+            "THIRD_PARTY_NOTICES.md",
+        ];
+        foreach (string value in shared)
+        {
+            Assert.True(job.Contains(value, StringComparison.Ordinal), $"build-kyberdash no longer contains {value}; update this list with the job.");
+            Assert.True(
+                local.Contains(value, StringComparison.Ordinal),
+                $"scripts/release-local.sh does not use {value}, which build-kyberdash does. Make the same change there.");
+        }
     }
 
     /// <summary>

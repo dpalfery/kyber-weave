@@ -96,6 +96,11 @@ public sealed record GateResult(
 /// <param name="ClassLinePercent">Line coverage across classes.</param>
 public sealed record CoverageResult(double FileLinePercent, double ClassLinePercent);
 
+/// <summary>One Cobertura report the gate suite wrote, and what it measured.</summary>
+/// <param name="Path">Repository-relative path of the report, with forward slashes.</param>
+/// <param name="Coverage">The line coverage the report records.</param>
+public sealed record CoverageReport(string Path, CoverageResult Coverage);
+
 /// <summary>A finding the engine removed, and the rule that removed it.</summary>
 /// <param name="Finding">The finding as reported.</param>
 /// <param name="Code">The <c>KW-REVIEW-*</c> rule that dropped it.</param>

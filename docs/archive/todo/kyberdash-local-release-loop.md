@@ -1,21 +1,44 @@
 ---
-id: todo/kyberdash-local-release-loop
+id: archive/todo/kyberdash-local-release-loop
 title: The local release loop cannot exercise the KyberDash install or update path
 doc-type: todo
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-19
-status: draft
+last-reviewed: 2026-09-24
+status: superseded
 ---
 
 # The local release loop cannot exercise the KyberDash install or update path
+
+> [!NOTE]
+> **Closed 2026-09-24.** `scripts/release-local.sh` now builds the kyberdash
+> single-executable for the host RID from a copy of the `build-kyberdash` steps.
+> `ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` pins that copy to the job.
+> `scripts/update-loop.sh` runs the update-side cases listed under *How to verify*. The
+> decisions:
+>
+> - **The build runs by default**, in CI as well as locally. `--no-kyberdash` opts out of
+>   it for a local run. Opt-in coverage is how this gap opened, and the build adds about
+>   fifteen seconds.
+> - **A build failure is fatal.** `dash/` is first-party code under
+>   [ADR 0020](../../adr/0020-kyberdash-one-time-fork.md), and CI's TypeScript gates already
+>   fail on a broken `npm ci`. `--no-kyberdash` is the explicit way past a broken build.
+> - **The below-floor case needs no build**, so it runs even under `--no-kyberdash`.
+> - **The tray case runs the real kyberdash** against a `tray.json` fixture, not a stub.
+>   Its first run found that `kyber-weave update` never updated the tray. The root
+>   `--version` swallowed the updater's `menubar --update --version <v>`, so kyberdash
+>   printed its version and exited 0. The same change fixed that with commander's
+>   positional options.
+> - **The `install.sh` half stays open.** It moved to
+>   [install-sh-local-origin](../../todo/install-sh-local-origin.md), because it cannot
+>   run until the script can reach the local server.
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the seam is. It does not sequence tasks or commit to an implementation.
 
 ## Why this exists
 
-[`distribution.md`](../distribution.md#verifying-a-release-locally) makes running
+[`distribution.md`](../../distribution.md#verifying-a-release-locally) makes running
 `./scripts/update-loop.sh` a requirement for changes to `install.sh` or the self-updater,
 on the reasoning that a self-updater is always executed by the *old* binary and so cannot be
 proven by the release containing the fix. That loop builds `kyber-weave`, `kyber-weave-mcp`,
@@ -63,7 +86,7 @@ both were an abort. Both are fixed now, and both would have been caught on first
   *below* the floor and asserting the CLI and MCP still install is the regression test for the
   exact failure this todo describes, and it needs no KyberDash build at all. That half is cheap
   and could land independently of the SEA build.
-- How this interacts with [install-sh-local-origin.md](install-sh-local-origin.md): the loop
+- How this interacts with [install-sh-local-origin.md](../../todo/install-sh-local-origin.md): the loop
   drives `kyber-weave update`, not `install.sh`, because the script has no origin override. The
   install-side assertions here are blocked on that todo, while the update-side ones are not.
 

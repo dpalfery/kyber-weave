@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Rendering;
 using Spectre.Console;
 
 namespace KyberWeave.Tests;
@@ -22,13 +23,17 @@ internal static class ProcessConsoleCapture
             try
             {
                 Console.SetOut(writer);
-                AnsiConsole.Console = AnsiConsole.Create(new AnsiConsoleSettings
+                IAnsiConsole capture = AnsiConsole.Create(new AnsiConsoleSettings
                 {
                     Ansi = AnsiSupport.No,
                     ColorSystem = ColorSystemSupport.NoColors,
                     Interactive = InteractionSupport.No,
                     Out = new AnsiConsoleOutput(writer)
                 });
+                // The capture's width is otherwise the host terminal's, which is -1 on a
+                // host that cannot report one; pin it the way the CLI entry point does.
+                ConsoleWidth.EnsureUsable(capture);
+                AnsiConsole.Console = capture;
                 return new CapturedConsoleExecution<T>(execute(), writer.ToString());
             }
             finally

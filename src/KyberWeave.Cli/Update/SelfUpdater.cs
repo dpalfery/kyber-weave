@@ -45,13 +45,15 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Action<string> _log;
     private readonly Func<string, IReadOnlyList<string>, int> _runProcess;
     private readonly Func<string, string?> _readEnvironment;
+    private readonly Func<string, bool> _canWriteDirectory;
 
     internal SelfUpdater(
         HttpMessageHandler handler,
         SelfUpdateHost host,
         Action<string>? log = null,
         Func<string, string?>? readEnvironment = null,
-        Func<string, IReadOnlyList<string>, int>? runProcess = null)
+        Func<string, IReadOnlyList<string>, int>? runProcess = null,
+        Func<string, bool>? canWriteDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
@@ -59,6 +61,9 @@ internal sealed class SelfUpdater : IDisposable
         _log = log ?? (_ => { });
         _runProcess = runProcess ?? RunProcess;
         _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
+        // A seam because the refusal cannot be provoked through mode bits everywhere:
+        // root and Windows both write through a read-only POSIX mode.
+        _canWriteDirectory = canWriteDirectory ?? CanWriteDirectory;
         _releases = new GitHubReleaseClient(
             handler,
             host.CurrentVersion,
@@ -442,7 +447,7 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         string directory = _host.InstallDirectory;
-        if (!Directory.Exists(directory) || !CanWriteDirectory(directory))
+        if (!Directory.Exists(directory) || !_canWriteDirectory(directory))
         {
             throw new SelfUpdateException(
                 $"no write permission for {directory}. Re-run from a writable Release install, or reinstall with scripts/install.sh --install-dir <dir>.");
@@ -456,7 +461,7 @@ internal sealed class SelfUpdater : IDisposable
             || normalized.EndsWith("/.dotnet/tools", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool CanWriteDirectory(string directory)
+    internal static bool CanWriteDirectory(string directory)
     {
         try
         {

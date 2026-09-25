@@ -60,7 +60,7 @@ public sealed class CopilotRendererTests
         Assert.Equal("architect", agent.CapabilityProfile);
         Assert.Equal("architect-copilot", agent.CopilotCapabilityProfile);
         Assert.Equal(
-            SquadPermissionDecision.Ask,
+            SquadPermissionDecision.Allow,
             source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["filesystem.write"]);
         Assert.Equal(
             SquadPermissionDecision.Ask,
@@ -189,7 +189,7 @@ public sealed class CopilotRendererTests
     [InlineData("docs-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, edit]")]
     [InlineData("github-devops", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, web, edit]")]
     [InlineData("maui-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
-    [InlineData("product-owner", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, agent]")]
+    [InlineData("product-owner", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, web, edit, agent]")]
     [InlineData("pulumi-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
     [InlineData("python-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]
     [InlineData("react-dev", "tools: [vscode, read, todo, 'codegraph/*', 'kyber-weave/*', 'context7/*', search, execute, edit]")]

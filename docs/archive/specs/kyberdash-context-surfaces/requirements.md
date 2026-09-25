@@ -1,10 +1,10 @@
 ---
-id: specs/kyberdash-context-surfaces/requirements
+id: archive/specs/kyberdash-context-surfaces/requirements
 title: KyberDash context surfaces requirements
 doc-type: requirements
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-09-22
+last-reviewed: 2026-09-24
 component: KyberDash
 keywords:
   - codeburn fork
@@ -48,10 +48,10 @@ reads, which leaves a later move of the engine to .NET free to happen without to
 tray or the web dashboard.
 
 Figures shown by the new surfaces follow the existing display rules:
-[honest unobservability](../../rules/honest-unobservability.md),
-[secondary cost display](../../rules/secondary-cost-display.md),
-[the composite efficiency ban](../../rules/composite-efficiency-ban.md) and
-[relocation over deletion](../../rules/relocation-over-deletion.md).
+[honest unobservability](../../../rules/honest-unobservability.md),
+[secondary cost display](../../../rules/secondary-cost-display.md),
+[the composite efficiency ban](../../../rules/composite-efficiency-ban.md) and
+[relocation over deletion](../../../rules/relocation-over-deletion.md).
 
 ## Requirements
 

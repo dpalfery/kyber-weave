@@ -47,6 +47,27 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        // Coalesce the positional path with --path; invalid client input returns exit
+        // code 2 before any output or work — the same rule every other squad command
+        // applies, because two names for one deployment root are an operator error, not
+        // a preference to resolve silently.
+        string? effectivePath;
+        try
+        {
+            effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
+        }
+        catch (ArgumentException ex)
+        {
+            SquadCommandComposition.WriteClientInputError(ex.Message);
+            return 2;
+        }
+
+        // The named root is the diagnosed root. The unresolved default — "." positional,
+        // no --path — keeps the injected working directory, the process's current
+        // directory in production, exactly as before the option existed.
+        string workingDirectory = SquadCommandComposition.ResolveTargetRoot(
+            effectivePath is null or "." ? _workingDirectory : effectivePath);
+
         AnsiConsole.MarkupLine("[bold]Kyber-Squad Doctor[/]");
         AnsiConsole.WriteLine();
 
@@ -88,7 +109,6 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         // 4. Canonical Source (Maintainer check - only when inside repository root)
-        string workingDirectory = _workingDirectory ?? Directory.GetCurrentDirectory();
         string? canonicalSourcePath = SquadPackSourceLocator.Resolve(workingDirectory);
         bool canonicalSourceValid = false;
         if (canonicalSourcePath is not null)

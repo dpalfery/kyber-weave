@@ -7,7 +7,6 @@ using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace KyberWeave.Tests;
 
