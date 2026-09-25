@@ -87,8 +87,16 @@ export function nativeRecordIdentity(
   envelope?: SourceRecordEnvelope,
   ordinal = 0,
 ): { nativeRecordId: string; recordDigest?: string } {
-  if (envelope?.nativeRecordId) return { nativeRecordId: envelope.nativeRecordId }
-  if (call.turnId !== undefined && call.turnId !== '') return { nativeRecordId: call.turnId }
+  // Cursor added request ids for transcript pairing after digest-based spans
+  // were already persisted. Keep that pairing id out of record identity so a
+  // refresh replaces the old span instead of inserting the same turn again.
+  const cursorPairingId = call.provider === 'cursor' ? call.turnId : undefined
+  if (envelope?.nativeRecordId && envelope.nativeRecordId !== cursorPairingId) {
+    return { nativeRecordId: envelope.nativeRecordId }
+  }
+  if (call.turnId !== undefined && call.turnId !== '' && cursorPairingId === undefined) {
+    return { nativeRecordId: call.turnId }
+  }
   const prefix = `${call.provider}:${call.sessionId}:`
   if (call.deduplicationKey.startsWith(prefix) && call.deduplicationKey.length > prefix.length) {
     return { nativeRecordId: call.deduplicationKey.slice(prefix.length) }

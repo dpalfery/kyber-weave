@@ -26,6 +26,7 @@ import { copilot } from '../providers/copilot.js'
 import { createCursorProvider } from '../providers/cursor.js'
 import { tokenValidator } from '../canon/adapters/quarantine.js'
 import { contextLimitOf } from '../canon/context-window.js'
+import { CanonStore } from '../canon/store.js'
 import { Synthesizer } from './synth.js'
 import { PROVIDER_PARSE_ERROR, ingestProviders } from './provider.js'
 
@@ -538,7 +539,26 @@ describe('T3 static source capability readers', () => {
     expect(result.problems).toEqual([])
     expect(result.records).toHaveLength(calls.length)
     expect(new Set(result.records.map((record) => record.spanId)).size).toBe(calls.length)
-    expect(result.records.find((record) => record.spanId.endsWith(':cursor-request-1'))?.tokens.reportedInput).toBe(240)
+    const promptIndex = calls.findIndex((entry) => entry.deduplicationKey.endsWith(':prompt'))
+    expect(result.records[promptIndex]?.tokens.reportedInput).toBe(240)
+
+    // Existing stores contain digest identities from before turnId was used
+    // for reader matching. A refresh must replace those rows, not add copies.
+    const legacy = await ingestProviders(['cursor'], () => ({
+      calls: calls.map((entry) => ({ ...entry, turnId: undefined })),
+      filePath: dbPath,
+      harnessId: 'cursor',
+      sourceKey: 'cursor:cursor-static-session',
+    }))
+    expect(result.records.map((record) => record.spanId)).toEqual(legacy.records.map((record) => record.spanId))
+    const store = new CanonStore(':memory:')
+    try {
+      store.upsertMany(legacy.records)
+      store.upsertMany(result.records)
+      expect(store.listAll()).toHaveLength(calls.length)
+    } finally {
+      store.close()
+    }
   })
 
   it('does not positionally pair an unidentified Cursor call with a native request turn', async () => {
