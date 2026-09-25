@@ -1661,9 +1661,7 @@ export class CanonStore {
 
   /** Drop a derived session. Safe by construction: the row is a cache. */
   deleteSession(sessionId: string): void {
-    this.db
-      .prepare('DELETE FROM session WHERE session_id = ? OR session_id LIKE ?')
-      .run(sessionId, `%:${sessionId}`)
+    this.db.prepare('DELETE FROM session WHERE session_id = ?').run(sessionId)
   }
 
   /** Drop derived sessions for a harness. */

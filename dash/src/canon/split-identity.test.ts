@@ -88,6 +88,24 @@ describe('T6 split harness identity', () => {
 })
 
 describe('T6 derivation does not collapse or seed Gemini', () => {
+  it('keeps freshly split sessions when pruning their old unsplit id', async () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(record('c1', 'cursor', 'native-shared'))
+    await buildSessions(store)
+    expect(store.getSessionPayload('native-shared')).toBeDefined()
+
+    store.upsert(record('a1', 'cursor-agent', 'native-shared', {
+      timestamp: '2026-09-03T10:00:05.000Z',
+    }))
+    const report = await buildSessions(store)
+
+    expect(report.pruned).toBe(1)
+    expect(store.getSessionPayload('native-shared')).toBeUndefined()
+    expect(store.getSessionPayload('cursor:native-shared')).toBeDefined()
+    expect(store.getSessionPayload('cursor-agent:native-shared')).toBeDefined()
+    store.close()
+  })
+
   it('builds separate sessions and rollups for Cursor and Cursor Agent', async () => {
     const store = new CanonStore(':memory:')
     store.upsertMany([
