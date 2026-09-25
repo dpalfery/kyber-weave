@@ -3,6 +3,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.Squad.Validation;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -19,11 +20,26 @@ namespace KyberWeave.Tests;
 /// shared-identity suppression, explicit tool allow-listing, model resolution from <c>models.yml</c>,
 /// and structured degradation accounting for <c>safety-narrowed</c> and
 /// <c>permission-not-expressible</c> codes.
+///
+/// <para>
+/// <strong>Primary-agent entry point:</strong> A primary agent with <c>fallback: role-skill</c>
+/// and profile <c>no-primary-agent: skill</c> renders as both a subagent file at
+/// <c>.claude/agents/&lt;name&gt;.md</c> and an entry-point skill at
+/// <c>.claude/skills/&lt;name&gt;/SKILL.md</c>, invoked as <c>/&lt;name&gt;</c> in the main conversation.
+/// The subagent file is kept for enforced invocation (<c>claude --agent &lt;name&gt;</c>).
+/// The skill frontmatter contains exactly <c>name</c>, <c>description</c>, and <c>license</c>;
+/// its body matches the canonical agent body verbatim. The entry-point skill and its resources
+/// share degradation records with the agent. Under profile <c>no-primary-agent: omit</c>,
+/// no entry-point skill is emitted, and the agent's existing records remain unchanged.
+/// </para>
 /// </remarks>
 public sealed class ClaudeRendererContractTests : IDisposable
 {
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+    private static readonly string[] SkillFrontmatterKeys = ["name", "description", "license"];
+    private static readonly string[] PrimaryAgentDegradationCodes = ["permission-not-expressible", "role-skill-fallback"];
 
     /// <summary>
     /// Claude Code's built-in tool vocabulary, transcribed from code.claude.com/docs/en/sub-agents
@@ -138,11 +154,18 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
         // C3: every rendered owner also projects its validated resource closure beside its
         // principal output, so the corpus count is principals plus emitted closures.
+        // A primary agent with no-primary-agent: skill contributes an entry-point skill
+        // (1 + its resource closure) in addition to the agent file.
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Invocation == SquadInvocation.Primary);
+        int primaryAgentSkillContribution = 1 + primaryAgent.Resources.Count;
+
         int expectedFileCount =
             source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
             + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
-                .Sum(skill => skill.Resources.Count);
+                .Sum(skill => skill.Resources.Count)
+            + primaryAgentSkillContribution;
         Assert.Equal(expectedFileCount, result.Files.Count);
         Assert.All(result.Files, f => Assert.Equal("claude", f.Target));
 
@@ -400,7 +423,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 string.Equals("claude", degradation.Target, StringComparison.Ordinal),
                 $"Degradation for '{degradation.CanonicalIdentity}' has the wrong target.");
             Assert.True(
-                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable",
+                degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable" or "role-skill-fallback",
                 $"Degradation for '{degradation.CanonicalIdentity}' has an unexpected code '{degradation.Code}'.");
             Assert.True(
                 string.Equals(degradation.CanonicalIdentity, degradation.OutputIdentity, StringComparison.Ordinal),
@@ -511,6 +534,323 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.Equal("sonnet", RequireScalar(frontmatter, "model", "conductor"));
     }
 
+    /// <summary>
+    /// Row (b): Project scope renders the primary agent as both a subagent and an entry-point
+    /// skill, each with its resource closure, under the same degradation records.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ExposesThePrimaryAgentAsAnEntryPointSkillBesideItsSubagent()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Invocation == SquadInvocation.Primary);
+
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Subagent file is present (Q1).
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{primaryAgent.Name}.md");
+
+        // Entry-point skill is present with exact frontmatter key set: {name, description, license}.
+        SquadDeploymentFile skillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/skills/{primaryAgent.Name}/SKILL.md");
+        (YamlMappingNode skillFrontmatter, string skillBody) = SplitFrontmatter(
+            Encoding.UTF8.GetString(skillFile.Content.Span),
+            primaryAgent.Name);
+
+        Assert.Equal(
+            SkillFrontmatterKeys.OrderBy(k => k, StringComparer.Ordinal),
+            skillFrontmatter.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(n => n.Value)
+                .OrderBy(v => v, StringComparer.Ordinal));
+
+        Assert.Equal(primaryAgent.Name, RequireScalar(skillFrontmatter, "name", primaryAgent.Name));
+        string expectedDescription = string.Join(" ", primaryAgent.Description.Split(
+            ['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        Assert.Equal(expectedDescription, RequireScalar(skillFrontmatter, "description", primaryAgent.Name));
+        Assert.Equal("MIT", RequireScalar(skillFrontmatter, "license", primaryAgent.Name));
+
+        // Body matches normalized canonical agent body.
+        string expectedAgentBody = primaryAgent.InstructionBody.Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (!expectedAgentBody.EndsWith('\n'))
+        {
+            expectedAgentBody += "\n";
+        }
+        Assert.Equal(expectedAgentBody, skillBody);
+
+        // Resources are projected beside the skill.
+        foreach (SquadResource resource in primaryAgent.Resources)
+        {
+            SquadDeploymentFile resourceFile = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".claude/skills/{primaryAgent.Name}/{resource.RelativePath}");
+            ReadOnlySpan<byte> expectedBytes = Encoding.UTF8.GetBytes(resource.Content);
+            Assert.True(expectedBytes.SequenceEqual(resourceFile.Content.Span));
+        }
+
+        // Exactly one role-skill-fallback record.
+        SquadDegradationRecord roleSkillFallback = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+        Assert.Equal(primaryAgent.Name, roleSkillFallback.OutputIdentity);
+        Assert.Equal(primaryAgent.BodyDigest, roleSkillFallback.InstructionDigest);
+        Assert.Contains($"/{primaryAgent.Name}", roleSkillFallback.Details, StringComparison.Ordinal);
+        Assert.Contains(primaryAgent.Fallback, roleSkillFallback.Details, StringComparison.Ordinal);
+        Assert.Contains("no-primary-agent: skill", roleSkillFallback.Details, StringComparison.Ordinal);
+
+        // Exactly one permission-not-expressible record.
+        SquadDegradationRecord permissionNotExpressible = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible");
+        Assert.Equal(primaryAgent.Name, permissionNotExpressible.OutputIdentity);
+        Assert.Equal(primaryAgent.BodyDigest, permissionNotExpressible.InstructionDigest);
+
+        // Check capability-decision pairs in details.
+        SquadCapabilityProfile agentCapProfile = source.CapabilityProfiles.Profiles[primaryAgent.CapabilityProfile];
+        foreach (string capability in source.CapabilityProfiles.Capabilities)
+        {
+            string decision = agentCapProfile.Permissions.TryGetValue(capability, out SquadPermissionDecision perm)
+                ? perm switch
+                {
+                    SquadPermissionDecision.Allow => "allow",
+                    SquadPermissionDecision.Ask => "ask",
+                    SquadPermissionDecision.Deny => "deny",
+                    _ => throw new InvalidOperationException($"Unexpected permission decision '{perm}'.")
+                }
+                : "deny";
+            Assert.Contains($"{capability}: {decision}", permissionNotExpressible.Details, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Roster:", permissionNotExpressible.Details, StringComparison.Ordinal);
+        Assert.Contains($"/{primaryAgent.Name}", permissionNotExpressible.Details, StringComparison.Ordinal);
+        Assert.Contains("MCP", permissionNotExpressible.Details, StringComparison.Ordinal);
+        Assert.Contains($"claude --agent {primaryAgent.Name}", permissionNotExpressible.Details, StringComparison.Ordinal);
+
+        // No other codes for this agent.
+        Assert.Equal(
+            PrimaryAgentDegradationCodes,
+            result.Degradations
+                .Where(d => d.CanonicalIdentity == primaryAgent.Name)
+                .Select(d => d.Code)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(c => c, StringComparer.Ordinal));
+
+        // Check all relative Markdown links in skill body resolve to emitted files.
+        const string linkPattern = @"\[([^\]]+)\]\(([^)]+)\)";
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(skillBody, linkPattern))
+        {
+            string link = match.Groups[2].Value;
+            if (!link.StartsWith("http", StringComparison.OrdinalIgnoreCase) && !link.StartsWith('#'))
+            {
+                string expectedPath = Path.Combine($".claude/skills/{primaryAgent.Name}", link).Replace("\\", "/", StringComparison.Ordinal);
+                Assert.Contains(
+                    result.Files,
+                    f => f.RelativePath == expectedPath);
+            }
+        }
+
+        // At most one record per (Target, CanonicalIdentity, Code).
+        var recordKeys = result.Degradations
+            .Select(d => (d.Target, d.CanonicalIdentity, d.Code))
+            .ToList();
+        Assert.Equal(recordKeys.Count, recordKeys.Distinct().Count());
+
+        // No Details contains "widening".
+        Assert.DoesNotContain(
+            result.Degradations,
+            d => d.Details != null && d.Details.Contains("widening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Row (c): Global scope renders the primary agent entry-point skill under <c>skills/</c>
+    /// instead of <c>.claude/skills/</c>, and the subagent under <c>agents/</c>.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_GlobalScopePlacesTheEntryPointSkillUnderSkills()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Invocation == SquadInvocation.Primary);
+
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Global);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Skill file is under skills/ without .claude prefix.
+        SquadDeploymentFile skillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+
+        // Resources are also under skills/ without .claude prefix.
+        foreach (SquadResource resource in primaryAgent.Resources)
+        {
+            SquadDeploymentFile resourceFile = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+        }
+
+        // Subagent file is under agents/ without .claude prefix.
+        SquadDeploymentFile agentFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+
+        // No .claude/ paths.
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.StartsWith(".claude/", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Row (d): The no-primary-agent setting switches only the entry-point skill. Both skill and
+    /// omit modes keep the agent file identical, and differ only in whether the skill and its
+    /// resources are emitted.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_NoPrimaryAgentValueSwitchesOnlyTheEntryPointSkill()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Invocation == SquadInvocation.Primary);
+
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+
+        // Render with skill mode (default).
+        SquadRenderRequest skillRequest = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+        SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
+        Assert.True(skillResult.Success);
+
+        // Render with omit mode.
+        using (var omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit"))
+        {
+            SquadRenderRequest omitRequest = new(
+                SourceDirectory: omitFixture.ProductRoot,
+                Targets: [SquadTarget.Claude],
+                Scope: SquadDeploymentScope.Project);
+            SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
+            Assert.True(omitResult.Success);
+
+            // Omit mode has no .claude/skills/<name>/ paths.
+            Assert.DoesNotContain(
+                omitResult.Files,
+                f => f.RelativePath.StartsWith($".claude/skills/{primaryAgent.Name}/", StringComparison.Ordinal));
+
+            // All omit-mode paths appear in skill mode.
+            foreach (SquadDeploymentFile omitFile in omitResult.Files)
+            {
+                Assert.Contains(skillResult.Files, sf => sf.RelativePath == omitFile.RelativePath);
+            }
+
+            // Skill-mode paths minus omit-mode paths equal exactly the skill and its resources.
+            HashSet<string> skillPaths = new(skillResult.Files.Select(f => f.RelativePath));
+            HashSet<string> omitPaths = new(omitResult.Files.Select(f => f.RelativePath));
+            skillPaths.ExceptWith(omitPaths);
+
+            string[] expectedSkillPaths = new string[1 + primaryAgent.Resources.Count];
+            expectedSkillPaths[0] = $".claude/skills/{primaryAgent.Name}/SKILL.md";
+            for (int i = 0; i < primaryAgent.Resources.Count; i++)
+            {
+                expectedSkillPaths[i + 1] = $".claude/skills/{primaryAgent.Name}/{primaryAgent.Resources[i].RelativePath}";
+            }
+
+            Assert.Equal(
+                expectedSkillPaths.OrderBy(p => p, StringComparer.Ordinal),
+                skillPaths.OrderBy(p => p, StringComparer.Ordinal));
+
+            // Agent file bytes are identical.
+            SquadDeploymentFile skillAgentFile = Assert.Single(
+                skillResult.Files,
+                f => f.RelativePath == $".claude/agents/{primaryAgent.Name}.md");
+            SquadDeploymentFile omitAgentFile = Assert.Single(
+                omitResult.Files,
+                f => f.RelativePath == $".claude/agents/{primaryAgent.Name}.md");
+            Assert.True(skillAgentFile.Content.Span.SequenceEqual(omitAgentFile.Content.Span));
+
+            // Omit mode: one permission-not-expressible (no role-skill-fallback, no omitted).
+            IReadOnlyList<SquadDegradationRecord> omitPermissionNotExpressible = omitResult.Degradations
+                .Where(d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible")
+                .ToArray();
+            Assert.Single(omitPermissionNotExpressible);
+            Assert.Contains(
+                "Roster:",
+                omitPermissionNotExpressible[0].Details,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                $"/{primaryAgent.Name}",
+                omitPermissionNotExpressible[0].Details,
+                StringComparison.Ordinal);
+
+            // Omit mode has no role-skill-fallback.
+            Assert.DoesNotContain(
+                omitResult.Degradations,
+                d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+        }
+    }
+
+    /// <summary>
+    /// Row (e): The renderer throws when a canonical skill has the same name as the primary agent,
+    /// before any file is produced.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ThrowsWhenACanonicalSkillOccupiesTheEntryPointIdentity()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Invocation == SquadInvocation.Primary);
+
+        using (var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name))
+        {
+            ClaudeRenderer renderer = new();
+            SquadRenderRequest request = new(
+                SourceDirectory: collisionFixture.ProductRoot,
+                Targets: [SquadTarget.Claude],
+                Scope: SquadDeploymentScope.Project);
+
+            SquadRenderValidationException ex = await Assert.ThrowsAsync<SquadRenderValidationException>(
+                () => renderer.RenderAsync(request));
+            Assert.Contains(primaryAgent.Name, ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Row (f): Regression guard. The loader rejects unsupported no-primary-agent values,
+    /// so this test passes before implementation and documents that the renderer also fails closed.
+    /// RED waived.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_FailsClosedOnAnUnsupportedNoPrimaryAgentValue()
+    {
+        using (var renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename"))
+        {
+            ClaudeRenderer renderer = new();
+            SquadRenderRequest request = new(
+                SourceDirectory: renameFixture.ProductRoot,
+                Targets: [SquadTarget.Claude],
+                Scope: SquadDeploymentScope.Project);
+
+            SquadSourceValidationException ex = await Assert.ThrowsAsync<SquadSourceValidationException>(() => renderer.RenderAsync(request));
+            Assert.Contains("no-primary-agent", ex.Message, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task RenderAsync_IsDeterministic()
     {
@@ -615,4 +955,49 @@ public sealed class ClaudeRendererContractTests : IDisposable
         return Assert.IsType<YamlScalarNode>(value).Value
             ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null scalar value.");
     }
+}
+
+/// <summary>
+/// Copies the real <c>products/kyber-squad</c> corpus and modifies the <c>no-primary-agent</c>
+/// value in the <c>role-skill</c> fallback profile to a different value (e.g., "omit" or an
+/// unsupported value like "rename"), so contract tests can validate rendering behavior under
+/// different profile configurations without editing the canonical corpus.
+/// </summary>
+internal sealed class ClaudeNoPrimaryAgentFixture : IDisposable
+{
+    private readonly TempDirectory _temp = new();
+
+    private ClaudeNoPrimaryAgentFixture()
+    {
+        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+    }
+
+    internal string ProductRoot { get; }
+
+    internal static ClaudeNoPrimaryAgentFixture Create(string noPrimaryAgentValue)
+    {
+        ClaudeNoPrimaryAgentFixture fixture = new();
+        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
+
+        string fallbacksPath = Path.Combine(fixture.ProductRoot, "profiles", "fallbacks.yml");
+        string original = File.ReadAllText(fallbacksPath);
+
+        // Replace "no-primary-agent: skill" with "no-primary-agent: <value>"
+        string mutated = original.Replace(
+            "no-primary-agent: skill",
+            $"no-primary-agent: {noPrimaryAgentValue}",
+            StringComparison.Ordinal);
+
+        if (string.Equals(original, mutated, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{fallbacksPath}' to contain 'no-primary-agent: skill' to replace.");
+        }
+
+        File.WriteAllText(fallbacksPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        return fixture;
+    }
+
+    public void Dispose() => _temp.Dispose();
 }
