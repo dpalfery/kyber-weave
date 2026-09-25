@@ -131,6 +131,6 @@ What needs deciding:
 - `scripts/install.sh` — quarantine handling and any team-id verification.
 - `src/KyberWeave.Cli/Update/` — the self-updater, if it gains signature checks. Changing it
   triggers the local release loop in [distribution](../../distribution.md#verifying-a-release-locally).
-- [`kyberdash-local-release-loop`](../../todo/kyberdash-local-release-loop.md) — the loop cannot build
+- [`kyberdash-local-release-loop`](kyberdash-local-release-loop.md) — the loop cannot build
   `kyberdash`, and cannot sign anything with a Developer ID either, so signed paths are
   verifiable only in a real release run.
