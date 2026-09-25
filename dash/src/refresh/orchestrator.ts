@@ -71,6 +71,7 @@ export async function refreshHarnessSources(
   const coveredFromUtc = dateRange.start.toISOString()
   const coveredThroughUtc = dateRange.end.toISOString()
   const importedAtUtc = commandStartedAt.toISOString()
+  store.reconcileDeadRefreshRuns(importedAtUtc)
   const runId = store.startRefreshRun({
     // Random, not derived: two runs can legitimately start in the same millisecond from
     // the same process (a test harness does exactly that), and a derived id would collide.
@@ -79,93 +80,115 @@ export async function refreshHarnessSources(
     pid: process.pid,
     trigger: options.trigger ?? 'cli',
   })
-  const descriptors = [...(dependencies.descriptors ?? HARNESS_DESCRIPTORS)]
-  const iterate = dependencies.iterateNativeUnits ?? productionIterateNativeUnits
-  const ingest = dependencies.ingestProviders ?? productionIngestProviders
-  const concurrency = dependencies.jobConcurrency ?? defaultJobConcurrency()
-  const writer = createCanonicalWriter({
-    capacity: dependencies.writerCapacity ?? DEFAULT_WRITER_CAPACITY,
-    commit: (item) => store.commitSourceUnit(item),
-  })
-
-  const providers = await dependencies.getAllProviders()
-  auditProviderRegistry(providers)
-
-  const otlpSpansByKey = indexOtlpSpans(store)
-  const parseAllSessions = dependencies.parseAllSessions
-    ?? ((range, filter) => warmClaudeSpecialPath(range, filter, dependencies.claudeCacheDir))
-
-  const settled = await runJobsSettled(descriptors, concurrency, async (descriptor) =>
-    runHarnessJob({
-      descriptor,
-      store,
-      providers,
-      dateRange,
-      coveredFromUtc,
-      coveredThroughUtc,
-      importedAtUtc,
-      iterate,
-      ingest,
-      writer,
-      otlpSpansByKey,
-      parseAllSessions,
-      fingerprintFile: dependencies.fingerprintFile,
-      peekEvidence: dependencies.peekEvidence,
-      parseCalls: dependencies.parseCalls,
-      signal: dependencies.signal,
-    }),
-  )
-
-  const rows = settled.map((result, index) => {
-    if (result.status === 'fulfilled') return result.value
-    return failedRow(descriptors[index]!.harnessId, asError(result.reason))
-  })
-
+  let runClosed = false
   try {
-    await writer.drain()
-  } catch {
-    // Per-item commit failures already landed on the responsible job row.
-  }
-  purgeExpiredContent(store, commandStartedAt)
+    const descriptors = [...(dependencies.descriptors ?? HARNESS_DESCRIPTORS)]
+    const iterate = dependencies.iterateNativeUnits ?? productionIterateNativeUnits
+    const ingest = dependencies.ingestProviders ?? productionIngestProviders
+    const concurrency = dependencies.jobConcurrency ?? defaultJobConcurrency()
+    const writer = createCanonicalWriter({
+      capacity: dependencies.writerCapacity ?? DEFAULT_WRITER_CAPACITY,
+      commit: (item) => store.commitSourceUnit(item),
+    })
 
-  // Exactly one projection per refresh, and only after the writer drained —
-  // projecting earlier would cache a store the writer was still committing to.
-  let derivationFailed = false
-  try {
-    await projectCanonicalStore(store)
-  } catch {
-    derivationFailed = true
-  }
+    const providers = await dependencies.getAllProviders()
+    auditProviderRegistry(providers)
 
-  const failedJobs = rows.filter((row) => row.status === 'failed').length
-  const exitCode: 0 | 1 = derivationFailed || failedJobs > 0 ? 1 : 0
+    const otlpSpansByKey = indexOtlpSpans(store)
+    const parseAllSessions = singleFlightParse(
+      dependencies.parseAllSessions
+        ?? ((range, filter) => warmClaudeSpecialPath(range, filter, dependencies.claudeCacheDir)),
+    )
 
-  // Close the run the same way whether it worked or not: the footer needs the failure as
-  // much as the success, and a run row left open would later read as one still going.
-  const summary =
-    exitCode === 0
-      ? `${rows.length} source job(s), ${store.sessionCount()} session(s)`
-      : `${failedJobs} of ${rows.length} source job(s) failed${derivationFailed ? '; derivation failed' : ''}`
-  store.completeRefreshRun(
-    runId,
-    exitCode === 0 ? 'success' : 'failure',
-    new Date().toISOString(),
-    summary,
-  )
+    const settled = await runJobsSettled(descriptors, concurrency, async (descriptor) =>
+      runHarnessJob({
+        descriptor,
+        store,
+        providers,
+        dateRange,
+        coveredFromUtc,
+        coveredThroughUtc,
+        importedAtUtc,
+        iterate,
+        ingest,
+        writer,
+        otlpSpansByKey,
+        parseAllSessions,
+        fingerprintFile: dependencies.fingerprintFile,
+        peekEvidence: dependencies.peekEvidence,
+        parseCalls: dependencies.parseCalls,
+        signal: dependencies.signal,
+      }),
+    )
 
-  return {
-    historyWeeks,
-    commandStartedAt: importedAtUtc,
-    rows,
-    derived: {
-      sessions: store.sessionCount(),
-      runs: store.runCount(),
-      executions: store.executionCount(),
-      rollups: store.harnessRollupCount(),
-    },
-    failedJobs,
-    derivationFailed,
-    exitCode,
+    const rows = settled.map((result, index) => {
+      if (result.status === 'fulfilled') return result.value
+      return failedRow(descriptors[index]!.harnessId, asError(result.reason))
+    })
+
+    try {
+      await writer.drain()
+    } catch {
+      // Per-item commit failures already landed on the responsible job row.
+    }
+    purgeExpiredContent(store, commandStartedAt)
+
+    // Exactly one projection per refresh, and only after the writer drained —
+    // projecting earlier would cache a store the writer was still committing to.
+    let derivationFailed = false
+    try {
+      await projectCanonicalStore(store)
+    } catch {
+      derivationFailed = true
+    }
+
+    const failedJobs = rows.filter((row) => row.status === 'failed').length
+    const exitCode: 0 | 1 = derivationFailed || failedJobs > 0 ? 1 : 0
+
+    const report: RefreshReport = {
+      historyWeeks,
+      commandStartedAt: importedAtUtc,
+      rows,
+      derived: {
+        sessions: store.sessionCount(),
+        runs: store.runCount(),
+        executions: store.executionCount(),
+        rollups: store.harnessRollupCount(),
+      },
+      failedJobs,
+      derivationFailed,
+      exitCode,
+    }
+
+    // Close the run the same way whether it worked or not: the footer needs the failure as
+    // much as the success, and a run row left open would later read as one still going.
+    const summary =
+      exitCode === 0
+        ? `${rows.length} source job(s), ${report.derived.sessions} session(s)`
+        : `${failedJobs} of ${rows.length} source job(s) failed${derivationFailed ? '; derivation failed' : ''}`
+    store.completeRefreshRun(
+      runId,
+      exitCode === 0 ? 'success' : 'failure',
+      new Date().toISOString(),
+      summary,
+    )
+    runClosed = true
+    return report
+  } catch (error) {
+    if (!runClosed) {
+      const failure = asError(error)
+      try {
+        store.completeRefreshRun(
+          runId,
+          'failure',
+          new Date().toISOString(),
+          safeDiagnostic(failure, 'refresh failed'),
+        )
+      } catch {
+        // Preserve the original refresh error if the store also cannot close the row.
+      }
+    }
+    throw error
   }
 }
 
@@ -253,7 +276,7 @@ async function runHarnessJob(context: JobContext): Promise<HarnessJobRow> {
       })
     }
 
-    const ingestResult = await ingestUnit(context.ingest, descriptor, unit)
+    const ingestResult = await ingestUnit(context.ingest, descriptor, unit, context.dateRange)
     for (const problem of ingestResult.problems) {
       store.recordProblem({
         ...problem,
@@ -321,10 +344,12 @@ async function ingestUnit(
   ingest: typeof productionIngestProviders,
   descriptor: HarnessSourceDescriptor,
   unit: NativeUnit,
+  dateRange: SourceReaderDependencies['dateRange'],
 ) {
   const loaded = await ingest([descriptor.harnessId], () => ({
     calls: unit.envelopes.map((envelope) => envelope.call),
     filePath: unit.source.path,
+    dateRange,
     harnessId: descriptor.harnessId,
     sourceKey: unit.sourceKey,
   }))
@@ -519,6 +544,25 @@ function otlpRecordsFor(
   return store.recordsBySpanIds(spanIds)
 }
 
+type ParseAllSessions = NonNullable<SourceReaderDependencies['parseAllSessions']>
+
+/**
+ * Share one in-flight warm per (range, filter). The Claude descriptors run concurrently
+ * under the job pool, and parallel warms would interleave session-cache saves and the
+ * KYBERDASH_CACHE_DIR swap.
+ */
+function singleFlightParse(parse: ParseAllSessions): ParseAllSessions {
+  const inFlight = new Map<string, Promise<unknown>>()
+  return (range, filter) => {
+    const key = JSON.stringify([range?.start.toISOString(), range?.end.toISOString(), filter])
+    const existing = inFlight.get(key)
+    if (existing !== undefined) return existing
+    const pending = parse(range, filter).finally(() => inFlight.delete(key))
+    inFlight.set(key, pending)
+    return pending
+  }
+}
+
 async function warmClaudeSpecialPath(
   dateRange: SourceReaderDependencies['dateRange'] | undefined,
   providerFilter: string | undefined,
@@ -527,13 +571,10 @@ async function warmClaudeSpecialPath(
   mkdirSync(cacheDir, { recursive: true })
   const previous = process.env['KYBERDASH_CACHE_DIR']
   process.env['KYBERDASH_CACHE_DIR'] = cacheDir
-  const { acquireCacheRefreshLock } = await import('./lock.js')
-  const lock = await acquireCacheRefreshLock({ directory: cacheDir })
   try {
     const { parseAllSessions } = await import('../ingest/parser.js')
     await parseAllSessions(dateRange, providerFilter)
   } finally {
-    if (lock.outcome === 'acquired') await lock.handle.release()
     if (previous === undefined) delete process.env['KYBERDASH_CACHE_DIR']
     else process.env['KYBERDASH_CACHE_DIR'] = previous
   }

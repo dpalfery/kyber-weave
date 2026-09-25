@@ -85,8 +85,8 @@ export function renderMarkdown(report: ContextReport): string {
     if (coverage.refresh.inProgress !== null) {
       push(`- **In progress:** pid ${coverage.refresh.inProgress.pid} since ${coverage.refresh.inProgress.since}`)
     }
-    push(`- **Quarantine:** ${coverage.quarantineCount}`)
-    push(`- **Problems:** ${coverage.problemCount}`)
+    push(`- **Quarantine:** ${coverage.quarantineCount === null ? 'unavailable' : coverage.quarantineCount}`)
+    push(`- **Problems:** ${coverage.problemCount === null ? 'unavailable' : coverage.problemCount}`)
     if (coverage.harnesses.length === 0) {
       push('- **Harnesses:** none in the window')
     } else {

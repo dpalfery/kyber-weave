@@ -10,8 +10,12 @@
 // measurement. And cost is assembled last and kept per basis (R8.9, R14.2): bases are not
 // blended, and no section above cost may order itself by it.
 
-import type { CanonicalRecord, MetricAvailability } from '../../canon/types.js'
-import type { KyberBridge, SessionSummary } from '../../server/bridge.js'
+import type { MetricAvailability } from '../../canon/types.js'
+import type {
+  KyberBridge,
+  SessionCostContribution,
+  SessionSummary,
+} from '../../server/bridge.js'
 import type { Finding } from '../findings.js'
 import { buildScorecard } from '../scorecard.js'
 import {
@@ -142,7 +146,7 @@ export function latestOf(sessions: readonly SessionSummary[]): SessionSummary | 
 }
 
 /** A priced record, reduced to what the cost section needs. */
-export type CostContribution = { sessionId: string | null; basis: string; status: string; value?: number }
+export type CostContribution = SessionCostContribution
 
 /**
  * Cost per basis, summed without blending (R8.9, R14.2, and R5.1 of the archived
@@ -198,17 +202,12 @@ export function costByBasis(contributions: readonly CostContribution[]): ReportC
  * would be the blending this section exists to prevent. Without a store to read, the
  * section reports that it could not be computed rather than falling back to the blend.
  */
-function readCostContributions(bridge: KyberBridge, sessionIds: ReadonlySet<string>): CostContribution[] {
-  const store = (bridge as unknown as { store?: { listAll?: () => CanonicalRecord[] } }).store
-  if (store?.listAll === undefined) return []
-  return safely(() => store.listAll!(), [])
-    .filter((record) => record.sessionId != null && sessionIds.has(record.sessionId))
-    .map((record) => ({
-      sessionId: record.sessionId ?? null,
-      basis: String(record.cost?.basis ?? 'unknown'),
-      status: String(record.cost?.status ?? 'no_rate'),
-      ...(typeof record.cost?.value === 'number' ? { value: record.cost.value } : {}),
-    }))
+function readCost(bridge: KyberBridge, sessionIds: ReadonlySet<string>): ReportCost {
+  try {
+    return costByBasis(bridge.getSessionCostContributions([...sessionIds]))
+  } catch {
+    return [{ basis: 'unknown', amountUsd: unmeasurable<number>('cost query failed') }]
+  }
 }
 
 /**
@@ -277,12 +276,18 @@ function buildCoverage(
     hints.push(`Last successful refresh was ${refresh.lastSuccessAt}. Run \`kyberdash dash refresh\`.`)
   }
 
+  const quarantineCount = safely(() => bridge.getQuarantineCount(), null)
+  const problemCount = safely(() => bridge.getProblemCount(), null)
+  if (quarantineCount === null || problemCount === null) {
+    hints.push('Database count query failed; quarantine or problem totals are unavailable.')
+  }
+
   return {
     storePath,
     refresh,
     harnesses,
-    quarantineCount: safely(() => bridge.getQuarantine().length, 0),
-    problemCount: safely(() => bridge.getProblems().length, 0),
+    quarantineCount,
+    problemCount,
     hints,
   }
 }
@@ -293,27 +298,10 @@ function buildCoverage(
  * last worked on Tuesday" is what tells a reader how stale the data is.
  */
 function readRefreshState(bridge: KyberBridge): ReportCoverage['refresh'] {
-  const store = (bridge as unknown as { store?: RefreshRunReader }).store
-  if (store?.latestRefreshRun === undefined) {
-    return { lastSuccessAt: null, lastFailure: null, inProgress: null }
-  }
-  const success = safely(() => store.latestRefreshRun('success'), undefined)
-  const failure = safely(() => store.latestRefreshRun('failure'), undefined)
-  const running = safely(() => store.latestRefreshRun('running'), undefined)
-  return {
-    lastSuccessAt: success?.completedAt ?? success?.startedAt ?? null,
-    lastFailure:
-      failure === undefined
-        ? null
-        : { at: failure.completedAt ?? failure.startedAt, summary: failure.summary ?? 'refresh failed' },
-    inProgress: running === undefined ? null : { pid: running.pid, since: running.startedAt },
-  }
-}
-
-type RefreshRunReader = {
-  latestRefreshRun(status: 'success' | 'failure' | 'running'):
-    | { startedAt: string; completedAt: string | null; pid: number; summary: string | null }
-    | undefined
+  return safely(
+    () => bridge.getRefreshState(),
+    { lastSuccessAt: null, lastFailure: null, inProgress: null },
+  )
 }
 
 function buildHarnesses(bridge: KyberBridge, scope: ReportScope): ReportHarness[] {
@@ -338,9 +326,7 @@ function buildLatestSession(
   // `getSessionContent()` is the unclipped `{ sessionId, parts }` inspector
   // view and never carries context — reading it here measured nothing and
   // always fell through to the no-structure reason.
-  const payload = safely(() => bridge.getSessionPayload(session.session_id), null) as
-    | { context?: unknown }
-    | null
+  const payload = safely(() => bridge.getSessionPayload(session.session_id), null)
   const context = extractContext(payload ?? undefined)
 
   const unmeasured = (reason: string) => ({
@@ -354,19 +340,44 @@ function buildLatestSession(
     cacheInvalidation: false,
   })
 
-  const latestTurn =
+  const windowUnavailableReason =
     context === null
-      ? unmeasured('harness exported no message structure for this session')
-      : {
-          index: context.turn.index,
-          pressure: measured(context.turn.pressure),
-          contextWindow: measured(context.contextLimit, 'tokens'),
-          buckets: Object.fromEntries(
-            BUCKET_KEYS.map((key) => [key, measured(context.turn.buckets[key] ?? 0, 'tokens')]),
-          ) as Record<BucketKey, ReturnType<typeof measured<number>>>,
-          residual: measured(context.turn.residual.tokens, 'tokens'),
-          cacheInvalidation: context.flagged.includes(context.turn.index),
-        }
+      ? 'harness exported no message structure for this session'
+      : context.contextLimit === undefined
+        ? context.unavailableReason
+        : context.contextLimitSource === 'default'
+          ? 'source reported no context window'
+          : undefined
+
+  const latestTurn = context === null ? unmeasured('harness exported no message structure for this session') : {
+    index: context.turn.index,
+    pressure:
+      windowUnavailableReason !== undefined
+        ? unmeasurable<number>(windowUnavailableReason)
+        : context.turn.pressure === undefined
+          ? unmeasurable<number>(context.unavailableReason)
+          : measured(context.turn.pressure),
+    contextWindow:
+      windowUnavailableReason !== undefined
+        ? unmeasurable<number>(windowUnavailableReason)
+        : measured(context.contextLimit!, 'tokens'),
+    buckets: Object.fromEntries(
+      BUCKET_KEYS.map((key) => {
+        const value = context.turn.buckets?.[key]
+        return [
+          key,
+          context.measurable && typeof value === 'number' && Number.isFinite(value)
+            ? measured(value, 'tokens')
+            : unmeasurable<number>(context.bucketReasons[key] ?? context.unavailableReason),
+        ]
+      }),
+    ) as Record<BucketKey, ReturnType<typeof measured<number>>>,
+    residual:
+      context.measurable && context.turn.residualTokens !== undefined
+        ? measured(context.turn.residualTokens, 'tokens')
+        : unmeasurable<number>(context.unavailableReason),
+    cacheInvalidation: context.flagged.includes(context.turn.index),
+  }
 
   return {
     sessionId: session.session_id,
@@ -377,7 +388,7 @@ function buildLatestSession(
     view: `session/${session.session_id}`,
     latestTurn,
     toolDefinitionSources:
-      context === null
+      context === null || context.turn.toolDefinitionsByServer === undefined
         ? []
         : [...context.turn.toolDefinitionsByServer.entries()]
             .sort(([, a], [, b]) => b - a)
@@ -387,42 +398,102 @@ function buildLatestSession(
 }
 
 type LatestContext = {
-  contextLimit: number
+  contextLimit?: number
+  contextLimitSource?: 'reported' | 'default'
+  measurable: boolean
+  unavailableReason: string
+  bucketReasons: Partial<Record<BucketKey, string>>
   turn: {
     index: number
-    pressure: number
-    buckets: Record<string, number>
-    residual: { tokens: number }
-    toolDefinitionsByServer: Map<string, number>
+    pressure?: number
+    buckets?: Record<string, unknown>
+    residualTokens?: number
+    toolDefinitionsByServer?: Map<string, number>
   }
   flagged: number[]
 }
 
-/** Pull the latest turn out of a persisted context analysis, or `null` when unmeasurable. */
-function extractContext(payload: { context?: unknown } | undefined): LatestContext | null {
-  const context = payload?.context as
-    | {
-        measurable?: boolean
-        contextLimit?: number
-        turns?: LatestContext['turn'][]
-        flaggedTurns?: number[]
-      }
-    | undefined
-  if (context?.measurable !== true) return null
-  const turns = context.turns ?? []
-  const turn = turns[turns.length - 1]
-  if (turn === undefined || typeof context.contextLimit !== 'number') return null
-  return {
-    contextLimit: context.contextLimit,
-    turn: {
-      ...turn,
-      toolDefinitionsByServer:
-        turn.toolDefinitionsByServer instanceof Map
-          ? turn.toolDefinitionsByServer
-          : new Map(Object.entries((turn.toolDefinitionsByServer ?? {}) as Record<string, number>)),
-    },
-    flagged: context.flaggedTurns ?? [],
+/** Pull whatever independent pressure/window facts survive from a persisted context analysis. */
+function extractContext(payload: { context?: unknown; turns?: unknown[] } | undefined): LatestContext | null {
+  const context = asObject(payload?.context)
+  if (context === undefined) return null
+
+  const analysisTurns = Array.isArray(context.turns) ? context.turns : []
+  const turn = asObject(analysisTurns[analysisTurns.length - 1])
+  const payloadTurns = Array.isArray(payload?.turns) ? payload.turns : []
+  const payloadTurn = asObject(payloadTurns[payloadTurns.length - 1])
+  const last = asObject(context.last)
+  const lastBuckets = asObject(last?.buckets)
+  const rawLimitSource = context.contextLimitSource
+  const contextLimitSource =
+    rawLimitSource === 'reported' || rawLimitSource === 'default' ? rawLimitSource : undefined
+  const contextLimit = finiteNumber(context.contextLimit)
+  const reportedInput = finiteNumber(last?.reported_input)
+  const turnIndex = finiteNumber(turn?.index) ?? finiteNumber(payloadTurn?.index) ?? 0
+  const turnPressure = finiteNumber(turn?.pressure)
+  const pressure =
+    contextLimitSource === 'default'
+      ? undefined
+      : turnPressure ??
+        (reportedInput !== undefined && contextLimit !== undefined && contextLimit > 0
+          ? reportedInput / contextLimit
+          : undefined)
+
+  const bucketReasons: Partial<Record<BucketKey, string>> = {}
+  for (const key of BUCKET_KEYS) {
+    const reason = asObject(lastBuckets?.[key])?.reason
+    if (typeof reason === 'string' && reason.length > 0) bucketReasons[key] = reason
   }
+  const declaredReason = typeof context.reason === 'string' ? context.reason : undefined
+  const firstBucketReason = BUCKET_KEYS.map((key) => bucketReasons[key]).find(
+    (reason): reason is string => reason !== undefined,
+  )
+  const unavailableReason =
+    firstBucketReason ??
+    (declaredReason !== 'declared_not_measurable' && declaredReason !== 'no_message_structure'
+      ? declaredReason
+      : undefined) ??
+    'harness exported no message structure for this session'
+
+  const rawServers = asObject(turn?.toolDefinitionsByServer)
+  const toolDefinitionsByServer =
+    rawServers === undefined
+      ? undefined
+      : new Map(
+          Object.entries(rawServers).filter(
+            (entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]),
+          ),
+        )
+  const residual = asObject(turn?.residual)
+  const residualTokens = finiteNumber(residual?.tokens)
+
+  return {
+    contextLimit: contextLimit !== undefined && contextLimit > 0 ? contextLimit : undefined,
+    contextLimitSource,
+    measurable: context.measurable === true,
+    unavailableReason,
+    bucketReasons,
+    turn: {
+      index: turnIndex,
+      pressure,
+      ...(turn === undefined ? {} : { buckets: asObject(turn.buckets) }),
+      residualTokens,
+      toolDefinitionsByServer,
+    },
+    flagged: Array.isArray(context.flaggedTurns)
+      ? context.flaggedTurns.filter((value): value is number => typeof value === 'number')
+      : [],
+  }
+}
+
+function asObject(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 /**
@@ -516,9 +587,7 @@ export function buildContextReport(
 
   // Last, always (R14.2).
   if (sections.has('cost')) {
-    report.cost = costByBasis(
-      readCostContributions(bridge, new Set(scoped.map((session) => session.session_id))),
-    )
+    report.cost = readCost(bridge, new Set(scoped.map((session) => session.session_id)))
   }
 
   return report

@@ -44,6 +44,7 @@
 // the sort.
 
 import { contextCompositionAvailability } from '../canon/measurability.js'
+import type { ContextLimitSource } from '../canon/context-window.js'
 import { CANONICAL_CONTENT_KEYS, type CanonicalContentKey, type Measurability } from '../canon/types.js'
 import { approximateO200kBase } from '../canon/tokens.js'
 import {
@@ -143,6 +144,8 @@ export const DEFAULT_ZERO_PREVIOUS_FLOOR = 1_000
 export type ContextCountOptions = {
   /** Context window size in tokens; headroom and pressure are against it. */
   contextLimit: number
+  /** Provenance of the context window: reported by telemetry or assumed default. */
+  contextLimitSource?: ContextLimitSource
   /** Sharp-rise factor for R7.5; defaults to {@link DEFAULT_FRESH_JUMP_FACTOR}. */
   freshJumpFactor?: number
   /** Fresh-input floor for rises from zero; defaults to the 1_000 above. */
@@ -228,6 +231,8 @@ export type ContextAnalysis =
       measurable: true
       /** The window size every headroom and pressure figure is against. */
       contextLimit: number
+      /** Provenance of the context window. */
+      contextLimitSource?: ContextLimitSource
       /** Composition and pressure per turn, session order (R7.1, R7.4). */
       turns: TurnPressure[]
       /** Summed residual over the session, as explicit as per turn (R7.3). */
@@ -253,6 +258,8 @@ export type ContextAnalysis =
       /** Turns the session had — what was refused a composition. */
       turns: number
       contextLimit: number
+      /** Provenance of the context window. */
+      contextLimitSource?: ContextLimitSource
     }
 
 function emptyBuckets(): Record<CanonicalContentKey, number> {
@@ -338,6 +345,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
       reason: declared ? 'declared_not_measurable' : 'no_message_structure',
       turns: turns.length,
       contextLimit,
+      ...(options.contextLimitSource !== undefined ? { contextLimitSource: options.contextLimitSource } : {}),
     }
   }
 
@@ -457,6 +465,7 @@ export function analyzeContext(turns: readonly ContextTurn[], options: ContextCo
   return {
     measurable: true,
     contextLimit,
+    ...(options.contextLimitSource !== undefined ? { contextLimitSource: options.contextLimitSource } : {}),
     turns: perTurn,
     residualTotal,
     derivedCounts,

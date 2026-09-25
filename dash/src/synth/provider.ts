@@ -34,13 +34,16 @@ export type { ParsedProviderCall, Provider, SessionSource } from '../providers/t
 import type { CanonicalRecord, Problem } from '../canon/types.js'
 import { claudeReader } from './readers/claude.js'
 import { copilotCliReader, loadCopilotCliCalls } from './readers/copilot.js'
+import { copilotVscodeReader } from './readers/copilot-vscode.js'
 import { loadClaudeCalls } from './readers/claude.js'
 import { codexReader } from './readers/codex.js'
 import { kiloReader } from './readers/kilo.js'
 import { opencodeReader } from './readers/opencode.js'
+import { cursorReader } from './readers/cursor.js'
 import { piReader } from './readers/pi.js'
 import type { ContentReader, ReaderTurn, SourceRecordEnvelope } from './readers/types.js'
 import { isExcludedHarness, Synthesizer } from './synth.js'
+import type { DateRange } from '../types.js'
 
 /** Problem code for a session store that exists but cannot be parsed (R1.3). */
 export const PROVIDER_PARSE_ERROR = 'PROVIDER_PARSE_ERROR'
@@ -71,6 +74,8 @@ export type ProviderLoad = {
   calls: ParsedProviderCall[]
   /** The same session file the registered reader must inspect. */
   filePath: string
+  /** Requested refresh window for readers that share a database among source units. */
+  dateRange?: DateRange
   /** Classified harness id for this source unit, when the job already knows it. */
   harnessId?: string
   /** Stable source-unit key for checkpoints and parse problems. */
@@ -110,6 +115,9 @@ export const PROVIDER_READERS: ReadonlyMap<string, ContentReader> = new Map([
   ['kilo-vscode-legacy', kiloReader],
   ['copilot', copilotCliReader],
   ['copilot-cli', copilotCliReader],
+  ['copilot-vscode', copilotVscodeReader],
+  ['cursor', cursorReader],
+  ['cursor-agent', cursorReader],
   ['pi', piReader],
 ])
 
@@ -141,7 +149,7 @@ function callsAndTurns(
   if (reader === undefined) return Promise.resolve([calls, undefined])
   return (async () => {
     const turns: ReaderTurn[] = []
-    for await (const turn of reader.read(load.filePath)) turns.push(turn)
+    for await (const turn of reader.read(load.filePath, load.dateRange)) turns.push(turn)
     return [calls, turns] as const
   })()
 }
@@ -156,8 +164,19 @@ function matchingTurns(
   calls: readonly ParsedProviderCall[],
   turns: readonly ReaderTurn[],
 ): Array<ReaderTurn | undefined> {
+  const turnsById = new Map<string, ReaderTurn>()
+  for (const turn of turns) {
+    if (turn.nativeRecordId !== undefined && !turnsById.has(turn.nativeRecordId)) {
+      turnsById.set(turn.nativeRecordId, turn)
+    }
+  }
+  const hasNativeIds = turnsById.size > 0
+
   return calls.map((call, index) => {
-    const turn = turns[index]
+    const positional = turns[index]
+    const turn = call.turnId === undefined
+      ? (hasNativeIds ? undefined : positional)
+      : turnsById.get(call.turnId) ?? (hasNativeIds ? undefined : positional)
     if (turn === undefined) return undefined
     if (turn.sessionId !== undefined && turn.sessionId !== call.sessionId) return undefined
     if (turn.nativeRecordId !== undefined && call.turnId !== undefined && turn.nativeRecordId !== call.turnId) {
@@ -226,7 +245,12 @@ function envelopesFor(
     sourceKey: load.sourceKey ?? `${harnessId}:${call.sessionId}`,
     nativeSessionId: call.sessionId,
     nativeRecordId: call.turnId,
-    call,
+    // The shared Copilot parser labels every surface `copilot`; preserve the
+    // specific VS Code identity on synthesized records so source-level
+    // measurability describes the chat-session journal we actually read.
+    call: identity === 'copilot-vscode' && call.provider === 'copilot'
+      ? { ...call, provider: identity }
+      : call,
     ...(turns?.[index] !== undefined ? { readerTurn: turns[index] } : {}),
   }))
 }
