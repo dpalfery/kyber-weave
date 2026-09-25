@@ -1,13 +1,26 @@
 {
   "mcpServers": {
+    "kyber-weave": {
+      "command": "${userHome}/.local/bin/kyber-weave-mcp",
+      "args": [
+        "--repo-root",
+        "${workspaceFolder}"
+      ],
+      "env": {
+        "PATH": "${userHome}/.local/bin:${env:PATH}"
+      }
+    },
     "codegraph": {
-      "command": "codegraph",
+      "command": "${userHome}/.local/bin/codegraph",
       "args": [
         "serve",
         "--mcp",
         "--path",
         "${workspaceFolder}"
-      ]
+      ],
+      "env": {
+        "PATH": "${userHome}/.local/bin:${env:PATH}"
+      }
     },
     "context7": {
       "url": "https://mcp.context7.com/mcp"
