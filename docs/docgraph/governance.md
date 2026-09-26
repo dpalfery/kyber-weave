@@ -5,7 +5,7 @@ doc-type: governance
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-24
 code-refs:
   - DocSpecValidator
   - DocDriftLinter
@@ -37,7 +37,7 @@ Needs no code index. Exits non-zero on any error.
 | Rule | Fires when |
 |---|---|
 | `KW-DOC-SPEC-001` | No frontmatter block, or one that could not be parsed |
-| `KW-DOC-SPEC-002` | `doc-type`, `status`, or `last-reviewed` outside its closed vocabulary or format |
+| `KW-DOC-SPEC-002` | `doc-type`, `status`, `last-reviewed`, or an undeclared `technology` outside its closed vocabulary or format |
 | `KW-DOC-SPEC-003` | A required key is missing or empty for this doc-type |
 | `KW-DOC-SPEC-004` | `component` or `owner` is not a row in [catalog.md](../catalog.md) |
 | `KW-DOC-SPEC-005` | `source-root` names a path that does not exist |

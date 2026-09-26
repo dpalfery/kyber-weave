@@ -14,12 +14,13 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <remarks>
 /// <para>
 /// Subagent and skill contract verified against Claude Code documentation
-/// (code.claude.com/docs/en/sub-agents and code.claude.com/docs/en/skills) on 2026-08-23:
-/// subagents are stored at <c>.claude/agents/&lt;name&gt;.md</c> (file stem equals the
-/// canonical identity — not Copilot's <c>.agent.md</c> double extension) containing Markdown
-/// with YAML frontmatter. Required keys are <c>name</c> and <c>description</c>; optional
-/// <c>model</c> accepts aliases <c>opus</c> / <c>sonnet</c> / <c>haiku</c> / <c>inherit</c>
-/// (or full model ids). Skills are <c>.claude/skills/&lt;name&gt;/SKILL.md</c>.
+/// (code.claude.com/docs/en/sub-agents and code.claude.com/docs/en/skills) on 2026-08-23, with
+/// primary-agent entry-point facts re-verified on 2026-09-25: subagents are stored at
+/// <c>.claude/agents/&lt;name&gt;.md</c> (file stem equals the canonical identity — not
+/// Copilot's <c>.agent.md</c> double extension) containing Markdown with YAML frontmatter.
+/// Required keys are <c>name</c> and <c>description</c>; optional <c>model</c> accepts aliases
+/// <c>opus</c> / <c>sonnet</c> / <c>haiku</c> / <c>inherit</c> (or full model ids). Skills are
+/// <c>.claude/skills/&lt;name&gt;/SKILL.md</c>.
 /// </para>
 /// <para>
 /// Claude's <c>tools</c> frontmatter key is an allow-list. Omitting it inherits every tool
@@ -47,6 +48,25 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// descriptions collapse to a single line. Profile-declared shared identities suppress
 /// their skill projections per the native single-projection rule enforced by
 /// <see cref="SquadRendererRegistry"/>.
+/// </para>
+/// <para>
+/// <strong>Primary-agent entry point:</strong> A primary agent with a fallback profile
+/// declaring <c>no-primary-agent: skill</c> renders as both a subagent at
+/// <c>.claude/agents/&lt;name&gt;.md</c> and an entry-point skill at
+/// <c>.claude/skills/&lt;name&gt;/SKILL.md</c>, invoked as <c>/&lt;name&gt;</c> in the main
+/// conversation. The subagent file is kept for enforced invocation via <c>claude --agent
+/// &lt;name&gt;</c> (the only mode where <c>Agent(roster)</c> and model are enforced). The skill
+/// frontmatter contains exactly <c>name</c>, <c>description</c>, and <c>license</c>; its body
+/// matches the canonical agent body verbatim, and its resource closure is projected beside it.
+/// The skill's description stays in Claude's context, so Claude may auto-load <c>/&lt;name&gt;</c>
+/// into the main conversation without the user typing it. Entry-point skill details merge into
+/// the single existing <c>permission-not-expressible</c> record, which states that the session's
+/// tools, permission mode, MCP servers and model apply to <c>/&lt;name&gt;</c>, and that
+/// <c>claude --agent &lt;name&gt;</c> is the enforced alternative. Scope precedence differs:
+/// skills resolve personal over project, so a project Squad install and a global one can place
+/// <c>/&lt;name&gt;</c> and <c>@agent-&lt;name&gt;</c> at different versions. Under
+/// <c>no-primary-agent: omit</c>, no entry-point skill is emitted and the agent's records remain
+/// unchanged.
 /// </para>
 /// </remarks>
 public sealed class ClaudeRenderer : ISquadRenderer
@@ -163,6 +183,17 @@ public sealed class ClaudeRenderer : ISquadRenderer
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+        // Read skill identities upfront so the primary-agent collision check can see whether
+        // a canonical skill already occupies the entry-point identity before any file is built.
+        HashSet<string> skillIdentities = source.Skills
+            .Select(skill => skill.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        // The declared vocabulary, not a renderer-local copy: a capability added to
+        // profiles/capabilities.yml must appear in a lowered primary agent's
+        // permission-not-expressible details without a renderer change.
+        string[] capabilityVocabulary = [.. source.CapabilityProfiles.Capabilities.Order(StringComparer.Ordinal)];
+
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
 
@@ -176,7 +207,51 @@ public sealed class ClaudeRenderer : ISquadRenderer
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, agent.Resources);
 
-            degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+            if (agent.Invocation == SquadInvocation.Primary)
+            {
+                SquadFallbackProfile fallbackProfile = source.FallbackProfiles.Profiles[agent.Fallback];
+                if (string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal))
+                {
+                    // Fail closed if a canonical skill occupies the entry-point identity:
+                    // Claude renders both a subagent and an entry-point skill, so collision here
+                    // cannot be resolved by role-prefixed fallback.
+                    if (skillIdentities.Contains(agent.Name))
+                    {
+                        throw new SquadRenderValidationException(
+                            $"Cannot render primary agent '{agent.Name}' as a Claude entry-point " +
+                            $"skill: a canonical skill named '{agent.Name}' already occupies that " +
+                            "identity. Claude renders both a subagent and an entry-point skill, " +
+                            "so this is a fail-closed condition rather than a naming collision " +
+                            "this renderer can resolve on its own.");
+                    }
+
+                    SquadDeploymentFile skillPrincipal = RenderPrimaryAgentEntryPointSkill(agent, request.Scope);
+                    files.Add(skillPrincipal);
+                    SquadResourceProjection.Append(files, skillPrincipal, agent.Resources);
+
+                    degradations.AddRange(BuildPrimaryAgentDegradationRecords(
+                        agent,
+                        fallbackProfile,
+                        source.CapabilityProfiles.Profiles,
+                        capabilityVocabulary));
+                }
+                else if (string.Equals(fallbackProfile.NoPrimaryAgent, "omit", StringComparison.Ordinal))
+                {
+                    // Omit mode: render exactly as pre-T3 (no entry-point skill, byte-identical records).
+                    degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+                }
+                else
+                {
+                    throw new SquadRenderValidationException(
+                        $"Fallback profile '{agent.Fallback}' declares unsupported " +
+                        $"no-primary-agent value '{fallbackProfile.NoPrimaryAgent}' for primary " +
+                        $"agent '{agent.Name}'.");
+                }
+            }
+            else
+            {
+                degradations.AddRange(BuildDegradationRecords(agent, source.CapabilityProfiles.Profiles));
+            }
         }
 
         foreach (SquadSkill skill in source.Skills)
@@ -227,6 +302,34 @@ public sealed class ClaudeRenderer : ISquadRenderer
         string agentsDir = ResolvePrefixedDirectory(AgentsDirectory, scope);
         return new SquadDeploymentFile(
             $"{agentsDir}/{agent.Name}.md",
+            Encoding.UTF8.GetBytes(content),
+            "claude");
+    }
+
+    private static SquadDeploymentFile RenderPrimaryAgentEntryPointSkill(
+        SquadAgent agent,
+        SquadDeploymentScope scope)
+    {
+        string singleLineDescription = string.Join(" ", agent.Description.Split(
+            ['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
+        {
+            ["name"] = agent.Name,
+            ["description"] = singleLineDescription,
+            ["license"] = "MIT"
+        };
+
+        string content;
+        lock (SerializerLock)
+        {
+            content = SquadMarkdownDocument.Compose(YamlSerializer, frontmatter, agent.InstructionBody);
+        }
+
+        string skillsDir = ResolvePrefixedDirectory(SkillsDirectory, scope);
+        return new SquadDeploymentFile(
+            $"{skillsDir}/{agent.Name}/SKILL.md",
             Encoding.UTF8.GetBytes(content),
             "claude");
     }
@@ -353,6 +456,115 @@ public sealed class ClaudeRenderer : ISquadRenderer
         }
 
         return ordered;
+    }
+
+    private static IEnumerable<SquadDegradationRecord> BuildPrimaryAgentDegradationRecords(
+        SquadAgent agent,
+        SquadFallbackProfile fallbackProfile,
+        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
+        IReadOnlyList<string> capabilityVocabulary)
+    {
+        bool isSkillMode = string.Equals(fallbackProfile.NoPrimaryAgent, "skill", StringComparison.Ordinal);
+
+        if (isSkillMode)
+        {
+            yield return new SquadDegradationRecord(
+                Target: "claude",
+                CanonicalIdentity: agent.Name,
+                OutputIdentity: agent.Name,
+                Code: "role-skill-fallback",
+                InstructionDigest: agent.BodyDigest,
+                Details: $"Claude has a real primary-agent primitive only through " +
+                    $"'claude --agent <name>' or the 'agent' setting; Claude Code enforces " +
+                    $"tools, Agent(roster) and model only in those modes. Fallback profile " +
+                    $"'{agent.Fallback}' declares no-primary-agent: skill, so this agent also " +
+                    $"renders as an entry-point skill invoked as `/{agent.Name}` in the main " +
+                    "conversation, where the primary-agent enforcement does not apply. The " +
+                    "subagent file is kept.");
+        }
+
+        List<string> notExpressibleDetails = [];
+
+        // Primary agents always declare every capability decision in permission-not-expressible,
+        // so the entry point and subagent descriptions both state what is not enforced.
+        notExpressibleDetails.Add(
+            $"Capability decisions ({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}).");
+
+        if (isSkillMode)
+        {
+            // The entry-point skill runs in the main conversation under session-wide permissions,
+            // not under the primary-agent enforcement that `claude --agent` provides.
+            notExpressibleDetails.Add(
+                $"The session's tools, permission mode, MCP servers and model apply to `/{agent.Name}`.");
+        }
+
+        if (capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
+            profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+            delegateDecision == SquadPermissionDecision.Allow &&
+            agent.DelegatesTo.Count > 0)
+        {
+            // Official docs state Agent(roster) is ignored when running as a nested subagent,
+            // so the roster protection only applies when this agent is the primary via `claude --agent`.
+            notExpressibleDetails.Add(
+                "Claude Code ignores Agent(roster) parentheses when this definition " +
+                "runs as a nested subagent; the permitted delegation roster is not enforced " +
+                "for nested Task/Agent spawns. Roster: " +
+                string.Join(", ", agent.DelegatesTo) + ".");
+        }
+
+        bool isPureOrchestrator = string.Equals(
+            agent.CapabilityProfile,
+            "orchestrator",
+            StringComparison.Ordinal);
+        if (isPureOrchestrator && isSkillMode)
+        {
+            // The MCP withholding in ResolveTools is only applied to the subagent allow-list;
+            // the entry-point skill inherits session MCP servers, which may differ.
+            notExpressibleDetails.Add(
+                "The pure-orchestrator MCP withholding (no mcp__codegraph__*, mcp__kyber-weave__*, " +
+                "mcp__context7__*) applies to the subagent file only, not the entry-point skill.");
+        }
+
+        if (isSkillMode)
+        {
+            notExpressibleDetails.Add(
+                $"`claude --agent {agent.Name}` is the enforced alternative where tools, Agent(roster) and model are enforced.");
+        }
+
+        if (notExpressibleDetails.Count > 0)
+        {
+            yield return new SquadDegradationRecord(
+                Target: "claude",
+                CanonicalIdentity: agent.Name,
+                OutputIdentity: agent.Name,
+                Code: "permission-not-expressible",
+                InstructionDigest: agent.BodyDigest,
+                Details: string.Join(" ", notExpressibleDetails));
+        }
+
+        SquadPermissionDecision executeDecision = profile is not null &&
+            profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec)
+            ? exec
+            : SquadPermissionDecision.Deny;
+        SquadPermissionDecision writeDecision = profile is not null &&
+            profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write)
+            ? write
+            : SquadPermissionDecision.Deny;
+
+        SquadDegradationRecord? notIsolable = CapabilityDegradations.BuildCapabilityNotIsolable(
+            targetToken: "claude",
+            canonicalIdentity: agent.Name,
+            outputIdentity: agent.Name,
+            instructionDigest: agent.BodyDigest,
+            executeDecision: executeDecision,
+            writeDecision: writeDecision,
+            grantedShellTools: ["Bash", "PowerShell"],
+            withheldWriteTools: ["Edit", "NotebookEdit", "Write"]);
+
+        if (notIsolable is not null)
+        {
+            yield return notIsolable;
+        }
     }
 
     private static IEnumerable<SquadDegradationRecord> BuildDegradationRecords(

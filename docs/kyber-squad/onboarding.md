@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-25
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -57,7 +57,7 @@ Kyber-Squad declares eleven coding-harness targets:
 |---|---|---|---|---|
 | `codex` | — | `.codex/` | Native agents | Implemented and registered |
 | `cursor` | — | `.cursor/` | Native agents | Implemented and registered |
-| `claude` | — | `.claude/` | Native agents | Implemented and registered |
+| `claude` | — | `.claude/` | Native agents + primary-agent entry-point skill | Implemented and registered |
 | `copilot` | `github-copilot` | `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/prompts/`, `.github/hooks/` | Native agents | Implemented and registered |
 | `opencode` | — | `.opencode/` | Native agents | Implemented and registered |
 | `kilo` | — | `.kilo/` | Native agents | Implemented and registered |
@@ -69,7 +69,7 @@ Kyber-Squad declares eleven coding-harness targets:
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
-[architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native), `copilot` (native), `cursor` (native),
+[architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
 `codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native subagents and skills, with the primary agent lowered to a slash command) have renderers. All eleven declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
@@ -82,6 +82,87 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Target-root echo and confirmation**: Every mutating run (`install`, `update`, `uninstall` without `--dry-run`) prints the resolved absolute target root and its scope (project/global) before any write. An interactive console is then asked to confirm; declining prints `Declined. No changes were made.` and exits with **exit code 2**. `--yes` skips the prompt for automation attached to a terminal; non-interactive consoles (scripts, CI, captured output) echo the root and proceed without prompting.
 - **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms.
 - **Update and uninstall**: Always consume the recorded target roster from the existing deployment receipt and never perform re-detection.
+
+### Claude notes
+
+Claude renders the primary `conductor` agent as both a subagent (for enforced invocation) and an
+entry-point skill (for main-thread access). The following operational details ensure correct
+deployment and use:
+
+**Three ways to run the conductor:**
+
+The generated skill and subagent have renderer coverage. Their invocation, reference loading,
+and coexistence have not yet been verified in a live Claude Code session; that check remains
+open in the [Claude conductor live-verification todo](../todo/claude-conductor-live-verification.md).
+
+1. **`/conductor <path or request>`** — main thread, in the conversation.
+   - The entry-point skill runs in the main conversation where the Agent tool is available.
+   - The session's tools, permission mode, MCP servers and model apply; the profile's enforced
+     model and tool restrictions do not.
+   - This is how the conductor reaches you from inside an ongoing session.
+
+2. **`claude --agent conductor`** — enforced mode, CLI launch.
+   - Enforces the agent's tool allow-list, `Agent(roster)` delegation roster, and the
+     orchestration profile's `sonnet` model.
+   - This is the strictly enforced alternative where every capability decision is enforced.
+
+3. **`@agent-conductor`** — nested subagent, discouraged.
+   - Runs the conductor as a nested subagent where the `Agent(roster)` parentheses are ignored
+     (official Claude Code documentation); the conductor's real roster is `Agent(architect,
+     azure-reader, …)` from its `delegates-to` declaration. By default the Agent tool works at
+     this depth, but see Cloud sessions below for an observed environment constraint that
+     removes it entirely.
+   - This is the failure mode to avoid; use `/conductor` or `--agent` instead.
+
+**Automatic skill loading (Q3-B).**
+The skill's description stays in Claude's context, so Claude may auto-load the `/conductor`
+skill into the main conversation by itself when a request matches it, without you typing
+`/conductor`. For operators who want it opt-in only:
+- Add `"permissions": {"deny": ["Skill(conductor)"]}` to your own Claude Code settings
+  (`.claude/settings.json` or `settings.local.json`). The exact-match rule prevents Claude from
+  invoking the skill; whether it also blocks a user-typed `/conductor` is undocumented and not
+  yet verified live.
+- Or start the enforced form with `claude --agent conductor`.
+
+Either way it is a Claude Code setting, not a file Squad writes.
+
+**Automatic delegation to the subagent (no frontmatter opt-out).**
+Delegation to `@agent-conductor` cannot be switched off from frontmatter. The operator setting
+`"permissions": {"deny": ["Agent(conductor)"]}` is documented Claude Code behaviour, not a file
+Squad writes. Whether it blocks `@agent-conductor` specifically is not yet verified live.
+
+**Scope precedence asymmetry.**
+With both a global and a project Squad install:
+- `/conductor` (skill) resolves to the **personal** copy at `~/.claude/skills/conductor/SKILL.md`
+  (skills: personal over project).
+- `@agent-conductor` and `--agent conductor` resolve to the **project** copy at
+  `.claude/agents/conductor.md` (agents: project over user).
+
+This scope-precedence rule is Claude Code's built-in behaviour; Squad documents it but neither
+designs nor corrects it.
+
+**Cloud sessions (CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1).**
+On 2026-09-25, cloud sessions were observed with `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`,
+which disables subagent nesting entirely:
+- A subagent conductor has no Agent tool and cannot delegate. Use `/conductor` instead.
+- Specialists that delegate further (`architect`, `product-owner`, `code-reviewer`) cannot
+  nest in cloud sessions.
+- `/conductor` runs in the main thread at depth 0, so it works and reaches you.
+
+This is not documented in public Claude Code docs; it is an observed environment constraint.
+By default a subagent can spawn subagents up to 3 layers below the main conversation; the
+override is the environment variable `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`.
+
+**Global paths and live reload.**
+- Global subagent: `~/.claude/agents/conductor.md` with references beside it.
+- Global skill: `~/.claude/skills/conductor/SKILL.md` with references beside it.
+- Claude Code watches `~/.claude/skills/` and picks up added skills without restart (provided
+  the directory exists before the session started; a top-level `~/.claude/` directory created
+  after session start needs a restart).
+- `/conductor` appears only after `squad update` with a release that carries it; until then,
+  older releases still have the subagent-only form.
+
+---
 
 ### Pi notes
 
@@ -305,7 +386,7 @@ agent-owned resources. A fresh deployment renders every owner's resources beside
 113 files on Copilot today — with authored relative links resolving inside the target output. The
 tracked root `.github/` self-deployment predates resource delivery and is refreshed only by a
 release; surplus packaged content remains until the
-[resource-migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted.
+[resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
 `squad pack` or the golden synchronization.

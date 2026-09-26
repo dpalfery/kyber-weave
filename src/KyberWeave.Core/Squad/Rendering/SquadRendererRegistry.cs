@@ -355,12 +355,14 @@ public sealed class SquadRendererRegistry : ISquadRenderer
 
     /// <remarks>
     /// Takes the whole <see cref="SquadAgent"/> and the loaded fallback profiles, not just a
-    /// name, because Pi is the first native target whose output path depends on
-    /// <see cref="SquadAgent.Invocation"/>: a subagent-invocation agent claims
-    /// <c>.pi/agents/&lt;name&gt;.md</c>, but a primary-invocation agent claims
-    /// <c>.pi/skills/&lt;name&gt;/SKILL.md</c> only when its fallback profile's
-    /// <c>no-primary-agent</c> value is <c>skill</c> — the other four native targets render
-    /// every agent uniformly regardless of invocation, so their branches stay name-only.
+    /// name, because some native targets' output paths depend on <see cref="SquadAgent.Invocation"/>
+    /// and the fallback profile's <c>no-primary-agent</c> value. Pi lowers a primary-invocation
+    /// agent to <c>.pi/skills/&lt;name&gt;/SKILL.md</c> when <c>no-primary-agent: skill</c>.
+    /// Claude adds an entry-point skill at <c>.claude/skills/&lt;name&gt;/SKILL.md</c> alongside
+    /// the kept subagent <c>.claude/agents/&lt;name&gt;.md</c>, so a primary agent is the one
+    /// target with two principals (subagent enforced, skill the unenforced main-thread entry).
+    /// ZCode and the other native targets render every agent uniformly without a hard-coded
+    /// special case.
     /// </remarks>
     private static string? AgentOutputPath(
         SquadTarget target,
