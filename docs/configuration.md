@@ -113,11 +113,12 @@ docs-analysis:
 ### Catalog path containment
 
 The `catalog-path` string is normalized at configuration load to reject absolute paths and `..`
-segments. In addition, at read time the catalog file itself is checked to ensure it is not a
-symbolic link: if the configured path resolves to a symlink, the catalog document is skipped
-silently. Symlinks under a docs root are skipped during the walk itself — no file inside a
-symlinked directory is ever reached. Together, these checks ensure the documentation walk
-cannot escape the configured repository boundaries (see [issue #124](https://github.com/dpalfery/kyber-weave/issues/124)).
+segments. At read time, the catalog is skipped silently when it, or any directory between it and
+the innermost docs root containing it (the repository root when none does), is a symbolic link.
+Symlinks under a docs root are skipped during the walk itself — no file inside a symlinked
+directory is ever reached. These checks apply to symlinks encountered below the configured root.
+A docs root or repository root that is itself a symlink is the host's choice and outside this
+guarantee (see [issue #124](https://github.com/dpalfery/kyber-weave/issues/124)).
 
 ### Merge semantics
 

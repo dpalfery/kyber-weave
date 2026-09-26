@@ -233,4 +233,68 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         Assert.NotNull(result.Owners);
         Assert.Contains("MyOwner", result.Owners);
     }
+
+    /// <summary>
+    /// A catalog configured beneath a symlinked directory is refused, even though the file
+    /// itself is not a link: the walk would never reach it, so neither may the catalog read.
+    /// </summary>
+    [Fact]
+    public void CatalogBeneathSymlinkedDirectoryIsExcluded()
+    {
+        WriteDocument("docs/normal.md", """
+            ---
+            id: normal
+            title: Normal Document
+            doc-type: reference
+            status: current
+            ---
+            # Normal
+            A normal document.
+            """);
+
+        WriteDocument("catalog.md", OutsideCatalog, root: "outside");
+        Directory.CreateSymbolicLink(Path.Combine(_repoRoot.Path, "docs", "linked"), _outside.Path);
+
+        OntologyConfig config = OntologyConfig.ProductDefaults
+            .WithDocsRoot("docs")
+            .Clone(catalogPath: "docs/linked/catalog.md");
+        DocumentSet result = new DocumentLoader(_repoRoot.Path, config).Load();
+
+        Assert.Single(result.Documents, doc => doc.Frontmatter.Id == "normal");
+        Assert.DoesNotContain(result.Documents, doc => doc.Frontmatter.Id == "catalog");
+        Assert.Empty(result.Components);
+        Assert.Empty(result.Owners);
+    }
+
+    /// <summary>
+    /// A configured root that is itself a symlink still supplies its catalog. Root selection
+    /// is the host's decision; only links encountered beneath the root are refused.
+    /// </summary>
+    [Fact]
+    public void CatalogInsideSymlinkedConfiguredRootIsLoaded()
+    {
+        WriteDocument("catalog.md", OutsideCatalog, root: "outside");
+        Directory.CreateSymbolicLink(Path.Combine(_repoRoot.Path, "docs"), _outside.Path);
+
+        OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
+        DocumentSet result = new DocumentLoader(_repoRoot.Path, config).Load();
+
+        Assert.Single(result.Documents, doc => doc.Frontmatter.Id == "catalog");
+        Assert.Contains("OutsideComponent", result.Components);
+        Assert.Contains("OutsideOwner", result.Owners);
+    }
+
+    private const string OutsideCatalog = """
+        ---
+        id: catalog
+        title: Outside Catalog
+        doc-type: index
+        status: current
+        ---
+        # Catalog
+
+        | Component | Type | Source root | Overview | Detailed documentation | Owner | Last reviewed | Status |
+        |---|---|---|---|---|---|---|---|
+        | OutsideComponent | service | outside | A component from outside | link | OutsideOwner | 2026-01-01 | current |
+        """;
 }

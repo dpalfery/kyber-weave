@@ -152,10 +152,9 @@ public sealed class DocumentIndexHost
         {
             string catalog = Path.Combine(
                 _repoRoot, _catalogRelativePath.Replace('/', Path.DirectorySeparatorChar));
-            // Skip the catalog file if it is itself a symlink (issue #124). Do not resolve
-            // the link; checking LinkTarget avoids stat-ing paths outside the root directory.
-            if (File.Exists(catalog)
-                && new FileInfo(catalog).LinkTarget is null
+            // Skip a catalog that is, or sits beneath, a symlink (issue #124), without
+            // resolving the link: see DocsRootPath.IsContainedFile.
+            if (DocsRootPath.IsContainedFile(_repoRoot, _catalogRelativePath, _docsRelativeRoots)
                 && visited.Add(catalog))
             {
                 count++;

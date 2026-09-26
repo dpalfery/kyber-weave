@@ -70,9 +70,9 @@ public sealed partial class DocumentLoader
         // The catalog is a governed document wherever it sits. A host that keeps it outside
         // the roots — because no single root is the natural home for it — would otherwise
         // trade frontmatter validation and retrievability for that placement.
-        // Skip the catalog if it is itself a symlink — the same containment principle that
-        // guards the root walks (D3: never follow a link).
-        if (!visited.Contains(_catalogPath) && File.Exists(_catalogPath) && new FileInfo(_catalogPath).LinkTarget is null)
+        // Skip the catalog if it is, or sits beneath, a symlink — the same containment
+        // principle that guards the root walks (D3: never follow a link).
+        if (!visited.Contains(_catalogPath) && IsCatalogContained())
         {
             documents.Add(Parse(_catalogPath, ToRelative(_catalogPath)));
         }
@@ -132,6 +132,9 @@ public sealed partial class DocumentLoader
     /// so a root the normalizer kept as distinct is not later collapsed when walking files.
     /// </summary>
     private static StringComparer PathComparer => DocsRootPath.PathComparer;
+
+    private bool IsCatalogContained() =>
+        DocsRootPath.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
 
     private DocumentModel Parse(string absolutePath, string relativePath)
     {
@@ -310,13 +313,9 @@ public sealed partial class DocumentLoader
         HashSet<string> components = new HashSet<string>(StringComparer.Ordinal);
         HashSet<string> owners = new HashSet<string>(StringComparer.Ordinal);
 
-        if (!File.Exists(_catalogPath))
-        {
-            return (components, owners);
-        }
-
-        // Skip reading vocabularies from the catalog if it is itself a symlink (D3: never follow a link).
-        if (new FileInfo(_catalogPath).LinkTarget is not null)
+        // Skip reading vocabularies from a catalog that is, or sits beneath, a symlink
+        // (D3: never follow a link).
+        if (!IsCatalogContained())
         {
             return (components, owners);
         }

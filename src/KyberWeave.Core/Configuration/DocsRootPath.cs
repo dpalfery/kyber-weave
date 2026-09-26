@@ -157,6 +157,64 @@ internal static class DocsRootPath
         return EnumerateContainedFilesRecursive(root, searchPattern);
     }
 
+    /// <summary>
+    /// True when <paramref name="relativePath"/> names an existing file that is reachable
+    /// from the repository root without crossing a symbolic link.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the containment check for a single configured file, such as the catalog, that
+    /// <see cref="EnumerateContainedFiles"/> is for a walk. The boundary is the innermost
+    /// configured root containing the file, which is where a walk would reach it from, or the
+    /// repository root when no root does. The boundary itself is not checked, because root
+    /// selection is the host's decision. Every directory below it, and the file, is.
+    /// </para>
+    /// <para>
+    /// Directories are checked outermost first, and <see cref="FileSystemInfo.LinkTarget"/> is
+    /// read before <see cref="File.Exists(string?)"/>. Resolving a path follows every link in
+    /// it, and <see cref="File.Exists(string?)"/> stats a link's target on Unix, so checking an
+    /// inner component first, or existence first, would reach through the link this refuses.
+    /// </para>
+    /// </remarks>
+    /// <param name="repoRoot">The absolute repository root.</param>
+    /// <param name="relativePath">The file's repository-relative path.</param>
+    /// <param name="relativeRoots">The configured documentation roots, repository-relative.</param>
+    internal static bool IsContainedFile(string repoRoot, string relativePath, IEnumerable<string> relativeRoots)
+    {
+        string[] segments = Segments(relativePath);
+        if (segments.Length == 0) return false;
+
+        int boundaryDepth = 0;
+        foreach (string root in relativeRoots)
+        {
+            string[] rootSegments = Segments(root);
+            if (rootSegments.Length > boundaryDepth
+                && rootSegments.Length < segments.Length
+                && rootSegments.SequenceEqual(segments.Take(rootSegments.Length), PathComparer))
+            {
+                boundaryDepth = rootSegments.Length;
+            }
+        }
+
+        string current = repoRoot;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            current = Path.Combine(current, segments[i]);
+            if (i < boundaryDepth) continue;
+
+            FileSystemInfo entry = i == segments.Length - 1 ? new FileInfo(current) : new DirectoryInfo(current);
+            if (entry.LinkTarget is not null) return false;
+        }
+
+        return File.Exists(current);
+    }
+
+    private static string[] Segments(string relativePath) =>
+        relativePath
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(s => s != RepositoryRoot)
+            .ToArray();
+
     private static IEnumerable<string> EnumerateContainedFilesRecursive(string directory, string searchPattern)
     {
         DirectoryInfo dirInfo = new DirectoryInfo(directory);
@@ -164,7 +222,10 @@ internal static class DocsRootPath
         {
             RecurseSubdirectories = false,
             IgnoreInaccessible = false,
-            AttributesToSkip = FileAttributes.Hidden | FileAttributes.System
+            // The SearchOption overload this walk replaced skipped no attributes. Unix marks
+            // every dot-prefixed name Hidden, so the default would drop .github/ and
+            // .kyber-weave/ from a root of "." while containing nothing: LinkTarget does that.
+            AttributesToSkip = 0
         };
         IEnumerable<FileSystemInfo> entries = dirInfo.EnumerateFileSystemInfos("*", options).ToList();
 

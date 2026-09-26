@@ -175,6 +175,31 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
     /// <summary>
     /// Helper to create a DocumentIndexHost with the specified configuration.
     /// </summary>
+    /// <summary>
+    /// A catalog configured beneath a symlinked directory contributes nothing to the stamp,
+    /// even though the file itself is not a link.
+    /// </summary>
+    [Fact]
+    public void CatalogBeneathSymlinkedDirectoryIsExcludedFromStamp()
+    {
+        string docsDir = Path.Combine(_root.Path, "docs");
+        Directory.CreateDirectory(docsDir);
+        string insideFile = Path.Combine(docsDir, "inside.md");
+        File.WriteAllText(insideFile, "# Inside");
+        File.SetLastWriteTimeUtc(insideFile, new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc));
+
+        long stampWithoutCatalog = CreateHost(_root.Path, ["docs"], "docs/linked/catalog.md").ComputeDocsStamp();
+
+        string outsideCatalog = Path.Combine(_outside.Path, "catalog.md");
+        File.WriteAllText(outsideCatalog, "# Catalog");
+        File.SetLastWriteTimeUtc(outsideCatalog, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc));
+        Directory.CreateSymbolicLink(Path.Combine(docsDir, "linked"), _outside.Path);
+
+        long stampWithLinkedCatalog = CreateHost(_root.Path, ["docs"], "docs/linked/catalog.md").ComputeDocsStamp();
+
+        Assert.Equal(stampWithoutCatalog, stampWithLinkedCatalog);
+    }
+
     private static DocumentIndexHost CreateHost(
         string repoRoot,
         IReadOnlyList<string>? docsRelativeRoots = null,

@@ -142,4 +142,28 @@ public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
         Assert.Contains(rootFile, fileList);
         Assert.Contains(nestedFile, fileList);
     }
+
+    /// <summary>
+    /// Dot-prefixed directories and files are walked like any other entry. Unix marks them
+    /// <see cref="FileAttributes.Hidden"/>, and the recursive overload this walk replaced
+    /// skipped no attributes, so skipping them here would drop <c>.github/</c> and
+    /// <c>.kyber-weave/</c> from a root of <c>.</c> without containing anything.
+    /// </summary>
+    [Fact]
+    public void DotPrefixedEntriesAreWalked()
+    {
+        string dotDirectory = Path.Combine(_root.Path, ".github");
+        Directory.CreateDirectory(dotDirectory);
+        string nestedFile = Path.Combine(dotDirectory, "nested.md");
+        File.WriteAllText(nestedFile, "# Nested");
+
+        string dotFile = Path.Combine(_root.Path, ".notes.md");
+        File.WriteAllText(dotFile, "# Notes");
+
+        List<string> files = DocsRootPath.EnumerateContainedFiles(_root.Path, "*.md").ToList();
+
+        Assert.Equal(2, files.Count);
+        Assert.Contains(nestedFile, files);
+        Assert.Contains(dotFile, files);
+    }
 }

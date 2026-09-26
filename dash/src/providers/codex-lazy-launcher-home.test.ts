@@ -7,8 +7,9 @@
 //
 // Detection is measured by spy call count on isNestedLauncherCodexHome and sameCodexHome,
 // which are mocked to return deterministic values without touching the real filesystem.
-// HOME and CODEX_HOME are redirected to temp directories to prevent real home access
-// during module initialization or environment variable defaults.
+// HOME, USERPROFILE and CODEX_HOME are redirected to temp directories to prevent real home
+// access during module initialization or environment variable defaults. USERPROFILE matters
+// on Windows, where os.homedir() reads it instead of HOME.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, rm } from 'fs/promises'
@@ -18,6 +19,13 @@ import { join } from 'path'
 let detectionRunCount = 0
 let tempHome: string
 let tempCodexHome: string
+let savedEnv: Record<'HOME' | 'USERPROFILE' | 'CODEX_HOME', string | undefined>
+
+function restoreEnv(name: keyof typeof savedEnv): void {
+  const value = savedEnv[name]
+  if (value === undefined) delete process.env[name]
+  else process.env[name] = value
+}
 
 // Mock the launcher-homes module with spies that return false/deterministic values,
 // preventing any real filesystem access or home directory probing.
@@ -43,15 +51,21 @@ describe('Codex lazy launcher-home detection', () => {
     detectionRunCount = 0
     tempHome = await mkdtemp(join(tmpdir(), 'codex-test-home-'))
     tempCodexHome = join(tempHome, '.codex')
-    // Save and override HOME/CODEX_HOME to temp directories
+    savedEnv = {
+      HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
+      CODEX_HOME: process.env.CODEX_HOME,
+    }
     process.env.HOME = tempHome
-    if (process.env.CODEX_HOME) delete process.env.CODEX_HOME
+    process.env.USERPROFILE = tempHome
+    process.env.CODEX_HOME = tempCodexHome
   })
 
   afterEach(async () => {
     await rm(tempHome, { recursive: true, force: true })
-    // Restore original environment
-    delete process.env.HOME
+    restoreEnv('HOME')
+    restoreEnv('USERPROFILE')
+    restoreEnv('CODEX_HOME')
     vi.resetModules()
   })
 
