@@ -931,7 +931,7 @@ public sealed class ZCodeRenderer : ISquadRenderer
             Code: "permission-not-expressible",
             InstructionDigest: agent.BodyDigest,
             Details: "Capability decisions " +
-                $"({DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
+                $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
                 "are not enforced as the canonical lattice: a command's 'allowed-tools' is a " +
                 "flat allow-list evaluated against the session the command runs in, not a " +
                 $"per-agent capability boundary, and its delegates-to roster ({rosterText}) is " +
@@ -939,30 +939,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
                 (mcpServerNames.Count > 0 && !GrantsMcp(agent, capabilityProfiles)
                     ? " " + DescribeWithheldMcp(agent, mcpServerNames)
                     : string.Empty));
-    }
-
-    /// <summary>
-    /// Reports every vocabulary capability's resolved decision, defaulting an undeclared
-    /// capability to <see cref="SquadPermissionDecision.Deny"/> the same way an absent
-    /// permission entry behaves everywhere else in this pipeline.
-    /// </summary>
-    private static string DescribeCapabilityDecisions(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
-    {
-        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile);
-
-        return string.Join(
-            "; ",
-            capabilityVocabulary.Select(capability =>
-            {
-                SquadPermissionDecision decision = profile is not null &&
-                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision resolved)
-                        ? resolved
-                        : SquadPermissionDecision.Deny;
-                return $"{capability}: {DescribeDecision(decision)}";
-            }));
     }
 
     /// <summary>
@@ -1007,14 +983,6 @@ public sealed class ZCodeRenderer : ISquadRenderer
         capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile) &&
         profile.Permissions.TryGetValue("filesystem.read", out SquadPermissionDecision decision) &&
         decision == SquadPermissionDecision.Allow;
-
-    private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
-    {
-        SquadPermissionDecision.Allow => "allow",
-        SquadPermissionDecision.Ask => "ask",
-        SquadPermissionDecision.Deny => "deny",
-        _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown permission decision.")
-    };
 
     private static string CollapseToSingleLine(string value) =>
         string.Join(
