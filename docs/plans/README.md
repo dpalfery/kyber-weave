@@ -19,7 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| [2026-09-26-install-sh-local-origin.md](2026-09-26-install-sh-local-origin.md) | Draft | 2026-09-26 | Let `scripts/install.sh` install from the loopback release server under `KYBER_WEAVE_RELEASE_ORIGIN`, and stage the local update loop's "from" binaries through that installer. Development mode: test-first. D1–D4 answered. D5 open. |
+| [2026-09-26-install-sh-local-origin.md](2026-09-26-install-sh-local-origin.md) | Draft | 2026-09-26 | Let `scripts/install.sh` install from the loopback release server under `KYBER_WEAVE_RELEASE_ORIGIN`, and stage the local update loop's `working` and git-ref "from" binaries through that installer. Development mode: test-first. D1–D5 answered. Decision-complete Draft. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

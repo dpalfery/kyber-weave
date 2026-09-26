@@ -21,7 +21,7 @@ Input: [GitHub issue #125](https://github.com/dpalfery/kyber-weave/issues/125).
 
 `development-mode: test-first`. The conductor relayed that choice. The user did not opt out.
 
-This Draft is not executable. D5 is open. Its recommendation is not an approved decision.
+No open decisions. Status stays Draft until an explicit finalize. This file is not implementation authority yet.
 
 ## Problem and goal
 
@@ -29,7 +29,7 @@ This Draft is not executable. D5 is open. Its recommendation is not an approved 
 
 The CLI reaches that server because `ReleaseOrigin` honours `KYBER_WEAVE_RELEASE_ORIGIN` and accepts only a loopback authority. `install.sh` has no equivalent. `RELEASE_BASE`, `LATEST_API`, and `RELEASES_API` are fixed to GitHub, and `fetch` / `fetch_stdout` reject any URL that does not start with `https://`. The loop therefore stages its "from" binaries with `tar` or `cp`. The installer's download, checksum comparison, and `cp`-then-`mv` replace stay unproven until a real release exists.
 
-Goal: `install.sh` reads `KYBER_WEAVE_RELEASE_ORIGIN` and installs a pinned version from the existing loopback release server only for `http` or `https` with no userinfo and host `127.0.0.1`, `localhost`, or `[::1]`. A corrupted asset fails the checksum comparison instead of being installed. Unset or non-loopback configuration keeps refusing non-HTTPS URLs. The local loop stages its "from" side through that installer on the paths D5 selects. `dash/src/install/origin.ts` stays unchanged.
+Goal: `install.sh` reads `KYBER_WEAVE_RELEASE_ORIGIN` and installs a pinned version from the existing loopback release server only for `http` or `https` with no userinfo and host `127.0.0.1`, `localhost`, or `[::1]`. A corrupted asset fails the checksum comparison instead of being installed. Unset or non-loopback configuration keeps refusing non-HTTPS URLs. After the loopback server is listening, `--from working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`. `--from installed` keeps the copy, because it means "use the binaries already on this machine". `dash/src/install/origin.ts` stays unchanged.
 
 ## Approved decisions
 
@@ -41,28 +41,11 @@ Goal: `install.sh` reads `KYBER_WEAVE_RELEASE_ORIGIN` and installs a pinned vers
 | D2 | Accept only `http` or `https`, no userinfo, and host `127.0.0.1`, `localhost`, or `[::1]`, with an optional port. Reject everything else, including other `127.*` addresses. | User replied 'use all recommended' on 2026-09-26, selecting D2-A. |
 | D3 | While the override is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`. An `http` origin refuses wget. An `https` loopback origin keeps today's flags for both tools. | User replied 'use all recommended' on 2026-09-26, selecting D3-C. |
 | D4 | `dash/src/install/origin.ts` is out of scope. Leave it unchanged and record the divergence. | User replied 'use all recommended' on 2026-09-26, selecting D4-B. |
+| D5 | After the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`. `--from installed` keeps the copy, because it means "use the binaries already on this machine". | User replied 'D5A' on 2026-09-26, selecting D5-A. |
 
 ## Decision ledger
 
-Draft only. Remove this section when the plan leaves Draft. D1–D4 are approved above. D5 stays `OPEN` until the conductor relays an answer keyed by id. Its recommendation is not approved.
-
-### D5 — Which loop paths call install.sh
-
-| | |
-|---|---|
-| Status | OPEN |
-| Dependency | none |
-| Recommendation | D5-A |
-
-D1 is answered, so this decision no longer waits on the variable name. The invocation exports `KYBER_WEAVE_RELEASE_ORIGIN`.
-
-The issue names `stage_from_directory`. The default `--from` is `working`, which uses `stage_from_release_tree` (`tar`) and never calls `stage_from_directory`. The server starts only after that staging. `--from installed` copies whatever is already in the install directory; those binaries are not a tag the loop just published.
-
-- **D5-A.** After the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`. `--from installed` keeps the copy, because it means "use the binaries already on this machine".
-- **D5-B.** Every `--from` mode, including `installed`, stages through `install.sh`.
-- **D5-C.** Change only the `cp` inside `stage_from_directory`. The default `working` run stays on `tar`.
-
-D5-A is what makes the issue's verification true for the default run without changing what `--from installed` means. D5-C leaves the default run unproven. Do not treat D5-A as the expected task outcome until it is answered.
+Draft only. Remove this section when the plan leaves Draft. No OPEN questions. D1–D5 are approved above.
 
 ## Investigation findings
 
@@ -78,14 +61,14 @@ Kyber-Weave `docs_explore` was unavailable (the MCP namespace was missing). Disc
 
 ## Test contract
 
-`development-mode: test-first`. Every implementation task has a row. D1–D4 are approved, and the assertions below use those options verbatim. D5 is still open. Tasks that mention a staging path name the paths D5 selects. They do not assume D5-A.
+`development-mode: test-first`. Every implementation task has a row. D1–D5 are approved, and the assertions below use those options verbatim.
 
 | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
 |---|---|---|---|---|---|
 | T1 | `tests/KyberWeave.Tests/ReleaseTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter FullyQualifiedName~ReleaseTests` | `KYBER_WEAVE_RELEASE_ORIGIN` unset, or set to a non-loopback origin, refuses an `http://` URL and installs no file. A legal origin is only `http` or `https`, with no userinfo, and host `127.0.0.1`, `localhost`, or `[::1]`, with an optional port. Any other host, including other `127.*` addresses, is refused. With a legal loopback origin, `install.sh --install-dir <dir> --version <pinned> --no-mcp` downloads from `scripts/local-release-server.py` and installs. A byte flipped in that asset after `SHA256SUMS.txt` is written exits non-zero, reports a SHA-256 mismatch, and leaves the install directory without `kyber-weave`. While the override is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`. An `http` origin refuses wget. An `https` loopback origin keeps today's flags (`curl --proto '=https' --proto-redir '=https'`, `wget --https-only`). An HTTP redirect away from loopback is not installed. `dash/src/install/origin.ts` is not exercised. Existing `ReleaseTests` checksum and RID facts stay green. POSIX-only facts skip on Windows the way the class already does. | The new facts exist and fail on unchanged `install.sh` because the loopback URL is refused before any checksum comparison, or because the helper they call is not defined. The failure is that refusal or a missing helper, not an edited assertion. | The same filter passes. The mismatch fact fails on the checksum comparison, not on the scheme guard. Assertions are not weakened. |
 | T2 | `tests/KyberWeave.Tests/ReleaseTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter FullyQualifiedName~ReleaseTests` | Same behavior as T1. T2 is the implementation that makes those facts pass. | T1's RED run, recorded before `scripts/install.sh` is edited. | T1's GREEN acceptance. |
-| T3 | No separate unit test. Integration command: `scripts/update-loop.sh` | `./scripts/update-loop.sh` | On the paths D5 selects, the "from" binaries in the sandbox are those `install.sh` installed from the loopback server under `KYBER_WEAVE_RELEASE_ORIGIN`. Every check the loop already prints still passes, including the self-update, the Squad install unless `--skip-squad` is passed, and the KyberDash cases unless `--no-kyberdash` is passed. | No unit RED. The missing loopback install is already RED under T1. Before T3, the default `working` path extracts with `tar` inside `stage_from_release_tree` and never runs `install.sh`. | `./scripts/update-loop.sh` exits 0. The run log shows `install.sh` performed the stage for whichever paths D5 selects. Existing PASS lines are still present. Needs `node` and `npm` on PATH when KyberDash is included, as [distribution.md](../distribution.md) already states. |
-| T4 | No product test. | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .` and `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .` | [install.md](../install.md) documents `KYBER_WEAVE_RELEASE_ORIGIN` and the D2 host limit. [distribution.md](../distribution.md) stops describing the installer half of the loop as waiting on issue #125, and describes the staging paths D5 selects. Neither page describes `dash/src/install/origin.ts` as loopback-checked. | No product RED. | Both commands exit 0. `docs validate . --merge-ready` stays expected to fail with `KW-DOC-LIFECYCLE-003` until T5 archives this plan. |
+| T3 | No separate unit test. Integration command: `scripts/update-loop.sh` | `./scripts/update-loop.sh` | After the server is listening, `--from working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>` under `KYBER_WEAVE_RELEASE_ORIGIN`. `--from installed` keeps the copy, because it means "use the binaries already on this machine". Every check the loop already prints still passes, including the self-update, the Squad install unless `--skip-squad` is passed, and the KyberDash cases unless `--no-kyberdash` is passed. | No unit RED. The missing loopback install is already RED under T1. Before T3, the default `working` path extracts with `tar` inside `stage_from_release_tree` and never runs `install.sh`. | `./scripts/update-loop.sh` exits 0. The run log shows `install.sh` staged the `working` and git-ref "from" binaries. The `installed` path still copies. Existing PASS lines are still present. Needs `node` and `npm` on PATH when KyberDash is included, as [distribution.md](../distribution.md) already states. |
+| T4 | No product test. | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .` and `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .` | [install.md](../install.md) documents `KYBER_WEAVE_RELEASE_ORIGIN` and the D2 host limit. [distribution.md](../distribution.md) stops describing the installer half of the loop as waiting on issue #125. It states that, after the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`, and that `--from installed` keeps the copy. Neither page describes `dash/src/install/origin.ts` as loopback-checked. | No product RED. | Both commands exit 0. `docs validate . --merge-ready` stays expected to fail with `KW-DOC-LIFECYCLE-003` until T5 archives this plan. |
 | T5 | No test. Closeout. | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready` and `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .` | This plan is archived and the index no longer lists it as active. Canonical pages match the shipped behavior. | No RED. | `--merge-ready` exits 0 because this file is no longer under `docs/plans/`. Drift exits 0. |
 
 Changing an assertion in this table, including weakening one to reach green, returns the plan to Draft and needs the conductor to relay reapproval.
@@ -110,17 +93,17 @@ Changing an assertion in this table, including weakening one to reach green, ret
 
 ### T3 — Stage the loop through install.sh
 
-- **Objective:** On the paths D5 selects, replace archive extraction or `cp` with `install.sh --install-dir "$BIN" --version <from>` after the loopback server answers `/healthz`. The process environment exports `KYBER_WEAVE_RELEASE_ORIGIN`.
-- **Files / symbols:** `scripts/update-loop.sh`. `stage_from_release_tree`. `stage_from_directory`. The server start that exports `KYBER_WEAVE_RELEASE_ORIGIN`. Do not change `scripts/local-release-server.py`, `scripts/release-local.sh`, or `dash/src/install/origin.ts`.
-- **Acceptance:** Test-contract row T3. Which of `working`, git ref, and `installed` call `install.sh` is whatever D5 answers. Do not assume D5-A.
-- **Depends on:** T2. D5 `ANSWERED`.
+- **Objective:** After the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`. `--from installed` keeps the copy, because it means "use the binaries already on this machine". The process environment exports `KYBER_WEAVE_RELEASE_ORIGIN`.
+- **Files / symbols:** `scripts/update-loop.sh`. `stage_from_release_tree` for `working` and a git ref. `stage_from_directory` for `--from installed`. The server start that exports `KYBER_WEAVE_RELEASE_ORIGIN`. Do not change `scripts/local-release-server.py`, `scripts/release-local.sh`, or `dash/src/install/origin.ts`.
+- **Acceptance:** Test-contract row T3.
+- **Depends on:** T2.
 - **Required skill:** `test-dev` for the GREEN re-run of T1 if the loop task touches shared fixtures. No specialist skill covers this shell script. The conductor assigns the edit directly.
 
 ### T4 — Document the override and the loop
 
 - **Objective:** Update the canonical Distribution pages so they describe the answered behavior.
 - **Files / symbols:** `docs/install.md` options table. `docs/distribution.md` section "Verifying a release locally", including the sentence that issue #125 tracks the installer gap.
-- **Acceptance:** Test-contract row T4. The pages name `KYBER_WEAVE_RELEASE_ORIGIN`, the D2 host limit, and the staging paths D5 selects. They do not document `dash/src/install/origin.ts` as loopback-checked.
+- **Acceptance:** Test-contract row T4. The pages name `KYBER_WEAVE_RELEASE_ORIGIN`, the D2 host limit, and the D5 staging rule: after the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`, and `--from installed` keeps the copy. They do not document `dash/src/install/origin.ts` as loopback-checked.
 - **Depends on:** T2 and T3, so the pages describe code that exists.
 - **Required skill:** `kyber-weave-docs`
 
@@ -138,13 +121,11 @@ No task edits `dash/src/install/origin.ts`.
 
 ```text
 T1 ─> T2 ─> T3 ─> T4 ─> review ─> T5
-            ^
-D5 ─────────┘
 ```
 
 `MAX_CONCURRENCY: 1`
 
-Audit: D1–D4 are approved and are not gates. T1 and T2 are a RED-then-GREEN pair, and T2 consumes T1's failing tests. T3 consumes a working `install.sh` from T2 and the path list D5 answers. T4 consumes that finished seam so the docs do not describe an unapproved staging path. T1 is the only writer of `tests/KyberWeave.Tests/ReleaseTests.cs`. T2 is the only writer of `scripts/install.sh`. T3 is the only writer of `scripts/update-loop.sh`. T4 is the only writer of the two Distribution pages. Those file scopes do not overlap, but the RED/GREEN and "docs describe shipped behavior" edges still serialize them. D5 is independent of any remaining decision and is the only open gate.
+Audit: D1–D5 are approved and are not gates. T1 and T2 are a RED-then-GREEN pair, and T2 consumes T1's failing tests. T3 consumes a working `install.sh` from T2. T4 consumes that finished seam. T1 is the only writer of `tests/KyberWeave.Tests/ReleaseTests.cs`. T2 is the only writer of `scripts/install.sh`. T3 is the only writer of `scripts/update-loop.sh`. T4 is the only writer of the two Distribution pages. Those file scopes do not overlap, but the RED/GREEN and "docs describe shipped behavior" edges still serialize them. No open decision remains.
 
 ## Risks
 
@@ -178,7 +159,7 @@ The repository gate suite (`review gates`) runs at review. This change does not 
 
 ## Review
 
-Review follows the repository review council after T1–T4 are green. The reviewer checks the diff against the approved decisions: `KYBER_WEAVE_RELEASE_ORIGIN`, the three-host check, the curl and wget split, the staging paths D5 answers, and that `dash/src/install/origin.ts` is untouched. A failing checksum must be the reason a corrupted asset is refused.
+Review follows the repository review council after T1–T4 are green. The reviewer checks the diff against the approved decisions: `KYBER_WEAVE_RELEASE_ORIGIN`, the three-host check, the curl and wget split, `working` and git-ref staging through `install.sh` after the server is listening, `--from installed` still copying, and `dash/src/install/origin.ts` untouched. A failing checksum must be the reason a corrupted asset is refused.
 
 ## docs-dev closeout
 
