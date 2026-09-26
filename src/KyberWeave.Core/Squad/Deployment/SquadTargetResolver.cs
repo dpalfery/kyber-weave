@@ -128,6 +128,9 @@ public static class SquadTargetResolver
     private static (IReadOnlyList<SquadTarget> Targets, SquadTargetResolutionSource Source)
         SelectTargets(SquadTargetResolutionRequest request)
     {
+        if (request.Operation == SquadTargetOperation.Update && request.ExplicitTargets.Count > 0)
+            return (SquadTargetCatalog.Parse(request.ExplicitTargets), SquadTargetResolutionSource.Explicit);
+
         if (request.Operation is SquadTargetOperation.Update or SquadTargetOperation.Uninstall)
         {
             return request.ReceiptTargets.Count > 0

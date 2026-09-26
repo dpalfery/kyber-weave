@@ -32,7 +32,7 @@ All squad operations are grouped under the `squad` branch:
 kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes]
 
 # Update an existing squad deployment
-kyber-weave squad update [path] [--global] [--dry-run] [--replace-managed] [--path <PATH>] [--yes]
+kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--replace-managed] [--path <PATH>] [--yes]
 
 # Uninstall squad deployment
 kyber-weave squad uninstall [path] [--global] [--dry-run] [--path <PATH>] [--yes]
@@ -81,7 +81,8 @@ Rendering canonical source into a harness's native files is Kyber-Weave's own co
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Target-root echo and confirmation**: Every mutating run (`install`, `update`, `uninstall` without `--dry-run`) prints the resolved absolute target root and its scope (project/global) before any write. An interactive console is then asked to confirm; declining prints `Declined. No changes were made.` and exits with **exit code 2**. `--yes` skips the prompt for automation attached to a terminal; non-interactive consoles (scripts, CI, captured output) echo the root and proceed without prompting.
 - **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms.
-- **Update and uninstall**: Always consume the recorded target roster from the existing deployment receipt and never perform re-detection.
+- **Update**: An explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt. When `--target` is omitted, update reuses the receipt roster. Update never auto-detects filesystem markers.
+- **Uninstall**: Uses the recorded target roster from the existing deployment receipt and never performs marker detection.
 
 ### Claude notes
 
@@ -322,6 +323,18 @@ When a new version of Kyber-Weave is available, upgrade the project's deployed s
 ```bash
 kyber-weave squad update
 ```
+
+Without `--target`, update reuses the deployment receipt's target roster. To add a target,
+pass the complete desired set, including every existing target that should remain. For example,
+to add `codex` to an existing `claude` deployment:
+
+```bash
+kyber-weave squad update --target claude,codex
+```
+
+The explicit list replaces the desired target roster for that update; it is not merged with the
+receipt. Update does not auto-detect filesystem markers. The same selection rules apply to
+`--dry-run`.
 
 By default, `squad update` preserves locally modified managed files and reports a drift warning. To intentionally overwrite local modifications with the upstream canonical version, pass `--replace-managed`:
 
