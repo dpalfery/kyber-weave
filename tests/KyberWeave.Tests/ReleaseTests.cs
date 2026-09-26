@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -9,18 +10,20 @@ using Xunit.Sdk;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the two halves of the release-pipeline contract that this side of the
-/// implementation owns:
+/// Pins the release-pipeline contract this test project owns:
 ///
-///   (a) the OS / architecture -> RID mapping the release workflow and the
-///       installer share, and
+///   (a) the OS / architecture -&gt; RID mapping the release workflow and the
+///       installer share,
 ///   (b) the SHA256SUMS.txt verification the installer runs before placing
-///       any binary on disk.
+///       any binary on disk, and
+///   (c) <c>KYBER_WEAVE_RELEASE_ORIGIN</c> — loopback <c>http</c>/<c>https</c>
+///       only, the curl and wget split, and a pinned install from
+///       <c>scripts/local-release-server.py</c>.
 ///
-/// <c>scripts/install.sh</c> is the single source of truth for both. The
-/// library-mode sourcing gated by <c>KYBER_WEAVE_INSTALL_LIB=1</c> exposes
-/// the helpers without running the installer, so what these tests exercise is
-/// the same shell code the user runs.
+/// <c>scripts/install.sh</c> is the single source of truth. Library-mode
+/// sourcing (<c>KYBER_WEAVE_INSTALL_LIB=1</c>) exposes helpers without running
+/// the installer. Full-install facts do not set that variable: library mode
+/// returns before download, checksum, and <c>install_binary</c>.
 ///
 /// Task 12.1 ("Add a test covering checksum verification and the
 /// platform-identifier resolution"). The installer tests are deliberately
@@ -791,12 +794,605 @@ public sealed class ReleaseTests
         }
     }
 
+    // ------------------------------------------------- loopback release origin
+    //
+    // KYBER_WEAVE_RELEASE_ORIGIN is http or https, with no userinfo, and host
+    // 127.0.0.1, localhost, or [::1], plus an optional port. Anything else,
+    // including other 127.* addresses, is refused. These facts call fetch the
+    // way the installer does. That function is defined only after the
+    // KYBER_WEAVE_INSTALL_LIB return, so on an unchanged script the call fails
+    // with "fetch: not found" before a checksum comparison and before the
+    // installer body can contact GitHub. Full-install invocations below do not
+    // set the library variable; they run only after that helper call has
+    // returned.
+
+    private const string PinnedVersion = "0.1.0";
+
+    private const string ReleaseOwner = "dpalfery";
+
+    private const string ReleaseRepo = "kyber-weave";
+
+    /// <summary>Below <c>KYBERDASH_MIN_VERSION</c>, so <c>--no-mcp</c> is the only archive the contract's command line skips.</summary>
+    private const string InstallPayload = "kyber-weave-local-origin";
+
+    private static readonly string[] ProxyVariables =
+    [
+        "http_proxy",
+        "https_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "all_proxy",
+    ];
+
+    private const string RedirectServerScript = """
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", "http://example.com/not-loopback")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, fmt, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        print(server.server_address[1], flush=True)
+        server.serve_forever()
+        """;
+
+    /// <summary>
+    /// An unset origin still refuses plain HTTP. The dest file is the download
+    /// <c>fetch</c> would have written; a refusal leaves it absent.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginUnsetRefusesPlainHttpAndWritesNoFile()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new Sandbox();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        ProcessResult result = InvokeFetch(
+            origin: null,
+            url: "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt",
+            destination: destination,
+            toolDirectory: PrependDownloader(sandbox, "curl", log),
+            replacePath: false,
+            includeStdout: false);
+
+        Assert.Contains("refusing non-HTTPS URL", result.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(File.Exists(destination), Describe(result));
+        Assert.False(DownloaderWasInvoked(log), Describe(result));
+    }
+
+    /// <summary>
+    /// A legal origin is only <c>http</c> or <c>https</c>, with no userinfo, and
+    /// host <c>127.0.0.1</c>, <c>localhost</c>, or <c>[::1]</c>, with an optional
+    /// port. While that override is active, curl uses <c>--proto '=http,https'</c>
+    /// for <c>http</c> and keeps <c>--proto '=https'</c> for <c>https</c>. Both
+    /// keep <c>--proto-redir '=https'</c>. <c>fetch_stdout</c> takes the same flags.
+    /// </summary>
+    [Theory]
+    [InlineData("http://127.0.0.1", "=http,https")]
+    [InlineData("http://127.0.0.1:9", "=http,https")]
+    [InlineData("http://127.0.0.1/", "=http,https")]
+    [InlineData("http://localhost", "=http,https")]
+    [InlineData("http://localhost:80", "=http,https")]
+    [InlineData("http://[::1]", "=http,https")]
+    [InlineData("http://[::1]:9", "=http,https")]
+    [InlineData("https://127.0.0.1", "=https")]
+    [InlineData("https://127.0.0.1:443", "=https")]
+    [InlineData("https://localhost", "=https")]
+    [InlineData("https://localhost:9", "=https")]
+    [InlineData("https://[::1]", "=https")]
+    [InlineData("https://[::1]:443", "=https")]
+    public void ReleaseOriginAcceptsLoopbackHttpOrHttps(string origin, string proto)
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new Sandbox();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        string url = SumsUrl(origin);
+        ProcessResult result = InvokeFetch(
+            origin,
+            url,
+            destination,
+            PrependDownloader(sandbox, "curl", log),
+            replacePath: false,
+            includeStdout: true);
+
+        Assert.True(result.ExitCode == 0, Describe(result));
+        List<string[]> invocations = ReadDownloaderInvocations(log);
+        Assert.Equal(2, invocations.Count);
+        foreach (string[] args in invocations)
+        {
+            AssertArgSequence(args, "--proto", proto, "--proto-redir", "=https");
+            Assert.Contains("-fsSL", args);
+            Assert.Contains(url, args);
+            if (proto == "=https")
+            {
+                Assert.DoesNotContain("=http,https", args);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Any other host, including other <c>127.*</c> addresses, userinfo, and a
+    /// scheme other than <c>http</c> or <c>https</c>, is refused. A legal origin
+    /// does not unlock an <c>http</c> URL whose host is not loopback. Nothing is
+    /// written and the downloader is not started.
+    /// </summary>
+    [Theory]
+    [InlineData("http://127.0.0.2", "")]
+    [InlineData("http://127.0.0.2:8080", "")]
+    [InlineData("http://127.1.0.1", "")]
+    [InlineData("http://127.0.0.10", "")]
+    [InlineData("https://127.0.0.2", "")]
+    [InlineData("http://example.com", "")]
+    [InlineData("https://example.com", "")]
+    [InlineData("https://github.com", "")]
+    [InlineData("http://user:pass@127.0.0.1:9", "")]
+    [InlineData("https://user:pass@127.0.0.1", "")]
+    [InlineData("http://user@localhost", "")]
+    [InlineData("ftp://127.0.0.1", "")]
+    [InlineData("http://[::2]", "")]
+    [InlineData("http://[::2]:9", "")]
+    [InlineData("http://0.0.0.0", "")]
+    [InlineData("http://127.0.0.1.example.com", "")]
+    [InlineData("http://localhost.localdomain", "")]
+    [InlineData("http://2130706433", "")]
+    [InlineData("http://[::ffff:127.0.0.1]", "")]
+    [InlineData("http://::1", "")]
+    [InlineData("http://127.0.0.1:abc", "")]
+    [InlineData("http://127.0.0.1:", "")]
+    [InlineData("http://127.0.0.1:9", "http://example.com/outside")]
+    [InlineData("https://example.com", "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt")]
+    public void ReleaseOriginRefusesNonLoopbackUserinfoAndForeignHosts(string origin, string explicitTarget)
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new Sandbox();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        string url = explicitTarget.Length == 0 ? SumsUrl(origin) : explicitTarget;
+        ProcessResult result = InvokeFetch(
+            origin,
+            url,
+            destination,
+            PrependDownloader(sandbox, "curl", log),
+            replacePath: false,
+            includeStdout: false);
+
+        Assert.Contains("kyber-weave: error:", result.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(File.Exists(destination), Describe(result));
+        Assert.False(DownloaderWasInvoked(log), Describe(result));
+    }
+
+    /// <summary>
+    /// An <c>http</c> origin refuses wget. Curl is absent on purpose, so the
+    /// installer would otherwise select wget and then must stop before it runs.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginHttpRefusesWget()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new Sandbox();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "wget-args");
+        const string origin = "http://127.0.0.1:9";
+        ProcessResult result = InvokeFetch(
+            origin,
+            SumsUrl(origin),
+            destination,
+            IsolatedWgetDirectory(sandbox, log),
+            replacePath: true,
+            includeStdout: false);
+
+        Assert.Contains("wget", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("refusing", result.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.False(File.Exists(destination), Describe(result));
+        Assert.False(DownloaderWasInvoked(log), Describe(result));
+    }
+
+    /// <summary>
+    /// An <c>https</c> loopback origin keeps today's wget flags (<c>--https-only</c>).
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginHttpsKeepsWgetHttpsOnly()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new Sandbox();
+        string destination = Path.Combine(sandbox.Root, "download");
+        string log = Path.Combine(sandbox.Root, "wget-args");
+        const string origin = "https://127.0.0.1:9";
+        string url = SumsUrl(origin);
+        ProcessResult result = InvokeFetch(
+            origin,
+            url,
+            destination,
+            IsolatedWgetDirectory(sandbox, log),
+            replacePath: true,
+            includeStdout: false);
+
+        Assert.True(result.ExitCode == 0, Describe(result));
+        List<string[]> invocations = ReadDownloaderInvocations(log);
+        string[] wgetArgs = Assert.Single(invocations);
+        AssertArgSequence(wgetArgs, "--https-only");
+        Assert.Contains(url, wgetArgs);
+    }
+
+    /// <summary>
+    /// With a legal loopback origin, <c>install.sh --install-dir --version --no-mcp</c>
+    /// downloads from <c>scripts/local-release-server.py</c> and installs.
+    /// <c>KYBER_WEAVE_INSTALL_LIB</c> is not set on that invocation.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginInstallsPinnedVersionFromTheLocalReleaseServer()
+    {
+        SkipOnWindows();
+
+        using PublishedRelease release = PublishedRelease.Create(corruptArchive: false);
+        string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
+        ProcessResult fetch = InvokeFetch(
+            release.Origin,
+            SumsUrl(release.Origin),
+            fetchDest,
+            toolDirectory: null,
+            replacePath: false,
+            includeStdout: false);
+
+        // The helper has to accept the loopback URL before the installer body
+        // runs. Until it is defined, this fails closed and the body — which
+        // would otherwise ignore the origin and contact GitHub — does not start.
+        Assert.True(fetch.ExitCode == 0, Describe(fetch));
+        Assert.Contains(release.AssetName, File.ReadAllText(fetchDest), StringComparison.Ordinal);
+
+        ProcessResult install = RunFullInstall(release.InstallDirectory, release.Origin);
+        Assert.True(install.ExitCode == 0, Describe(install));
+        string installed = Path.Combine(release.InstallDirectory, "kyber-weave");
+        Assert.Equal(InstallPayload, File.ReadAllText(installed));
+        Assert.False(File.Exists(Path.Combine(release.InstallDirectory, "kyber-weave-mcp")));
+    }
+
+    /// <summary>
+    /// A byte flipped in the asset after <c>SHA256SUMS.txt</c> is written exits
+    /// non-zero, reports a SHA-256 mismatch, and leaves the install directory
+    /// without <c>kyber-weave</c>. The live install path must be the thing that
+    /// fails: a green helper-only checksum test would hide a second parser in
+    /// <c>verify_and_extract</c>.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginRejectsByteFlippedAfterTheChecksumIsWritten()
+    {
+        SkipOnWindows();
+
+        using PublishedRelease release = PublishedRelease.Create(corruptArchive: true);
+        string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
+        ProcessResult fetch = InvokeFetch(
+            release.Origin,
+            SumsUrl(release.Origin),
+            fetchDest,
+            toolDirectory: null,
+            replacePath: false,
+            includeStdout: false);
+        Assert.True(fetch.ExitCode == 0, Describe(fetch));
+
+        ProcessResult install = RunFullInstall(release.InstallDirectory, release.Origin);
+        Assert.Contains("SHA256 mismatch", install.StandardError, StringComparison.Ordinal);
+        Assert.NotEqual(0, install.ExitCode);
+        Assert.False(
+            File.Exists(Path.Combine(release.InstallDirectory, "kyber-weave")),
+            Describe(install));
+    }
+
+    /// <summary>
+    /// An HTTP redirect away from loopback is not installed. The loopback URL
+    /// itself must have been accepted; a scheme refusal of that URL is not this
+    /// outcome. The logging curl records the URL the installer actually requested.
+    /// </summary>
+    [Fact]
+    public void ReleaseOriginHttpRedirectAwayFromLoopbackIsNotInstalled()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new Sandbox();
+        string script = Path.Combine(sandbox.Root, "redirect.py");
+        File.WriteAllText(script, RedirectServerScript);
+        using ListeningServer server = ListeningServer.Start(script);
+        string origin = "http://127.0.0.1:" + server.Port.ToString(CultureInfo.InvariantCulture);
+        string fetchDest = Path.Combine(sandbox.Root, "fetched");
+        ProcessResult fetch = InvokeFetch(
+            origin,
+            SumsUrl(origin),
+            fetchDest,
+            toolDirectory: null,
+            replacePath: false,
+            includeStdout: false);
+
+        Assert.True(
+            fetch.ExitCode != 127
+                && !fetch.StandardError.Contains("fetch: not found", StringComparison.Ordinal),
+            Describe(fetch));
+
+        string log = Path.Combine(sandbox.Root, "curl-args");
+        string installDir = Path.Combine(sandbox.Root, "install");
+        Directory.CreateDirectory(installDir);
+        ProcessResult install = RunFullInstall(
+            installDir,
+            origin,
+            PrependRecordingCurl(sandbox, log));
+
+        Assert.NotEqual(0, install.ExitCode);
+        Assert.False(File.Exists(Path.Combine(installDir, "kyber-weave")), Describe(install));
+        string recorded = File.Exists(log) ? File.ReadAllText(log) : string.Empty;
+        Assert.Contains(origin, recorded, StringComparison.Ordinal);
+        Assert.DoesNotContain("github.com", recorded, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "refusing non-HTTPS URL: " + origin,
+            install.StandardError,
+            StringComparison.Ordinal);
+    }
+
+    private static string SumsUrl(string origin)
+    {
+        string prefix = origin.EndsWith('/') ? origin[..^1] : origin;
+        return prefix
+            + "/"
+            + ReleaseOwner
+            + "/"
+            + ReleaseRepo
+            + "/releases/download/v"
+            + PinnedVersion
+            + "/SHA256SUMS.txt";
+    }
+
+    private static string Describe(ProcessResult result)
+    {
+        return "exit "
+            + result.ExitCode.ToString(CultureInfo.InvariantCulture)
+            + "\nstderr:\n"
+            + result.StandardError
+            + "\nstdout:\n"
+            + result.StandardOutput;
+    }
+
+    private static void AssertArgSequence(IReadOnlyList<string> args, params string[] expected)
+    {
+        int from = 0;
+        foreach (string token in expected)
+        {
+            int index = -1;
+            for (int i = from; i < args.Count; i++)
+            {
+                if (string.Equals(args[i], token, StringComparison.Ordinal))
+                {
+                    index = i;
+                    break;
+                }
+            }
+
+            Assert.True(
+                index >= 0,
+                "missing '" + token + "' in [" + string.Join(' ', args) + "]");
+            from = index + 1;
+        }
+    }
+
+    /// <summary>
+    /// Sources <c>install.sh</c> in library mode and calls <c>fetch</c>.
+    /// <paramref name="origin"/> null removes <c>KYBER_WEAVE_RELEASE_ORIGIN</c>.
+    /// </summary>
+    private static ProcessResult InvokeFetch(
+        string? origin,
+        string url,
+        string destination,
+        string? toolDirectory,
+        bool replacePath,
+        bool includeStdout)
+    {
+        string body = "fetch \"$KYBER_WEAVE_TEST_URL\" \"$KYBER_WEAVE_TEST_DEST\"\n";
+        if (includeStdout)
+        {
+            body += "fetch_stdout \"$KYBER_WEAVE_TEST_URL\"\n";
+        }
+
+        ProcessStartInfo startInfo = CreateShellStartInfo(". \"" + InstallShPath + "\"\n" + body);
+        if (origin is null)
+        {
+            startInfo.Environment.Remove("KYBER_WEAVE_RELEASE_ORIGIN");
+        }
+        else
+        {
+            startInfo.Environment["KYBER_WEAVE_RELEASE_ORIGIN"] = origin;
+        }
+
+        startInfo.Environment["KYBER_WEAVE_TEST_URL"] = url;
+        startInfo.Environment["KYBER_WEAVE_TEST_DEST"] = destination;
+        if (toolDirectory is not null)
+        {
+            startInfo.Environment["PATH"] = replacePath
+                ? toolDirectory
+                : toolDirectory + ":" + startInfo.Environment["PATH"];
+        }
+
+        ClearProxies(startInfo);
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>
+    /// Runs the installer the way a user would. Does not set
+    /// <c>KYBER_WEAVE_INSTALL_LIB</c>: that gate returns before any download.
+    /// </summary>
+    private static ProcessResult RunFullInstall(string installDir, string origin, string? prependPath = null)
+    {
+        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(InstallShPath);
+        startInfo.ArgumentList.Add("--install-dir");
+        startInfo.ArgumentList.Add(installDir);
+        startInfo.ArgumentList.Add("--version");
+        startInfo.ArgumentList.Add(PinnedVersion);
+        startInfo.ArgumentList.Add("--no-mcp");
+        startInfo.Environment["KYBER_WEAVE_RELEASE_ORIGIN"] = origin;
+        startInfo.Environment.Remove("KYBER_WEAVE_INSTALL_LIB");
+        if (prependPath is not null)
+        {
+            startInfo.Environment["PATH"] = prependPath + ":" + startInfo.Environment["PATH"];
+        }
+
+        ClearProxies(startInfo);
+        if (startInfo.Environment.TryGetValue("KYBER_WEAVE_INSTALL_LIB", out string? library) && library == "1")
+        {
+            throw new InvalidOperationException(
+                "Full-install facts must not set KYBER_WEAVE_INSTALL_LIB; library mode returns before download.");
+        }
+
+        return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
+    }
+
+    private static void ClearProxies(ProcessStartInfo startInfo)
+    {
+        foreach (string name in ProxyVariables)
+        {
+            startInfo.Environment.Remove(name);
+        }
+    }
+
+    private static string CurrentInstallRid()
+    {
+        ProcessStartInfo startInfo = CreateShellStartInfo(
+            ". \"" + InstallShPath + "\"; kyber_weave_resolve_rid \"$(uname -s)\" \"$(uname -m)\"");
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));
+        Assert.Equal(0, result.ExitCode);
+        return result.StandardOutput.Trim();
+    }
+
+    private static string PrependDownloader(Sandbox sandbox, string toolName, string logPath)
+    {
+        string directory = Path.Combine(sandbox.Root, toolName + "-bin");
+        Directory.CreateDirectory(directory);
+        WriteDownloader(Path.Combine(directory, toolName), logPath, execRealTool: null);
+        return directory;
+    }
+
+    private static string PrependRecordingCurl(Sandbox sandbox, string logPath)
+    {
+        string directory = Path.Combine(sandbox.Root, "curl-bin");
+        Directory.CreateDirectory(directory);
+        WriteDownloader(Path.Combine(directory, "curl"), logPath, execRealTool: ResolveExecutable("curl"));
+        return directory;
+    }
+
+    /// <summary>
+    /// PATH that contains wget, tar, and sha256sum, and not curl, so the
+    /// installer selects wget before the library return.
+    /// </summary>
+    private static string IsolatedWgetDirectory(Sandbox sandbox, string logPath)
+    {
+        string directory = Path.Combine(sandbox.Root, "wget-only");
+        Directory.CreateDirectory(directory);
+        WriteDownloader(Path.Combine(directory, "wget"), logPath, execRealTool: null);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.CreateSymbolicLink(Path.Combine(directory, "tar"), ResolveExecutable("tar"));
+            File.CreateSymbolicLink(Path.Combine(directory, "sha256sum"), ResolveExecutable("sha256sum"));
+        }
+
+        return directory;
+    }
+
+    private static void WriteDownloader(string path, string logPath, string? execRealTool)
+    {
+        string body = "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '"
+            + logPath
+            + "'\nprintf '\\n' >> '"
+            + logPath
+            + "'\n";
+        if (execRealTool is null)
+        {
+            body += "exit 0\n";
+        }
+        else
+        {
+            body += "exec '" + execRealTool + "' \"$@\"\n";
+        }
+
+        File.WriteAllText(path, body);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    private static bool DownloaderWasInvoked(string logPath)
+    {
+        return File.Exists(logPath) && File.ReadAllText(logPath).Trim().Length > 0;
+    }
+
+    private static List<string[]> ReadDownloaderInvocations(string logPath)
+    {
+        List<string[]> invocations = [];
+        if (!File.Exists(logPath))
+        {
+            return invocations;
+        }
+
+        string[] blocks = File.ReadAllText(logPath).Split("\n\n", StringSplitOptions.RemoveEmptyEntries);
+        foreach (string block in blocks)
+        {
+            string[] args = block.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            if (args.Length > 0)
+            {
+                invocations.Add(args);
+            }
+        }
+
+        return invocations;
+    }
+
+    private static string ResolveExecutable(string name)
+    {
+        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("command -v " + name);
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));
+        Assert.True(result.ExitCode == 0, "command -v " + name + " failed: " + result.StandardError);
+        return result.StandardOutput.Trim();
+    }
+
     // ------------------------------------------------------------- Sandbox
 
     /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>
     private sealed class Sandbox : IDisposable
     {
         private readonly string _dir;
+
+        public string Root => _dir;
+
         public string SumsPath => Path.Combine(_dir, "SHA256SUMS.txt");
 
         public Sandbox(string suffix = "")
@@ -860,4 +1456,172 @@ public sealed class ReleaseTests
         }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// A <c>v0.1.0</c> tree served by <c>scripts/local-release-server.py</c>.
+    /// The checksum file is written before a corrupt archive is flipped, which
+    /// is the order the mismatch fact has to observe.
+    /// </summary>
+    private sealed class PublishedRelease : IDisposable
+    {
+        private readonly Sandbox _sandbox;
+        private readonly ListeningServer _server;
+
+        private PublishedRelease(Sandbox sandbox, ListeningServer server, string assetName)
+        {
+            _sandbox = sandbox;
+            _server = server;
+            AssetName = assetName;
+            InstallDirectory = Path.Combine(sandbox.Root, "install");
+            Directory.CreateDirectory(InstallDirectory);
+            Origin = "http://127.0.0.1:" + server.Port.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public Sandbox Sandbox => _sandbox;
+
+        public string Origin { get; }
+
+        public string InstallDirectory { get; }
+
+        public string AssetName { get; }
+
+        public static PublishedRelease Create(bool corruptArchive)
+        {
+            Sandbox sandbox = new Sandbox();
+            ListeningServer? server = null;
+            try
+            {
+                string rid = CurrentInstallRid();
+                string assetName = "kyber-weave-" + rid + ".tar.gz";
+                string tagDir = Path.Combine(sandbox.Root, "v" + PinnedVersion);
+                Directory.CreateDirectory(tagDir);
+                string stage = Path.Combine(sandbox.Root, "stage");
+                Directory.CreateDirectory(stage);
+                File.WriteAllText(Path.Combine(stage, "kyber-weave"), InstallPayload);
+                string archive = Path.Combine(tagDir, assetName);
+
+                ProcessStartInfo tar = new ProcessStartInfo(ResolveExecutable("tar"))
+                {
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                };
+                tar.ArgumentList.Add("-czf");
+                tar.ArgumentList.Add(archive);
+                tar.ArgumentList.Add("-C");
+                tar.ArgumentList.Add(stage);
+                tar.ArgumentList.Add("kyber-weave");
+                ProcessResult tarResult = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));
+                Assert.True(tarResult.ExitCode == 0, tarResult.StandardError);
+
+                string hash = Sha256(archive);
+                File.WriteAllText(Path.Combine(tagDir, "SHA256SUMS.txt"), hash + "  " + assetName + "\n");
+                if (corruptArchive)
+                {
+                    byte[] bytes = File.ReadAllBytes(archive);
+                    bytes[0] ^= 0xFF;
+                    File.WriteAllBytes(archive, bytes);
+                }
+
+                server = ListeningServer.Start(
+                    Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "local-release-server.py"),
+                    "--root",
+                    sandbox.Root,
+                    "--port",
+                    "0");
+                return new PublishedRelease(sandbox, server, assetName);
+            }
+            catch
+            {
+                server?.Dispose();
+                sandbox.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            _server.Dispose();
+            _sandbox.Dispose();
+        }
+    }
+
+    /// <summary>A Python HTTP server that prints its ephemeral port and then serves until disposed.</summary>
+    private sealed class ListeningServer : IDisposable
+    {
+        private readonly Process _process;
+        private readonly Task<string> _stderr;
+
+        private ListeningServer(Process process, Task<string> stderr, int port)
+        {
+            _process = process;
+            _stderr = stderr;
+            Port = port;
+        }
+
+        public int Port { get; }
+
+        public static ListeningServer Start(string scriptPath, params string[] arguments)
+        {
+            ProcessStartInfo startInfo = new ProcessStartInfo(ResolveExecutable("python3"))
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add(scriptPath);
+            foreach (string argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            Process process = new Process { StartInfo = startInfo };
+            process.Start();
+            process.StandardInput.Close();
+            Task<string> stderr = process.StandardError.ReadToEndAsync();
+            Task<string?> readLine = process.StandardOutput.ReadLineAsync();
+            if (!readLine.Wait(TimeSpan.FromSeconds(10)))
+            {
+                string err = KillAndRead(process, stderr);
+                throw new InvalidOperationException("server did not print a port. " + err);
+            }
+
+            string? line = readLine.Result;
+            if (line is null
+                || !int.TryParse(line.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int port))
+            {
+                string err = KillAndRead(process, stderr);
+                throw new InvalidOperationException("server port line was '" + line + "'. " + err);
+            }
+
+            return new ListeningServer(process, stderr, port);
+        }
+
+        public void Dispose()
+        {
+            KillAndRead(_process, _stderr);
+        }
+
+        private static string KillAndRead(Process process, Task<string> stderr)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Already exited. The stderr read still has to finish so the pipe closes.
+            }
+
+            string error = stderr.Wait(TimeSpan.FromSeconds(5)) ? stderr.Result : string.Empty;
+            process.Dispose();
+            return error;
+        }
+    }
+
 }
