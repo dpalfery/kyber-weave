@@ -111,6 +111,9 @@ public static class SkillReviewExchange
         return new SkillReviewExportResult(bundle, json);
     }
 
+    /// <summary>
+    /// Imports a verdict bundle against the candidates in <paramref name="expectedBundle"/>.
+    /// </summary>
     public static SkillReviewImportResult ImportVerdicts(
         string json,
         SkillReviewCandidateBundle expectedBundle)

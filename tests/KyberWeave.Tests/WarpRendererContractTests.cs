@@ -80,6 +80,7 @@ public sealed class WarpRendererContractTests : IDisposable
         Assert.Equal([SquadTarget.Warp], renderer.SupportedTargets);
     }
 
+    /// <summary>The renderer refuses a request for any target but Warp.</summary>
     [Fact]
     public async Task RenderAsync_RejectsNonWarpTarget()
     {

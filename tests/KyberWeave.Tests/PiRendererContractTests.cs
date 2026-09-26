@@ -1020,6 +1020,7 @@ public sealed class PiRendererContractTests : IDisposable
             "Conductor lowered skill should omit 'thinking' (pi: inherit).");
     }
 
+    /// <summary>Splits a rendered file into its parsed YAML frontmatter and body, failing the test if either delimiter is missing.</summary>
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
     {
         const string delimiter = "---\n";

@@ -140,6 +140,10 @@ public sealed partial class DocumentLoader
     private bool IsCatalogContained() =>
         DocsRootPath.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
 
+    /// <summary>
+    /// Reads one Markdown file into a <see cref="DocumentModel"/>, with its frontmatter when it
+    /// has any; a file without frontmatter keeps its whole text as the body.
+    /// </summary>
     private DocumentModel Parse(string absolutePath, string relativePath)
     {
         string raw = File.ReadAllText(absolutePath);

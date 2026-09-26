@@ -88,7 +88,6 @@ public sealed class ReviewDuplicatesCommand : Command<ReviewDuplicatesSettings>
         return report.HasErrors ? 1 : 0;
     }
 
-
     /// <summary>
     /// Takes the two CodeGraph ports separately rather than the concrete adapter, so the
     /// symbol enumerator is consumed as a port and a fake can stand in for it.

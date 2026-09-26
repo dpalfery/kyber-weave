@@ -21,6 +21,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
     private const string SkillPackage = "dpalfery/kyber-weave";
 
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, DocsInitSettings settings, CancellationToken cancellationToken)
     {
         (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(settings);
@@ -62,7 +63,6 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         return 0;
     }
-
 
     /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>
     internal static (int ExitCode, ScaffoldResult? Result, string? Error) TryScaffold(

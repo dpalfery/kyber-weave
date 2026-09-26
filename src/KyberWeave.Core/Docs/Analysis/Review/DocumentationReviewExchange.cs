@@ -195,6 +195,10 @@ public sealed class DocumentationReviewExchange
         return new ReviewImportResult(true, verdicts.Length, new DiagnosticReport());
     }
 
+    /// <summary>
+    /// The evidence claims to persist for the reviewed candidates, in stable order, numbering
+    /// repeated content hashes within a candidate so each evidence id stays unique.
+    /// </summary>
     private static IReadOnlyList<PersistedClaim> PersistedClaims(
         IReadOnlyList<AnalysisCandidate> candidates)
     {
@@ -354,6 +358,7 @@ public sealed class DocumentationReviewExchange
         return ids;
     }
 
+    /// <summary>True when <paramref name="label"/> is a verdict a candidate of <paramref name="kind"/> may receive.</summary>
     private static bool LabelApplies(AnalysisRuleKind kind, AnalysisVerdictLabel label) =>
         label is AnalysisVerdictLabel.Benign or AnalysisVerdictLabel.Uncertain
         || (kind == AnalysisRuleKind.Duplicate && label == AnalysisVerdictLabel.Duplicate)
@@ -361,8 +366,9 @@ public sealed class DocumentationReviewExchange
         || (kind == AnalysisRuleKind.Terminology && label == AnalysisVerdictLabel.DistinctSenses);
 
     /// <summary>
-    /// True when a distinct-senses verdict on a terminology candidate proposes at least one
-    /// well-formed glossary sense, each for the candidate's own term.
+    /// True when the verdict proposes no glossary senses. When it does propose them, true
+    /// only for a distinct-senses verdict on a terminology candidate that proposes at least
+    /// one sense, every one well-formed and for the candidate's own term.
     /// </summary>
     private static bool GlossarySensesAreValid(
         ReviewVerdictItem verdict,
@@ -390,6 +396,7 @@ public sealed class DocumentationReviewExchange
         // ReSharper restore ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
     }
 
+    /// <summary>True for a <c>component:</c> or <c>code-ref:</c> scope with a non-blank value.</summary>
     private static bool ValidScope(string scope) =>
         (scope.StartsWith("component:", StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(scope["component:".Length..]))

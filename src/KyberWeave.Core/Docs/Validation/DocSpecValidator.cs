@@ -50,6 +50,10 @@ public sealed class DocSpecValidator
         _config = config;
     }
 
+    /// <summary>
+    /// Validates every document in <paramref name="set"/> against the ontology, after first
+    /// collecting the corpus-wide ids that duplicate and reference checks need.
+    /// </summary>
     public DiagnosticReport Validate(DocumentSet set)
     {
         ArgumentNullException.ThrowIfNull(set);
@@ -80,10 +84,15 @@ public sealed class DocSpecValidator
     }
 
     /// <summary>
-    /// Adds every frontmatter, vocabulary and identity finding for <paramref name="doc"/> to
-    /// <paramref name="report"/>, recording its id in <paramref name="knownIds"/> and
-    /// <paramref name="idOwners"/> for the corpus-wide uniqueness check.
+    /// Adds every frontmatter, vocabulary, duplicate-id and reference finding for
+    /// <paramref name="doc"/> to <paramref name="report"/>.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="idOwners"/> and <paramref name="knownIds"/> are the corpus-wide id maps
+    /// <see cref="Validate"/> builds before the first call: a duplicate id is reported from
+    /// <paramref name="idOwners"/>, and each reference is resolved against
+    /// <paramref name="knownIds"/>, with the nearest known id as the hint.
+    /// </remarks>
     private void ValidateDocument(
         DocumentModel doc,
         DocumentSet set,

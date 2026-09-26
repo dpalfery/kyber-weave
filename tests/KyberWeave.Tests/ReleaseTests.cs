@@ -445,6 +445,7 @@ public sealed class ReleaseTests
         Assert.Equal(2, result.ExitCode);
     }
 
+    /// <summary>Checksum verification reads only this asset's line, ignoring other assets' hashes in the sums file.</summary>
     [Fact]
     public void VerifyChecksumIgnoresOtherAssetsHashesWhenBaselineMatches()
     {

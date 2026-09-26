@@ -134,6 +134,7 @@ public class DocumentKeywordScoringTests
         Assert.Equal(0.0, DocumentIndex.ScoreExact(doc, "unrelated"));
     }
 
+    /// <summary>Partial keyword matches score by the keyword weight, capped at 1.5 times it however many match.</summary>
     [Fact]
     public void PartialKeywordMatchScoresViaKeywordPartialWeightCappedAtOnePointFiveMultiplier()
     {

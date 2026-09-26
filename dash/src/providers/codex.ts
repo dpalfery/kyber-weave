@@ -1336,6 +1336,7 @@ function rootsFor(home: string): ProbeRoot[] {
   ]
 }
 
+/** Drops nest sources whose rollout session id already appears under the billed home. */
 function dropOverlappingNestSources(sources: SessionSource[], billedHome: string): SessionSource[] {
   const billedIds = listRolloutSessionIds(billedHome)
   return sources.filter(source => {
@@ -1401,6 +1402,7 @@ export function createCodexProvider(
       return model
     },
 
+    /** The display name for a Codex tool, or the raw name when none is mapped. */
     toolDisplayName(rawTool: string): string {
       return toolNameMap[rawTool] ?? rawTool
     },

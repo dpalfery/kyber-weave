@@ -75,6 +75,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             $"Expected products/kyber-squad under ToolRoot at '{ProductRoot}'.");
     }
 
+    /// <summary>The renderer refuses a request for any target but Antigravity.</summary>
     [Fact]
     public async Task RenderAsync_RejectsNonAntigravityTarget()
     {
@@ -511,6 +512,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>Every canonical skill still emits its <c>SKILL.md</c> under native rendering.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_EmitsCanonicalSkillFiles()
     {

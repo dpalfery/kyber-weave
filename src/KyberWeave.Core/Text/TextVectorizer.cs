@@ -88,6 +88,7 @@ public static partial class TextVectorizer
         return token;
     }
 
+    /// <summary>Cosine similarity of two sparse term vectors; 0 when either is empty.</summary>
     public static double CosineSimilarity(IReadOnlyDictionary<string, double> a, IReadOnlyDictionary<string, double> b)
     {
         if (a.Count == 0 || b.Count == 0) return 0;
@@ -100,6 +101,7 @@ public static partial class TextVectorizer
         return magA == 0 || magB == 0 ? 0 : dot / (magA * magB);
     }
 
+    /// <summary>The tokenizer: runs of lower-case letters and digits.</summary>
     [GeneratedRegex("[a-z0-9]+", RegexOptions.Compiled)]
     private static partial Regex MyRegex();
 }

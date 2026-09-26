@@ -69,7 +69,7 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         return outcome.ExitCode;
     }
 
-
+    /// <summary>The verdict as printed in the console summary.</summary>
     private static string Describe(ReviewVerdict verdict) => verdict switch
     {
         ReviewVerdict.Approve => "APPROVE",

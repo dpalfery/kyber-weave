@@ -92,6 +92,7 @@ function writeUncheckpointedWalDatabase(dbPath: string): void {
   expect(existsSync(dbPath + '-shm')).toBe(false)
 }
 
+/** Creates a closed WAL database with the session schema SQLite discovery reads, and one session. */
 function createDiscoveryDatabase(dbPath: string): void {
   const db = new NativeDatabase(dbPath)
   db.exec('PRAGMA journal_mode=WAL')
@@ -139,6 +140,7 @@ function makeSourceParentReadOnly(skip: (reason?: string) => void): boolean {
   return makeReadOnly(sourceRoot, skip)
 }
 
+/** Restores write access to the fixture's source parent. */
 function makeSourceParentWritable(): void {
   chmodSync(sourceRoot, 0o755)
 }

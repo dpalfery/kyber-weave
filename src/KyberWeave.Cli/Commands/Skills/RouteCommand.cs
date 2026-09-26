@@ -46,6 +46,7 @@ public sealed class RouteSettings : CommandSettings
 
 public sealed class RouteCommand : Command<RouteSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, RouteSettings settings, CancellationToken cancellationToken)
     {
         SkillSet set = SkillLoader.LoadSet(settings.SkillsPath);
@@ -66,7 +67,7 @@ public sealed class RouteCommand : Command<RouteSettings>
             : RunSingle(settings, set, strategy);
     }
 
-
+    /// <summary>Routes the one prompt given on the command line and prints the ranked skills.</summary>
     private static int RunSingle(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
         if (string.IsNullOrWhiteSpace(settings.Prompt))
