@@ -411,7 +411,21 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.NotNull(result.Plan);
         Assert.NotNull(result.Receipt);
         Assert.NotEmpty(result.Receipt.Files);
-        Assert.Equal(ExpectedRenderedFileCount(), result.Receipt.Files.Count);
+        Assert.Equal(ExpectedRenderedFileCount(target), result.Receipt.Files.Count);
+
+        // Claude is the one target where a primary agent adds an entry-point skill.
+        if (target == SquadTarget.Claude)
+        {
+            string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+            SquadSource source = SquadSourceLoader.Load(productRoot);
+            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"agents/{primaryAgentName}.md");
+        }
 
         bool sawAgentFile = false;
         bool sawSkillFile = false;
@@ -623,7 +637,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.NotNull(result.Plan);
         Assert.NotNull(result.Receipt);
         Assert.NotEmpty(result.Receipt.Files);
-        Assert.Equal(ExpectedRenderedFileCount(), result.Receipt.Files.Count);
+        Assert.Equal(ExpectedRenderedFileCount(SquadTarget.Factory), result.Receipt.Files.Count);
 
         string expectedRoot = globalRoots.ResolveGlobalRoot(SquadTarget.Factory);
         bool sawDroidFile = false;
@@ -790,7 +804,7 @@ public sealed class SquadGlobalRootTests : IDisposable
 
         string expectedRoot = globalRoots.ResolveGlobalRoot(target);
         string expectedToken = SquadTargetCatalog.GetToken(target);
-        int expectedFileCount = ExpectedRenderedFileCount();
+        int expectedFileCount = ExpectedRenderedFileCount(target);
 
         // Act
         SquadLifecycleResult result = await service.InstallAsync(request);
@@ -800,6 +814,20 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.NotNull(result.Receipt);
         Assert.Equal(expectedFileCount, result.Receipt.Files.Count);
         Assert.All(result.Receipt.Files, file => Assert.Equal(expectedToken, file.Target));
+
+        // Claude is the one target where a primary agent adds an entry-point skill.
+        if (target == SquadTarget.Claude)
+        {
+            string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+            SquadSource source = SquadSourceLoader.Load(productRoot);
+            string primaryAgentName = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary).Name;
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"skills/{primaryAgentName}/SKILL.md");
+            Assert.Single(
+                result.Receipt.Files,
+                f => f.RelativePath == $"agents/{primaryAgentName}.md");
+        }
 
         Assert.True(
             Directory.Exists(expectedRoot),
@@ -814,10 +842,10 @@ public sealed class SquadGlobalRootTests : IDisposable
     /// <summary>
     /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
     /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a
-    /// hardcoded literal. Target-agnostic per R17: a lowered primary agent still contributes
-    /// exactly one principal, whether it renders as an agent or a skill.
+    /// hardcoded literal. Claude is the one target where a primary agent adds a principal
+    /// (an entry-point skill beside its subagent).
     /// </summary>
-    private static int ExpectedRenderedFileCount()
+    private static int ExpectedRenderedFileCount(SquadTarget target)
     {
         string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
         SquadSource source = SquadSourceLoader.Load(productRoot);
@@ -826,10 +854,29 @@ public sealed class SquadGlobalRootTests : IDisposable
             .ToHashSet(StringComparer.Ordinal);
         int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
 
-        return source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
+        int baseCount = source.Agents.Count + source.Agents.Sum(agent => agent.Resources.Count)
             + source.Skills.Count - suppressedSkillCount
             + source.Skills.Where(skill => !sharedIdentities.Contains(skill.Name))
                 .Sum(skill => skill.Resources.Count);
+
+        // Claude is the one target where a primary agent adds an entry-point skill beside its subagent.
+        if (target == SquadTarget.Claude)
+        {
+            int claudeAddition = 0;
+            foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Primary))
+            {
+                string fallbackProfileId = agent.Fallback;
+                SquadFallbackProfile profile = source.FallbackProfiles.Profiles[fallbackProfileId];
+                if (profile.NoPrimaryAgent == "skill")
+                {
+                    // Add 1 for the SKILL.md and agent.Resources.Count for the resources
+                    claudeAddition += 1 + agent.Resources.Count;
+                }
+            }
+            return baseCount + claudeAddition;
+        }
+
+        return baseCount;
     }
 
     private static SquadLock GlobalLock(IReadOnlyList<string> targets) =>

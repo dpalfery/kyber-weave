@@ -41,10 +41,12 @@ last-reviewed: YYYY-MM-DD
 
 ### Open
 
-No todo document remains in this folder. Nine that were still open moved to GitHub
-issues #125–#133. The four that those issues left listed here, because a pull request
-was still open, are closed below — including the skill-vocabulary todo this change
-archived.
+| Todo | Component | Status | Description |
+|---|---|---|---|
+| [claude-conductor-live-verification.md](claude-conductor-live-verification.md) | KyberSquad | draft | Verify PR #136's `/conductor` skill and retained subagent in a live Claude Code session; the renderer and CI checks do not establish runtime behaviour. |
+
+Nine earlier open todos moved to GitHub issues #125–#133. The four that those issues
+left listed here while pull requests were open are closed below.
 
 ### Closed
 
