@@ -37,18 +37,32 @@ namespace KyberWeave.Mcp;
 /// behaviour here is unchanged on the SDK's main branch as of September 2026.
 /// </para>
 /// </remarks>
-public sealed class DrainingStreamServerTransport : StreamServerTransport
+/// <param name="input">The stream requests are read from.</param>
+/// <param name="output">The stream responses are written to. The transport owns it.</param>
+/// <param name="serverName">The server name used in the transport's log lines.</param>
+/// <param name="loggerFactory">The logger factory for the transport's log lines.</param>
+public sealed class DrainingStreamServerTransport(
+    Stream input,
+    Stream output,
+    string? serverName = null,
+    ILoggerFactory? loggerFactory = null)
+    : StreamServerTransport(input, output, serverName, loggerFactory)
 {
     private static readonly byte[] Newline = "\n"u8.ToArray();
 
     private static readonly JsonTypeInfo<JsonRpcMessage> MessageTypeInfo =
         (JsonTypeInfo<JsonRpcMessage>)McpJsonUtilities.DefaultOptions.GetTypeInfo(typeof(JsonRpcMessage));
 
+    // _output and _logger are field initializers, not constructor-body assignments, on purpose:
+    // C# runs field initializers before the base constructor, and the base constructor starts the
+    // read loop, whose parse-error reply calls SendMessageAsync. Assigned in a constructor body,
+    // they could still be null when that first send arrives. Members must use these fields,
+    // never the primary-constructor parameters.
     [SuppressMessage(
         "Usage",
         "CA2213:Disposable fields should be disposed",
         Justification = "The base transport owns the output stream and disposes it in DisposeAsync.")]
-    private readonly Stream _output;
+    private readonly Stream _output = output;
 
     [SuppressMessage(
         "Usage",
@@ -56,23 +70,8 @@ public sealed class DrainingStreamServerTransport : StreamServerTransport
         Justification = "A SemaphoreSlim holds nothing to release unless its wait handle is used, and disposing it would turn a late send into ObjectDisposedException instead of the IOException callers expect. The SDK does not dispose its own send lock either.")]
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
-    private readonly ILogger _logger;
-
-    /// <summary>Creates a transport over an explicit pair of streams.</summary>
-    /// <param name="input">The stream requests are read from.</param>
-    /// <param name="output">The stream responses are written to. The transport owns it.</param>
-    /// <param name="serverName">The server name used in the transport's log lines.</param>
-    /// <param name="loggerFactory">The logger factory for the transport's log lines.</param>
-    public DrainingStreamServerTransport(
-        Stream input,
-        Stream output,
-        string? serverName = null,
-        ILoggerFactory? loggerFactory = null)
-        : base(input, output, serverName, loggerFactory)
-    {
-        _output = output;
-        _logger = loggerFactory?.CreateLogger<DrainingStreamServerTransport>() ?? NullLogger<DrainingStreamServerTransport>.Instance;
-    }
+    private readonly ILogger _logger =
+        loggerFactory?.CreateLogger<DrainingStreamServerTransport>() ?? NullLogger<DrainingStreamServerTransport>.Instance;
 
     /// <summary>Creates a transport over the process's stdin and stdout.</summary>
     /// <param name="serverName">The server name used in the transport's log lines.</param>
