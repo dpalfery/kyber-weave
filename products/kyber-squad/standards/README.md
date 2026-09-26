@@ -30,8 +30,8 @@ worse — it goes stale the first time the linter's config changes and nobody no
 They were rewritten from the per-technology review references in
 [`../skills/code-review/references/`](../skills/code-review/references/), which are written for
 a reviewer ("check that…") rather than for an author ("do this"). Those references still exist
-and still say roughly the same things; consolidating them is
-[a todo](../../../docs/todo/portable-artifacts-carry-project-standards.md), not something this
+and still say roughly the same things; consolidating them tracked in
+[#126](https://github.com/dpalfery/kyber-weave/issues/126), not something this
 folder did.
 
 The seven templates that match the seven review references are `csharp`, `react`, `python`,

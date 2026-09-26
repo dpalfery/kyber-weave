@@ -369,7 +369,7 @@ and validates.
   bytes. Canonical source and both recursive package formats retain all 64 skill resources
   (88 files under `products/kyber-squad/skills/`) and resolve the retained references. They
   remain until the
-  [content-preserving migration todo](../todo/migrate-skill-resources-into-standards.md) passes.
+  [content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) passes.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
