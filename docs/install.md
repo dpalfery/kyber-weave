@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-10
+last-reviewed: 2026-09-26
 ---
 
 # Installing Kyber-Weave
@@ -45,6 +45,16 @@ export PATH="$HOME/.local/bin:$PATH"
 | `--no-mcp` | `KYBER_WEAVE_NO_MCP=1` | CLI only; skip the MCP server |
 | `--no-kyberdash` | `KYBER_WEAVE_NO_KYBERDASH=1` | CLI + MCP; skip the KyberDash binary |
 | `--with-menubar` | `KYBER_WEAVE_WITH_MENUBAR=1` | macOS only; also install the signed menubar app to `~/Applications` after verifying its SHA-256 and code signature |
+| — | `KYBER_WEAVE_RELEASE_ORIGIN` | Install from a loopback stand-in instead of GitHub. Unset keeps the GitHub release roots |
+
+`KYBER_WEAVE_RELEASE_ORIGIN` has no flag. `scripts/install.sh` reads it. A legal origin is only `http` or
+`https`, with no userinfo, and host `127.0.0.1`, `localhost`, or `[::1]`, with an optional
+port. Every other value is rejected, including other `127.*` addresses. While an `http`
+override is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`.
+An `http` origin refuses wget. An `https` loopback origin keeps
+`curl --proto '=https' --proto-redir '=https'` and `wget --https-only`. Unset configuration
+still refuses any URL that is not HTTPS. A non-loopback value is rejected before a
+download, so it installs nothing and does not fetch a non-HTTPS URL.
 
 Pinning a specific version or install directory:
 
@@ -69,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 
 1. Detects your OS and architecture and picks the matching RID
 2. Resolves the latest stable release tag (or newest pre-release tag when `--prerelease` is active), unless `--version` pinned an explicit version
-3. Downloads `SHA256SUMS.txt` and each binary archive over HTTPS, following HTTPS-only redirects
+3. Downloads `SHA256SUMS.txt` and each binary archive over HTTPS, following HTTPS-only redirects. A legal `KYBER_WEAVE_RELEASE_ORIGIN` is the only case that may start on plain HTTP, and redirects stay HTTPS-only
 4. **Verifies every binary against its published checksum** before installing
 5. Extracts into the install directory
 

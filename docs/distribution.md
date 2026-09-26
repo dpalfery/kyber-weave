@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-09-26
 ---
 
 # Distribution and release flow
@@ -25,7 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/dpalfery/kyber-weave/main/scripts/i
 `scripts/install.sh` is the one first-install channel Kyber-Weave documents. It resolves the
 latest release tag (or pre-release tags when `--prerelease` / `KYBER_WEAVE_PRERELEASE=1`
 is set, or a specific release via `--version`), verifies SHA-256 against `SHA256SUMS.txt`,
-follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo.
+follows HTTPS-only redirects, and installs to `~/.local/bin` without sudo. Unset, it refuses
+any URL that is not HTTPS. The loopback exception is
+[`KYBER_WEAVE_RELEASE_ORIGIN`](#verifying-a-release-locally).
 
 It installs `kyber-weave`, `kyber-weave-mcp`, and — from releases that publish it —
 `kyberdash`. `--no-mcp` and `--no-kyberdash` narrow that set.
@@ -243,11 +245,26 @@ Three pieces are usable separately:
 | [`scripts/local-release-server.py`](../scripts/local-release-server.py) | Serves that tree as the GitHub Releases endpoints the CLI reads. Loopback only. |
 | [`scripts/update-loop.sh`](../scripts/update-loop.sh) | Drives the two together and asserts the outcome. |
 
-The redirect is `KYBER_WEAVE_RELEASE_ORIGIN`, resolved by
+The self-updater reaches that server through `KYBER_WEAVE_RELEASE_ORIGIN`, resolved by
 [`ReleaseOrigin`](../src/KyberWeave.Cli/Update/ReleaseOrigin.cs). It accepts **loopback
 authorities only**, and permits plain HTTP only for a loopback URL under an active override —
 a redirect off the local server still has to be HTTPS. Those restrictions are the point of
 the type; `ReleaseOriginTests` pins them, and widening them needs a reason you can state.
+
+`scripts/install.sh` reads the same variable. A legal origin is only `http` or `https`,
+with no userinfo, and host `127.0.0.1`, `localhost`, or `[::1]`, with an optional port.
+Every other value is rejected, including other `127.*` addresses. While an `http` override
+is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`. An `http`
+origin refuses wget. An `https` loopback origin keeps `curl --proto '=https'
+--proto-redir '=https'` and `wget --https-only`. Unset or non-loopback configuration still
+refuses non-HTTPS URLs: an unset origin rejects them in the downloader, and a non-loopback
+origin is rejected before any download.
+
+The loop exports `KYBER_WEAVE_RELEASE_ORIGIN` after the loopback server is listening.
+`--from working` and a git ref then stage by
+`install.sh --install-dir "$BIN" --version <from>`. `--from installed` keeps the copy,
+because it means the binaries already on this machine. The loop serves
+`http://127.0.0.1` with the port the server printed, so that staging needs curl.
 
 Run against a **published single-file binary**, never `dotnet run`. The failure this exists
 to catch — a running image replacing itself and then failing to load an assembly it had not
@@ -283,9 +300,7 @@ that a tray was installed. Its first run found the tray step had never run at al
 `--version` swallowed the updater's `menubar --update --version <v>`, so `kyberdash`
 printed its version and exited 0.
 
-Two things stay out of reach. The `install.sh` side waits on the script gaining an origin
-override; the [install.sh origin override issue (#125)](https://github.com/dpalfery/kyber-weave/issues/125) tracks both.
-Cross-RID builds are the other: the Node that makes the blob has to run here.
+Cross-RID builds stay out of reach. The Node that makes the blob has to run here.
 
 ## Continuous integration security
 
