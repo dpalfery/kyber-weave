@@ -93,17 +93,6 @@ public sealed class SquadDeploymentPlan
     internal string ResolvePhysicalPath(string target, string relativePath) =>
         SquadPathPolicy.ResolveFile(ResolvePhysicalRoot(target), relativePath);
 
-    /// <summary>
-    /// Resolves the physical root directory for a file based on its target and this plan's scope.
-    /// Used for path verification and containment checks in both Project and Global deployments.
-    /// </summary>
-    internal string ResolvePhysicalRoot(SquadOwnedFile file)
-    {
-        ArgumentNullException.ThrowIfNull(file);
-
-        return ResolvePhysicalRoot(file.Target);
-    }
-
     /// <summary>Resolves the physical root directory for a bare target token.</summary>
     /// <remarks>
     /// <c>globalRoots</c> is an opt-in, purely-additive parameter (R18/U8): every deployment

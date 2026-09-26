@@ -93,7 +93,7 @@ public static partial class AgentSpecValidator
         }
 
         // Report diagnostics for unresolved references
-        foreach (var (reference, (source, exists, hint)) in references)
+        foreach (var (reference, (_, exists, hint)) in references)
         {
             if (!exists)
             {

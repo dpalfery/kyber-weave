@@ -1,5 +1,4 @@
 using KyberWeave.Core.Diagnostics;
-using System.Threading;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using Spectre.Console;
@@ -10,6 +9,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Governance view: doc-type coverage by component.</summary>
 public sealed class DocsCatalogCommand : Command<DocsSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
@@ -52,6 +52,4 @@ public sealed class DocsCatalogCommand : Command<DocsSettings>
             $"{set.Documents.Count(d => d.HasFrontmatter)} with frontmatter.[/]");
         return 0;
     }
-
-    public int Execute(CommandContext context, DocsSettings settings) => Execute(context, settings, CancellationToken.None);
 }

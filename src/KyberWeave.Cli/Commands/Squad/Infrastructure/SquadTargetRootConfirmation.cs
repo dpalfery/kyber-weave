@@ -39,6 +39,12 @@ public static class SquadTargetRootConfirmation
     /// once when the console is interactive and <paramref name="yes"/> is
     /// <c>false</c>, and returns whether the mutation may proceed.
     /// </summary>
+    /// <param name="root">The resolved absolute target root, echoed verbatim.</param>
+    /// <param name="scope">Whether the run writes to project or global scope.</param>
+    /// <param name="verb">The squad command being confirmed, such as <c>install</c>.</param>
+    /// <param name="isInteractive">Whether a human is at the console to answer a prompt.</param>
+    /// <param name="yes">Whether <c>--yes</c> was passed, which proceeds without prompting.</param>
+    /// <param name="readAnswer">Asks the question and returns whether the answer confirms.</param>
     /// <param name="globalTargetRoots">
     /// The physical global root each selected target will be written beneath, for a
     /// <c>--global</c> run; each is echoed and carried into the prompt question. Null or

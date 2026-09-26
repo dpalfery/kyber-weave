@@ -111,6 +111,9 @@ public static class SkillReviewExchange
         return new SkillReviewExportResult(bundle, json);
     }
 
+    /// <summary>
+    /// Imports a verdict bundle against the candidates in <paramref name="expectedBundle"/>.
+    /// </summary>
     public static SkillReviewImportResult ImportVerdicts(
         string json,
         SkillReviewCandidateBundle expectedBundle)
@@ -119,6 +122,10 @@ public static class SkillReviewExchange
         return ImportVerdicts(json, expectedBundle.Candidates);
     }
 
+    /// <summary>
+    /// Parses a verdict bundle and checks it against <paramref name="currentCandidates"/>,
+    /// returning the imported verdicts, or the diagnostics that explain why it was refused.
+    /// </summary>
     public static SkillReviewImportResult ImportVerdicts(
         string json,
         IReadOnlyList<SkillReviewCandidate> currentCandidates)
@@ -149,6 +156,8 @@ public static class SkillReviewExchange
             return Failure($"Unsupported verdict schema '{bundle.Schema}'. Expected '{VerdictSchema}'.");
         }
 
+        // Deserialized input: System.Text.Json does not enforce non-nullable annotations.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (bundle.Verdicts is null)
         {
             return Failure("The verdict bundle omits the verdicts collection.");
@@ -177,6 +186,7 @@ public static class SkillReviewExchange
 
         foreach (SkillReviewVerdict? verdict in bundle.Verdicts)
         {
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
             if (verdict is null)
             {
                 return Failure("The verdict bundle contains a null verdict.");

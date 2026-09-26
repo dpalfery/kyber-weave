@@ -445,6 +445,7 @@ public sealed class ReleaseTests
         Assert.Equal(2, result.ExitCode);
     }
 
+    /// <summary>Checksum verification reads only this asset's line, ignoring other assets' hashes in the sums file.</summary>
     [Fact]
     public void VerifyChecksumIgnoresOtherAssetsHashesWhenBaselineMatches()
     {
@@ -475,9 +476,6 @@ public sealed class ReleaseTests
         Assert.Equal(0, result.ExitCode);
     }
 
-    // ------------------------------------------------------------- Sandbox
-
-    /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>
     // ---- build-tray release job (task 9.4, Requirements 12.1-12.4, 12.9) ----
 
     /// <summary>
@@ -793,6 +791,9 @@ public sealed class ReleaseTests
         }
     }
 
+    // ------------------------------------------------------------- Sandbox
+
+    /// <summary>Per-test scratch directory for sums files and dummy archives.</summary>
     private sealed class Sandbox : IDisposable
     {
         private readonly string _dir;
