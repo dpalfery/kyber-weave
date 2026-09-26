@@ -2,7 +2,7 @@
 id: plans/2026-09-26-install-sh-local-origin
 title: install.sh loopback release origin
 doc-type: plan
-status: draft
+status: current
 component: Distribution
 owner: dpalfery
 last-reviewed: 2026-09-26
@@ -15,13 +15,13 @@ keywords:
 
 # install.sh loopback release origin
 
-**Status: Draft**
+**Status: Ready**
 
 Input: [GitHub issue #125](https://github.com/dpalfery/kyber-weave/issues/125).
 
 `development-mode: test-first`. The conductor relayed that choice. The user did not opt out.
 
-No open decisions. Status stays Draft until an explicit finalize. This file is not implementation authority yet.
+Approved for execution. The user replied "approve" on 2026-09-26. That answer responds to the presented approve-and-execute gate. Frontmatter `status` is `current` because the ontology closed set has no `ready` value. This heading and the plan index carry the lifecycle word Ready.
 
 ## Problem and goal
 
@@ -42,14 +42,11 @@ Goal: `install.sh` reads `KYBER_WEAVE_RELEASE_ORIGIN` and installs a pinned vers
 | D3 | While the override is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`. An `http` origin refuses wget. An `https` loopback origin keeps today's flags for both tools. | User replied 'use all recommended' on 2026-09-26, selecting D3-C. |
 | D4 | `dash/src/install/origin.ts` is out of scope. Leave it unchanged and record the divergence. | User replied 'use all recommended' on 2026-09-26, selecting D4-B. |
 | D5 | After the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`. `--from installed` keeps the copy, because it means "use the binaries already on this machine". | User replied 'D5A' on 2026-09-26, selecting D5-A. |
-
-## Decision ledger
-
-Draft only. Remove this section when the plan leaves Draft. No OPEN questions. D1–D5 are approved above.
+| P3 | Approve and execute this plan. | User replied "approve" on 2026-09-26. That answer responds to the presented approve-and-execute gate. |
 
 ## Investigation findings
 
-Kyber-Weave `docs_explore` was unavailable (the MCP namespace was missing). Discovery started at [docs/README.md](../README.md). `.codegraph/` is present. `codegraph explore` was used for `ReleaseOrigin`, the local release server, and the plan validators. `scripts/install.sh` and `scripts/update-loop.sh` are not indexed; they were read directly. Nothing under `docs/archive/` is execution authority. This file is the active Draft linked from [docs/plans/README.md](README.md). [docs/specs/README.md](../specs/README.md) has no open spec.
+Kyber-Weave `docs_explore` was unavailable (the MCP namespace was missing). Discovery started at [docs/README.md](../README.md). `.codegraph/` is present. `codegraph explore` was used for `ReleaseOrigin`, the local release server, and the plan validators. `scripts/install.sh` and `scripts/update-loop.sh` are not indexed; they were read directly. Nothing under `docs/archive/` is execution authority. This file is the active Ready plan linked from [docs/plans/README.md](README.md). [docs/specs/README.md](../specs/README.md) has no open spec.
 
 - [docs/catalog.md](../catalog.md) assigns Distribution to `scripts`, [install.md](../install.md), and [distribution.md](../distribution.md).
 - [distribution.md](../distribution.md) already states the loopback contract for `KYBER_WEAVE_RELEASE_ORIGIN`, points the remaining installer gap at issue #125, and requires `./scripts/update-loop.sh` when `install.sh` changes. No ADR covers the override.
@@ -134,7 +131,7 @@ Audit: D1–D5 are approved and are not gates. T1 and T2 are a RED-then-GREEN pa
 - `dash/src/install/origin.ts` keeps accepting a non-loopback `KYBER_WEAVE_RELEASE_ORIGIN`. The loop already exports that variable. This plan must not claim the variable is safe for every consumer.
 - `verify_and_extract` and `kyber_weave_verify_checksum` can drift until T2 makes the live path call the helper. T1's corrupted-asset fact is what stops a green helper test from hiding a second parser.
 - `./scripts/update-loop.sh` publishes single-file binaries and, unless `--no-kyberdash` is set, builds KyberDash. It is the integration proof, not the RED cycle.
-- `docs validate . --merge-ready` fails with `KW-DOC-LIFECYCLE-003` while this file remains in `docs/plans/`. That is the merge gate described in the plan index, not a defect in this Draft.
+- `docs validate . --merge-ready` fails with `KW-DOC-LIFECYCLE-003` while this file remains in `docs/plans/`. That is the merge gate described in the plan index, not a defect in this Ready plan.
 
 ## Out of scope
 
