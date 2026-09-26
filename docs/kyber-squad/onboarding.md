@@ -382,7 +382,7 @@ agent-owned resources. A fresh deployment renders every owner's resources beside
 113 files on Copilot today — with authored relative links resolving inside the target output. The
 tracked root `.github/` self-deployment predates resource delivery and is refreshed only by a
 release; surplus packaged content remains until the
-[resource-migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted.
+[resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
 `squad pack` or the golden synchronization.

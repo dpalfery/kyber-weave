@@ -1,10 +1,10 @@
 ---
 name: kyber-weave-docs
-description: "Generate conformant Kyber-Weave frontmatter for repository documentation so that docs validate and docs drift pass. Use when a document fails a  KW-DOC-SPEC or KW-DOC-DRIFT rule, when retrofitting an existing documentation tree after kyber-weave docs init, or when authoring a new governed document and you must choose doc-type, status, component, source-root, and code-refs.  Not for editing prose or style, authoring SKILL.md skills, or writing harness agent definitions."
+description: "Generate conformant Kyber-Weave frontmatter for repository documentation so that docs validate and docs drift pass. Use when a document fails a KW-DOC-SPEC or KW-DOC-DRIFT rule, when retrofitting an existing documentation tree after kyber-weave docs init, or when authoring a new governed document — including a todo or a coding standard — and you must choose doc-type, status, component, technology, source-root, and code-refs. Not for editing prose or style, authoring SKILL.md skills, or writing harness agent definitions."
 license: MIT
 metadata:
   author: dpalfery
-  version: 0.1.3
+  version: 0.1.4
 ---
 
 # Authoring Kyber-Weave documentation
@@ -34,21 +34,34 @@ last-reviewed: 2026-08-01      # ISO yyyy-MM-dd, no other format
 ---
 ```
 
-**doc-type** is one of: `architecture`, `onboarding`, `requirements`, `adr`, `plan`,
-`spec`, `runbook`, `reference`, `rule`, `governance`, `index`.
+**doc-type** and **status** are closed sets. Read both, and the required-key
+matrix, from the document named by `<documentation-ontology>` in the Config Reg.
+`docs init` writes that file from the host's ontology, so a list copied into this
+skill goes stale the next time a type is added. That is how `todo` and
+`coding-standard` were omitted here, and how an agent then labelled a coding
+standard `reference`: the document validated, and nothing reported that it would
+never resolve as a standard.
 
-**status** is one of: `current`, `draft`, `needs-review`, `superseded`.
+If `<documentation-ontology>` does not exist yet, finish **Setting up a new
+repository** and run `docs init` before choosing a type. Do not guess the set.
 
-These are closed sets. If nothing fits, the answer is `reference` — never invent a value,
-and never widen the vocabulary to fit one document.
+Do not invent a value. Do not relabel a document `reference` because no type seems
+to fit. `reference` is reference material. A reminder of work not done now is
+`todo`. A document that says how one technology's code is written in this
+repository is `coding-standard`.
 
 ## Additional keys by doc-type
 
-| doc-type | Also required |
-|---|---|
-| `architecture`, `requirements`, `runbook`, `plan`, `spec` | `component` |
-| `onboarding` | `component`, `source-root` |
-| `adr`, `reference`, `rule`, `governance`, `index` | nothing |
+Read the required-key matrix in `<documentation-ontology>` and apply that row. The
+ontology document is the authority; this skill does not keep a second copy of the
+matrix. Two rows the omitted list used to hide, which the product defaults still
+require:
+
+- `todo` — `component`, in addition to the base keys
+- `coding-standard` — `technology`, and not `component`
+
+When the ontology document disagrees with those two rows, the ontology document
+wins. A host can require more; it cannot make a copied list in this skill true.
 
 `component` and `owner` must already be rows in the catalog. If the value you need is not
 there, **add the catalog row first** — inventing a component in frontmatter fails
@@ -109,8 +122,10 @@ The type drives retrieval ranking, so a wrong one is not cosmetic:
 - **`adr` sits at 0.9**
 
 Labelling a standard as a `plan` buries it. Labelling a closed plan as `reference`
-promotes a work artifact into guidance an agent will act on. Pick what the document *is*,
-not what would rank best.
+promotes a work artifact into guidance an agent will act on. Labelling a coding
+standard as `reference` validates and then never resolves as a standard. Labelling
+a deferred finding as `reference` or `plan` hides it from the todo inventory. Pick
+what the document *is*, not what would rank best.
 
 Set `status: draft` when you have filled the mechanical keys but a human has not confirmed
 the semantic ones. Draft is demoted to 0.85, which degrades gracefully — far better than a
@@ -151,6 +166,49 @@ code-refs:
 right. `source-root` and `code-refs` appear together, satisfying the pairing invariant for
 an architecture document.
 
+## Authoring a coding standard
+
+A coding standard is how one technology's code is written in this repository. It is
+not a `rule`, which governs the repository whatever the language, and it is not a
+`reference`.
+
+1. Read the technologies list in `<documentation-ontology>`. It is the same list as
+   `ontology.technologies` in `.kyber-weave/kyber-weave.yml`. A value that is not on
+   it is not a legal `technology`.
+2. Write the document at `<docs-root>/standards/<technology>/README.md`. The folder
+   name and the `technology` value are the same string. That is the file the
+   registry property `<technology>-coding-standard` points at.
+3. Frontmatter is the six base keys plus `technology`. Do not set `component`. One
+   standard covers every component the catalog lists, so naming one of them would
+   claim a scope the document does not have.
+4. `owner` must already be a catalog row. Add the row first when it is missing.
+5. When the repository writes that stack and the technology is not declared yet, add
+   it under `ontology.technologies` and run `kyber-weave docs init`. Init creates
+   the folder and publishes the registry property. Do that only for a stack the
+   repository actually uses. Do not add a technology, and do not add a doc-type, to
+   silence a finding on a document that is not a standard.
+
+`technology` on any other doc-type fails `KW-DOC-SPEC-007`. A technology the
+repository has not declared fails `KW-DOC-SPEC-002`. A folder name that does not
+match the key fails `KW-DOC-SPEC-007`.
+
+`csharp` in the example has to already be declared. `status: draft` because a human
+has not confirmed the prose; the keys themselves are the mechanical part.
+
+```yaml
+---
+id: standards/csharp
+title: C# coding standard
+doc-type: coding-standard
+status: draft
+technology: csharp
+owner: payments-team
+last-reviewed: 2026-08-01
+---
+```
+
+The file is `<docs-root>/standards/csharp/README.md`.
+
 ## Setting up a new repository
 
 Before a governed corpus can exist, every agent and skill must be able to resolve the
@@ -176,11 +234,15 @@ Agents and skills should look up the following properties dynamically to find th
 - **<docs-root>**: `docs`
 - **<documentation-index>**: `docs/catalog.md`
 - **<documentation-ontology>**: `docs/documentation-ontology.md`
+```
 
-1. Read the document. Decide what it actually *is* → `doc-type`.
+1. Read the document. Decide what it actually *is* → `doc-type`, from
+   `<documentation-ontology>`, not from memory.
 2. Check the catalog for the `component` and `owner`. Add a row if missing.
+   A coding standard uses `technology` instead of `component`.
 3. Write the base keys. Use a real ISO date for `last-reviewed`.
-4. Add type-specific keys. Honour the pairing invariant.
+4. Add type-specific keys from the ontology's required-key matrix. Honour the
+   pairing invariant.
 5. Verify every `code-refs` symbol resolves before listing it.
 6. Run `kyber-weave docs validate .` and fix findings by rule id.
 7. Run `kyber-weave docs drift .` and correct or drop unresolved symbols.
@@ -220,6 +282,8 @@ review. Do not invent a glossary doc-type or use sense-row status as document st
 - Guess the docs root during setup — ask the user and record the answer under the Config
   Reg heading in `AGENTS.md`
 - Change `doc-type` or `status` vocabularies to fit one document
+- Label a coding standard or a todo as `reference` to make validation pass
+- Copy a doc-type list into this skill — read `<documentation-ontology>`
 - Set `status: current` on frontmatter you filled in without review
 - Backdate or forward-date `last-reviewed` — use the date it was actually reviewed
 - Auto-rewrite source prose from an unreviewed duplicate, conflict, or terminology candidate

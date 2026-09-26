@@ -95,7 +95,7 @@ Renderers project each owner's validated resource closure beside its principal o
 Copilot render emits 113 files with no dangling local references. The tracked root `.github/`
 self-deployment predates resource delivery and is refreshed only by a release. Both recursive
 package formats retain all supplemental resources. Surplus content remains until the
-[skill-resource migration todo](../todo/migrate-skill-resources-into-standards.md) satisfies its
+[skill-resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) satisfies its
 content-preservation, routing, and deployment acceptance criteria.
 
 `products/kyber-squad/` is canonical and package authority. The repository root

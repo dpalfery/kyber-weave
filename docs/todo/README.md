@@ -41,15 +41,10 @@ last-reviewed: YYYY-MM-DD
 
 ### Open
 
-Ranked by impact on the product: broken user-facing behaviour first, then release and
-verification gaps, then content migration and hygiene.
-
-| # | Todo | Component | Description |
-|---|---|---|---|
-| 1 | [canon-multi-harness-session-gather.md](canon-multi-harness-session-gather.md) | KyberDash | Sessions whose canonical key spans several harnesses get a `${harness}:${key}` id that the record gather never matches, so they silently contribute no findings or run outcomes. |
-| 2 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | The authoring skill's doc-type list lacks `todo` and `coding-standard`, so agents label a coding standard `reference`. |
-| 3 | [stale-refresh-run-rows.md](stale-refresh-run-rows.md) | KyberDash | `refresh_run` rows stay `running` forever after their refresh process dies; diagnostic-only, not on the report data path. |
-| 4 | [agent-spec-broken-reference-rule.md](agent-spec-broken-reference-rule.md) | ContextHygiene | `KW-AGENT-SPEC-004` is documented as "Broken file reference" but never raised — implement the check or withdraw the row. |
+No todo document remains in this folder. Nine that were still open moved to GitHub
+issues #125–#133. The four that those issues left listed here, because a pull request
+was still open, are closed below — including the skill-vocabulary todo this change
+archived.
 
 ### Closed
 
@@ -59,8 +54,9 @@ Archived under [`archive/todo/`](../archive/todo/). Kept for provenance, never c
 |---|---|---|---|
 | [agent-spec-broken-reference-rule.md](../archive/todo/agent-spec-broken-reference-rule.md) | ContextHygiene | superseded | KW-AGENT-SPEC-004 was documented but never emitted (fixed: AgentSpecValidator now raises it for unresolved file references; delivered by [plan](../archive/plans/2026-09-24-agent-spec-broken-reference-rule.md)). |
 | [stale-refresh-run-rows.md](../archive/todo/stale-refresh-run-rows.md) | KyberDash | superseded | Dead-PID and timed-out `refresh_run` rows are reconciled to failure before the next refresh (fixed in PR #117). |
+| [kyber-weave-docs-skill-vocabulary.md](../archive/todo/kyber-weave-docs-skill-vocabulary.md) | DocGraph | superseded | The authoring skill's doc-type list omitted `todo` and `coding-standard` and told agents to use `reference` (fixed: the skill reads the closed set from `<documentation-ontology>` and states how to author a coding standard). |
 | [canon-multi-harness-session-gather.md](../archive/todo/canon-multi-harness-session-gather.md) | KyberDash | superseded | Sessions whose canonical key spans several harnesses got a `${harness}:${key}` id the record gather never matched, so they contributed no findings or run outcomes (fixed: one `SessionIdentities` table assigns every share a collision-free id, and `recordsForShare` gathers by key plus canonical harness). |
-| [kyberdash-local-release-loop.md](../archive/todo/kyberdash-local-release-loop.md) | Distribution | superseded | The local release loop built no `kyberdash`, so its update path was unverifiable offline (fixed: the loop builds the single-executable for the host RID and runs the update, opt-out, below-floor and tray-delegation cases; the `install.sh` half moved to [install-sh-local-origin](install-sh-local-origin.md)). |
+| [kyberdash-local-release-loop.md](../archive/todo/kyberdash-local-release-loop.md) | Distribution | superseded | The local release loop built no `kyberdash`, so its update path was unverifiable offline (fixed: the loop builds the single-executable for the host RID and runs the update, opt-out, below-floor and tray-delegation cases; the `install.sh` half moved to [#125](https://github.com/dpalfery/kyber-weave/issues/125)). |
 | [claude-renderer-ask-narrowing.md](../archive/todo/claude-renderer-ask-narrowing.md) | KyberSquad | superseded | Claude, Pi and ZCode turned `ask` into deny, so `architect` and `product-owner` could not save their plans and specs (fixed: both profiles now hold `filesystem.write: allow`, with the plan, spec and todo boundary instruction-only). |
 | [embeddings-endpoint-loopback-check.md](../archive/todo/embeddings-endpoint-loopback-check.md) | DocGraph | superseded | A non-loopback HTTPS embeddings endpoint was accepted where the test asserts rejection (fixed: the loader now requires loopback resolution). |
 | [kyber-squad-renderer-coverage.md](../archive/todo/kyber-squad-renderer-coverage.md) | KyberSquad | superseded | Kyber-Squad renderer target coverage (complete: all eleven targets have renderers; the CLI gaps have their own todos). |
