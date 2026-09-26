@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-25-claude-conductor-entry-point-skill
+id: archive/plans/2026-09-25-claude-conductor-entry-point-skill
 title: Expose the Claude conductor as a /conductor entry-point skill
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-25
@@ -11,7 +11,7 @@ development-mode: test-first
 
 # Expose the Claude conductor as a /conductor entry-point skill
 
-**Status:** Ready
+**Status:** Archived (implementation delivered; live Claude verification deferred)
 **Date:** 2026-09-25
 **Development mode:** test-first (the default; the user confirmed it through the conductor, 2026-09-25)
 **Goal:** Under `squad install --target claude`, make the primary-invocation agent `conductor`
@@ -66,7 +66,7 @@ Every citation from the intake digest was re-checked against the current tree.
 - A skill directory takes supporting files, and only `SKILL.md` defines a skill.
 - A command file under `.claude/commands/<subdir>/` registers as `<subdir>:<name>`, so
   resources placed beside a command would become phantom commands. This is the ZCode problem
-  that [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) solved by
+  that [ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md) solved by
   relocating resources.
 - **Chosen primitive:** a skill at `.claude/skills/conductor/SKILL.md`, run inline (no
   `context: fork`).
@@ -299,9 +299,9 @@ number is 0024, and nothing in the tree reserves it. It goes unused: under Q5-B 
 - A `--global` install from any other root fails on sibling ownership
   (`SquadDeploymentPlan.cs:696-701`).
 - `squad install` and `squad update` fetch only the release that matches the running CLI's own
-  version (see [the version-flag todo](../todo/squad-install-version-flag.md)). A local build is
+  version (see [the version-flag issue](https://github.com/dpalfery/kyber-weave/issues/127)). A local build is
   therefore deployed through the
-  [local release loop](../distribution.md#verifying-a-release-locally):
+  [local release loop](../../distribution.md#verifying-a-release-locally):
   1. `scripts/release-local.sh --version <v>`;
   2. `scripts/local-release-server.py`;
   3. a loopback `KYBER_WEAVE_RELEASE_ORIGIN`;
@@ -354,7 +354,7 @@ does not enforce the orchestrator profile.
 
 | Alternative | Why rejected |
 |---|---|
-| A legacy command at `.claude/commands/conductor.md` | Claude Code registers files under `.claude/commands/<subdir>/` as `<subdir>:<name>` commands. The conductor's resources would become phantom commands, or would need ZCode-style relocation and link rewriting ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md) §2). A skill directory takes supporting files natively, and a skill wins over a same-named command. |
+| A legacy command at `.claude/commands/conductor.md` | Claude Code registers files under `.claude/commands/<subdir>/` as `<subdir>:<name>` commands. The conductor's resources would become phantom commands, or would need ZCode-style relocation and link rewriting ([ADR 0021](../../adr/0021-zcode-command-lowering-and-resource-relocation.md) §2). A skill directory takes supporting files natively, and a skill wins over a same-named command. |
 | A skill with `context: fork` and `agent: conductor` | This runs an isolated subagent that does not see the conversation history and runs in the background by default. It recreates the nested-subagent failure (no Agent tool at depth 1) and cannot relay decision gates to the user. |
 | Setting `"agent": "conductor"` in `.claude/settings.json` | It makes every session a conductor session, and Squad does not own settings files. |
 | Replacing the subagent with the skill (Q1-B) | It drops the only enforced form (`claude --agent conductor`), breaks existing `@agent-conductor` use, and `squad update` would delete the file. |
@@ -933,12 +933,33 @@ neither the self-updater, `install.sh`, the Squad release path, nor `kyberdash`.
   - archive the plan and its index row.
   - No todo is created for the out-of-scope drift in §5 unless the user accepts one.
 
+## 13. PR #136 closeout (2026-09-25)
+
+The PR contains the T1–T5 implementation and canonical documentation. At head `b75a3cd`,
+GitHub Actions run `36205234996` passed Build and test, the platform contracts, security
+checks, and the release loops. The Skill and docs gate failed on the single
+`KW-DOC-LIFECYCLE-003` finding for this plan in the active plans directory; CI Summary failed
+because that required gate failed.
+
+The user directed this closeout toward fixing the PR rather than changing the local Claude
+installation. T6 checks (i)–(v) were **not exercised in a live Claude Code session**. Renderer
+tests and package output are not presented as live evidence. The remaining check is recorded in
+[the Claude conductor live-verification todo](../../todo/claude-conductor-live-verification.md),
+and the corresponding caveat remains in [onboarding](../../kyber-squad/onboarding.md).
+
+The implementation rationale and rejected alternatives are harvested into
+[Kyber-Squad architecture](../../kyber-squad/architecture.md), with the behaviour and rollout
+guidance in [requirements](../../kyber-squad/requirements.md) and
+[onboarding](../../kyber-squad/onboarding.md). No ADR was added: §3 of this plan and §3 of the
+architecture record the decision. The plan was archived on 2026-09-25 so the PR can pass the
+merge-ready documentation lifecycle gate without treating the deferred live check as completed.
+
 ## Related
 
-- [Kyber-Squad architecture](../kyber-squad/architecture.md)
-- [Kyber-Squad requirements](../kyber-squad/requirements.md)
-- [Kyber-Squad onboarding](../kyber-squad/onboarding.md)
-- [ADR 0019: Pi primary-agent skill lowering](../adr/0019-pi-native-subagents-and-primary-lowering.md)
-- [ADR 0021: ZCode command lowering](../adr/0021-zcode-command-lowering-and-resource-relocation.md)
-- [ADR 0022: Antigravity native agents](../adr/0022-antigravity-native-agents.md)
-- [Verifying a release locally](../distribution.md#verifying-a-release-locally)
+- [Kyber-Squad architecture](../../kyber-squad/architecture.md)
+- [Kyber-Squad requirements](../../kyber-squad/requirements.md)
+- [Kyber-Squad onboarding](../../kyber-squad/onboarding.md)
+- [ADR 0019: Pi primary-agent skill lowering](../../adr/0019-pi-native-subagents-and-primary-lowering.md)
+- [ADR 0021: ZCode command lowering](../../adr/0021-zcode-command-lowering-and-resource-relocation.md)
+- [ADR 0022: Antigravity native agents](../../adr/0022-antigravity-native-agents.md)
+- [Verifying a release locally](../../distribution.md#verifying-a-release-locally)

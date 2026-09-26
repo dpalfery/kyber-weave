@@ -91,6 +91,10 @@ deployment and use:
 
 **Three ways to run the conductor:**
 
+The generated skill and subagent have renderer coverage. Their invocation, reference loading,
+and coexistence have not yet been verified in a live Claude Code session; that check remains
+open in the [Claude conductor live-verification todo](../todo/claude-conductor-live-verification.md).
+
 1. **`/conductor <path or request>`** — main thread, in the conversation.
    - The entry-point skill runs in the main conversation where the Agent tool is available.
    - The session's tools, permission mode, MCP servers and model apply; the profile's enforced
