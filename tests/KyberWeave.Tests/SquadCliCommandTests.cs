@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
@@ -6,6 +7,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -970,6 +972,111 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("Successfully updated", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Issue 99: updating a codex receipt with explicit <c>codex,claude</c> must render
+    /// both harnesses and persist that same ordered set. Leaving the receipt roster in
+    /// charge reports success while claude never reaches the lock or the receipt.
+    /// </summary>
+    [Fact]
+    public void UpdateExplicitTargetsReconcileRenderedReceiptAndLockTargets()
+    {
+        string targetDir = Path.Combine(_temp.Path, "update-explicit-targets");
+        Directory.CreateDirectory(targetDir);
+
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit"));
+        SquadStateStore stateStore = new(userPaths);
+
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
+            (".codex/agents/architect.toml", "name = \"architect\"\n"));
+
+        // Confirmation is a separate gate from target selection. Pin it closed so a
+        // pty cannot turn this regression into a hung prompt.
+        SquadUpdateCommand command = new(
+            userPaths: userPaths,
+            stateStore: stateStore,
+            releaseSource: releaseSource,
+            renderer: renderer,
+            isInteractive: false);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadUpdateSettings
+            {
+                Path = targetDir,
+                Targets = ["codex,claude"],
+                Global = false,
+                DryRun = false,
+                ReplaceManaged = true
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        SquadRenderRequest renderRequest = Assert.Single(renderer.RenderRequests);
+        SquadLock? persistedLock = stateStore.ReadLock(targetDir, SquadDeploymentScope.Project);
+        SquadReceipt? persistedReceipt = stateStore.ReadReceipt(targetDir, SquadDeploymentScope.Project);
+        Assert.NotNull(persistedLock);
+        Assert.NotNull(persistedReceipt);
+        string[] receiptTargets = persistedReceipt.Files
+            .Select(file => file.Target)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Multiple(
+            () => Assert.Equal([SquadTarget.Codex, SquadTarget.Claude], renderRequest.Targets),
+            () => Assert.Equal(["codex", "claude"], persistedLock.Targets),
+            () => Assert.Equal(["codex", "claude"], receiptTargets));
+    }
+
+    /// <summary>
+    /// Issue 99: a dry-run of the same explicit pair must report the two-target deployed
+    /// file count. Dry-run planning still has to leave the existing lock and receipt
+    /// byte-identical, because the operator has not accepted a write.
+    /// </summary>
+    [Fact]
+    public void UpdateExplicitTargetsDryRunReportsDesiredSetWithoutWritingState()
+    {
+        string targetDir = Path.Combine(_temp.Path, "update-explicit-targets-dry-run");
+        Directory.CreateDirectory(targetDir);
+
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit-dry-run"));
+        SquadStateStore stateStore = new(userPaths);
+
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
+            (".codex/agents/architect.toml", "name = \"architect\"\n"));
+
+        string lockPath = stateStore.ResolveLockPath(targetDir, SquadDeploymentScope.Project);
+        string receiptPath = stateStore.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project);
+        byte[] lockBefore = File.ReadAllBytes(lockPath);
+        byte[] receiptBefore = File.ReadAllBytes(receiptPath);
+        int desiredFileCount = RenderedDeploymentFileCount(SquadTarget.Codex, SquadTarget.Claude);
+
+        SquadUpdateCommand command = new(
+            userPaths: userPaths,
+            stateStore: stateStore,
+            releaseSource: releaseSource,
+            renderer: renderer,
+            isInteractive: false);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadUpdateSettings
+            {
+                Path = targetDir,
+                Targets = ["codex,claude"],
+                Global = false,
+                DryRun = true,
+                ReplaceManaged = true
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Multiple(
+            () => Assert.Equal(desiredFileCount, PlannedDeployedFileCount(execution.Output)),
+            () => Assert.Equal(lockBefore, File.ReadAllBytes(lockPath)),
+            () => Assert.Equal(receiptBefore, File.ReadAllBytes(receiptPath)));
+    }
+
     [Theory]
     [InlineData("invalid-target")]
     [InlineData("claude,unknown-target")]
@@ -1210,6 +1317,37 @@ public sealed class SquadCliCommandTests : IDisposable
 
     private static string RepositoryRoot([CallerFilePath] string sourcePath = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
+
+    /// <summary>
+    /// The dry-run oracle is the file count the injected renderer emits for the desired
+    /// pair. A one-target plan cannot report that count.
+    /// </summary>
+    private static int RenderedDeploymentFileCount(params SquadTarget[] targets)
+    {
+        FakeSquadRenderer renderer = new();
+        SquadRenderResult result = renderer.RenderAsync(
+            new SquadRenderRequest(
+                SourceDirectory: ".",
+                Targets: targets,
+                Scope: SquadDeploymentScope.Project)).GetAwaiter().GetResult();
+        return result.Files.Count;
+    }
+
+    private static int PlannedDeployedFileCount(string output)
+    {
+        const string marker = "planned ";
+        const string trailer = " deployed files";
+        int markerIndex = output.IndexOf(marker, StringComparison.Ordinal);
+        Assert.True(markerIndex >= 0, output);
+        int countStart = markerIndex + marker.Length;
+        int trailerIndex = output.IndexOf(trailer, countStart, StringComparison.Ordinal);
+        Assert.True(trailerIndex > countStart, output);
+        string digits = output[countStart..trailerIndex];
+        Assert.True(
+            int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out int count),
+            digits);
+        return count;
+    }
 
     private static void SeedDeployment(
         string targetRoot,
