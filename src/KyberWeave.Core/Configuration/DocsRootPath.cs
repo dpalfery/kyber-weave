@@ -125,4 +125,97 @@ internal static class DocsRootPath
 
         return roots;
     }
+
+    /// <summary>
+    /// Enumerates files under a root directory matching a search pattern, without descending
+    /// into symbolic links.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This method walks the directory tree manually one level at a time, rather than using
+    /// <see cref="SearchOption.AllDirectories"/>, because .NET's built-in recursive enumeration
+    /// invariably follows directory symbolic links (dotnet/runtime#52666). Resolving a symlink
+    /// to check containment would mean statting paths outside the currently-listed directory,
+    /// violating the principle that a walk never performs filesystem operations on paths beyond
+    /// those its enumeration explicitly discovers.
+    /// </para>
+    /// <para>
+    /// When an entry is itself a symlink (checked via <see cref="FileSystemInfo.LinkTarget"/>
+    /// without resolving the link), the entry is skipped entirely: a symlinked directory is not
+    /// descended into, a symlinked file is not yielded. This uniform policy — never resolving to
+    /// find out where a link points — avoids the sandboxing/permission prompts that resolving a
+    /// link could trigger, and keeps the walk confined to the space its enumeration discovers.
+    /// Even a symlink whose target happens to sit inside the root is skipped, because
+    /// determining containment would require resolving the link first.
+    /// </para>
+    /// </remarks>
+    /// <param name="root">The root directory to enumerate.</param>
+    /// <param name="searchPattern">A search pattern (e.g., "*.md") matching filenames to include.</param>
+    /// <returns>An enumerable of full paths to files matching the pattern, in no guaranteed order.</returns>
+    internal static IEnumerable<string> EnumerateContainedFiles(string root, string searchPattern)
+    {
+        return EnumerateContainedFilesRecursive(root, searchPattern);
+    }
+
+    private static IEnumerable<string> EnumerateContainedFilesRecursive(string directory, string searchPattern)
+    {
+        DirectoryInfo dirInfo = new DirectoryInfo(directory);
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = false,
+            IgnoreInaccessible = false,
+            AttributesToSkip = FileAttributes.Hidden | FileAttributes.System
+        };
+        IEnumerable<FileSystemInfo> entries = dirInfo.EnumerateFileSystemInfos("*", options).ToList();
+
+        foreach (FileSystemInfo entry in entries)
+        {
+            // Skip symlinks entirely: do not descend into symlinked directories,
+            // do not yield symlinked files. Check only the entry itself without resolving it.
+            if (entry.LinkTarget is not null)
+            {
+                continue;
+            }
+
+            if (entry is DirectoryInfo subdirectory)
+            {
+                // Recurse into non-symlinked directories
+                foreach (string file in EnumerateContainedFilesRecursive(subdirectory.FullName, searchPattern))
+                {
+                    yield return file;
+                }
+            }
+            else if (entry is FileInfo file && MatchesSearchPattern(file.Name, searchPattern))
+            {
+                // Yield files matching the search pattern
+                yield return file.FullName;
+            }
+        }
+    }
+
+    private static bool MatchesSearchPattern(string fileName, string searchPattern)
+    {
+        // Match wildcard patterns like "*.md", compatible with Directory.EnumerateFiles semantics
+        if (searchPattern == "*")
+        {
+            return true;
+        }
+
+        if (searchPattern.StartsWith("*.", StringComparison.Ordinal))
+        {
+            // Pattern like "*.md" — match by extension
+            string extension = searchPattern.Substring(1); // ".md"
+            StringComparison comparison = OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal;
+            return fileName.EndsWith(extension, comparison);
+        }
+
+        // For other patterns, use exact match or return false
+        // (This could be extended to support other glob patterns if needed)
+        StringComparison cmp = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return fileName.Equals(searchPattern, cmp);
+    }
 }

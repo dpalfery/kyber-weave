@@ -51,8 +51,12 @@ public sealed partial class DocumentLoader
             string absoluteRoot = Absolute(docsRoot);
             if (!Directory.Exists(absoluteRoot)) continue;
 
-            foreach (string file in Directory
-                         .EnumerateFiles(absoluteRoot, "*.md", SearchOption.AllDirectories)
+            // Use EnumerateContainedFiles to walk the tree manually one level at a time,
+            // skipping symlinks entirely. Directory.EnumerateFiles with SearchOption.AllDirectories
+            // invariably follows symlinked directories, creating the link-escaping vulnerability
+            // addressed by issue #124 / D3. See DocsRootPath.EnumerateContainedFiles for details.
+            foreach (string file in DocsRootPath
+                         .EnumerateContainedFiles(absoluteRoot, "*.md")
                          .OrderBy(p => p, StringComparer.Ordinal))
             {
                 if (!visited.Add(file)) continue;
@@ -66,7 +70,9 @@ public sealed partial class DocumentLoader
         // The catalog is a governed document wherever it sits. A host that keeps it outside
         // the roots — because no single root is the natural home for it — would otherwise
         // trade frontmatter validation and retrievability for that placement.
-        if (!visited.Contains(_catalogPath) && File.Exists(_catalogPath))
+        // Skip the catalog if it is itself a symlink — the same containment principle that
+        // guards the root walks (D3: never follow a link).
+        if (!visited.Contains(_catalogPath) && File.Exists(_catalogPath) && new FileInfo(_catalogPath).LinkTarget is null)
         {
             documents.Add(Parse(_catalogPath, ToRelative(_catalogPath)));
         }
@@ -305,6 +311,12 @@ public sealed partial class DocumentLoader
         HashSet<string> owners = new HashSet<string>(StringComparer.Ordinal);
 
         if (!File.Exists(_catalogPath))
+        {
+            return (components, owners);
+        }
+
+        // Skip reading vocabularies from the catalog if it is itself a symlink (D3: never follow a link).
+        if (new FileInfo(_catalogPath).LinkTarget is not null)
         {
             return (components, owners);
         }

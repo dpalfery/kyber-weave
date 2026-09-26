@@ -1351,18 +1351,36 @@ export function createCodexProvider(
   const dir = getCodexDir(codexDir)
   const primaryDir = opts?.primaryDir ?? defaultBilledCodexHome()
   const launcherRoots = opts?.launcherRoots ?? defaultLauncherRoots()
-  // Explicit nest factory whose path is a realpath alias of the billed home:
-  // empty so a second factory cannot double-count the same tree. The no-arg
-  // singleton must not take this branch — CODEX_HOME may be that alias.
-  const duplicateHome =
-    codexDir !== undefined &&
-    sameCodexHome(dir, primaryDir) &&
-    resolve(dir) !== resolve(primaryDir)
-  const nestHome = isNestedLauncherCodexHome(dir, { primaryDir, launcherRoots })
-  // Production `codex` singleton is createCodexProvider() with no args. When
-  // the resolved dir is a launcher nest and ~/.codex is a distinct existing
-  // tree, walk BOTH and drop nest sources whose session id is already billed.
-  const scanBoth = nestHome && codexDir === undefined
+
+  // Memoized launcher-home detection closure. Detection runs only when discovery
+  // is explicitly requested (probeRoots or discoverSessions), never at provider
+  // construction. This fixes issue #124 follow-up: detection is cached per instance,
+  // shared between both methods, and computed exactly once.
+  let detectionState: {
+    duplicateHome: boolean
+    nestHome: boolean
+    scanBoth: boolean
+  } | undefined
+
+  const getDetectionState = () => {
+    if (detectionState === undefined) {
+      // Explicit nest factory whose path is a realpath alias of the billed home:
+      // empty so a second factory cannot double-count the same tree. The no-arg
+      // singleton must not take this branch — CODEX_HOME may be that alias.
+      const duplicateHome =
+        codexDir !== undefined &&
+        sameCodexHome(dir, primaryDir) &&
+        resolve(dir) !== resolve(primaryDir)
+      const nestHome = isNestedLauncherCodexHome(dir, { primaryDir, launcherRoots })
+      // Production `codex` singleton is createCodexProvider() with no args. When
+      // the resolved dir is a launcher nest and ~/.codex is a distinct existing
+      // tree, walk BOTH and drop nest sources whose session id is already billed.
+      const scanBoth = nestHome && codexDir === undefined
+
+      detectionState = { duplicateHome, nestHome, scanBoth }
+    }
+    return detectionState
+  }
 
   return {
     name: 'codex',
@@ -1382,6 +1400,7 @@ export function createCodexProvider(
     // Trees discoverSessions actually walks. Honors CODEX_HOME; when the
     // production singleton scans nest + billed home, both appear here.
     async probeRoots(): Promise<ProbeRoot[]> {
+      const { duplicateHome, scanBoth } = getDetectionState()
       if (duplicateHome) return []
       if (scanBoth) return [...rootsFor(primaryDir), ...rootsFor(dir)]
       return rootsFor(dir)
@@ -1390,6 +1409,7 @@ export function createCodexProvider(
     async discoverSessions(): Promise<SessionSource[]> {
       // Same physical tree via two factories is complete overlap, not a
       // distinct nest. isNestedLauncherCodexHome is false in that case.
+      const { duplicateHome, nestHome, scanBoth } = getDetectionState()
       if (duplicateHome) return []
       const sources = await discoverSessionsInDir(dir)
       if (scanBoth) {

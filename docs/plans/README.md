@@ -17,6 +17,10 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
+| Plan | Status | Date | Canonical Docs / Linked | Goal |
+|---|---|---|---|---|
+| [2026-09-25-mcp-docs-walk-containment.md](2026-09-25-mcp-docs-walk-containment.md) | Current | 2026-09-25 | Approved 2026-09-25; user chose Q4 option A | Contain `DocumentLoader`/`DocumentIndexHost` enumeration to configured docs roots by skipping any symlink encountered during a walk (no resolve, no diagnostic), closing the TCC-observed Photos/Documents/Downloads/container/cloud-domain footprint against `kyber-weave-mcp` (issue #124), and defer KyberDash's Codex nested-launcher-home check to first use instead of module load. Development mode: test-first. |
+
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
 ## Archived Plans
