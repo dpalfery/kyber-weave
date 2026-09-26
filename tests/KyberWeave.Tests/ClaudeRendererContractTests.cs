@@ -85,9 +85,8 @@ public sealed class ClaudeRendererContractTests : IDisposable
 
     /// <summary>
     /// The nested-roster sentence for the <c>permission-not-expressible</c> record in omit mode.
-    /// Declared independently of <see cref="ClaudeRenderer.BuildDegradationRecords"/> so a change
-    /// to either side has to be made deliberately in both. This sentence is constructed by
-    /// <see cref="ClaudeRenderer"/> at lines 617–620 (origin/main). When <c>delegate: allow</c>
+    /// Declared independently of <c>ClaudeRenderer.BuildDegradationRecords</c> so a change
+    /// to either side has to be made deliberately in both. When <c>delegate: allow</c>
     /// and the agent's roster is non-empty, this text (with <c>&lt;Roster&gt;</c> replaced by the
     /// comma-joined delegation list) is emitted in both skill and omit modes.
     /// </summary>

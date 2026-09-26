@@ -56,15 +56,31 @@ report() {
 # archive carries dotnet-sdk-10.0 (a 10.0.1xx band that global.json's latestFeature roll-forward
 # accepts); dotnet-install.sh is no option because the session proxy denies
 # builds.dotnet.microsoft.com, where every Microsoft download link redirects.
-if ! command -v dotnet >/dev/null 2>&1; then
+compatible_sdk_version() {
+    command -v dotnet >/dev/null 2>&1 || return 1
+    # A runtime-only host or a different SDK major/minor cannot satisfy global.json.
+    dotnet --list-sdks 2>/dev/null | awk '
+        {
+            split($1, version, ".")
+            if (version[1] == 10 && version[2] == 0 && version[3] + 0 >= 100) {
+                print $1
+                found = 1
+                exit
+            }
+        }
+        END { if (!found) exit 1 }
+    '
+}
+
+SDK_VERSION="$(compatible_sdk_version || true)"
+if [ -z "$SDK_VERSION" ]; then
     apt-get install -y dotnet-sdk-10.0 \
         || { apt-get update && apt-get install -y dotnet-sdk-10.0; } \
         || echo "dotnet-sdk-10.0 install failed"
 fi
-DOTNET_NOTE="no .NET SDK"
-if command -v dotnet >/dev/null 2>&1; then
-    DOTNET_NOTE=".NET SDK $(dotnet --version 2>/dev/null)"
-fi
+SDK_VERSION="$(compatible_sdk_version || true)"
+DOTNET_NOTE="${SDK_VERSION:+.NET SDK $SDK_VERSION}"
+DOTNET_NOTE="${DOTNET_NOTE:-no compatible .NET SDK}"
 
 # The CodeGraph adapter and the analysis-persistence tests shell out to the sqlite3 CLI (the
 # deliberate trade in AGENTS.md); without it those tests fail here although CI passes them.

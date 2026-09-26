@@ -196,10 +196,10 @@ records remain unchanged.
 
 **Fail-closed on canonical skill collision.** If a canonical skill occupies the entry-point
 identity, the render fails with a `SquadRenderValidationException` rather than resolving the
-collision through role-prefixing. This is a design choice specific to Claude: the subagent and
-skill resolve to different values in Claude's own scope-precedence rules (skills: personal over
-project; agents: project over user), so collision is theoretically possible and is treated as
-exceptional.
+collision through role-prefixing. The canonical skill and entry-point skill would both claim
+`.claude/skills/<name>/SKILL.md`. Separately, Claude resolves personal skills before project
+skills but project agents before user agents, so mixed-scope installs can expose `/<name>` and
+`@agent-<name>` from different versions.
 
 **Rejected alternatives:**
 - Legacy `.claude/commands/conductor.md` command: Claude Code registers files under
