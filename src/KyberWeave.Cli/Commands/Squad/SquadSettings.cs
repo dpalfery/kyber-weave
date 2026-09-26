@@ -52,6 +52,11 @@ public sealed class SquadInstallSettings : CommandSettings
     [CommandOption("--yes")]
     [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
     public bool Yes { get; set; }
+
+    /// <summary>Pin the Kyber-Squad release version to deploy (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.</summary>
+    [CommandOption("-v|--version <VERSION>")]
+    [Description("Pin the Kyber-Squad release version to deploy (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
+    public string? Version { get; set; }
 }
 
 /// <summary>Settings for the <c>squad update</c> command.</summary>
@@ -102,6 +107,11 @@ public sealed class SquadUpdateSettings : CommandSettings
     [CommandOption("--yes")]
     [Description("Skip the interactive confirmation prompt before the mutation. Has no effect when the console is non-interactive, which never prompts.")]
     public bool Yes { get; set; }
+
+    /// <summary>Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.</summary>
+    [CommandOption("-v|--version <VERSION>")]
+    [Description("Pin the Kyber-Squad release version to update to (X.Y.Z or X.Y.Z-prerelease; a leading 'v' and '+build' metadata are accepted and stripped). Defaults to the running CLI's own version.")]
+    public string? Version { get; set; }
 }
 
 /// <summary>Settings for the <c>squad uninstall</c> command.</summary>

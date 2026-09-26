@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
 using System.Threading;
 using KyberWeave.Core.Squad.Deployment;
@@ -56,9 +57,11 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
         SquadStateStore stateStore = _stateStore ?? SquadCommandComposition.ResolveStateStore(_userPaths);
 
-        // Coalesce the positional path with --path and validate explicit targets and
-        // exclusions; invalid client input returns exit code 2 before any resolution
+        // Coalesce the positional path with --path and validate explicit targets,
+        // exclusions, and the pinned version; invalid client input returns exit code 2
+        // before any resolution or network call
         string? effectivePath;
+        string? pinnedVersion;
         try
         {
             effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
@@ -68,8 +71,10 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
 
             if (settings.Exclusions.Length > 0)
                 _ = SquadTargetCatalog.Parse(settings.Exclusions);
+
+            pinnedVersion = SquadCommandComposition.NormalizePinnedVersion(settings.Version);
         }
-        catch (ArgumentException ex)
+        catch (Exception ex) when (ex is ArgumentException or SelfUpdateException)
         {
             SquadCommandComposition.WriteClientInputError(ex.Message);
             return 2;
@@ -132,6 +137,7 @@ public sealed class SquadInstallCommand : Command<SquadInstallSettings>
             Scope: scope,
             Targets: decision.Targets,
             Exclusions: settings.Exclusions,
+            Version: pinnedVersion,
             Adopt: settings.Adopt,
             DryRun: settings.DryRun);
 

@@ -143,7 +143,8 @@ app.Configure(config =>
             .WithExample("squad", "install", "--target", "codex,cursor")
             .WithExample("squad", "install", "--global")
             .WithExample("squad", "install", "--path", "./deploy")
-            .WithExample("squad", "install", "--target", "codex,cursor", "--yes");
+            .WithExample("squad", "install", "--target", "codex,cursor", "--yes")
+            .WithExample("squad", "install", "--target", "codex,cursor", "--version", "1.2.3");
 
         squad.AddCommand<SquadUpdateCommand>("update")
             .WithDescription("Update an existing Squad deployment while preserving managed local edits.")
@@ -151,7 +152,8 @@ app.Configure(config =>
             .WithExample("squad", "update", "--replace-managed")
             .WithExample("squad", "update", "--global")
             .WithExample("squad", "update", "--path", "./deploy")
-            .WithExample("squad", "update", "--replace-managed", "--yes");
+            .WithExample("squad", "update", "--replace-managed", "--yes")
+            .WithExample("squad", "update", "--version", "1.2.3");
 
         squad.AddCommand<SquadUninstallCommand>("uninstall")
             .WithDescription("Remove deployed files and state recorded in the ownership receipt.")

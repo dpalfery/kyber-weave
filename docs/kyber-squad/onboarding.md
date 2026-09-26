@@ -29,10 +29,10 @@ All squad operations are grouped under the `squad` branch:
 
 ```bash
 # Install squad into project (or global) scope
-kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes]
+kyber-weave squad install [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--adopt] [--path <PATH>] [--yes] [--version <VERSION>]
 
 # Update an existing squad deployment
-kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--replace-managed] [--path <PATH>] [--yes]
+kyber-weave squad update [path] [--target <targets>] [--exclude <targets>] [--global] [--dry-run] [--replace-managed] [--path <PATH>] [--yes] [--version <VERSION>]
 
 # Uninstall squad deployment
 kyber-weave squad uninstall [path] [--global] [--dry-run] [--path <PATH>] [--yes]
@@ -46,6 +46,17 @@ kyber-weave squad doctor [path] [--global] [--path <PATH>]
 # Build release packages (repository maintainer only)
 kyber-weave squad pack --format <apm|plugins|all> --out <directory>
 ```
+
+**Version pinning.** `squad install` and `squad update` accept `-v|--version <VERSION>` to pin the
+Kyber-Squad release version to deploy or update to — `X.Y.Z` or `X.Y.Z-prerelease`; a leading `v`
+and `+build` metadata are accepted and stripped. Omitting the flag keeps the default: the running
+CLI's own version. Input that is not a semantic version is rejected before any network call with
+**exit code 2**; a well-formed version with no matching GitHub release fails with **exit code 1**
+and a diagnostic naming the version, the repository, and the releases page listing available
+versions. `squad update --version` may pin forward or backward relative to the receipt's recorded
+version — there is no guard; the pinned version is deployed as asked. (`squad pack` carries the
+same `-v|--version`, but there it stamps the package manifests and archives rather than pinning a
+release to deploy.)
 
 ---
 
