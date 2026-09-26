@@ -59,7 +59,7 @@ principal: 21 `.github/agents/<name>.agent.md` files, 24 `.github/skills/<name>/
 files, and the linked resources, 113 files total, with authored relative links resolving in
 the output. Kyber-Squad preserves retained skill knowledge in canonical source and packages
 until the
-[skill-resource migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted and
+[skill-resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted and
 verified. Generated `.github` output remains a deployment artifact rather than canonical product
 source.
 
