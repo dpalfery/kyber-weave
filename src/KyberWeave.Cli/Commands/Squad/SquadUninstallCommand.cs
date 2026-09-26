@@ -1,6 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
-using System.Threading;
 using Spectre.Console;
 using Spectre.Console.Cli;
 

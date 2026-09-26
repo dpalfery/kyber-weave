@@ -51,8 +51,12 @@ public sealed partial class DocumentLoader
             string absoluteRoot = Absolute(docsRoot);
             if (!Directory.Exists(absoluteRoot)) continue;
 
-            foreach (string file in Directory
-                         .EnumerateFiles(absoluteRoot, "*.md", SearchOption.AllDirectories)
+            // Use EnumerateContainedFiles to walk the tree manually one level at a time,
+            // skipping symlinks entirely. Directory.EnumerateFiles with SearchOption.AllDirectories
+            // invariably follows symlinked directories, creating the link-escaping vulnerability
+            // addressed by issue #124 / D3. See DocsRootPath.EnumerateContainedFiles for details.
+            foreach (string file in DocsRootPath
+                         .EnumerateContainedFiles(absoluteRoot, "*.md")
                          .OrderBy(p => p, StringComparer.Ordinal))
             {
                 if (!visited.Add(file)) continue;
@@ -66,7 +70,9 @@ public sealed partial class DocumentLoader
         // The catalog is a governed document wherever it sits. A host that keeps it outside
         // the roots — because no single root is the natural home for it — would otherwise
         // trade frontmatter validation and retrievability for that placement.
-        if (!visited.Contains(_catalogPath) && File.Exists(_catalogPath))
+        // Skip the catalog if it is, or sits beneath, a symlink — the same containment
+        // principle that guards the root walks (D3: never follow a link).
+        if (!visited.Contains(_catalogPath) && IsCatalogContained())
         {
             documents.Add(Parse(_catalogPath, ToRelative(_catalogPath)));
         }
@@ -127,6 +133,17 @@ public sealed partial class DocumentLoader
     /// </summary>
     private static StringComparer PathComparer => DocsRootPath.PathComparer;
 
+    /// <summary>
+    /// True when the configured catalog exists and neither it nor a directory beneath its
+    /// root is a symbolic link; see <see cref="DocsRootPath.IsContainedFile"/>.
+    /// </summary>
+    private bool IsCatalogContained() =>
+        DocsRootPath.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
+
+    /// <summary>
+    /// Reads one Markdown file into a <see cref="DocumentModel"/>, with its frontmatter when it
+    /// has any; a file without frontmatter keeps its whole text as the body.
+    /// </summary>
     private DocumentModel Parse(string absolutePath, string relativePath)
     {
         string raw = File.ReadAllText(absolutePath);
@@ -304,7 +321,9 @@ public sealed partial class DocumentLoader
         HashSet<string> components = new HashSet<string>(StringComparer.Ordinal);
         HashSet<string> owners = new HashSet<string>(StringComparer.Ordinal);
 
-        if (!File.Exists(_catalogPath))
+        // Skip reading vocabularies from a catalog that is, or sits beneath, a symlink
+        // (D3: never follow a link).
+        if (!IsCatalogContained())
         {
             return (components, owners);
         }

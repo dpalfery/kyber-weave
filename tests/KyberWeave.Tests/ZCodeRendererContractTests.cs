@@ -186,7 +186,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
             if (line.StartsWith("  - ", StringComparison.Ordinal))
             {
                 Assert.NotNull(pendingListKey);
-                lists[pendingListKey!].Add(Unquote(line[4..]));
+                lists[pendingListKey].Add(Unquote(line[4..]));
                 continue;
             }
 

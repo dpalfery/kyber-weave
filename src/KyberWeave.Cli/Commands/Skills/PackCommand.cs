@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Threading;
 using System.IO.Compression;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
@@ -27,6 +26,7 @@ public sealed class PackSettings : CommandSettings
 
 public sealed class PackCommand : Command<PackSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
     {
         string skillFile = Path.Combine(settings.Path, "SKILL.md");
@@ -72,8 +72,7 @@ public sealed class PackCommand : Command<PackSettings>
         return 0;
     }
 
-    public int Execute(CommandContext context, PackSettings settings) => Execute(context, settings, CancellationToken.None);
-
+    /// <summary>Prints each error or critical diagnostic, code first.</summary>
     private static void ReportRenderer_RenderErrors(DiagnosticReport report)
     {
         foreach (Diagnostic d in report.Items.Where(i => i.Severity is Severity.Error or Severity.Critical))

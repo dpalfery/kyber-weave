@@ -1,5 +1,4 @@
 using KyberWeave.Core.Diagnostics;
-using System.Threading;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
 using Spectre.Console.Cli;
@@ -8,6 +7,7 @@ namespace KyberWeave.Cli.Commands.Skills;
 
 public sealed class ValidateCommand : Command<AnalysisSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, AnalysisSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
@@ -19,6 +19,4 @@ public sealed class ValidateCommand : Command<AnalysisSettings>
         CommandHelpers.Finish(report, settings, "skill validate", "Skill");
         return report.HasErrors ? 1 : 0;
     }
-
-    public int Execute(CommandContext context, AnalysisSettings settings) => Execute(context, settings, CancellationToken.None);
 }

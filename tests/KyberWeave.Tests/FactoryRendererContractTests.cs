@@ -85,11 +85,11 @@ public sealed class FactoryRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
     public void Dispose()
     {
         // No disposable state: suite reads canonical checked-in corpus.
         // Implements IDisposable per repository test coding standard.
-        GC.SuppressFinalize(this);
     }
 
     [Fact]

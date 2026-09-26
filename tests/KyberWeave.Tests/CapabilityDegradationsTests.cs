@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
