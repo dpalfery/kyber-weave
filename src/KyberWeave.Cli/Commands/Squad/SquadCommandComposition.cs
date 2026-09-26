@@ -299,7 +299,7 @@ internal static class SquadCommandComposition
         if (!GitHubSquadReleaseSource.IsValidReleaseVersion(normalized))
         {
             throw new ArgumentException(
-                $"--version must be a semantic version (X.Y.Z or X.Y.Z-prerelease); " +
+                "--version must be a semantic version (X.Y.Z or X.Y.Z-prerelease); " +
                 "a leading 'v' and '+build' metadata are accepted and stripped. " +
                 $"Got '{version}'.");
         }
