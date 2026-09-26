@@ -17,7 +17,9 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-No active plans.
+| Plan | Status | Date | Goal |
+|---|---|---|---|
+| [2026-09-26-canon-fixture-consolidation.md](2026-09-26-canon-fixture-consolidation.md) | Ready | 2026-09-26 | Consolidate the duplicated `CanonicalRecord` fixture helpers (`tokens`, `turn`) of `dash/src/canon/findings.test.ts` and `sessions.test.ts` into one shared fixture module, so duplicate clusters `dup-7222c0d2` and `dup-3bfb5437` leave the regenerated report — fix for [issue #129](https://github.com/dpalfery/kyber-weave/issues/129), delivered through a PR driven to CodeRabbit approval. Development mode: test-first. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
