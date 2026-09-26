@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-26-canon-fixture-consolidation
+id: archive/plans/2026-09-26-canon-fixture-consolidation
 title: Consolidate the canon suites' CanonicalRecord fixture helpers
 doc-type: plan
-status: current
+status: archived
 owner: dpalfery
 last-reviewed: 2026-09-26
 component: KyberDash
@@ -11,7 +11,9 @@ development-mode: test-first
 
 # Consolidate the canon suites' CanonicalRecord fixture helpers
 
-**Status:** Ready
+**Status:** Archived 2026-09-26 — delivered and locally verified; the evidence is recorded in
+Closeout. The PR-level terminal condition (CI green, CodeRabbit approval, no merge per D5) is
+recorded on the PR itself.
 **Approved:** 2026-09-26 — the user's directive relayed by the conductor ("fix issue 129 … use a
 plan, dont ask me any questions, run autonomously. push the pr, once the CI pipelines run
 successfully, ask code rabbit ai to do a code review, fix any comments and ask for a rereview
@@ -296,3 +298,35 @@ The end-of-change review is the repo's own council over the PR diff plus the Cod
 in the Closeout appended by T4. `docs-dev` closeout is T4 itself (T3 collapsed to a
 verification no-op by the 2026-09-26 amendment); no canonical document harvest is expected
 (plan §2), so the archived plan remains the record of D1–D5.
+
+## Closeout (T4, 2026-09-26)
+
+**Delivery.** Branch `fix/129-canon-fixture-consolidation`, commits `7846172` (code: consolidate
+the canon `CanonicalRecord` fixture helpers into `dash/src/canon/fixtures/records.ts`) and
+`4e5f150` (plan registration), based on origin/main `1ccc761`. The PR closes
+[issue #129](https://github.com/dpalfery/kyber-weave/issues/129).
+
+**D4 count re-baselining lineage.** The duplicates oracle is 52 clusters on the `origin/main`
+base: the planning-time read of 58 was a stale-index artifact, 56 was the true pre-fix count at
+`9a2eea7`, the post-fix count was 54, and 52 after the rebase, because main's `#122`/`#136`/`#139`
+test work removed clusters from the baseline. The guard intent is unchanged throughout — both
+target cluster ids absent plus an exact total count. Set-difference evidence: the branch removes
+exactly `[dup-3bfb5437, dup-7222c0d2]` and adds none. Both reports are retained at gitignored
+`artifacts/duplicates.json` and `artifacts/duplicates-main-baseline.json`.
+
+**T3 collapse.** Main's `#135` migrated the open todos to GitHub issues by deletion without
+archive copies, superseding the planned todo archival; the closure record is issue #129's
+closure by the PR.
+
+**Rebase.** The branch was rebased onto `origin/main` (7 commits; local main is a strict
+ancestor); the single prescribed conflict, in `docs/plans/README.md`, was resolved per plan,
+with zero T3 leftovers.
+
+**Gate evidence on the rebased tree.** dash test 3,632 passed / 0 failed; typecheck, lint, and
+`check:reachable` all exit 0; the duplicates oracle is met (52 clusters, both target ids absent,
+no `KW-REVIEW-032`, no cluster referencing `fixtures/records.ts`); `docs validate .` and
+`docs drift .` zero findings; `dotnet build` Release 0 warnings / 0 errors — noting it required
+`dotnet restore` on the rebased tree because of main's `#136` JetBrains.Annotations addition.
+
+**T5 stage B terminal condition.** CI green plus CodeRabbit approval, with no merge per D5, is
+recorded on the PR itself; this closeout records the local evidence base at archival time.
