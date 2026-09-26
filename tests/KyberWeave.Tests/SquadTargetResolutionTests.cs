@@ -263,6 +263,36 @@ public sealed class SquadTargetResolutionTests : IDisposable
             SquadTarget.Warp);
     }
 
+    /// <summary>
+    /// Issue 99: <c>squad update --target codex,claude</c> against a codex receipt must
+    /// take that list as the complete desired set. Receipt precedence drops claude before
+    /// rendering or persistence can see it, and a cursor marker or configured warp target
+    /// must not be unioned in either.
+    /// </summary>
+    [Fact]
+    public void UpdateExplicitTargetsOverrideReceiptTargets()
+    {
+        Directory.CreateDirectory(Path.Combine(_temp.Path, ".cursor"));
+        SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
+        {
+            RootPath = _temp.Path,
+            Operation = SquadTargetOperation.Update,
+            ExplicitTargets = ["codex,claude"],
+            ConfiguredTargets = [SquadTarget.Warp],
+            ReceiptTargets = [SquadTarget.Codex],
+            IsInteractive = true
+        };
+
+        SquadTargetResolutionDecision decision = SquadTargetResolver.Resolve(request);
+
+        Assert.Multiple(
+            () => Assert.Equal(SquadTargetResolutionKind.Resolved, decision.Kind),
+            () => Assert.Equal(SquadTargetResolutionSource.Explicit, decision.Source),
+            () => Assert.Equal([SquadTarget.Codex, SquadTarget.Claude], decision.Targets),
+            () => Assert.Null(decision.ExitCode),
+            () => Assert.Null(decision.RecoveryCommand));
+    }
+
     [Fact]
     public void InstallNoTargetInInteractiveTerminalReturnsChooserDecisionWithoutReadingConsole()
     {
