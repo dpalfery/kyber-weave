@@ -275,7 +275,11 @@ internal static class SquadCommandComposition
     /// resolution applies unchanged.
     /// </summary>
     /// <remarks>
-    /// Three gates, in this order, hold every invalid pinned version on the commands'
+    /// Null is reserved for the omitted flag — it is the only input that maps to
+    /// <c>null</c>, so the lifecycle's default version resolution applies unchanged. A
+    /// supplied-but-blank value is refused instead of falling back to that same default,
+    /// which would silently deploy a version the operator did not ask for. Three gates,
+    /// in this order, then hold every invalid pinned version on the commands'
     /// exit-2 client-input convention before root resolution and before any network call.
     /// The build-metadata check runs first because <see cref="ReleaseVersion.Normalize"/>
     /// strips a '+build' suffix blind: without it, '1.2.3+' or '1.2.3+a..b' would
@@ -290,12 +294,19 @@ internal static class SquadCommandComposition
     /// or '01.2.3'. The release source keeps its own check as defense-in-depth.
     /// </remarks>
     /// <exception cref="SelfUpdateException">The value is not a Release tag shape.</exception>
-    /// <exception cref="ArgumentException">The value carries malformed build metadata, or is tag-shaped but not strict SemVer.</exception>
+    /// <exception cref="ArgumentException">The value is empty or whitespace-only, carries malformed build metadata, or is tag-shaped but not strict SemVer.</exception>
     public static string? NormalizePinnedVersion(string? version)
     {
-        if (string.IsNullOrWhiteSpace(version))
+        if (version is null)
         {
             return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            throw new ArgumentException(
+                "--version was supplied but is empty; give a release version (X.Y.Z or X.Y.Z-prerelease) " +
+                "or omit the flag to deploy the running CLI's own version.");
         }
 
         EnsureValidBuildMetadata(version);
@@ -339,7 +350,7 @@ internal static class SquadCommandComposition
         {
             throw new ArgumentException(
                 "--version build metadata must be dot-separated identifiers of ASCII letters, digits, and hyphens, " +
-                "each at least one character long (X.Y.Z-build.metadata). " +
+                "each at least one character long (X.Y.Z+build.metadata). " +
                 $"Got '{version}'.");
         }
     }

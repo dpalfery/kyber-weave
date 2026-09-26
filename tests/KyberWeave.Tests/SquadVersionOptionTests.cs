@@ -13,11 +13,12 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the <c>-v|--version</c> contract on <c>squad install</c> and <c>squad update</c>
-/// (Test contract T1a/T1b/T1c of docs/plans/2026-09-25-squad-install-update-version-flag.md):
+/// (Test contract T1a/T1b/T1c of docs/archive/plans/2026-09-25-squad-install-update-version-flag.md):
 /// a pinned version is normalized before the release request is built and reaches the release
 /// source stripped of its <c>v</c> prefix and <c>+build</c> metadata; input that is not a
-/// release tag, or whose <c>+build</c> metadata is malformed, is a client error (exit 2)
-/// rejected before any network call or filesystem write; and a well-formed version with no
+/// release tag, or that is blank, or whose <c>+build</c> metadata is malformed, is a client
+/// error (exit 2) rejected before any network call or filesystem write; and a well-formed
+/// version with no
 /// matching GitHub release fails closed (exit 1) with a targeted diagnostic instead of the
 /// raw 404.
 /// </summary>
@@ -166,6 +167,10 @@ public sealed class SquadVersionOptionTests : IDisposable
     [InlineData("1.2.3+", "1.2.3+")]
     [InlineData("1.2.3+a..b", "1.2.3+a..b")]
     [InlineData("1.2.3+a b", "1.2.3+a b")]
+    // Whitespace-only input is an explicit --version the operator typed; it must be
+    // rejected as client input, not silently fall through to the omitted-flag default.
+    [InlineData(" ", "--version")]
+    [InlineData("\t", "--version")]
     public void Install_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
         string version,
         string expectedMessageFragment)
@@ -212,6 +217,10 @@ public sealed class SquadVersionOptionTests : IDisposable
     [InlineData("1.2.3+", "1.2.3+")]
     [InlineData("1.2.3+a..b", "1.2.3+a..b")]
     [InlineData("1.2.3+a b", "1.2.3+a b")]
+    // Whitespace-only input is an explicit --version the operator typed; it must be
+    // rejected as client input, not silently fall through to the omitted-flag default.
+    [InlineData(" ", "--version")]
+    [InlineData("\t", "--version")]
     public void Update_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
         string version,
         string expectedMessageFragment)
