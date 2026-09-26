@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-26-install-sh-local-origin
+id: archive/plans/2026-09-26-install-sh-local-origin
 title: install.sh loopback release origin
 doc-type: plan
-status: current
+status: archived
 component: Distribution
 owner: dpalfery
 last-reviewed: 2026-09-26
@@ -15,17 +15,19 @@ keywords:
 
 # install.sh loopback release origin
 
-**Status: Ready**
+**Status: Complete**
+
+Complete and archived on 2026-09-26. Fixes #125. The evidence is in Closeout.
 
 Input: [GitHub issue #125](https://github.com/dpalfery/kyber-weave/issues/125).
 
 `development-mode: test-first`. The conductor relayed that choice. The user did not opt out.
 
-Approved for execution. The user replied "approve" on 2026-09-26. That answer responds to the presented approve-and-execute gate. Frontmatter `status` is `current` because the ontology closed set has no `ready` value. This heading and the plan index carry the lifecycle word Ready.
+Approved for execution. The user replied "approve" on 2026-09-26. That answer responds to the presented approve-and-execute gate. While this plan was open, frontmatter `status` was `current` because the ontology closed set has no `ready` value, and this heading and the plan index carried the lifecycle word Ready. Closeout sets frontmatter `status` to `archived` and this heading to Complete, the lifecycle word the plan index uses for a finished plan.
 
 ## Problem and goal
 
-`scripts/update-loop.sh` proves `kyber-weave update` and `kyber-weave squad install` against binaries served from loopback. It does not prove `scripts/install.sh`, which [distribution.md](../distribution.md) and [install.md](../install.md) document as the first-install channel.
+`scripts/update-loop.sh` proves `kyber-weave update` and `kyber-weave squad install` against binaries served from loopback. It does not prove `scripts/install.sh`, which [distribution.md](../../distribution.md) and [install.md](../../install.md) document as the first-install channel.
 
 The CLI reaches that server because `ReleaseOrigin` honours `KYBER_WEAVE_RELEASE_ORIGIN` and accepts only a loopback authority. `install.sh` has no equivalent. `RELEASE_BASE`, `LATEST_API`, and `RELEASES_API` are fixed to GitHub, and `fetch` / `fetch_stdout` reject any URL that does not start with `https://`. The loop therefore stages its "from" binaries with `tar` or `cp`. The installer's download, checksum comparison, and `cp`-then-`mv` replace stay unproven until a real release exists.
 
@@ -46,10 +48,10 @@ Goal: `install.sh` reads `KYBER_WEAVE_RELEASE_ORIGIN` and installs a pinned vers
 
 ## Investigation findings
 
-Kyber-Weave `docs_explore` was unavailable (the MCP namespace was missing). Discovery started at [docs/README.md](../README.md). `.codegraph/` is present. `codegraph explore` was used for `ReleaseOrigin`, the local release server, and the plan validators. `scripts/install.sh` and `scripts/update-loop.sh` are not indexed; they were read directly. Nothing under `docs/archive/` is execution authority. This file is the active Ready plan linked from [docs/plans/README.md](README.md). [docs/specs/README.md](../specs/README.md) has no open spec.
+Kyber-Weave `docs_explore` was unavailable (the MCP namespace was missing). Discovery started at [docs/README.md](../../README.md). `.codegraph/` is present. `codegraph explore` was used for `ReleaseOrigin`, the local release server, and the plan validators. `scripts/install.sh` and `scripts/update-loop.sh` are not indexed; they were read directly. Nothing under `docs/archive/` is execution authority. While it was open, this file was the active Ready plan linked from [docs/plans/README.md](../../plans/README.md). [docs/specs/README.md](../../specs/README.md) has no open spec.
 
-- [docs/catalog.md](../catalog.md) assigns Distribution to `scripts`, [install.md](../install.md), and [distribution.md](../distribution.md).
-- [distribution.md](../distribution.md) already states the loopback contract for `KYBER_WEAVE_RELEASE_ORIGIN`, points the remaining installer gap at issue #125, and requires `./scripts/update-loop.sh` when `install.sh` changes. No ADR covers the override.
+- [docs/catalog.md](../../catalog.md) assigns Distribution to `scripts`, [install.md](../../install.md), and [distribution.md](../../distribution.md).
+- [distribution.md](../../distribution.md) already states the loopback contract for `KYBER_WEAVE_RELEASE_ORIGIN`, points the remaining installer gap at issue #125, and requires `./scripts/update-loop.sh` when `install.sh` changes. No ADR covers the override.
 - `ReleaseOrigin.Resolve` and `ReleaseOrigin.EnsureAllowed` in `src/KyberWeave.Cli/Update/ReleaseOrigin.cs` are the reference behavior. `ReleaseOriginTests` already pins that C# contract. This plan does not change it.
 - `scripts/local-release-server.py` binds `127.0.0.1`, prints the port, and serves both `/repos/<owner>/<repo>/releases...` and `/<owner>/<repo>/releases/download/<tag>/<file>`. No server work is required for the paths `install.sh` builds once those three constants share one origin.
 - `scripts/install.sh` sets the three endpoints near the top of the file. `fetch` and `fetch_stdout` are the scheme guards. `kyber_weave_lookup_checksum` and `kyber_weave_verify_checksum` are defined before the `KYBER_WEAVE_INSTALL_LIB` return and are what `tests/KyberWeave.Tests/ReleaseTests.cs` calls. `verify_and_extract` repeats the awk match after that return instead of calling the helper. `install_binary` does `cp` to a dotfile, then `mv -f`. Issue #125's "neither has a local test" is true for those two main-body copies and false for the helper.
@@ -64,8 +66,8 @@ Kyber-Weave `docs_explore` was unavailable (the MCP namespace was missing). Disc
 |---|---|---|---|---|---|
 | T1 | `tests/KyberWeave.Tests/ReleaseTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter FullyQualifiedName~ReleaseTests` | `KYBER_WEAVE_RELEASE_ORIGIN` unset, or set to a non-loopback origin, refuses an `http://` URL and installs no file. A legal origin is only `http` or `https`, with no userinfo, and host `127.0.0.1`, `localhost`, or `[::1]`, with an optional port. Any other host, including other `127.*` addresses, is refused. With a legal loopback origin, `install.sh --install-dir <dir> --version <pinned> --no-mcp` downloads from `scripts/local-release-server.py` and installs. A byte flipped in that asset after `SHA256SUMS.txt` is written exits non-zero, reports a SHA-256 mismatch, and leaves the install directory without `kyber-weave`. While the override is active, curl uses `--proto '=http,https'` and keeps `--proto-redir '=https'`. An `http` origin refuses wget. An `https` loopback origin keeps today's flags (`curl --proto '=https' --proto-redir '=https'`, `wget --https-only`). An HTTP redirect away from loopback is not installed. `dash/src/install/origin.ts` is not exercised. Existing `ReleaseTests` checksum and RID facts stay green. POSIX-only facts skip on Windows the way the class already does. | The new facts exist and fail on unchanged `install.sh` because the loopback URL is refused before any checksum comparison, or because the helper they call is not defined. The failure is that refusal or a missing helper, not an edited assertion. | The same filter passes. The mismatch fact fails on the checksum comparison, not on the scheme guard. Assertions are not weakened. |
 | T2 | `tests/KyberWeave.Tests/ReleaseTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter FullyQualifiedName~ReleaseTests` | Same behavior as T1. T2 is the implementation that makes those facts pass. | T1's RED run, recorded before `scripts/install.sh` is edited. | T1's GREEN acceptance. |
-| T3 | No separate unit test. Integration command: `scripts/update-loop.sh` | `./scripts/update-loop.sh` | After the server is listening, `--from working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>` under `KYBER_WEAVE_RELEASE_ORIGIN`. `--from installed` keeps the copy, because it means "use the binaries already on this machine". Every check the loop already prints still passes, including the self-update, the Squad install unless `--skip-squad` is passed, and the KyberDash cases unless `--no-kyberdash` is passed. | No unit RED. The missing loopback install is already RED under T1. Before T3, the default `working` path extracts with `tar` inside `stage_from_release_tree` and never runs `install.sh`. | `./scripts/update-loop.sh` exits 0. The run log shows `install.sh` staged the `working` and git-ref "from" binaries. The `installed` path still copies. Existing PASS lines are still present. Needs `node` and `npm` on PATH when KyberDash is included, as [distribution.md](../distribution.md) already states. |
-| T4 | No product test. | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .` and `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .` | [install.md](../install.md) documents `KYBER_WEAVE_RELEASE_ORIGIN` and the D2 host limit. [distribution.md](../distribution.md) stops describing the installer half of the loop as waiting on issue #125. It states that, after the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`, and that `--from installed` keeps the copy. Neither page describes `dash/src/install/origin.ts` as loopback-checked. | No product RED. | Both commands exit 0. `docs validate . --merge-ready` stays expected to fail with `KW-DOC-LIFECYCLE-003` until T5 archives this plan. |
+| T3 | No separate unit test. Integration command: `scripts/update-loop.sh` | `./scripts/update-loop.sh` | After the server is listening, `--from working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>` under `KYBER_WEAVE_RELEASE_ORIGIN`. `--from installed` keeps the copy, because it means "use the binaries already on this machine". Every check the loop already prints still passes, including the self-update, the Squad install unless `--skip-squad` is passed, and the KyberDash cases unless `--no-kyberdash` is passed. | No unit RED. The missing loopback install is already RED under T1. Before T3, the default `working` path extracts with `tar` inside `stage_from_release_tree` and never runs `install.sh`. | `./scripts/update-loop.sh` exits 0. The run log shows `install.sh` staged the `working` and git-ref "from" binaries. The `installed` path still copies. Existing PASS lines are still present. Needs `node` and `npm` on PATH when KyberDash is included, as [distribution.md](../../distribution.md) already states. |
+| T4 | No product test. | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate .` and `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .` | [install.md](../../install.md) documents `KYBER_WEAVE_RELEASE_ORIGIN` and the D2 host limit. [distribution.md](../../distribution.md) stops describing the installer half of the loop as waiting on issue #125. It states that, after the server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>`, and that `--from installed` keeps the copy. Neither page describes `dash/src/install/origin.ts` as loopback-checked. | No product RED. | Both commands exit 0. `docs validate . --merge-ready` stays expected to fail with `KW-DOC-LIFECYCLE-003` until T5 archives this plan. |
 | T5 | No test. Closeout. | `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready` and `dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .` | This plan is archived and the index no longer lists it as active. Canonical pages match the shipped behavior. | No RED. | `--merge-ready` exits 0 because this file is no longer under `docs/plans/`. Drift exits 0. |
 
 Changing an assertion in this table, including weakening one to reach green, returns the plan to Draft and needs the conductor to relay reapproval.
@@ -140,7 +142,7 @@ Audit: D1–D5 are approved and are not gates. T1 and T2 are a RED-then-GREEN pa
 - `dash/src/install/origin.ts`. D4 leaves it unchanged.
 - `npm/lib/download.js`, which has its own HTTPS-only `RELEASE_BASE` and is not the documented first-install channel.
 - Windows `.zip` installs. `install.sh` already refuses Windows.
-- Cross-RID loop builds. [distribution.md](../distribution.md) already leaves those out of reach.
+- Cross-RID loop builds. [distribution.md](../../distribution.md) already leaves those out of reach.
 - Any new `KW-*` rule id.
 
 ## Verification gates
@@ -160,4 +162,16 @@ Review follows the repository review council after T1–T4 are green. The review
 
 ## docs-dev closeout
 
-T5 is the closeout. `kyber-weave-docs` verifies the evidence, confirms [install.md](../install.md) and [distribution.md](../distribution.md) carry the shipped rule, archives this plan under `docs/archive/plans/`, and updates [docs/plans/README.md](README.md) so the active list no longer links it. No ADR is expected unless an answer chooses a constraint the canonical pages cannot hold. Closeout then re-runs `docs validate . --merge-ready` and `docs drift .`.
+T5 is the closeout. `kyber-weave-docs` verifies the evidence, confirms [install.md](../../install.md) and [distribution.md](../../distribution.md) carry the shipped rule, archives this plan under `docs/archive/plans/`, and updates [docs/plans/README.md](../../plans/README.md) so the active list no longer links it. No ADR is expected unless an answer chooses a constraint the canonical pages cannot hold. Closeout then re-runs `docs validate . --merge-ready` and `docs drift .`.
+
+## Closeout (T5, 2026-09-26)
+
+**Canonical documentation.** [install.md](../../install.md) and [distribution.md](../../distribution.md) already describe the shipped rule: `KYBER_WEAVE_RELEASE_ORIGIN`, the hosts `127.0.0.1`, `localhost`, and `[::1]`, the curl and wget split, and the staging rule that, after the loopback server is listening, `working` and a git ref stage by `install.sh --install-dir "$BIN" --version <from>` while `--from installed` keeps the copy. Neither page describes `dash/src/install/origin.ts` as loopback-checked, and neither still describes issue #125 as an open installer gap. No ADR: the constraint fits those two pages.
+
+**Test evidence.** Commit `7c2a659` adds the failing `ReleaseOrigin` facts and changes only `tests/KyberWeave.Tests/ReleaseTests.cs`. At that commit, `FullyQualifiedName~KyberWeave.Tests.ReleaseTests.ReleaseOrigin` was 43 failed / 0 passed. Each failure was `/bin/sh: 2: fetch: not found`, including `ReleaseOriginRejectsByteFlippedAfterTheChecksumIsWritten` (exit 127), so the refusal happened before checksum comparison. The complement of pre-existing `ReleaseTests` (`FullyQualifiedName~KyberWeave.Tests.ReleaseTests&FullyQualifiedName!~ReleaseOrigin`) passed 65. Commit `0a6ed70` changes only `scripts/install.sh`. GREEN: the `ReleaseOrigin` filter passed 43 (`/opt/cursor/artifacts/release-origin-tests.log`) and `FullyQualifiedName~ReleaseTests` passed 118 (`/opt/cursor/artifacts/release-tests.log`).
+
+**Loop evidence.** Commit `69a6890` changes only `scripts/update-loop.sh`. `/opt/cursor/artifacts/update-loop-working.log` contains `install.sh staged the working from binaries` and `EXIT:0`. `/opt/cursor/artifacts/update-loop-git-ref.log` contains `install.sh staged the git-ref from binaries` and `EXIT:0`. `/opt/cursor/artifacts/update-loop-installed.log` contains `copied the binaries already on this machine` and `EXIT:0`, and does not stage through `install.sh`.
+
+**Review.** The 2026-09-26 council returned **APPROVE**, risk **MEDIUM**, under `KW-REVIEW-024` (`/opt/cursor/artifacts/code-review-report.md`). All 15 declared gates passed: format-whitespace, format-style, build, test, skill-validate, skill-lint, skill-scan, docs-validate, docs-drift, inspectcode, duplicates, ts-typecheck, ts-test, ts-lint, ts-reachable. One accepted minor finding (a redundant `System.Globalization.CultureInfo` qualifier in `ReleaseTests.cs`) did not block and is not fixed in this closeout.
+
+**Index.** [docs/plans/README.md](../../plans/README.md) no longer lists this plan as active. The archived-plans row points at [install.md](../../install.md) and [distribution.md](../../distribution.md), with no ADR.
