@@ -57,7 +57,7 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(
             handler,
             new Uri("http://api.github.test/"));
@@ -67,7 +67,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         Assert.Contains("HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         using RoutingHandler handler = new RoutingHandler();
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
         SquadReleaseRequest request = new SquadReleaseRequest(
             Repository,
@@ -118,7 +118,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         Assert.Contains("release version", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Theory]
@@ -175,7 +175,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             $"{checksum}  {AssetName}\n",
             redirectArchiveTo: insecureLocation);
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -183,7 +183,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         Assert.Contains("HTTPS", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(insecureLocation, handler.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -205,7 +205,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             }
             """));
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
         InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
@@ -213,7 +213,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         Assert.Contains("SHA256SUMS.txt", exception.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(archiveUri, handler.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -227,7 +227,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v9.9.9");
         handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.NotFound));
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
         SquadReleaseRequest request = new SquadReleaseRequest(
             Repository,
@@ -241,7 +241,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         Assert.Contains(Repository, exception.Message, StringComparison.Ordinal);
         Assert.Contains("releases", exception.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal([releaseUri], handler.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -253,7 +253,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
         handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.InternalServerError));
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
         HttpRequestException exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
@@ -261,7 +261,7 @@ public sealed class SquadReleaseClientTests : IDisposable
 
         Assert.DoesNotContain(Repository, exception.Message, StringComparison.Ordinal);
         Assert.Equal([releaseUri], handler.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -405,7 +405,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             Path.Combine(state, "squad.receipt.json"),
             "preserve receipt",
             CancellationToken.None);
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));
         using RoutingHandler handler = ReleaseHandler(archiveBytes, $"{Sha256(archiveBytes)}  {AssetName}\n");
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
@@ -418,7 +418,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             "outside must stay unchanged",
             await File.ReadAllTextAsync(outsideFile, CancellationToken.None));
         Assert.Equal(outside, new DirectoryInfo(linkedDirectory).LinkTarget);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -443,13 +443,13 @@ public sealed class SquadReleaseClientTests : IDisposable
             $"{Sha256(archiveBytes)}  {AssetName}\n",
             cancelAfterArchiveRead: cancellation);
         SeedStateOnly();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             source.DownloadAndExtractAsync(Request(), cancellation.Token));
 
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -462,7 +462,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             archiveBytes,
             $"{Sha256(archiveBytes)}  {AssetName}\n");
         SeedStateOnly();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         // ReSharper disable once AccessToDisposedClosure
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(
             handler,
@@ -478,7 +478,7 @@ public sealed class SquadReleaseClientTests : IDisposable
             source.DownloadAndExtractAsync(Request(), cancellation.Token));
 
         Assert.True(stagingCreated);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
         Assert.Empty(Directory.EnumerateDirectories(
             _temp.Path,
             ".destination.kyber-squad-*",
@@ -561,14 +561,14 @@ public sealed class SquadReleaseClientTests : IDisposable
     private async Task<Exception> DownloadFailure(byte[] archiveBytes, string checksumManifest)
     {
         SeedDestinationAndState();
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
         using RoutingHandler handler = ReleaseHandler(archiveBytes, checksumManifest);
         using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
 
         Exception exception = await Assert.ThrowsAnyAsync<Exception>(() =>
             source.DownloadAndExtractAsync(Request(), CancellationToken.None));
 
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
         return exception;
     }
 
@@ -586,22 +586,6 @@ public sealed class SquadReleaseClientTests : IDisposable
         Directory.CreateDirectory(state);
         File.WriteAllText(Path.Combine(state, "squad.lock.yml"), "preserve lock");
         File.WriteAllText(Path.Combine(state, "squad.receipt.json"), "preserve receipt");
-    }
-
-    private IReadOnlyDictionary<string, byte[]> SnapshotTree() =>
-        Directory.EnumerateFiles(_temp.Path, "*", SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.Ordinal)
-            .ToDictionary(
-                path => Path.GetRelativePath(_temp.Path, path).Replace('\\', '/'),
-                File.ReadAllBytes,
-                StringComparer.Ordinal);
-
-    private void AssertTreeUnchanged(IReadOnlyDictionary<string, byte[]> before)
-    {
-        IReadOnlyDictionary<string, byte[]> after = SnapshotTree();
-        Assert.Equal(before.Keys, after.Keys);
-        foreach (string path in before.Keys)
-            Assert.Equal(before[path], after[path]);
     }
 
     private static void AssertPathOnlyVersionInvocation(

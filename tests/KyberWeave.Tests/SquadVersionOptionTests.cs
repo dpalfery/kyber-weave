@@ -175,7 +175,7 @@ public sealed class SquadVersionOptionTests : IDisposable
             stateStore: stateStore,
             releaseSource: releaseSource,
             renderer: renderer);
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -193,7 +193,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedMessageFragment, execution.Output, StringComparison.Ordinal);
         Assert.Empty(releaseSource.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Theory]
@@ -219,7 +219,7 @@ public sealed class SquadVersionOptionTests : IDisposable
             stateStore: stateStore,
             releaseSource: releaseSource,
             renderer: renderer);
-        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -237,7 +237,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedMessageFragment, execution.Output, StringComparison.Ordinal);
         Assert.Empty(releaseSource.Requests);
-        AssertTreeUnchanged(before);
+        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
     }
 
     [Fact]
@@ -348,22 +348,6 @@ public sealed class SquadVersionOptionTests : IDisposable
 
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
         File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
-    }
-
-    private IReadOnlyDictionary<string, byte[]> SnapshotTree() =>
-        Directory.EnumerateFiles(_temp.Path, "*", SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.Ordinal)
-            .ToDictionary(
-                path => Path.GetRelativePath(_temp.Path, path).Replace('\\', '/'),
-                File.ReadAllBytes,
-                StringComparer.Ordinal);
-
-    private void AssertTreeUnchanged(IReadOnlyDictionary<string, byte[]> before)
-    {
-        IReadOnlyDictionary<string, byte[]> after = SnapshotTree();
-        Assert.Equal(before.Keys, after.Keys);
-        foreach (string path in before.Keys)
-            Assert.Equal(before[path], after[path]);
     }
 
     private static CommandExecution Capture(Func<int> execute)
