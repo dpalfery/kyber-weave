@@ -1344,6 +1344,10 @@ function dropOverlappingNestSources(sources: SessionSource[], billedHome: string
   })
 }
 
+/**
+ * The Codex provider for `codexDir`, or for CODEX_HOME / ~/.codex when omitted. Launcher-home
+ * detection is deferred to the first probeRoots() or discoverSessions() call (#143).
+ */
 export function createCodexProvider(
   codexDir?: string,
   opts?: { primaryDir?: string; launcherRoots?: string[] },
@@ -1354,7 +1358,7 @@ export function createCodexProvider(
 
   // Memoized launcher-home detection closure. Detection runs only when discovery
   // is explicitly requested (probeRoots or discoverSessions), never at provider
-  // construction. This fixes issue #124 follow-up: detection is cached per instance,
+  // construction (#143): detection is cached per instance,
   // shared between both methods, and computed exactly once.
   let detectionState: {
     duplicateHome: boolean
@@ -1362,6 +1366,10 @@ export function createCodexProvider(
     scanBoth: boolean
   } | undefined
 
+  /**
+   * Launcher-home detection for this provider, computed on first call and reused after.
+   * It stats the Codex and launcher homes, so it runs only when discovery is requested.
+   */
   const getDetectionState = () => {
     if (detectionState === undefined) {
       // Explicit nest factory whose path is a realpath alias of the billed home:
@@ -1397,8 +1405,10 @@ export function createCodexProvider(
       return toolNameMap[rawTool] ?? rawTool
     },
 
-    // Trees discoverSessions actually walks. Honors CODEX_HOME; when the
-    // production singleton scans nest + billed home, both appear here.
+    /**
+     * Trees discoverSessions actually walks. Honors CODEX_HOME; when the
+     * production singleton scans nest + billed home, both appear here.
+     */
     async probeRoots(): Promise<ProbeRoot[]> {
       const { duplicateHome, scanBoth } = getDetectionState()
       if (duplicateHome) return []
@@ -1406,6 +1416,10 @@ export function createCodexProvider(
       return rootsFor(dir)
     },
 
+    /**
+     * Session files under the Codex home, plus the billed home when the singleton
+     * resolved to a launcher nest, with nest sessions already billed dropped.
+     */
     async discoverSessions(): Promise<SessionSource[]> {
       // Same physical tree via two factories is complete overlap, not a
       // distinct nest. isNestedLauncherCodexHome is false in that case.

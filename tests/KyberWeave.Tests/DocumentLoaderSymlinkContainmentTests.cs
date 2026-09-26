@@ -16,13 +16,14 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
     private readonly TempDirectory _repoRoot = new();
     private readonly TempDirectory _outside = new();
 
+    /// <summary>Deletes the repository and outside temp directories.</summary>
     public void Dispose()
     {
         _repoRoot.Dispose();
         _outside.Dispose();
-        GC.SuppressFinalize(this);
     }
 
+    /// <summary>Writes <c>.kyber-weave/kyber-weave.yml</c> in the repository root.</summary>
     private void WriteConfig(string yaml)
     {
         string configDir = Path.Combine(_repoRoot.Path, ".kyber-weave");
@@ -30,6 +31,10 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         File.WriteAllText(Path.Combine(configDir, "kyber-weave.yml"), yaml);
     }
 
+    /// <summary>
+    /// Writes <paramref name="content"/> at <paramref name="path"/> under the repository root,
+    /// or under the outside directory when <paramref name="root"/> is anything but <c>docs</c>.
+    /// </summary>
     private void WriteDocument(string path, string content, string root = "docs")
     {
         string fullPath = Path.Combine(root == "docs" ? _repoRoot.Path : _outside.Path, path);

@@ -133,6 +133,10 @@ public sealed partial class DocumentLoader
     /// </summary>
     private static StringComparer PathComparer => DocsRootPath.PathComparer;
 
+    /// <summary>
+    /// True when the configured catalog exists and neither it nor a directory beneath its
+    /// root is a symbolic link; see <see cref="DocsRootPath.IsContainedFile"/>.
+    /// </summary>
     private bool IsCatalogContained() =>
         DocsRootPath.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
 

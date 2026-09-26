@@ -17,6 +17,7 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
     private readonly TempDirectory _root = new();
     private readonly TempDirectory _outside = new();
 
+    /// <summary>Deletes the repository and outside temp directories.</summary>
     public void Dispose()
     {
         _root.Dispose();
@@ -200,6 +201,10 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
         Assert.Equal(stampWithoutCatalog, stampWithLinkedCatalog);
     }
 
+    /// <summary>
+    /// A host whose factories are inert: <see cref="DocumentIndexHost.ComputeDocsStamp()"/>
+    /// reads the filesystem directly and never calls them.
+    /// </summary>
     private static DocumentIndexHost CreateHost(
         string repoRoot,
         IReadOnlyList<string>? docsRelativeRoots = null,

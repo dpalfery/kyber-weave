@@ -21,6 +21,7 @@ let tempHome: string
 let tempCodexHome: string
 let savedEnv: Record<'HOME' | 'USERPROFILE' | 'CODEX_HOME', string | undefined>
 
+/** Puts one saved variable back, deleting it when it was unset before the test. */
 function restoreEnv(name: keyof typeof savedEnv): void {
   const value = savedEnv[name]
   if (value === undefined) delete process.env[name]

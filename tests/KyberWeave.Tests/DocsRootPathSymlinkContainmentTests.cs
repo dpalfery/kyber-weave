@@ -13,6 +13,7 @@ public sealed class DocsRootPathSymlinkContainmentTests : IDisposable
     private readonly TempDirectory _root = new();
     private readonly TempDirectory _outside = new();
 
+    /// <summary>Deletes the repository and outside temp directories.</summary>
     public void Dispose()
     {
         _root.Dispose();

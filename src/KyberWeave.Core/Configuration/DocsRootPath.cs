@@ -209,12 +209,24 @@ internal static class DocsRootPath
         return File.Exists(current);
     }
 
+    /// <summary>
+    /// The path segments of a repository-relative path, accepting either separator and
+    /// dropping <c>.</c>, so the repository root has none.
+    /// </summary>
     private static string[] Segments(string relativePath) =>
         relativePath
             .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
             .Where(s => s != RepositoryRoot)
             .ToArray();
 
+    /// <summary>
+    /// Lists one directory, yields its matching files, and recurses into its subdirectories,
+    /// skipping every entry that is itself a symbolic link.
+    /// </summary>
+    /// <remarks>
+    /// The listing is materialized before recursing so no directory handle stays open while
+    /// a subtree is walked.
+    /// </remarks>
     private static IEnumerable<string> EnumerateContainedFilesRecursive(string directory, string searchPattern)
     {
         DirectoryInfo dirInfo = new DirectoryInfo(directory);
@@ -254,6 +266,10 @@ internal static class DocsRootPath
         }
     }
 
+    /// <summary>
+    /// Matches <paramref name="fileName"/> against <c>*</c>, a <c>*.ext</c> pattern, or an
+    /// exact name, case-insensitively on Windows only.
+    /// </summary>
     private static bool MatchesSearchPattern(string fileName, string searchPattern)
     {
         // Match wildcard patterns like "*.md", compatible with Directory.EnumerateFiles semantics
