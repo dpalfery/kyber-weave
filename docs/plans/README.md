@@ -4,7 +4,7 @@ title: Kyber-Weave Plan Inventory
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-26
 ---
 
 # Kyber-Weave Plan Inventory
@@ -17,9 +17,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-| Plan | Status | Date | Canonical Docs / Linked | Goal |
-|---|---|---|---|---|
-| [2026-09-25-mcp-docs-walk-containment.md](2026-09-25-mcp-docs-walk-containment.md) | Current | 2026-09-25 | Approved 2026-09-25; user chose Q4 option A | Contain `DocumentLoader`/`DocumentIndexHost` enumeration to configured docs roots by skipping any symlink encountered during a walk (no resolve, no diagnostic), closing the TCC-observed Photos/Documents/Downloads/container/cloud-domain footprint against `kyber-weave-mcp` (issue #124), and defer KyberDash's Codex nested-launcher-home check to first use instead of module load. Development mode: test-first. |
+No active plans.
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
@@ -27,6 +25,7 @@ Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](..
 
 | Plan | Status | Date | Archive Date | Canonical Docs / Harvested ADRs | Goal |
 |---|---|---|---|---|---|
+| [2026-09-25-mcp-docs-walk-containment.md](../archive/plans/2026-09-25-mcp-docs-walk-containment.md) | Complete | 2026-09-25 | 2026-09-26 | [configuration.md](../configuration.md), [standards/csharp/README.md](../standards/csharp/README.md); no ADR — a bug fix under the existing D3 containment principle | Contain documentation-walk enumeration to configured docs roots by skipping any symlink encountered during a walk (no resolve, no diagnostic), closing the TCC-observed Photos/Documents/Downloads/container/cloud-domain footprint (issue #124), and defer KyberDash's Codex nested-launcher-home check to first use. Development mode: test-first. Complete: council APPROVE, 15/15 gates green, 2026-09-26. Fixes #124. |
 | [2026-09-25-claude-conductor-entry-point-skill.md](../archive/plans/2026-09-25-claude-conductor-entry-point-skill.md) | Archived; live check open | 2026-09-25 | 2026-09-25 | [kyber-squad/architecture.md](../kyber-squad/architecture.md), [kyber-squad/requirements.md](../kyber-squad/requirements.md), [kyber-squad/onboarding.md](../kyber-squad/onboarding.md); [live-verification todo](../todo/claude-conductor-live-verification.md) remains open; no ADR — the decision is recorded in plan §3 and architecture §3 | Deliver the Claude `/conductor` entry-point skill beside its subagent. The live Claude Code check was deferred during PR #136 CI closeout. Development mode: test-first. |
 | [2026-09-24-agent-spec-broken-reference-rule.md](../archive/plans/2026-09-24-agent-spec-broken-reference-rule.md) | Complete | 2026-09-24 | 2026-09-24 | [context-hygiene/agents.md](../context-hygiene/agents.md), [ci-pipelines/rule-reference.md](../ci-pipelines/rule-reference.md), [todo/agent-spec-broken-reference-rule.md](../archive/todo/agent-spec-broken-reference-rule.md) (closed); no ADR | Implement KW-AGENT-SPEC-004 (broken file reference) check in AgentSpecValidator, and audit all KW-AGENT-SPEC-* and KW-AGENT-SEC-* ids to ensure every rule is emitted. Development mode: test-first. Complete: council APPROVE, all 15 review gates PASS, 2026-09-24. |
 | [2026-09-23-kyberdash-ingestion-report-integrity.md](../archive/plans/2026-09-23-kyberdash-ingestion-report-integrity.md) | Complete | 2026-09-23 | 2026-09-24 | [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0023](../adr/0023-kyberdash-report-model-and-tray-ownership.md) | Restore KyberDash ingestion and report integrity across harnesses: honest unobservability, public DB-backed bridge queries, schema v13 problem idempotency, dead PID reconciliation, and SEA binary deployment. Complete: review APPROVE, 256/256 Vitest passed (3,586 tests), 2,067 .NET tests passed, 2026-09-24. |

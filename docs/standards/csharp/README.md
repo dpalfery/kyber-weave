@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: csharp
 owner: dpalfery
-last-reviewed: 2026-08-16
+last-reviewed: 2026-09-26
 ---
 
 # C# coding standard
@@ -59,6 +59,20 @@ configuration defaults, the parser, and the documentation that describes it.
 
 **Nullable is enabled.** A nullable annotation is a claim; do not answer a warning with `!`
 when the honest fix is a check or a different signature.
+
+## Safe filesystem enumeration
+
+Any recursive filesystem walk over a user-controlled root must not use `SearchOption.AllDirectories`
+or `RecurseSubdirectories = true` directly, because .NET invariably follows directory symbolic
+links during such recursion ([dotnet/runtime#52666](https://github.com/dotnet/runtime/issues/52666)).
+This can cause the walk to escape the intended directory boundary.
+
+Instead, walk one level at a time using `new DirectoryInfo(dir).EnumerateFileSystemInfos("*", new EnumerationOptions { RecurseSubdirectories = false })`,
+and for each entry check `entry.LinkTarget is not null` to detect a symlink. Skip any entry
+that is itself a symlink — do not descend into symlinked directories, do not yield symlinked
+files, and never call `ResolveLinkTarget` (which opens symlinks, potentially reaching outside
+the root). See [`DocsRootPath.EnumerateContainedFiles`](../../src/KyberWeave.Core/Configuration/DocsRootPath.cs)
+in the codebase for the canonical implementation of this pattern.
 
 ## Comments explain why, not what
 

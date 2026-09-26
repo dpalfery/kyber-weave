@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-08-17
+last-reviewed: 2026-09-26
 code-refs:
   - KyberWeaveConfigLoader
   - OntologyConfig
@@ -109,6 +109,15 @@ docs-analysis:
 | `required-keys` | per-type matrix | Extra keys required by doc-type |
 | `catalog.component-column` | `1` | Index of the Component cell in a catalog row |
 | `catalog.owner-column` | `6` | Index of the Owner cell in a catalog row |
+
+### Catalog path containment
+
+The `catalog-path` string is normalized at configuration load to reject absolute paths and `..`
+segments. In addition, at read time the catalog file itself is checked to ensure it is not a
+symbolic link: if the configured path resolves to a symlink, the catalog document is skipped
+silently. Symlinks under a docs root are skipped during the walk itself — no file inside a
+symlinked directory is ever reached. Together, these checks ensure the documentation walk
+cannot escape the configured repository boundaries (see [issue #124](https://github.com/dpalfery/kyber-weave/issues/124)).
 
 ### Merge semantics
 

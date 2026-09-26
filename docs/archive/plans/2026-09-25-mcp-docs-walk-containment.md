@@ -1,13 +1,13 @@
 ---
-id: plans/2026-09-25-mcp-docs-walk-containment
+id: archive/plans/2026-09-25-mcp-docs-walk-containment
 title: Contain documentation-walk enumeration to configured roots and known harness folders
 doc-type: plan
-status: current
+status: archived
 development-mode: test-first
 component: DocGraph
 owner: dpalfery
 created: 2026-09-25
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-26
 approved: 2026-09-25
 ---
 
@@ -412,7 +412,7 @@ Acceptance:
   `realpathSync`) run before the function returns, regardless of whether any method is ever
   called on the result — assertion 1 FAILS today.
 
-### T8 — GREEN: defer Codex nested-launcher-home detection to first use (skill: the `TypeScript worker` role that owned equivalent non-React `dash/src/*.ts` GREEN work in [`docs/archive/plans/2026-09-23-kyberdash-ingestion-report-integrity.md`](../archive/plans/2026-09-23-kyberdash-ingestion-report-integrity.md), rows T5-T9 — `react-dev` is scoped to `.tsx`/`.jsx` only and does not cover this file)
+### T8 — GREEN: defer Codex nested-launcher-home detection to first use (skill: the `TypeScript worker` role that owned equivalent non-React `dash/src/*.ts` GREEN work in [`docs/2026-09-23-kyberdash-ingestion-report-integrity.md`](../2026-09-23-kyberdash-ingestion-report-integrity.md), rows T5-T9 — `react-dev` is scoped to `.tsx`/`.jsx` only and does not cover this file)
 
 **Scope**: `dash/src/providers/codex.ts` (`createCodexProvider`, lines 1347-1407).
 **Depends on**: T7.
@@ -428,7 +428,7 @@ shape or to `dash/src/ingest/launcher-homes.ts`.
 
 **Why this belongs where it already lives**: per `docs/dash/architecture.md`'s repository
 layout table, `dash/src/**` is "the CLI engine: provider session parsers, ..."; `codex.ts` and
-`launcher-homes.ts` are exactly that. [ADR 0020](../adr/0020-kyberdash-one-time-fork.md) retired
+`launcher-homes.ts` are exactly that. [ADR 0020](../../adr/0020-kyberdash-one-time-fork.md) retired
 the merge-zone rule this file previously sat under ("no further upstream change is merged ...
 any file under `dash/` is edited on its merits, under the repository's gates") — there is no
 merge-zone constraint left to apply, and no relocation is implied by this fix.
@@ -580,13 +580,10 @@ Both must show zero findings before T9 closes the plan.
 - `docs/archive/plans/2026-09-23-kyberdash-ingestion-report-integrity.md` read for TypeScript
   ownership precedent on non-React `dash/src/*.ts` GREEN work (rows T5-T9, specialist
   `TypeScript worker`).
-- [ADR 0020](../adr/0020-kyberdash-one-time-fork.md) read to confirm the merge-zone rule cited
+- [ADR 0020](../../adr/0020-kyberdash-one-time-fork.md) read to confirm the merge-zone rule cited
   by the task instructions is retired, not merely inapplicable.
 - Issue #124 read via `gh issue view 124` for the exact reported text and screenshots described.
 
 ## Plan lifecycle and closure
 
-**Status**: Current. Approved 2026-09-25 by user ("a, approve"); ready for execution.
-
-**Closure**: T9 archives this plan into `docs/plans/README.md`'s Archived Plans table once T1-T8
-are green and both `docs validate`/`docs drift` show zero findings.
+**Status**: Archived. **Complete**: All implementation tasks T1–T8 passed under test-first development mode with full code review and verification. Council decision: APPROVE with 15/15 gates green. Test evidence: .NET 2126 tests passed / 0 failed; KyberDash 257 files, 3632 tests passed. Issue #124 fixed by commits 2d1d5535 (fix: stop docs walks following symlinks out of the repo) and merge 1d65a4a0 (Merge remote-tracking branch 'origin/main' into main). Canonical documentation harvested: symlink containment rule at [docs/standards/csharp/README.md](../../standards/csharp/README.md), catalog-path symlink-check note at [docs/configuration.md](../../configuration.md). No ADR required — this is a bug fix against the already-decided D3 containment principle, not a new architectural decision. Archived 2026-09-26.
