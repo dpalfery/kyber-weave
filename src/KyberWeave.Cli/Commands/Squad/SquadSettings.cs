@@ -72,9 +72,9 @@ public sealed class SquadUpdateSettings : CommandSettings
     [Description("Target the per-user global deployment directory rather than the local project.")]
     public bool Global { get; set; }
 
-    /// <summary>Optional harness target(s) to restrict update to.</summary>
+    /// <summary>The complete desired harness target set for update.</summary>
     [CommandOption("-t|--target <TARGETS>")]
-    [Description("Harness target(s) to update: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, all.")]
+    [Description("The complete desired update target set: codex, cursor, claude, copilot, opencode, kilo, antigravity, warp, factory, pi, zcode, all.")]
     [SuppressMessage(
         "Performance", "CA1819:Properties should not return arrays",
         Justification = "Spectre.Console.Cli binds repeated options to arrays.")]
