@@ -221,6 +221,10 @@ public sealed class DocumentationReviewExchange
         return claims;
     }
 
+    /// <summary>
+    /// The reason <paramref name="bundle"/> cannot be imported against
+    /// <paramref name="candidates"/>, or <see langword="null"/> when it can.
+    /// </summary>
     private string? ValidateBundle(
         ReviewVerdictBundle bundle,
         IReadOnlyDictionary<string, AnalysisCandidate> candidates)
@@ -356,6 +360,10 @@ public sealed class DocumentationReviewExchange
         || (kind == AnalysisRuleKind.Conflict && label == AnalysisVerdictLabel.Conflict)
         || (kind == AnalysisRuleKind.Terminology && label == AnalysisVerdictLabel.DistinctSenses);
 
+    /// <summary>
+    /// True when a distinct-senses verdict on a terminology candidate proposes at least one
+    /// well-formed glossary sense, each for the candidate's own term.
+    /// </summary>
     private static bool GlossarySensesAreValid(
         ReviewVerdictItem verdict,
         AnalysisCandidate candidate)

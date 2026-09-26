@@ -79,6 +79,11 @@ public sealed class DocSpecValidator
         return report;
     }
 
+    /// <summary>
+    /// Adds every frontmatter, vocabulary and identity finding for <paramref name="doc"/> to
+    /// <paramref name="report"/>, recording its id in <paramref name="knownIds"/> and
+    /// <paramref name="idOwners"/> for the corpus-wide uniqueness check.
+    /// </summary>
     private void ValidateDocument(
         DocumentModel doc,
         DocumentSet set,

@@ -10,6 +10,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Entity-drift tier: resolves documented code references against CodeGraph.</summary>
 public sealed class DocsDriftCommand : Command<DocsSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();

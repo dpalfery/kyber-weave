@@ -24,6 +24,10 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
     private static readonly string CorpusRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
+    /// <summary>
+    /// Copies the checked-in Squad corpus into the request's destination, standing in for a
+    /// downloaded and verified release archive.
+    /// </summary>
     public Task<SquadReleaseResult> DownloadAndExtractAsync(
         SquadReleaseRequest request,
         CancellationToken cancellationToken = default)

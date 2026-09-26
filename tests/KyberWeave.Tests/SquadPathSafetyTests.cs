@@ -792,6 +792,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         }).Result;
     }
 
+    /// <summary>Runs <paramref name="execute"/> once with console output captured.</summary>
     private static (T Result, string Output) Capture<T>([InstantHandle] Func<T> execute)
     {
         CapturedConsoleExecution<T> execution = ProcessConsoleCapture.Run(execute);

@@ -9,6 +9,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// <summary>Governance view: doc-type coverage by component.</summary>
 public sealed class DocsCatalogCommand : Command<DocsSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();

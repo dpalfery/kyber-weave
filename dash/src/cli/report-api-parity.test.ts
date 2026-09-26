@@ -259,6 +259,7 @@ describe('report JSON and GET /api/kyber/report (R11.14)', () => {
     // Anchored a day back on an hour boundary, so the fixture stays inside the `--days 7`
     // window whenever the suite runs. Fixed dates aged out of it a week after they were written.
     const anchor = Math.floor((Date.now() - 24 * 3600_000) / 3600_000) * 3600_000
+    /** ISO timestamp `minutes` after the anchor. */
     const at = (minutes: number): string => new Date(anchor + minutes * 60_000).toISOString()
     const store = new CanonStore(db)
     store.upsertSession({

@@ -23,6 +23,7 @@ public sealed class CatalogSettings : CommandSettings
 
 public sealed class CatalogCommand : Command<CatalogSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, CatalogSettings settings, CancellationToken cancellationToken)
     {
         SkillSet set = SkillLoader.LoadSet(settings.Path);

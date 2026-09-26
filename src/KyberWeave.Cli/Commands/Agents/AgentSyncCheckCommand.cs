@@ -9,6 +9,7 @@ namespace KyberWeave.Cli.Commands.Agents;
 
 public sealed class AgentSyncCheckCommand : Command<AnalysisSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, AnalysisSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();

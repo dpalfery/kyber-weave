@@ -7,6 +7,7 @@ namespace KyberWeave.Cli.Commands.Skills;
 
 public sealed class ValidateCommand : Command<AnalysisSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, AnalysisSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();

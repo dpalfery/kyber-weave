@@ -92,6 +92,10 @@ public sealed class WarpRendererContractTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
+    /// <summary>
+    /// Renders the shipped corpus and checks every agent and skill lands at its Warp path,
+    /// with collisions derived from the source.
+    /// </summary>
     [Fact]
     public async Task RenderAsync_Warp_RendersTheRealCanonicalCorpus()
     {

@@ -12,6 +12,10 @@ internal static class ProcessConsoleCapture
 {
     private static readonly Lock Gate = new();
 
+    /// <summary>
+    /// Runs <paramref name="execute"/> once, before returning, with console output captured,
+    /// holding the process-wide console lock for the duration.
+    /// </summary>
     public static CapturedConsoleExecution<T> Run<T>([InstantHandle] Func<T> execute)
     {
         ArgumentNullException.ThrowIfNull(execute);

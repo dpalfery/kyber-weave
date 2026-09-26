@@ -158,6 +158,10 @@ public class DocumentKeywordScoringTests
         Assert.Equal(0.0, DocumentIndex.ScorePartialIdentity(twoKeywordsDoc, queryUnrelated));
     }
 
+    /// <summary>
+    /// Declared keywords are indexed lower-cased, so lookups match regardless of the case
+    /// the author wrote, and undeclared words are absent.
+    /// </summary>
     [Fact]
     public void ByKeywordInvertedMapIndexesDeclaredKeywordsCaseInsensitively()
     {

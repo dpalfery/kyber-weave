@@ -34,6 +34,7 @@ public sealed class KiloRendererContractTests : IDisposable
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
     public void Dispose()
     {
         // No disposable state: suite reads canonical checked-in corpus.

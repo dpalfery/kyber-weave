@@ -87,6 +87,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
+    /// <summary>Renders the shipped corpus and checks every agent and skill lands at its native path, with collisions derived from the source.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
@@ -534,6 +535,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>Native rendering emits no role-prefixed collision files.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_OmitsRolePrefixForCollisions()
     {
@@ -557,6 +559,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             $"Native renderer must not emit role-prefixed collision files. Found: {string.Join(", ", rolePrefixedPaths)}");
     }
 
+    /// <summary>The conductor's native <c>agent.md</c> carries name, model and both tool-enable keys.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_AgentFrontmatterIncludesNativeKeys()
     {
@@ -594,6 +597,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             "Conductor must have enable_subagent_tools key");
     }
 
+    /// <summary>The conductor renders with <c>mainAgent: true</c> (D5).</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_ConductorHasMainAgentFlag()
     {
@@ -914,6 +918,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>Every agent with a non-empty <c>delegates-to</c> roster gets subagent invocation enabled (D12).</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_DelegationEmittedPerDelegatesToRoster()
     {

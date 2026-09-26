@@ -22,6 +22,7 @@ public sealed class LintSettings : AnalysisSettings
 
 public sealed class LintCommand : Command<LintSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, LintSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();

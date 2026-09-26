@@ -11,6 +11,7 @@ public sealed class CoverageCollectorTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
 
+    /// <summary>Deletes the test's temporary directory.</summary>
     public void Dispose()
     {
         _temp.Dispose();

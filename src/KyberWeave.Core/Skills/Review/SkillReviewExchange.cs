@@ -119,6 +119,10 @@ public static class SkillReviewExchange
         return ImportVerdicts(json, expectedBundle.Candidates);
     }
 
+    /// <summary>
+    /// Parses a verdict bundle and checks it against <paramref name="currentCandidates"/>,
+    /// returning the imported verdicts, or the diagnostics that explain why it was refused.
+    /// </summary>
     public static SkillReviewImportResult ImportVerdicts(
         string json,
         IReadOnlyList<SkillReviewCandidate> currentCandidates)
