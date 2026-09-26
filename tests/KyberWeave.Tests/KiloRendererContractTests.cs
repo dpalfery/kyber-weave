@@ -3,7 +3,6 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -38,7 +37,6 @@ public sealed class KiloRendererContractTests : IDisposable
     public void Dispose()
     {
         // No disposable state: suite reads canonical checked-in corpus.
-        GC.SuppressFinalize(this);
     }
 
     [Fact]

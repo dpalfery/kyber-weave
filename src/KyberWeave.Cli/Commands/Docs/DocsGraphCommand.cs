@@ -1,5 +1,4 @@
 using KyberWeave.Core.CodeGraph;
-using System.Threading;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;

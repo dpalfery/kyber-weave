@@ -158,7 +158,7 @@ public sealed class DocSpecValidator
 
         if (fm.Keywords is not null)
         {
-            foreach (string? keyword in fm.Keywords)
+            foreach (string keyword in fm.Keywords)
             {
                 if (string.IsNullOrWhiteSpace(keyword))
                 {
@@ -173,7 +173,7 @@ public sealed class DocSpecValidator
 
         if (fm.Aliases is not null)
         {
-            foreach (string? alias in fm.Aliases)
+            foreach (string alias in fm.Aliases)
             {
                 if (string.IsNullOrWhiteSpace(alias))
                 {

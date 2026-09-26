@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Threading;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Skills.Model;
@@ -67,7 +66,6 @@ public sealed class RouteCommand : Command<RouteSettings>
             : RunSingle(settings, set, strategy);
     }
 
-    public int Execute(CommandContext context, RouteSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static int RunSingle(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {

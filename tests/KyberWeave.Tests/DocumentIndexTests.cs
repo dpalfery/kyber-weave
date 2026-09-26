@@ -166,10 +166,10 @@ public class DocumentKeywordScoringTests
         DocumentIndex index = DocumentIndex.Build(corpus, FakeCodeGraphResolver.WithSymbols());
 
         Assert.True(index.ByKeyword.TryGetValue("dashboard", out List<DocumentModel>? dashboardDocs));
-        Assert.Contains(doc, dashboardDocs!);
+        Assert.Contains(doc, dashboardDocs);
 
         Assert.True(index.ByKeyword.TryGetValue("tauri", out List<DocumentModel>? tauriDocs));
-        Assert.Contains(doc, tauriDocs!);
+        Assert.Contains(doc, tauriDocs);
 
         Assert.False(index.ByKeyword.ContainsKey("unindexed"));
     }

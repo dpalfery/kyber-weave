@@ -1,5 +1,4 @@
 using KyberWeave.Core.CodeGraph;
-using System.Threading;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
@@ -27,6 +26,4 @@ public sealed class DocsDriftCommand : Command<DocsSettings>
         CommandHelpers.Finish(report, settings, "docs drift", "Document");
         return report.HasErrors ? 1 : 0;
     }
-
-    public int Execute(CommandContext context, DocsSettings settings) => Execute(context, settings, CancellationToken.None);
 }

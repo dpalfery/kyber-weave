@@ -1,5 +1,4 @@
 using JetBrains.Annotations;
-using System.Threading;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis;

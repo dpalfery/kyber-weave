@@ -255,7 +255,7 @@ public sealed class WarpRendererContractTests : IDisposable
                 Assert.True(
                     source.CapabilityProfiles.Profiles.TryGetValue(a.CapabilityProfile, out SquadCapabilityProfile? profile),
                     $"Agent '{a.Name}' references undeclared capability profile '{a.CapabilityProfile}'.");
-                return HasNonDenyCapability(source.CapabilityProfiles, profile!);
+                return HasNonDenyCapability(source.CapabilityProfiles, profile);
             })
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)

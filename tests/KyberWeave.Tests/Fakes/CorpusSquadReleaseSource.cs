@@ -24,17 +24,12 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
     private static readonly string CorpusRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
-    private readonly List<SquadReleaseRequest> _requests = [];
-
-    public IReadOnlyList<SquadReleaseRequest> Requests => _requests;
-
     public Task<SquadReleaseResult> DownloadAndExtractAsync(
         SquadReleaseRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
-        _requests.Add(request);
 
         List<string> extractedFiles = CopyCorpus(CorpusRoot, request.DestinationPath);
 

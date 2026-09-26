@@ -100,8 +100,6 @@ public static partial class TextVectorizer
         return magA == 0 || magB == 0 ? 0 : dot / (magA * magB);
     }
 
-    public static double Similarity(string left, string right) =>
-        CosineSimilarity(Vectorize(left), Vectorize(right));
     [GeneratedRegex("[a-z0-9]+", RegexOptions.Compiled)]
     private static partial Regex MyRegex();
 }

@@ -479,7 +479,7 @@ public sealed partial class DocumentIndex
              + keywordCoverage;
     }
 
-    [GeneratedRegex(@"([a-z0-9])([A-Z])")]
+    [GeneratedRegex("([a-z0-9])([A-Z])")]
     private static partial Regex CamelCaseBoundaryRegex();
 
     /// <summary>

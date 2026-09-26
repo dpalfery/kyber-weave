@@ -1,3 +1,4 @@
+using JetBrains.Annotations;
 using KyberWeave.Cli.Rendering;
 using Spectre.Console;
 
@@ -11,7 +12,7 @@ internal static class ProcessConsoleCapture
 {
     private static readonly Lock Gate = new();
 
-    public static CapturedConsoleExecution<T> Run<T>(Func<T> execute)
+    public static CapturedConsoleExecution<T> Run<T>([InstantHandle] Func<T> execute)
     {
         ArgumentNullException.ThrowIfNull(execute);
 

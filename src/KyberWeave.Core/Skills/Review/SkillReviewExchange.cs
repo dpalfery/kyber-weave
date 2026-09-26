@@ -149,6 +149,8 @@ public static class SkillReviewExchange
             return Failure($"Unsupported verdict schema '{bundle.Schema}'. Expected '{VerdictSchema}'.");
         }
 
+        // Deserialized input: System.Text.Json does not enforce non-nullable annotations.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (bundle.Verdicts is null)
         {
             return Failure("The verdict bundle omits the verdicts collection.");
@@ -177,6 +179,7 @@ public static class SkillReviewExchange
 
         foreach (SkillReviewVerdict? verdict in bundle.Verdicts)
         {
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
             if (verdict is null)
             {
                 return Failure("The verdict bundle contains a null verdict.");

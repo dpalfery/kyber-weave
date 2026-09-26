@@ -1,5 +1,4 @@
 using KyberWeave.Core.Agents.Model;
-using System.Threading;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Validation;
 using KyberWeave.Core.Configuration;
@@ -26,6 +25,4 @@ public sealed class AgentSyncCheckCommand : Command<AnalysisSettings>
         CommandHelpers.Finish(report, settings, "agent sync-check", "Agent");
         return report.HasErrors ? 1 : 0;
     }
-
-    public int Execute(CommandContext context, AnalysisSettings settings) => Execute(context, settings, CancellationToken.None);
 }

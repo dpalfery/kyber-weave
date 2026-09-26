@@ -14,7 +14,6 @@ public sealed class CoverageCollectorTests : IDisposable
     public void Dispose()
     {
         _temp.Dispose();
-        GC.SuppressFinalize(this);
     }
 
     [Fact]

@@ -111,7 +111,6 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         // No disposable state: suite reads canonical checked-in corpus.
         // Implements IDisposable per repository test coding standard.
-        GC.SuppressFinalize(this);
     }
 
     [Fact]

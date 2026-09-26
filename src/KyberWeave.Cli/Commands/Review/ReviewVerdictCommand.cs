@@ -1,5 +1,4 @@
 using KyberWeave.Core.Configuration;
-using System.Threading;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
@@ -70,7 +69,6 @@ public sealed class ReviewVerdictCommand : Command<ReviewVerdictSettings>
         return outcome.ExitCode;
     }
 
-    public int Execute(CommandContext context, ReviewVerdictSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static string Describe(ReviewVerdict verdict) => verdict switch
     {

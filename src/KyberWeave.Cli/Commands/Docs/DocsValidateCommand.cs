@@ -1,5 +1,4 @@
 using KyberWeave.Core.Configuration;
-using System.Threading;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Model;

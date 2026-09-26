@@ -231,6 +231,8 @@ public sealed class DocumentationReviewExchange
             return "The verdict bundle analyzer version is stale.";
         if (!StringComparer.Ordinal.Equals(bundle.RubricVersion, DocumentationAnalyzer.RubricVersion))
             return "The verdict bundle rubric version is stale.";
+        // Deserialized input: System.Text.Json does not enforce non-nullable annotations.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (bundle.Verdicts is null)
             return "The verdict bundle omits the verdicts collection.";
         if (bundle.Verdicts.Count == 0)
@@ -240,6 +242,7 @@ public sealed class DocumentationReviewExchange
         List<AnalysisCandidate> reviewedCandidates = new List<AnalysisCandidate>(bundle.Verdicts.Count);
         foreach (ReviewVerdictItem? verdict in bundle.Verdicts)
         {
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
             if (verdict is null)
                 return "The verdict bundle contains a null verdict.";
             if (string.IsNullOrWhiteSpace(verdict.CandidateId) || !seen.Add(verdict.CandidateId))
@@ -365,6 +368,8 @@ public sealed class DocumentationReviewExchange
             return false;
         }
 
+        // Deserialized input: System.Text.Json does not enforce non-nullable annotations.
+        // ReSharper disable ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         return verdict.ProposedGlossarySenses.All(sense =>
             sense is not null
             && !string.IsNullOrWhiteSpace(sense.Term)
@@ -374,6 +379,7 @@ public sealed class DocumentationReviewExchange
             && sense.Scopes.All(scope => scope is not null && ValidScope(scope))
             && sense.Aliases is not null
             && sense.Aliases.All(alias => !string.IsNullOrWhiteSpace(alias)));
+        // ReSharper restore ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
     }
 
     private static bool ValidScope(string scope) =>

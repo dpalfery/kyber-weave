@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Threading;
 using System.IO.Compression;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
@@ -72,7 +71,6 @@ public sealed class PackCommand : Command<PackSettings>
         return 0;
     }
 
-    public int Execute(CommandContext context, PackSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static void ReportRenderer_RenderErrors(DiagnosticReport report)
     {

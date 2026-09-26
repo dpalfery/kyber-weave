@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Threading;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Processes;
 using Spectre.Console;
@@ -64,7 +63,6 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         return 0;
     }
 
-    public int Execute(CommandContext context, DocsInitSettings settings) => Execute(context, settings, CancellationToken.None);
 
     /// <summary>Runs the scaffold step and translates expected operator failures to exit 1.</summary>
     internal static (int ExitCode, ScaffoldResult? Result, string? Error) TryScaffold(

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Threading;
 using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -60,7 +59,6 @@ public sealed partial class NewCommand : Command<NewSettings>
         return 0;
     }
 
-    public int Execute(CommandContext context, NewSettings settings) => Execute(context, settings, CancellationToken.None);
 
     private static string Template(string template, string name, bool includeLicense, bool includeMetadata)
     {

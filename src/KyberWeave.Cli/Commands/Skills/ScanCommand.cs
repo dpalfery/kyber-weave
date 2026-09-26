@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Threading;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Security;
@@ -35,6 +34,4 @@ public sealed class ScanCommand : Command<ScanSettings>
             _ => report.HasCritical ? 1 : 0
         };
     }
-
-    public int Execute(CommandContext context, ScanSettings settings) => Execute(context, settings, CancellationToken.None);
 }

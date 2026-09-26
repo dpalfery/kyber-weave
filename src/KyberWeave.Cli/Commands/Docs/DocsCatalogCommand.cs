@@ -1,5 +1,4 @@
 using KyberWeave.Core.Diagnostics;
-using System.Threading;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using Spectre.Console;
@@ -52,6 +51,4 @@ public sealed class DocsCatalogCommand : Command<DocsSettings>
             $"{set.Documents.Count(d => d.HasFrontmatter)} with frontmatter.[/]");
         return 0;
     }
-
-    public int Execute(CommandContext context, DocsSettings settings) => Execute(context, settings, CancellationToken.None);
 }
