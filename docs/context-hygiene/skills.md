@@ -158,7 +158,7 @@ Hotshot golden bytes. Canonical storage and recursive Squad packages preserve 64
 resources, for 88 skill-tree files, and renderers project them beside the rendered principal, so
 deployed skill references resolve. The tracked root `.github/` self-deployment predates resource
 delivery; surplus packaged content remains until the
-[content-preserving migration todo](../todo/migrate-skill-resources-into-standards.md) is accepted.
+[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.
 
 The agent and skill namespaces intersect at seven names, all distinct-body collisions. No product
 identity is shared. Fallback rendering keeps each colliding skill at `<name>` and lowers its agent

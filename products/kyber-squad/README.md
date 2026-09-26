@@ -131,7 +131,7 @@ Copilot render now emits the 45 principal files plus each owner's resources (113
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
 resources today. Surplus skill content remains packaged until the
-[content-preserving migration todo](../../docs/todo/migrate-skill-resources-into-standards.md)
+[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128)
 meets its acceptance criteria.
 
 `kyber-weave-docs` is intentionally managed separately under
