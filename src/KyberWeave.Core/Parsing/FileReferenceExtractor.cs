@@ -9,7 +9,7 @@ namespace KyberWeave.Core.Parsing;
 /// <summary>
 /// Controls how inline paths in Markdown text are scanned for file references.
 /// </summary>
-public enum InlinePathScanMode
+internal enum InlinePathScanMode
 {
     /// <summary>
     /// Matches only complete inline code spans (e.g. `references/guide.md`).
@@ -25,7 +25,7 @@ public enum InlinePathScanMode
 /// <summary>
 /// Options configuring file reference extraction, normalization, and validation.
 /// </summary>
-public sealed class FileReferenceOptions
+internal sealed class FileReferenceOptions
 {
     /// <summary>
     /// The inline path scanning mode.
@@ -85,7 +85,7 @@ public sealed class FileReferenceOptions
 /// <param name="Exists">True when the resolved path exists on disk as a file or directory.</param>
 /// <param name="IsPathTraversal">True when the reference attempted directory traversal outside the owning directory.</param>
 /// <param name="NearestMatch">The nearest existing matching path relative to the owning directory, or null if none found.</param>
-public readonly record struct ExtractedFileReference(
+internal readonly record struct ExtractedFileReference(
     string Reference,
     string? ResolvedFullPath,
     bool Exists,
@@ -96,9 +96,12 @@ public readonly record struct ExtractedFileReference(
 /// <summary>
 /// Extracts and validates file references from Markdown documents and text spans.
 /// </summary>
-public static partial class FileReferenceExtractor
+internal static partial class FileReferenceExtractor
 {
     private static readonly char[] PathSeparators = ['/', '\\'];
+
+    private static readonly MarkdownPipeline MarkdownPipeline =
+        new MarkdownPipelineBuilder { TrackTrivia = true }.Build();
 
     [GeneratedRegex(@"\A(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)\z", RegexOptions.Compiled)]
     internal static partial Regex FullInlineSpanRegex();
@@ -110,9 +113,19 @@ public static partial class FileReferenceExtractor
     private static partial Regex RelativePathSpanRegex();
 
     /// <summary>
+    /// Matches valid configuration registry token names (e.g. "docs-root", "plan-index").
+    /// </summary>
+    /// <remarks>
+    /// Distinguishes angle-bracketed config tokens from angle-bracketed Markdown link URLs
+    /// containing file paths (such as &lt;references/missing guide.md&gt;).
+    /// </remarks>
+    [GeneratedRegex(@"\A[A-Za-z][A-Za-z0-9\-]*\z", RegexOptions.Compiled)]
+    private static partial Regex ConfigRegTokenNameRegex();
+
+    /// <summary>
     /// Extracts file references from a single Markdown text string.
     /// </summary>
-    public static IReadOnlyList<ExtractedFileReference> ExtractFromText(
+    internal static IReadOnlyList<ExtractedFileReference> ExtractFromText(
         string text,
         string directoryPath,
         FileReferenceOptions? options = null)
@@ -124,14 +137,14 @@ public static partial class FileReferenceExtractor
             return [];
         }
 
-        MarkdownDocument document = Markdown.Parse(text);
+        MarkdownDocument document = Markdown.Parse(text, MarkdownPipeline);
         return ExtractFromDocument(document, text, directoryPath, options);
     }
 
     /// <summary>
     /// Extracts file references from multiple Markdown text strings.
     /// </summary>
-    public static IReadOnlyList<ExtractedFileReference> ExtractFromTexts(
+    internal static IReadOnlyList<ExtractedFileReference> ExtractFromTexts(
         IEnumerable<string> texts,
         string directoryPath,
         FileReferenceOptions? options = null)
@@ -150,7 +163,7 @@ public static partial class FileReferenceExtractor
                 continue;
             }
 
-            MarkdownDocument document = Markdown.Parse(text);
+            MarkdownDocument document = Markdown.Parse(text, MarkdownPipeline);
             ExtractInternal(document, text, directoryPath, options, results, comparer);
         }
 
@@ -160,7 +173,7 @@ public static partial class FileReferenceExtractor
     /// <summary>
     /// Extracts file references from an existing parsed Markdig <see cref="MarkdownDocument"/>.
     /// </summary>
-    public static IReadOnlyList<ExtractedFileReference> ExtractFromDocument(
+    internal static IReadOnlyList<ExtractedFileReference> ExtractFromDocument(
         MarkdownDocument document,
         string rawMarkdown,
         string directoryPath,
@@ -190,14 +203,9 @@ public static partial class FileReferenceExtractor
         {
             if (link.Url is { } url)
             {
-                string targetUrl = url;
-                if (!string.IsNullOrWhiteSpace(rawMarkdown) &&
-                    (rawMarkdown.Contains("(<" + url + ">", StringComparison.Ordinal) ||
-                     rawMarkdown.Contains("(<" + url + "#", StringComparison.Ordinal) ||
-                     rawMarkdown.Contains("<" + url + ">", StringComparison.Ordinal)))
-                {
-                    targetUrl = "<" + url + ">";
-                }
+                string targetUrl = link.UrlHasPointyBrackets && ConfigRegTokenNameRegex().IsMatch(url)
+                    ? "<" + url + ">"
+                    : url;
 
                 ProcessReference(targetUrl, directoryPath, options, results, comparer);
             }
@@ -346,7 +354,7 @@ public static partial class FileReferenceExtractor
     /// Checks if a relative path resolves to an existing file or directory on disk,
     /// verifying that it does not escape the directory and respects filesystem case sensitivity.
     /// </summary>
-    public static bool ResolvesOnDisk(string directoryPath, string relativePath, StringComparer? comparer = null)
+    internal static bool ResolvesOnDisk(string directoryPath, string relativePath, StringComparer? comparer = null)
     {
         try
         {
@@ -425,7 +433,7 @@ public static partial class FileReferenceExtractor
     /// Probes case sensitivity by checking if an existing file or directory can be resolved with inverted casing.
     /// Falls back to OS default if probing is impossible (e.g. empty directory tree or access denied).
     /// </remarks>
-    public static StringComparer GetPathComparer(string directoryPath)
+    internal static StringComparer GetPathComparer(string directoryPath)
     {
         try
         {
@@ -492,7 +500,7 @@ public static partial class FileReferenceExtractor
     /// ensuring no suggestions escape the parent directory boundary.
     /// Computes similarity using <see cref="StringDistance.Levenshtein"/>.
     /// </remarks>
-    public static string? FindNearestMatch(string directoryPath, string brokenReference)
+    internal static string? FindNearestMatch(string directoryPath, string brokenReference)
     {
         string referenceName = Path.GetFileName(brokenReference);
         if (string.IsNullOrWhiteSpace(referenceName))

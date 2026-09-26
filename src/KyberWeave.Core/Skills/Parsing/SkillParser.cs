@@ -17,7 +17,7 @@ namespace KyberWeave.Core.Skills.Parsing;
 public static class SkillParser
 {
     private static readonly MarkdownPipeline Pipeline =
-        new MarkdownPipelineBuilder().UseYamlFrontMatter().Build();
+        new MarkdownPipelineBuilder { TrackTrivia = true }.UseYamlFrontMatter().Build();
 
     private static readonly IDeserializer Deserializer =
         new DeserializerBuilder()

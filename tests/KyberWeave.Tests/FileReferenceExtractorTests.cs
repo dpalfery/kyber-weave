@@ -257,4 +257,27 @@ public class FileReferenceExtractorTests
         Assert.Equal("references/guide.md", reference.Reference);
         Assert.True(reference.Exists);
     }
+
+    [Fact]
+    public void AngleBracketPathToMissingFileIsExtractedWithExistsFalse()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string markdown = "Check the [Guide](<references/missing guide.md>) for details.";
+        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+
+        ExtractedFileReference reference = Assert.Single(results);
+        Assert.Equal("references/missing guide.md", reference.Reference);
+        Assert.False(reference.Exists);
+    }
+
+    [Fact]
+    public void AngleBracketConfigRegTokenIsSkipped()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string markdown = "Refer to [Docs](<docs-root>) for documentation.";
+        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+
+        Assert.Empty(results);
+    }
 }
+
