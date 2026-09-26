@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildFindings } from './findings.js'
+import { tokens, turn } from './fixtures/records.js'
 import { buildRuns } from './runs.js'
 import { buildSessions } from './sessions.js'
 import { CanonStore } from './store.js'
-import type { CanonicalRecord, ContentPart } from './types.js'
+import type { CanonicalRecord } from './types.js'
 
 // `buildFindings` is the wire between the pure detectors and the dashboard: it
 // turns the records a run actually carries into the `finding` rows
@@ -15,38 +16,6 @@ import type { CanonicalRecord, ContentPart } from './types.js'
 // analysis reads — and the fixed 200,000 default is reserved for records that
 // report nothing, with the window it used stated in the persisted payload
 // rather than implied.
-
-const tokens = (over: Partial<CanonicalRecord['tokens']> = {}) => ({
-  freshInput: 1000,
-  cacheRead: 0,
-  cacheCreation: 0,
-  output: 100,
-  reportedInput: 1000,
-  reportedOutput: 100,
-  ...over,
-})
-
-function turn(spanId: string, parts: ContentPart[], over: Partial<CanonicalRecord> = {}): CanonicalRecord {
-  return {
-    spanId,
-    traceId: 'trace-1',
-    parentSpanId: null,
-    source: 'antigravity',
-    harness: 'antigravity',
-    sessionId: 'sess-1',
-    name: 'llm_request',
-    op: 'llm.invoke',
-    kind: 'client',
-    timestamp: '2026-09-03T10:00:00.000Z',
-    durationMs: 100,
-    status: 'ok',
-    tokens: tokens(),
-    content: {},
-    parts,
-    cost: { basis: 'unknown', status: 'no_rate' },
-    ...over,
-  }
-}
 
 /** The window provenance the persisted payload carries (D2). */
 type ContextWindowProvenance = {
