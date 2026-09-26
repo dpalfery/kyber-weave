@@ -839,6 +839,56 @@ public sealed class SquadGlobalRootTests : IDisposable
         Assert.Empty(Directory.EnumerateFileSystemEntries(projectRoot, "*", SearchOption.AllDirectories));
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Behavior (7): Guard test — every renderer's Global output contains no legacy prefix
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task RenderReceiptLayout_GlobalRender_ContainsNoPrefixedPaths()
+    {
+        // Guard: verify that every registered renderer's global output contains no path starting with
+        // the target's legacy prefix. This ensures the layout classification cannot mistake per-target
+        // renders for legacy single-root paths.
+        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+
+        // Map of target to its legacy prefix from the investigation findings.
+        Dictionary<SquadTarget, string> legacyPrefixes = new()
+        {
+            { SquadTarget.Claude, ".claude/" },
+            { SquadTarget.Codex, ".codex/" },
+            { SquadTarget.Cursor, ".cursor/" },
+            { SquadTarget.Copilot, ".github/" },
+            { SquadTarget.Antigravity, ".agents/" },
+            { SquadTarget.Pi, ".pi/" },
+            { SquadTarget.OpenCode, ".opencode/" },
+            { SquadTarget.Kilo, ".kilo/" },
+            { SquadTarget.Factory, ".factory/" },
+            { SquadTarget.Warp, ".warp/" },
+            { SquadTarget.ZCode, ".zcode/" }
+        };
+
+        ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
+
+        foreach (SquadTarget target in SquadTargetCatalog.All)
+        {
+            SquadRenderResult result = await renderer.RenderAsync(
+                new SquadRenderRequest(
+                    SourceDirectory: productRoot,
+                    Targets: [target],
+                    Scope: SquadDeploymentScope.Global));
+
+            if (legacyPrefixes.TryGetValue(target, out string? prefix))
+            {
+                foreach (var file in result.Files)
+                {
+                    Assert.False(
+                        file.RelativePath.StartsWith(prefix!, StringComparison.Ordinal),
+                        $"Renderer for {target} must not emit paths prefixed with '{prefix}' in global scope.");
+                }
+            }
+        }
+    }
+
     /// <summary>
     /// R17: <c>Agents.Count + Σ agent resources + Skills.Count − shared-identity skills +
     /// Σ non-suppressed skill resources</c>, read from the loaded corpus rather than a

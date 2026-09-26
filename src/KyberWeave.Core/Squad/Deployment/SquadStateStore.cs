@@ -14,7 +14,24 @@ public sealed class SquadStateStore
     private const string ReceiptFileName = "squad.receipt.json";
     private const string TransactionDirectoryName = ".squad-transaction";
     private const string LockSchema = "kyber-squad.lock/v1";
-    private const string ReceiptSchema = "kyber-squad.receipt/v1";
+
+    /// <summary>
+    /// The one receipt schema source (#91 / A3): project receipts stay on this schema forever,
+    /// and it is also what a legacy Global receipt written before #91 carries.
+    /// </summary>
+    internal const string ReceiptSchemaV1 = "kyber-squad.receipt/v1";
+
+    /// <summary>
+    /// Written for Global receipts only, additive over v1 with a required <c>layout</c> field.
+    /// An older CLI that predates this schema refuses it outright rather than misreading it.
+    /// </summary>
+    internal const string ReceiptSchemaV2 = "kyber-squad.receipt/v2";
+
+    private static readonly JsonWriterOptions ReceiptWriterOptions = new JsonWriterOptions
+    {
+        Indented = true,
+        NewLine = "\n"
+    };
 
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private static readonly IReadOnlySet<string> CanonicalTargetTokens =
@@ -129,12 +146,48 @@ public sealed class SquadStateStore
         }
     }
 
-    /// <summary>Serializes a receipt as stable, indented JSON with portable relative paths.</summary>
+    /// <summary>
+    /// Serializes a receipt as stable, indented JSON with portable relative paths. A Global
+    /// receipt is always written on <see cref="ReceiptSchemaV2"/> — the v1 field set unchanged,
+    /// plus its required <c>layout</c> — since v2 exists for Global receipts only (A3); a
+    /// project receipt is written byte-identical to every receipt this store has ever produced,
+    /// on <see cref="ReceiptSchemaV1"/> with no <c>layout</c> field. The write schema is derived
+    /// from <see cref="SquadReceipt.Scope"/> alone, never from the schema string already on
+    /// <paramref name="receipt"/> — so a receipt built directly through the record's
+    /// constructor upgrades to v2 the moment it is written for Global scope.
+    /// </summary>
     public string SerializeReceipt(SquadReceipt receipt)
     {
         ArgumentNullException.ThrowIfNull(receipt);
         ValidateReceipt(receipt);
-        return JsonSerializer.Serialize(receipt, JsonOptions) + "\n";
+
+        bool isGlobal = receipt.Scope == SquadDeploymentScope.Global;
+
+        using MemoryStream stream = new MemoryStream();
+        using (Utf8JsonWriter writer = new Utf8JsonWriter(stream, ReceiptWriterOptions))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("schema", isGlobal ? ReceiptSchemaV2 : ReceiptSchemaV1);
+            writer.WriteString("scope", isGlobal ? "global" : "project");
+            if (isGlobal)
+            {
+                writer.WriteString(
+                    "layout",
+                    receipt.Layout == SquadReceiptLayout.SingleRoot ? "single-root" : "per-target-roots");
+            }
+
+            writer.WriteString("targetRoot", receipt.TargetRoot);
+            writer.WriteString(
+                "installedAtUtc",
+                receipt.InstalledAtUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+            writer.WritePropertyName("degradations");
+            JsonSerializer.Serialize(writer, receipt.Degradations, JsonOptions);
+            writer.WritePropertyName("files");
+            JsonSerializer.Serialize(writer, receipt.Files, JsonOptions);
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray()) + "\n";
     }
 
     /// <summary>Deserializes a Squad ownership receipt.</summary>
@@ -143,9 +196,9 @@ public sealed class SquadStateStore
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
         try
         {
-            ValidateReceiptJsonShape(json);
-            SquadReceipt receipt = JsonSerializer.Deserialize<SquadReceipt>(json, JsonOptions)
-                ?? throw new InvalidDataException("Squad receipt JSON is empty.");
+            using JsonDocument document = JsonDocument.Parse(json);
+            ValidateReceiptJsonShape(document.RootElement);
+            SquadReceipt receipt = BuildReceiptFromJson(document.RootElement);
             ValidateReceipt(receipt);
             return receipt;
         }
@@ -160,6 +213,69 @@ public sealed class SquadStateStore
                 $"Squad receipt JSON is invalid: {exception.Message}",
                 exception);
         }
+    }
+
+    /// <summary>
+    /// Builds the in-memory receipt from an already shape-validated JSON document. A v1 Global
+    /// receipt carries no <c>layout</c> field, so its layout is classified from its own owned
+    /// files' paths (<see cref="SquadDeploymentPlan.ClassifyGlobalLayout"/>) — the only signal
+    /// #91 left behind. A v2 receipt is always Global (A3) regardless of whether its optional
+    /// <c>scope</c> field was present, and its explicit <c>layout</c> field is trusted as-is.
+    /// </summary>
+    private static SquadReceipt BuildReceiptFromJson(JsonElement root)
+    {
+        string schema = root.GetProperty("schema").GetString()
+            ?? throw new InvalidDataException("Squad receipt schema must be a string.");
+        bool isV2 = string.Equals(schema, ReceiptSchemaV2, StringComparison.Ordinal);
+
+        SquadDeploymentScope scope = isV2
+            ? SquadDeploymentScope.Global
+            : root.GetProperty("scope").GetString() switch
+            {
+                "project" => SquadDeploymentScope.Project,
+                "global" => SquadDeploymentScope.Global,
+                var other => throw new InvalidDataException(
+                    $"Squad receipt scope '{other}' is not a recognized canonical scope.")
+            };
+
+        string targetRoot = root.GetProperty("targetRoot").GetString()
+            ?? throw new InvalidDataException("Squad receipt targetRoot must be a string.");
+        DateTimeOffset installedAtUtc = DateTimeOffset.Parse(
+            root.GetProperty("installedAtUtc").GetString()
+                ?? throw new InvalidDataException("Squad receipt installedAtUtc must be a string."),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind);
+        IReadOnlyList<SquadDegradation> degradations =
+            root.GetProperty("degradations").Deserialize<IReadOnlyList<SquadDegradation>>(JsonOptions)
+            ?? [];
+        IReadOnlyList<SquadOwnedFile> files =
+            root.GetProperty("files").Deserialize<IReadOnlyList<SquadOwnedFile>>(JsonOptions)
+            ?? [];
+
+        SquadReceiptLayout layout;
+        if (isV2)
+        {
+            layout = root.GetProperty("layout").GetString() switch
+            {
+                "single-root" => SquadReceiptLayout.SingleRoot,
+                "per-target-roots" => SquadReceiptLayout.PerTargetRoots,
+                var other => throw new InvalidDataException(
+                    $"Squad receipt layout '{other}' is not a recognized canonical layout.")
+            };
+        }
+        else if (scope == SquadDeploymentScope.Global)
+        {
+            layout = SquadDeploymentPlan.ClassifyGlobalLayout(files);
+        }
+        else
+        {
+            layout = SquadReceiptLayout.PerTargetRoots;
+        }
+
+        return new SquadReceipt(schema, scope, targetRoot, installedAtUtc, degradations, files)
+        {
+            Layout = layout
+        };
     }
 
     /// <summary>Reads the receipt for a deployment, or returns <see langword="null"/> when absent.</summary>
@@ -393,10 +509,13 @@ public sealed class SquadStateStore
 
     private static void ValidateReceipt(SquadReceipt receipt)
     {
-        if (!string.Equals(receipt.Schema, ReceiptSchema, StringComparison.Ordinal))
+        bool isKnownSchema =
+            string.Equals(receipt.Schema, ReceiptSchemaV1, StringComparison.Ordinal) ||
+            string.Equals(receipt.Schema, ReceiptSchemaV2, StringComparison.Ordinal);
+        if (!isKnownSchema)
         {
             throw new InvalidDataException(
-                $"Squad receipt schema must be '{ReceiptSchema}'.");
+                $"Squad receipt schema must be '{ReceiptSchemaV1}' or '{ReceiptSchemaV2}'.");
         }
 
         if (!string.Equals(receipt.TargetRoot, ".", StringComparison.Ordinal))
@@ -599,20 +718,32 @@ public sealed class SquadStateStore
         }).ToArray();
     }
 
-    private static void ValidateReceiptJsonShape(string json)
+    /// <summary>
+    /// Validates the receipt's raw JSON field shape, before any object binding: schema v1 keeps
+    /// today's exact field set; schema v2 is that same set with <c>scope</c> made optional
+    /// (present only if the receipt was hand-authored to include it — always Global, per A3)
+    /// and a required <c>layout</c> added, restricted to its two canonical tokens.
+    /// </summary>
+    private static void ValidateReceiptJsonShape(JsonElement root)
     {
-        using JsonDocument document = JsonDocument.Parse(json);
-        RequireExactJsonFields(
-            document.RootElement,
-            ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files"],
-            "receipt");
-        RequireCanonicalJsonEnum(
-            document.RootElement,
-            "scope",
-            ["project", "global"],
-            "receipt");
+        if (root.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("Squad receipt must be an object.");
 
-        JsonElement degradations = document.RootElement.GetProperty("degradations");
+        string? schema = root.TryGetProperty("schema", out JsonElement schemaElement) &&
+            schemaElement.ValueKind == JsonValueKind.String
+            ? schemaElement.GetString()
+            : null;
+
+        if (string.Equals(schema, ReceiptSchemaV2, StringComparison.Ordinal))
+        {
+            ValidateReceiptJsonShapeV2(root);
+        }
+        else
+        {
+            ValidateReceiptJsonShapeV1(root);
+        }
+
+        JsonElement degradations = root.GetProperty("degradations");
         if (degradations.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("Squad receipt degradations must be an array.");
         foreach (JsonElement degradation in degradations.EnumerateArray())
@@ -623,7 +754,7 @@ public sealed class SquadStateStore
                 "receipt degradation");
         }
 
-        JsonElement files = document.RootElement.GetProperty("files");
+        JsonElement files = root.GetProperty("files");
         if (files.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("Squad receipt files must be an array.");
         foreach (JsonElement file in files.EnumerateArray())
@@ -635,10 +766,50 @@ public sealed class SquadStateStore
         }
     }
 
+    private static void ValidateReceiptJsonShapeV1(JsonElement root)
+    {
+        RequireExactJsonFields(
+            root,
+            ["schema", "scope", "targetRoot", "installedAtUtc", "degradations", "files"],
+            "receipt");
+        RequireCanonicalJsonEnum(root, "scope", ["project", "global"], "receipt");
+    }
+
+    private static void ValidateReceiptJsonShapeV2(JsonElement root)
+    {
+        RequireExactJsonFields(
+            root,
+            ["schema", "layout", "targetRoot", "installedAtUtc", "degradations", "files"],
+            "receipt",
+            optional: ["scope"]);
+
+        JsonElement layout = root.GetProperty("layout");
+        string? layoutToken = layout.ValueKind == JsonValueKind.String ? layout.GetString() : null;
+        if (layoutToken is not ("single-root" or "per-target-roots"))
+        {
+            throw new InvalidDataException(
+                "Squad receipt field 'layout' must be 'single-root' or 'per-target-roots', " +
+                $"but found '{layoutToken ?? "null"}'.");
+        }
+
+        if (root.TryGetProperty("scope", out JsonElement scopeElement))
+        {
+            string? scopeToken = scopeElement.ValueKind == JsonValueKind.String ? scopeElement.GetString() : null;
+            if (!string.Equals(scopeToken, "global", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Squad receipt schema '{ReceiptSchemaV2}' is for global scope only, but found " +
+                    $"scope '{scopeToken ?? "null"}'. Write a project receipt on schema " +
+                    $"'{ReceiptSchemaV1}' instead.");
+            }
+        }
+    }
+
     private static void RequireExactJsonFields(
         JsonElement element,
         IReadOnlyCollection<string> expected,
-        string subject)
+        string subject,
+        IReadOnlyCollection<string>? optional = null)
     {
         if (element.ValueKind != JsonValueKind.Object)
             throw new InvalidDataException($"Squad {subject} must be an object.");
@@ -652,8 +823,12 @@ public sealed class SquadStateStore
                 throw new InvalidDataException($"Squad {subject} field '{property.Name}' cannot be null.");
         }
 
+        HashSet<string> allowed = new HashSet<string>(expected, StringComparer.Ordinal);
+        if (optional is not null)
+            allowed.UnionWith(optional);
+
         string[] missing = expected.Where(field => !actual.Contains(field)).ToArray();
-        string[] unknown = actual.Where(field => !expected.Contains(field)).ToArray();
+        string[] unknown = actual.Where(field => !allowed.Contains(field)).ToArray();
         if (missing.Length > 0 || unknown.Length > 0)
         {
             throw new InvalidDataException(

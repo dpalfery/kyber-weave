@@ -1289,6 +1289,134 @@ public sealed class SquadCliCommandTests : IDisposable
 
     #endregion
 
+    #region Receipt Layout Tests — Behavior (6): CLI Status and Uninstall with Legacy Receipts
+
+    [Fact]
+    public void StatusReceiptLayout_CleanLegacyGlobalReceipt_PrintsOkAndExitsZero()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        Directory.CreateDirectory(appDataDir);
+        Directory.CreateDirectory(fakeCodexRoot);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedDeployment(targetRoot, SquadDeploymentScope.Global, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = targetRoot,
+                Global = true
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("ok", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("legacy", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StatusReceiptLayout_DriftEditedFileLegacyReceipt_PrintsDriftAndExitsOne()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        Directory.CreateDirectory(appDataDir);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedDeployment(targetRoot, SquadDeploymentScope.Global, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "edited conductor content",
+            Encoding.UTF8);
+
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = targetRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".codex/agents/conductor.toml", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("(modified)", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("missing", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UninstallReceiptLayout_LegacyGlobalReceipt_ConfirmationNamesRecordedRoot()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        Directory.CreateDirectory(appDataDir);
+        Directory.CreateDirectory(fakeCodexRoot);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedDeployment(targetRoot, SquadDeploymentScope.Global, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        string? originalCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", fakeCodexRoot);
+
+            SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+            using CorpusSquadReleaseSource releaseSource = new();
+            SquadLifecycleService lifecycleService = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+            SquadUninstallCommand command = new(userPaths: userPaths, lifecycleService: lifecycleService);
+            CommandExecution execution = Capture(() => command.Execute(
+                null!,
+                new SquadUninstallSettings
+                {
+                    Path = targetRoot,
+                    Global = true,
+                    Yes = true
+                }));
+
+            Assert.Contains($"codex writes beneath {targetRoot}.", execution.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", originalCodexHome);
+        }
+    }
+
+    #endregion
+
     private static string ExtractDoctorSection(string output, string header, params string[] otherHeaders)
     {
         int start = output.IndexOf(header, StringComparison.OrdinalIgnoreCase);
@@ -1565,3 +1693,4 @@ public sealed class SquadCliCommandTests : IDisposable
 
     #endregion
 }
+

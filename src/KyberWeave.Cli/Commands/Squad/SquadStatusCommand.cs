@@ -64,17 +64,28 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
 
         AnsiConsole.MarkupLine($"Kyber-Squad deployment at [bold]{Markup.Escape(targetRoot)}[/] ([grey]{(scope == SquadDeploymentScope.Global ? "global" : "project")}[/]):");
 
+        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]legacy layout:[/] this receipt predates issue #91 and every entry " +
+                $"resolves beneath the recorded root [bold]{Markup.Escape(targetRoot)}[/] rather " +
+                "than each target's own global root. Recover with [bold]squad uninstall --global[/] " +
+                "then [bold]squad install --global[/].");
+        }
+
         bool hasIssues = false;
+        bool hasMissing = false;
         foreach (SquadOwnedFile file in receipt.Files)
         {
             string fullPath;
             try
             {
                 // A receipt's relative paths are target-relative: beneath the deployment root
-                // for project scope, beneath each target's own global root otherwise. Joining
-                // targetRoot directly would check a global deployment against the project
-                // directory and report every file missing.
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(scope, targetRoot, globalRoots, file);
+                // for project scope, beneath each target's own global root otherwise (or
+                // beneath the recorded root for a legacy single-root receipt — see
+                // ResolveOwnedFilePath). Joining targetRoot directly would check a global
+                // deployment against the project directory and report every file missing.
+                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file);
             }
             catch (Exception)
             {
@@ -87,6 +98,7 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             {
                 AnsiConsole.MarkupLine(StatusLine("red", "missing", file, scope));
                 hasIssues = true;
+                hasMissing = true;
                 continue;
             }
 
@@ -105,7 +117,10 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
         if (hasIssues)
         {
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[red]Drift or missing files detected in Kyber-Squad deployment.[/]");
+            string summary = hasMissing
+                ? "Drift or missing files detected in Kyber-Squad deployment."
+                : "Drift detected in Kyber-Squad deployment.";
+            AnsiConsole.MarkupLine($"[red]{summary}[/]");
             return 1;
         }
 

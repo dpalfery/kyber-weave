@@ -107,7 +107,10 @@ internal static class SquadCommandComposition
     /// Derives the per-target global roots a <c>--global</c> uninstall will write from the
     /// deployment receipt: uninstall has no <c>--target</c> option, so the receipt's owned
     /// files are the authoritative target list, and the lifecycle resolves each through
-    /// <see cref="ISquadGlobalRootResolver.ResolveGlobalRoot"/> at plan time.
+    /// <see cref="ISquadGlobalRootResolver.ResolveGlobalRoot"/> at plan time — unless the
+    /// receipt is a legacy single-root receipt (#91), in which case every target actually
+    /// writes beneath the recorded <paramref name="targetRoot"/>, and naming the resolver's
+    /// per-target answer instead would confirm roots the uninstall will not touch.
     /// </summary>
     /// <remarks>
     /// Every failure mode degrades to "no per-target roots to name" rather than throwing:
@@ -142,6 +145,11 @@ internal static class SquadCommandComposition
         catch (ArgumentException)
         {
             return [];
+        }
+
+        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        {
+            return [.. targets.Select(target => (target, targetRoot))];
         }
 
         return ResolveGlobalTargetRoots(targets);

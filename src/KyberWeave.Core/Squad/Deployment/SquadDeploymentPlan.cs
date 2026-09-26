@@ -1,12 +1,11 @@
 using System.Security.Cryptography;
+using KyberWeave.Core.Squad.Rendering;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>A preflighted set of file and state mutations for one Squad lifecycle operation.</summary>
 public sealed class SquadDeploymentPlan
 {
-    private const string ReceiptSchema = "kyber-squad.receipt/v1";
-
     private SquadDeploymentPlan(
         string targetRoot,
         SquadPhysicalRootIdentity physicalRootIdentity,
@@ -17,7 +16,8 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<SquadFilePrecondition> filePreconditions,
         SquadStateMutation lockMutation,
         SquadStateMutation receiptMutation,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        bool isSingleRootLayout = false)
     {
         TargetRoot = targetRoot;
         PhysicalRootPath = physicalRootIdentity.PhysicalPath;
@@ -32,6 +32,7 @@ public sealed class SquadDeploymentPlan
         LockMutation = lockMutation;
         ReceiptMutation = receiptMutation;
         _globalRoots = globalRoots;
+        _isSingleRootLayout = isSingleRootLayout;
     }
 
     /// <summary>The absolute root into which harness-native files are deployed.</summary>
@@ -70,13 +71,15 @@ public sealed class SquadDeploymentPlan
     internal SquadStateMutation ReceiptMutation { get; }
 
     private readonly ISquadGlobalRootResolver? _globalRoots;
+    private readonly bool _isSingleRootLayout;
 
     /// <summary>
     /// Resolves the absolute physical path where <c>file.RelativePath</c> will be written,
     /// based on the deployment scope: for <see cref="SquadDeploymentScope.Project"/> that is
     /// <c>PhysicalRootPath</c> (the project root) combined with the relative path unchanged;
     /// for <see cref="SquadDeploymentScope.Global"/> it is the resolver's root for
-    /// <c>file.Target</c> combined with the relative path.
+    /// <c>file.Target</c> combined with the relative path, unless this plan carries a legacy
+    /// single-root receipt, in which case it is <c>PhysicalRootPath</c> regardless.
     /// </summary>
     internal string ResolvePhysicalPath(SquadOwnedFile file)
     {
@@ -102,18 +105,23 @@ public sealed class SquadDeploymentPlan
     /// files landed. Falling back to <c>PhysicalRootPath</c> here when no resolver was supplied
     /// keeps that legacy single-root behavior byte-for-byte unchanged. Once a resolver is
     /// supplied, an unmapped target is a real bug: <see cref="SquadGlobalRoots"/> throws for it
-    /// directly, and this method never substitutes the project root for a resolver's answer.
+    /// directly, and this method never substitutes the project root for a resolver's answer —
+    /// except when this plan's receipt classifies as <see cref="SquadReceiptLayout.SingleRoot"/>
+    /// (#91: a receipt written before rc.11 recorded every entry beneath the one deployment
+    /// root), in which case the recorded root is the correct physical answer regardless of what
+    /// a resolver would say.
     /// </remarks>
     internal string ResolvePhysicalRoot(string target) =>
-        ResolvePhysicalRoot(Scope, PhysicalRootPath, _globalRoots, target);
+        ResolvePhysicalRoot(Scope, PhysicalRootPath, _globalRoots, target, _isSingleRootLayout);
 
     private static string ResolvePhysicalRoot(
         SquadDeploymentScope scope,
         string physicalRootPath,
         ISquadGlobalRootResolver? globalRoots,
-        string target)
+        string target,
+        bool isSingleRootLayout)
     {
-        if (globalRoots is null)
+        if (globalRoots is null || (scope == SquadDeploymentScope.Global && isSingleRootLayout))
         {
             return physicalRootPath;
         }
@@ -132,36 +140,132 @@ public sealed class SquadDeploymentPlan
         string physicalRootPath,
         ISquadGlobalRootResolver? globalRoots,
         string target,
-        string relativePath) =>
+        string relativePath,
+        bool isSingleRootLayout) =>
         SquadPathPolicy.ResolveFile(
-            ResolvePhysicalRoot(scope, physicalRootPath, globalRoots, target),
+            ResolvePhysicalRoot(scope, physicalRootPath, globalRoots, target, isSingleRootLayout),
             relativePath);
 
     /// <summary>
     /// Resolves the absolute physical path where a receipt-owned file is deployed, using the
     /// same scope and resolver rules as deploy time. Project scope resolves beneath
-    /// <paramref name="targetRoot"/>; Global scope resolves beneath the file's target root
-    /// from <paramref name="globalRoots"/> (falling back to the single root when no resolver
-    /// is supplied, matching legacy single-root deployments). Consumers that verify deployed
-    /// bytes — status reporting in particular — must use this rather than joining
-    /// <paramref name="targetRoot"/> with the relative path directly, which only holds for
-    /// Project scope.
+    /// <paramref name="targetRoot"/>; Global scope resolves beneath the file's target root from
+    /// <paramref name="globalRoots"/>, unless <paramref name="receipt"/> classifies as a legacy
+    /// single-root receipt (<see cref="IsLegacySingleRootReceipt"/>) — written before rc.11
+    /// (#91) — in which case it resolves beneath <paramref name="targetRoot"/> regardless of
+    /// what the resolver would answer, matching where that receipt's files actually live.
+    /// Consumers that verify deployed bytes — status reporting in particular — must use this
+    /// rather than joining <paramref name="targetRoot"/> with the relative path directly, which
+    /// only holds for Project scope.
     /// </summary>
     public static string ResolveOwnedFilePath(
-        SquadDeploymentScope scope,
+        SquadReceipt receipt,
         string targetRoot,
         ISquadGlobalRootResolver? globalRoots,
         SquadOwnedFile file)
     {
+        ArgumentNullException.ThrowIfNull(receipt);
         ArgumentNullException.ThrowIfNull(file);
 
         return ResolvePhysicalPath(
-            scope,
+            receipt.Scope,
             SquadPhysicalRootIdentity.Resolve(targetRoot).PhysicalPath,
             globalRoots,
             file.Target,
-            file.RelativePath);
+            file.RelativePath,
+            IsLegacySingleRootReceipt(receipt));
     }
+
+    /// <summary>
+    /// Each target's pre-#91 legacy Global prefix, fixed per target and taken from the
+    /// renderer's own prefix constant rather than derived from the target token, because two
+    /// targets' verified prefixes diverge from their token: Copilot renders beneath
+    /// <c>.github/</c>, not <c>.copilot/</c> (<see cref="CopilotRenderer"/>), and Antigravity
+    /// beneath <c>.agents/</c>, not <c>.antigravity/</c> (<see cref="AntigravityRenderer"/>).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> LegacyGlobalPrefixes =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["codex"] = ".codex/",
+            ["cursor"] = ".cursor/",
+            ["claude"] = ".claude/",
+            ["copilot"] = ".github/",
+            ["opencode"] = ".opencode/",
+            ["kilo"] = ".kilo/",
+            ["antigravity"] = ".agents/",
+            ["warp"] = ".warp/",
+            ["factory"] = ".factory/",
+            ["pi"] = ".pi/",
+            ["zcode"] = ".zcode/"
+        };
+
+    /// <summary>
+    /// Classifies a Global receipt's owned files as legacy single-root or modern
+    /// per-target-roots, purely from their recorded paths — never touching disk (Q3b was
+    /// rejected precisely because a filesystem-dependent check could reclassify the same
+    /// receipt differently over time).
+    /// </summary>
+    /// <remarks>
+    /// Global receipts written before #91 (rc.9/rc.10) rendered exactly as Project scope did, so
+    /// every owned path still carried its harness's dot-prefixed project folder. Since #91 every
+    /// renderer strips that prefix under Global scope — guarded by
+    /// <c>RenderReceiptLayout_GlobalRender_ContainsNoPrefixedPaths</c> — and writes a bare path
+    /// instead, so whether a file starts with its own target's <see cref="LegacyGlobalPrefixes"/>
+    /// entry is the fingerprint of a receipt #91 predates (A5): every entry prefixed classifies
+    /// as <see cref="SquadReceiptLayout.SingleRoot"/>, no entry prefixed classifies as
+    /// <see cref="SquadReceiptLayout.PerTargetRoots"/>, and a mix of the two is refused outright
+    /// rather than guessed at.
+    /// </remarks>
+    internal static SquadReceiptLayout ClassifyGlobalLayout(IReadOnlyList<SquadOwnedFile> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+
+        bool anyPrefixed = false;
+        bool anyBare = false;
+        foreach (SquadOwnedFile file in files)
+        {
+            bool isPrefixed = LegacyGlobalPrefixes.TryGetValue(file.Target, out string? prefix) &&
+                file.RelativePath.StartsWith(prefix, StringComparison.Ordinal);
+            if (isPrefixed)
+                anyPrefixed = true;
+            else
+                anyBare = true;
+        }
+
+        if (anyPrefixed && anyBare)
+        {
+            throw new InvalidDataException(
+                "Squad receipt mixes legacy prefixed paths with modern bare paths across its " +
+                "files, so its layout cannot be classified. Recover it by hand: verify or " +
+                "remove each file, then delete the receipt and lock so a fresh install can " +
+                "recreate them.");
+        }
+
+        return anyPrefixed ? SquadReceiptLayout.SingleRoot : SquadReceiptLayout.PerTargetRoots;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="receipt"/> is a Global receipt written before #91 (rc.9/rc.10),
+    /// whose owned files record each target's project-scope dot-prefixed path beneath the one
+    /// recorded deployment root rather than beneath that target's own global root.
+    /// </summary>
+    public static bool IsLegacySingleRootReceipt(SquadReceipt receipt)
+    {
+        ArgumentNullException.ThrowIfNull(receipt);
+        return receipt.Scope == SquadDeploymentScope.Global &&
+            ClassifyGlobalLayout(receipt.Files) == SquadReceiptLayout.SingleRoot;
+    }
+
+    /// <summary>
+    /// The conflict a legacy single-root receipt raises before any download or file mutation,
+    /// naming the two commands (in order) that move a deployment to the current layout.
+    /// </summary>
+    internal static SquadDeploymentConflictException LegacySingleRootLayoutConflict() =>
+        new(
+            "This Global Kyber-Squad receipt uses the legacy single-root layout written before " +
+            "rc.11 (kyber-weave/kyber-weave#91) and cannot be updated in place. Run " +
+            "'squad uninstall --global' to remove it, then 'squad install --global' to " +
+            "reinstall with the current per-target layout.");
 
     /// <summary>Preflights a new installation without changing the deployment tree.</summary>
     public static SquadDeploymentPlan CreateInstall(
@@ -240,7 +344,8 @@ public sealed class SquadDeploymentPlan
             preconditions,
             SquadStateMutation.Write,
             SquadStateMutation.Write,
-            globalRoots);
+            globalRoots,
+            isSingleRootLayout: false);
     }
 
     /// <summary>Preflights an update while preserving locally edited receipt-owned files by default.</summary>
@@ -259,6 +364,15 @@ public sealed class SquadDeploymentPlan
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
         ArgumentNullException.ThrowIfNull(previousReceipt);
         EnsureReceiptScope(previousReceipt, scope);
+
+        // The double-prefix bug #91 describes can only occur once a per-target resolver is in
+        // play: with none, legacy single-root and modern per-target-roots resolution already
+        // agree (both fall back to the plan's own physical root), so there is nothing to
+        // refuse against.
+        if (globalRoots is not null && IsLegacySingleRootReceipt(previousReceipt))
+        {
+            throw LegacySingleRootLayoutConflict();
+        }
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
         string root = identity.PhysicalPath;
@@ -350,7 +464,11 @@ public sealed class SquadDeploymentPlan
             if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, previous.Target, previous.RelativePath))
                 continue;
 
-            string fullPath = ResolvePhysicalPath(scope, root, globalRoots, previous.Target, previous.RelativePath);
+            // The legacy-receipt refusal above already guarantees previousReceipt is not
+            // single-root by the time this loop runs, so every remaining entry resolves through
+            // the modern per-target path.
+            string fullPath = ResolvePhysicalPath(
+                scope, root, globalRoots, previous.Target, previous.RelativePath, isSingleRootLayout: false);
 
             if (Directory.Exists(fullPath))
             {
@@ -385,7 +503,8 @@ public sealed class SquadDeploymentPlan
             preconditions,
             SquadStateMutation.Write,
             SquadStateMutation.Write,
-            globalRoots);
+            globalRoots,
+            isSingleRootLayout: false);
     }
 
     /// <summary>Preflights an ownership-aware uninstall without changing the deployment tree.</summary>
@@ -400,6 +519,12 @@ public sealed class SquadDeploymentPlan
         ArgumentNullException.ThrowIfNull(receipt);
         EnsureReceiptScope(receipt, scope);
 
+        // Resolved once, from the receipt being uninstalled, and used both to walk its files
+        // below and to carry on the plan instance so SquadTransaction resolves the same way at
+        // execute time (#91): a legacy single-root receipt's files live beneath the recorded
+        // root regardless of what a per-target resolver would answer.
+        bool isSingleRootLayout = IsLegacySingleRootReceipt(receipt);
+
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot);
         string root = identity.PhysicalPath;
         _ = ReceiptFilesByPath(root, receipt);
@@ -411,7 +536,8 @@ public sealed class SquadDeploymentPlan
             if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, owned.Target, owned.RelativePath))
                 continue;
 
-            string fullPath = ResolvePhysicalPath(scope, root, globalRoots, owned.Target, owned.RelativePath);
+            string fullPath = ResolvePhysicalPath(
+                scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout);
 
             if (Directory.Exists(fullPath))
             {
@@ -435,7 +561,13 @@ public sealed class SquadDeploymentPlan
                 retained.Add(owned);
         }
 
-        SquadReceipt retainedReceipt = receipt with { Files = retained };
+        // The layout carries forward onto the retained receipt so a later re-serialize (when
+        // any file was locally edited and survives the uninstall) still writes the correct
+        // explicit `layout` — reclassified from what actually remains, not merely copied.
+        SquadReceiptLayout retainedLayout = scope == SquadDeploymentScope.Global
+            ? ClassifyGlobalLayout(retained)
+            : receipt.Layout;
+        SquadReceipt retainedReceipt = receipt with { Files = retained, Layout = retainedLayout };
         bool hasRetainedFiles = retained.Count > 0;
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
@@ -447,7 +579,8 @@ public sealed class SquadDeploymentPlan
             preconditions,
             hasRetainedFiles ? SquadStateMutation.Keep : SquadStateMutation.Delete,
             hasRetainedFiles ? SquadStateMutation.Write : SquadStateMutation.Delete,
-            globalRoots);
+            globalRoots,
+            isSingleRootLayout);
     }
 
     private static void ValidateCommon(
@@ -575,7 +708,10 @@ public sealed class SquadDeploymentPlan
 
             seenIdentities.Add(fileIdentity, relativePath);
             SquadDeploymentFile normalizedFile = rendered with { RelativePath = relativePath };
-            string fullPath = ResolvePhysicalPath(scope, root, globalRoots, rendered.Target, relativePath);
+            // A freshly rendered file is never legacy: every renderer has stripped its Global
+            // prefix since #91, so this always resolves through the modern per-target path.
+            string fullPath = ResolvePhysicalPath(
+                scope, root, globalRoots, rendered.Target, relativePath, isSingleRootLayout: false);
             if (seenFullPaths.TryGetValue(fullPath, out string? existingPath))
             {
                 throw new SquadDeploymentConflictException(
@@ -637,7 +773,7 @@ public sealed class SquadDeploymentPlan
         IReadOnlyList<SquadDegradation> degradations,
         IReadOnlyList<SquadOwnedFile> ownedFiles) =>
         new(
-            ReceiptSchema,
+            SquadStateStore.ReceiptSchemaV1,
             scope,
             ".",
             timeProvider.GetUtcNow(),
