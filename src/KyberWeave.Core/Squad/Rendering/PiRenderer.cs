@@ -597,45 +597,12 @@ public sealed class PiRenderer : ISquadRenderer
             Code: "permission-not-expressible",
             InstructionDigest: agent.BodyDigest,
             Details: "Capability decisions " +
-                $"({DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
+                $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
                 "are not enforced: a top-level Pi skill runs under the harness default tool " +
                 "set, not the canonical capability lattice, and its delegates-to roster " +
                 $"({rosterText}) is instruction-only, not a runtime-enforced " +
                 "'allowed_subagents' list.");
     }
-
-    /// <summary>
-    /// Reports every vocabulary capability's resolved decision (per section 6's
-    /// <c>permission-not-expressible</c> contract for a lowered primary agent), defaulting an
-    /// undeclared capability to <see cref="SquadPermissionDecision.Deny"/> the same way an
-    /// absent permission entry behaves everywhere else in this pipeline.
-    /// </summary>
-    private static string DescribeCapabilityDecisions(
-        SquadAgent agent,
-        IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
-        IReadOnlyList<string> capabilityVocabulary)
-    {
-        capabilityProfiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile);
-
-        return string.Join(
-            "; ",
-            capabilityVocabulary.Select(capability =>
-            {
-                SquadPermissionDecision decision = profile is not null &&
-                    profile.Permissions.TryGetValue(capability, out SquadPermissionDecision resolved)
-                        ? resolved
-                        : SquadPermissionDecision.Deny;
-                return $"{capability}: {DescribeDecision(decision)}";
-            }));
-    }
-
-    private static string DescribeDecision(SquadPermissionDecision decision) => decision switch
-    {
-        SquadPermissionDecision.Allow => "allow",
-        SquadPermissionDecision.Ask => "ask",
-        SquadPermissionDecision.Deny => "deny",
-        _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown permission decision.")
-    };
 
     private static string CollapseToSingleLine(string value) =>
         string.Join(
