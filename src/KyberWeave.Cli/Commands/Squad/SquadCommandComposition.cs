@@ -269,6 +269,92 @@ internal static class SquadCommandComposition
             "Supply either the positional path or --path <PATH>, not both.");
     }
 
+    /// <summary>
+    /// Normalizes a pinned <c>-v|--version</c> value into the release version to request,
+    /// or <c>null</c> when the flag is omitted so the lifecycle's default version
+    /// resolution applies unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Null is reserved for the omitted flag — it is the only input that maps to
+    /// <c>null</c>, so the lifecycle's default version resolution applies unchanged. A
+    /// supplied-but-blank value is refused instead of falling back to that same default,
+    /// which would silently deploy a version the operator did not ask for. Three gates,
+    /// in this order, then hold every invalid pinned version on the commands'
+    /// exit-2 client-input convention before root resolution and before any network call.
+    /// The build-metadata check runs first because <see cref="ReleaseVersion.Normalize"/>
+    /// strips a '+build' suffix blind: without it, '1.2.3+' or '1.2.3+a..b' would
+    /// silently canonicalize to '1.2.3' and a release request would be issued for a
+    /// version the operator did not quite ask for. <see cref="ReleaseVersion.Normalize"/>
+    /// then applies the looser, canonicalizing rule: it strips a leading 'v' and '+build'
+    /// metadata (so 'v1.2.3+sha' becomes '1.2.3') and rejects input that is not a Release
+    /// tag shape at all. The strict SemVer check runs last and reuses
+    /// <see cref="GitHubSquadReleaseSource.IsValidReleaseVersion"/> — the one rule the
+    /// release source itself enforces, reused rather than duplicated so the two cannot
+    /// diverge — to reject tag-shaped forms the stricter rule still forbids, like '1.0'
+    /// or '01.2.3'. The release source keeps its own check as defense-in-depth.
+    /// </remarks>
+    /// <exception cref="SelfUpdateException">The value is not a Release tag shape.</exception>
+    /// <exception cref="ArgumentException">The value is empty or whitespace-only, carries malformed build metadata, or is tag-shaped but not strict SemVer.</exception>
+    public static string? NormalizePinnedVersion(string? version)
+    {
+        if (version is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            throw new ArgumentException(
+                "--version was supplied but is empty; give a release version (X.Y.Z or X.Y.Z-prerelease) " +
+                "or omit the flag to deploy the running CLI's own version.");
+        }
+
+        EnsureValidBuildMetadata(version);
+        string normalized = ReleaseVersion.Normalize(version);
+        if (!GitHubSquadReleaseSource.IsValidReleaseVersion(normalized))
+        {
+            throw new ArgumentException(
+                "--version must be a semantic version (X.Y.Z or X.Y.Z-prerelease); " +
+                "a leading 'v' and '+build' metadata are accepted and stripped. " +
+                $"Got '{version}'.");
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
+    /// Rejects malformed SemVer build metadata in a pinned <c>--version</c> value before
+    /// <see cref="ReleaseVersion.Normalize"/> strips the suffix.
+    /// </summary>
+    /// <remarks>
+    /// Normalize truncates at the first '+' without validating what follows, so a value
+    /// like '1.2.3+' or '1.2.3+a..b' would be silently canonicalized to '1.2.3'. Per
+    /// SemVer 2.0.0, build metadata is dot-separated identifiers, each non-empty and
+    /// drawn from ASCII letters, digits, and hyphens; anything else is refused on the
+    /// commands' exit-2 convention rather than canonicalized away. The suffix is read
+    /// from the trimmed value because that is the text Normalize itself strips.
+    /// </remarks>
+    private static void EnsureValidBuildMetadata(string version)
+    {
+        string trimmed = version.Trim();
+        int plus = trimmed.IndexOf('+', StringComparison.Ordinal);
+        if (plus < 0)
+        {
+            return;
+        }
+
+        string buildMetadata = trimmed[(plus + 1)..];
+        bool isValid = buildMetadata.Split('.').All(identifier =>
+            identifier.Length > 0 && identifier.All(c => char.IsAsciiLetterOrDigit(c) || c is '-'));
+        if (!isValid)
+        {
+            throw new ArgumentException(
+                "--version build metadata must be dot-separated identifiers of ASCII letters, digits, and hyphens, " +
+                "each at least one character long (X.Y.Z+build.metadata). " +
+                $"Got '{version}'.");
+        }
+    }
+
     /// <summary>Resolves the target root directory path.</summary>
     public static string ResolveTargetRoot(string? path) =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path);
