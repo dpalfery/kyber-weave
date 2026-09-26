@@ -195,6 +195,10 @@ public sealed class DocumentationReviewExchange
         return new ReviewImportResult(true, verdicts.Length, new DiagnosticReport());
     }
 
+    /// <summary>
+    /// The evidence claims to persist for the reviewed candidates, in stable order, numbering
+    /// repeated content hashes within a candidate so each evidence id stays unique.
+    /// </summary>
     private static IReadOnlyList<PersistedClaim> PersistedClaims(
         IReadOnlyList<AnalysisCandidate> candidates)
     {
@@ -221,6 +225,10 @@ public sealed class DocumentationReviewExchange
         return claims;
     }
 
+    /// <summary>
+    /// The reason <paramref name="bundle"/> cannot be imported against
+    /// <paramref name="candidates"/>, or <see langword="null"/> when it can.
+    /// </summary>
     private string? ValidateBundle(
         ReviewVerdictBundle bundle,
         IReadOnlyDictionary<string, AnalysisCandidate> candidates)
@@ -231,6 +239,8 @@ public sealed class DocumentationReviewExchange
             return "The verdict bundle analyzer version is stale.";
         if (!StringComparer.Ordinal.Equals(bundle.RubricVersion, DocumentationAnalyzer.RubricVersion))
             return "The verdict bundle rubric version is stale.";
+        // Deserialized input: System.Text.Json does not enforce non-nullable annotations.
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (bundle.Verdicts is null)
             return "The verdict bundle omits the verdicts collection.";
         if (bundle.Verdicts.Count == 0)
@@ -240,6 +250,7 @@ public sealed class DocumentationReviewExchange
         List<AnalysisCandidate> reviewedCandidates = new List<AnalysisCandidate>(bundle.Verdicts.Count);
         foreach (ReviewVerdictItem? verdict in bundle.Verdicts)
         {
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
             if (verdict is null)
                 return "The verdict bundle contains a null verdict.";
             if (string.IsNullOrWhiteSpace(verdict.CandidateId) || !seen.Add(verdict.CandidateId))
@@ -347,12 +358,18 @@ public sealed class DocumentationReviewExchange
         return ids;
     }
 
+    /// <summary>True when <paramref name="label"/> is a verdict a candidate of <paramref name="kind"/> may receive.</summary>
     private static bool LabelApplies(AnalysisRuleKind kind, AnalysisVerdictLabel label) =>
         label is AnalysisVerdictLabel.Benign or AnalysisVerdictLabel.Uncertain
         || (kind == AnalysisRuleKind.Duplicate && label == AnalysisVerdictLabel.Duplicate)
         || (kind == AnalysisRuleKind.Conflict && label == AnalysisVerdictLabel.Conflict)
         || (kind == AnalysisRuleKind.Terminology && label == AnalysisVerdictLabel.DistinctSenses);
 
+    /// <summary>
+    /// True when the verdict proposes no glossary senses. When it does propose them, true
+    /// only for a distinct-senses verdict on a terminology candidate that proposes at least
+    /// one sense, every one well-formed and for the candidate's own term.
+    /// </summary>
     private static bool GlossarySensesAreValid(
         ReviewVerdictItem verdict,
         AnalysisCandidate candidate)
@@ -365,6 +382,8 @@ public sealed class DocumentationReviewExchange
             return false;
         }
 
+        // Deserialized input: System.Text.Json does not enforce non-nullable annotations.
+        // ReSharper disable ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         return verdict.ProposedGlossarySenses.All(sense =>
             sense is not null
             && !string.IsNullOrWhiteSpace(sense.Term)
@@ -374,8 +393,10 @@ public sealed class DocumentationReviewExchange
             && sense.Scopes.All(scope => scope is not null && ValidScope(scope))
             && sense.Aliases is not null
             && sense.Aliases.All(alias => !string.IsNullOrWhiteSpace(alias)));
+        // ReSharper restore ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
     }
 
+    /// <summary>True for a <c>component:</c> or <c>code-ref:</c> scope with a non-blank value.</summary>
     private static bool ValidScope(string scope) =>
         (scope.StartsWith("component:", StringComparison.Ordinal)
             && !string.IsNullOrWhiteSpace(scope["component:".Length..]))

@@ -134,6 +134,7 @@ public class DocumentKeywordScoringTests
         Assert.Equal(0.0, DocumentIndex.ScoreExact(doc, "unrelated"));
     }
 
+    /// <summary>Partial keyword matches score by the keyword weight, capped at 1.5 times it however many match.</summary>
     [Fact]
     public void PartialKeywordMatchScoresViaKeywordPartialWeightCappedAtOnePointFiveMultiplier()
     {
@@ -158,6 +159,10 @@ public class DocumentKeywordScoringTests
         Assert.Equal(0.0, DocumentIndex.ScorePartialIdentity(twoKeywordsDoc, queryUnrelated));
     }
 
+    /// <summary>
+    /// Declared keywords are indexed lower-cased, so lookups match regardless of the case
+    /// the author wrote, and undeclared words are absent.
+    /// </summary>
     [Fact]
     public void ByKeywordInvertedMapIndexesDeclaredKeywordsCaseInsensitively()
     {
@@ -166,10 +171,10 @@ public class DocumentKeywordScoringTests
         DocumentIndex index = DocumentIndex.Build(corpus, FakeCodeGraphResolver.WithSymbols());
 
         Assert.True(index.ByKeyword.TryGetValue("dashboard", out List<DocumentModel>? dashboardDocs));
-        Assert.Contains(doc, dashboardDocs!);
+        Assert.Contains(doc, dashboardDocs);
 
         Assert.True(index.ByKeyword.TryGetValue("tauri", out List<DocumentModel>? tauriDocs));
-        Assert.Contains(doc, tauriDocs!);
+        Assert.Contains(doc, tauriDocs);
 
         Assert.False(index.ByKeyword.ContainsKey("unindexed"));
     }

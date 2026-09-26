@@ -80,6 +80,7 @@ public sealed class WarpRendererContractTests : IDisposable
         Assert.Equal([SquadTarget.Warp], renderer.SupportedTargets);
     }
 
+    /// <summary>The renderer refuses a request for any target but Warp.</summary>
     [Fact]
     public async Task RenderAsync_RejectsNonWarpTarget()
     {
@@ -92,6 +93,10 @@ public sealed class WarpRendererContractTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
+    /// <summary>
+    /// Renders the shipped corpus and checks every agent and skill lands at its Warp path,
+    /// with collisions derived from the source.
+    /// </summary>
     [Fact]
     public async Task RenderAsync_Warp_RendersTheRealCanonicalCorpus()
     {
@@ -255,7 +260,7 @@ public sealed class WarpRendererContractTests : IDisposable
                 Assert.True(
                     source.CapabilityProfiles.Profiles.TryGetValue(a.CapabilityProfile, out SquadCapabilityProfile? profile),
                     $"Agent '{a.Name}' references undeclared capability profile '{a.CapabilityProfile}'.");
-                return HasNonDenyCapability(source.CapabilityProfiles, profile!);
+                return HasNonDenyCapability(source.CapabilityProfiles, profile);
             })
             .Select(a => a.Name)
             .OrderBy(name => name, StringComparer.Ordinal)

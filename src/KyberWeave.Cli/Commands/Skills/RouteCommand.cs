@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Threading;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Skills.Model;
@@ -47,6 +46,7 @@ public sealed class RouteSettings : CommandSettings
 
 public sealed class RouteCommand : Command<RouteSettings>
 {
+    /// <inheritdoc />
     protected override int Execute(CommandContext context, RouteSettings settings, CancellationToken cancellationToken)
     {
         SkillSet set = SkillLoader.LoadSet(settings.SkillsPath);
@@ -67,8 +67,7 @@ public sealed class RouteCommand : Command<RouteSettings>
             : RunSingle(settings, set, strategy);
     }
 
-    public int Execute(CommandContext context, RouteSettings settings) => Execute(context, settings, CancellationToken.None);
-
+    /// <summary>Routes the one prompt given on the command line and prints the ranked skills.</summary>
     private static int RunSingle(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
         if (string.IsNullOrWhiteSpace(settings.Prompt))

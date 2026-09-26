@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -92,6 +92,7 @@ function writeUncheckpointedWalDatabase(dbPath: string): void {
   expect(existsSync(dbPath + '-shm')).toBe(false)
 }
 
+/** Creates a closed WAL database with the session schema SQLite discovery reads, and one session. */
 function createDiscoveryDatabase(dbPath: string): void {
   const db = new NativeDatabase(dbPath)
   db.exec('PRAGMA journal_mode=WAL')
@@ -113,16 +114,33 @@ function createDiscoveryDatabase(dbPath: string): void {
   db.close()
 }
 
-function makeSourceParentReadOnly(skip: (reason?: string) => void): boolean {
-  chmodSync(sourceRoot, 0o555)
-  const mode = statSync(sourceRoot).mode & 0o777
-  if ((mode & 0o222) !== 0) {
-    skip(`SKIP: chmod 0555 did not make the fixture parent non-writable (mode ${mode.toString(8)})`)
-    return false
+/**
+ * Makes `dir` non-writable, or skips the test when this process can still write to it.
+ *
+ * chmod 0555 is the fixture's only lever, and it does not bind root (CAP_DAC_OVERRIDE) or a
+ * filesystem that ignores mode bits. Checking the mode bits would report success there and
+ * run the test without its precondition, so this probes an actual write instead.
+ */
+function makeReadOnly(dir: string, skip: (reason?: string) => void): boolean {
+  chmodSync(dir, 0o555)
+  const probe = join(dir, '.write-probe')
+  try {
+    writeFileSync(probe, '')
+  } catch {
+    return true
   }
-  return true
+  rmSync(probe)
+  chmodSync(dir, 0o755)
+  skip(`SKIP: chmod 0555 did not make ${dir} non-writable for this process`)
+  return false
 }
 
+/** Makes the fixture's source parent non-writable; see {@link makeReadOnly}. */
+function makeSourceParentReadOnly(skip: (reason?: string) => void): boolean {
+  return makeReadOnly(sourceRoot, skip)
+}
+
+/** Restores write access to the fixture's source parent. */
 function makeSourceParentWritable(): void {
   chmodSync(sourceRoot, 0o755)
 }
@@ -278,7 +296,7 @@ describe('SQLite read-only parent fallback', () => {
     const dbPath = join(sourceRoot, 'state.vscdb')
     writeUncheckpointedWalDatabase(dbPath)
     if (!makeSourceParentReadOnly(skip)) return
-    chmodSync(cacheRoot, 0o555)
+    if (!makeReadOnly(cacheRoot, skip)) return
 
     const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     try {

@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Threading;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;

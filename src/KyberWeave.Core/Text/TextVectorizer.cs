@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using JetBrains.Annotations;
 
 namespace KyberWeave.Core.Text;
 
@@ -88,6 +89,7 @@ public static partial class TextVectorizer
         return token;
     }
 
+    /// <summary>Cosine similarity of two sparse term vectors; 0 when either is empty.</summary>
     public static double CosineSimilarity(IReadOnlyDictionary<string, double> a, IReadOnlyDictionary<string, double> b)
     {
         if (a.Count == 0 || b.Count == 0) return 0;
@@ -100,8 +102,16 @@ public static partial class TextVectorizer
         return magA == 0 || magB == 0 ? 0 : dot / (magA * magB);
     }
 
+    /// <summary>Cosine similarity of two texts after vectorizing each.</summary>
+    /// <remarks>
+    /// Nothing in this repository calls it, but <c>KyberWeave.Core</c> ships as a package and
+    /// this is part of its public surface, so it stays.
+    /// </remarks>
+    [PublicAPI]
     public static double Similarity(string left, string right) =>
         CosineSimilarity(Vectorize(left), Vectorize(right));
+
+    /// <summary>The tokenizer: runs of lower-case letters and digits.</summary>
     [GeneratedRegex("[a-z0-9]+", RegexOptions.Compiled)]
     private static partial Regex MyRegex();
 }

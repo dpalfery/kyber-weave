@@ -2,7 +2,6 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -11,7 +10,7 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Renders the real, checked-in canonical Squad source (<c>products/kyber-squad</c>) through
 /// <see cref="AntigravityRenderer"/> and pins the native agent-per-directory contract
-/// (agents at <c>.agents/agents/<name>/agent.md</c>, skills at <c>.agents/skills/<name>/SKILL.md</c>).
+/// (agents at <c>.agents/agents/&lt;name&gt;/agent.md</c>, skills at <c>.agents/skills/&lt;name&gt;/SKILL.md</c>).
 /// </summary>
 /// <remarks>
 /// Counts and collision sets are derived from the loaded <see cref="SquadSource"/> so the
@@ -76,6 +75,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             $"Expected products/kyber-squad under ToolRoot at '{ProductRoot}'.");
     }
 
+    /// <summary>The renderer refuses a request for any target but Antigravity.</summary>
     [Fact]
     public async Task RenderAsync_RejectsNonAntigravityTarget()
     {
@@ -88,6 +88,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => renderer.RenderAsync(request));
     }
 
+    /// <summary>Renders the shipped corpus and checks every agent and skill lands at its native path, with collisions derived from the source.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_RendersTheRealCanonicalCorpus()
     {
@@ -105,7 +106,6 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         HashSet<string> collisions = DeriveCollisions(source);
 
-        int unoccupiedAgents = source.Agents.Count(a => !shared.Contains(a.Name) && !collisions.Contains(a.Name));
 
         // Native dual-root rendering: every agent emits an agent.md file,
         // all canonical skills are emitted, and each projects its validated resource closure beneath
@@ -263,7 +263,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 source.CapabilityProfiles.Profiles.TryGetValue(agent.CapabilityProfile, out SquadCapabilityProfile? profile),
                 $"Agent '{agent.Name}' references undeclared capability profile '{agent.CapabilityProfile}'.");
 
-            bool executeAllowed = profile!.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
+            bool executeAllowed = profile.Permissions.TryGetValue("process.execute", out SquadPermissionDecision exec) &&
                 exec == SquadPermissionDecision.Allow;
             bool writeAllowed = profile.Permissions.TryGetValue("filesystem.write", out SquadPermissionDecision write) &&
                 write == SquadPermissionDecision.Allow;
@@ -512,6 +512,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>Every canonical skill still emits its <c>SKILL.md</c> under native rendering.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_EmitsCanonicalSkillFiles()
     {
@@ -536,10 +537,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>Native rendering emits no role-prefixed collision files.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_OmitsRolePrefixForCollisions()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -560,10 +561,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
             $"Native renderer must not emit role-prefixed collision files. Found: {string.Join(", ", rolePrefixedPaths)}");
     }
 
+    /// <summary>The conductor's native <c>agent.md</c> carries name, model and both tool-enable keys.</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_AgentFrontmatterIncludesNativeKeys()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -598,10 +599,10 @@ public sealed class AntigravityRendererContractTests : IDisposable
             "Conductor must have enable_subagent_tools key");
     }
 
+    /// <summary>The conductor renders with <c>mainAgent: true</c> (D5).</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_ConductorHasMainAgentFlag()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadRendererRegistry registry = new([new AntigravityRenderer()]);
         SquadRenderRequest request = new(
             SourceDirectory: ProductRoot,
@@ -622,7 +623,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         Assert.True(
             mainAgentNode is not null,
             "Conductor must have mainAgent key");
-        string mainAgentValue = Assert.IsType<YamlScalarNode>(mainAgentNode!).Value
+        string mainAgentValue = Assert.IsType<YamlScalarNode>(mainAgentNode).Value
             ?? throw new InvalidOperationException("mainAgent scalar is null");
         Assert.True(
             string.Equals("true", mainAgentValue, StringComparison.OrdinalIgnoreCase),
@@ -919,6 +920,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
         }
     }
 
+    /// <summary>Every agent with a non-empty <c>delegates-to</c> roster gets subagent invocation enabled (D12).</summary>
     [Fact]
     public async Task RenderAsync_Antigravity_Native_DelegationEmittedPerDelegatesToRoster()
     {
@@ -957,7 +959,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             Assert.True(
                 toolsNodeOptional is not null,
                 $"Delegating agent '{agent.Name}' must have tools list");
-            YamlSequenceNode toolsSeq = Assert.IsType<YamlSequenceNode>(toolsNodeOptional!);
+            YamlSequenceNode toolsSeq = Assert.IsType<YamlSequenceNode>(toolsNodeOptional);
             string[] tools = toolsSeq.Children
                 .OfType<YamlScalarNode>()
                 .Select(n => n.Value ?? string.Empty)

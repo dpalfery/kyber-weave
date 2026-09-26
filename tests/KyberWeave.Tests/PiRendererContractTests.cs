@@ -1014,12 +1014,13 @@ public sealed class PiRendererContractTests : IDisposable
 
         Assert.False(
             frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
-            $"Conductor lowered skill should omit 'model' (pi: inherit).");
+            "Conductor lowered skill should omit 'model' (pi: inherit).");
         Assert.False(
             frontmatter.Children.ContainsKey(new YamlScalarNode("thinking")),
-            $"Conductor lowered skill should omit 'thinking' (pi: inherit).");
+            "Conductor lowered skill should omit 'thinking' (pi: inherit).");
     }
 
+    /// <summary>Splits a rendered file into its parsed YAML frontmatter and body, failing the test if either delimiter is missing.</summary>
     private static (YamlMappingNode Frontmatter, string Body) SplitFrontmatter(string text, string identity)
     {
         const string delimiter = "---\n";

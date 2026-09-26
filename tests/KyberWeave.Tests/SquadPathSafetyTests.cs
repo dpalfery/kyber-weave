@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using JetBrains.Annotations;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Rendering;
@@ -791,7 +792,8 @@ public sealed class SquadPathSafetyTests : IDisposable
         }).Result;
     }
 
-    private static (T Result, string Output) Capture<T>(Func<T> execute)
+    /// <summary>Runs <paramref name="execute"/> once with console output captured.</summary>
+    private static (T Result, string Output) Capture<T>([InstantHandle] Func<T> execute)
     {
         CapturedConsoleExecution<T> execution = ProcessConsoleCapture.Run(execute);
         return (execution.Result, execution.Output);
@@ -911,14 +913,14 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// </summary>
     /// <remarks>
     /// The squad global-root resolver reads its per-target overrides (<c>CODEX_HOME</c>,
-    /// <c>CLAUDE_CONFIG_DIR</c>, …) through <see cref="Environment.GetEnvironmentVariable"/>
+    /// <c>CLAUDE_CONFIG_DIR</c>, …) through <see cref="Environment.GetEnvironmentVariable(string)"/>
     /// at resolution time, so the environment is the one seam that decides where a real
     /// <c>--global</c> command run writes; every other test in the suite injects a resolver
     /// or a getter and never observes the process environment. xUnit runs test classes in
     /// parallel, so the window stays as short as one command execution and is restored even
     /// when the body fails.
     /// </remarks>
-    private static T RunWithEnvironment<T>(IReadOnlyDictionary<string, string> variables, Func<T> body)
+    private static T RunWithEnvironment<T>(IReadOnlyDictionary<string, string> variables, [InstantHandle] Func<T> body)
     {
         Dictionary<string, string?> previousValues = new(StringComparer.Ordinal);
         foreach ((string name, string value) in variables)

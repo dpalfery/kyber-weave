@@ -437,7 +437,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             Lock(),
             [
                 Rendered("agents/conductor.md", "claude conductor", "claude"),
-                Rendered("agents/conductor.md", "codex conductor", "codex")
+                Rendered("agents/conductor.md", "codex conductor")
             ],
             [],
             adopt: false,

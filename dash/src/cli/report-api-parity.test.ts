@@ -256,13 +256,18 @@ describe('report JSON and GET /api/kyber/report (R11.14)', () => {
     homes.push(home)
     const db = join(home, 'canon.db')
     const sessionId = 'sess-health'
+    // Anchored a day back on an hour boundary, so the fixture stays inside the `--days 7`
+    // window whenever the suite runs. Fixed dates aged out of it a week after they were written.
+    const anchor = Math.floor((Date.now() - 24 * 3600_000) / 3600_000) * 3600_000
+    /** ISO timestamp `minutes` after the anchor. */
+    const at = (minutes: number): string => new Date(anchor + minutes * 60_000).toISOString()
     const store = new CanonStore(db)
     store.upsertSession({
       sessionId,
       harness: 'cursor',
       repo: 'kyber-weave',
-      started: '2026-09-19T10:00:00.000Z',
-      ended: '2026-09-19T11:00:00.000Z',
+      started: at(0),
+      ended: at(60),
       payload: {
         summary: { turn_count: 1, total_input: 1_000, total_output: 20 },
         context: {
@@ -295,7 +300,7 @@ describe('report JSON and GET /api/kyber/report (R11.14)', () => {
       name: `health record ${index}`,
       op: 'llm.invoke',
       kind: 'client',
-      timestamp: `2026-09-19T10:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      timestamp: at(index % 60),
       durationMs: 10,
       status: 'ok',
       tokens: {
@@ -337,26 +342,26 @@ describe('report JSON and GET /api/kyber/report (R11.14)', () => {
     }
     store.startRefreshRun({
       id: 'health-refresh-success',
-      startedAt: '2026-09-19T10:30:00.000Z',
+      startedAt: at(30),
       pid: process.pid,
       trigger: 'cli',
     })
     store.completeRefreshRun(
       'health-refresh-success',
       'success',
-      '2026-09-19T10:45:00.000Z',
+      at(45),
       'fixture refresh succeeded',
     )
     store.startRefreshRun({
       id: 'health-refresh-failure',
-      startedAt: '2026-09-19T11:30:00.000Z',
+      startedAt: at(90),
       pid: process.pid,
       trigger: 'scheduled',
     })
     store.completeRefreshRun(
       'health-refresh-failure',
       'failure',
-      '2026-09-19T11:45:00.000Z',
+      at(105),
       'fixture refresh failed',
     )
     store.close()
@@ -387,9 +392,9 @@ describe('report JSON and GET /api/kyber/report (R11.14)', () => {
       quarantineCount: 251,
       problemCount: 307,
       refresh: {
-        lastSuccessAt: '2026-09-19T10:45:00.000Z',
+        lastSuccessAt: at(45),
         lastFailure: {
-          at: '2026-09-19T11:45:00.000Z',
+          at: at(105),
           summary: 'fixture refresh failed',
         },
         inProgress: null,

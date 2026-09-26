@@ -136,7 +136,9 @@ public sealed class DocumentIndexHost
                 : Path.Combine(_repoRoot, relativeRoot.Replace('/', Path.DirectorySeparatorChar));
             if (!Directory.Exists(docsRoot)) continue;
 
-            foreach (string file in Directory.EnumerateFiles(docsRoot, "*.md", SearchOption.AllDirectories))
+            // Use DocsRootPath.EnumerateContainedFiles to avoid following symbolic links
+            // into directories outside the configured root (issue #124).
+            foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, "*.md"))
             {
                 if (!visited.Add(file)) continue;
 
@@ -150,7 +152,10 @@ public sealed class DocumentIndexHost
         {
             string catalog = Path.Combine(
                 _repoRoot, _catalogRelativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(catalog) && visited.Add(catalog))
+            // Skip a catalog that is, or sits beneath, a symlink (issue #124), without
+            // resolving the link: see DocsRootPath.IsContainedFile.
+            if (DocsRootPath.IsContainedFile(_repoRoot, _catalogRelativePath, _docsRelativeRoots)
+                && visited.Add(catalog))
             {
                 count++;
                 long ticks = File.GetLastWriteTimeUtc(catalog).Ticks;

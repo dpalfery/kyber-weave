@@ -479,7 +479,8 @@ public sealed partial class DocumentIndex
              + keywordCoverage;
     }
 
-    [GeneratedRegex(@"([a-z0-9])([A-Z])")]
+    /// <summary>A lower-case letter or digit followed by a capital: the split point in a camelCase identifier.</summary>
+    [GeneratedRegex("([a-z0-9])([A-Z])")]
     private static partial Regex CamelCaseBoundaryRegex();
 
     /// <summary>
