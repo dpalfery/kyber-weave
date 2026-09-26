@@ -20,10 +20,17 @@ title: "Skills in your ALM: a governance playbook"
 
 ### `KW-DOC-SPEC-002` — outside a closed vocabulary
 
-`doc-type` or `status` is not in the closed set, or `last-reviewed` is not ISO
-`yyyy-MM-dd`. `2026-8-1` fails; `2026-08-01` passes. `Current` fails on the value, not the
-case — comparison is case-insensitive, so the real cause is a value like `active` or
-`published` that simply is not in the set.
+`doc-type` or `status` is not in the closed set, `last-reviewed` is not ISO
+`yyyy-MM-dd`, or `technology` names a stack the repository has not declared in
+`ontology.technologies`. `2026-8-1` fails; `2026-08-01` passes. `Current` fails on
+the value, not the case — comparison is case-insensitive, so the real cause is a
+value like `active` or `published` that simply is not in the set.
+
+An undeclared technology is this rule, not `KW-DOC-SPEC-007`. Add the stack under
+`ontology.technologies` and re-run `docs init` only when the repository writes that
+stack. Init creates `<docs-root>/standards/<technology>/` and publishes
+`<technology>-coding-standard`. Do not add a technology to silence a finding on a
+document that is not a coding standard.
 
 ### `KW-DOC-SPEC-003` — required key missing
 
@@ -56,6 +63,18 @@ no document declares.
 
 Ids are permanent and unique. When two collide, the newer document changes — renaming an
 established id breaks every reference to it.
+
+### `KW-DOC-SPEC-007` — technology on the wrong document
+
+`technology` is set on a document that is not a `coding-standard`, or the value does
+not match the folder the file sits in.
+
+Clear a misplaced key by dropping it, or by making the document a `coding-standard`
+when that is what it is and the file is already the registry target,
+`<docs-root>/standards/<technology>/README.md`. A folder mismatch on that file is
+cleared by changing the key to the folder's name. A file anywhere else is cleared
+by moving it there; changing its key does not make the registry resolve it. The
+folder name, the key, and `ontology.technologies` are one value.
 
 ## Drift — `docs drift`
 

@@ -1,28 +1,35 @@
 ---
-id: todo/kyber-weave-docs-skill-vocabulary
+id: archive/todo/kyber-weave-docs-skill-vocabulary
 title: The kyber-weave-docs skill teaches a doc-type vocabulary two members short
 doc-type: todo
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-08-16
-status: draft
+last-reviewed: 2026-09-24
+status: superseded
 ---
 
 # The kyber-weave-docs skill teaches a doc-type vocabulary two members short
+
+**Status:** Superseded and archived
+**Archive Date:** 2026-09-24
+
+The skill no longer keeps a doc-type list. It reads the closed set and the required-key matrix from `<documentation-ontology>`, which `docs init` writes from the host ontology. A copied list is how `todo` and `coding-standard` were lost. Authoring a coding standard stays in this skill: the file lives at `<docs-root>/standards/<technology>/README.md`, `technology` is legal only when `ontology.technologies` already names it, and declaring a technology is what makes `docs init` create the folder and the `<technology>-coding-standard` registry property. A separate standards-authoring skill stays deferred. `KyberWeaveDocsSkillVocabularyTests` fails if the residual `reference` fallback, or a copied "one of" list, comes back.
+
+---
 
 This is **context for planning the work, not a plan**.
 
 ## Why this exists
 
-[`.apm/skills/kyber-weave-docs/SKILL.md`](../../.apm/skills/kyber-weave-docs/SKILL.md) states
+[`.apm/skills/kyber-weave-docs/SKILL.md`](../../../.apm/skills/kyber-weave-docs/SKILL.md) states
 the closed doc-type vocabulary inline, and that list is now missing two members the validator
 accepts:
 
 - `todo`, closed as a real doc-type by
-  [the specs/plans/todos work](../archive/plans/2026-08-16-specs-plans-todos-governance.md) —
+  [the specs/plans/todos work](../plans/2026-08-16-specs-plans-todos-governance.md) —
   the skill was not updated then;
 - `coding-standard`, added by
-  [the standards work](../archive/plans/2026-08-16-coding-standards-and-config-reg.md), which
+  [the standards work](../plans/2026-08-16-coding-standards-and-config-reg.md), which
   deliberately made no skill changes.
 
 The skill also says *"if nothing fits, the answer is `reference` — never invent a value"*.
@@ -38,8 +45,8 @@ it, and it never resolves as a standard.
   needs to know that `technology` is legal only when declared in `ontology.technologies`, and
   that declaring it is what creates the folder and the registry property.
 - The authoritative statements the skill should agree with are
-  [`documentation-ontology.md`](../documentation-ontology.md) and
-  [`OntologyConfig`](../../src/KyberWeave.Core/Configuration/OntologyConfig.cs). Both are
+  [`documentation-ontology.md`](../../documentation-ontology.md) and
+  [`OntologyConfig`](../../../src/KyberWeave.Core/Configuration/OntologyConfig.cs). Both are
   current.
 - The same duplication will recur: the vocabulary is stated in the enum, the config defaults,
   the emitted ontology reference, this repository's ontology document, and the skill. Four of

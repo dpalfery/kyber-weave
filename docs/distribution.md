@@ -117,7 +117,7 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Both formats package `skills/` recursively: 24 `SKILL.md` files plus 64 retained resources, for
 88 skill-tree files. The resources stay in release packages until the
-[content-preserving migration todo](todo/migrate-skill-resources-into-standards.md) is accepted;
+[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted;
 their omission from the exact 24-file Copilot golden skill surface is not a package contract.
 
 `products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
@@ -284,7 +284,7 @@ that a tray was installed. Its first run found the tray step had never run at al
 printed its version and exited 0.
 
 Two things stay out of reach. The `install.sh` side waits on the script gaining an origin
-override; the [install-sh-local-origin todo](todo/install-sh-local-origin.md) tracks both.
+override; the [install.sh origin override issue (#125)](https://github.com/dpalfery/kyber-weave/issues/125) tracks both.
 Cross-RID builds are the other: the Node that makes the blob has to run here.
 
 ## Continuous integration security
