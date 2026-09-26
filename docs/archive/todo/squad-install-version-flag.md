@@ -1,14 +1,20 @@
 ---
-id: todo/squad-install-version-flag
+id: archive/todo/squad-install-version-flag
 title: Add a --version flag to squad install and squad update
 doc-type: todo
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-08-16
-status: draft
+last-reviewed: 2026-09-25
+status: superseded
 ---
 
 # Add a --version flag to squad install and squad update
+
+> [!NOTE]
+> **Superseded by implementation plan:** This todo has been superseded by plan
+> [docs/plans/2026-09-25-squad-install-update-version-flag.md](../plans/2026-09-25-squad-install-update-version-flag.md),
+> which added `-v|--version <VERSION>` pinning to `squad install` and `squad update` and closed
+> [issue #127](https://github.com/dpalfery/kyber-weave/issues/127).
 
 This is **context for planning the work, not a plan** — what's known, what needs deciding,
 and where the seam is. It does not sequence tasks or commit to an implementation.

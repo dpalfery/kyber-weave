@@ -269,6 +269,44 @@ internal static class SquadCommandComposition
             "Supply either the positional path or --path <PATH>, not both.");
     }
 
+    /// <summary>
+    /// Normalizes a pinned <c>-v|--version</c> value into the release version to request,
+    /// or <c>null</c> when the flag is omitted so the lifecycle's default version
+    /// resolution applies unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Two gates, in this order, hold every invalid pinned version on the commands'
+    /// exit-2 client-input convention before root resolution and before any network call.
+    /// <see cref="ReleaseVersion.Normalize"/> runs first because it is the looser,
+    /// canonicalizing rule: it strips a leading 'v' and '+build' metadata (so
+    /// 'v1.2.3+sha' becomes '1.2.3') and rejects input that is not a Release tag shape at
+    /// all. The strict SemVer check runs second and reuses
+    /// <see cref="GitHubSquadReleaseSource.IsValidReleaseVersion"/> — the one rule the
+    /// release source itself enforces, reused rather than duplicated so the two cannot
+    /// diverge — to reject tag-shaped forms the stricter rule still forbids, like '1.0'
+    /// or '01.2.3'. The release source keeps its own check as defense-in-depth.
+    /// </remarks>
+    /// <exception cref="SelfUpdateException">The value is not a Release tag shape.</exception>
+    /// <exception cref="ArgumentException">The value is tag-shaped but not strict SemVer.</exception>
+    public static string? NormalizePinnedVersion(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return null;
+        }
+
+        string normalized = ReleaseVersion.Normalize(version);
+        if (!GitHubSquadReleaseSource.IsValidReleaseVersion(normalized))
+        {
+            throw new ArgumentException(
+                $"--version must be a semantic version (X.Y.Z or X.Y.Z-prerelease); " +
+                "a leading 'v' and '+build' metadata are accepted and stripped. " +
+                $"Got '{version}'.");
+        }
+
+        return normalized;
+    }
+
     /// <summary>Resolves the target root directory path.</summary>
     public static string ResolveTargetRoot(string? path) =>
         Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path);

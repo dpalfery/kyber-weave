@@ -84,7 +84,27 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         RejectExistingSymbolicLinks(extractionRoot);
 
         Uri releaseUri = BuildReleaseUri(request.Repository, request.Version);
-        GitHubRelease release = await ReadReleaseAsync(releaseUri, cancellationToken).ConfigureAwait(false);
+
+        // A 404 on the release-tag GET means the pinned version maps to no GitHub tag — a
+        // release-state fault the caller resolves by choosing an available version, so it
+        // gets the same targeted treatment as a missing asset instead of a raw transport
+        // error. GitHub answers 404 for a private or throttled repository too; that
+        // ambiguity is accepted (the repository is public) and the message names the exact
+        // version and releases page regardless, while every other status keeps the raw
+        // failure so a genuine server error is not misread as "version does not exist".
+        GitHubRelease release;
+        try
+        {
+            release = await ReadReleaseAsync(releaseUri, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new InvalidDataException(
+                $"No Kyber-Squad release exists at version '{request.Version}' in '{request.Repository}'. "
+                    + $"Squad is released with the CLI under 'v{request.Version}' tags; see "
+                    + $"https://github.com/{request.Repository}/releases for available versions.",
+                exception);
+        }
         if (!string.Equals(release.TagName, $"v{request.Version}", StringComparison.Ordinal))
         {
             throw new InvalidDataException(
@@ -174,7 +194,13 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         RegexOptions.CultureInvariant)]
     private static partial Regex ReleaseVersionPattern();
 
-    private static bool IsValidReleaseVersion(string version) =>
+    /// <summary>
+    /// The strict release-tag rule <see cref="ValidateRequest"/> enforces before any
+    /// network call: X.Y.Z or X.Y.Z-prerelease, no leading zeros, no build metadata.
+    /// Internal so the command boundary validates pinned <c>--version</c> input with this
+    /// one rule rather than a duplicate regex that could diverge from it.
+    /// </summary>
+    internal static bool IsValidReleaseVersion(string version) =>
         ReleaseVersionPattern().IsMatch(version);
 
     private Uri BuildReleaseUri(string repository, string version)

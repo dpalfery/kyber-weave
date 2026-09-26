@@ -217,6 +217,54 @@ public sealed class SquadReleaseClientTests : IDisposable
     }
 
     [Fact]
+    public async Task DownloadAndExtractAsyncWhenNoReleaseExistsAtTheRequestedVersionThrowsTheTargetedMissingReleaseDiagnostic()
+    {
+        // T1c of docs/plans/2026-09-25-squad-install-update-version-flag.md: a well-formed
+        // pinned version with no matching GitHub release must surface as a targeted "no
+        // release exists at version X" diagnostic — not the raw 404 — and the failure must
+        // leave the destination untouched after exactly one release-tag request.
+        using RoutingHandler handler = new RoutingHandler();
+        Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v9.9.9");
+        handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.NotFound));
+        SeedDestinationAndState();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+        SquadReleaseRequest request = new SquadReleaseRequest(
+            Repository,
+            "9.9.9",
+            Path.Combine(_temp.Path, "destination"));
+
+        InvalidDataException exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            source.DownloadAndExtractAsync(request, CancellationToken.None));
+
+        Assert.Contains("9.9.9", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(Repository, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("releases", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal([releaseUri], handler.Requests);
+        AssertTreeUnchanged(before);
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsyncWhenReleaseLookupFailsWithoutNotFoundSurfacesTheRawTransportFailure()
+    {
+        // The targeted missing-release diagnostic keys on 404 alone; a genuine server error
+        // keeps the raw transport failure so it is not misread as "that version does not exist".
+        using RoutingHandler handler = new RoutingHandler();
+        Uri releaseUri = new Uri(ApiRoot, $"repos/{Repository}/releases/tags/v{Version}");
+        handler.Enqueue(releaseUri, () => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        SeedDestinationAndState();
+        IReadOnlyDictionary<string, byte[]> before = SnapshotTree();
+        using ISquadReleaseSource source = new GitHubSquadReleaseSource(handler, ApiRoot);
+
+        HttpRequestException exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            source.DownloadAndExtractAsync(Request(), CancellationToken.None));
+
+        Assert.DoesNotContain(Repository, exception.Message, StringComparison.Ordinal);
+        Assert.Equal([releaseUri], handler.Requests);
+        AssertTreeUnchanged(before);
+    }
+
+    [Fact]
     public async Task DownloadAndExtractAsyncWhenChecksumHasOnlyLookalikeNamesRejectsMissingExactAssetRow()
     {
         byte[] archiveBytes = CreateArchive(("payload/manifest.json", "canonical"));

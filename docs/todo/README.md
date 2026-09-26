@@ -49,13 +49,12 @@ verification gaps, then content migration and hygiene.
 | 1 | [kyber-weave-docs-skill-vocabulary.md](kyber-weave-docs-skill-vocabulary.md) | DocGraph | The authoring skill's doc-type list lacks `todo` and `coding-standard`, so agents label a coding standard `reference`. |
 | 2 | [install-sh-local-origin.md](install-sh-local-origin.md) | Distribution | `install.sh` is HTTPS-only, so the local update loop cannot exercise the first-install channel. |
 | 3 | [portable-artifacts-carry-project-standards.md](portable-artifacts-carry-project-standards.md) | KyberSquad | Remove project-specific coding standards embedded in the canonical agents and the seven code-review references; `squad install` does not deploy the standards templates. |
-| 4 | [squad-install-version-flag.md](squad-install-version-flag.md) | KyberSquad | Add a `--version` flag to `squad install` and `squad update`. |
-| 5 | [migrate-skill-resources-into-standards.md](migrate-skill-resources-into-standards.md) | KyberSquad | Migrate retained skill-resource knowledge content-by-content into standards, governed documentation, or another verified durable home. |
-| 6 | [canon-test-fixture-consolidation.md](canon-test-fixture-consolidation.md) | KyberDash | `findings.test.ts` and `sessions.test.ts` duplicate the `CanonicalRecord` fixture helpers `tokens` and `turn`; test hygiene, no behaviour is wrong. |
-| 7 | [shell-implies-write-live-verification-other-targets.md](shell-implies-write-live-verification-other-targets.md) | KyberSquad | `capability-not-isolable` on Claude, Pi, ZCode, Factory and OpenCode rests on code inspection; live verification would confirm it and could unlock withheld Antigravity tools. |
-| 8 | [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | Packaging Squad as a ZCode plugin trades per-file receipt ownership for per-unit enablement — a deployment-model decision, not remaining ZCode work. |
-| 9 | [kyberdash-windows-code-signing.md](kyberdash-windows-code-signing.md) | Distribution | The Windows tray installer ships without Authenticode signing, so SmartScreen warns; needs a certificate and a signing step. |
-| 10 | [kyberdash-linux-tray.md](kyberdash-linux-tray.md) | KyberDash | The tray ships for macOS and Windows only; `kyberdash menubar` on Linux exits 1. |
+| 4 | [migrate-skill-resources-into-standards.md](migrate-skill-resources-into-standards.md) | KyberSquad | Migrate retained skill-resource knowledge content-by-content into standards, governed documentation, or another verified durable home. |
+| 5 | [canon-test-fixture-consolidation.md](canon-test-fixture-consolidation.md) | KyberDash | `findings.test.ts` and `sessions.test.ts` duplicate the `CanonicalRecord` fixture helpers `tokens` and `turn`; test hygiene, no behaviour is wrong. |
+| 6 | [shell-implies-write-live-verification-other-targets.md](shell-implies-write-live-verification-other-targets.md) | KyberSquad | `capability-not-isolable` on Claude, Pi, ZCode, Factory and OpenCode rests on code inspection; live verification would confirm it and could unlock withheld Antigravity tools. |
+| 7 | [zcode-plugin-packaging.md](zcode-plugin-packaging.md) | KyberSquad | Packaging Squad as a ZCode plugin trades per-file receipt ownership for per-unit enablement — a deployment-model decision, not remaining ZCode work. |
+| 8 | [kyberdash-windows-code-signing.md](kyberdash-windows-code-signing.md) | Distribution | The Windows tray installer ships without Authenticode signing, so SmartScreen warns; needs a certificate and a signing step. |
+| 9 | [kyberdash-linux-tray.md](kyberdash-linux-tray.md) | KyberDash | The tray ships for macOS and Windows only; `kyberdash menubar` on Linux exits 1. |
 
 ### Closed
 
@@ -63,6 +62,7 @@ Archived under [`archive/todo/`](../archive/todo/). Kept for provenance, never c
 
 | Todo | Component | Status | Description |
 |---|---|---|---|
+| [squad-install-version-flag.md](../archive/todo/squad-install-version-flag.md) | KyberSquad | superseded | `squad install` and `squad update` could deploy only the Squad release matching the running CLI's own version — a dev build matched no release at all (fixed: `-v|--version <VERSION>` pins and validates the release before any network call, with a targeted diagnostic when none matches; delivered by [plan](../archive/plans/2026-09-25-squad-install-update-version-flag.md) closing issue [#127](https://github.com/dpalfery/kyber-weave/issues/127)). |
 | [agent-spec-broken-reference-rule.md](../archive/todo/agent-spec-broken-reference-rule.md) | ContextHygiene | superseded | KW-AGENT-SPEC-004 was documented but never emitted (fixed: AgentSpecValidator now raises it for unresolved file references; delivered by [plan](../archive/plans/2026-09-24-agent-spec-broken-reference-rule.md)). |
 | [stale-refresh-run-rows.md](../archive/todo/stale-refresh-run-rows.md) | KyberDash | superseded | Dead-PID and timed-out `refresh_run` rows are reconciled to failure before the next refresh (fixed in PR #117). |
 | [canon-multi-harness-session-gather.md](../archive/todo/canon-multi-harness-session-gather.md) | KyberDash | superseded | Sessions whose canonical key spans several harnesses got a `${harness}:${key}` id the record gather never matched, so they contributed no findings or run outcomes (fixed: one `SessionIdentities` table assigns every share a collision-free id, and `recordsForShare` gathers by key plus canonical harness). |
