@@ -1,9 +1,8 @@
-using System.Text.RegularExpressions;
+using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Skills.Model;
 using Markdig;
 using Markdig.Extensions.Yaml;
 using Markdig.Syntax;
-using Markdig.Syntax.Inlines;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -15,7 +14,7 @@ namespace KyberWeave.Core.Skills.Parsing;
 /// YAML front matter extension to split front matter from body, YamlDotNet to
 /// deserialize the front matter, and a raw YAML pass to capture unknown keys.
 /// </summary>
-public static partial class SkillParser
+public static class SkillParser
 {
     private static readonly MarkdownPipeline Pipeline =
         new MarkdownPipelineBuilder().UseYamlFrontMatter().Build();
@@ -30,9 +29,6 @@ public static partial class SkillParser
     {
         "name", "description", "license", "compatibility", "metadata", "allowed-tools"
     };
-
-    private static readonly Regex InlinePathRegex =
-        MyRegex();
 
     public static Skill ParseFile(string skillFilePath)
     {
@@ -124,45 +120,8 @@ public static partial class SkillParser
 
     private static List<SkillReferenceLink> ExtractReferenceLinks(MarkdownDocument document, string body, string directoryPath)
     {
-        Dictionary<string, bool> found = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-
-        void Consider(string target)
-        {
-            if (string.IsNullOrWhiteSpace(target)) return;
-            if (target.StartsWith("http://", StringComparison.Ordinal) || target.StartsWith("https://", StringComparison.Ordinal) || target.StartsWith('#') || target.StartsWith("mailto:", StringComparison.Ordinal))
-                return;
-            string normalized = target.Trim();
-            if (normalized.StartsWith("./", StringComparison.Ordinal))
-            {
-                normalized = normalized.Substring(2);
-            }
-            bool resolves = ResolvesOnDisk(directoryPath, normalized);
-            found[normalized] = resolves;
-        }
-
-        foreach (LinkInline link in document.Descendants<LinkInline>())
-            if (link.Url is { } url) Consider(url);
-
-        foreach (Match m in InlinePathRegex.Matches(body))
-            Consider(m.Groups["path"].Value);
-
-        return found.Select(kv => new SkillReferenceLink(kv.Key, kv.Value)).ToList();
-    }
-
-    private static bool ResolvesOnDisk(string directoryPath, string relative)
-    {
-        try
-        {
-            if (relative.Contains("..", StringComparison.Ordinal)) return false; // traversal: treat as unresolved/suspicious
-            string full = Path.GetFullPath(Path.Combine(directoryPath, relative));
-            string baseFull = Path.GetFullPath(directoryPath);
-            if (!full.StartsWith(baseFull, StringComparison.Ordinal)) return false;
-            return File.Exists(full) || Directory.Exists(full);
-        }
-        catch
-        {
-            return false;
-        }
+        IReadOnlyList<ExtractedFileReference> extracted = FileReferenceExtractor.ExtractFromDocument(document, body, directoryPath, FileReferenceOptions.SkillDefault);
+        return extracted.Select(r => new SkillReferenceLink(r.Reference, r.Exists)).ToList();
     }
 
     private static List<SkillResource> DiscoverResources(string directoryPath, string skillFilePath)
@@ -193,7 +152,4 @@ public static partial class SkillParser
             _ => SkillResourceKind.Other
         };
     }
-
-    [GeneratedRegex(@"(?<![A-Za-z0-9._\-/])(?<path>(?:\./)?(?:scripts|references|assets)/[A-Za-z0-9._\-/]+)", RegexOptions.Compiled)]
-    private static partial Regex MyRegex();
 }
