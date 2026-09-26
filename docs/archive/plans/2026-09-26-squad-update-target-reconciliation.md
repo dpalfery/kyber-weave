@@ -1,8 +1,8 @@
 ---
-id: plans/squad-update-target-reconciliation
+id: archive/plans/2026-09-26-squad-update-target-reconciliation
 title: Squad update target reconciliation
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-26
@@ -13,8 +13,9 @@ development-mode: test-first
 
 ## Status
 
-Ready. The conductor approved execution as `approve-issue-99` on 2026-09-26, sourced from
-the user's research-and-fix order for issue 99. This plan is now implementation authority.
+Complete and archived on 2026-09-26. The conductor approved execution as
+`approve-issue-99` on 2026-09-26, sourced from the user's research-and-fix order for issue
+99. The implementation and review evidence is recorded in Closeout.
 
 ## Problem and goal
 
@@ -271,6 +272,42 @@ the active plan in `docs/plans/` when merge-ready.
 
 ## Human judgement reserved
 
-The only reserved human judgement is approval of this complete Draft for execution. No open
-product or architecture question remains, and no live global-home mutation is required to approve
-the plan.
+At planning time, the only reserved human judgement was approval of the complete Draft for
+execution. No open product or architecture question remained, and no live global-home mutation
+was required to approve the plan.
+
+## Closeout (T5, 2026-09-26)
+
+**Implementation.** Commit `28ed386` corrected `SquadTargetResolver.SelectTargets`: for
+`Update`, a non-empty explicit target list parses to the ordered desired set with source
+`Explicit` before the receipt branch. An update without explicit targets and every uninstall
+still use the receipt only; configuration and marker detection are not update fallbacks, and no
+union is computed. The same commit describes `SquadUpdateSettings.Targets` as the complete
+desired update target set. This is the D1/D2 contract approved above, not a new architectural
+decision.
+
+**Test evidence.** The three named T1 regressions failed before the production change for the
+expected receipt-precedence defect (`/opt/cursor/artifacts/t1-red.log`: 3 failed, 0 passed).
+They passed unchanged after T2 (`/opt/cursor/artifacts/t2-green.log`: 3 passed, exit 0), and
+the complete `SquadTargetResolutionTests` and `SquadCliCommandTests` run passed
+101/101 (`/opt/cursor/artifacts/t2-classes.log`, exit 0). The tests verify explicit source and
+ordered targets, matching render/lock/receipt rosters, the desired-set dry-run count, and
+byte-identical persisted state during dry-run. T1, T2, and T3 each passed task review on pass 1.
+
+**Canonical documentation.** T3 updated
+[the adoption and usage guide](../../kyber-squad/onboarding.md) and
+[KS-003](../../kyber-squad/requirements.md) to state the shipped precedence: an explicit
+update list is the complete desired set, omission reuses the receipt, update never re-detects
+markers, and uninstall remains receipt-only. The guide includes a copy-ready add-target
+example. No wider lifecycle or exclusion behavior is claimed.
+
+**Review.** The 2026-09-26 council returned **APPROVE**, risk **LOW**, under
+`KW-REVIEW-024`, with no accepted or dropped findings. All 15 declared gates passed and
+`./scripts/update-loop.sh` exited 0 (`/opt/cursor/artifacts/t4-review.md`). Because
+implementation restored the already-approved lifecycle contract and introduced no new,
+costly-to-reverse architectural decision, closeout creates no ADR; D1 and D2 remain recorded
+in this plan with their original provenance.
+
+**Closeout verification.** After archival and inventory update,
+`docs validate . --merge-ready` and `docs drift .` both exited 0 with zero findings. Their
+combined output is saved at `/opt/cursor/artifacts/t5-docs-closeout.log`.
