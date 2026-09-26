@@ -228,14 +228,15 @@ public sealed class SquadStateStore
             ?? throw new InvalidDataException("Squad receipt schema must be a string.");
         bool isV2 = string.Equals(schema, ReceiptSchemaV2, StringComparison.Ordinal);
 
+        string? scopeText = isV2 ? null : root.GetProperty("scope").GetString();
         SquadDeploymentScope scope = isV2
             ? SquadDeploymentScope.Global
-            : root.GetProperty("scope").GetString() switch
+            : scopeText switch
             {
                 "project" => SquadDeploymentScope.Project,
                 "global" => SquadDeploymentScope.Global,
-                var other => throw new InvalidDataException(
-                    $"Squad receipt scope '{other}' is not a recognized canonical scope.")
+                _ => throw new InvalidDataException(
+                    $"Squad receipt scope '{scopeText}' is not a recognized canonical scope.")
             };
 
         string targetRoot = root.GetProperty("targetRoot").GetString()
@@ -255,12 +256,13 @@ public sealed class SquadStateStore
         SquadReceiptLayout layout;
         if (isV2)
         {
-            layout = root.GetProperty("layout").GetString() switch
+            string? layoutText = root.GetProperty("layout").GetString();
+            layout = layoutText switch
             {
                 "single-root" => SquadReceiptLayout.SingleRoot,
                 "per-target-roots" => SquadReceiptLayout.PerTargetRoots,
-                var other => throw new InvalidDataException(
-                    $"Squad receipt layout '{other}' is not a recognized canonical layout.")
+                _ => throw new InvalidDataException(
+                    $"Squad receipt layout '{layoutText}' is not a recognized canonical layout.")
             };
         }
         else if (scope == SquadDeploymentScope.Global)
