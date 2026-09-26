@@ -16,17 +16,20 @@ namespace KyberWeave.Tests;
 /// (Test contract T1a/T1b/T1c of docs/plans/2026-09-25-squad-install-update-version-flag.md):
 /// a pinned version is normalized before the release request is built and reaches the release
 /// source stripped of its <c>v</c> prefix and <c>+build</c> metadata; input that is not a
-/// release tag is a client error (exit 2) rejected before any network call or filesystem
-/// write; and a well-formed version with no matching GitHub release fails closed (exit 1)
-/// with a targeted diagnostic instead of the raw 404.
+/// release tag, or whose <c>+build</c> metadata is malformed, is a client error (exit 2)
+/// rejected before any network call or filesystem write; and a well-formed version with no
+/// matching GitHub release fails closed (exit 1) with a targeted diagnostic instead of the
+/// raw 404.
 /// </summary>
 public sealed class SquadVersionOptionTests : IDisposable
 {
     private static readonly Uri ApiRoot = new("https://api.github.test/");
     private readonly TempDirectory _temp = new();
 
-    [Fact]
-    public void Install_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero()
+    [Theory]
+    [InlineData("v1.2.3+dev")]
+    [InlineData("1.2.3+a.b.9")]
+    public void Install_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero(string version)
     {
         string targetDir = Path.Combine(_temp.Path, "install-pinned");
         Directory.CreateDirectory(targetDir);
@@ -49,7 +52,7 @@ public sealed class SquadVersionOptionTests : IDisposable
                 Global = false,
                 DryRun = false,
                 Adopt = false,
-                Version = "v1.2.3+dev"
+                Version = version
             }));
 
         Assert.Equal(0, execution.ExitCode);
@@ -160,6 +163,9 @@ public sealed class SquadVersionOptionTests : IDisposable
     [InlineData("1.0", "1.0")]
     [InlineData("01.2.3", "01.2.3")]
     [InlineData("1.2.3-01", "1.2.3-01")]
+    [InlineData("1.2.3+", "1.2.3+")]
+    [InlineData("1.2.3+a..b", "1.2.3+a..b")]
+    [InlineData("1.2.3+a b", "1.2.3+a b")]
     public void Install_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
         string version,
         string expectedMessageFragment)
@@ -203,6 +209,9 @@ public sealed class SquadVersionOptionTests : IDisposable
     [InlineData("1.0", "1.0")]
     [InlineData("01.2.3", "01.2.3")]
     [InlineData("1.2.3-01", "1.2.3-01")]
+    [InlineData("1.2.3+", "1.2.3+")]
+    [InlineData("1.2.3+a..b", "1.2.3+a..b")]
+    [InlineData("1.2.3+a b", "1.2.3+a b")]
     public void Update_InvalidPinnedVersion_ExitsTwoWithAnErrorLineBeforeAnyNetworkCallOrFilesystemWrite(
         string version,
         string expectedMessageFragment)

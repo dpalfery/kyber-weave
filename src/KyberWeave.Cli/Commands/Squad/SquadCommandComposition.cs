@@ -275,19 +275,22 @@ internal static class SquadCommandComposition
     /// resolution applies unchanged.
     /// </summary>
     /// <remarks>
-    /// Two gates, in this order, hold every invalid pinned version on the commands'
+    /// Three gates, in this order, hold every invalid pinned version on the commands'
     /// exit-2 client-input convention before root resolution and before any network call.
-    /// <see cref="ReleaseVersion.Normalize"/> runs first because it is the looser,
-    /// canonicalizing rule: it strips a leading 'v' and '+build' metadata (so
-    /// 'v1.2.3+sha' becomes '1.2.3') and rejects input that is not a Release tag shape at
-    /// all. The strict SemVer check runs second and reuses
+    /// The build-metadata check runs first because <see cref="ReleaseVersion.Normalize"/>
+    /// strips a '+build' suffix blind: without it, '1.2.3+' or '1.2.3+a..b' would
+    /// silently canonicalize to '1.2.3' and a release request would be issued for a
+    /// version the operator did not quite ask for. <see cref="ReleaseVersion.Normalize"/>
+    /// then applies the looser, canonicalizing rule: it strips a leading 'v' and '+build'
+    /// metadata (so 'v1.2.3+sha' becomes '1.2.3') and rejects input that is not a Release
+    /// tag shape at all. The strict SemVer check runs last and reuses
     /// <see cref="GitHubSquadReleaseSource.IsValidReleaseVersion"/> — the one rule the
     /// release source itself enforces, reused rather than duplicated so the two cannot
     /// diverge — to reject tag-shaped forms the stricter rule still forbids, like '1.0'
     /// or '01.2.3'. The release source keeps its own check as defense-in-depth.
     /// </remarks>
     /// <exception cref="SelfUpdateException">The value is not a Release tag shape.</exception>
-    /// <exception cref="ArgumentException">The value is tag-shaped but not strict SemVer.</exception>
+    /// <exception cref="ArgumentException">The value carries malformed build metadata, or is tag-shaped but not strict SemVer.</exception>
     public static string? NormalizePinnedVersion(string? version)
     {
         if (string.IsNullOrWhiteSpace(version))
@@ -295,6 +298,7 @@ internal static class SquadCommandComposition
             return null;
         }
 
+        EnsureValidBuildMetadata(version);
         string normalized = ReleaseVersion.Normalize(version);
         if (!GitHubSquadReleaseSource.IsValidReleaseVersion(normalized))
         {
@@ -305,6 +309,39 @@ internal static class SquadCommandComposition
         }
 
         return normalized;
+    }
+
+    /// <summary>
+    /// Rejects malformed SemVer build metadata in a pinned <c>--version</c> value before
+    /// <see cref="ReleaseVersion.Normalize"/> strips the suffix.
+    /// </summary>
+    /// <remarks>
+    /// Normalize truncates at the first '+' without validating what follows, so a value
+    /// like '1.2.3+' or '1.2.3+a..b' would be silently canonicalized to '1.2.3'. Per
+    /// SemVer 2.0.0, build metadata is dot-separated identifiers, each non-empty and
+    /// drawn from ASCII letters, digits, and hyphens; anything else is refused on the
+    /// commands' exit-2 convention rather than canonicalized away. The suffix is read
+    /// from the trimmed value because that is the text Normalize itself strips.
+    /// </remarks>
+    private static void EnsureValidBuildMetadata(string version)
+    {
+        string trimmed = version.Trim();
+        int plus = trimmed.IndexOf('+', StringComparison.Ordinal);
+        if (plus < 0)
+        {
+            return;
+        }
+
+        string buildMetadata = trimmed[(plus + 1)..];
+        bool isValid = buildMetadata.Split('.').All(identifier =>
+            identifier.Length > 0 && identifier.All(c => char.IsAsciiLetterOrDigit(c) || c is '-'));
+        if (!isValid)
+        {
+            throw new ArgumentException(
+                "--version build metadata must be dot-separated identifiers of ASCII letters, digits, and hyphens, " +
+                "each at least one character long (X.Y.Z-build.metadata). " +
+                $"Got '{version}'.");
+        }
     }
 
     /// <summary>Resolves the target root directory path.</summary>
