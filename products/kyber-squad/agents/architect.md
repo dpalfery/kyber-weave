@@ -31,6 +31,8 @@ Use governed documentation queries before raw documentation search and CodeGraph
 
 Retry a failed discovery call once. After a second repository-query failure, make only a narrow self-gathered lookup and label it in the plan. After a second live-state failure, persist the current Draft and return `STATUS: BLOCKED`; never guess.
 
+Some harnesses give you no tool for invoking another agent. When that is so, make the broad sweeps and external lookups yourself and label them self-gathered in the plan. Live Azure state you cannot read at all: persist the current Draft and return `STATUS: BLOCKED` naming the exact question, so the conductor can put it to `azure-reader` and return the answer to you.
+
 ## Route
 
 Load only the reference needed for the assigned operation:

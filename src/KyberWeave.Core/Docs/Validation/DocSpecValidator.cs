@@ -2,6 +2,7 @@ using System.Globalization;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Core.Text;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -434,7 +435,7 @@ public sealed class DocSpecValidator
 
         foreach (string candidate in candidates)
         {
-            int distance = Levenshtein(value, candidate);
+            int distance = StringDistance.Levenshtein(value, candidate, ignoreCase: true);
             if (distance < bestDistance)
             {
                 bestDistance = distance;
@@ -445,29 +446,5 @@ public sealed class DocSpecValidator
         if (best is null) return null;
         int threshold = Math.Max(3, value.Length / 2);
         return bestDistance <= threshold ? best : null;
-    }
-
-    private static int Levenshtein(string a, string b)
-    {
-        if (a.Length == 0) return b.Length;
-        if (b.Length == 0) return a.Length;
-
-        int[] previous = new int[b.Length + 1];
-        int[] current = new int[b.Length + 1];
-
-        for (int j = 0; j <= b.Length; j++) previous[j] = j;
-
-        for (int i = 1; i < a.Length + 1; i++)
-        {
-            current[0] = i;
-            for (int j = 1; j <= b.Length; j++)
-            {
-                int cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
-                current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
-            }
-            (previous, current) = (current, previous);
-        }
-
-        return previous[b.Length];
     }
 }

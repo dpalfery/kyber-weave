@@ -412,11 +412,82 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Contains("factory", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("warp", availableSection, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("codex", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("zcode", availableSection, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("devin", availableSection, StringComparison.OrdinalIgnoreCase);
 
         // A plain substring check would false-positive here: "copilot" contains "pi" at
         // index 2-3, so the pi renderer's presence has to be asserted as a whole word.
         Assert.Matches(@"\bpi\b", availableSection);
         Assert.DoesNotContain("Not yet implemented:", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A workspace holding a Squad skill under both <c>.devin/skills/</c> and
+    /// <c>.claude/skills/</c> loads it twice in Devin, which imports Claude's skills by default.
+    /// Doctor warns with the remedy but does not fail: both copies work.
+    /// </summary>
+    [Fact]
+    public void Doctor_DevinWorkspace_WarnsOnSkillsDevinWouldLoadTwice()
+    {
+        string workingDir = Path.Combine(_temp.Path, "doctor-devin-overlap");
+        foreach (string root in new[] { ".devin", ".claude" })
+        {
+            string skillDirectory = Path.Combine(workingDir, root, "skills", "code-review");
+            Directory.CreateDirectory(skillDirectory);
+            File.WriteAllText(Path.Combine(skillDirectory, "SKILL.md"), "---\nname: code-review\n---\n");
+        }
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(_temp.Path, "doctor-devin-home"), isWindows: false);
+        SquadDoctorCommand command = new SquadDoctorCommand(
+            executor,
+            userPaths,
+            workingDirectory: workingDir,
+            globalRoots: globalRoots);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = workingDir,
+                Global = false
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("warn", normalizedOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".claude/skills/", normalizedOutput, StringComparison.Ordinal);
+        Assert.Contains("code-review", normalizedOutput, StringComparison.Ordinal);
+        Assert.Contains("\"claude\": false", normalizedOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Doctor_WorkspaceWithoutDevin_SkipsTheDuplicateImportCheck()
+    {
+        string workingDir = Path.Combine(_temp.Path, "doctor-no-devin");
+        Directory.CreateDirectory(workingDir);
+
+        FakeProcessExecutor executor = new FakeProcessExecutor()
+            .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
+        SquadDoctorCommand command = new SquadDoctorCommand(executor, userPaths, workingDirectory: workingDir);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadDoctorSettings
+            {
+                Path = workingDir,
+                Global = false
+            }));
+
+        string normalizedOutput = string.Join(
+            ' ',
+            execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("Devin duplicate imports: not checked", normalizedOutput, StringComparison.Ordinal);
     }
 
     [Fact]

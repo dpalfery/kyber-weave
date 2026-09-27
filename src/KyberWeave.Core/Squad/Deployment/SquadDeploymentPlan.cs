@@ -196,7 +196,8 @@ public sealed class SquadDeploymentPlan
             ["warp"] = ".warp/",
             ["factory"] = ".factory/",
             ["pi"] = ".pi/",
-            ["zcode"] = ".zcode/"
+            ["zcode"] = ".zcode/",
+            ["devin"] = ".devin/"
         };
 
     /// <summary>
