@@ -6,9 +6,10 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-08-15
+last-reviewed: 2026-09-26
 code-refs:
   - DocsTools
+  - DrainingStreamServerTransport
 ---
 
 # Running the DocGraph MCP server
@@ -23,6 +24,20 @@ JSON-RPC owns stdout, and the CLI is built on Spectre.Console, which also writes
 separate executable makes stream corruption **structurally impossible** rather than a
 matter of discipline. All logging is pinned to stderr for the same reason — one stray line
 on stdout breaks the transport.
+
+## Closing stdin
+
+A client may write its requests and close stdin without waiting, as a scripted health check
+or `kyber-weave-mcp < requests.jsonl` does. Every request the server read before stdin
+closed is still answered on stdout, and the process exits once the last answer is written.
+Only replies are sent after stdin closes. Notifications, and any request the server would
+start itself, are dropped, because nothing can answer them any more.
+
+The SDK's own stdio transport drops every message once stdin reaches end of stream, even
+replies to requests it has already read. `DrainingStreamServerTransport` replaces it for
+that reason; its remarks have the detail. Releases up to and including `v0.1.7-rc.13` ship
+the SDK transport, and there piped requests produce zero bytes on stdout
+([#95](https://github.com/dpalfery/kyber-weave/issues/95)).
 
 ## Wiring it up
 
@@ -347,6 +362,7 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 | Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
 | `docs_glossary` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
+| Piped requests exit 0 with nothing on stdout | A release up to `v0.1.7-rc.13` dropped replies once stdin closed — upgrade, or keep stdin open until the replies arrive. See [Closing stdin](#closing-stdin) |
 
 ## Related
 
