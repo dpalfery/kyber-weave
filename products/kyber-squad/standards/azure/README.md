@@ -15,10 +15,10 @@ document as `<azure-coding-standard>`.
 
 ## Authority & status
 
-When this standard is in `status: current`, what it says here outranks whatever defaults a
-portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
-template/proposal and does NOT override portable agent defaults until reviewed and promoted
-to `current`.
+When this standard is in `status: current`, it is the rule for this technology in this
+repository. Portable agents ship no built-in default to fall back on. While it is in
+`status: draft` it is a proposal: an agent that resolves it says so and asks a human whether
+to proceed on it, exactly as it does when no standard is declared.
 
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`.
@@ -32,6 +32,7 @@ to `current`.
 - Credentials are acquired through the SDK's credential chain (`DefaultAzureCredential` or a
   narrower type), so local development and production differ by configuration rather than by
   code path.
+- Every service endpoint is reached over HTTPS.
 
 ## Use the SDK
 
@@ -56,6 +57,9 @@ I/O is async all the way down; a `.Result` or `.Wait()` on a cloud call is a dea
 for load. Prefer one batched operation to many small ones — for Storage and Cosmos DB this is
 the difference between a request and a bill.
 
+A cache in front of a service (Azure Cache for Redis, for example) states its expiry and what
+invalidates it.
+
 ## Observability
 
 Log the operation, the resource, the outcome and the correlation id, through the platform's
@@ -64,6 +68,8 @@ connection string, or the customer's data.
 
 Failures carry enough context to identify which resource and which request, because the same
 error message from three services is not diagnosable.
+
+Telemetry reaches Application Insights through the platform logger, not a side channel.
 
 ## Cost
 
