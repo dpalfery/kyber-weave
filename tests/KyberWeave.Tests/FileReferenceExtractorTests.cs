@@ -66,6 +66,52 @@ public class FileReferenceExtractorTests
         Assert.True(reference.Exists);
     }
 
+    /// <summary>
+    /// Regression (issue 134): UnfencedText mode scans the raw markdown, so the tail of an
+    /// https link destination matched UnfencedPathRegex and leaked in as a reference — the
+    /// match begins after the scheme, so the URL filter never sees the destination.
+    /// </summary>
+    [Fact]
+    public void HttpsLinkDestinationIsNotExtractedInUnfencedTextMode()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string markdown = "See the [docs](https://example.com/references/missing.md) online.";
+        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+
+        Assert.DoesNotContain(results, r => r.Reference == "references/missing.md");
+    }
+
+    /// <summary>
+    /// Regression (issue 134): the AST-based UnfencedText scan must keep extracting inline
+    /// code spans (e.g. LOAD `references/rules.md`), which the previous raw-markdown scan
+    /// covered and which the skill validator relies on for broken-reference detection.
+    /// </summary>
+    [Fact]
+    public void InlineCodeSpanPathIsExtractedInUnfencedTextMode()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string markdown = "LOAD `references/rules.md` before continuing.";
+        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+
+        ExtractedFileReference reference = Assert.Single(results);
+        Assert.Equal("references/rules.md", reference.Reference);
+        Assert.False(reference.Exists);
+    }
+
+    /// <summary>
+    /// Regression (issue 134): UnfencedText mode scans the raw markdown, so a path inside a
+    /// fenced code block matched even though fenced content is not unfenced body text.
+    /// </summary>
+    [Fact]
+    public void FencedCodeBlockPathIsNotExtractedInUnfencedTextMode()
+    {
+        using TempDirectory tempDir = new TempDirectory();
+        string markdown = "Example usage:\n\n```\nreferences/block.md\n```";
+        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+
+        Assert.DoesNotContain(results, r => r.Reference == "references/block.md");
+    }
+
     [Fact]
     public void LeadingDotSlashPrefixIsNormalized()
     {
@@ -251,7 +297,7 @@ public class FileReferenceExtractorTests
 
         string raw = "See [guide](references/guide.md).";
         Markdig.Syntax.MarkdownDocument document = Markdig.Markdown.Parse(raw);
-        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromDocument(document, raw, tempDir.Path, FileReferenceOptions.AgentDefault);
+        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromDocument(document, tempDir.Path, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guide.md", reference.Reference);

@@ -17,8 +17,13 @@ internal enum InlinePathScanMode
     CodeInlineOnly,
 
     /// <summary>
-    /// Matches target subdirectory paths anywhere in unfenced body text.
+    /// Matches target subdirectory paths anywhere in unfenced body text, including inline code spans.
     /// </summary>
+    /// <remarks>
+    /// The scan surface is literal text inlines (<see cref="LiteralInline"/>) and code spans
+    /// (<see cref="CodeInline"/>): fenced code is parsed as block content rather than inlines and
+    /// link destinations live on <see cref="LinkInline"/>, so neither can leak into a match.
+    /// </remarks>
     UnfencedText
 }
 
@@ -138,7 +143,7 @@ internal static partial class FileReferenceExtractor
         }
 
         MarkdownDocument document = Markdown.Parse(text, MarkdownPipeline);
-        return ExtractFromDocument(document, text, directoryPath, options);
+        return ExtractFromDocument(document, directoryPath, options);
     }
 
     /// <summary>
@@ -164,7 +169,7 @@ internal static partial class FileReferenceExtractor
             }
 
             MarkdownDocument document = Markdown.Parse(text, MarkdownPipeline);
-            ExtractInternal(document, text, directoryPath, options, results, comparer);
+            ExtractInternal(document, directoryPath, options, results, comparer);
         }
 
         return results.Values.ToArray();
@@ -175,7 +180,6 @@ internal static partial class FileReferenceExtractor
     /// </summary>
     internal static IReadOnlyList<ExtractedFileReference> ExtractFromDocument(
         MarkdownDocument document,
-        string rawMarkdown,
         string directoryPath,
         FileReferenceOptions? options = null)
     {
@@ -186,14 +190,13 @@ internal static partial class FileReferenceExtractor
         StringComparer comparer = GetPathComparer(directoryPath);
         Dictionary<string, ExtractedFileReference> results = new(comparer);
 
-        ExtractInternal(document, rawMarkdown, directoryPath, options, results, comparer);
+        ExtractInternal(document, directoryPath, options, results, comparer);
 
         return results.Values.ToArray();
     }
 
     private static void ExtractInternal(
         MarkdownDocument document,
-        string rawMarkdown,
         string directoryPath,
         FileReferenceOptions options,
         Dictionary<string, ExtractedFileReference> results,
@@ -230,9 +233,14 @@ internal static partial class FileReferenceExtractor
                 }
             }
         }
-        else if (options.InlineScanMode == InlinePathScanMode.UnfencedText && !string.IsNullOrWhiteSpace(rawMarkdown))
+        else if (options.InlineScanMode == InlinePathScanMode.UnfencedText)
         {
-            foreach (Match match in UnfencedPathRegex().Matches(rawMarkdown))
+            IEnumerable<Match> matches = document.Descendants<LiteralInline>()
+                .SelectMany(literal => UnfencedPathRegex().Matches(literal.Content.ToString()))
+                .Concat(document.Descendants<CodeInline>()
+                    .SelectMany(code => UnfencedPathRegex().Matches(code.Content)));
+
+            foreach (Match match in matches)
             {
                 ProcessReference(match.Groups["path"].Value, directoryPath, options, results, comparer);
             }

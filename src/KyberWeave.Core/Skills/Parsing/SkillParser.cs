@@ -62,7 +62,7 @@ public static class SkillParser
         CaptureUnknownKeys(rawYaml, frontmatter);
 
         string body = ExtractBody(content, yamlBlock);
-        List<SkillReferenceLink> links = ExtractReferenceLinks(document, body, directoryPath);
+        List<SkillReferenceLink> links = ExtractReferenceLinks(document, directoryPath);
         List<SkillResource> resources = DiscoverResources(directoryPath, skillFilePath);
 
         return new Skill
@@ -118,9 +118,9 @@ public static class SkillParser
         }
     }
 
-    private static List<SkillReferenceLink> ExtractReferenceLinks(MarkdownDocument document, string body, string directoryPath)
+    private static List<SkillReferenceLink> ExtractReferenceLinks(MarkdownDocument document, string directoryPath)
     {
-        IReadOnlyList<ExtractedFileReference> extracted = FileReferenceExtractor.ExtractFromDocument(document, body, directoryPath, FileReferenceOptions.SkillDefault);
+        IReadOnlyList<ExtractedFileReference> extracted = FileReferenceExtractor.ExtractFromDocument(document, directoryPath, FileReferenceOptions.SkillDefault);
         return extracted.Select(r => new SkillReferenceLink(r.Reference, r.Exists)).ToList();
     }
 
