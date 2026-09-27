@@ -5,8 +5,12 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Mcp;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 if (args.Contains("--version", StringComparer.OrdinalIgnoreCase) || args.Contains("-v", StringComparer.OrdinalIgnoreCase))
 {
@@ -54,6 +58,17 @@ builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
     .WithToolsFromAssembly();
+
+// The SDK registers its single-session hosting only through its transport extensions, and
+// WithStreamServerTransport would construct a transport of its own on the spot. So the stdio
+// extension supplies the hosting, and its ITransport is swapped for one that still answers
+// requests read before stdin closed, which the SDK transport silently drops. See
+// DrainingStreamServerTransport for why. The SDK's factory is replaced before anything resolves
+// it, so its transport is never constructed and never starts reading stdin.
+builder.Services.Replace(ServiceDescriptor.Singleton<ITransport>(services =>
+    DrainingStreamServerTransport.ForStandardStreams(
+        services.GetRequiredService<IOptions<McpServerOptions>>().Value.ServerInfo?.Name ?? "kyber-weave-mcp",
+        services.GetService<ILoggerFactory>())));
 
 await builder.Build().RunAsync().ConfigureAwait(false);
 return 0;
