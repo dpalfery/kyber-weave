@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-09-27
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -18,8 +18,8 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**24 canonical skills**, with transactional recovery and state governance. Eleven harness targets
-are declared; all eleven are currently implemented and registered.
+**24 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+are declared; all twelve are currently implemented and registered.
 
 ---
 
@@ -62,7 +62,7 @@ release to deploy.)
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad declares eleven coding-harness targets:
+Kyber-Squad declares twelve coding-harness targets:
 
 | Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
 |---|---|---|---|---|
@@ -77,11 +77,12 @@ Kyber-Squad declares eleven coding-harness targets:
 | `warp` | — | `.warp/` | Role-skill lowering | Implemented and registered |
 | `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
 | `zcode` | — | `.zcode/` | Native agents (with conductor lowered to slash command) | Implemented and registered |
+| `devin` | — | `.devin/` | Native agents (directory per agent, with conductor lowered to skill) | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native subagents and skills, with the primary agent lowered to a slash command) have renderers. All eleven declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with the primary agent lowered to a slash command), and `devin` (native subagents and skills, with the primary agent lowered to a skill) have renderers. All twelve declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
@@ -236,6 +237,38 @@ override for `~/.factory`.
 **Inspect:** in a Factory session, `/droids` lists project and personal droids; `/skills`
 lists discovered skills. Confirm names there after install.
 
+### Devin notes
+
+The `devin` target deploys to Devin Desktop — Cognition's desktop app for Windows and macOS,
+formerly Windsurf — whose local agent, Devin Local, reads the Devin CLI's formats. Subagents
+render as `.devin/agents/<name>/AGENT.md` and skills as `.devin/skills/<name>/SKILL.md`. With
+`--global` they go to Devin's user configuration directory: `%APPDATA%\devin\` on Windows,
+`~/.config/devin/` on macOS and Linux (`$XDG_CONFIG_HOME/devin/` when that is set).
+
+**Migrating from Windsurf**: Devin reads the legacy `.windsurf/skills/` only when
+`.devin/skills/` does not exist. Installing the `devin` target creates `.devin/skills/`, so any
+hand-authored skills still under `.windsurf/skills/` stop loading. Move them to
+`.devin/skills/` first. Squad never writes or removes anything under `.windsurf/`.
+
+**Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
+deployed as the skill `conductor` and runs in the main Devin Local session, which dispatches the
+specialists as subagents. Those subagents cannot delegate further on Devin: Devin cannot limit
+nested delegation to a roster, so Squad does not enable it. `architect`, `code-reviewer`, and
+`product-owner` therefore do their discovery and review-lens work themselves rather than fanning
+out, and the receipt records a `permission-not-expressible` degradation for each.
+
+**MCP servers**: subagents' `allowed-tools` name the CodeGraph, context7, and Kyber-Weave MCP
+tools. Configure those servers in Devin's `mcp_config.json` (project `.devin/` or the user
+configuration directory); Squad does not write it, and `squad doctor` does not check it for
+Devin.
+
+**Coexistence with Antigravity**: Devin also loads `.agents/agents/` and `.agents/skills/`, which
+is exactly where the `antigravity` target writes. With both targets installed in one repository,
+Devin sees two definitions of every Squad agent and skill, so pick one of the two per repository.
+
+**Inspect:** `devin doctor` reports which custom profiles loaded, and `devin skills list` lists
+discovered skills. Confirm names there after install.
+
 ---
 
 ## Deployment Scopes
@@ -272,6 +305,7 @@ and `doctor`.
 | `factory` | `~/.factory` (no override) | `droids/<name>.md`, `skills/<name>/SKILL.md` |
 | `warp` | `~/.warp` (no override) | `skills/<name>/SKILL.md` |
 | `zcode` | `$ZCODE_STORAGE_DIR` → `~/.zcode/cli/config.json` `storage.dir` → `~/.zcode` | `agents/<name>.md`, `commands/<name>.md`, `skills/<name>/SKILL.md` |
+| `devin` | Windows: `%APPDATA%\devin`; macOS and Linux: `$XDG_CONFIG_HOME/devin` → `~/.config/devin` | `agents/<name>/AGENT.md`, `skills/<name>/SKILL.md` |
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
 `.agents/skills/…` / `.github/…`) prefix under the project root.
@@ -363,7 +397,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the eleven declared targets can install today) and the Kyber-Weave MCP server:
+Run diagnostic checks on renderer coverage (which of the twelve declared targets can install today) and the Kyber-Weave MCP server:
 
 ```bash
 kyber-weave squad doctor

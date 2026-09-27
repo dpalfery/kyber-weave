@@ -4,7 +4,7 @@ title: Component and owner catalog
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-27
 ---
 
 # Component and owner catalog
@@ -21,7 +21,7 @@ answers for it, and where its source lives.
 |---|---|---|---|---|---|---|---|
 | DocGraph | Feature | `src/KyberWeave.Core/Docs` | The documentation ontology, conformance gates, graph-first claim analysis, managed terminology, and retrieval graph served over MCP. | [docgraph/architecture.md](docgraph/architecture.md) · [docgraph/analysis.md](docgraph/analysis.md) · [docgraph/mcp-runbook.md](docgraph/mcp-runbook.md) | dpalfery | 2026-08-12 | current |
 | ContextHygiene | Feature | `src/KyberWeave.Core/Skills` | Governance for the artifacts that shape an agent's context: Agent Skills and harness agent definitions. | [context-hygiene/skills.md](context-hygiene/skills.md) · [context-hygiene/agents.md](context-hygiene/agents.md) (Governance library; tested via `dotnet test`) | dpalfery | 2026-08-01 | current |
-| KyberSquad | Feature | `src/KyberWeave.Core/Squad` | Agent and skill deployment control plane with eleven declared harness targets, eleven registered renderers, and transactional recovery. | [kyber-squad/architecture.md](kyber-squad/architecture.md) · [kyber-squad/onboarding.md](kyber-squad/onboarding.md) (CLI control plane; executed via `squad`) | dpalfery | 2026-09-14 | current |
+| KyberSquad | Feature | `src/KyberWeave.Core/Squad` | Agent and skill deployment control plane with twelve declared harness targets, twelve registered renderers, and transactional recovery. | [kyber-squad/architecture.md](kyber-squad/architecture.md) · [kyber-squad/onboarding.md](kyber-squad/onboarding.md) (CLI control plane; executed via `squad`) | dpalfery | 2026-09-27 | current |
 | ReviewCouncil | Feature | `src/KyberWeave.Core/Review` | Parallel code review: a council of specialist lenses over the diff, the host's deterministic gate suite, and a rule-based verdict engine that decides from both. | [code-review/architecture.md](code-review/architecture.md) · [code-review/README.md](code-review/README.md) (Review engine; executed via `review`) | dpalfery | 2026-08-20 | current |
 | KyberDash | Feature | `dash` | Local context-troubleshooting product with three surfaces over one `ContextReport`: the `kyberdash report` CLI, the web dashboard (progressive-disclosure spine, Context Inspector, run comparison), and a Tauri tray for macOS and Windows that owns the web server, scheduled `dash refresh` into canonical `canon.db`, and the OTLP receiver. | [dash/README.md](dash/README.md) · [dash/architecture.md](dash/architecture.md) · [dash/runbook.md](dash/runbook.md) · [dash/telemetry-inventory.md](dash/telemetry-inventory.md) (Interactive multi-surface dashboard) | dpalfery | 2026-09-24 | current |
 | CI Pipelines | Feature | `src/KyberWeave.Core/Diagnostics` | The diagnostic engine every gate reports through: stable rule ids, severity gating, and SARIF. | [ci-pipelines/architecture.md](ci-pipelines/architecture.md) · [ci-pipelines/workflows-runbook.md](ci-pipelines/workflows-runbook.md) | dpalfery | 2026-08-01 | current |

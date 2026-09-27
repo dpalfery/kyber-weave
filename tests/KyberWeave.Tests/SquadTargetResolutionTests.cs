@@ -9,7 +9,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadTargetResolutionTests : IDisposable
 {
-    private static readonly SquadTarget[] ElevenTargets =
+    private static readonly SquadTarget[] TwelveTargets =
     [
         SquadTarget.Codex,
         SquadTarget.Cursor,
@@ -21,7 +21,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
         SquadTarget.Warp,
         SquadTarget.Factory,
         SquadTarget.Pi,
-        SquadTarget.ZCode
+        SquadTarget.ZCode,
+        SquadTarget.Devin
     ];
 
     private readonly TempDirectory _temp = new();
@@ -40,7 +41,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
         { ".kilo", true, SquadTarget.Kilo },
         { ".warp", true, SquadTarget.Warp },
         { ".factory", true, SquadTarget.Factory },
-        { ".zcode", true, SquadTarget.ZCode }
+        { ".zcode", true, SquadTarget.ZCode },
+        { ".devin", true, SquadTarget.Devin }
     };
 
     /// <summary>
@@ -48,11 +50,11 @@ public sealed class SquadTargetResolutionTests : IDisposable
     /// target is appended: Pi follows Factory, and ZCode follows Pi.
     /// </summary>
     [Fact]
-    public void CatalogContainsExactlyElevenTargetsInStableOrder()
+    public void CatalogContainsExactlyTwelveTargetsInStableOrder()
     {
-        Assert.Equal(ElevenTargets, SquadTargetCatalog.All);
+        Assert.Equal(TwelveTargets, SquadTargetCatalog.All);
         Assert.Equal(
-            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi", "zcode"],
+            ["codex", "cursor", "claude", "copilot", "opencode", "kilo", "antigravity", "warp", "factory", "pi", "zcode", "devin"],
             SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
     }
 
@@ -72,7 +74,17 @@ public sealed class SquadTargetResolutionTests : IDisposable
     {
         IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 
-        Assert.Equal(ElevenTargets, targets);
+        Assert.Equal(TwelveTargets, targets);
+    }
+
+    [Theory]
+    [InlineData("devin")]
+    [InlineData("Devin")]
+    public void ParseDevinTokenSelectsDevinCaseInsensitively(string token)
+    {
+        IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse([token]);
+
+        Assert.Equal(SquadTarget.Devin, Assert.Single(targets));
     }
 
     [Theory]
@@ -163,7 +175,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
             SquadTarget.Antigravity,
             SquadTarget.Factory,
             SquadTarget.Pi,
-            SquadTarget.ZCode);
+            SquadTarget.ZCode,
+            SquadTarget.Devin);
     }
 
     [Theory]

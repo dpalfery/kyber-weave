@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Core/Review
 owner: dpalfery
-last-reviewed: 2026-09-16
+last-reviewed: 2026-09-27
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -388,7 +388,7 @@ and the usual cause needs a person.
 
 ## Current limitations
 
-All eleven declared targets have a registered renderer. On the ten native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only — see
+All twelve declared targets have a registered renderer. On the eleven native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only. On `devin` a subagent cannot delegate, so `code-reviewer` applies each lens itself rather than fanning out the council — see
 [rendering](../kyber-squad/architecture.md#8-rendering).
 
 There is no cost measurement and no per-repository ceiling yet. The adversarial confirmation

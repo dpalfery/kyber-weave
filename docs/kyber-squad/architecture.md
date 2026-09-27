@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-09-27
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -33,6 +33,7 @@ code-refs:
   - KiloRenderer
   - PiRenderer
   - FactoryRenderer
+  - DevinRenderer
 ---
 
 # Kyber-Squad architecture
@@ -40,7 +41,7 @@ code-refs:
 Kyber-Squad is the multi-harness governance and deployment engine within Kyber-Weave.
 It normalizes canonical agent and skill definitions into an intermediate representation (**AgentIR**),
 evaluates capability and permission lattices, applies deterministic role-skill lowering, and executes
-atomic, recoverable deployments. Its catalog declares eleven target coding harnesses; all eleven have
+atomic, recoverable deployments. Its catalog declares twelve target coding harnesses; all twelve have
 implemented and registered renderers today.
 
 ---
@@ -75,7 +76,7 @@ flowchart TD
     end
 
     subgraph TargetHarnesses["Declared Target Harnesses"]
-        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory, Warp, ZCode)"]
+        RegisteredTargets["Registered Renderers\n(Copilot, Cursor, Claude, Codex, Antigravity, OpenCode, Kilo, Pi, Factory, Warp, ZCode, Devin)"]
         UnsupportedTargets["Coverage Preflight Failure\n(Future / Undeclared Targets)"]
     end
 
@@ -348,7 +349,8 @@ and validates.
   `PiRenderer` for native subagent projection to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md` with primary-agent lowering ([ADR 0019](../adr/0019-pi-native-subagents-and-primary-lowering.md)),
   `FactoryRenderer` for `.factory/droids/*.md` and `.factory/skills/*/SKILL.md`,
   `WarpRenderer` for fallback role-skill lowering to `.warp/skills/*/SKILL.md`,
-  and `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)).
+  `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)),
+  and `DevinRenderer` for Devin Desktop's local agent: per-agent directories at `.devin/agents/*/AGENT.md` and skills at `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill.
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
@@ -363,6 +365,7 @@ and validates.
 | `factory` | `FactoryRenderer` | `.factory/droids/<name>.md` | `.factory/skills/<name>/SKILL.md` | Native |
 | `warp` | `WarpRenderer` | `.warp/skills/role-<name>/SKILL.md` (lowered; see [§3](#3-role-skill-lowering-and-namespace-resolution)) | `.warp/skills/<name>/SKILL.md` | Fallback |
 | `zcode` | `ZCodeRenderer` | `.zcode/agents/<name>.md`; the primary agent lowers to `.zcode/commands/<name>.md` | `.zcode/skills/<name>/SKILL.md` | Native |
+| `devin` | `DevinRenderer` | `.devin/agents/<name>/AGENT.md` | `.devin/skills/<name>/SKILL.md` (conductor lowered here) | Native |
 
 - **Copilot-only projection inputs**: each canonical agent declares exact `copilot-tools`, and
   may name a target-scoped `copilot-capability-profile`. These fields validate and render the
@@ -389,7 +392,7 @@ and validates.
   consequently pins every key in the taxonomy, writing `deny` wherever the lattice does not
   grant. A target whose permission model is an allow-list — Claude, ZCode, Pi — needs no such
   treatment, because omitting a name there withholds it.
-- **MCP grants differ per target, and `zcode` is the one that enumerates.** `ClaudeRenderer`
+- **MCP grants differ per target, and `zcode` and `devin` enumerate.** `ClaudeRenderer`
   grants three MCP server wildcards (`mcp__codegraph__*`, `mcp__kyber-weave__*`,
   `mcp__context7__*`) to any agent allowed to read the filesystem except the pure orchestrator.
   The pure-orchestrator MCP withholding applies to the subagent file only; an entry-point skill
@@ -398,8 +401,19 @@ and validates.
   qualified `mcp__<server>__<tool>` names declared by `toolchain.yml`'s `required-mcp-tools`.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
   not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
+  `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
+  because that is the form Devin's permission rules name MCP tools in; the servers themselves
+  stay the operator's to configure in Devin's `mcp_config.json`.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
+- **`devin` withholds delegation from subagents.** Devin Local dispatches a named profile
+  through `run_subagent`, and a profile reaches further subagents only through its
+  `max-nesting` setting. Devin has no `allowed_subagents` equivalent, so granting nested
+  delegation would reach every profile rather than the canonical `delegates-to` roster.
+  `DevinRenderer` emits neither and records `permission-not-expressible` naming the roster.
+  The lowered conductor is unaffected, because it runs in the main session. Agents use Devin's
+  directory layout so each resource closure stays inside its own agent's directory and authored
+  links resolve verbatim; see the `DevinRenderer` class remarks for the full evidence.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both
   `.zcode/agents/` and `.zcode/commands/` recursively, so a closure beside its principal would
   register as phantom agents and commands rather than as resources. `ZCodeRenderer` therefore
@@ -435,7 +449,7 @@ and validates.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
-- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`) are implemented and registered. All eleven declared targets are covered. `kyber-weave squad doctor` reports which
+- **Coverage today**: `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native), `codex` (native: `.codex/agents/*.toml` + `.codex/skills/*/SKILL.md`), `antigravity` (native: `.agents/agents/*/agent.md` + `.agents/skills/*/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native: `.opencode/agents/*.md` + `.opencode/skills/*/SKILL.md`), `kilo` (native: `.kilo/agents/*.md` + `.kilo/skills/*/SKILL.md`), `pi` (native subagents with primary-agent lowering to `.pi/agents/*.md` and `.pi/skills/*/SKILL.md`), `factory` (native: `.factory/droids/*.md` + `.factory/skills/*/SKILL.md`), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native: `.zcode/agents/*.md` + `.zcode/skills/*/SKILL.md`, with the primary agent lowered to `.zcode/commands/*.md`), and `devin` (native: `.devin/agents/*/AGENT.md` + `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill) are implemented and registered. All twelve declared targets are covered. `kyber-weave squad doctor` reports which
   targets are covered.
 - **Authority and self-deployment boundary**: `products/kyber-squad/` is canonical and package
   authority. Root `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and
