@@ -84,4 +84,7 @@ Out:
 - `docs drift .`: zero findings.
 - Hotshot golden and migration-report body hashes updated for the nine changed agents and
   the `code-review` `SKILL.md`, following the convention the earlier standard migrations used.
+- Review: NEEDS_HUMAN (risk MEDIUM) — `review.policy.always-human` matches
+  `products/kyber-squad/agents/**`. Content findings: the `ubuntu-latest` runner default was
+  not migrated (fixed in the `github-actions` template) and one wrap miss (fixed).
 - Open: `tauri-dev` still embeds Rust/Tauri rules; it needs a template before they can move.

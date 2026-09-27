@@ -94,3 +94,6 @@ disabled test without a linked issue and a date.
 
 Pin the runner image, the language version, and the tool versions. `latest` in CI means the
 build that passes today fails on a morning nobody changed anything.
+
+Jobs run on a Linux runner unless the job needs another OS — Windows for a MAUI publish, macOS
+for iOS signing — and say why when they do.
