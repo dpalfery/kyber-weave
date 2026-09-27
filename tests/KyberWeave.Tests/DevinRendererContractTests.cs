@@ -23,14 +23,15 @@ namespace KyberWeave.Tests;
 /// <c>invocation: primary</c> agent (<c>conductor</c>) lowers to
 /// <c>.devin/skills/&lt;name&gt;/SKILL.md</c>, because Devin has no primary-agent primitive
 /// (Devin Local is the only top-level agent). Canonical skills render at
-/// <c>.devin/skills/&lt;name&gt;/SKILL.md</c>, never under the legacy <c>.windsurf/skills/</c>,
-/// which Devin reads only when <c>.devin/skills/</c> is absent.
+/// <c>.devin/skills/&lt;name&gt;/SKILL.md</c>, never under <c>.windsurf/skills/</c>, which is an
+/// import from another tool rather than Devin's own root.
 /// </para>
 /// <para>
-/// The capability→tool contract below is transcribed independently from the Devin tool
-/// vocabulary (<c>read, edit, write, exec, grep, glob, webfetch, web_search, skill</c>) rather
-/// than read from the renderer, so a renderer edit that silently widens or narrows a grant
-/// fails here.
+/// The capability→tool contract below is transcribed independently from Devin's core tool
+/// names (the <c>lifecycle-hooks</c> reference) rather than read from the renderer, so a
+/// renderer edit that silently widens or narrows a grant fails here. So is the model table:
+/// the pinned <c>devin:</c> values are an owner decision, and a change to them should be a
+/// deliberate edit in two places.
 /// </para>
 /// </remarks>
 public sealed class DevinRendererContractTests : IDisposable
@@ -40,27 +41,55 @@ public sealed class DevinRendererContractTests : IDisposable
 
     private static readonly (string Capability, string[] Tools)[] CapabilityToolContract =
     [
-        ("filesystem.read", ["read"]),
+        ("filesystem.read", ["read", "notebook_read"]),
         ("filesystem.search", ["grep", "glob"]),
-        ("filesystem.write", ["edit", "write"]),
-        ("process.execute", ["exec"]),
+        ("filesystem.write", ["edit", "write", "apply_patch", "notebook_edit"]),
+        ("process.execute", ["exec", "get_output", "write_to_process", "kill_shell"]),
         ("network.read", ["webfetch", "web_search"]),
     ];
 
-    /// <summary>Granted on every subagent: without it the deployed skill tree is unreachable.</summary>
-    private static readonly string[] UngovernedTools = ["skill"];
+    /// <summary>
+    /// Granted on every subagent: <c>todo_write</c> touches no file, and without <c>skill</c> the
+    /// deployed skill tree is unreachable.
+    /// </summary>
+    private static readonly string[] UngovernedTools = ["todo_write", "skill"];
 
     private static readonly string[] ToolOrder =
-        ["skill", "read", "grep", "glob", "edit", "write", "exec", "webfetch", "web_search"];
+    [
+        "todo_write", "skill", "read", "notebook_read", "grep", "glob", "edit", "write",
+        "apply_patch", "notebook_edit", "exec", "get_output", "write_to_process", "kill_shell",
+        "webfetch", "web_search"
+    ];
 
     private static readonly string[] ApprovedAgentKeys = ["name", "description", "model", "allowed-tools"];
 
     /// <summary>
-    /// A Devin skill's <c>allowed-tools</c> auto-approves rather than restricts, and its
-    /// <c>permissions</c> add to the session's rather than replace them, so neither may appear
-    /// on a rendered skill.
+    /// A Devin skill's <c>allowed-tools</c> and <c>permissions.allow</c> auto-approve rather than
+    /// restrict, and <c>permissions.deny</c> on the lowered conductor might reach the subagents
+    /// it dispatches (ADR 0025), so no rendered skill carries a tool or permission key.
     /// </summary>
     private static readonly string[] ApprovedSkillKeys = ["name", "description"];
+
+    /// <summary>
+    /// The lowered primary agent adds <c>triggers: [user]</c>: Devin Cloud discovers the same
+    /// skill tree but loads no custom subagents, so the conductor must never start on a
+    /// description match.
+    /// </summary>
+    private static readonly string[] ApprovedLoweredSkillKeys = ["name", "description", "triggers"];
+
+    private static readonly string[] UserOnlyTriggers = ["user"];
+
+    /// <summary>
+    /// The owner-approved Devin model per canonical model profile (ADR 0025). Exact model ids,
+    /// effort included, rather than family aliases that float to a newer model and price.
+    /// </summary>
+    private static readonly Dictionary<string, string> ExpectedDevinModels = new(StringComparer.Ordinal)
+    {
+        ["deep-planning"] = "claude-opus-5-5-high",
+        ["fast"] = "deepseek-v4-1-flash-high",
+        ["general"] = "swe-2-high",
+        ["reviewer"] = "grok-4-7-high"
+    };
 
     public void Dispose()
     {
@@ -160,9 +189,11 @@ public sealed class DevinRendererContractTests : IDisposable
                 CollapseToSingleLine(agent.Description),
                 RequireScalar(frontmatter, "description", agent.Name));
 
-            // Every canonical model profile declares `default: inherit` and no `devin:` override,
-            // so no agent pins a model and Devin's own model selection applies.
-            Assert.DoesNotContain("model", keys);
+            // Every subagent's profile pins a Devin model: an unpinned custom subagent runs on
+            // the router-chosen default subagent model, not the parent's.
+            Assert.Equal(
+                ExpectedDevinModels[agent.ModelProfile],
+                RequireScalar(frontmatter, "model", agent.Name));
 
             SquadCapabilityProfile profile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
             IReadOnlyList<string> expectedTools =
@@ -228,8 +259,9 @@ public sealed class DevinRendererContractTests : IDisposable
             Encoding.UTF8.GetString(skillFile.Content.Span),
             conductor.Name);
 
-        Assert.Equal(ApprovedSkillKeys, FrontmatterKeys(frontmatter));
+        Assert.Equal(ApprovedLoweredSkillKeys, FrontmatterKeys(frontmatter));
         Assert.Equal(conductor.Name, RequireScalar(frontmatter, "name", conductor.Name));
+        Assert.Equal(UserOnlyTriggers, RequireSequence(frontmatter, "triggers", conductor.Name));
         Assert.Equal(NormalizeBody(conductor.InstructionBody), body);
 
         foreach (SquadResource resource in conductor.Resources)
@@ -243,6 +275,12 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_SkillsNeverCarryToolOrPermissionKeys()
     {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        HashSet<string> loweredIdentities = source.Agents
+            .Where(a => a.Invocation == SquadInvocation.Primary)
+            .Select(a => a.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -256,7 +294,9 @@ public sealed class DevinRendererContractTests : IDisposable
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(
                 Encoding.UTF8.GetString(skill.Content.Span),
                 skill.RelativePath);
-            Assert.Equal(ApprovedSkillKeys, FrontmatterKeys(frontmatter));
+            Assert.Equal(
+                loweredIdentities.Contains(skill.RelativePath.Split('/')[2]) ? ApprovedLoweredSkillKeys : ApprovedSkillKeys,
+                FrontmatterKeys(frontmatter));
         }
     }
 
@@ -342,6 +382,7 @@ public sealed class DevinRendererContractTests : IDisposable
             Assert.Contains("exec", record.Details, StringComparison.Ordinal);
             Assert.Contains("edit", record.Details, StringComparison.Ordinal);
             Assert.Contains("write", record.Details, StringComparison.Ordinal);
+            Assert.Contains("apply_patch", record.Details, StringComparison.Ordinal);
         }
     }
 
@@ -417,6 +458,61 @@ public sealed class DevinRendererContractTests : IDisposable
             Encoding.UTF8.GetString(inherited.Content.Span),
             DevinModelOverrideFixture.InheritAgentName);
         Assert.DoesNotContain("model", FrontmatterKeys(inheritedFrontmatter));
+    }
+
+    /// <summary>
+    /// Every agent on a canonical model profile renders that profile's pinned Devin model, and
+    /// the orchestration profile — held only by the conductor, which lowers to a skill that runs
+    /// on the session's model — renders none.
+    /// </summary>
+    [Theory]
+    [InlineData("deep-planning", "claude-opus-5-5-high")]
+    [InlineData("fast", "deepseek-v4-1-flash-high")]
+    [InlineData("general", "swe-2-high")]
+    [InlineData("reviewer", "grok-4-7-high")]
+    public async Task RenderAsync_Devin_CanonicalProfilesEmitTheirPinnedModel(
+        string profileName,
+        string expectedModel)
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent[] agents = source.Agents
+            .Where(a => a.Invocation == SquadInvocation.Subagent &&
+                string.Equals(a.ModelProfile, profileName, StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(agents);
+
+        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in agents)
+        {
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".devin/agents/{agent.Name}/AGENT.md");
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                agent.Name);
+            Assert.Equal(expectedModel, RequireScalar(frontmatter, "model", agent.Name));
+        }
+    }
+
+    [Fact]
+    public async Task RenderAsync_Devin_OrchestrationProfileEmitsNoModel()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent conductor = Assert.Single(source.Agents, a => a.Invocation == SquadInvocation.Primary);
+        Assert.Equal("orchestration", conductor.ModelProfile);
+
+        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile skillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".devin/skills/{conductor.Name}/SKILL.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(skillFile.Content.Span),
+            conductor.Name);
+        Assert.DoesNotContain("model", FrontmatterKeys(frontmatter));
     }
 
     [Fact]
@@ -537,15 +633,15 @@ public sealed class DevinRendererContractTests : IDisposable
 }
 
 /// <summary>
-/// Copies the real <c>products/kyber-squad</c> corpus and adds a <c>devin:</c> harness
-/// override to one model profile and an explicit <c>devin: inherit</c> to another, so both
-/// branches of model resolution are observable without hand-authoring a minimal corpus.
+/// Copies the real <c>products/kyber-squad</c> corpus and sets one model profile's
+/// <c>devin:</c> value to a different model and another's to an explicit <c>inherit</c>, so
+/// both branches of model resolution are observable without hand-authoring a minimal corpus.
 /// </summary>
 internal sealed class DevinModelOverrideFixture : IDisposable
 {
     internal const string OverriddenProfile = "general";
     internal const string OverriddenAgentName = "dal-dev";
-    internal const string OverrideModel = "swe-1.6";
+    internal const string OverrideModel = "swe-1-6";
     internal const string InheritProfile = "fast";
     internal const string InheritAgentName = "csharp-dev";
 
@@ -566,8 +662,8 @@ internal sealed class DevinModelOverrideFixture : IDisposable
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
         string original = File.ReadAllText(modelsPath).Replace("\r\n", "\n", StringComparison.Ordinal);
-        string mutated = AppendHarnessValue(original, OverriddenProfile, OverrideModel);
-        mutated = AppendHarnessValue(mutated, InheritProfile, "inherit");
+        string mutated = SetHarnessValue(original, OverriddenProfile, OverrideModel);
+        mutated = SetHarnessValue(mutated, InheritProfile, "inherit");
 
         File.WriteAllText(modelsPath, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         return fixture;
@@ -575,15 +671,26 @@ internal sealed class DevinModelOverrideFixture : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
-    private static string AppendHarnessValue(string content, string profileName, string value)
+    /// <summary>
+    /// Replaces the profile's <c>devin:</c> line, or adds one after <c>default</c> when the
+    /// profile has none, so the fixture keeps working whichever way the corpus pins Devin.
+    /// </summary>
+    private static string SetHarnessValue(string content, string profileName, string value)
     {
         string header = $"  {profileName}:\n    default: inherit\n";
-        int index = content.IndexOf(header, StringComparison.Ordinal);
-        if (index < 0)
+        int start = content.IndexOf(header, StringComparison.Ordinal);
+        if (start < 0)
         {
             throw new InvalidOperationException($"Profile '{profileName}' not found in models.yml.");
         }
 
-        return content.Insert(index + header.Length, $"    devin: {value}\n");
+        Match next = Regex.Match(content[(start + header.Length)..], @"^  \S", RegexOptions.Multiline);
+        int end = next.Success ? start + header.Length + next.Index : content.Length;
+        string block = content[start..end];
+        string replaced = Regex.IsMatch(block, @"^    devin: ", RegexOptions.Multiline)
+            ? Regex.Replace(block, @"^    devin: .*$", $"    devin: {value}", RegexOptions.Multiline)
+            : block.Insert(header.Length, $"    devin: {value}\n");
+
+        return string.Concat(content.AsSpan(0, start), replaced, content.AsSpan(end));
     }
 }

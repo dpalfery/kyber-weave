@@ -88,6 +88,7 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "kilo", "glm5.3")]
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
     [InlineData("deep-planning", "pi", "zai/glm-5.3[thinking=high]")]
+    [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
     [InlineData("fast", "claude", "haiku")]
     [InlineData("fast", "codex", "gpt-5.6-luna")]
     [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
@@ -95,6 +96,7 @@ public sealed class SquadSourceTests
     [InlineData("fast", "kilo", "spark1.3 contributor")]
     [InlineData("fast", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("fast", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=low]")]
+    [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
     [InlineData("general", "claude", "haiku")]
     [InlineData("general", "codex", "gpt-5.6-terra")]
     [InlineData("general", "copilot", "Grok 4.6 (copilot)")]
@@ -102,6 +104,7 @@ public sealed class SquadSourceTests
     [InlineData("general", "kilo", "muse-spark1.3 contributor")]
     [InlineData("general", "opencode", "opencode/muse-spark-1.3-contributor-free")]
     [InlineData("general", "pi", "opencode/muse-spark-1.3-contributor-free[thinking=medium]")]
+    [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
     [InlineData("reviewer", "codex", "gpt-5.6-terra")]
     [InlineData("reviewer", "copilot", "Kimi K2.7 Code (copilot)")]
@@ -109,10 +112,12 @@ public sealed class SquadSourceTests
     [InlineData("reviewer", "kilo", "kimi k2.7 code")]
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
     [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
+    [InlineData("reviewer", "devin", "grok-4-7-high")]
     [InlineData("orchestration", "claude", "sonnet")]
     [InlineData("orchestration", "kilo", "inherit")]
     [InlineData("orchestration", "opencode", "opencode/big-pickle")]
     [InlineData("orchestration", "pi", "inherit")]
+    [InlineData("orchestration", "devin", "inherit")]
     public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);

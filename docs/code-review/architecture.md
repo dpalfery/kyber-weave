@@ -388,7 +388,7 @@ and the usual cause needs a person.
 
 ## Current limitations
 
-All twelve declared targets have a registered renderer. On the eleven native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only. On `devin` a subagent cannot delegate, so `code-reviewer` applies each lens itself rather than fanning out the council — see
+All twelve declared targets have a registered renderer. On the eleven native targets these permissions lower to their native representations and are enforced; `warp` is a fallback target whose deployed skills carry no capability enforcement, so there the council and the narrowing are instruction-only. On `devin` a subagent cannot delegate, so `code-reviewer` applies each lens itself, one at a time, runs the refutation pass itself, and says in its report that the council ran in-process, which is weaker evidence than independent seats — see
 [rendering](../kyber-squad/architecture.md#8-rendering).
 
 There is no cost measurement and no per-repository ceiling yet. The adversarial confirmation
