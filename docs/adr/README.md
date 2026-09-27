@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-23
+last-reviewed: 2026-09-26
 ---
 
 # Architecture decision records
@@ -39,6 +39,7 @@ a new ADR that supersedes the old one.
 | [0021](0021-zcode-command-lowering-and-resource-relocation.md) | [ZCode Command Lowering, Resource Relocation, and the Inverted Empty Tool List](0021-zcode-command-lowering-and-resource-relocation.md) | Accepted | 2026-09-21 | ZCode's conductor lowers to `/conductor`; agent resources move under `.zcode/skills/` with rewritten links because the agent and command roots are scanned recursively; `tools: []` means inherit-everything, so an empty grant fails the render closed; and MCP is granted by enumerated tool name, gated by `squad doctor`. |
 | [0022](0022-antigravity-native-agents.md) | [Native per-agent Antigravity rendering and cross-target capability-not-isolable degradation](0022-antigravity-native-agents.md) | Accepted | 2026-09-23 | Antigravity reclassified from fallback role-skill lowering to native `.agents/agents/<name>/agent.md` alongside canonical skills; shell execution implies file-write via redirection, recorded cross-target as `capability-not-isolable`; and unenforceable delegates-to rosters record `permission-not-expressible`. |
 | [0023](0023-kyberdash-report-model-and-tray-ownership.md) | [One KyberDash Report Model, Rust-Side HTTP, and the Tray's Ownership of Server, Refresh and Receiver](0023-kyberdash-report-model-and-tray-ownership.md) | Accepted | 2026-09-24 | Every surface renders one `ContextReport`; the tray's Rust core does all HTTP; the tray owns the web server, scheduled refresh and receiver; a held refresh lock exits 3. Supersedes only ADR 0016's refresh-button sentence. |
+| [0024](0024-squad-global-receipt-layout-marker.md) | [An Explicit Layout Marker on Global Squad Receipts, with Legacy Single-Root Recovery](0024-squad-global-receipt-layout-marker.md) | Accepted | 2026-09-26 | Global receipts are written as `kyber-squad.receipt/v2` with a required `layout` (`single-root` or `per-target-roots`) while project receipts stay v1; a v1 Global receipt is classified from its own paths, never the disk; legacy single-root receipts can be checked with `status` and removed with `uninstall`, and `update` and same-target `install` refuse them before any download. |
 
 ## Writing one
 

@@ -143,9 +143,10 @@ fi
 
 # ------------------------------------------------------------------ stage "from"
 
-# The "from" binaries only need to exist and be runnable; how they arrived does not
-# affect the failure under test, which is a running image replacing itself. Copying
-# sidesteps install.sh, which is HTTPS-only and cannot read the local server.
+# --from installed means the binaries already on this machine, so it copies.
+# working and a git ref are not on the machine; those wait until the loopback
+# server is listening and then go through install.sh. The copy used to be the
+# only option because the installer refused anything but https://github.com.
 stage_from_directory() {
     source_dir="$1"
     [ -x "${source_dir}/kyber-weave" ] || die "no kyber-weave in ${source_dir}"
@@ -155,9 +156,28 @@ stage_from_directory() {
     fi
     chmod 755 "${BIN}"/kyber-weave*
     xattr -d com.apple.quarantine "${BIN}"/kyber-weave* 2>/dev/null || true
+    log "copied the binaries already on this machine from ${source_dir}"
 }
 
+# Requires KYBER_WEAVE_RELEASE_ORIGIN in the environment. install.sh is a
+# child process, so the export at server start is what points it at loopback;
+# without that it still targets github.com.
 stage_from_release_tree() {
+    version="$1"
+    target="$2"
+    log "staging '${FROM}' by install.sh --install-dir ${target} --version ${version}"
+    "${REPO_ROOT}/scripts/install.sh" --install-dir "$target" --version "$version"
+    if [ "$FROM" = "working" ]; then
+        log "install.sh staged the working from binaries"
+    else
+        log "install.sh staged the git-ref from binaries"
+    fi
+}
+
+# The floor case starts from the published "to" binaries. Those are a fixture,
+# not a from-install: a version above the KyberDash floor makes install.sh
+# fetch kyberdash, and a --no-kyberdash publish has no such asset.
+unpack_published_binaries() {
     tag="$1"
     target="$2"
     for binary in kyber-weave kyber-weave-mcp; do
@@ -170,7 +190,8 @@ stage_from_release_tree() {
 }
 
 # The "from" release doubles as the below-floor release, so it is built without
-# KyberDash whichever source it comes from.
+# KyberDash whichever source it comes from. Installing it into $BIN happens
+# after the server is listening, except the copy below.
 case "$FROM" in
     installed)
         install_dir="${KYBER_WEAVE_INSTALL_DIR:-${HOME}/.local/bin}"
@@ -182,33 +203,19 @@ case "$FROM" in
             --version "$FLOOR_VERSION" --out "$RELEASE_TREE" --rid "$RID" --no-squad --no-kyberdash
         ;;
     working)
-        log "staging 'from' binaries from the working tree (same code as 'to')"
+        log "publishing 'from' binaries from the working tree (same code as 'to')"
         FROM_VERSION="$FLOOR_VERSION"
         "${REPO_ROOT}/scripts/release-local.sh" \
             --version "$FROM_VERSION" --out "$RELEASE_TREE" --rid "$RID" --no-squad --no-kyberdash
-        stage_from_release_tree "v${FROM_VERSION}" "$BIN"
         ;;
     *)
-        log "staging 'from' binaries built at ${FROM}"
+        log "publishing 'from' binaries built at ${FROM}"
         FROM_VERSION="$FLOOR_VERSION"
         "${REPO_ROOT}/scripts/release-local.sh" \
             --version "$FROM_VERSION" --out "$RELEASE_TREE" --rid "$RID" \
             --ref "$FROM" --no-squad --no-kyberdash
-        stage_from_release_tree "v${FROM_VERSION}" "$BIN"
         ;;
 esac
-
-# Kept pristine: the self-update below replaces what is in $BIN, and every KyberDash
-# case starts again from these.
-cp -p "${BIN}"/kyber-weave* "$FROM_BIN/"
-stage_from_release_tree "$TO_TAG" "$TO_BIN"
-
-FROM_REPORTED="$("${BIN}/kyber-weave" --version 2>&1 || true)"
-log "from: ${FROM_REPORTED}  ->  to: kyber-weave ${TO_VERSION}"
-
-if [ "$FROM_REPORTED" = "kyber-weave ${TO_VERSION}" ]; then
-    die "'from' and 'to' are both ${TO_VERSION}; update would short-circuit. Pass --to a different version."
-fi
 
 # ------------------------------------------------------------------- serve local
 
@@ -296,6 +303,28 @@ export KYBER_WEAVE_RELEASE_ORIGIN="$ORIGIN"
 # in a passing run, rather than as a flake with nothing to compare against.
 SERVER_READY_SECONDS=$(( $(date +%s) - SERVER_STARTED_AT ))
 log "serving ${RELEASE_TREE} at ${ORIGIN} (ready in ${SERVER_READY_SECONDS}s of ${SERVER_START_TIMEOUT:-60}s)"
+
+# working and a git ref are staged only after the export above. install.sh
+# reads KYBER_WEAVE_RELEASE_ORIGIN from the environment; exporting it in this
+# process is what makes the child installer use the loopback server.
+case "$FROM" in
+    installed) ;;
+    *)
+        stage_from_release_tree "$FROM_VERSION" "$BIN"
+        ;;
+esac
+
+# Kept pristine: the self-update below replaces what is in $BIN, and every KyberDash
+# case starts again from these.
+cp -p "${BIN}"/kyber-weave* "$FROM_BIN/"
+unpack_published_binaries "$TO_TAG" "$TO_BIN"
+
+FROM_REPORTED="$("${BIN}/kyber-weave" --version 2>&1 || true)"
+log "from: ${FROM_REPORTED}  ->  to: kyber-weave ${TO_VERSION}"
+
+if [ "$FROM_REPORTED" = "kyber-weave ${TO_VERSION}" ]; then
+    die "'from' and 'to' are both ${TO_VERSION}; update would short-circuit. Pass --to a different version."
+fi
 
 # ------------------------------------------------------------------ self-update
 
