@@ -430,7 +430,9 @@ and validates.
   `allowed-tools` and `permissions.allow` pre-approve rather than restrict, so no skill carries
   either. `permissions.deny` could narrow the lowered conductor, but Devin does not document
   whether it reaches the subagents the conductor dispatches — which need exactly the tools the
-  conductor is denied — so it is withheld pending a real-install check. Devin also loads
+  conductor is denied — so it is withheld pending a real-install check. The lowered conductor
+  does carry `triggers: [user]`: Devin Cloud discovers the same skills but loads no custom
+  subagents, so it must never start the conductor by description match. Devin also loads
   `.agents/` natively and imports `.claude/`, `.github/skills/`, and `.windsurf/skills/` by
   default, so `squad doctor` warns when a workspace would load a Squad identity twice.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both

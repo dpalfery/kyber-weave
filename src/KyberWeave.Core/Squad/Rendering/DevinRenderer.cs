@@ -120,10 +120,15 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// recording <c>role-skill-fallback</c> and <c>permission-not-expressible</c>; <c>omit</c> emits
 /// nothing and records <c>omitted</c>. As on Pi, agents and skills are separate namespaces, so a
 /// canonical skill already occupying the lowered identity fails the render rather than taking
-/// a <c>role-</c> prefix.
+/// a <c>role-</c> prefix. The lowered skill carries <c>triggers: [user]</c>, so Devin runs it
+/// only when the operator asks for it. That follows <see cref="ZCodeRenderer"/>'s reasoning for
+/// a slash command — an orchestrator that seizes a turn by description match is worse than one
+/// started on purpose — and it matters more on Devin, because Devin Cloud discovers the same
+/// <c>.devin/skills/</c> tree but loads no custom subagents ("CLI/Desktop-only today"), so an
+/// auto-invoked conductor there would route work to agents that do not exist.
 /// </para>
 /// <para>
-/// <b>Skills carry only <c>name</c> and <c>description</c>.</b> On a skill,
+/// <b>Skills carry no tool keys.</b> On a skill,
 /// <c>allowed-tools</c> auto-approves the listed tools rather than restricting them, and
 /// <c>permissions.allow</c> does the same, so neither is ever emitted. <c>permissions.deny</c>
 /// is the documented way to block a tool while an inline skill runs, and would narrow a lowered
@@ -162,6 +167,12 @@ public sealed class DevinRenderer : ISquadRenderer
         ("process.execute", ["exec", "get_output", "write_to_process", "kill_shell"]),
         ("network.read", ["webfetch", "web_search"]),
     ];
+
+    /// <summary>
+    /// The lowered primary agent's <c>triggers</c>: the operator may start it, the model may not
+    /// (see the class remarks).
+    /// </summary>
+    private static readonly string[] UserOnlyTriggers = ["user"];
 
     /// <summary>Granted on every subagent regardless of capability profile.</summary>
     private static readonly string[] UngovernedTools = ["todo_write", "skill"];
@@ -266,6 +277,7 @@ public sealed class DevinRenderer : ISquadRenderer
                     agent.Name,
                     agent.Description,
                     agent.InstructionBody,
+                    userInvokedOnly: true,
                     request.Scope);
                 files.Add(principal);
                 SquadResourceProjection.Append(files, principal, agent.Resources);
@@ -309,6 +321,7 @@ public sealed class DevinRenderer : ISquadRenderer
                 skill.Name,
                 skill.Description,
                 skill.InstructionBody,
+                userInvokedOnly: false,
                 request.Scope);
             files.Add(principal);
             SquadResourceProjection.Append(files, principal, skill.Resources);
@@ -354,6 +367,7 @@ public sealed class DevinRenderer : ISquadRenderer
         string name,
         string description,
         string instructionBody,
+        bool userInvokedOnly,
         SquadDeploymentScope scope)
     {
         Dictionary<string, object?> frontmatter = new(StringComparer.Ordinal)
@@ -361,6 +375,11 @@ public sealed class DevinRenderer : ISquadRenderer
             ["name"] = name,
             ["description"] = CollapseToSingleLine(description)
         };
+
+        if (userInvokedOnly)
+        {
+            frontmatter["triggers"] = UserOnlyTriggers;
+        }
 
         string content;
         lock (SerializerLock)

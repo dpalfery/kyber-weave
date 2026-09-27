@@ -59,6 +59,12 @@ And Devin reads more than its own tree: `.agents/agents/` and `.agents/skills/` 
 default `.claude/skills/`, `.claude/commands/`, `.github/skills/`, and `.windsurf/skills/`
 through `read_config_from`.
 
+Devin Cloud — the hosted agent, also reached through `devin --cloud` and `/handoff` — shares
+the skill format but not the subagent one. It discovers `SKILL.md` files from `.devin/skills/`,
+`.agents/skills/`, `.claude/skills/`, `.github/skills/`, `.cognition/skills/`, and
+`.windsurf/skills/`, and honours a skill's `triggers`, but custom subagents are "CLI/Desktop-only
+today". Cloud also offers fewer models than Desktop.
+
 ## Decision
 
 1. **Agents render in the directory layout under `.devin/` only.** Each subagent is
@@ -76,7 +82,8 @@ through `read_config_from`.
    `permissions.allow`, because those pre-approve. `permissions.deny` is withheld as well — see
    the alternatives — so the lowered conductor's capability decisions and its `delegates-to`
    roster are recorded as `permission-not-expressible`, and its orchestrator boundary is
-   instruction-only, as it is on Pi.
+   instruction-only, as it is on Pi. The lowered skill does carry `triggers: [user]`, so it
+   runs only when the operator starts it — see decision 7.
 
 3. **Every tool that performs a granted capability is granted.** `filesystem.write` lowers to
    `edit`, `write`, `apply_patch`, and `notebook_edit`; `filesystem.read` to `read` and
@@ -105,21 +112,33 @@ through `read_config_from`.
 
    | Profile | Model | Why |
    |---|---|---|
-   | `deep-planning` | `claude-opus-5-5-medium` | Frontier reasoning at low volume; matches the Claude target's `opus`, so plans compare across the two |
+   | `deep-planning` | `claude-opus-5-5-high` | Frontier reasoning at high effort; low volume, so the effort is affordable where it shapes everything downstream. Matches the Claude target's `opus` |
    | `general` | `swe-2-high` | Cognition's current coding model, and Devin's own implementation sidekick in Fusion |
-   | `fast` | `swe-1-7-medium` | The highest-volume tier: $0.50 / $2.50 per million tokens (enterprise), against SWE-2's $3 / $15 list price after 2026-10-15 |
-   | `reviewer` | `claude-sonnet-5-medium` | A different vendor from the implementers; matches the Claude target's `sonnet` |
+   | `fast` | `deepseek-v4-1-flash-high` | The highest-volume tier, so price per token dominates; the owner's judgement is that V4.1 Flash is both far cheaper and stronger than the alternatives here |
+   | `reviewer` | `grok-4-7-high` | A third vendor: the implementers are DeepSeek and Cognition and the planner is Anthropic, so review is independent of both |
 
-   The shape is Fusion's — a frontier model plans and reviews, a cost-efficient coding model
-   implements — expressed through Squad's roles. `orchestration` is `inherit`: the conductor is
-   a skill in the main session and runs on the model the operator picked. Prices and
-   multipliers are those published on 2026-09-27.
+   Each role family runs on a different vendor, so a review never grades its own model's
+   work. `orchestration` is `inherit`: the conductor is a skill in the main session and runs on
+   the model the operator picked. `claude-opus-5-5-high` and `swe-2-high` are in Devin's
+   published model list as read on 2026-09-27; `grok-4-7-high` and `deepseek-v4-1-flash-high`
+   follow its naming (`grok-4-6-high`, `deepseek-v4-flash-high`) but were not yet listed, and
+   were chosen from the in-app picker.
 
 6. **Duplicate loading is reported, not prevented.** `squad doctor` warns, per tree, when a
    workspace holds a Squad identity under `.devin/` and under a tree Devin also loads, naming
    the `read_config_from` switch for an imported tree and "pick one target" for `.agents/`. The
    renderer does not write `.devin/config.json`, because the `claude` import also carries
    `CLAUDE.md` rules and Claude's MCP servers, and giving those up is the operator's trade.
+
+7. **The conductor starts only when asked, because Devin Cloud has no roster.** Cloud sessions
+   discover skills from `.devin/skills/` and five other roots, and invoke them by description
+   match, but load no custom subagents — Devin documents those as CLI and Desktop only. An
+   auto-invoked conductor in Cloud would route work to agents that do not exist. The lowered
+   skill therefore carries `triggers: [user]`, which both Cloud and the CLI honour, and the
+   operator starts it with `/conductor`. This is ZCode's reasoning
+   ([ADR 0021](0021-zcode-command-lowering-and-resource-relocation.md)) reached by a different
+   route. No model fallback is needed for Cloud: the pins live only in subagent profiles, which
+   Cloud never reads, and skills carry no `model`.
 
 ## Alternatives rejected
 
@@ -133,9 +152,14 @@ through `read_config_from`.
 - **Fusion or Adaptive as a subagent model.** Fusion is chosen in an interactive picker, not by
   id, and Adaptive routes per request — possibly to a GPT model, reintroducing the tool
   variance decision 3 exists for — so neither pins anything.
-- **GPT models for write-capable profiles.** Cheaper per token (`gpt-6-luna-medium` at
+- **GPT models for write-capable profiles.** Cheap per token (`gpt-6-luna-medium` at
   $0.10 / $0.50), and viable once decision 3's `apply_patch` grant is verified on a real
-  install; not chosen as the default while that is unverified.
+  install; not chosen while that is unverified.
+- **A Claude reviewer.** `claude-sonnet-5-medium` would match the Claude target, but it shares a
+  vendor with the planner; `grok-4-7-high` keeps every role family on a different vendor.
+- **Per-surface model pins for Cloud.** Devin Cloud offers fewer models than Desktop, but a
+  profile file serves both and Cloud does not load it today, so there is nothing to fall back
+  from yet.
 - **Emitting `allowed-tools` on the conductor skill.** It reads like a restriction and is the
   opposite: it pre-approves.
 - **Emitting the conductor's denials as `permissions.deny`.** It would enforce the orchestrator
@@ -152,7 +176,10 @@ through `read_config_from`.
 - The conductor's orchestrator boundary is instruction-only on Devin until the
   `permissions.deny` question is settled on a real install.
 - The model table is an owner decision that ages. When Devin retires an id, `models.yml` and
-  the renderer contract test change together.
+  the renderer contract test change together. Two ids were pinned ahead of Devin's published
+  list, so `devin doctor` and `/session-stats` after install are the confirmation.
+- If Devin brings custom subagents to Cloud, a Desktop-only model id could be unavailable
+  there; that is the point at which a per-surface fallback would be needed.
 - Several readings remain to confirm on a real install: MCP names in `allowed-tools`, the
   `apply_patch` grant under `agent.codex_tools`, how Devin orders two same-named definitions,
   and `XDG_CONFIG_HOME` on macOS.

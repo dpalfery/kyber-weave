@@ -71,15 +71,24 @@ public sealed class DevinRendererContractTests : IDisposable
     private static readonly string[] ApprovedSkillKeys = ["name", "description"];
 
     /// <summary>
+    /// The lowered primary agent adds <c>triggers: [user]</c>: Devin Cloud discovers the same
+    /// skill tree but loads no custom subagents, so the conductor must never start on a
+    /// description match.
+    /// </summary>
+    private static readonly string[] ApprovedLoweredSkillKeys = ["name", "description", "triggers"];
+
+    private static readonly string[] UserOnlyTriggers = ["user"];
+
+    /// <summary>
     /// The owner-approved Devin model per canonical model profile (ADR 0025). Exact model ids,
     /// effort included, rather than family aliases that float to a newer model and price.
     /// </summary>
     private static readonly Dictionary<string, string> ExpectedDevinModels = new(StringComparer.Ordinal)
     {
-        ["deep-planning"] = "claude-opus-5-5-medium",
-        ["fast"] = "swe-1-7-medium",
+        ["deep-planning"] = "claude-opus-5-5-high",
+        ["fast"] = "deepseek-v4-1-flash-high",
         ["general"] = "swe-2-high",
-        ["reviewer"] = "claude-sonnet-5-medium"
+        ["reviewer"] = "grok-4-7-high"
     };
 
     public void Dispose()
@@ -250,8 +259,9 @@ public sealed class DevinRendererContractTests : IDisposable
             Encoding.UTF8.GetString(skillFile.Content.Span),
             conductor.Name);
 
-        Assert.Equal(ApprovedSkillKeys, FrontmatterKeys(frontmatter));
+        Assert.Equal(ApprovedLoweredSkillKeys, FrontmatterKeys(frontmatter));
         Assert.Equal(conductor.Name, RequireScalar(frontmatter, "name", conductor.Name));
+        Assert.Equal(UserOnlyTriggers, RequireSequence(frontmatter, "triggers", conductor.Name));
         Assert.Equal(NormalizeBody(conductor.InstructionBody), body);
 
         foreach (SquadResource resource in conductor.Resources)
@@ -265,6 +275,12 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_SkillsNeverCarryToolOrPermissionKeys()
     {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        HashSet<string> loweredIdentities = source.Agents
+            .Where(a => a.Invocation == SquadInvocation.Primary)
+            .Select(a => a.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -278,7 +294,9 @@ public sealed class DevinRendererContractTests : IDisposable
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(
                 Encoding.UTF8.GetString(skill.Content.Span),
                 skill.RelativePath);
-            Assert.Equal(ApprovedSkillKeys, FrontmatterKeys(frontmatter));
+            Assert.Equal(
+                loweredIdentities.Contains(skill.RelativePath.Split('/')[2]) ? ApprovedLoweredSkillKeys : ApprovedSkillKeys,
+                FrontmatterKeys(frontmatter));
         }
     }
 
@@ -448,10 +466,10 @@ public sealed class DevinRendererContractTests : IDisposable
     /// on the session's model — renders none.
     /// </summary>
     [Theory]
-    [InlineData("deep-planning", "claude-opus-5-5-medium")]
-    [InlineData("fast", "swe-1-7-medium")]
+    [InlineData("deep-planning", "claude-opus-5-5-high")]
+    [InlineData("fast", "deepseek-v4-1-flash-high")]
     [InlineData("general", "swe-2-high")]
-    [InlineData("reviewer", "claude-sonnet-5-medium")]
+    [InlineData("reviewer", "grok-4-7-high")]
     public async Task RenderAsync_Devin_CanonicalProfilesEmitTheirPinnedModel(
         string profileName,
         string expectedModel)

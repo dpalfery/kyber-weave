@@ -261,15 +261,25 @@ frontier model:
 
 | Model profile | Devin model | Agents |
 |---|---|---|
-| `deep-planning` | `claude-opus-5-5-medium` | architect, bug-crusher-investigator, sql-database-architect |
+| `deep-planning` | `claude-opus-5-5-high` | architect, bug-crusher-investigator, sql-database-architect |
 | `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
-| `fast` | `swe-1-7-medium` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
-| `reviewer` | `claude-sonnet-5-medium` | code-reviewer, review-lens, review-triage, task-reviewer |
+| `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
+| `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage, task-reviewer |
 
 The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
 recommendation there. A model outside your organization's allowlist is an administrator
-change, not a Squad one. `/session-stats` in a session lists cost by model, which is how to
-confirm a subagent ran on its pin.
+change, not a Squad one. `devin doctor` flags a profile whose frontmatter Devin rejects, and
+`/session-stats` in a session lists cost by model, which is how to confirm a subagent ran on
+its pin — worth doing after install, because the Grok 4.7 and DeepSeek V4.1 Flash ids follow
+Devin's naming but were not yet in its published model list when they were pinned.
+
+**Devin Cloud**: Cloud sessions — including `devin --cloud` and a `/handoff` from a local
+session — load no custom subagents; Devin documents them as CLI and Desktop only. The model
+pins therefore never apply there. Cloud does discover skills, from `.devin/skills/` and five
+other roots including `.claude/skills/`, `.github/skills/`, and `.agents/skills/`, so the Squad
+skills are visible in Cloud while the Squad agents are not. The `conductor` skill is rendered
+with `triggers: [user]` so Devin never starts it on its own; start it yourself in Desktop, and
+do not invoke it in Cloud, where there is no roster for it to dispatch.
 
 **Loading the same agent twice**: besides `.devin/`, Devin loads `.agents/agents/` and
 `.agents/skills/` natively — exactly where the `antigravity` target writes — and by default
@@ -294,8 +304,8 @@ keep loading after installing `devin`. Squad never writes or removes anything un
 `.windsurf/`; a skill there that shares a Squad skill's name is one of the duplicates above.
 
 **Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
-deployed as the skill `conductor` and runs in the main Devin Local session, which dispatches the
-specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
+deployed as the skill `conductor` — invoke it as `/conductor` — and runs in the main Devin Local
+session, which dispatches the specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
 or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot delegate further
 on Devin: Devin cannot limit nested delegation to a roster, so Squad
 does not enable it. `code-reviewer` therefore applies each review lens itself and says in its
