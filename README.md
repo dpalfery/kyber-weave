@@ -163,7 +163,7 @@ leasing (`kyber-weave-squad-<root-key>`), same-filesystem no-overwrite leaf clai
 and compare-and-restore recovery that safely preserves local operator modifications.
 
 ```bash
-kyber-weave squad install                    # auto-detects targets across 10 harnesses
+kyber-weave squad install                    # auto-detects targets across 12 harnesses
 kyber-weave squad update                     # updates deployments while preserving local edits
 kyber-weave squad status                     # verifies file integrity and reports drift
 kyber-weave squad doctor                     # checks toolchain prerequisites

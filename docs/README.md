@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-27
 ---
 
 # Kyber-Weave documentation
@@ -36,7 +36,7 @@ correct in a repository that arranges its documentation differently.
 
 - [Context Hygiene](context-hygiene/README.md) — Why and how to govern agent prompts and skills across coding harnesses
 - [DocGraph](docgraph/README.md) — Why and how to turn markdown docs into a queryable in-memory graph joined to live code
-- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a ten-target harness catalog; ten targets render today with rollback
+- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a twelve-target harness catalog; twelve targets render today with rollback
 - [KyberDash](dash/README.md) — Why and how to observe and tune agent context with local .NET Aspire OTEL telemetry
 
 ---
@@ -118,8 +118,8 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 Unified multi-harness deployment and lifecycle control plane for 21 canonical agents and
 24 skills, each owner projecting a validated resource closure beside its rendered principal.
-The product declares eleven harness targets; all eleven are implemented and registered today
-(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, and `zcode`).
+The product declares twelve harness targets; all twelve are implemented and registered today
+(`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.
 
 | Page | Covers |
