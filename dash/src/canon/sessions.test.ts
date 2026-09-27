@@ -2,12 +2,13 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
+import { tokens, turn } from './fixtures/records.js'
 import { getMeasurability } from './measurability.js'
 import { CanonStore } from './store.js'
 import { activeTokenizer, cacheKey, approximateO200kBase } from './tokens.js'
 import { buildSessionRow, buildSessions, mergeMeasurability } from './sessions.js'
 import type { AsadSessionPayload } from './sessions.js'
-import type { CanonicalRecord, ContentPart } from './types.js'
+import type { CanonicalRecord } from './types.js'
 
 type SessionPayloadView = AsadSessionPayload & {
   context: AsadSessionPayload['context'] & {
@@ -83,38 +84,6 @@ function expectJsonShape(
 // wire: that a stored record reaches `analyzeContext` with its server
 // attribution and harness-reported counts intact, and that the payload the
 // dashboard reads is the analysis output rather than a reconstruction of it.
-
-const tokens = (over: Partial<CanonicalRecord['tokens']> = {}) => ({
-  freshInput: 1000,
-  cacheRead: 0,
-  cacheCreation: 0,
-  output: 100,
-  reportedInput: 1000,
-  reportedOutput: 100,
-  ...over,
-})
-
-function turn(spanId: string, parts: ContentPart[], over: Partial<CanonicalRecord> = {}): CanonicalRecord {
-  return {
-    spanId,
-    traceId: 'trace-1',
-    parentSpanId: null,
-    source: 'antigravity',
-    harness: 'antigravity',
-    sessionId: 'sess-1',
-    name: 'llm_request',
-    op: 'llm.invoke',
-    kind: 'client',
-    timestamp: '2026-09-03T10:00:00.000Z',
-    durationMs: 100,
-    status: 'ok',
-    tokens: tokens(),
-    content: {},
-    parts,
-    cost: { basis: 'unknown', status: 'no_rate' },
-    ...over,
-  }
-}
 
 describe('buildSessionRow', () => {
   it('carries ground-truth MCP servers through to the per-server bands', () => {
