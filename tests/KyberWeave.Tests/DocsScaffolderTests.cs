@@ -872,7 +872,7 @@ public sealed class DocsScaffolderTests : IDisposable
     }
 
     /// <summary>
-    /// Initializing with kyberStandards enabled on a fresh repository creates all 10 rich
+    /// Initializing with kyberStandards enabled on a fresh repository creates all 11 rich
     /// coding standards from embedded templates, registers them in ontology.technologies
     /// and AGENTS.md Config Reg, and passes docs validation cleanly.
     /// </summary>
@@ -897,7 +897,7 @@ public sealed class DocsScaffolderTests : IDisposable
             Assert.Equal(expected, content);
         }
 
-        // .kyber-weave/kyber-weave.yml contains all 10 technologies under ontology.technologies
+        // .kyber-weave/kyber-weave.yml contains all 11 technologies under ontology.technologies
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
         Assert.Equal(
             KyberStandardsTemplates.All.OrderBy(t => t),
@@ -910,7 +910,7 @@ public sealed class DocsScaffolderTests : IDisposable
             Assert.Contains($"- {tech}", configYaml, StringComparison.Ordinal);
         }
 
-        // AGENTS.md Config Reg block has all 10 <{tech}-coding-standard> properties
+        // AGENTS.md Config Reg block has all 11 <{tech}-coding-standard> properties
         string agents = Read("AGENTS.md");
         foreach (string tech in KyberStandardsTemplates.All)
         {

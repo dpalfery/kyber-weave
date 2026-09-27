@@ -48,7 +48,7 @@ different trees. Comments and every other key survive the edit.
 
 Passing `--kyber-standards` scaffolds the 10 rich Kyber Squad coding standards templates
 under `<docs-root>/standards/`, merges their technologies into `ontology.technologies`
-in `.kyber-weave/kyber-weave.yml`, and registers all 10 `<{tech}-coding-standard>` properties
+in `.kyber-weave/kyber-weave.yml`, and registers all 11 `<{tech}-coding-standard>` properties
 in Config Reg.
 
 The same conservative rule applies to `.kyber-weave/.gitignore`: an effective `cache/`

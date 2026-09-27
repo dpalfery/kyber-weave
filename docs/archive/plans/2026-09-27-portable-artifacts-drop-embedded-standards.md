@@ -46,8 +46,11 @@ contract tests (golden hotshot fixture, agent-spec validation) are the regressio
 In:
 
 - Agents that write technology code: `csharp-dev`, `maui-dev`, `dal-dev`, `pulumi-dev`,
-  `python-dev`, `test-dev`, `react-dev`, `github-devops`, `sql-database-architect` — each
-  names its standard and carries the D1 behaviour.
+  `python-dev`, `test-dev`, `react-dev`, `github-devops`, `sql-database-architect`,
+  `tauri-dev` — each names its standard and carries the D1 behaviour.
+- A new `tauri` template receives `tauri-dev`'s project choices (version, layout, error
+  pattern, sidecar packaging and protocol, CSP, build commands); it is embedded and seeded
+  by `docs init --kyber-standards` like the other ten.
 - `github-devops` and `sql-database-architect`: reversible defaults move into the
   `github-actions` and `sql` templates. Platform facts and security floors stay.
 - The seven references under `products/kyber-squad/skills/code-review/references/`. The C#
@@ -59,7 +62,6 @@ In:
 
 Out:
 
-- `tauri-dev` — no Rust/Tauri template exists to receive its rules.
 - Automated template installation (D3).
 
 ## Tasks
@@ -87,4 +89,5 @@ Out:
 - Review: NEEDS_HUMAN (risk MEDIUM) — `review.policy.always-human` matches
   `products/kyber-squad/agents/**`. Content findings: the `ubuntu-latest` runner default was
   not migrated (fixed in the `github-actions` template) and one wrap miss (fixed).
-- Open: `tauri-dev` still embeds Rust/Tauri rules; it needs a template before they can move.
+- CodeRabbit flagged `tauri-dev` as still embedding rules; the user chose to migrate it in
+  this change. The `tauri` template and the eleventh embedded standard were added.

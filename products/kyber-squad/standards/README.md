@@ -2,7 +2,7 @@
 
 A starting standard per technology, for a repository adopting
 `<docs-root>/standards/<technology>/`. These are **templates, not governance**: `squad install`
-does not deploy them, and nothing reads one until a host adopts it — all ten at once with
+does not deploy them, and nothing reads one until a host adopts it — all eleven at once with
 `kyber-weave docs init . --kyber-standards`, or one at a time by hand, as below.
 
 ## Using one
@@ -40,8 +40,8 @@ for a reviewer ("check that…") rather than for an author ("do this"). Since
 declared standard; every rule they held lives here.
 
 The seven templates that match the seven review references are `csharp`, `react`, `python`,
-`sql`, `azure`, `pulumi`, and `github-actions`. `maui`, `data-access-layer`, and `test` are
-additional templates rewritten from agents rather than from a review reference. `pulumi` and
+`sql`, `azure`, `pulumi`, and `github-actions`. `maui`, `data-access-layer`, `test`, and
+`tauri` are additional templates rewritten from agents rather than from a review reference. `pulumi` and
 `python` were then rewritten from their agents so stack, packaging, environment, and
 quality-gate policy live in the template — those agents only name **<pulumi-coding-standard>**
 and **<python-coding-standard>**. `github-actions` and `sql` also carry the defaults the
