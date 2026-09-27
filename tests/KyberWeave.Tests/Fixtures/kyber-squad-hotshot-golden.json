@@ -225,7 +225,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "2fe9f41566f10639b97532b51b1bd8a01ae29b64a31b76d6ffb45c3654fff1a0",
+      "body_sha256": "3a41500cedc000c3f9efa043a2f4e6eaf6ff15540d3e9abb41e01c997803afd4",
       "file_sha256": "09cd65841fbb82e81060cbbccdc91c6aac7ee209a84b97e30799cc3281cbe146"
     },
     {
@@ -241,7 +241,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "03153aa8fc3ac5fa24d68ac81df675912d1b57fb1df24006277958ac3668bee7",
+      "body_sha256": "baba4b6e2b02cf1b227a888b31a19508ffd4361788d609d787d23c845b62985e",
       "file_sha256": "efbd8ed5a6f2f8342a184cf57cba08c3649dba0e736e980257101a1056f3079a"
     },
     {
@@ -273,7 +273,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "af12af51815171a44b021409f7f303dcda5f9de2cb64c48163132b69098cebad",
+      "body_sha256": "9ae22c08e55db63976145f441a51d834d66b0482cd4520bca33981d990d5a29b",
       "file_sha256": "52ed73aca2f79ad7f57ccaad94299fa96827f34c5e97133728b037aa3a6d2593"
     },
     {
@@ -289,7 +289,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "676ed30e147b4bde586be852a6768849b2a6f6128c3bcd57c831162af664721f",
+      "body_sha256": "3e2f539c18070714d125785a638208148599c897e9671a5ef93038394e8bd6b6",
       "file_sha256": "d275ca8508a007832e6c00bb77f38735f1f849ac4bd8eb7a554ee1b05e371a2f"
     },
     {
@@ -323,7 +323,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "59a44060f3a0ccdd426b4f22de7c6eb33f0be4dfc6bc50a0cd487b4fa656cbdc",
+      "body_sha256": "b313c44d855bf7a0da06a680ecea89b9a8b13599c80b09d63c11b6dbfb3b6ef9",
       "file_sha256": "968b2999eb8f998b8fc9863389ddca445661c8c444cecf079b3257dac9ae0040"
     },
     {
@@ -339,14 +339,14 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "a844c92006903f71a7a2b3103828e82ea813be23040f74b5c531cfef90946c9d",
+      "body_sha256": "234474ff1bd109e20505cba04fde73c702916b7d5b36b9b5cd32acb28ab744e8",
       "file_sha256": "f058efe4c9f5bd07ff6d908f539265eb5219a59806ac7db8b1be42525eefa944"
     },
     {
       "path": ".github/agents/react-dev.agent.md",
       "frontmatter": {
         "name": "react-dev",
-        "description": "Implements React UI: components, hooks, client-side state, MUI (Pigment CSS) styling, feature-slice structure. Use when the change is in a .tsx or .jsx file, whether the app runs in a browser or in a desktop WebView such as Tauri. Do not use when the UI is native/mobile, or when the change is the desktop core rather than the web layer.",
+        "description": "Implements React UI: components, hooks, client-side state, styling, and component structure as the host's React standard declares. Use when the change is in a .tsx or .jsx file, whether the app runs in a browser or in a desktop WebView such as Tauri. Do not use when the UI is native/mobile, or when the change is the desktop core rather than the web layer.",
         "model": "GPT-5.6 Luna (copilot)",
         "tools": ["vscode", "execute", "read", "codegraph/*", "kyber-weave/*", "context7/*", "edit", "search", "todo"],
         "user-invocable": false,
@@ -355,7 +355,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "16044bfd2892c80bc255455c0ad95ef69edfef534a39ca724d334e522904fa7d",
+      "body_sha256": "38e9dc5bfcb871a8f4c8e0d76de32590916e80d5ba0ec5795630753d691f5f8c",
       "file_sha256": "8c34dadd97cd379d7e7b03c172f297c89ba88d9a540c4d1f0ce43d4cb6018fdd"
     },
     {
@@ -419,7 +419,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "7c219d53a0c3c8238c64335fc34a53829e379b8586b899a98ae86116923172fb",
+      "body_sha256": "07709a461ac1e404d74c892f90299369c718bfe63bea947c6375e29be3936764",
       "file_sha256": "7310fbcad5e1d87b90c9c1d95a031931a028f9a486f8235e52347721e8f74ee6"
     },
     {
@@ -483,7 +483,7 @@
           "fallback": "role-skill"
         }
       },
-      "body_sha256": "09111459da6bde07c75687c7449ca5ccfb67b627a41bc4ac94e04690ef8ec210",
+      "body_sha256": "ed1e4cffe3fce3a7b0270213279f0ddb5dd149c62da4d6c74411fba533287524",
       "file_sha256": "b461f218e0645748eb5beec7675c3d5908191d6facf2cb19ac0338fdc638e548"
     }
   ],
@@ -493,7 +493,7 @@
     { "path": ".github/skills/azure-cli/SKILL.md", "file_sha256": "ce5c823e733d81da51dc48e665e447defc570908708fc48f997ae653aac0f115" },
     { "path": ".github/skills/azure-naming/SKILL.md", "file_sha256": "df13f0ac027bab01024c709638168da26276d5e8737270592355a86d309efb51" },
     { "path": ".github/skills/bug-crusher/SKILL.md", "file_sha256": "9e2a00d57f5915143561d239d38a8f1f6225f7210198fa8d9be44989e470b4b7" },
-    { "path": ".github/skills/code-review/SKILL.md", "file_sha256": "8d88b7b5597d0bf4dff65ac3b83f0ffd3f35000f84a442894003c905dfbca992" },
+    { "path": ".github/skills/code-review/SKILL.md", "file_sha256": "44924453fe0fcad566e7f9fde16d32846dbfd47aafc59b89ee6f6f63fecfc3d5" },
     { "path": ".github/skills/create-pull-request-github/SKILL.md", "file_sha256": "82a23b03e606903df330bb379288bc91c34daa6902ef7051d5050db657dd2db7" },
     { "path": ".github/skills/create-pull-request/SKILL.md", "file_sha256": "74b67dcb95548b62f214b3ba9597c142ea2dddb3728c3627a59ff152e47eeb71" },
     { "path": ".github/skills/csharp-dev/SKILL.md", "file_sha256": "b0236ec8b31ea62cf703e317e0c86a71513062cd9f0e86a42d58529a560064e4" },

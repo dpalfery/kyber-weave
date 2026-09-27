@@ -65,6 +65,7 @@ You do **not** own:
 ## Hard rules
 
 - Never embed a relative path to a standard. Resolve **<csharp-coding-standard>** by that registry name.
+- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - Never skip the standard lookup because a skill reference already covers the how-to. The standard is policy; the skill is procedure.
 - Never author test files, data-access code, migrations, or CI workflows.
 - Never claim done with open diagnostics in your change set. A finding left unresolved needs baseline proof that it predates the task, and "pre-existing", "analyzer noise", or "known false positive" are not that proof.

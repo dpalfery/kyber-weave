@@ -15,10 +15,10 @@ How CI workflows are written in this repository. Agents and skills resolve this 
 
 ## Authority & status
 
-When this standard is in `status: current`, what it says here outranks whatever defaults a
-portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
-template/proposal and does NOT override portable agent defaults until reviewed and promoted
-to `current`.
+When this standard is in `status: current`, it is the rule for this technology in this
+repository. Portable agents ship no built-in default to fall back on. While it is in
+`status: draft` it is a proposal: an agent that resolves it says so and asks a human whether
+to proceed on it, exactly as it does when no standard is declared.
 
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`.
@@ -67,6 +67,28 @@ gate that can be skipped by merging anyway is documentation, not a gate.
 
 Failing steps fail the job: no `continue-on-error` to make a red workflow green, and no
 disabled test without a linked issue and a date.
+
+- Pull-request workflows trigger on `pull_request` and run the tests and linters.
+- A declared coverage or quality threshold fails the build when it is missed.
+- An AI review bot's API key is a secret like any other, the bot runs without elevated
+  privileges, and its output is structured (JSON) so a gate can read it.
+
+## Deployment
+
+- **Build and deploy are separate jobs.** Build and test in one job; deploy depends on it and
+  runs only when it passed. Every path from a push to production goes through a test gate.
+- **Deploy secrets live in environment secrets**, not repository secrets, so they scope to the
+  environment that uses them. Mask any computed secret-like value with `::add-mask::`.
+- **Cloud sign-in is federated.** Authenticate to Azure with `azure/login` using OIDC
+  (`client-id`, `tenant-id`, `subscription-id`); push container images to the registry with the
+  same federated identity rather than a username and password.
+- **Production requires a named reviewer** in the GitHub environment's protection rules.
+- **Deploy jobs take a `concurrency` group per environment** without `cancel-in-progress`, so
+  two deployments to one environment never interleave and neither is abandoned half-applied.
+- **A deploy job is safe to re-run** against the same environment.
+- **Container images are multi-stage builds.**
+- **Test results and build artifacts are uploaded** with an explicit `retention-days`; .NET test
+  steps log with `--logger trx` so the results can be published.
 
 ## Determinism
 

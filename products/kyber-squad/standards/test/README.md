@@ -17,10 +17,10 @@ and `<react-coding-standard>` the same way.
 
 ## Authority & status
 
-When this standard is in `status: current`, what it says here outranks whatever defaults a
-portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
-template/proposal and does NOT override portable agent defaults until reviewed and promoted
-to `current`.
+When this standard is in `status: current`, it is the rule for this technology in this
+repository. Portable agents ship no built-in default to fall back on. While it is in
+`status: draft` it is a proposal: an agent that resolves it says so and asks a human whether
+to proceed on it, exactly as it does when no standard is declared.
 
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`. Every choice here is a guess about a repository this template has

@@ -1,8 +1,9 @@
 # Coding standard templates
 
 A starting standard per technology, for a repository adopting
-`<docs-root>/standards/<technology>/`. These are **templates, not governance**: nothing here
-is installed by `squad install` today, and nothing reads them until a host copies one in.
+`<docs-root>/standards/<technology>/`. These are **templates, not governance**: `squad install`
+does not deploy them, and nothing reads one until a host adopts it — all ten at once with
+`kyber-weave docs init . --kyber-standards`, or one at a time by hand, as below.
 
 ## Using one
 
@@ -21,6 +22,11 @@ is installed by `squad install` today, and nothing reads them until a host copie
 3. Replace that file with this template, set `owner` to a row in the host's `catalog.md`, set
    `last-reviewed`, and promote `status` to `current` once someone has actually read it.
 
+Until step 3 is done the agents have nothing to follow. They ship no built-in standard: an
+agent that finds `<react-coding-standard>` undeclared, or pointing at a `status: draft`
+document, says so and asks a human whether to proceed. The code-review checklists report the
+same gap rather than substituting rules of their own.
+
 ## What these are
 
 Each template states decisions rather than describing the language: a standard that restates a
@@ -28,18 +34,19 @@ framework's own documentation is noise, and one that repeats what a linter alrea
 worse — it goes stale the first time the linter's config changes and nobody notices.
 
 They were rewritten from the per-technology review references in
-[`../skills/code-review/references/`](../skills/code-review/references/), which are written for
-a reviewer ("check that…") rather than for an author ("do this"). Those references still exist
-and still say roughly the same things; consolidating them tracked in
-[#126](https://github.com/dpalfery/kyber-weave/issues/126), not something this
-folder did.
+[`../skills/code-review/references/`](../skills/code-review/references/), which were written
+for a reviewer ("check that…") rather than for an author ("do this"). Since
+[#126](https://github.com/dpalfery/kyber-weave/issues/126) those references only point at the
+declared standard; every rule they held lives here.
 
 The seven templates that match the seven review references are `csharp`, `react`, `python`,
 `sql`, `azure`, `pulumi`, and `github-actions`. `maui`, `data-access-layer`, and `test` are
 additional templates rewritten from agents rather than from a review reference. `pulumi` and
 `python` were then rewritten from their agents so stack, packaging, environment, and
 quality-gate policy live in the template — those agents only name **<pulumi-coding-standard>**
-and **<python-coding-standard>**. `test` was rewritten from the `test-dev` agent so runners,
+and **<python-coding-standard>**. `github-actions` and `sql` also carry the defaults the
+`github-devops` and `sql-database-architect` agents used to embed, and `csharp` carries the
+ReSharper redundancy-tier guidance the C# review reference used to hold. `test` was rewritten from the `test-dev` agent so runners,
 isolation, naming, and assertion policy live in the template — the agent only names
 **<test-coding-standard>**. Kyber-Weave's own
 [`docs/standards/csharp/`](../../../docs/standards/csharp/README.md) is not a substitute for

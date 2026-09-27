@@ -15,10 +15,10 @@ How C# is written in this repository. Agents and skills resolve this document as
 
 ## Authority & status
 
-When this standard is in `status: current`, what it says here outranks whatever defaults a
-portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
-template/proposal and does NOT override portable agent defaults until reviewed and promoted
-to `current`.
+When this standard is in `status: current`, it is the rule for this technology in this
+repository. Portable agents ship no built-in default to fall back on. While it is in
+`status: draft` it is a proposal: an agent that resolves it says so and asks a human whether
+to proceed on it, exactly as it does when no standard is declared.
 
 > Template. Set `owner` to a row in `catalog.md`, replace `<Solution>` with the host's
 > root namespace, review the decisions below, and promote `status` to `current`. Do not
@@ -47,6 +47,19 @@ Adding an id to `NoWarn` is a repository-wide decision and needs a reason you ca
 in the file.
 
 Do not merge code that fails the build, and do not restate analyzer rules here.
+
+**ReSharper redundancy tier.** Where ReSharper InspectCode runs as a gate scoped to
+`--severity=WARNING`, the solution settings (`<Solution>.sln.DotSettings`) promote the
+redundancy tier from `SUGGESTION` to `WARNING`, or the gate drops the whole family before
+anyone sees it: `RedundantOverload.*`, `UnusedMember.Global`, `UnusedType.Global`,
+`UnusedMethodReturnValue.Global`, `VirtualMemberNeverOverridden.*`, and
+`ClassWithVirtualMembersNeverInherited.*`. Already at `WARNING` and needing no promotion:
+`EmptyConstructor`, `RedundantBaseConstructorCall`, `RedundantDefaultMemberInitializer`,
+`RedundantOverriddenMember`, `RedundantArgumentDefaultValue`, `DuplicatedStatements`.
+`ClassNeverInstantiated.Global` is noise wherever a container or CLI framework constructs
+types reflectively, and belongs in the suppression list. `UnusedMember.Global` is worth its
+false positives: mark reflectively constructed types `[UsedImplicitly]` rather than disabling
+the rule.
 
 ## Style the analyzers already enforce
 
@@ -153,6 +166,14 @@ queue, downstream API) so an orchestrator can tell liveness from readiness.
 
 Cache responses only where the data is safe to reuse. Rate-limit public endpoints.
 Measure with the platform diagnostics rather than guessing.
+
+## Performance
+
+- No database or remote call inside a loop. Batch it, or cache what is safe to reuse.
+- LINQ where it reads better; a plain loop where LINQ would allocate or enumerate twice on a
+  hot path.
+- Watch allocation on hot paths — short-lived objects and boxing are what drive GC pressure.
+- Choose the algorithm for the input size the code will actually see.
 
 ## Dependencies
 
