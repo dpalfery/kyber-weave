@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
@@ -1289,6 +1290,134 @@ public sealed class SquadCliCommandTests : IDisposable
 
     #endregion
 
+    #region Receipt Layout Tests — Behavior (6): CLI Status and Uninstall with Legacy Receipts
+
+    [Fact]
+    public void StatusReceiptLayout_CleanLegacyGlobalReceipt_PrintsOkAndExitsZero()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        Directory.CreateDirectory(appDataDir);
+        Directory.CreateDirectory(fakeCodexRoot);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = targetRoot,
+                Global = true
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("ok", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("legacy", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StatusReceiptLayout_DriftEditedFileLegacyReceipt_PrintsDriftAndExitsOne()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        Directory.CreateDirectory(appDataDir);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "edited conductor content",
+            Encoding.UTF8);
+
+        SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+        SquadStatusCommand command = new(userPaths: userPaths, globalRoots: globalRoots);
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadStatusSettings
+            {
+                Path = targetRoot,
+                Global = true
+            }));
+
+        Assert.Equal(1, execution.ExitCode);
+        Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".codex/agents/conductor.toml", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("(modified)", execution.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("missing", execution.Output, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UninstallReceiptLayout_LegacyGlobalReceipt_ConfirmationNamesRecordedRoot()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+        string appDataDir = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        Directory.CreateDirectory(appDataDir);
+        Directory.CreateDirectory(fakeCodexRoot);
+        FakeUserPaths userPaths = new(appDataDir);
+        SquadStateStore stateStore = new(userPaths);
+
+        Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
+        File.WriteAllText(
+            Path.Combine(targetRoot, ".codex", "agents", "conductor.toml"),
+            "conductor content",
+            Encoding.UTF8);
+
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
+            (".codex/agents/conductor.toml", "conductor content"));
+
+        string? originalCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        try
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", fakeCodexRoot);
+
+            SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
+            using CorpusSquadReleaseSource releaseSource = new();
+            SquadLifecycleService lifecycleService = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+            SquadUninstallCommand command = new(userPaths: userPaths, lifecycleService: lifecycleService);
+            CommandExecution execution = Capture(() => command.Execute(
+                null!,
+                new SquadUninstallSettings
+                {
+                    Path = targetRoot,
+                    Global = true,
+                    Yes = true
+                }));
+
+            Assert.Contains($"codex writes beneath {targetRoot}.", execution.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEX_HOME", originalCodexHome);
+        }
+    }
+
+    #endregion
+
     private static string ExtractDoctorSection(string output, string header, params string[] otherHeaders)
     {
         int start = output.IndexOf(header, StringComparison.OrdinalIgnoreCase);
@@ -1392,6 +1521,68 @@ public sealed class SquadCliCommandTests : IDisposable
             Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
+        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Seeds a Global deployment whose receipt is persisted as authentic legacy v1 JSON — the
+    /// shape a genuine pre-#91 CLI wrote, with no explicit <c>layout</c> field — rather than
+    /// through <see cref="SquadStateStore.SerializeReceipt"/>, which always upgrades a Global
+    /// receipt to v2 regardless of the schema string already on the in-memory object. A
+    /// directly constructed receipt with prefixed paths but an unset (default)
+    /// <see cref="SquadReceipt.Layout"/> would otherwise round-trip through the v2 writer as a
+    /// self-contradicting payload — exactly what the v2 read-side cross-check (#91) now refuses.
+    /// </summary>
+    private static void SeedLegacyGlobalDeployment(
+        string targetRoot,
+        SquadStateStore stateStore,
+        params (string RelativePath, string Content)[] files)
+    {
+        string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global);
+        string lockPath = stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+
+        JsonArray filesJson = [];
+        foreach ((string relPath, string content) in files)
+        {
+            string fullPath = Path.Combine(targetRoot, relPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            File.WriteAllBytes(fullPath, bytes);
+            string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            filesJson.Add(new JsonObject
+            {
+                ["relativePath"] = relPath,
+                ["sha256"] = sha256,
+                ["target"] = "codex",
+                ["adopted"] = false
+            });
+        }
+
+        JsonObject receiptJson = new JsonObject
+        {
+            ["schema"] = "kyber-squad.receipt/v1",
+            ["scope"] = "global",
+            ["targetRoot"] = ".",
+            ["installedAtUtc"] = DateTimeOffset.UtcNow.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+            ["degradations"] = new JsonArray(),
+            ["files"] = filesJson
+        };
+
+        SquadLock squadLock = new SquadLock(
+            Schema: "kyber-squad.lock/v1",
+            SquadVersion: "1.2.3",
+            CliVersion: "1.2.3",
+            McpVersion: "1.2.3",
+            Bundle: "full",
+            Targets: ["codex"],
+            Exclusions: [],
+            Translation: "best-effort",
+            BundleDigest: "a".PadRight(64, '0'),
+            AssetDigest: "b".PadRight(64, '0'),
+            Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+
+        File.WriteAllText(receiptPath, receiptJson.ToJsonString() + "\n", Encoding.UTF8);
         File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
     }
 
@@ -1565,3 +1756,4 @@ public sealed class SquadCliCommandTests : IDisposable
 
     #endregion
 }
+

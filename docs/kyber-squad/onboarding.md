@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-26
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -286,6 +286,8 @@ hand-authored file, or adopt it only when the bytes already match.
 **Model pins.** Per-harness model tokens in `models.yml` are user-provider specific. An
 unresolvable pin inherits silently (the renderer omits `model`) rather than failing the
 install; confirm the resolved model in the harness itself after a first deploy.
+
+**Legacy rc.9/rc.10 global recovery.** See [Receipt version and layout contract](architecture.md#receipt-version-and-layout-contract) in the architecture section for layout semantics. If you have a global install from rc.9 or rc.10, `kyber-weave squad status --global` will inspect and flag the legacy layout. To complete migration, run `kyber-weave squad uninstall --global` followed by `kyber-weave squad install --global` with the current CLI.
 
 ---
 

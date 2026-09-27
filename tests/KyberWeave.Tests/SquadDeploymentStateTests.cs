@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Release;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -287,11 +289,16 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Directory.CreateDirectory(firstRoot);
         Directory.CreateDirectory(secondRoot);
         SquadStateStore store = Store(applicationData);
+        // Bare paths, not dot-prefixed: a fresh CreateInstall always renders through the modern
+        // per-target layout (NormalizeRenderedFiles never treats a new render as legacy), so a
+        // dot-prefixed path here would only manufacture a self-contradicting receipt of this
+        // test's own making against the read-side layout cross-check (#91), not exercise
+        // anything CreateInstall itself does.
         SquadDeploymentPlan firstPlan = SquadDeploymentPlan.CreateInstall(
             firstRoot,
             SquadDeploymentScope.Global,
             Lock(),
-            [Rendered(".codex/agents/first.toml", "first")],
+            [Rendered("agents/first.toml", "first")],
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt));
@@ -299,7 +306,7 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             secondRoot,
             SquadDeploymentScope.Global,
             Lock(),
-            [Rendered(".codex/agents/second.toml", "second")],
+            [Rendered("agents/second.toml", "second")],
             [],
             adopt: false,
             new FixedTimeProvider(InstalledAt.AddMinutes(1)));
@@ -313,8 +320,8 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         SquadReceipt secondReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
             secondRoot,
             SquadDeploymentScope.Global));
-        Assert.Equal(".codex/agents/first.toml", Assert.Single(firstReceipt.Files).RelativePath);
-        Assert.Equal(".codex/agents/second.toml", Assert.Single(secondReceipt.Files).RelativePath);
+        Assert.Equal("agents/first.toml", Assert.Single(firstReceipt.Files).RelativePath);
+        Assert.Equal("agents/second.toml", Assert.Single(secondReceipt.Files).RelativePath);
         Assert.NotEqual(firstReceipt.InstalledAtUtc, secondReceipt.InstalledAtUtc);
 
         string stateDirectory = store.ResolveStateDirectory(firstRoot, SquadDeploymentScope.Global);
@@ -359,7 +366,12 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         string json = store.SerializeReceipt(receipt);
 
-        AssertReceiptEqual(receipt, store.DeserializeReceipt(json));
+        // A Global receipt always serializes on the v2 schema (A3), even when constructed
+        // directly with the v1 literal, so the round-tripped schema is expected to differ from
+        // what was passed to SerializeReceipt.
+        AssertReceiptEqual(
+            receipt with { Schema = SquadStateStore.ReceiptSchemaV2 },
+            store.DeserializeReceipt(json));
     }
 
     [Fact]
@@ -448,8 +460,11 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         Assert.Equal("claude conductor", Read(claudeRoot, "agents/conductor.md"));
         Assert.Equal("codex conductor", Read(codexRoot, "agents/conductor.md"));
+        // A Global receipt always serializes on the v2 schema (A3), so what SquadTransaction
+        // persisted and re-read differs from the plan's own v1-labeled in-memory receipt only
+        // in that one field.
         AssertReceiptEqual(
-            plan.Receipt,
+            plan.Receipt with { Schema = SquadStateStore.ReceiptSchemaV2 },
             Assert.IsType<SquadReceipt>(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Global)));
 
         SquadStatusCommand command = new(stateStore: store, globalRoots: globalRoots);
@@ -2547,9 +2562,19 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
 
         foreach (SquadDeploymentScope scope in Enum.GetValues<SquadDeploymentScope>())
         {
+            // The fixture's file is dot-prefixed (it doubles as Project-scope fixture data
+            // elsewhere), so forcing Scope to Global here must also carry a Layout that agrees
+            // with that path's own classification (#91's read-side cross-check) — otherwise this
+            // round-trip would hand the v2 writer a self-contradicting receipt of the test's own
+            // making, not the serializer's.
+            SquadReceiptLayout globalLayout = SquadDeploymentPlan.ClassifyGlobalLayout(fixture.Receipt.Files);
             SquadReceipt[] receipts =
             [
-                fixture.Receipt with { Scope = scope },
+                fixture.Receipt with
+                {
+                    Scope = scope,
+                    Layout = scope == SquadDeploymentScope.Global ? globalLayout : fixture.Receipt.Layout
+                },
                 fixture.Receipt with
                 {
                     Scope = scope,
@@ -2561,7 +2586,13 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             {
                 string serialized = store.SerializeReceipt(receipt);
                 Assert.Contains($"\"scope\": \"{scope.ToString().ToLowerInvariant()}\"", serialized, StringComparison.Ordinal);
-                AssertReceiptEqual(receipt, store.DeserializeReceipt(serialized));
+
+                // A Global receipt always serializes on the v2 schema (A3); Project stays on
+                // whatever schema the fixture already carries.
+                SquadReceipt expected = scope == SquadDeploymentScope.Global
+                    ? receipt with { Schema = SquadStateStore.ReceiptSchemaV2 }
+                    : receipt;
+                AssertReceiptEqual(expected, store.DeserializeReceipt(serialized));
             }
         }
 
@@ -3556,6 +3587,688 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         Assert.DoesNotContain("PublishIntent", adjacentRemoval, StringComparison.Ordinal);
         Assert.DoesNotContain("Notify", restore, StringComparison.Ordinal);
         Assert.DoesNotContain("await", restore, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Behavior (1): Receipt layout marker tests — v2 with layout: per-target-roots for global
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void SerializeReceiptLayout_GlobalInstall_WritesV2WithPerTargetRootsLayout()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        SquadStateStore store = Store(applicationData);
+        SquadReceipt receipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(".codex/agents/conductor.toml", Digest("conductor"), "codex", false)
+            ]);
+
+        string json = store.SerializeReceipt(receipt);
+
+        Assert.Contains("\"schema\": \"kyber-squad.receipt/v2\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"layout\": \"per-target-roots\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SerializeReceiptLayout_ProjectInstall_StaysV1WithoutLayout()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string applicationData = Path.Combine(fixture.Path, "application-data");
+        SquadStateStore store = Store(applicationData);
+        SquadReceipt receipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Project,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(".codex/agents/conductor.toml", Digest("conductor"), "codex", false)
+            ]);
+
+        string json = store.SerializeReceipt(receipt);
+
+        Assert.Contains("\"schema\": \"kyber-squad.receipt/v1\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"layout\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"scope\": \"project\"", json, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Behavior (2): Receipt validation — v2 rejected when invalid, v1 mixed paths rejected
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void DeserializeReceiptLayout_V2GlobalReceiptRoundTrips()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string validV2Json = """
+            {
+              "schema": "kyber-squad.receipt/v2",
+              "scope": "global",
+              "layout": "per-target-roots",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": []
+            }
+            """;
+
+        SquadReceipt receipt = store.DeserializeReceipt(validV2Json);
+
+        Assert.Equal("kyber-squad.receipt/v2", receipt.Schema);
+    }
+
+    [Fact]
+    public void DeserializeReceiptLayout_V2ProjectReceipt_RejectedWithInvalidDataException()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string invalidV2Json = """
+            {
+              "schema": "kyber-squad.receipt/v2",
+              "scope": "project",
+              "layout": "per-target-roots",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": []
+            }
+            """;
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(invalidV2Json));
+
+        Assert.Contains("v2", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("project", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeserializeReceiptLayout_V2MissingLayout_RejectedWithInvalidDataException()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string invalidJson = """
+            {
+              "schema": "kyber-squad.receipt/v2",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": []
+            }
+            """;
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(invalidJson));
+
+        Assert.Contains("layout", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeserializeReceiptLayout_V2UnknownLayout_RejectedWithInvalidDataException()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string invalidJson = """
+            {
+              "schema": "kyber-squad.receipt/v2",
+              "layout": "unknown-layout",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": []
+            }
+            """;
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(invalidJson));
+
+        Assert.Contains("layout", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("unknown-layout", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("per-target-roots", ".codex/agents/conductor.toml")]
+    [InlineData("single-root", "agents/conductor.toml")]
+    public void DeserializeReceiptLayout_V2LayoutContradictsPaths_RejectedWithInvalidDataException(
+        string declaredLayout,
+        string relativePath)
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string contradictingJson = $$"""
+            {
+              "schema": "kyber-squad.receipt/v2",
+              "layout": "{{declaredLayout}}",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": [
+                {
+                  "relativePath": "{{relativePath}}",
+                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                  "target": "codex",
+                  "adopted": false
+                }
+              ]
+            }
+            """;
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(contradictingJson));
+
+        Assert.Contains("layout", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(declaredLayout, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeserializeReceiptLayout_V1LegacyMixedPrefixedAndBarePaths_RejectedWithInvalidDataException()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string mixedJson = """
+            {
+              "schema": "kyber-squad.receipt/v1",
+              "scope": "global",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": [
+                {
+                  "relativePath": ".codex/agents/conductor.toml",
+                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                  "target": "codex",
+                  "adopted": false
+                },
+                {
+                  "relativePath": "agents/copilot.md",
+                  "sha256": "def456def456def456def456def456def456def456def456def456def456deef",
+                  "target": "copilot",
+                  "adopted": false
+                }
+              ]
+            }
+            """;
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(
+            () => store.DeserializeReceipt(mixedJson));
+
+        Assert.Contains("mix", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DeserializeReceiptLayout_V1GlobalWithBarePaths_AcceptedAsPerTargetLayout()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string barePathsJson = """
+            {
+              "schema": "kyber-squad.receipt/v1",
+              "scope": "global",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": [
+                {
+                  "relativePath": "agents/conductor.toml",
+                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                  "target": "codex",
+                  "adopted": false
+                }
+              ]
+            }
+            """;
+
+        SquadReceipt receipt = store.DeserializeReceipt(barePathsJson);
+
+        Assert.Equal("kyber-squad.receipt/v1", receipt.Schema);
+        Assert.Single(receipt.Files);
+        Assert.Equal("agents/conductor.toml", receipt.Files[0].RelativePath);
+
+        string reserialized = store.SerializeReceipt(receipt);
+        Assert.Contains("\"layout\": \"per-target-roots\"", reserialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeserializeReceiptLayout_V1GlobalWithPrefixedPaths_AcceptedAsSingleRootLayout()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        SquadStateStore store = Store(fixture.Path);
+        string prefixedPathsJson = """
+            {
+              "schema": "kyber-squad.receipt/v1",
+              "scope": "global",
+              "targetRoot": ".",
+              "installedAtUtc": "2026-08-14T12:34:56.0000000Z",
+              "degradations": [],
+              "files": [
+                {
+                  "relativePath": ".codex/agents/conductor.toml",
+                  "sha256": "abc123abc123abc123abc123abc123abc123abc123abc123abc123abc123abcd",
+                  "target": "codex",
+                  "adopted": false
+                },
+                {
+                  "relativePath": ".github/agents/reviewer.agent.md",
+                  "sha256": "def456def456def456def456def456def456def456def456def456def456deef",
+                  "target": "copilot",
+                  "adopted": false
+                }
+              ]
+            }
+            """;
+
+        SquadReceipt receipt = store.DeserializeReceipt(prefixedPathsJson);
+
+        Assert.Equal("kyber-squad.receipt/v1", receipt.Schema);
+        Assert.Equal(2, receipt.Files.Count);
+
+        string reserialized = store.SerializeReceipt(receipt);
+        Assert.Contains("\"layout\": \"single-root\"", reserialized, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Behavior (3): Uninstall of legacy v1 global receipt with target-prefixed paths
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void UninstallReceiptLayout_LegacySingleRootReceipt_DeletesCleanFilesUnderRecordedRoot()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
+        Directory.CreateDirectory(recordedRoot);
+        string applicationData = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        string fakeCopilotRoot = Path.Combine(fixture.Path, "fake-copilot");
+        Directory.CreateDirectory(fakeCodexRoot);
+        Directory.CreateDirectory(fakeCopilotRoot);
+
+        Write(recordedRoot, ".codex/agents/conductor.toml", "conductor clean");
+        Write(recordedRoot, ".github/agents/reviewer.agent.md", "copilot clean");
+        Write(recordedRoot, ".codex/agents/edited.toml", "edited content");
+
+        SquadReceipt legacyReceipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(
+                    ".codex/agents/conductor.toml",
+                    Digest("conductor clean"),
+                    "codex",
+                    false),
+                new SquadOwnedFile(
+                    ".github/agents/reviewer.agent.md",
+                    Digest("copilot clean"),
+                    "copilot",
+                    false),
+                new SquadOwnedFile(
+                    ".codex/agents/edited.toml",
+                    Digest("original installed content"),
+                    "codex",
+                    false)
+            ]);
+
+        FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
+        {
+            [SquadTarget.Codex] = fakeCodexRoot,
+            [SquadTarget.Copilot] = fakeCopilotRoot
+        });
+
+        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlan.CreateUninstall(
+            recordedRoot,
+            SquadDeploymentScope.Global,
+            legacyReceipt,
+            globalRoots);
+
+        new SquadTransaction(Store(applicationData)).Execute(uninstallPlan);
+
+        Assert.False(File.Exists(Path.Combine(recordedRoot, ".codex/agents/conductor.toml")));
+        Assert.False(File.Exists(Path.Combine(recordedRoot, ".github/agents/reviewer.agent.md")));
+        Assert.True(File.Exists(Path.Combine(recordedRoot, ".codex/agents/edited.toml")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fakeCodexRoot, "*", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fakeCopilotRoot, "*", SearchOption.AllDirectories));
+
+        SquadReceipt? retainedReceipt = Store(applicationData).ReadReceipt(recordedRoot, SquadDeploymentScope.Global);
+        Assert.NotNull(retainedReceipt);
+        Assert.Single(retainedReceipt.Files);
+        Assert.Equal(".codex/agents/edited.toml", retainedReceipt.Files[0].RelativePath);
+        Assert.Equal(SquadReceiptLayout.SingleRoot, retainedReceipt.Layout);
+
+        string retainedJson = Store(applicationData).SerializeReceipt(retainedReceipt);
+        Assert.Contains("\"schema\": \"kyber-squad.receipt/v2\"", retainedJson, StringComparison.Ordinal);
+        Assert.Contains("\"layout\": \"single-root\"", retainedJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UninstallReceiptLayout_LegacyReceiptAllClean_DeletesEverythingThenLockAndReceipt()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
+        Directory.CreateDirectory(recordedRoot);
+        string applicationData = Path.Combine(fixture.Path, "app-data");
+        string fakeCodexRoot = Path.Combine(fixture.Path, "fake-codex");
+        string fakeCopilotRoot = Path.Combine(fixture.Path, "fake-copilot");
+        Directory.CreateDirectory(fakeCodexRoot);
+        Directory.CreateDirectory(fakeCopilotRoot);
+
+        Write(recordedRoot, ".codex/agents/conductor.toml", "conductor clean");
+        Write(recordedRoot, ".github/agents/reviewer.agent.md", "copilot clean");
+
+        SquadReceipt legacyReceipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(
+                    ".codex/agents/conductor.toml",
+                    Digest("conductor clean"),
+                    "codex",
+                    false),
+                new SquadOwnedFile(
+                    ".github/agents/reviewer.agent.md",
+                    Digest("copilot clean"),
+                    "copilot",
+                    false)
+            ]);
+
+        SquadStateStore stateStore = Store(applicationData);
+        string receiptPath = stateStore.ResolveReceiptPath(recordedRoot, SquadDeploymentScope.Global);
+        string lockPath = stateStore.ResolveLockPath(recordedRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(legacyReceipt), Encoding.UTF8);
+        File.WriteAllText(lockPath, stateStore.SerializeLock(Lock()), Encoding.UTF8);
+
+        FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
+        {
+            [SquadTarget.Codex] = fakeCodexRoot,
+            [SquadTarget.Copilot] = fakeCopilotRoot
+        });
+
+        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlan.CreateUninstall(
+            recordedRoot,
+            SquadDeploymentScope.Global,
+            legacyReceipt,
+            globalRoots);
+
+        new SquadTransaction(stateStore).Execute(uninstallPlan);
+
+        Assert.False(File.Exists(Path.Combine(recordedRoot, ".codex/agents/conductor.toml")));
+        Assert.False(File.Exists(Path.Combine(recordedRoot, ".github/agents/reviewer.agent.md")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fakeCodexRoot, "*", SearchOption.AllDirectories));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fakeCopilotRoot, "*", SearchOption.AllDirectories));
+
+        Assert.False(File.Exists(receiptPath));
+        Assert.False(File.Exists(lockPath));
+        Assert.Null(stateStore.ReadReceipt(recordedRoot, SquadDeploymentScope.Global));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Behavior (4): Update and install refuse legacy receipts before download
+    // ---------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateReceiptLayout_LegacySingleRootReceipt_ThrowsSquadDeploymentConflictException(bool dryRun)
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
+        Directory.CreateDirectory(recordedRoot);
+        string applicationData = Path.Combine(fixture.Path, "app-data");
+
+        Write(recordedRoot, ".codex/agents/conductor.toml", "conductor content");
+
+        SquadReceipt legacyReceipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(
+                    ".codex/agents/conductor.toml",
+                    Digest("conductor content"),
+                    "codex",
+                    false)
+            ]);
+
+        SquadStateStore stateStore = Store(applicationData);
+        string stateDir = stateStore.ResolveStateDirectory(recordedRoot, SquadDeploymentScope.Global);
+        string receiptPath = stateStore.ResolveReceiptPath(recordedRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        await File.WriteAllTextAsync(
+            receiptPath,
+            SerializeAsLegacyV1Json(legacyReceipt),
+            Encoding.UTF8);
+
+        SortedDictionary<string, byte[]> receiptSnapshotBefore = Snapshot(stateDir);
+        SortedDictionary<string, byte[]> deploymentSnapshotBefore = Snapshot(recordedRoot);
+
+        using RecordingReleaseSource releaseSource = new();
+        FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
+        {
+            [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
+        });
+        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+
+        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(
+            () => service.UpdateAsync(new SquadUpdateRequest(
+                TargetRoot: recordedRoot,
+                Scope: SquadDeploymentScope.Global,
+                Targets: [SquadTarget.Codex],
+                DryRun: dryRun)));
+
+        Assert.Contains("squad uninstall --global", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("squad install --global", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, releaseSource.CallCount);
+
+        SortedDictionary<string, byte[]> receiptSnapshotAfter = Snapshot(stateDir);
+        SortedDictionary<string, byte[]> deploymentSnapshotAfter = Snapshot(recordedRoot);
+        AssertSnapshotsEqual(receiptSnapshotBefore, receiptSnapshotAfter);
+        AssertSnapshotsEqual(deploymentSnapshotBefore, deploymentSnapshotAfter);
+    }
+
+    [Fact]
+    public async Task InstallReceiptLayout_ExistingLegacySingleRootReceipt_ThrowsSquadDeploymentConflictException()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string recordedRoot = Path.Combine(fixture.Path, "legacy-install");
+        Directory.CreateDirectory(recordedRoot);
+        string applicationData = Path.Combine(fixture.Path, "app-data");
+
+        Write(recordedRoot, ".codex/agents/conductor.toml", "conductor content");
+
+        SquadReceipt legacyReceipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(
+                    ".codex/agents/conductor.toml",
+                    Digest("conductor content"),
+                    "codex",
+                    false)
+            ]);
+
+        SquadStateStore stateStore = Store(applicationData);
+        string stateDir = stateStore.ResolveStateDirectory(recordedRoot, SquadDeploymentScope.Global);
+        string receiptPath = stateStore.ResolveReceiptPath(recordedRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        await File.WriteAllTextAsync(
+            receiptPath,
+            SerializeAsLegacyV1Json(legacyReceipt),
+            Encoding.UTF8);
+
+        SortedDictionary<string, byte[]> receiptSnapshotBefore = Snapshot(stateDir);
+        SortedDictionary<string, byte[]> deploymentSnapshotBefore = Snapshot(recordedRoot);
+
+        using RecordingReleaseSource releaseSource = new();
+        FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
+        {
+            [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
+        });
+        SquadLifecycleService service = new(releaseSource, SquadCommandComposition.ResolveRenderer(), stateStore, globalRoots: globalRoots);
+
+        SquadDeploymentConflictException exception = await Assert.ThrowsAsync<SquadDeploymentConflictException>(
+            () => service.InstallAsync(new SquadInstallRequest(
+                TargetRoot: recordedRoot,
+                Scope: SquadDeploymentScope.Global,
+                Targets: [SquadTarget.Codex])));
+
+        Assert.Contains("squad uninstall --global", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("squad install --global", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, releaseSource.CallCount);
+
+        SortedDictionary<string, byte[]> receiptSnapshotAfter = Snapshot(stateDir);
+        SortedDictionary<string, byte[]> deploymentSnapshotAfter = Snapshot(recordedRoot);
+        AssertSnapshotsEqual(receiptSnapshotBefore, receiptSnapshotAfter);
+        AssertSnapshotsEqual(deploymentSnapshotBefore, deploymentSnapshotAfter);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Behavior (5): v1 receipt with bare paths updates normally and rewrites as v2 per-target
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void UpdateReceiptLayout_V1BarePaths_RoundTripsAsV2PerTargetRoots()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string applicationData = Path.Combine(fixture.Path, "app-data");
+        string targetRoot = fixture.Path;
+        SquadStateStore store = Store(applicationData);
+
+        Write(targetRoot, "agents/conductor.toml", "conductor content");
+
+        SquadReceipt barePathsReceipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            targetRoot,
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(
+                    "agents/conductor.toml",
+                    Digest("conductor content"),
+                    "codex",
+                    false)
+            ]);
+
+        SquadDeploymentPlan updatePlan = SquadDeploymentPlan.CreateUpdate(
+            targetRoot,
+            SquadDeploymentScope.Global,
+            Lock("1.2.4"),
+            [Rendered("agents/conductor.toml", "updated content")],
+            barePathsReceipt,
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddDays(1)));
+
+        string receiptJson = store.SerializeReceipt(updatePlan.Receipt);
+
+        Assert.Contains("\"schema\": \"kyber-squad.receipt/v2\"", receiptJson, StringComparison.Ordinal);
+        Assert.Contains("\"layout\": \"per-target-roots\"", receiptJson, StringComparison.Ordinal);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Behavior (6): CreateUpdate stamps its output layout from what it actually retains, even
+    // with no resolver supplied — closing the gap where a mismatched label could otherwise be
+    // persisted and later trusted by a run that does supply one (F1).
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void CreateUpdateReceiptLayout_NullResolverMixedRetainedAndRenderedPaths_ThrowsSquadDeploymentConflictException()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+
+        // The prefixed codex entry is re-rendered under its own old identity and is locally
+        // edited, so it is retained as-is (still prefixed) rather than replaced. The claude
+        // entry is a brand-new render with a modern bare path. Combined, the update's own
+        // output would mix prefixed and bare paths.
+        Write(targetRoot, ".codex/agents/conductor.toml", "edited content");
+
+        SquadReceipt previousReceipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(
+                    ".codex/agents/conductor.toml",
+                    Digest("original content"),
+                    "codex",
+                    false)
+            ]);
+
+        SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
+            SquadDeploymentPlan.CreateUpdate(
+                targetRoot,
+                SquadDeploymentScope.Global,
+                Lock("1.2.4"),
+                [
+                    Rendered(".codex/agents/conductor.toml", "updated content"),
+                    Rendered("agents/reviewer.md", "reviewer body", "claude")
+                ],
+                previousReceipt,
+                [],
+                replaceManaged: false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)),
+                globalRoots: null));
+
+        Assert.Contains("squad uninstall --global", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("squad install --global", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateUpdateReceiptLayout_NullResolverAllCleanLegacyReceipt_LayoutMatchesClassification()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        string targetRoot = fixture.Path;
+
+        Write(targetRoot, ".codex/agents/conductor.toml", "conductor content");
+
+        SquadReceipt previousReceipt = new(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Global,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(
+                    ".codex/agents/conductor.toml",
+                    Digest("conductor content"),
+                    "codex",
+                    false)
+            ]);
+
+        SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+            targetRoot,
+            SquadDeploymentScope.Global,
+            Lock("1.2.4"),
+            [Rendered(".codex/agents/conductor.toml", "updated conductor content")],
+            previousReceipt,
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddDays(1)),
+            globalRoots: null);
+
+        Assert.Equal(
+            SquadDeploymentPlan.ClassifyGlobalLayout(plan.Receipt.Files),
+            plan.Receipt.Layout);
+        Assert.Equal(SquadReceiptLayout.SingleRoot, plan.Receipt.Layout);
     }
 
     private static void AssertCaughtClaimMutation(
@@ -4976,6 +5689,43 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     private static string Digest(string content) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 
+    /// <summary>
+    /// Serializes <paramref name="receipt"/> as authentic legacy v1 JSON — the shape a genuine
+    /// pre-#91 CLI wrote, with no explicit <c>layout</c> field — rather than through
+    /// <see cref="SquadStateStore.SerializeReceipt"/>, which always upgrades a Global receipt
+    /// to v2 regardless of the schema string already on the in-memory object. A directly
+    /// constructed receipt with prefixed paths but an unset (default)
+    /// <see cref="SquadReceipt.Layout"/> would otherwise round-trip through the v2 writer as a
+    /// self-contradicting payload — exactly what the v2 read-side cross-check (#91) now refuses.
+    /// </summary>
+    private static string SerializeAsLegacyV1Json(SquadReceipt receipt)
+    {
+        JsonObject json = new JsonObject
+        {
+            ["schema"] = "kyber-squad.receipt/v1",
+            ["scope"] = receipt.Scope == SquadDeploymentScope.Global ? "global" : "project",
+            ["targetRoot"] = receipt.TargetRoot,
+            ["installedAtUtc"] = receipt.InstalledAtUtc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+            ["degradations"] = new JsonArray(
+                [.. receipt.Degradations.Select(degradation => (JsonNode)new JsonObject
+                {
+                    ["target"] = degradation.Target,
+                    ["subject"] = degradation.Subject,
+                    ["code"] = degradation.Code
+                })]),
+            ["files"] = new JsonArray(
+                [.. receipt.Files.Select(file => (JsonNode)new JsonObject
+                {
+                    ["relativePath"] = file.RelativePath,
+                    ["sha256"] = file.Sha256,
+                    ["target"] = file.Target,
+                    ["adopted"] = file.Adopted
+                })])
+        };
+
+        return json.ToJsonString() + "\n";
+    }
+
     private static void Write(string root, string relativePath, string content)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -5262,6 +6012,25 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
         string IntentPath,
         string LiveRelativePath,
         TreeEntry ExpectedLiveAfterImage);
+
+    private sealed class RecordingReleaseSource : ISquadReleaseSource
+    {
+        private int _callCount;
+
+        public int CallCount => _callCount;
+
+        public Task<SquadReleaseResult> DownloadAndExtractAsync(
+            SquadReleaseRequest request,
+            CancellationToken cancellationToken)
+        {
+            _callCount++;
+            throw new NotImplementedException();
+        }
+
+        public void Dispose()
+        {
+        }
+    }
 
     private sealed class FakeSquadUserPaths(string applicationDataDirectory) : ISquadUserPaths
     {
