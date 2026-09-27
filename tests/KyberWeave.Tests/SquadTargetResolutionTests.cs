@@ -47,7 +47,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
 
     /// <summary>
     /// Receipts persist target tokens, so existing members keep their positions and a new
-    /// target is appended: Pi follows Factory, and ZCode follows Pi.
+    /// target is appended: Pi follows Factory, ZCode follows Pi, and Devin follows ZCode.
     /// </summary>
     [Fact]
     public void CatalogContainsExactlyTwelveTargetsInStableOrder()
@@ -70,7 +70,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     }
 
     [Fact]
-    public void ParseAllExpandsToTheApprovedElevenTargetRoster()
+    public void ParseAllExpandsToTheApprovedTwelveTargetRoster()
     {
         IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse(["all"]);
 

@@ -36,7 +36,7 @@ correct in a repository that arranges its documentation differently.
 
 - [Context Hygiene](context-hygiene/README.md) — Why and how to govern agent prompts and skills across coding harnesses
 - [DocGraph](docgraph/README.md) — Why and how to turn markdown docs into a queryable in-memory graph joined to live code
-- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a ten-target harness catalog; ten targets render today with rollback
+- [Kyber-Squad](kyber-squad/README.md) — Why and how to govern a twelve-target harness catalog; twelve targets render today with rollback
 - [KyberDash](dash/README.md) — Why and how to observe and tune agent context with local .NET Aspire OTEL telemetry
 
 ---
