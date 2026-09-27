@@ -12,6 +12,7 @@ decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
   - adr/0024-squad-global-receipt-layout-marker
+  - adr/0025-devin-native-agents-and-skill-lowering
 keywords:
   - multi-harness
   - deployment
@@ -350,7 +351,7 @@ and validates.
   `FactoryRenderer` for `.factory/droids/*.md` and `.factory/skills/*/SKILL.md`,
   `WarpRenderer` for fallback role-skill lowering to `.warp/skills/*/SKILL.md`,
   `ZCodeRenderer` for `.zcode/agents/*.md` and `.zcode/skills/*/SKILL.md` with the primary agent lowered to a slash command at `.zcode/commands/*.md` ([ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md)),
-  and `DevinRenderer` for Devin Desktop's local agent: per-agent directories at `.devin/agents/*/AGENT.md` and skills at `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill.
+  and `DevinRenderer` for Devin Desktop's local agent: per-agent directories at `.devin/agents/*/AGENT.md` and skills at `.devin/skills/*/SKILL.md`, with the primary agent lowered to a skill ([ADR 0025](../adr/0025-devin-native-agents-and-skill-lowering.md)).
 
 | Target | Renderer | Agent Output | Skill Output | Kind |
 |---|---|---|---|---|
@@ -402,8 +403,9 @@ and validates.
   Those names are hard requirements in ZCode, so `squad doctor` fails a ZCode install that does
   not declare the servers — see [ADR 0021](../adr/0021-zcode-command-lowering-and-resource-relocation.md).
   `DevinRenderer` appends the same fully qualified names to each subagent's `allowed-tools`,
-  because that is the form Devin's permission rules name MCP tools in; the servers themselves
-  stay the operator's to configure in Devin's `mcp_config.json`.
+  because that is the form Devin's permission rules name MCP tools in, and never grants Devin's
+  generic MCP tools (`mcp_list_tools`, `mcp_call_tool`), which would reach every configured
+  server; the servers themselves stay the operator's to configure in Devin's `mcp_config.json`.
   The roster lives in canonical source because it is an external contract that drifts, and because
   the renderer and the doctor check must read the same list.
 - **`devin` withholds delegation from subagents.** Devin Local dispatches a named profile
@@ -411,9 +413,26 @@ and validates.
   `max-nesting` setting. Devin has no `allowed_subagents` equivalent, so granting nested
   delegation would reach every profile rather than the canonical `delegates-to` roster.
   `DevinRenderer` emits neither and records `permission-not-expressible` naming the roster.
-  The lowered conductor is unaffected, because it runs in the main session. Agents use Devin's
-  directory layout so each resource closure stays inside its own agent's directory and authored
-  links resolve verbatim; see the `DevinRenderer` class remarks for the full evidence.
+  The lowered conductor is unaffected, because it runs in the main session. The delegating roles
+  carry their own fallback: `code-reviewer` applies each lens itself, in turn, and says in its
+  report that the council ran in-process; `architect` gathers its own sweeps and returns a live
+  Azure question as `STATUS: BLOCKED`, which the conductor puts to `azure-reader` and answers.
+  Agents use Devin's directory layout so each resource closure stays inside its own agent's
+  directory and authored links resolve verbatim; see the `DevinRenderer` class remarks for the
+  full evidence.
+- **`devin` grants every tool that performs a capability.**
+  Devin chooses tools per model — a GPT model edits through `apply_patch` when
+  `agent.codex_tools` is on — so `filesystem.write` lowers to `edit`, `write`, `apply_patch`,
+  and `notebook_edit`, and `process.execute` to `exec` with `get_output`, `write_to_process`,
+  and `kill_shell`. `todo_write` and `skill` are the ungoverned base. A subagent without
+  `model` runs on Devin's router-chosen default subagent model rather than the parent's, so
+  every non-orchestration model profile pins an exact Devin model id. On a Devin skill,
+  `allowed-tools` and `permissions.allow` pre-approve rather than restrict, so no skill carries
+  either. `permissions.deny` could narrow the lowered conductor, but Devin does not document
+  whether it reaches the subagents the conductor dispatches — which need exactly the tools the
+  conductor is denied — so it is withheld pending a real-install check. Devin also loads
+  `.agents/` natively and imports `.claude/`, `.github/skills/`, and `.windsurf/skills/` by
+  default, so `squad doctor` warns when a workspace would load a Squad identity twice.
 - **The one target-local exception to verbatim links is `zcode`**: ZCode scans both
   `.zcode/agents/` and `.zcode/commands/` recursively, so a closure beside its principal would
   register as phantom agents and commands rather than as resources. `ZCodeRenderer` therefore

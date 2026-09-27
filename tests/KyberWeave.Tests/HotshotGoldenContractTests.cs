@@ -40,6 +40,7 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] EvolvedAgentIdentities =
     [
         "architect",
+        "code-reviewer",      // in-process council when the harness gives subagents no agent tool (ADR 0025)
         "conductor",
         "product-owner",
         "task-reviewer"

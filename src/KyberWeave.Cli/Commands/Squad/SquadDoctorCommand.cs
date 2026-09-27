@@ -76,7 +76,7 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string cliVersion = GetCliVersion();
         AnsiConsole.MarkupLine($"  [green]ok[/] CLI Version: [bold]{Markup.Escape(cliVersion)}[/]");
 
-        // 2. Renderer coverage — which of the ten approved targets can actually install today.
+        // 2. Renderer coverage — which of the declared targets can actually install today.
         ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
         string[] supported = renderer.SupportedTargets
             .Select(SquadTargetCatalog.GetToken)
@@ -134,6 +134,10 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 hasIssues = true;
             }
         }
+
+        // 5. Devin duplicate imports. Runs without canonical source, because the duplicates it
+        // looks for are what an installed workspace holds, not what the source would render.
+        ReportDevinImportOverlap(workingDirectory);
 
         if (settings.Global &&
             ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
@@ -230,6 +234,66 @@ public sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Warns when Devin would load a Squad identity twice: once from <c>.devin/</c> and again
+    /// from a tree it reads natively or imports from another tool.
+    /// </summary>
+    /// <remarks>
+    /// A warning rather than a failure: both copies are Squad's own and each works, so the
+    /// cost is an ambiguous choice between two same-named profiles, not a broken install.
+    /// Each warning names the remedy, and the remedy differs by tree — an imported tree has a
+    /// <c>read_config_from</c> switch, a native one does not — so the hint is per entry. Keyed
+    /// on the same <c>.devin/</c> marker target resolution uses, so a workspace without Devin
+    /// is reported as skipped.
+    /// </remarks>
+    private void ReportDevinImportOverlap(string workingDirectory)
+    {
+        if (!Directory.Exists(Path.Combine(workingDirectory, ".devin")))
+        {
+            AnsiConsole.MarkupLine(
+                "  [grey]info[/] Devin duplicate imports: not checked (no '.devin/' in this directory)");
+            return;
+        }
+
+        // An unresolvable user directory only hides the user-level import settings; the
+        // project-level check still means something without it.
+        string? devinUserRoot;
+        try
+        {
+            devinUserRoot = (_globalRoots ?? SquadCommandComposition.ResolveGlobalRoots())
+                .ResolveGlobalRoot(SquadTarget.Devin);
+        }
+        catch (ArgumentException)
+        {
+            devinUserRoot = null;
+        }
+
+        DevinImportOverlapReport report = DevinImportOverlap.Inspect(
+            workingDirectory,
+            devinUserRoot,
+            SquadCommandComposition.ReadFileTextOrNull);
+
+        if (report.Overlaps.Count == 0)
+        {
+            AnsiConsole.MarkupLine("  [green]ok[/] Devin duplicate imports: none");
+            return;
+        }
+
+        foreach (DevinImportOverlapEntry overlap in report.Overlaps)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [yellow]warn[/] Devin also loads {overlap.Identities.Count} {overlap.Kind}(s) from " +
+                $"'{Markup.Escape(overlap.SourceRoot)}/' that '.devin/' already defines: " +
+                $"[bold]{Markup.Escape(string.Join(", ", overlap.Identities))}[/]");
+            AnsiConsole.MarkupLine(overlap.ImportSetting is null
+                ? $"         Devin reads '{Markup.Escape(overlap.SourceRoot)}/' natively and cannot be told " +
+                    "not to; deploy only one of the targets that write there."
+                : $"         Set \"read_config_from\": {{ \"{Markup.Escape(overlap.ImportSetting)}\": false }} " +
+                    "in .devin/config.json to stop the import (it also drops everything else that " +
+                    "import brings), or deploy only one of the two targets.");
+        }
     }
 
     /// <returns>

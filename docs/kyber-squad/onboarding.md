@@ -10,6 +10,7 @@ status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
+  - adr/0025-devin-native-agents-and-skill-lowering
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -243,31 +244,77 @@ The `devin` target deploys to Devin Desktop — Cognition's desktop app for Wind
 formerly Windsurf — whose local agent, Devin Local, reads the Devin CLI's formats. Subagents
 render as `.devin/agents/<name>/AGENT.md` and skills as `.devin/skills/<name>/SKILL.md`. With
 `--global` they go to Devin's user configuration directory: `%APPDATA%\devin\` on Windows,
-`~/.config/devin/` on macOS and Linux (`$XDG_CONFIG_HOME/devin/` when that is set).
+`~/.config/devin/` on macOS and Linux (`$XDG_CONFIG_HOME/devin/` when that is set). The
+decisions behind the rendering are in
+[ADR 0025](../adr/0025-devin-native-agents-and-skill-lowering.md).
 
-**Migrating from Windsurf**: Devin reads the legacy `.windsurf/skills/` only when
-`.devin/skills/` does not exist. Installing the `devin` target creates `.devin/skills/`, so any
-hand-authored skills still under `.windsurf/skills/` stop loading. Move them to
-`.devin/skills/` first. Squad never writes or removes anything under `.windsurf/`.
+**Before you install**: select the **Devin Local** agent, not Cascade — Cascade has no
+subagents — and turn on **Subagents (Preview)** in Devin Settings. Keep Devin current: the
+rendered `allowed-tools` lists name `write`, which Devin recognizes from CLI v3000.11.1
+(2026-09-21). If an administrator has set the **Default subagent model** to None, or
+`subagents_enabled` is `false`, no subagent runs and only the `conductor` skill is usable.
+
+**Models**: each subagent pins a Devin model by exact id, effort included, from its model
+profile. Without a pin, Devin runs a custom subagent on its router-chosen default subagent
+model, not on the model you picked, so pinning is what keeps planners and reviewers on a
+frontier model:
+
+| Model profile | Devin model | Agents |
+|---|---|---|
+| `deep-planning` | `claude-opus-5-5-medium` | architect, bug-crusher-investigator, sql-database-architect |
+| `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
+| `fast` | `swe-1-7-medium` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
+| `reviewer` | `claude-sonnet-5-medium` | code-reviewer, review-lens, review-triage, task-reviewer |
+
+The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
+recommendation there. A model outside your organization's allowlist is an administrator
+change, not a Squad one. `/session-stats` in a session lists cost by model, which is how to
+confirm a subagent ran on its pin.
+
+**Loading the same agent twice**: besides `.devin/`, Devin loads `.agents/agents/` and
+`.agents/skills/` natively — exactly where the `antigravity` target writes — and by default
+imports `.claude/skills/`, `.claude/commands/`, `.github/skills/` (and `~/.copilot/skills/`),
+and `.windsurf/skills/` through its `read_config_from` setting. A repository with Squad
+installed for `devin` and for `claude`, `copilot`, or `antigravity` therefore shows Devin two
+definitions of the same agent or skill. `squad doctor` warns when it finds one and names the
+remedy: for an imported tree, turn the import off in `.devin/config.json`, for example
+
+```json
+{
+  "read_config_from": { "claude": false }
+}
+```
+
+— bearing in mind the `claude` import also brings `CLAUDE.md` rules and Claude's MCP servers,
+which turning it off drops too. `.agents/` cannot be turned off, so with Antigravity pick one of
+the two targets per repository.
+
+**Coming from Windsurf**: Devin still imports `.windsurf/skills/`, so hand-authored skills there
+keep loading after installing `devin`. Squad never writes or removes anything under
+`.windsurf/`; a skill there that shares a Squad skill's name is one of the duplicates above.
 
 **Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
 deployed as the skill `conductor` and runs in the main Devin Local session, which dispatches the
-specialists as subagents. Those subagents cannot delegate further on Devin: Devin cannot limit
-nested delegation to a roster, so Squad does not enable it. `architect`, `code-reviewer`, and
-`product-owner` therefore do their discovery and review-lens work themselves rather than fanning
-out, and the receipt records a `permission-not-expressible` degradation for each.
+specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
+or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot delegate further
+on Devin: Devin cannot limit nested delegation to a roster, so Squad
+does not enable it. `code-reviewer` therefore applies each review lens itself and says in its
+report that the council ran in-process; `architect` does its own sweeps and hands a live Azure
+question back for the conductor to put to `azure-reader`; `product-owner` does its own external
+research. The receipt records a `permission-not-expressible` degradation for each.
 
 **MCP servers**: subagents' `allowed-tools` name the CodeGraph, context7, and Kyber-Weave MCP
-tools. Configure those servers in Devin's `mcp_config.json` (project `.devin/` or the user
-configuration directory); Squad does not write it, and `squad doctor` does not check it for
-Devin.
+tools individually. Configure those servers in Devin's `mcp_config.json` (project `.devin/` or
+the user configuration directory); Devin also imports servers from `.mcp.json`,
+`.cursor/mcp.json`, and `opencode.json`. Squad does not write any of them, and `squad doctor`
+does not check them for Devin.
 
-**Coexistence with Antigravity**: Devin also loads `.agents/agents/` and `.agents/skills/`, which
-is exactly where the `antigravity` target writes. With both targets installed in one repository,
-Devin sees two definitions of every Squad agent and skill, so pick one of the two per repository.
+**Plugins**: Devin can install the Agent Plugins archive `squad pack` produces, which exposes
+the skills as `/kyber-squad:<skill>`. Use that or `squad install --target devin`, not both, or
+every skill appears under two names.
 
-**Inspect:** `devin doctor` reports which custom profiles loaded, and `devin skills list` lists
-discovered skills. Confirm names there after install.
+**Inspect:** `devin doctor` reports which custom profiles loaded and flags malformed
+frontmatter, and `devin skills list` lists discovered skills. Confirm names there after install.
 
 ---
 
@@ -397,7 +444,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the twelve declared targets can install today) and the Kyber-Weave MCP server:
+Run diagnostic checks on renderer coverage (which of the twelve declared targets can install today), the Kyber-Weave MCP server, and — in a workspace with `.devin/` — any Squad agent or skill Devin would load twice:
 
 ```bash
 kyber-weave squad doctor

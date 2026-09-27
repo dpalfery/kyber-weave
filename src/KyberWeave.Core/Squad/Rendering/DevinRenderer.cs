@@ -13,30 +13,32 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <remarks>
 /// <para>
 /// <b>Source of truth.</b> Devin Desktop is Cognition's desktop app, shipped on 2026-06-02 as
-/// the successor to Windsurf. Its local agent, Devin Local, uses the Devin CLI's skill and
-/// subagent formats and discovery. The facts below were cross-checked on 2026-09-27 against
-/// Devin's published documentation (<c>docs.devin.ai/desktop/devin-local</c>,
-/// <c>docs.devin.ai/cli/subagents</c>, <c>docs.devin.ai/cli/extensibility/skills</c>,
-/// <c>docs.devin.ai/cli/reference/permissions</c>) and against integrations that record which
-/// Devin CLI build they were verified on (v3000.6.7 and v3000.10.21, the latter via
-/// <c>devin doctor</c> and <c>devin skills list</c>). The documentation host was not reachable
-/// from the environment this renderer was written in, so the documented facts were read
-/// through search excerpts and those integrations rather than fetched directly. Anything
-/// below that says "not documented" is a reading this renderer takes the non-broadening side
-/// of, and each is recorded as a degradation rather than asserted as a mapping.
+/// the successor to Windsurf. Its local agent, Devin Local, is the Devin CLI's agent harness,
+/// so it uses the CLI's skill and subagent formats and discovery. The facts below were read on
+/// 2026-09-27 from Devin's published documentation (<c>docs.devin.ai/desktop/devin-local</c>,
+/// <c>docs.devin.ai/cli/subagents</c>, <c>docs.devin.ai/cli/extensibility/skills</c> and its
+/// <c>creating-skills</c> reference, <c>docs.devin.ai/cli/reference/permissions</c>,
+/// <c>docs.devin.ai/cli/reference/configuration/read-config-from</c>, and the tool-name table in
+/// <c>docs.devin.ai/cli/extensibility/hooks/lifecycle-hooks</c>) and from the Devin CLI
+/// changelog. The oldest build this output is correct for is v3000.11.1 (2026-09-21), the
+/// first release whose <c>allowed-tools</c> and permission rules recognize <c>write</c>.
+/// Anything below that says "not documented" is a reading this renderer takes the
+/// non-broadening side of, and each is recorded as a degradation rather than asserted as a
+/// mapping.
 /// </para>
 /// <para>
 /// <b>Discovery roots.</b> Custom subagents load from <c>.devin/agents/</c> and
 /// <c>.agents/agents/</c> in the workspace, and from <c>agents/</c> in the Devin user
 /// configuration directory (<c>~/.config/devin</c>, or <c>%APPDATA%\devin</c> on Windows — see
-/// <see cref="SquadGlobalRoots"/>). Skills load from <c>.devin/skills/</c> and
-/// <c>.agents/skills/</c>, and from <c>skills/</c> in the user directory. The legacy Windsurf
-/// root <c>.windsurf/skills/</c> is read only when <c>.devin/skills/</c> does not exist, so
-/// this renderer never writes it: deploying there would be shadowed by the first
-/// <c>.devin/skills/</c> anything else creates. <c>.agents/agents/&lt;name&gt;/agent.md</c> and
-/// <c>.agents/skills/</c> are also <see cref="AntigravityRenderer"/>'s output, so an Antigravity
-/// deployment in the same repository is already visible to Devin; onboarding tells an operator
-/// to pick one of the two per repository rather than rely on how Devin orders duplicates.
+/// <see cref="SquadGlobalRoots"/>). Skills load natively from <c>.devin/skills/</c> and
+/// <c>.agents/skills/</c>, and from <c>skills/</c> in the user directory. This renderer writes
+/// only the <c>.devin/</c> roots. Devin additionally imports other tools' trees by default
+/// through <c>read_config_from</c> — <c>.windsurf/skills/</c>, <c>.claude/skills/</c> and
+/// <c>.claude/commands/</c>, and <c>.github/skills/</c> — and <c>.agents/</c> is where
+/// <see cref="AntigravityRenderer"/> writes. Squad's own Claude, Copilot, and Antigravity
+/// output is therefore visible to Devin too, so a repository carrying both would load each
+/// Squad identity twice; <see cref="DevinImportOverlap"/> reports that from
+/// <c>squad doctor</c> rather than this renderer writing Devin's configuration to prevent it.
 /// </para>
 /// <para>
 /// <b>Directory layout for agents.</b> Devin reads a subagent from either
@@ -51,33 +53,50 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// </para>
 /// <para>
 /// <b>Agent frontmatter.</b> A subagent profile is YAML frontmatter followed by the system
-/// prompt. Its documented keys include <c>name</c>, <c>description</c>, <c>model</c>,
-/// <c>allowed-tools</c>, <c>permissions</c>, and <c>max-nesting</c>. This renderer emits
+/// prompt. Its documented keys are <c>name</c>, <c>description</c>, <c>model</c>,
+/// <c>allowed-tools</c> (alias <c>tools</c>), and <c>max-nesting</c>. This renderer emits
 /// <c>name</c>, <c>description</c>, <c>model</c> (only when a <c>devin:</c> harness value
 /// resolves to something other than <c>inherit</c>), and <c>allowed-tools</c>, nothing else.
-/// On a subagent profile <c>allowed-tools</c> is a hard restriction, so it is always emitted;
-/// what an absent or empty list means is not documented, so a resolved grant of nothing is a
-/// render error rather than an empty list that might mean "every tool".
+/// Omitting <c>model</c> does not inherit the parent's model on Devin: a custom subagent with
+/// no <c>model</c> runs on the default subagent model, which a server-side router picks at
+/// spawn time unless an administrator pins one. On a subagent profile <c>allowed-tools</c> is a
+/// hard restriction, so it is always emitted; what an empty list means is not documented, so a
+/// resolved grant of nothing is a render error rather than an empty list that might mean
+/// "every tool".
 /// </para>
 /// <para>
-/// <b>Capability lowering.</b> Devin's built-in tool names are <c>read</c>, <c>grep</c>,
-/// <c>glob</c>, <c>edit</c>, <c>write</c>, <c>exec</c>, <c>webfetch</c>, <c>web_search</c>, and
-/// <c>skill</c>. <c>skill</c> is granted on every subagent, matching
-/// <see cref="ClaudeRenderer"/>'s ungoverned base: it opens only the skill tree this renderer
-/// deploys, and withholding it would deploy skills no subagent could reach. Only
-/// <see cref="SquadPermissionDecision.Allow"/> grants anything further. Devin's permission
-/// rules do have an <c>ask</c> list, but whether a subagent — which runs in its own
-/// conversation chain — can surface that prompt to the operator is not documented, so
-/// <c>ask</c> withholds the tool and records <c>safety-narrowed</c>, as on Pi and ZCode.
-/// <c>network.publish</c> has no built-in tool, so an <c>allow</c> for it records
-/// <c>permission-not-expressible</c>.
+/// <b>Capability lowering.</b> Devin's core tool names are <c>read</c>,
+/// <c>notebook_read</c>, <c>grep</c>, <c>glob</c>, <c>edit</c>, <c>write</c>,
+/// <c>apply_patch</c>, <c>notebook_edit</c>, <c>exec</c> with its companions
+/// <c>get_output</c>, <c>write_to_process</c>, and <c>kill_shell</c>, <c>webfetch</c>,
+/// <c>web_search</c>, <c>todo_write</c>, and <c>skill</c>. Every tool that performs a
+/// capability is granted with it, because the tool a model reaches for varies by model: a GPT
+/// model edits through <c>apply_patch</c> when <c>agent.codex_tools</c> is on, and a
+/// write-capable agent granted only <c>edit</c> and <c>write</c> would then be unable to edit at
+/// all. <c>todo_write</c> and <c>skill</c> are granted on every subagent, matching
+/// <see cref="ClaudeRenderer"/>'s ungoverned base: the first writes no file and executes
+/// nothing, and the second opens only the skill tree this renderer deploys — withholding it
+/// would deploy skills no subagent could reach. Only <see cref="SquadPermissionDecision.Allow"/>
+/// grants anything further. <c>network.publish</c> has no tool, so an <c>allow</c> for it
+/// records <c>permission-not-expressible</c>.
+/// </para>
+/// <para>
+/// <b><c>ask</c> narrows to withheld.</b> Devin prompts for a foreground subagent's tool call
+/// only when the session's permission mode does not already approve it — Accept Edits, Smart,
+/// Bypass, and Autonomous each auto-approve some of these tools, and a grant made once in a
+/// session carries into every later subagent. A background subagent never prompts: it
+/// auto-denies anything not already approved. A subagent profile has no <c>permissions</c> key
+/// with which to force the prompt, so the approval <c>ask</c> requires cannot be guaranteed,
+/// and the tool is withheld and recorded as <c>safety-narrowed</c>, as on Claude, Pi, and ZCode.
 /// </para>
 /// <para>
 /// <b>MCP is granted by concrete tool name.</b> Devin names an MCP tool
 /// <c>mcp__&lt;server&gt;__&lt;tool&gt;</c> in its permission rules, so the tools declared in
 /// <c>toolchain.yml</c>'s <c>required-mcp-tools</c> are appended to <c>allowed-tools</c> in that
 /// form, for every role allowed to read the filesystem except the pure orchestrator — the
-/// same rule <see cref="ClaudeRenderer"/> and <see cref="ZCodeRenderer"/> apply. The servers
+/// same rule <see cref="ClaudeRenderer"/> and <see cref="ZCodeRenderer"/> apply. Devin's
+/// generic MCP tools (<c>mcp_list_tools</c>, <c>mcp_call_tool</c>, and the rest) are never
+/// granted: they reach every configured server's tools, not the declared ones. The servers
 /// themselves are the operator's to configure in Devin's <c>mcp_config.json</c>; this renderer
 /// never writes it.
 /// </para>
@@ -88,9 +107,10 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <c>allowed_subagents</c> equivalent — so granting nested delegation would reach every
 /// profile, not the canonical <c>delegates-to</c> list. This renderer therefore emits neither
 /// <c>run_subagent</c> nor <c>max-nesting</c>, and an allowed <c>delegate</c> records
-/// <c>permission-not-expressible</c> naming the roster that becomes unreachable. The lowered
-/// conductor is unaffected: it runs in the main Devin Local session, where subagent dispatch is
-/// always available.
+/// <c>permission-not-expressible</c> naming the roster that becomes unreachable. The canonical
+/// bodies of the delegating roles say what to do when no agent-invocation tool is available.
+/// The lowered conductor is unaffected: it runs in the main Devin Local session, where subagent
+/// dispatch is always available.
 /// </para>
 /// <para>
 /// <b>Primary-agent lowering.</b> Devin has no primary-agent primitive: Devin Local is the
@@ -105,10 +125,14 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// <b>Skills carry only <c>name</c> and <c>description</c>.</b> On a skill,
 /// <c>allowed-tools</c> auto-approves the listed tools rather than restricting them, and
-/// <c>permissions</c> add to the session's rules rather than replacing them. Both would widen
-/// what runs without a prompt, and neither can narrow, so no skill — canonical or lowered —
-/// carries either key, and a lowered primary agent's capability decisions are recorded as not
-/// enforced.
+/// <c>permissions.allow</c> does the same, so neither is ever emitted. <c>permissions.deny</c>
+/// is the documented way to block a tool while an inline skill runs, and would narrow a lowered
+/// primary agent — but Devin documents neither how long an inline skill counts as running nor
+/// whether its deny rules reach the subagents it dispatches meanwhile. The conductor's profile
+/// denies <c>edit</c>, <c>write</c>, and <c>exec</c>, the very tools every implementer it
+/// dispatches needs, so emitting the denial risks disabling the whole roster rather than the
+/// conductor. It is withheld until a real install shows the rules stay in the conductor's own
+/// turn, and the lowered agent's capability decisions are recorded as not enforced.
 /// </para>
 /// </remarks>
 public sealed class DevinRenderer : ISquadRenderer
@@ -125,28 +149,33 @@ public sealed class DevinRenderer : ISquadRenderer
     private const string PureOrchestratorProfile = "orchestrator";
 
     /// <summary>
-    /// Lowers the semantic capability vocabulary onto Devin's built-in tool names.
-    /// <c>network.publish</c> is absent because no built-in tool expresses it, and
-    /// <c>delegate</c> because granting it cannot keep the roster (see the class remarks).
+    /// Lowers the semantic capability vocabulary onto Devin's core tool names, every tool that
+    /// performs a capability included. <c>network.publish</c> is absent because no tool
+    /// expresses it, and <c>delegate</c> because granting it cannot keep the roster (see the
+    /// class remarks).
     /// </summary>
     private static readonly (string Capability, string[] Tools)[] CapabilityTools =
     [
-        ("filesystem.read", ["read"]),
+        ("filesystem.read", ["read", "notebook_read"]),
         ("filesystem.search", ["grep", "glob"]),
-        ("filesystem.write", ["edit", "write"]),
-        ("process.execute", ["exec"]),
+        ("filesystem.write", ["edit", "write", "apply_patch", "notebook_edit"]),
+        ("process.execute", ["exec", "get_output", "write_to_process", "kill_shell"]),
         ("network.read", ["webfetch", "web_search"]),
     ];
 
     /// <summary>Granted on every subagent regardless of capability profile.</summary>
-    private static readonly string[] UngovernedTools = ["skill"];
+    private static readonly string[] UngovernedTools = ["todo_write", "skill"];
 
     /// <summary>
-    /// Fixed <c>allowed-tools</c> emission order, so a rendered agent is byte-stable regardless
-    /// of how the capability profile's permissions happen to enumerate.
+    /// Fixed tool emission order, so a rendered file is byte-stable regardless of how the
+    /// capability profile's permissions happen to enumerate.
     /// </summary>
     private static readonly string[] ToolOrder =
-        ["skill", "read", "grep", "glob", "edit", "write", "exec", "webfetch", "web_search"];
+    [
+        "todo_write", "skill", "read", "notebook_read", "grep", "glob", "edit", "write",
+        "apply_patch", "notebook_edit", "exec", "get_output", "write_to_process", "kill_shell",
+        "webfetch", "web_search"
+    ];
 
     private static readonly ISerializer YamlSerializer = new SerializerBuilder().Build();
 
@@ -357,7 +386,8 @@ public sealed class DevinRenderer : ISquadRenderer
     /// <summary>
     /// The <c>devin</c> harness value when the model profile declares one, otherwise the
     /// target-neutral <c>default</c>; either an explicit or a defaulted <c>inherit</c> omits
-    /// <c>model</c>, leaving Devin's own model selection in charge.
+    /// <c>model</c>, which on Devin leaves the subagent on the router-chosen default subagent
+    /// model rather than the parent's.
     /// </summary>
     private static string? ResolveDevinModel(
         SquadAgent agent,
@@ -444,10 +474,11 @@ public sealed class DevinRenderer : ISquadRenderer
                 Code: "safety-narrowed",
                 InstructionDigest: agent.BodyDigest,
                 Details: $"Capability profile '{agent.CapabilityProfile}' requires 'ask' for " +
-                    $"{string.Join(", ", narrowed)}. Devin does not document that a subagent, " +
-                    "which runs in its own conversation chain, can surface a permission prompt, " +
-                    "so these narrow to withheld: the corresponding tools are absent from the " +
-                    "agent's 'allowed-tools' list.");
+                    $"{string.Join(", ", narrowed)}. Devin prompts for a subagent's tool call " +
+                    "only in the foreground and only when the session's permission mode has not " +
+                    "already approved it, a background subagent never prompts, and a subagent " +
+                    "profile cannot force the prompt, so these narrow to withheld: the " +
+                    "corresponding tools are absent from the agent's 'allowed-tools' list.");
         }
 
         List<string> notExpressible = [];
@@ -461,7 +492,7 @@ public sealed class DevinRenderer : ISquadRenderer
             publish == SquadPermissionDecision.Allow)
         {
             notExpressible.Add(
-                "Capability 'network.publish' is allowed but no built-in Devin tool exists to express it.");
+                "Capability 'network.publish' is allowed but no Devin tool exists to express it.");
         }
 
         if (profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
@@ -503,7 +534,7 @@ public sealed class DevinRenderer : ISquadRenderer
             executeDecision: executeDecision,
             writeDecision: writeDecision,
             grantedShellTools: ["exec"],
-            withheldWriteTools: ["edit", "write"]);
+            withheldWriteTools: ["edit", "write", "apply_patch", "notebook_edit"]);
 
         if (notIsolable is not null)
         {
@@ -540,9 +571,11 @@ public sealed class DevinRenderer : ISquadRenderer
             InstructionDigest: agent.BodyDigest,
             Details: "Capability decisions " +
                 $"({CapabilityDegradations.DescribeCapabilityDecisions(agent, capabilityProfiles, capabilityVocabulary)}) " +
-                "are not enforced: a Devin skill runs under the session's permissions, which its " +
-                "'allowed-tools' and 'permissions' keys can only add to, never narrow, and its " +
-                $"delegates-to roster ({rosterText}) is instruction-only.");
+                "are not enforced: a Devin skill runs under the session's permissions. Its " +
+                "'allowed-tools' and 'permissions.allow' would pre-approve rather than restrict, " +
+                "and 'permissions.deny' is not emitted because Devin does not document whether " +
+                "it reaches the subagents the skill dispatches, which need the tools this " +
+                $"profile denies. Its delegates-to roster ({rosterText}) is instruction-only.");
     }
 
     /// <summary>
