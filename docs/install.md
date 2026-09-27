@@ -226,6 +226,25 @@ must also be on PATH.
 
 See the [workflow runbook](ci-pipelines/workflows-runbook.md).
 
+### Codex Cloud
+
+Set the Codex Cloud environment setup script to:
+
+```bash
+bash scripts/codex-cloud-setup.sh
+```
+
+The script installs a compatible .NET 10 SDK and `sqlite3` for repository tooling,
+then installs the Kyber-Weave CLI and MCP binaries without KyberDash. It installs
+APM, runs `docs init` for the Codex target to deploy the documentation skill, and
+installs or updates Kyber-Squad in the cloud user's global Codex home. It also
+adds the CLI install directory to `~/.bashrc` so it remains on `PATH` in later
+cloud sessions.
+
+By default, the script installs the latest prerelease. Set `KYBER_WEAVE_VERSION`
+to pin a release, or set `KYBER_WEAVE_PRERELEASE=0` to select the latest stable
+release.
+
 ## From source
 
 Requires .NET SDK 10 (pinned in `global.json`).
