@@ -78,4 +78,6 @@ do not merge code that fails them. No `console.log` or commented-out blocks in m
 New dependencies need a reason: what it does, why the existing stack cannot, and who
 maintains it.
 
-No direct DOM manipulation (`document.getElementById` and the like); use state and effects.
+Do not query or manipulate the DOM directly (`document.getElementById` and the like); use state
+and effects. A React ref is allowed where accessibility requires moving focus, and for nothing
+else.
