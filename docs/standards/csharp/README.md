@@ -36,7 +36,9 @@ Two consequences worth stating:
 coming from other .NET repositories.
 
 - **Explicit types, never `var`** — including where the type is apparent. `csharp_style_var_*`
-  is `false:warning` in all three positions.
+  is `false:warning` in all three positions. `KyberWeave.sln.DotSettings` sets ReSharper's
+  var preferences to `UseExplicitType` to match, so the `KyberWeave` cleanup profile rewrites
+  `var` to explicit types rather than the reverse.
 - **File-scoped namespaces.**
 - **Predefined type keywords** — `string`, `int`, `bool`, never `String` or `Int32`.
 - **Allman braces**, and a new line before `else`, `catch` and `finally`.

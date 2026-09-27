@@ -238,6 +238,107 @@ public sealed class SquadGlobalRootTests : IDisposable
     }
 
     // ---------------------------------------------------------------------------------------
+    // Devin is the only target whose default root differs by operating system: Devin CLI
+    // v3000.x documents its user configuration at ~/.config/devin on macOS and Linux and at
+    // %APPDATA%\devin on Windows, and custom subagents and skills load from agents/ and
+    // skills/ beneath that directory. The platform is injected so both branches run on every
+    // CI leg rather than only on the one whose OS happens to match.
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnUnix_DefaultsToTheDotConfigDirectory()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-unix-home");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(_ => null, tempHome, isWindows: false);
+
+        Assert.Equal(
+            Path.Combine(tempHome, ".config", "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnUnix_HonoursXdgConfigHome()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-xdg-home");
+        Directory.CreateDirectory(tempHome);
+        string xdgConfigHome = Path.Combine(_temp.Path, "devin-xdg-config");
+        SquadGlobalRoots resolver = new(
+            name => name == "XDG_CONFIG_HOME" ? xdgConfigHome : null,
+            tempHome,
+            isWindows: false);
+
+        Assert.Equal(
+            Path.Combine(xdgConfigHome, "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindows_UsesTheRoamingAppDataDirectory()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-home");
+        Directory.CreateDirectory(tempHome);
+        string appData = Path.Combine(_temp.Path, "devin-appdata-roaming");
+        SquadGlobalRoots resolver = new(
+            name => name == "APPDATA" ? appData : null,
+            tempHome,
+            isWindows: true);
+
+        Assert.Equal(
+            Path.Combine(appData, "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindowsWithoutAppData_FallsBackBeneathTheProfile()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-no-appdata");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(_ => null, tempHome, isWindows: true);
+
+        Assert.Equal(
+            Path.Combine(tempHome, "AppData", "Roaming", "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindows_IgnoresXdgConfigHome()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-xdg");
+        Directory.CreateDirectory(tempHome);
+        string appData = Path.Combine(_temp.Path, "devin-windows-xdg-appdata");
+        string xdgConfigHome = Path.Combine(_temp.Path, "devin-windows-xdg-config");
+        SquadGlobalRoots resolver = new(
+            name => name switch
+            {
+                "APPDATA" => appData,
+                "XDG_CONFIG_HOME" => xdgConfigHome,
+                _ => null
+            },
+            tempHome,
+            isWindows: true);
+
+        Assert.Equal(
+            Path.Combine(appData, "devin"),
+            resolver.ResolveGlobalRoot(SquadTarget.Devin));
+    }
+
+    [Fact]
+    public void ResolveGlobalRoot_DevinOnWindows_RejectsARelativeAppData()
+    {
+        string tempHome = Path.Combine(_temp.Path, "devin-windows-relative");
+        Directory.CreateDirectory(tempHome);
+        SquadGlobalRoots resolver = new(
+            name => name == "APPDATA" ? Path.Combine("relative", "roaming") : null,
+            tempHome,
+            isWindows: true);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => resolver.ResolveGlobalRoot(SquadTarget.Devin));
+        Assert.Equal("APPDATA", exception.ParamName);
+    }
+
+    // ---------------------------------------------------------------------------------------
     // Criterion 2: a global dry run per target plans bare relative paths under the resolved root.
     // ---------------------------------------------------------------------------------------
 
@@ -377,6 +478,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Kilo)]
     [InlineData(SquadTarget.Warp)]
     [InlineData(SquadTarget.ZCode)]
+    [InlineData(SquadTarget.Devin)]
     public async Task InstallAsync_GlobalScopeDryRun_PlansEveryFileUnderTheResolvedTargetRootWithBareRelativePaths(
         SquadTarget target)
     {
@@ -724,6 +826,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.OpenCode, ".opencode/")]
     [InlineData(SquadTarget.Kilo, ".kilo/")]
     [InlineData(SquadTarget.ZCode, ".zcode/")]
+    [InlineData(SquadTarget.Devin, ".devin/")]
     public async Task InstallAsync_ProjectScopeDryRun_RelativePathsKeepTodaysHarnessPrefix(
         SquadTarget target,
         string expectedPrefix)
@@ -780,6 +883,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [InlineData(SquadTarget.Claude)]
     [InlineData(SquadTarget.Pi)]
     [InlineData(SquadTarget.ZCode)]
+    [InlineData(SquadTarget.Devin)]
     public async Task InstallAsync_RealInstallGlobalScope_WritesOnlyUnderTheResolvedHomeSubtree(SquadTarget target)
     {
         // Arrange
@@ -864,7 +968,8 @@ public sealed class SquadGlobalRootTests : IDisposable
             { SquadTarget.Kilo, ".kilo/" },
             { SquadTarget.Factory, ".factory/" },
             { SquadTarget.Warp, ".warp/" },
-            { SquadTarget.ZCode, ".zcode/" }
+            { SquadTarget.ZCode, ".zcode/" },
+            { SquadTarget.Devin, ".devin/" }
         };
 
         ISquadRenderer renderer = SquadCommandComposition.ResolveRenderer();
