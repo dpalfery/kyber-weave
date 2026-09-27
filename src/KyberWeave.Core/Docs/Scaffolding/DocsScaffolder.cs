@@ -686,6 +686,9 @@ public static class DocsScaffolder
 
         """;
 
+    /// <summary>
+    /// Builds the draft coding-standard stub <c>docs init</c> writes for a declared technology.
+    /// </summary>
     private static string TechnologyStandard(string technology, string owner)
     {
         string yamlOwner = HostConfigYaml.QuoteScalar(owner);
