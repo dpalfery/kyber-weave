@@ -11,6 +11,7 @@ decided-by:
   - adr/0017-copilot-deterministic-tool-order
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
+  - adr/0024-squad-global-receipt-layout-marker
 keywords:
   - multi-harness
   - deployment

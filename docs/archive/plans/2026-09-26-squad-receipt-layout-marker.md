@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-26-squad-receipt-layout-marker
+id: archive/plans/2026-09-26-squad-receipt-layout-marker
 title: Squad receipt layout marker
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-26
@@ -13,7 +13,7 @@ development-mode: test-first
 
 ## Status
 
-Approved for execution. Decisions A3–A5 recorded 2026-09-26.
+Complete and archived 2026-09-26. Decisions A3–A5 recorded 2026-09-26 and harvested as [ADR 0024](../../adr/0024-squad-global-receipt-layout-marker.md); see the T6 closeout below.
 
 ## Problem and goal
 
@@ -170,3 +170,17 @@ Pending: `docs validate .` and `docs drift .` run by the orchestrator after save
 ## Review and closeout
 
 T5 reviews the complete change. T6 is the `docs-dev` closeout: it archives this plan and moves its index row to Archived.
+
+## Closeout (T6, 2026-09-26)
+
+**Implementation.** Commit `2d2a34b` delivered T1–T4, and `83fbee6` removed `var` patterns from the scope and layout parsing. `9e70c8f` keeps the console captures in `ProcessConsoleCapture.cs` free of ANSI escapes on CI runners, so the new CLI assertions hold there. The shipped contract is decisions A3–A5 as approved above.
+
+**Test evidence.** On the branch head `cd3ccff`, the runner **F** (`FullyQualifiedName~ReceiptLayout`) passed 18/18, and the full Squad filter passed 955/955, against the 937 baseline plus the 18 new tests. CI run [36291127122](https://github.com/dpalfery/kyber-weave/actions/runs/36291127122) passed Build and test, the Squad filesystem contract on Linux, macOS and Windows, and the self-update and Squad install loop on Linux and macOS. The T1 RED log is not attached to the pull request, so this closeout does not claim it.
+
+**Canonical documentation.** T4 added [Receipt version and layout contract](../../kyber-squad/architecture.md#receipt-version-and-layout-contract) to the architecture and the rc.9/rc.10 Global recovery note to [the onboarding guide](../../kyber-squad/onboarding.md). The architecture document now cites the ADR in `decided-by`.
+
+**ADR.** [ADR 0024](../../adr/0024-squad-global-receipt-layout-marker.md) records the receipt layout contract: a persisted-format constraint that older CLIs enforce by refusing v2, together with the rejected alternatives Q1b–Q1d, Q2b–Q2d and Q3b–Q3c.
+
+**Review.** No T5 council verdict is recorded on the pull request. CI's required gates are the review evidence at closeout.
+
+**Closeout verification.** After archival, the index update and the ADR, `docs validate . --merge-ready` exited 0 with zero findings. Before this closeout, that was the one check failing in CI, with `KW-DOC-LIFECYCLE-003`. `docs drift .` did not run: this checkout has no CodeGraph index, so it stops at `KW-DOC-DRIFT-001` before checking anything, and CI defers drift until an index is provisioned. The closeout adds no `code-refs`, so it introduces no drift of its own.
