@@ -46,7 +46,7 @@ drop. The one key `docs init` will rewrite there is `ontology.docs-root`, in pla
 when `--docs-root` moves it, so the catalog and the validator never end up reading
 different trees. Comments and every other key survive the edit.
 
-Passing `--kyber-standards` scaffolds the 10 rich Kyber Squad coding standards templates
+Passing `--kyber-standards` scaffolds the 11 rich Kyber Squad coding standards templates
 under `<docs-root>/standards/`, merges their technologies into `ontology.technologies`
 in `.kyber-weave/kyber-weave.yml`, and registers all 11 `<{tech}-coding-standard>` properties
 in Config Reg.

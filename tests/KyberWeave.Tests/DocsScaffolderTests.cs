@@ -877,13 +877,13 @@ public sealed class DocsScaffolderTests : IDisposable
     /// and AGENTS.md Config Reg, and passes docs validation cleanly.
     /// </summary>
     [Fact]
-    public void ScaffoldWithKyberStandardsOnFreshRepoScaffoldsAllTenRichStandardsAndUpdatesConfig()
+    public void ScaffoldWithKyberStandardsOnFreshRepoScaffoldsAllRichStandardsAndUpdatesConfig()
     {
         string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 
         ScaffoldResult result = DocsScaffolder.Scaffold(_temp.Path, kyberStandards: true);
 
-        // All 10 standards under <docs-root>/standards/<tech>/README.md are created
+        // All 11 standards under <docs-root>/standards/<tech>/README.md are created
         Assert.Equal(KyberStandardsTemplates.All.Count, KyberStandardsTemplates.All.Count(tech =>
             result.Files.Any(f => f.RelativePath == $"{result.DocsRoot}/standards/{tech}/README.md"
                 && f is { Outcome: ScaffoldOutcome.Created, Written: true })));
