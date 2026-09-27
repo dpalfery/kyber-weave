@@ -128,6 +128,17 @@ internal static partial class FileReferenceExtractor
     private static partial Regex ConfigRegTokenNameRegex();
 
     /// <summary>
+    /// Matches a bare URL span from its scheme prefix to the next whitespace or the end of the content.
+    /// </summary>
+    /// <remarks>
+    /// A path inside a bare URL names a remote resource rather than a repository file, so path
+    /// matches that start within the span are skipped during <see cref="InlinePathScanMode.UnfencedText"/>
+    /// scanning. The span ends at the first whitespace, so a path mentioned after the URL stays outside it.
+    /// </remarks>
+    [GeneratedRegex(@"[A-Za-z][A-Za-z0-9+.\-]*://\S*", RegexOptions.Compiled)]
+    private static partial Regex UrlSpanRegex();
+
+    /// <summary>
     /// Extracts file references from a single Markdown text string.
     /// </summary>
     internal static IReadOnlyList<ExtractedFileReference> ExtractFromText(
@@ -236,14 +247,35 @@ internal static partial class FileReferenceExtractor
         else if (options.InlineScanMode == InlinePathScanMode.UnfencedText)
         {
             IEnumerable<Match> matches = document.Descendants<LiteralInline>()
-                .SelectMany(literal => UnfencedPathRegex().Matches(literal.Content.ToString()))
+                .SelectMany(literal => PathMatchesOutsideUrls(literal.Content.ToString()))
                 .Concat(document.Descendants<CodeInline>()
-                    .SelectMany(code => UnfencedPathRegex().Matches(code.Content)));
+                    .SelectMany(code => PathMatchesOutsideUrls(code.Content)));
 
             foreach (Match match in matches)
             {
                 ProcessReference(match.Groups["path"].Value, directoryPath, options, results, comparer);
             }
+        }
+    }
+
+    /// <summary>
+    /// Enumerates the unfenced path matches in <paramref name="content"/> whose start index lies
+    /// outside every URL span.
+    /// </summary>
+    private static IEnumerable<Match> PathMatchesOutsideUrls(string content)
+    {
+        List<(int Start, int End)> urlSpans = UrlSpanRegex().Matches(content)
+            .Select(static url => (Start: url.Index, End: url.Index + url.Length))
+            .ToList();
+
+        foreach (Match match in UnfencedPathRegex().Matches(content))
+        {
+            if (urlSpans.Any(span => match.Index >= span.Start && match.Index < span.End))
+            {
+                continue;
+            }
+
+            yield return match;
         }
     }
 
@@ -301,10 +333,10 @@ internal static partial class FileReferenceExtractor
 
         // Skip foreign and absolute filesystem paths
         if (options.SkipForeignAbsolutePaths && (
-            Path.IsPathRooted(normalized) ||
-            (normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':') ||
-            normalized.StartsWith('\\') ||
-            normalized.StartsWith("//", StringComparison.Ordinal)))
+                Path.IsPathRooted(normalized) ||
+                (normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':') ||
+                normalized.StartsWith('\\') ||
+                normalized.StartsWith("//", StringComparison.Ordinal)))
         {
             return;
         }
@@ -320,11 +352,11 @@ internal static partial class FileReferenceExtractor
             if (!results.ContainsKey(normalized))
             {
                 results[normalized] = new ExtractedFileReference(
-                    Reference: normalized,
-                    ResolvedFullPath: null,
-                    Exists: false,
-                    IsPathTraversal: true,
-                    NearestMatch: null);
+                    normalized,
+                    null,
+                    false,
+                    true,
+                    null);
             }
 
             return;
@@ -351,11 +383,11 @@ internal static partial class FileReferenceExtractor
         string? nearestMatch = !exists ? FindNearestMatch(directoryPath, normalized) : null;
 
         results[normalized] = new ExtractedFileReference(
-            Reference: normalized,
-            ResolvedFullPath: resolvedFullPath,
-            Exists: exists,
-            IsPathTraversal: false,
-            NearestMatch: nearestMatch);
+            normalized,
+            resolvedFullPath,
+            exists,
+            false,
+            nearestMatch);
     }
 
     /// <summary>
@@ -428,7 +460,8 @@ internal static partial class FileReferenceExtractor
 
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or PathTooLongException or NotSupportedException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                       or PathTooLongException or NotSupportedException)
         {
             return false;
         }
@@ -445,7 +478,7 @@ internal static partial class FileReferenceExtractor
     {
         try
         {
-            DirectoryInfo? directory = new DirectoryInfo(Path.GetFullPath(directoryPath));
+            DirectoryInfo? directory = new(Path.GetFullPath(directoryPath));
             while (directory is not null)
             {
                 if (Directory.Exists(directory.FullName))
@@ -474,7 +507,7 @@ internal static partial class FileReferenceExtractor
                         alternateName[letterIndex] = char.IsUpper(alternateName[letterIndex])
                             ? char.ToLowerInvariant(alternateName[letterIndex])
                             : char.ToUpperInvariant(alternateName[letterIndex]);
-                        string alternate = new string(alternateName);
+                        string alternate = new(alternateName);
                         string alternatePath = Path.Combine(directory.FullName, alternate);
 
                         if (!File.Exists(alternatePath) && !Directory.Exists(alternatePath))
@@ -547,7 +580,8 @@ internal static partial class FileReferenceExtractor
                 candidates.Add((relPath, distance));
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                       or PathTooLongException or NotSupportedException)
         {
             return null;
         }
