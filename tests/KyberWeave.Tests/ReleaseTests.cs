@@ -1300,8 +1300,10 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// PATH that contains wget, tar, and sha256sum, and not curl, so the
-    /// installer selects wget before the library return.
+    /// PATH that contains wget, tar, and a checksum tool, and not curl, so the
+    /// installer selects wget before the library return. <c>install.sh</c> accepts
+    /// <c>sha256sum</c> or <c>shasum</c>. macOS ships the latter, and this directory
+    /// replaces PATH, so the host tool is invisible unless it is linked here.
     /// </summary>
     private static string IsolatedWgetDirectory(Sandbox sandbox, string logPath)
     {
@@ -1311,7 +1313,14 @@ public sealed class ReleaseTests
         if (!OperatingSystem.IsWindows())
         {
             File.CreateSymbolicLink(Path.Combine(directory, "tar"), ResolveExecutable("tar"));
-            File.CreateSymbolicLink(Path.Combine(directory, "sha256sum"), ResolveExecutable("sha256sum"));
+            string? checksum = TryResolveExecutable("sha256sum") ?? TryResolveExecutable("shasum");
+            if (checksum is null)
+            {
+                throw SkipException.ForSkip(
+                    "wget origin facts need sha256sum or shasum on PATH.");
+            }
+
+            File.CreateSymbolicLink(Path.Combine(directory, Path.GetFileName(checksum)), checksum);
         }
 
         return directory;
@@ -1370,6 +1379,18 @@ public sealed class ReleaseTests
 
     private static string ResolveExecutable(string name)
     {
+        string? path = TryResolveExecutable(name);
+        Assert.True(path is not null, "command -v " + name + " failed");
+        return path;
+    }
+
+    /// <summary>
+    /// Absolute path of <paramref name="name"/>, or null when it is not on PATH.
+    /// Does not add interpreters such as perl; <c>shasum</c> on macOS uses a fixed
+    /// <c>/usr/bin/perl</c> shebang.
+    /// </summary>
+    private static string? TryResolveExecutable(string name)
+    {
         ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
         {
             RedirectStandardInput = true,
@@ -1380,8 +1401,13 @@ public sealed class ReleaseTests
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add("command -v " + name);
         ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(10));
-        Assert.True(result.ExitCode == 0, "command -v " + name + " failed: " + result.StandardError);
-        return result.StandardOutput.Trim();
+        if (result.ExitCode != 0)
+        {
+            return null;
+        }
+
+        string path = result.StandardOutput.Trim();
+        return path.Length == 0 ? null : path;
     }
 
     // ------------------------------------------------------------- Sandbox
