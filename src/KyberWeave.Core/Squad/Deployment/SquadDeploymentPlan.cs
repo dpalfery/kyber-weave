@@ -492,7 +492,29 @@ public sealed class SquadDeploymentPlan
                 nextOwnedFiles.Add(previous);
         }
 
-        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, nextOwnedFiles);
+        // Classified from what this update actually produces, not merely inherited from
+        // previousReceipt (already confirmed non-single-root above whenever a resolver is
+        // supplied) — so an update run with no resolver, where retained and freshly rendered
+        // entries can legitimately differ in shape, never stamps a layout that disagrees with
+        // the files it is about to write (#91: a mismatched label persisted here is exactly
+        // what a later run that does supply a resolver would wrongly trust).
+        SquadReceiptLayout nextLayout = SquadReceiptLayout.PerTargetRoots;
+        if (scope == SquadDeploymentScope.Global)
+        {
+            try
+            {
+                nextLayout = ClassifyGlobalLayout(nextOwnedFiles);
+            }
+            catch (InvalidDataException)
+            {
+                throw LegacySingleRootLayoutConflict();
+            }
+        }
+
+        SquadReceipt receipt = NewReceipt(scope, timeProvider, degradations, nextOwnedFiles) with
+        {
+            Layout = nextLayout
+        };
         return new SquadDeploymentPlan(
             Path.GetFullPath(targetRoot),
             identity,
@@ -504,7 +526,7 @@ public sealed class SquadDeploymentPlan
             SquadStateMutation.Write,
             SquadStateMutation.Write,
             globalRoots,
-            isSingleRootLayout: false);
+            isSingleRootLayout: nextLayout == SquadReceiptLayout.SingleRoot);
     }
 
     /// <summary>Preflights an ownership-aware uninstall without changing the deployment tree.</summary>

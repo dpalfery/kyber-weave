@@ -882,7 +882,7 @@ public sealed class SquadGlobalRootTests : IDisposable
                 foreach (var file in result.Files)
                 {
                     Assert.False(
-                        file.RelativePath.StartsWith(prefix!, StringComparison.Ordinal),
+                        file.RelativePath.StartsWith(prefix, StringComparison.Ordinal),
                         $"Renderer for {target} must not emit paths prefixed with '{prefix}' in global scope.");
                 }
             }

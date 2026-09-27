@@ -264,6 +264,26 @@ public sealed class SquadStateStore
                 _ => throw new InvalidDataException(
                     $"Squad receipt layout '{layoutText}' is not a recognized canonical layout.")
             };
+
+            // An empty file list is consistent with either declared layout — there is nothing
+            // to classify against. A non-empty list must agree with what its own paths
+            // classify as; a persisted receipt that lies about its layout is exactly the state
+            // a corrupted or hand-edited write could leave behind, and trusting it silently is
+            // what let a mismatched label reach a later, resolver-supplied run (#91).
+            if (files.Count > 0)
+            {
+                SquadReceiptLayout classified = SquadDeploymentPlan.ClassifyGlobalLayout(files);
+                if (classified != layout)
+                {
+                    string classifiedText = classified == SquadReceiptLayout.SingleRoot
+                        ? "single-root"
+                        : "per-target-roots";
+                    throw new InvalidDataException(
+                        $"Squad receipt declares layout '{layoutText}' but its files classify as " +
+                        $"'{classifiedText}'. Recover it by hand: verify or remove each file, then " +
+                        "delete the receipt and lock so a fresh install can recreate them.");
+                }
+            }
         }
         else if (scope == SquadDeploymentScope.Global)
         {

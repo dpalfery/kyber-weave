@@ -69,8 +69,8 @@ public sealed class SquadStatusCommand : Command<SquadStatusSettings>
             AnsiConsole.MarkupLine(
                 $"[yellow]legacy layout:[/] this receipt predates issue #91 and every entry " +
                 $"resolves beneath the recorded root [bold]{Markup.Escape(targetRoot)}[/] rather " +
-                "than each target's own global root. Recover with [bold]squad uninstall --global[/] " +
-                "then [bold]squad install --global[/].");
+                "than each target's own global root. Recover with [bold]kyber-weave squad uninstall --global[/] " +
+                "then [bold]kyber-weave squad install --global[/].");
         }
 
         bool hasIssues = false;

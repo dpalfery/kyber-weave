@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
@@ -1309,7 +1310,7 @@ public sealed class SquadCliCommandTests : IDisposable
             "conductor content",
             Encoding.UTF8);
 
-        SeedDeployment(targetRoot, SquadDeploymentScope.Global, stateStore,
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
             (".codex/agents/conductor.toml", "conductor content"));
 
         SquadGlobalRoots globalRoots = new(_ => null, Path.Combine(fixture.Path, "fake-home"));
@@ -1343,7 +1344,7 @@ public sealed class SquadCliCommandTests : IDisposable
             "conductor content",
             Encoding.UTF8);
 
-        SeedDeployment(targetRoot, SquadDeploymentScope.Global, stateStore,
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
             (".codex/agents/conductor.toml", "conductor content"));
 
         File.WriteAllText(
@@ -1386,7 +1387,7 @@ public sealed class SquadCliCommandTests : IDisposable
             "conductor content",
             Encoding.UTF8);
 
-        SeedDeployment(targetRoot, SquadDeploymentScope.Global, stateStore,
+        SeedLegacyGlobalDeployment(targetRoot, stateStore,
             (".codex/agents/conductor.toml", "conductor content"));
 
         string? originalCodexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
@@ -1520,6 +1521,68 @@ public sealed class SquadCliCommandTests : IDisposable
             Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
         File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
+        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Seeds a Global deployment whose receipt is persisted as authentic legacy v1 JSON — the
+    /// shape a genuine pre-#91 CLI wrote, with no explicit <c>layout</c> field — rather than
+    /// through <see cref="SquadStateStore.SerializeReceipt"/>, which always upgrades a Global
+    /// receipt to v2 regardless of the schema string already on the in-memory object. A
+    /// directly constructed receipt with prefixed paths but an unset (default)
+    /// <see cref="SquadReceipt.Layout"/> would otherwise round-trip through the v2 writer as a
+    /// self-contradicting payload — exactly what the v2 read-side cross-check (#91) now refuses.
+    /// </summary>
+    private static void SeedLegacyGlobalDeployment(
+        string targetRoot,
+        SquadStateStore stateStore,
+        params (string RelativePath, string Content)[] files)
+    {
+        string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Global);
+        string lockPath = stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+
+        JsonArray filesJson = [];
+        foreach ((string relPath, string content) in files)
+        {
+            string fullPath = Path.Combine(targetRoot, relPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            File.WriteAllBytes(fullPath, bytes);
+            string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            filesJson.Add(new JsonObject
+            {
+                ["relativePath"] = relPath,
+                ["sha256"] = sha256,
+                ["target"] = "codex",
+                ["adopted"] = false
+            });
+        }
+
+        JsonObject receiptJson = new JsonObject
+        {
+            ["schema"] = "kyber-squad.receipt/v1",
+            ["scope"] = "global",
+            ["targetRoot"] = ".",
+            ["installedAtUtc"] = DateTimeOffset.UtcNow.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
+            ["degradations"] = new JsonArray(),
+            ["files"] = filesJson
+        };
+
+        SquadLock squadLock = new SquadLock(
+            Schema: "kyber-squad.lock/v1",
+            SquadVersion: "1.2.3",
+            CliVersion: "1.2.3",
+            McpVersion: "1.2.3",
+            Bundle: "full",
+            Targets: ["codex"],
+            Exclusions: [],
+            Translation: "best-effort",
+            BundleDigest: "a".PadRight(64, '0'),
+            AssetDigest: "b".PadRight(64, '0'),
+            Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
+
+        File.WriteAllText(receiptPath, receiptJson.ToJsonString() + "\n", Encoding.UTF8);
         File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
     }
 
