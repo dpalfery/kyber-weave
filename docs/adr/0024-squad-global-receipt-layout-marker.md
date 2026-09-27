@@ -55,7 +55,9 @@ environment override: Copilot (`~/.github` vs `~/.copilot`) and Antigravity (`~/
 
    The same receipt always classifies the same way. A guard test pins that no registered
    renderer's Global output starts with its target's legacy prefix, since the classifier
-   depends on that.
+   depends on that. `update` and `uninstall` stamp the layout they classify from the files
+   they keep, and a v2 receipt whose declared `layout` contradicts its own paths is rejected
+   on read, so a mislabeled receipt can neither be written by them nor trusted.
 
 3. **Legacy receipts are read-and-remove only.** `status` and `uninstall` resolve a
    `single-root` receipt beneath its recorded deployment root:
