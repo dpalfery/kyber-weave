@@ -128,6 +128,12 @@ public static class DevinImportOverlap
     /// Devin's accepted definition names, or a flat <c>&lt;name&gt;.md</c>. Identities come
     /// from paths rather than frontmatter, which is how every Squad renderer names them.
     /// </summary>
+    /// <remarks>
+    /// Enumeration is lazy, so an unreadable or vanishing directory throws while the loops
+    /// advance rather than at the call. Those failures return what was read before them: a
+    /// doctor warning built on part of a tree is still true, and a doctor that crashes on one
+    /// unreadable folder reports nothing at all.
+    /// </remarks>
     private static HashSet<string> ReadIdentities(string directory, string kind)
     {
         HashSet<string> identities = new(StringComparer.Ordinal);
@@ -137,20 +143,27 @@ public static class DevinImportOverlap
         }
 
         string[] definitionNames = kind == SkillKind ? ["SKILL.md"] : AgentDefinitionFileNames;
-        foreach (string child in Directory.EnumerateDirectories(directory))
+        try
         {
-            if (definitionNames.Any(name => File.Exists(Path.Combine(child, name))))
+            foreach (string child in Directory.EnumerateDirectories(directory))
             {
-                identities.Add(Path.GetFileName(child));
+                if (definitionNames.Any(name => File.Exists(Path.Combine(child, name))))
+                {
+                    identities.Add(Path.GetFileName(child));
+                }
+            }
+
+            if (kind == AgentKind)
+            {
+                foreach (string file in Directory.EnumerateFiles(directory, "*.md"))
+                {
+                    identities.Add(Path.GetFileNameWithoutExtension(file));
+                }
             }
         }
-
-        if (kind == AgentKind)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            foreach (string file in Directory.EnumerateFiles(directory, "*.md"))
-            {
-                identities.Add(Path.GetFileNameWithoutExtension(file));
-            }
+            // Keep the identities read before the failure; see remarks.
         }
 
         return identities;

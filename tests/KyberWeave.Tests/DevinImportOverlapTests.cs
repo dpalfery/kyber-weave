@@ -188,6 +188,39 @@ public sealed class DevinImportOverlapTests : IDisposable
         Assert.Equal("claude", overlap.ImportSetting);
     }
 
+    /// <summary>
+    /// Enumeration is lazy, so an unreadable tree throws mid-loop; the check reports what it
+    /// could read instead of taking <c>squad doctor</c> down with it. Unix-only, because the
+    /// unreadable directory is made with a file mode.
+    /// </summary>
+    [Fact]
+    public void Inspect_UnreadableImportedTree_ReportsTheRestInsteadOfThrowing()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string ws = Workspace();
+        Skill(ws, ".devin/skills", "code-review");
+        Skill(ws, ".claude/skills", "code-review");
+        Skill(ws, ".github/skills", "code-review");
+        string unreadable = Path.Combine(ws, ".claude", "skills");
+        UnixFileMode original = File.GetUnixFileMode(unreadable);
+        File.SetUnixFileMode(unreadable, UnixFileMode.None);
+        try
+        {
+            DevinImportOverlapReport report = DevinImportOverlap.Inspect(ws, devinUserRoot: null, NoFiles);
+
+            DevinImportOverlapEntry overlap = Assert.Single(report.Overlaps);
+            Assert.Equal(".github/skills", overlap.SourceRoot);
+        }
+        finally
+        {
+            File.SetUnixFileMode(unreadable, original);
+        }
+    }
+
     [Fact]
     public void Inspect_DirectoryWithoutADefinitionFile_IsNotAnIdentity()
     {
