@@ -15,10 +15,10 @@ How SQL is written in this repository. Agents and skills resolve this document a
 
 ## Authority & status
 
-When this standard is in `status: current`, what it says here outranks whatever defaults a
-portable agent shipped with. While in `status: draft`, it serves as a non-authoritative
-template/proposal and does NOT override portable agent defaults until reviewed and promoted
-to `current`.
+When this standard is in `status: current`, it is the rule for this technology in this
+repository. Portable agents ship no built-in default to fall back on. While it is in
+`status: draft` it is a proposal: an agent that resolves it says so and asks a human whether
+to proceed on it, exactly as it does when no standard is declared.
 
 > Template. Set `owner` to a row in `catalog.md`, review the decisions below, and promote
 > `status` to `current`.
@@ -44,6 +44,30 @@ they are validated against an allow-list, never interpolated from input.
 - No scalar user-defined functions in `WHERE` or `SELECT` over large sets — they defeat the
   optimizer.
 
+## T-SQL authoring
+
+- **Schema-qualify every object reference** (`dbo.customer`, `sales.usp_get_order`).
+- **`SET NOCOUNT ON;`** is the first statement in a stored-procedure body.
+- User procedures take a `usp_` prefix or none.
+- Modules are created with `CREATE OR ALTER` and dropped with `DROP ... IF EXISTS`, so a
+  script can run twice.
+- Transactions are explicit (`BEGIN TRANSACTION` / `COMMIT`) and short.
+- Narrow results as early as possible: only the rows and columns the caller needs.
+
+## Schema and types
+
+- **Third normal form by default.** Denormalize only as a deliberate, documented performance
+  decision.
+- **The narrowest correct type.** `int` / `bigint` for keys, `decimal` for exact and monetary
+  values, `date` / `time` / `datetime2` rather than `datetime`, `bit` for booleans, `nvarchar`
+  for Unicode text.
+- **Every table has a clustered index.** The clustered key is narrow, unique, ever-increasing,
+  immutable, non-nullable, and fixed-width — an `IDENTITY` or `SEQUENCE` column. Not a
+  `uniqueidentifier` unless its values are generated sequentially. When the primary key does
+  not fit that shape, declare it nonclustered and cluster elsewhere.
+- Integrity is enforced with constraints — `PRIMARY KEY`, `FOREIGN KEY`, `UNIQUE`, `CHECK`,
+  `NOT NULL`, `DEFAULT` — not by application logic alone.
+
 ## Correctness at the edges
 
 `NULL` is not a value and does not compare like one. State what a `WHERE` clause should do
@@ -58,6 +82,15 @@ A query added with a new access pattern comes with the index that serves it, or 
 reason it does not need one. Check the plan rather than guessing; an index that is never used
 still costs every write.
 
+- Key columns in order of use: equality and join columns first, then the rest from most to
+  least distinct.
+- Cover with `INCLUDE` rather than widening the key, and never include `(n)varchar(max)` or
+  `xml`.
+- Check for an existing or overlapping index first, and extend it rather than adding a
+  near-duplicate. A missing-index suggestion is a lead, not a decision.
+- Build or rebuild large indexes `ONLINE` where the edition supports it, and consider row or
+  page compression.
+
 ## Naming and layout
 
 - One convention for schemas, tables and columns — `snake_case` unless the platform's own
@@ -65,6 +98,23 @@ still costs every write.
 - Keywords uppercase, one clause per line, joins and conditions indented consistently. A
   formatter settles this; the point is that diffs stay readable.
 - Singular or plural table names is a coin flip. Pick one here and stop re-deciding it.
+
+## Delivery
+
+The schema is code. Its source of truth is an SDK-style SQL database project
+(`Microsoft.Build.Sql`), not whatever a database currently holds.
+
+- `dotnet build` produces the `.dacpac`, with SQL code analysis on, so the rules above are
+  checked by the build.
+- Deploy with SqlPackage `Publish` (or `azure/sql-action`, which wraps it). Build once, and
+  deploy the same artifact to every environment.
+- Before production, generate a preview with SqlPackage `Script` or `DeployReport` and have a
+  human approve it.
+- Pipelines use a standalone SqlPackage installed as a `dotnet` tool, and connect with a
+  managed or Entra identity rather than a password.
+
+A repository whose schema changes ship as migration scripts instead replaces this section and
+keeps the one below.
 
 ## Migrations
 
@@ -78,3 +128,6 @@ stops using them, so a rollback does not lose data.
 
 Application accounts get the permissions the application uses, and no more. Nothing routine
 runs as `sa`, `root`, or the schema owner.
+
+Sensitive columns are encrypted, hashed, or masked, and a query selects only the columns it
+needs rather than whatever `*` expands to.

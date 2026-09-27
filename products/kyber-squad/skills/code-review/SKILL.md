@@ -117,7 +117,9 @@ quoting the counterpart it found. Neither may report the other's unit.
 [C#](references/csharp.md), [Python](references/python.md), [React](references/react.md),
 [SQL](references/sql.md), [Pulumi](references/pulumi.md), [Azure](references/azure.md),
 [GitHub Actions](references/github-actions.md) — are lens modifiers, not lenses. A lens loads
-the checklists for the technologies actually present in the diff.
+the checklists for the technologies actually present in the diff. Each checklist points at the
+host's declared `<technology>-coding-standard` and states no rule of its own; an undeclared or
+draft standard is reported, never replaced with a built-in checklist.
 
 ### 3. Confirm before believing
 

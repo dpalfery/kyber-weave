@@ -33,7 +33,7 @@ public sealed partial class HotshotGoldenContractTests
     private const int ExpectedCopilotRenderFileCount = 48;
     private const string ExpectedSchema = "kyber-squad.hotshot-golden/v1";
     private const string ExpectedSourceCommit = "677c3a876ba9c62f1083608596b238c9deaff167";
-    private const string ExpectedManifestSha256 = "27a4ce4886c5d6a6b7c9829f77a6f5f468b765970c5e4bb8173f29b2850c1d20";
+    private const string ExpectedManifestSha256 = "6e927ded6de8b86f151d474e84c68056236752c122e164eeb4278b4977a6dda1";
     private const string ExternalGoldenRootVariable = "KYBER_SQUAD_HOTSHOT_GOLDEN_ROOT";
     private const string MaiCodeCopilotModel = "MAI-Code-1.1-Flash (copilot)";
 
