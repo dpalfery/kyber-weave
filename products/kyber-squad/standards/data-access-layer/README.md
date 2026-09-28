@@ -66,6 +66,17 @@ to proceed on it, exactly as it does when no standard is declared.
 Application and API code consumes `IRepository<T>`. It does not open connections or
 write SQL.
 
+## Migrations
+
+- One migration per schema change: each schema change ships as its own versioned
+  `[Migration(yyyyMMddHHmmss)]` class.
+- Never edit an applied migration; add a new one instead. A migration already applied in any
+  environment is immutable — a later edit to it there would not run at all.
+- For a non-nullable column added to an existing table, add a default first, then remove the
+  default in a separate migration, so rows written before the change still satisfy `NOT NULL`.
+- Down() is a host decision: implementing it is optional, and a production correction is
+  always a forward migration, per **<sql-coding-standard>**.
+
 ## Commands
 
 ```bash
@@ -74,3 +85,7 @@ dotnet test
 fluentmigrator migrate
 fluentmigrator rollback
 ```
+
+`fluentmigrator rollback` only runs where the host has implemented `Down()` for the migration
+being rolled back. Where `Down()` is not implemented, correct forward with a new migration
+instead, per § Migrations.

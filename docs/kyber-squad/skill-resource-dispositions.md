@@ -175,7 +175,7 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/dal-dev/references/schema-design.md` | 44 | `as clustered key (16 bytes, not ever-increasing) unless sequentially generated` | duplicate | sql § Schema and types | `unless its values are generated sequentially` | — |
 | `skills/dal-dev/references/schema-design.md` | 45 | `Enforce integrity with constraints` | duplicate | sql § Schema and types | `Integrity is enforced with constraints` | — |
 | `skills/dal-dev/references/schema-design.md` | 51 | `Order multi-column index keys: equality/join columns first` | duplicate | sql § Indexes | `equality and join columns first` | — |
-| `skills/dal-dev/references/schema-design.md` | 52 | `clause to cover queries with non-key columns. Don't include` | duplicate | sql § Indexes | `never include (n)varchar(max) or xml` | — |
+| `skills/dal-dev/references/schema-design.md` | 52 | `clause to cover queries with non-key columns. Don't include` | duplicate | sql § Indexes | `rather than widening the key, and never include` | — |
 | `skills/dal-dev/references/schema-design.md` | 53 | `Before adding an index, check for overlapping indexes` | duplicate | sql § Indexes | `Check for an existing or overlapping index first` | — |
 | `skills/dal-dev/references/schema-design.md` | 54 | `For large tables, build/rebuild with` | duplicate | sql § Indexes | `Build or rebuild large indexes` | — |
 | `skills/dal-dev/references/schema-design.md` | 55 | `Avoid over-indexing — every index has write and storage cost` | retained | — | | Technique: a general index-cost rule of thumb, not a host-reversible policy (D2). |

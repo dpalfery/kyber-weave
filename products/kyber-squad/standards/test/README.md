@@ -63,6 +63,10 @@ to proceed on it, exactly as it does when no standard is declared.
 Tests run in any order and do not depend on each other. Each test arranges its own data.
 No shared mutable state between test methods.
 
+Clean up test data in DisposeAsync or use a transaction-per-test pattern, so one test's rows
+never leak into the next. Use unique identifiers for test records to avoid conflicts with
+parallel runs — a GUID or a per-test prefix, not a fixed id another test might also claim.
+
 ## What to assert
 
 A test name is an assertion, not a number. New behaviour ships with the test that would

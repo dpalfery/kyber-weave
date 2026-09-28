@@ -167,6 +167,26 @@ queue, downstream API) so an orchestrator can tell liveness from readiness.
 Cache responses only where the data is safe to reuse. Rate-limit public endpoints.
 Measure with the platform diagnostics rather than guessing.
 
+Use route constraints to prevent wrong-type requests from reaching action logic — a route
+like `{id:int}` fails routing instead of failing model binding inside the action. A collection
+endpoint returns 200 with an empty array, not 404, when the collection is empty; an empty
+result is not a missing resource. Actions do not access HttpContext directly; use action
+method parameters (`[FromRoute]`, `[FromQuery]`, `[FromBody]`, `CancellationToken`) instead,
+so the action stays testable without a fake `HttpContext`.
+
+## Backend-for-frontend
+
+Applies when the host uses a backend-for-frontend (BFF) pattern in front of a YARP reverse
+proxy. Skip this section for a host with no BFF.
+
+- The browser never sees or stores access tokens; they are kept server-side in encrypted
+  cookies.
+- Validate incoming Host headers against an allowlist to prevent header injection.
+- CORS uses explicit frontend origins, never a wildcard.
+- The BFF serves a fallback route for client-side routing.
+- Do not bypass YARP for direct API calls from the BFF.
+- Forward Bearer tokens via YARP transforms on every proxied request.
+
 ## Performance
 
 - No database or remote call inside a loop. Batch it, or cache what is safe to reuse.
