@@ -89,7 +89,7 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
     [InlineData("deep-planning", "pi", "zai/glm-5.3[thinking=high]")]
     [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
-    [InlineData("fast", "claude", "haiku")]
+    [InlineData("fast", "claude", "sonnet")]
     [InlineData("fast", "codex", "gpt-5.6-luna")]
     [InlineData("fast", "copilot", "MAI-Code-1.1-Flash (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]

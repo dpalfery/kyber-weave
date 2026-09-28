@@ -15,7 +15,7 @@ profiles:
   fast:
     default: inherit
     antigravity: flash
-    claude: haiku
+    claude: sonnet
     codex: gpt-5.6-luna
     copilot: MAI-Code-1.1-Flash (copilot)
     cursor: composer-2.5[]
