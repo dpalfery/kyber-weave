@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -1012,112 +1013,84 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// Prevents regression: a CreateUpdate call with a prior receipt that owns a retired skill
-    /// file deletes it if unchanged, retains it if locally edited, and persists the receipt
-    /// without the deleted file.
+    /// Prevents a host that deployed <c>create-pull-request-github</c> before it was retired
+    /// into <c>create-pull-request</c> from keeping the retired skill forever after
+    /// <c>squad update</c>, or from losing an operator's edited copy of it. The rendered set is
+    /// the real canonical Claude render, so the test fails while the retired skill is still
+    /// canonical.
     /// </summary>
     [Fact]
-    public void CreateUpdateRetiresCreatePullRequestGithubFromAPriorReleaseUnlessLocallyEdited()
+    public async Task CreateUpdateRetiresCreatePullRequestGithubFromAPriorReleaseUnlessLocallyEdited()
     {
-        using TempDirectory fixture = new TempDirectory();
         const string retiredSkillPath = ".claude/skills/create-pull-request-github/SKILL.md";
-        const string installedRetiredContent = "---\nname: create-pull-request-github\ndescription: GitHub PR skill\n---\nGitHub PR guidance\n";
-        const string editedRetiredContent = "---\nname: create-pull-request-github\ndescription: operator edited\n---\nOperator guidance\n";
-        const string newSkillPath = ".claude/skills/create-pull-request/SKILL.md";
-        const string newSkillContent = "---\nname: create-pull-request\ndescription: Combined PR skill\n---\nCombined PR guidance\n";
+        const string installedContent =
+            "---\nname: create-pull-request-github\ndescription: Prior release\n---\nPrior release guidance\n";
+        const string editedContent =
+            "---\nname: create-pull-request-github\ndescription: Operator edited\n---\nOperator guidance\n";
+        SquadRenderResult render = await new SquadRendererRegistry([new ClaudeRenderer()]).RenderAsync(
+            new SquadRenderRequest(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+                [SquadTarget.Claude],
+                SquadDeploymentScope.Project));
+        Assert.True(render.Success, string.Join("; ", render.Errors));
+        SquadReceipt previousReceipt = Receipt(new SquadOwnedFile(
+            retiredSkillPath,
+            Digest(installedContent),
+            "claude",
+            Adopted: false));
 
-        // Scenario 1: Unchanged retired skill is deleted on update
+        using (TempDirectory fixture = new TempDirectory())
         {
-            SquadOwnedFile retiredOwned = new(
-                retiredSkillPath,
-                Digest(installedRetiredContent),
-                "claude",
-                Adopted: false);
-            SquadReceipt previousReceipt = Receipt(retiredOwned);
-
-            Write(fixture.Path, retiredSkillPath, installedRetiredContent);
+            Write(fixture.Path, retiredSkillPath, installedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
-
-            Assert.True(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
 
             SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
-                [Rendered(newSkillPath, newSkillContent, "claude")],
+                render.Files,
                 previousReceipt,
                 [],
                 replaceManaged: false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
 
-            // Verify the unchanged retired skill is planned for deletion
             Assert.Contains(
                 plan.PlannedFileChanges,
                 change => change.RelativePath == retiredSkillPath &&
-                          change.Target == "claude" &&
                           change.Kind == SquadFileMutationKind.Delete);
-
             Transaction(fixture.Path).Execute(plan);
 
-            // Unchanged retired skill is deleted
             Assert.False(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
-
-            // New skill is deployed
-            Assert.True(File.Exists(ToPlatformPath(fixture.Path, newSkillPath)));
-
-            // Persisted receipt has the new skill but not the retired one
             SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
                 fixture.Path,
                 SquadDeploymentScope.Project));
-            Assert.Contains(persisted.Files, f => f.RelativePath == newSkillPath);
-            Assert.DoesNotContain(persisted.Files, f => f.RelativePath == retiredSkillPath);
+            Assert.DoesNotContain(persisted.Files, file => file.RelativePath == retiredSkillPath);
         }
 
-        // Scenario 2: Locally edited retired skill is retained with both replaceManaged false and true
         foreach (bool replaceManaged in new[] { false, true })
         {
-            using TempDirectory editFixture = new TempDirectory();
+            using TempDirectory fixture = new TempDirectory();
+            Write(fixture.Path, retiredSkillPath, editedContent);
+            WriteState(fixture.Path, Lock(), previousReceipt);
 
-            SquadOwnedFile retiredOwned = new(
-                retiredSkillPath,
-                Digest(installedRetiredContent),
-                "claude",
-                Adopted: false);
-            SquadReceipt editPreviousReceipt = Receipt(retiredOwned);
-
-            Write(editFixture.Path, retiredSkillPath, editedRetiredContent);
-            WriteState(editFixture.Path, Lock(), editPreviousReceipt);
-
-            SquadDeploymentPlan editPlan = SquadDeploymentPlan.CreateUpdate(
-                editFixture.Path,
+            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
-                [Rendered(newSkillPath, newSkillContent, "claude")],
-                editPreviousReceipt,
+                render.Files,
+                previousReceipt,
                 [],
-                replaceManaged: replaceManaged,
+                replaceManaged,
                 new FixedTimeProvider(InstalledAt.AddDays(1)));
 
-            // Edited file should NOT be planned for deletion
-            Assert.DoesNotContain(
-                editPlan.PlannedFileChanges,
-                change => change.RelativePath == retiredSkillPath);
+            Assert.DoesNotContain(plan.PlannedFileChanges, change => change.RelativePath == retiredSkillPath);
+            Transaction(fixture.Path).Execute(plan);
 
-            Transaction(editFixture.Path).Execute(editPlan);
-
-            // Edited retired skill is retained
-            Assert.True(File.Exists(ToPlatformPath(editFixture.Path, retiredSkillPath)));
-            Assert.Equal(editedRetiredContent, Read(editFixture.Path, retiredSkillPath));
-
-            // New skill is deployed
-            Assert.True(File.Exists(ToPlatformPath(editFixture.Path, newSkillPath)));
-
-            // Persisted receipt still owns the edited retired skill (retained even with replaceManaged true)
-            SquadReceipt editPersisted = Assert.IsType<SquadReceipt>(Store(editFixture.Path).ReadReceipt(
-                editFixture.Path,
+            Assert.Equal(editedContent, Read(fixture.Path, retiredSkillPath));
+            SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+                fixture.Path,
                 SquadDeploymentScope.Project));
-            Assert.Contains(editPersisted.Files, f => f.RelativePath == retiredSkillPath);
-            Assert.Contains(editPersisted.Files, f => f.RelativePath == newSkillPath);
+            Assert.Contains(persisted.Files, file => file.RelativePath == retiredSkillPath);
         }
     }
 

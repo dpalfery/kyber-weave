@@ -470,7 +470,7 @@ public sealed partial class HotshotGoldenContractTests
             .Where(files.ContainsKey)
             .ToArray();
         string[] retiredSkillPaths = RetiredSkillIdentities
-            .Select(name => $"skills/{name}/SKILL.md")
+            .Select(name => $".github/skills/{name}/SKILL.md")
             .Where(files.ContainsKey)
             .ToArray();
         AddSequenceMismatch(mismatches, "retired rendered paths", [], retiredAgentPaths.Concat(retiredSkillPaths).ToArray());
@@ -546,10 +546,24 @@ public sealed partial class HotshotGoldenContractTests
         HashSet<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToHashSet(StringComparer.Ordinal);
         foreach (string resource in manifest.CanonicalResources)
         {
+            if (RetiredSkillIdentities.Contains(CanonicalSkillName(resource), StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             if (!entryNames.Contains(resource))
             {
                 mismatches.Add($"{Path.GetFileName(archivePath)} omits '{resource}'");
             }
+        }
+
+        foreach (string retired in RetiredSkillIdentities)
+        {
+            string[] retiredEntries = entryNames
+                .Where(name => name.StartsWith($"skills/{retired}/", StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            AddSequenceMismatch(mismatches, $"{Path.GetFileName(archivePath)} retired skill entries", [], retiredEntries);
         }
     }
 
