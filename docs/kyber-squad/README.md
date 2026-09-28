@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-09-28
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -25,7 +25,7 @@ and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `op
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 21 specialized agent roles and 24 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 21 specialized agent roles and 23 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.
@@ -39,7 +39,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 24 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 21 canonical agents and 23 skills — each projecting its validated resource closure beside the rendered principal — for all twelve registered renderers while retaining a governed twelve-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in `.kyber-weave/squad.receipt.json` and `squad.lock.yml`—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
@@ -49,16 +49,17 @@ Modifying local developer environments or repository-level agent configurations 
 
 ## Canonical, packaged, and rendered skill surfaces
 
-The canonical product contains 24 `SKILL.md` files whose raw bytes match the designated Hotshot
-golden copy. It also retains 64 supplemental references, scripts, provider instructions, and
-metadata files, for 88 files under `products/kyber-squad/skills/`. Recursive APM and Agent Plugins
-packages carry all 88 files and preserve each retained local reference.
+The canonical product contains 23 `SKILL.md` files. Every one except the five explicitly evolved
+skills matches the designated Hotshot golden copy byte for byte. It also retains 66 supplemental
+references, scripts, provider instructions, and metadata files, for 89 files under
+`products/kyber-squad/skills/`. Recursive APM and Agent Plugins packages carry all 89 files and
+preserve each retained local reference.
 
-A fresh GitHub Copilot render projects each owner's validated resource closure beside its
-principal: 21 `.github/agents/<name>.agent.md` files, 24 `.github/skills/<name>/SKILL.md`
-files, and the linked resources, 113 files total, with authored relative links resolving in
-the output. Kyber-Squad preserves retained skill knowledge in canonical source and packages
-until the
+A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
+21 `.github/agents/<name>.agent.md` files, 23 `.github/skills/<name>/SKILL.md` files, and the
+linked resources, 118 files total, with authored relative links resolving in the output. A file
+named only in a code span is packaged but not rendered. Kyber-Squad preserves retained skill
+knowledge in canonical source and packages until the
 [skill-resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted and
 verified. Generated `.github` output remains a deployment artifact rather than canonical product
 source.

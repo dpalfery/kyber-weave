@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-09-28
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -19,7 +19,7 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**24 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+**23 canonical skills**, with transactional recovery and state governance. Twelve harness targets
 are declared; all twelve are currently implemented and registered.
 
 ---
@@ -446,6 +446,12 @@ By default, `squad update` preserves locally modified managed files and reports 
 kyber-weave squad update --replace-managed
 ```
 
+When a release no longer renders a file that an earlier install or update deployed, `squad update`
+deletes it if its bytes still match the receipt. A copy an operator edited stays in place and stays
+owned, even with `--replace-managed`; delete it by hand if it is no longer wanted. This is how
+`create-pull-request-github` leaves a host that deployed it before it was retired into
+`create-pull-request`.
+
 ### Checking Deployment Status and Health
 
 Verify the integrity of installed files, inspect version alignment, and detect unmanaged drift:
@@ -495,12 +501,13 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 24 canonical
-`SKILL.md` files plus the 64 retained supplemental resources, and retained local skill references
+Both archive formats recurse through each skill directory. They contain all 23 canonical
+`SKILL.md` files plus the 66 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
-agent-owned resources. A fresh deployment renders every owner's resources beside its principal —
-113 files on Copilot today — with authored relative links resolving inside the target output. The
+agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
+beside its principal — 118 files on Copilot today — with authored relative links resolving inside
+the target output; a file named only in a code span is packaged but not rendered. The
 tracked root `.github/` self-deployment predates resource delivery and is refreshed only by a
 release; surplus packaged content remains until the
 [resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.

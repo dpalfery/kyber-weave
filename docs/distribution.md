@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-09-28
 ---
 
 # Distribution and release flow
@@ -97,8 +97,8 @@ In addition to binary executables, each GitHub Release publishes two version-mat
 
 | Asset Name | Format | Contents |
 |---|---|---|
-| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 24 skills with 64 supplemental resources, profiles, schemas, and `mcp.json` |
-| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 24 portable skills, their 64 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
+| `kyber-squad-<version>.zip` | APM bundle | All 21 canonical agents with their 10 owned references, 23 skills with 66 supplemental resources, profiles, schemas, and `mcp.json` |
+| `kyber-squad-plugin-<version>.zip` | Agent Plugins v1 | All 23 portable skills, their 66 supplemental resources, and MCP server configuration; never agents or agent-owned resources |
 
 ### Packaging via `squad pack`
 
@@ -117,10 +117,11 @@ kyber-weave squad pack --format all --out ./artifacts
 
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
-Both formats package `skills/` recursively: 24 `SKILL.md` files plus 64 retained resources, for
-88 skill-tree files. The resources stay in release packages until the
+Both formats package `skills/` recursively: 23 `SKILL.md` files plus 66 retained resources, for
+89 skill-tree files. The resources stay in release packages until the
 [content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted;
-their omission from the exact 24-file Copilot golden skill surface is not a package contract.
+their omission from the exact 24-file Copilot golden skill surface of the pinned Hotshot fixture
+is not a package contract.
 
 `products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
 `.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` are an

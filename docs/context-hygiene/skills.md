@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Core/Skills
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-09-28
 code-refs:
   - SkillLoader
   - RoutingLinter
@@ -147,16 +147,19 @@ layout for each runtime is APM's problem rather than a second copy of that mappi
 
 While ContextHygiene validates individual skill specifications, scores routing readiness,
 and scans instruction surfaces, **[Kyber-Squad](../kyber-squad/architecture.md)** acts as the
-unified multi-harness deployment control plane. Kyber-Squad maintains 24 canonical skills
+unified multi-harness deployment control plane. Kyber-Squad maintains 23 canonical skills
 (alongside 21 canonical agent roles and lowering rules) under `products/kyber-squad/` and
 manages their transactional deployment, drift tracking, and lifecycle. Its catalog declares twelve
 harness targets. All twelve renderers are implemented and registered (`copilot`, `cursor`, `claude`,
 `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
 
-Every raw `SKILL.md` except the explicitly evolved `product-owner` and `bug-crusher` matches the
-Hotshot golden bytes. Canonical storage and recursive Squad packages preserve 64 supplemental
-resources, for 88 skill-tree files, and renderers project them beside the rendered principal, so
-deployed skill references resolve. The tracked root `.github/` self-deployment predates resource
+Every raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `product-owner`,
+`second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the Hotshot golden
+bytes; the golden `create-pull-request-github` skill is retired into `create-pull-request`.
+Canonical storage and recursive Squad packages preserve 66 supplemental resources, for 89
+skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
+principal, so those references resolve when deployed; a file named only in a code span is
+packaged but not rendered. The tracked root `.github/` self-deployment predates resource
 delivery; surplus packaged content remains until the
 [content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.
 

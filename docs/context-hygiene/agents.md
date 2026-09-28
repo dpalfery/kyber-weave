@@ -55,7 +55,7 @@ definitions in `products/kyber-squad/` and compiles them into target-native conf
 for all twelve currently implemented and registered renderers: `copilot`, `cursor`, `claude`, `codex`,
 `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`.
 
-The current agent namespace intersects the 24-skill namespace at seven names, all distinct-body
+The current agent namespace intersects the 23-skill namespace at seven names, all distinct-body
 collisions. There are no shared product identities. Fallback targets preserve each colliding skill
 and lower its agent to `role-<name>`; unoccupied agents, including `conductor`, lower to
 same-name role skills.
