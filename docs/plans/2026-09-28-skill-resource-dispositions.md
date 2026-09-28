@@ -2,7 +2,7 @@
 id: plans/2026-09-28-skill-resource-dispositions
 title: Skill-resource dispositions and content-preserving migration
 doc-type: plan
-status: draft
+status: current
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-28
@@ -15,7 +15,7 @@ development-mode: test-first
 
 Draft, 2026-09-28; re-baselined 2026-09-28 on commit 611862e, after the
 [provider-aware create-pull-request plan](../archive/plans/2026-09-28-provider-aware-create-pull-request.md)
-was archived. Q1 answered 2026-09-28 (D6); awaiting the user's approval to execute. For
+was archived. Q1 answered (D6). Ready: approved for execution by the user on 2026-09-28. For
 [issue 128](https://github.com/dpalfery/kyber-weave/issues/128).
 
 ## Problem and goal
