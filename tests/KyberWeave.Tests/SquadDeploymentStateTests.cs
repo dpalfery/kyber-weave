@@ -1012,6 +1012,116 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// Prevents regression: a CreateUpdate call with a prior receipt that owns a retired skill
+    /// file deletes it if unchanged, retains it if locally edited, and persists the receipt
+    /// without the deleted file.
+    /// </summary>
+    [Fact]
+    public void CreateUpdateRetiresCreatePullRequestGithubFromAPriorReleaseUnlessLocallyEdited()
+    {
+        using TempDirectory fixture = new TempDirectory();
+        const string retiredSkillPath = ".claude/skills/create-pull-request-github/SKILL.md";
+        const string installedRetiredContent = "---\nname: create-pull-request-github\ndescription: GitHub PR skill\n---\nGitHub PR guidance\n";
+        const string editedRetiredContent = "---\nname: create-pull-request-github\ndescription: operator edited\n---\nOperator guidance\n";
+        const string newSkillPath = ".claude/skills/create-pull-request/SKILL.md";
+        const string newSkillContent = "---\nname: create-pull-request\ndescription: Combined PR skill\n---\nCombined PR guidance\n";
+
+        // Scenario 1: Unchanged retired skill is deleted on update
+        {
+            SquadOwnedFile retiredOwned = new(
+                retiredSkillPath,
+                Digest(installedRetiredContent),
+                "claude",
+                Adopted: false);
+            SquadReceipt previousReceipt = Receipt(retiredOwned);
+
+            Write(fixture.Path, retiredSkillPath, installedRetiredContent);
+            WriteState(fixture.Path, Lock(), previousReceipt);
+
+            Assert.True(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
+
+            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [Rendered(newSkillPath, newSkillContent, "claude")],
+                previousReceipt,
+                [],
+                replaceManaged: false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+
+            // Verify the unchanged retired skill is planned for deletion
+            Assert.Contains(
+                plan.PlannedFileChanges,
+                change => change.RelativePath == retiredSkillPath &&
+                          change.Target == "claude" &&
+                          change.Kind == SquadFileMutationKind.Delete);
+
+            Transaction(fixture.Path).Execute(plan);
+
+            // Unchanged retired skill is deleted
+            Assert.False(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
+
+            // New skill is deployed
+            Assert.True(File.Exists(ToPlatformPath(fixture.Path, newSkillPath)));
+
+            // Persisted receipt has the new skill but not the retired one
+            SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+                fixture.Path,
+                SquadDeploymentScope.Project));
+            Assert.Contains(persisted.Files, f => f.RelativePath == newSkillPath);
+            Assert.DoesNotContain(persisted.Files, f => f.RelativePath == retiredSkillPath);
+        }
+
+        // Scenario 2: Locally edited retired skill is retained with both replaceManaged false and true
+        foreach (bool replaceManaged in new[] { false, true })
+        {
+            using TempDirectory editFixture = new TempDirectory();
+
+            SquadOwnedFile retiredOwned = new(
+                retiredSkillPath,
+                Digest(installedRetiredContent),
+                "claude",
+                Adopted: false);
+            SquadReceipt editPreviousReceipt = Receipt(retiredOwned);
+
+            Write(editFixture.Path, retiredSkillPath, editedRetiredContent);
+            WriteState(editFixture.Path, Lock(), editPreviousReceipt);
+
+            SquadDeploymentPlan editPlan = SquadDeploymentPlan.CreateUpdate(
+                editFixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                [Rendered(newSkillPath, newSkillContent, "claude")],
+                editPreviousReceipt,
+                [],
+                replaceManaged: replaceManaged,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+
+            // Edited file should NOT be planned for deletion
+            Assert.DoesNotContain(
+                editPlan.PlannedFileChanges,
+                change => change.RelativePath == retiredSkillPath);
+
+            Transaction(editFixture.Path).Execute(editPlan);
+
+            // Edited retired skill is retained
+            Assert.True(File.Exists(ToPlatformPath(editFixture.Path, retiredSkillPath)));
+            Assert.Equal(editedRetiredContent, Read(editFixture.Path, retiredSkillPath));
+
+            // New skill is deployed
+            Assert.True(File.Exists(ToPlatformPath(editFixture.Path, newSkillPath)));
+
+            // Persisted receipt still owns the edited retired skill (retained even with replaceManaged true)
+            SquadReceipt editPersisted = Assert.IsType<SquadReceipt>(Store(editFixture.Path).ReadReceipt(
+                editFixture.Path,
+                SquadDeploymentScope.Project));
+            Assert.Contains(editPersisted.Files, f => f.RelativePath == retiredSkillPath);
+            Assert.Contains(editPersisted.Files, f => f.RelativePath == newSkillPath);
+        }
+    }
+
+    /// <summary>
     /// A failed resource update must restore the exact prior bytes and ownership receipt, even
     /// when the failure happens after the new resource after-image has been published.
     /// </summary>

@@ -73,8 +73,15 @@ public sealed partial class HotshotGoldenContractTests
     private static readonly string[] EvolvedSkillIdentities =
     [
         "bug-crusher",
+        "create-pull-request", // combined with create-pull-request-github; provider selection and neutral layer
+        "pr-review-fix-comments", // provider files now rendered (plan 2026-09-28)
         "product-owner",
         "second-brain"        // hardcoded 6-Docs replaced with <docs-root> (todo squad-hardcoded-docs-root)
+    ];
+
+    private static readonly string[] RetiredSkillIdentities =
+    [
+        "create-pull-request-github" // consolidated into create-pull-request (plan 2026-09-28)
     ];
 
     private static readonly string[] RetiredAgentIdentities =
@@ -236,7 +243,11 @@ public sealed partial class HotshotGoldenContractTests
             .Except(RetiredAgentIdentities, StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        string[] expectedSkills = manifest.Skills.Select(entry => SkillName(entry.Path)).Order(StringComparer.Ordinal).ToArray();
+        string[] expectedSkills = manifest.Skills
+            .Select(entry => SkillName(entry.Path))
+            .Except(RetiredSkillIdentities, StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
         AddSequenceMismatch(mismatches, "canonical agents", expectedAgents, source.Agents.Select(agent => agent.Name));
         AddSequenceMismatch(mismatches, "bundle agents", expectedAgents, source.Bundle.AgentNames.Order(StringComparer.Ordinal));
         AddSequenceMismatch(mismatches, "canonical skills", expectedSkills, source.Skills.Select(skill => skill.Name));
@@ -292,13 +303,15 @@ public sealed partial class HotshotGoldenContractTests
         string skillRoot = Path.Combine(ProductRoot, "skills");
         string[] actualSkillFiles = Directory.EnumerateFiles(skillRoot, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
-            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
+            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
+                          !RetiredSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
         string[] expectedSkillFiles = manifest.Skills
             .Select(entry => entry.Path.Replace(".github/", string.Empty, StringComparison.Ordinal))
             .Concat(manifest.CanonicalResources)
-            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
+            .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
+                          !RetiredSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
         AddSequenceMismatch(mismatches, "non-evolved recursive canonical skill files", expectedSkillFiles, actualSkillFiles);
@@ -306,7 +319,8 @@ public sealed partial class HotshotGoldenContractTests
         foreach (GoldenSkillEntry expected in manifest.Skills)
         {
             string name = SkillName(expected.Path);
-            if (EvolvedSkillIdentities.Contains(name, StringComparer.Ordinal))
+            if (EvolvedSkillIdentities.Contains(name, StringComparer.Ordinal) ||
+                RetiredSkillIdentities.Contains(name, StringComparer.Ordinal))
             {
                 continue;
             }
@@ -444,16 +458,22 @@ public sealed partial class HotshotGoldenContractTests
         Dictionary<string, SquadDeploymentFile> files = result.Files.ToDictionary(file => file.RelativePath, StringComparer.Ordinal);
         string[] expectedPaths = manifest.Agents.Select(entry => entry.Path)
             .Where(path => !RetiredAgentIdentities.Contains(AgentName(path), StringComparer.Ordinal))
-            .Concat(manifest.Skills.Select(entry => entry.Path))
+            .Concat(manifest.Skills
+                .Select(entry => entry.Path)
+                .Where(path => !RetiredSkillIdentities.Contains(SkillName(path), StringComparer.Ordinal)))
             .Order(StringComparer.Ordinal)
             .ToArray();
         string[] missingPaths = expectedPaths.Where(path => !files.ContainsKey(path)).ToArray();
         AddSequenceMismatch(mismatches, "missing required rendered paths", [], missingPaths);
-        string[] retiredPaths = RetiredAgentIdentities
+        string[] retiredAgentPaths = RetiredAgentIdentities
             .Select(name => $".github/agents/{name}.agent.md")
             .Where(files.ContainsKey)
             .ToArray();
-        AddSequenceMismatch(mismatches, "retired rendered paths", [], retiredPaths);
+        string[] retiredSkillPaths = RetiredSkillIdentities
+            .Select(name => $"skills/{name}/SKILL.md")
+            .Where(files.ContainsKey)
+            .ToArray();
+        AddSequenceMismatch(mismatches, "retired rendered paths", [], retiredAgentPaths.Concat(retiredSkillPaths).ToArray());
 
         foreach (GoldenAgentEntry expected in manifest.Agents)
         {
@@ -497,7 +517,9 @@ public sealed partial class HotshotGoldenContractTests
 
         foreach (GoldenSkillEntry expected in manifest.Skills)
         {
-            if (EvolvedSkillIdentities.Contains(SkillName(expected.Path), StringComparer.Ordinal))
+            string skillName = SkillName(expected.Path);
+            if (EvolvedSkillIdentities.Contains(skillName, StringComparer.Ordinal) ||
+                RetiredSkillIdentities.Contains(skillName, StringComparer.Ordinal))
             {
                 continue;
             }
@@ -539,6 +561,12 @@ public sealed partial class HotshotGoldenContractTests
     {
         foreach (GoldenSkillEntry skillEntry in manifest.Skills)
         {
+            string skillName = SkillName(skillEntry.Path);
+            if (RetiredSkillIdentities.Contains(skillName, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
             string relativeSkillPath = skillEntry.Path.Replace(".github/", string.Empty, StringComparison.Ordinal);
             string skillPath = Path.Combine(root, relativeSkillPath.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(skillPath))
