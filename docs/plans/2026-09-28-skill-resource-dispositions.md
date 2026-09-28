@@ -13,12 +13,14 @@ development-mode: test-first
 
 ## Status
 
-Draft, 2026-09-28. Not executable: decision Q1 is open. For
+Draft, 2026-09-28; re-baselined 2026-09-28 on commit 611862e, after the
+[provider-aware create-pull-request plan](../archive/plans/2026-09-28-provider-aware-create-pull-request.md)
+was archived. Not executable: decision Q1 is open. For
 [issue 128](https://github.com/dpalfery/kyber-weave/issues/128).
 
 ## Problem and goal
 
-Sixty-four supplemental files sit beside the 24 canonical `SKILL.md` files under
+Sixty-six supplemental files sit beside the 24 canonical `SKILL.md` files under
 `products/kyber-squad/skills/`. Seven pages say they are retained "until #128 is accepted".
 Nothing records what each file is for, which of its lines are policy a host should own, or
 where that policy lives. A few references still state rules that duplicate the
@@ -31,7 +33,7 @@ CURRENT reference,
 become pointers to the declared `<technology>-coding-standard`. One host's facts and taste are
 removed and recorded as superseded. The retention wording in the docs is replaced by the
 settled disposition. No resource is deleted, moved, or renamed. No `SKILL.md` changes, and the
-64/88/113 counts hold.
+66/89/118 counts hold.
 
 ## Intake assessment
 
@@ -59,10 +61,10 @@ and direct reads of the dal-dev, csharp-dev, test-dev, and maui-dev references; 
 |---|---|---|
 | M1 | `development-mode: test-first`. | Default; the user did not opt out (conductor, 2026-09-28). |
 | D1 | The artifact is a plan, not a spec. | User decision relayed by conductor, 2026-09-28. |
-| D2 | A skill's own directory is an acceptable durable home for non-policy content: the 15 review lenses, MSBuild/CI technique, MAUI technique, Pylance/python procedure, product-owner phase references, PR provider files, create-PR scripts, second-brain templates, setup inventory, and `setup-dev-environment/agents/openai.yaml` (kept; the audit records why it sits outside the reference closure). They stay in place with a recorded rationale. Policy-bearing references keep their path; their normative lines become a pointer to the declared `<technology>-coding-standard` (the #126 pattern) while technique and examples stay. SKILL.md routing, file paths, and the 64/88 counts do not change. Retiring any resource is out of scope; no follow-up todo is created. | User decision relayed by conductor, 2026-09-28. |
+| D2 | A skill's own directory is an acceptable durable home for non-policy content: the 15 review lenses, MSBuild/CI technique, MAUI technique, Pylance/python procedure, product-owner phase references, PR provider files, the `create-pull-request` GitHub scripts, second-brain templates, setup inventory, and `setup-dev-environment/agents/openai.yaml` (kept; the audit records why it sits outside the reference closure). They stay in place with a recorded rationale. Policy-bearing references keep their path; their normative lines become a pointer to the declared `<technology>-coding-standard` (the #126 pattern) while technique and examples stay. SKILL.md routing, file paths, and the 64/88 counts do not change. Retiring any resource is out of scope; no follow-up todo is created. | User decision relayed by conductor, 2026-09-28. |
 | D3 | `standards/sql` keeps its forward-only rule. `standards/data-access-layer` states that `Down()` is a host decision (optional) and stops mandating it. `dal-dev/references/migration-scripts.md:51` is superseded accordingly, and the template's `fluentmigrator rollback` line is reconciled with this. | User decision relayed by conductor, 2026-09-28. |
 | D4 | Portable rules the templates lack are added to the matching template (sql, data-access-layer, csharp, test, maui as applicable). One host's preferences (e.g. "do not add Scalar") and host project facts (e.g. azure-ai-rag's Agent Framework / no-Semantic-Kernel statement, wrapper classes, agent names) are recorded as intentionally superseded, not added. `azure-ai-rag.md` loses its project facts and keeps its portable Azure OpenAI / AI Search technique as skill-owned procedure. | User decision relayed by conductor, 2026-09-28. |
-| D5 | The content-preservation audit is a governed CURRENT `reference` document, `docs/kyber-squad/skill-resource-dispositions.md`, with one row per resource (all 64): path, content class, disposition (`retain-in-place` / `policy-migrated-to-template` / `superseded-intentionally` / `pointer-already-#126`), destination, and verification evidence. Every moved or superseded policy line names its destination section or supersession reason. It outlives this plan. | User decision relayed by conductor, 2026-09-28. |
+| D5 | The content-preservation audit is a governed CURRENT `reference` document, `docs/kyber-squad/skill-resource-dispositions.md`, with one row per resource (all 66): path, content class, disposition (`retain-in-place` / `policy-migrated-to-template` / `superseded-intentionally` / `pointer-already-#126`), destination, and verification evidence. Every moved or superseded policy line names its destination section or supersession reason. It outlives this plan. | User decision relayed by conductor, 2026-09-28. |
 
 Applied, not new: under D4, `bff-yarp.md`'s host facts (`MotorcycleRag.WebUI.BFF.csproj`,
 `Yarp.ReverseProxy` 2.3.0, .NET 10.0, "Pigment CSS") are superseded the same way.
@@ -72,23 +74,27 @@ Applied, not new: under D4, `bff-yarp.md`'s host facts (`MotorcycleRag.WebUI.BFF
 | ID | Question | Options | Recommendation | Blocks | Status |
 |---|---|---|---|---|---|
 | D1–D5 | See Approved decisions. | — | — | — | ANSWERED |
-| Q1 | Six resources never reach a `squad install` render. The render closure follows Markdown links only. `create-pr.sh`/`.ps1`, `providers/github.md`/`azure-devops.md`, and `second-brain/references/templates.md` are cited as inline code paths; `openai.yaml` is unreferenced. All six ship in both packages. How should #128 treat this? | (a) Record it truthfully: Delivery = `packaged-only` in the audit and corrected doc wording; no code or SKILL.md change. (b) Extend `ResourceClosureBuilder` to follow inline resource paths (production C#, render count 113 → 118, renderer tests change). (c) Convert the inline paths to links (breaks D2 and two non-evolved golden hashes). | (a) — keeps #128 about content placement; a render fix can be a follow-up only if the user accepts one. | T5 wording; T2 Delivery reasons | OPEN |
+| Q1 | Two resources never reach a `squad install` render, because the render closure follows Markdown links only: `second-brain/references/templates.md` (named in code spans in `second-brain/SKILL.md`, which tells the agent to read it) and `setup-dev-environment/agents/openai.yaml` (Codex skill-UI metadata nothing references). Both ship in both packages. The provider-aware plan already made the other four earlier cases (the PR provider files and scripts) link-reached. How should #128 treat these two? | (a) Record both as `packaged-only` in the audit, with reasons; second-brain's templates stay undeployed. (b) Turn second-brain's `references/templates.md` mentions into Markdown links so it deploys; `second-brain` is already an evolved golden skill, so no pinned bytes break. Record `openai.yaml` as `packaged-only` metadata. (c) Extend `ResourceClosureBuilder` to follow code-span resource paths (production C#, renderer tests change). | (b) — it fixes the last skill that points at a file it does not deploy, with a one-skill edit the golden contract already allows. | T2 Delivery column; T5 wording; a T4d task under (b) | OPEN |
 
 ## Investigation findings
 
-1. **Inventory.** 88 files = 24 `SKILL.md` + 64 resources: code-review lenses 15 and
-   technology references 7, create-pull-request-github scripts 2, csharp-dev 6, dal-dev 3,
-   github-devops 6, maui-dev 8, pr-review-fix-comments providers 2, product-owner 4,
-   python-dev 3, second-brain 1, setup-dev-environment 2, test-dev 5.
+1. **Inventory** (re-baselined at 611862e). 89 files = 23 `SKILL.md` + 66 resources:
+   code-review lenses 15 and technology references 7, create-pull-request providers 2 and
+   scripts 2, csharp-dev 6, dal-dev 3, github-devops 6, maui-dev 8, pr-review-fix-comments
+   providers 2, product-owner 4, python-dev 3, second-brain 1, setup-dev-environment 2,
+   test-dev 5. The provider-aware plan retired `create-pull-request-github`; its two scripts
+   became the linked `create-pull-request/scripts/github-create-pr.{sh,ps1}`.
 2. **Render closure.** `ResourceClosureBuilder` (`SquadSourceLoader.cs:1346-1561`) follows
    Markdown `LinkInline` targets transitively through Markdown resources and throws on a
-   missing or escaping target. Fenced code is not parsed. 58 skill resources are in a
-   closure; 21 + 24 principals + 10 agent resources + 58 = 113
-   (`OpenCodeRendererContractTests:193-200`). The six outside every closure are listed in Q1.
-3. **Golden contract.** `HotshotGoldenContractTests:31-32` pins 64/88. Lines 292-304 pin the
+   missing or escaping target. Fenced code is not parsed. 64 skill resources are in a
+   closure; 21 agents + 10 agent resources + 23 skills + 64 = 118
+   (`OpenCodeRendererContractTests`). The two outside every closure are listed in Q1.
+3. **Golden contract.** `HotshotGoldenContractTests:31-32` pins the fixture's 64/88; the
+   canonical tree now holds 66/89. Lines 292-304 pin the
    non-evolved skill-file path set, and 306-328 pin the bytes of non-evolved `SKILL.md` files.
-   Resource content is not hashed. `EvolvedSkillIdentities` = bug-crusher, product-owner,
-   second-brain. `RecursivePackagesRetainEveryCanonicalSkillResourceAndResolveLocalReferences`
+   Resource content is not hashed. `EvolvedSkillIdentities` = bug-crusher, create-pull-request,
+   pr-review-fix-comments, product-owner, second-brain; `RetiredSkillIdentities` =
+   create-pull-request-github. `RecursivePackagesRetainEveryCanonicalSkillResourceAndResolveLocalReferences`
    (342-361) checks that the resources are present in both archives, and that SKILL.md links
    and inline paths under `scripts|references|assets|providers|agents` resolve in canonical
    source and the extracted plugin package. It checks neither resource-to-resource links nor
@@ -118,13 +124,14 @@ Applied, not new: under D4, `bff-yarp.md`'s host facts (`MotorcycleRag.WebUI.BFF
    `fluentmigrator rollback` (:75), and `migration-scripts.md:51` mandates `Down()`.
 7. **The seven code-review technology references** have been pointer-only since #126 (verified
    on `sql.md`). Every `<x-coding-standard>` token in skills today names an existing template.
-8. **Docs still citing #128 as pending:** `products/kyber-squad/README.md:132-134`,
-   `docs/kyber-squad/README.md:60-64`, `docs/kyber-squad/architecture.md:466-469`,
-   `docs/kyber-squad/requirements.md:24` (KS-001) and :95-100, `docs/kyber-squad/onboarding.md:502-506`,
-   `docs/context-hygiene/skills.md:157-161`, and `docs/distribution.md:120-123`. Some also say
-   deployed skill references resolve, which Q1 contradicts.
-9. **Pre-existing, out of scope.** Four of those passages name two evolved skills, but the test
-   lists three. Flagged only.
+8. **Docs still citing #128 as pending** (re-checked at 611862e): the "retained until #128"
+   clauses in `products/kyber-squad/README.md`, `docs/kyber-squad/README.md`,
+   `docs/kyber-squad/architecture.md`, `docs/kyber-squad/requirements.md` (KS-001 and the
+   golden-render requirement), `docs/kyber-squad/onboarding.md`, `docs/context-hygiene/skills.md`,
+   and `docs/distribution.md`. The provider-aware plan already reworded their delivery claims:
+   link-reached files render and code-span-only files are packaged only.
+9. **Resolved by the provider-aware plan.** Its T5 made those passages list all five evolved
+   skills and name `create-pull-request-github` as retired.
 
 ## Classification rule (binding on T2–T4)
 
@@ -154,7 +161,7 @@ Frontmatter: `id: squad/skill-resource-dispositions`, `doc-type: reference`,
 The intro states D2, D4, D5, the classification rule, and the closure explanation (Q1). It
 also says that quoted excerpts are records, not guidance.
 
-`## Resource dispositions` has exactly 64 rows:
+`## Resource dispositions` has exactly 66 rows:
 
 | Column | Content |
 |---|---|
@@ -170,7 +177,7 @@ also says that quoted excerpts are records, not guidance.
 | Column | Rule |
 |---|---|
 | Source | A resource path from the table above. |
-| Line | The line number at base commit 1768d28. |
+| Line | The line number at base commit 611862e. |
 | Excerpt | A code-span substring of that line, copied verbatim. It is at least 12 characters and contains no backtick or pipe. |
 | Disposition | One of `migrated`, `duplicate`, `superseded`, `retained`. |
 | Destination | `<technology> § <exact ## or ### heading>`. Required for `migrated` and `duplicate`; optional for `superseded` (D3 uses it). Otherwise `—`. |
@@ -196,7 +203,7 @@ Test ids (in the new class):
 
 | Id | Test | What it asserts |
 |---|---|---|
-| A1 | `EveryCanonicalSkillResourceHasExactlyOneDispositionRow` | The files enumerated from disk equal the table's set, 64 of them, with no duplicates. |
+| A1 | `EveryCanonicalSkillResourceHasExactlyOneDispositionRow` | The files enumerated from disk equal the table's set, 66 of them, with no duplicates. |
 | A2 | `DispositionsUseClosedVocabulariesAndAgreeWithTheLedger` | The closed values and the disposition mapping hold. |
 | A3 | `DeliveryColumnMatchesTheRenderedResourceClosure` | Delivery agrees with the resources `SquadSourceLoader.Load` returns for each skill. |
 | A4 | `LedgerDestinationsNameExistingTemplateSectionsContainingTheirAnchor` | Each destination section exists and contains its anchor. |
@@ -209,7 +216,7 @@ The tests assert through Markdig-parsed tables and name the offending row in eac
 
 | Task | Test project or file | Runner command | Observable behavior | RED evidence required | GREEN acceptance |
 |---|---|---|---|---|---|
-| T1 | `tests/KyberWeave.Tests/SkillResourceDispositionAuditTests.cs` | the class filter | The contract A1–A8 exists, and A7 reports a dangling link in a fixture resource. | A1–A6 and A8 fail and name the missing audit doc; A1 also lists all 64 paths. A7's fixture case fails against a stub checker. A7's real-tree case passes at 1768d28 (a baseline, not RED). | A7 passes in both cases. The others still fail only because the doc is missing. |
+| T1 | `tests/KyberWeave.Tests/SkillResourceDispositionAuditTests.cs` | the class filter | The contract A1–A8 exists, and A7 reports a dangling link in a fixture resource. | A1–A6 and A8 fail and name the missing audit doc; A1 also lists all 66 paths. A7's fixture case fails against a stub checker. A7's real-tree case passes at 611862e (a baseline, not RED). | A7 passes in both cases. The others still fail only because the doc is missing. |
 | T2 | same (unedited) | same | The audit exists and is consistent. | Before: A1–A3 fail (the T1 run). After T2, record A4, A5, A6 and A8 failing. A5 must list every non-`retained` ledger row as still present, which proves the excerpts are verbatim. | A1–A3 pass, with no assertion changed. |
 | T3 | same, plus `KyberStandardsTemplatesTests`, `DocsScaffolderTests`, `DocsInitCommandTests`, `SquadPackAndReleaseTests` | the class filter plus those classes | Template sections carry the anchors, and `docs init` seeds them. | A4 and A8 failing (T2 evidence). | A4 and A8 pass; the regression classes pass. |
 | T4a, T4b, T4c | same, plus `HotshotGoldenContractTests`, `SquadResourceClosureTests`, `OpenCodeRendererContractTests`, `ZCodeRendererContractTests` | the class filter plus those classes | For each task's files: excerpts are gone (or retained), pointers are present, links resolve. | A5 and A6 failures that name the task's files (T2 evidence). | No A5 or A6 failure names the task's files; after all three, A5 and A6 pass. The regression classes pass (64/88, 113, golden path set and bytes). |
@@ -239,7 +246,7 @@ Specialist: docs-dev. Skills: `kyber-weave-docs`, `dal-dev`, `csharp-dev`, `test
 Scope: `docs/kyber-squad/skill-resource-dispositions.md` (new).
 Depends on: T1.
 
-1. Author the 64-row table and the ledger against base 1768d28, using the classification rule.
+1. Author the 66-row table and the ledger against base 611862e, using the classification rule.
    Every `packaged-only` row gives its reason. For `openai.yaml`, that reason is: Codex
    skill-UI metadata, referenced by no instruction, so no closure reaches it (D2).
 2. Ledger every normative line in the policy-bearing references (Finding 5), with a planned
@@ -327,7 +334,7 @@ Depends on: T2, Q1.
 2. In KS-001, drop "all retained until … accepted".
 3. State render delivery according to the Q1 answer.
 4. Add the audit to "Jump In" in `docs/kyber-squad/README.md`.
-5. Keep the counts 64/88/113, and bump `last-reviewed` on each governed page edited.
+5. Keep the counts 66/89/118, and bump `last-reviewed` on each governed page edited.
 
 ### T6-VERIFY-tests-and-consumer-paths
 
@@ -342,7 +349,7 @@ Depends on: T3, T4a, T4b, T4c, T5.
    the scaffolded docs root.
 3. From the repository root, run
    `dotnet run --project src/KyberWeave.Cli -c Release --no-build -- squad pack --format all --out <scratch>/pack`.
-   Both archives must hold 88 skill-tree files, and every edited resource must be byte-equal
+   Both archives must hold 89 skill-tree files, and every edited resource must be byte-equal
    to canonical.
 4. Record the evidence for closeout.
 
@@ -406,7 +413,6 @@ T3, T4a, T4b, T4c, and T5 have disjoint file scopes. MAX_CONCURRENCY: 5.
 - Renderer or closure changes, unless Q1 = (b).
 - The golden fixture.
 - The root `.github/` self-deployment.
-- The pre-existing "two evolved skills" wording (Finding 9).
 
 ## Verification gates
 
