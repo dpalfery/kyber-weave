@@ -19,7 +19,7 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
-| [2026-09-28-kyberdash-sea-release-integrity.md](2026-09-28-kyberdash-sea-release-integrity.md) | Draft | 2026-09-28 | Fix [issue #157](https://github.com/dpalfery/kyber-weave/issues/157): the released `kyberdash` binary serves the built web dashboard, records an absolute executable path in `tray.json`, and reports harnesses once a refresh creates the store after `kyberdash web` started. Development mode: test-first. Decisions D1–D3 open. |
+| [2026-09-28-kyberdash-sea-release-integrity.md](2026-09-28-kyberdash-sea-release-integrity.md) | Draft | 2026-09-28 | Fix [issue #157](https://github.com/dpalfery/kyber-weave/issues/157): the released `kyberdash` binary serves the built web dashboard, records an absolute executable path in `tray.json`, and makes `kyberdash web` follow the `canon.db` at its path (opened once it exists, reopened when replaced). Development mode: test-first. D1–D3 approved (D1-A embed SPA in the SEA, D2-B follow the file, D3-A no migration); awaiting approve-and-execute. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
