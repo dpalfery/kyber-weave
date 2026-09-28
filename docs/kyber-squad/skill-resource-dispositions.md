@@ -145,7 +145,7 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | Source | Line | Excerpt | Disposition | Destination | Anchor | Reason |
 |---|---|---|---|---|---|---|
 | `skills/dal-dev/references/adonet-repository.md` | 11 | `Do not use EF Core` | duplicate | data-access-layer § Stack | `Dapper and Entity Framework are out of scope` | — |
-| `skills/dal-dev/references/adonet-repository.md` | 18 | `ISqlConnectionFactory` | duplicate | data-access-layer § Stack | `creates and opens connections. Never` | — |
+| `skills/dal-dev/references/adonet-repository.md` | 18 | `Always inject` | duplicate | data-access-layer § Stack | `creates and opens connections. Never` | — |
 | `skills/dal-dev/references/adonet-repository.md` | 59 | `Connection strings come from configuration` | duplicate | data-access-layer § Hard rules | `never a literal, never a committed file` | — |
 | `skills/dal-dev/references/adonet-repository.md` | 103 | `Use a transaction for multi-statement work` | duplicate | data-access-layer § Hard rules | `Do not nest transactions` | — |
 | `skills/dal-dev/references/adonet-repository.md` | 113 | `factory Singleton` | duplicate | data-access-layer § Hard rules | `Register the factory as Singleton and repositories as Scoped` | — |
@@ -216,7 +216,7 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/csharp-dev/references/bff-yarp.md` | 99 | `Server-side in encrypted cookies (never exposed to browser)` | migrated | csharp § Backend-for-frontend | `The browser never sees or stores access tokens` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 120 | `for React HMR` | retained | — | | Technique: development-only CSP relaxation required for React HMR, not a host-reversible policy (D2). |
 | `skills/csharp-dev/references/bff-yarp.md` | 121 | `Pigment CSS is CSP-compliant` | superseded | — | | One host's taste (CSS choice), not portable policy (D4). |
-| `skills/csharp-dev/references/bff-yarp.md` | 124 | `HostHeaderValidationMiddleware` | migrated | csharp § Backend-for-frontend | `Validate incoming Host headers against an allowlist to prevent header injection` | — |
+| `skills/csharp-dev/references/bff-yarp.md` | 124 | `headers against an allowlist to prevent injection attacks` | migrated | csharp § Backend-for-frontend | `Validate incoming Host headers against an allowlist to prevent header injection` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 129 | `No wildcard origins` | migrated | csharp § Backend-for-frontend | `CORS uses explicit frontend origins, never a wildcard` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 133 | `Fallback route serves` | migrated | csharp § Backend-for-frontend | `The BFF serves a fallback route for client-side routing` | — |
 | `skills/csharp-dev/references/bff-yarp.md` | 138 | `MotorcycleRag.WebUI.BFF.csproj` | superseded | — | | Host project fact (project file name), not portable policy (D4). |
