@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-28-skill-resource-dispositions
+id: archive/plans/2026-09-28-skill-resource-dispositions
 title: Skill-resource dispositions and content-preserving migration
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-28
@@ -13,10 +13,10 @@ development-mode: test-first
 
 ## Status
 
-Draft, 2026-09-28; re-baselined 2026-09-28 on commit 611862e, after the
-[provider-aware create-pull-request plan](../archive/plans/2026-09-28-provider-aware-create-pull-request.md)
-was archived. Q1 answered (D6). Ready: approved for execution by the user on 2026-09-28. For
-[issue 128](https://github.com/dpalfery/kyber-weave/issues/128).
+Complete and archived on 2026-09-28. Approved by the user on 2026-09-28 for
+[issue 128](https://github.com/dpalfery/kyber-weave/issues/128), after the
+[provider-aware create-pull-request plan](2026-09-28-provider-aware-create-pull-request.md)
+on the same branch. Evidence in [Closeout](#closeout-2026-09-28).
 
 ## Problem and goal
 
@@ -28,7 +28,7 @@ where that policy lives. A few references still state rules that duplicate the
 
 Goal: every resource gets a reviewed disposition and a line-level preservation record in a
 CURRENT reference,
-[`docs/kyber-squad/skill-resource-dispositions.md`](../kyber-squad/skill-resource-dispositions.md)
+[`docs/kyber-squad/skill-resource-dispositions.md`](../../kyber-squad/skill-resource-dispositions.md)
 (D5). Portable policy the templates lack moves into them (D4). Duplicated normative lines
 become pointers to the declared `<technology>-coding-standard`. One host's facts and taste are
 removed and recorded as superseded. The retention wording in the docs is replaced by the
@@ -71,7 +71,7 @@ and direct reads of the dal-dev, csharp-dev, test-dev, and maui-dev references; 
 Applied, not new: under D4, `bff-yarp.md`'s host facts (`MotorcycleRag.WebUI.BFF.csproj`,
 `Yarp.ReverseProxy` 2.3.0, .NET 10.0, "Pigment CSS") are superseded the same way.
 
-## Decision ledger (Draft only)
+## Decision ledger
 
 | ID | Question | Options | Recommendation | Blocks | Status |
 |---|---|---|---|---|---|
@@ -449,3 +449,56 @@ dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 ```
+
+## Closeout (2026-09-28)
+
+- **RED (T1, 5451f9f):** A1–A6 and A8 failed, each naming the missing audit document; A1 listed
+  all 66 paths. A7 passed on the real tree, and its fixture failed against an empty checker
+  before passing. After review, A2 also requires three things: moved rows name a destination
+  and anchor; superseded and retained rows give a reason; and every policy-bearing resource has
+  ledger rows. Without these, no excerpt check could pass over an empty ledger.
+- **T2 (d22a0ab):** 66 disposition rows (48 retain-in-place, 11 policy-migrated-to-template,
+  7 pointer-already-#126) and a 116-row ledger (20 migrated, 63 duplicate, 13 superseded,
+  20 retained). Delivery: 65 rendered and one packaged-only (`openai.yaml`). A1–A3 passed.
+  - A5 reported every non-retained excerpt as still present, which proves the excerpts are
+    verbatim.
+  - A4 and A8 named exactly the anchors T3 had to write.
+  - A first pass ledgered only a sample of two dal-dev files; review sent it back, and the
+    ledger now covers every normative line.
+- **T3 (ff69168):** the rules below were added. `docs init --kyber-standards` into a scratch
+  repository seeds all 84 anchors the ledger cites. A4 and A8 passed.
+  - sql: xp_cmdshell, Entra ID/Kerberos, SCOPE_IDENTITY, sargable predicates, deprecated
+    types.
+  - data-access-layer: a new § Migrations; `Down()` is a host decision (D3); `fluentmigrator
+    rollback` is annotated.
+  - csharp: route constraints, the empty collection returning 200, no direct `HttpContext`,
+    and a conditional § Backend-for-frontend.
+  - test: per-test cleanup and unique record ids.
+- **T4a–c (5b73d43):** 11 references point at their declared standard. Technique and code
+  examples are unchanged. Host facts were removed per D4. Two ledger excerpts quoted bare type
+  names that correctly remain in kept examples; they now quote the rule sentence instead.
+  All nine audit tests pass.
+- **T4d (96523d2):** `second-brain` links `references/templates.md`, so the fresh render grows
+  from 118 to 119 files.
+- **T5 (fefbfb1):** seven docs replace every "retained until #128" clause with the settled
+  disposition and a link to the audit. They state that only `openai.yaml` is packaged-only,
+  and they use 119.
+- **Verification (T6/T9):**
+  - build: 0 warnings; `dotnet format`: clean;
+  - full suite: 2,387/2,388. The one failure is the root-uid-only Devin import test, which
+    passes as non-root (see the provider-aware closeout);
+  - `docs validate` and `docs drift`: 0 findings;
+  - `skill validate` on the changed skills: clean;
+  - `squad pack`: 89 skill-tree files per archive, byte-equal to canonical.
+- **Review (T7):** the engine verdict is `RequestChanges` (KW-REVIEW-005), and its only cause
+  is that root-uid test gate; 14 of 15 gates pass. The council position is APPROVE. About 35
+  ledger rows were checked against the base: none lost its home, host facts were removed from
+  every occurrence, and D3 is consistent across sql and data-access-layer. Two minor findings
+  (an unchecked Destination column and two InspectCode redundancies in the new test) were fixed.
+- **Also on the branch:** the `fast` model profile maps to `sonnet` on Claude (84e9bee), at the
+  user's request, pinned by `RenderAsync_Claude_FastProfileWorkersRunOnSonnet`.
+- **Harvest:** D2, D4, D5, and D6 are stated in the audit reference. D3 is in the
+  data-access-layer and sql templates. No ADR is needed: the decisions are recorded in the
+  audit and the templates, and none constrains future work beyond them. No todo was created;
+  retiring resources stays out of scope (D2).
+

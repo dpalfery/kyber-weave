@@ -14,8 +14,8 @@ development-mode: test-first
 ## Status
 
 Complete and archived on 2026-09-28. Approved by the user on 2026-09-28; evidence in
-[Closeout](#closeout-2026-09-28). The [#128 draft](../../plans/2026-09-28-skill-resource-dispositions.md)
-stays open on the same branch (D3) and must be re-baselined against this change before it runs.
+[Closeout](#closeout-2026-09-28). The [#128 plan](2026-09-28-skill-resource-dispositions.md)
+ran next on the same branch (D3), re-baselined against this change.
 
 ## Problem and goal
 

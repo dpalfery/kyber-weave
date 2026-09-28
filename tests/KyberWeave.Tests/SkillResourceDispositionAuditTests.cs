@@ -61,7 +61,7 @@ public sealed class SkillResourceDispositionAuditTests
     };
 
     private static readonly Regex WhitespaceRun = new(@"\s+", RegexOptions.None);
-    private static readonly Regex CodingStandardToken = new(@"<([a-z][a-z0-9-]*)-coding-standard>", RegexOptions.None);
+    private static readonly Regex CodingStandardToken = new("<([a-z][a-z0-9-]*)-coding-standard>", RegexOptions.None);
     private static readonly Regex UriScheme = new(@"^[a-zA-Z][a-zA-Z0-9+.\-]*:", RegexOptions.None);
 
     private static string ProductRoot =>
@@ -151,6 +151,12 @@ public sealed class SkillResourceDispositionAuditTests
                 if (string.IsNullOrWhiteSpace(row.Verification))
                 {
                     findings.Add($"{row.Resource}: Verification is empty.");
+                }
+
+                // The Destination is prose for readers, but an empty one leaves a row saying nothing about where the content lives.
+                if (string.IsNullOrWhiteSpace(row.Destination))
+                {
+                    findings.Add($"{row.Resource}: Destination is empty.");
                 }
             }
 
@@ -721,7 +727,7 @@ public sealed class SkillResourceDispositionAuditTests
     {
         CodeInline? code = cell.Descendants<CodeInline>().FirstOrDefault();
         Assert.True(code is not null, $"{rowLabel}: '{column}' cell is not a code span ('{CellText(cell)}').");
-        return code!.Content;
+        return code.Content;
     }
 
     /// <summary>Splits Markdown into level-2 sections, ignoring headings inside code.</summary>
