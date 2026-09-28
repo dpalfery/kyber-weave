@@ -19,7 +19,7 @@ remote:
 An explicit organization, project, or repository from the user wins over the remote. The CLI
 infers all three from the remote with `--detect` (on by default); set lasting defaults with
 `az devops configure --defaults organization=https://dev.azure.com/<organization> project=<project>`.
-The MCP tools take a `repositoryId`, which `repo_repository` returns. Branches are passed to the
+The MCP tools take a `repositoryId`, which `repo_repository` (`get`) returns as `id`. Branches are passed to the
 MCP tools as full refs (`refs/heads/<branch>`) and to the CLI as plain names. A pull request is
 identified by its numeric ID.
 
@@ -32,8 +32,8 @@ server; match on the bare name below.
 
 | Step | MCP tool | CLI fallback |
 |---|---|---|
-| List long-lived branches | `repo_branch` (`list`) | `az repos ref list --repository <repository> --filter heads/` |
-| Read default branch | `repo_repository` (read the repository; its `defaultBranch`) | `az repos show --repository <repository> --query defaultBranch` |
+| List long-lived branches | `repo_branch` (`list`, `repositoryId`); names come back without `refs/heads/` | `az repos ref list --repository <repository> --filter heads/` |
+| Read default branch | `repo_repository` (`get`, `project`, `repositoryNameOrId`); read `defaultBranch`, a full `refs/heads/<branch>` ref. The `list` action omits it | `az repos show --repository <repository> --query defaultBranch` |
 | Find an open PR for source and target | `repo_pull_request` (`list`) | `az repos pr list --repository <repository> --source-branch <source> --target-branch <target> --status active` |
 | Create the PR | `repo_pull_request_write` (`create`: `repositoryId`, `sourceRefName`, `targetRefName`, `title`, `description`, `isDraft`, `workItems`) | `az repos pr create --repository <repository> --source-branch <source> --target-branch <target> --title <title> --description <line> [<line> ...]`, plus `--draft true` for a draft |
 | Update the PR | `repo_pull_request_write` (`update`) | `az repos pr update --id <id> --title <title> --description <line> [<line> ...]` |
@@ -99,10 +99,11 @@ Verified on 2026-09-28 against each tool's own source or documentation. `learn.m
 pages were checked through their published Markdown source in `MicrosoftDocs/azure-devops-docs`.
 
 - `az repos pr create`, `update`, `list`, `show`, `work-item add`, `policy list`: [azure-devops-cli-extension `pull_request.py`](https://github.com/Azure/azure-devops-cli-extension/blob/master/azure-devops/azext_devops/dev/repos/pull_request.py) and [`commands.py`](https://github.com/Azure/azure-devops-cli-extension/blob/master/azure-devops/azext_devops/dev/repos/commands.py); reference: <https://learn.microsoft.com/cli/azure/repos/pr>
-- `az repos ref list --filter`: [azure-devops-cli-extension `ref.py`](https://github.com/Azure/azure-devops-cli-extension/blob/master/azure-devops/azext_devops/dev/repos/ref.py)
+- `az repos show` and `az repos ref list --filter`: [azure-devops-cli-extension `commands.py`](https://github.com/Azure/azure-devops-cli-extension/blob/master/azure-devops/azext_devops/dev/repos/commands.py) and [`ref.py`](https://github.com/Azure/azure-devops-cli-extension/blob/master/azure-devops/azext_devops/dev/repos/ref.py)
 - `az devops configure --defaults`: [azure-devops-cli-extension `configure.py`](https://github.com/Azure/azure-devops-cli-extension/blob/master/azure-devops/azext_devops/dev/team/configure.py)
 - CLI sign-in and `--detect`: <https://learn.microsoft.com/azure/devops/cli/>
-- Azure DevOps MCP server tools and `create` parameters: [microsoft/azure-devops-mcp `docs/TOOLSET.md`](https://github.com/microsoft/azure-devops-mcp/blob/main/docs/TOOLSET.md) and [`src/tools/repositories.ts`](https://github.com/microsoft/azure-devops-mcp/blob/main/src/tools/repositories.ts)
+- Azure DevOps MCP server tools, actions, and parameters (`repo_repository`, `repo_branch`, `repo_pull_request`, `repo_pull_request_write`): [microsoft/azure-devops-mcp `docs/TOOLSET.md`](https://github.com/microsoft/azure-devops-mcp/blob/main/docs/TOOLSET.md) and [`src/tools/repositories.ts`](https://github.com/microsoft/azure-devops-mcp/blob/main/src/tools/repositories.ts)
+- `defaultBranch` on the repository object: [azure-devops-node-api `GitInterfaces.ts`](https://github.com/microsoft/azure-devops-node-api/blob/master/api/interfaces/GitInterfaces.ts)
 - Pull request templates: [`pull-request-templates.md`](https://github.com/MicrosoftDocs/azure-devops-docs/blob/main/docs/repos/git/pull-request-templates.md); page: <https://learn.microsoft.com/azure/devops/repos/git/pull-request-templates>
 - Resolution mentions: [`resolution-mentions.md`](https://github.com/MicrosoftDocs/azure-devops-docs/blob/main/docs/repos/git/resolution-mentions.md); page: <https://learn.microsoft.com/azure/devops/repos/git/resolution-mentions>
 - Remote URL forms: <https://learn.microsoft.com/azure/devops/repos/git/use-ssh-keys-to-authenticate>
