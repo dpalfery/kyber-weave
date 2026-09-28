@@ -392,10 +392,13 @@ public sealed class PullRequestSkillConsolidationTests
     {
         Section[] matching = sections.Where(section => section.Heading == heading).ToArray();
         Assert.True(matching.Length == 1, $"Expected exactly one '## {heading}', found {matching.Length}.");
+
+        // A soft line break inside a Markdown paragraph is a space, so wrapping must not hide a phrase.
+        string prose = Regex.Replace(matching[0].Body, @"\s+", " ");
         foreach (string phrase in phrases)
         {
             Assert.True(
-                matching[0].Body.Contains(phrase, StringComparison.Ordinal),
+                prose.Contains(phrase, StringComparison.Ordinal),
                 $"'## {heading}' does not state '{phrase}'.");
         }
     }
