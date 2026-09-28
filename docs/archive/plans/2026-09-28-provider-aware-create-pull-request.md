@@ -1,8 +1,8 @@
 ---
-id: plans/2026-09-28-provider-aware-create-pull-request
+id: archive/plans/2026-09-28-provider-aware-create-pull-request
 title: Provider-aware create-pull-request skill and host-fact cleanup
 doc-type: plan
-status: current
+status: archived
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-09-28
@@ -13,9 +13,9 @@ development-mode: test-first
 
 ## Status
 
-Ready, 2026-09-28. Approved for execution by the user; Q1–Q4 answered.
-[Verified external facts](#verified-external-facts) F1–F16 were attached on 2026-09-28. This
-plan runs before the [#128 draft](2026-09-28-skill-resource-dispositions.md).
+Complete and archived on 2026-09-28. Approved by the user on 2026-09-28; evidence in
+[Closeout](#closeout-2026-09-28). The [#128 draft](../../plans/2026-09-28-skill-resource-dispositions.md)
+stays open on the same branch (D3) and must be re-baselined against this change before it runs.
 
 ## Problem and goal
 
@@ -92,7 +92,7 @@ one count in a code comment.
 | Q3 | What happens to the GitHub helper scripts? | (a) Move them to `create-pull-request/scripts/github-create-pr.{sh,ps1}` and reduce them to mechanics: the caller supplies the title and the body file, and the scripts hold no convention logic. Link them so they deploy. (b) Move them unchanged. They keep branch-name title-casing and the default-branch-only `Closes`, which contradict R2 and R3. (c) Delete them; the GitHub provider documents the MCP and `gh` steps only. | (a). The scripts keep their value, and the conventions live in one place. No Azure DevOps script is added under any option, because the provider's MCP and `az repos` steps are enough. | T1 (expected closure), T3 | ANSWERED |
 | Q4 | Scope beyond the two PR skills? | (a) The PR skills only. (b) Also link the two `pr-review-fix-comments` provider files so they deploy. This is the same defect, in the pattern this plan copies, and it makes that skill evolved. (c) Option (b), plus the host facts in `csp-security/SKILL.md` (:51 Pigment CSS; :82 and :95 `Motorcycle*` types) and `architecture-decision-record/SKILL.md:21` ("this repository's retrieval"). Those become two more evolved golden skills. | (b). The combined skill copies a selection pattern whose own provider files never deploy today; fixing that costs one table edit, and the same tests cover it. Leave the (c) items as a GAP, with a todo only if the user accepts one. | T1, T2, T5 | ANSWERED |
 
-## Proposed resolutions (awaiting Q2)
+## Approved resolutions (R1–R7, D4)
 
 Each resolution is stated once, in the combined `SKILL.md`. Mechanics that depend on the
 platform go in the provider file and cite the F-ids.
@@ -584,8 +584,8 @@ Depends on: T7.
 1. Archive this plan under the latest archived plan's frontmatter convention, and add a
    Closeout section: RED and GREEN counts, suite totals, gates, the verdict, and T6 evidence.
 2. Add an Archived index row. Canonical docs:
-   [requirements](../kyber-squad/requirements.md) and
-   [onboarding](../kyber-squad/onboarding.md). No ADR: R1–R7 are recorded in the skill and
+   [requirements](../../kyber-squad/requirements.md) and
+   [onboarding](../../kyber-squad/onboarding.md). No ADR: R1–R7 are recorded in the skill and
    this plan.
 3. Carry out D3: leave the #128 draft and its index row in place. This branch merges only
    after #128 closes, so `docs validate . --merge-ready` is expected to report the #128 draft
@@ -665,3 +665,67 @@ dotnet run --project src/KyberWeave.Cli --no-build -c Release -- skill scan .apm
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli --no-build -c Release -- docs drift .
 ```
+
+## Closeout (2026-09-28)
+
+- **RED (T1, commit 6fda121):** before any skill change, the plan's filter failed 29 tests,
+  each for its named reason:
+  - P1: the retired skill was still canonical.
+  - P2: the closures were empty against the expected sets.
+  - P3: all 13 target and scope cases rendered the retired skill.
+  - P4: no `## Provider Selection` in `create-pull-request`, and no provider links in
+    `pr-review-fix-comments`.
+  - P5a: no `## Target branch`.
+  - P5b: both provider files were missing.
+  - P6: 25 host-fact hits, all in the three planned files.
+  - P7: no Delete was planned while the retired skill was still rendered.
+  - G1/G2: 24 skills and 113 files, where 23 and 118 were expected.
+
+  Every other test in the filter passed.
+- **GREEN (T2–T4, commit a618a64):** the filter passes 553/553 with no assertion changed. The
+  convention test now collapses whitespace before matching an anchor phrase, so wrapped prose
+  cannot hide it.
+- **Full suite:** 2,377 tests; 2,376 passed. The one failure,
+  `DevinImportOverlapTests.Inspect_UnreadableImportedTree_ReportsTheRestInsteadOfThrowing`, is an
+  artifact of the container: it runs as uid 0, and root reads a mode-000 directory. Run as a
+  non-root user from the same build, the class passes 10/10. The test touches no file in this
+  change. A separate task to guard it was suggested, not taken into this plan.
+- **Gates** (`review gates .`): 15 declared, 14 passed, `test` failed for the reason above. The
+  clean gates are build (0 warnings), format whitespace and style, `skill validate`, `skill lint`,
+  `skill scan`, `docs validate`, `docs drift`, `inspectcode`, duplicates, and the four KyberDash
+  gates. KyberDash ran 3,619 tests, with 13 skipped.
+
+  Reaching 14 took three environment fixes, none of them repository changes:
+  - the .NET 10 SDK from the Ubuntu archive;
+  - repointing a dangling `/usr/local/bin/dotnet` to it;
+  - `npm ci` for `dash`, `dash/web`, and `dash/tray/ui`.
+- **Consumer paths (T6):** `squad pack --format all` produced two archives. Each holds 89
+  skill-tree files and 23 `SKILL.md` files, and no `create-pull-request-github` entry.
+  `create-pull-request` carries its four resources. `bash -n` passes on the shell script;
+  `pwsh` is not installed, so the PowerShell script was not parsed. A live `squad install` from
+  the development build is impossible, because it resolves release `0.1.0`, which does not
+  exist. P3 (all 12 targets plus global Claude) and P7 (a real Claude render through
+  `CreateUpdate` and the transaction) cover that path instead.
+- **Review (T7):** the engine verdict is `RequestChanges` (KW-REVIEW-005), and its only cause
+  is the root-uid `test` gate. The council's position is APPROVE-quality.
+  - Major — provider rows named branch and default-branch tools no F-row covered. Fixed in
+    4cc12e9: F17–F20 were added, and the Azure DevOps provider now names `repo_repository`
+    `get`, because `list` omits `defaultBranch`.
+  - Minor — two InspectCode redundancies in the new test class. Fixed.
+  - Minor — the two scripts compare the PR body differently. Kept on purpose: the PowerShell
+    side trims the final newline that `Get-Content -Raw` keeps.
+- **How the work was done:** T5 was written by `docs-dev`. The conductor corrected its onboarding
+  upgrade note (the comparison is against receipt bytes, not canonical bytes), a claim that all
+  23 `SKILL.md` files match the golden copy, and a sentence it dropped about package reference
+  resolution. `test-dev` failed two review passes of T1, so the conductor session wrote T1–T4
+  directly from this plan's contract and the verified facts.
+- **Harvest:** R1–R7 live in `create-pull-request/SKILL.md`; provider facts live in the two
+  provider files, which cite their sources. Canonical documentation records the counts,
+  evolved and retired identities, and upgrade behaviour:
+  [requirements](../../kyber-squad/requirements.md),
+  [onboarding](../../kyber-squad/onboarding.md), and
+  [architecture](../../kyber-squad/architecture.md). No ADR: nothing here constrains future
+  work beyond what the skill states.
+- **Left out of scope (D6):** host facts in `csp-security`, in `architecture-decision-record`, and
+  in the `IMotorcycleApiClient` examples of the #128-owned references. No todo was created.
+

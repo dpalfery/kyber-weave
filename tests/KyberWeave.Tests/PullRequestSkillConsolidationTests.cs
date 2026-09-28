@@ -285,7 +285,7 @@ public sealed class PullRequestSkillConsolidationTests
 
         Assert.DoesNotContain(RetiredSkill, body, StringComparison.Ordinal);
         Assert.DoesNotContain(".github/PULL_REQUEST_TEMPLATE.md", body, StringComparison.Ordinal);
-        Assert.DoesNotMatch(new Regex(@"branch(es)? from `?develop`?", RegexOptions.IgnoreCase), body);
+        Assert.DoesNotMatch(new Regex("branch(es)? from `?develop`?", RegexOptions.IgnoreCase), body);
 
         string[] providerCommands = CodeText(body)
             .Where(line => line.StartsWith("gh ", StringComparison.Ordinal) ||
@@ -453,7 +453,7 @@ public sealed class PullRequestSkillConsolidationTests
         markdown.Split('\n')
             .Select(line => line.Trim())
             .Where(line => line.StartsWith('|'))
-            .Select(line => line.Split('|', StringSplitOptions.None)[1].Trim())
+            .Select(line => line.Split('|')[1].Trim())
             .Where(cell => cell.Length > 0 && !cell.All(character => character is '-' or ':'))
             .ToArray();
 
