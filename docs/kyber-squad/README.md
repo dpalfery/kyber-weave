@@ -57,12 +57,13 @@ preserve each retained local reference.
 
 A fresh GitHub Copilot render projects each owner's linked resources beside its principal:
 21 `.github/agents/<name>.agent.md` files, 23 `.github/skills/<name>/SKILL.md` files, and the
-linked resources, 118 files total, with authored relative links resolving in the output. A file
-named only in a code span is packaged but not rendered. Kyber-Squad preserves retained skill
-knowledge in canonical source and packages until the
-[skill-resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted and
-verified. Generated `.github` output remains a deployment artifact rather than canonical product
-source.
+linked resources, 119 files total, with authored relative links resolving in the output. Every
+skill resource reaches every render except `skills/setup-dev-environment/agents/openai.yaml`,
+which is packaged-only Codex skill-UI metadata. Every retained resource now has a reviewed
+disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):
+non-policy content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted. Generated `.github` output
+remains a deployment artifact rather than canonical product source.
 
 `products/kyber-squad/` is the canonical and package authority. The repository root
 `.github/agents/` and `.github/skills/` trees are an intentional stale Copilot self-deployment;
@@ -79,3 +80,4 @@ Explore the full Kyber-Squad documentation suite:
 * **[Adoption & Usage Guide](onboarding.md)** — Installing, updating, scoping (`--global`), targeting specific harnesses, and running health checks.
 * **[Architecture](architecture.md)** — AgentIR intermediate representation, role-skill lowering pipeline, capability lattice, state store, and transaction engine.
 * **[Requirements & Degradation Matrix](requirements.md)** — Detailed KS-001 through KS-008 specifications, harness feature matrices, and degradation taxonomy.
+* **[Skill-Resource Dispositions](skill-resource-dispositions.md)** — The content-preservation audit and policy-line ledger for every retained skill resource.

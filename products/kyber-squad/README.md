@@ -128,12 +128,14 @@ Agent Plugins packages preserve those resources and their local references.
 Renderers project every file an owner's Markdown links reach beside its principal output, with
 authored relative links preserved, so the former dangling-reference defect is closed for every
 linked resource: a fresh Copilot render now emits the 44 principal files plus each owner's linked
-resources (118 files total). A file named only in a code span is packaged but not rendered.
+resources (119 files total). Every skill resource reaches every render except
+`skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
-resources today. Surplus skill content remains packaged until the
-[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128)
-meets its acceptance criteria.
+resources today. Every retained resource now has a reviewed disposition in the
+[skill-resource dispositions audit](../../docs/kyber-squad/skill-resource-dispositions.md):
+non-policy content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 `kyber-weave-docs` is intentionally managed separately under
 `.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.

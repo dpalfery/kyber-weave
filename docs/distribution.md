@@ -118,10 +118,12 @@ kyber-weave squad pack --format all --out ./artifacts
 `squad pack` requires the current working directory to be the repository root containing `KyberWeave.sln` and `products/kyber-squad/squad.yml`. It does not fall back to embedded binaries or network sources.
 
 Both formats package `skills/` recursively: 23 `SKILL.md` files plus 66 retained resources, for
-89 skill-tree files. The resources stay in release packages until the
-[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted;
-their omission from the exact 24-file Copilot golden skill surface of the pinned Hotshot fixture
-is not a package contract.
+89 skill-tree files. Every retained resource has a reviewed disposition in the
+[skill-resource dispositions audit](kyber-squad/skill-resource-dispositions.md): non-policy
+content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted; their omission from the
+exact 24-file Copilot golden skill surface of the pinned Hotshot fixture is not a package
+contract.
 
 `products/kyber-squad/` is canonical and package authority. The root `.github/agents/`,
 `.github/skills/`, `.kyber-weave/squad.lock.yml`, and `.kyber-weave/squad.receipt.json` are an

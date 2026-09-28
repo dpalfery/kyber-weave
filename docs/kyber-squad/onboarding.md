@@ -506,11 +506,14 @@ Both archive formats recurse through each skill directory. They contain all 23 c
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 118 files on Copilot today — with authored relative links resolving inside
-the target output; a file named only in a code span is packaged but not rendered. The
-tracked root `.github/` self-deployment predates resource delivery and is refreshed only by a
-release; surplus packaged content remains until the
-[resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.
+beside its principal — 119 files on Copilot today — with authored relative links resolving inside
+the target output; every skill resource reaches this render except
+`skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
+metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed
+only by a release. Every retained resource has a reviewed disposition in the
+[skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays in
+its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
 `squad pack` or the golden synchronization.

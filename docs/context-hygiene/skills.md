@@ -158,10 +158,13 @@ Every raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`, `
 bytes; the golden `create-pull-request-github` skill is retired into `create-pull-request`.
 Canonical storage and recursive Squad packages preserve 66 supplemental resources, for 89
 skill-tree files. Renderers project every file a Markdown link reaches beside the rendered
-principal, so those references resolve when deployed; a file named only in a code span is
-packaged but not rendered. The tracked root `.github/` self-deployment predates resource
-delivery; surplus packaged content remains until the
-[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.
+principal, so those references resolve when deployed; every skill resource reaches its render
+except `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex
+skill-UI metadata. The tracked root `.github/` self-deployment predates resource delivery. Every
+retained resource has a reviewed disposition in the
+[skill-resource dispositions audit](../kyber-squad/skill-resource-dispositions.md): non-policy
+content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 The agent and skill namespaces intersect at seven names, all distinct-body collisions. No product
 identity is shared. Fallback rendering keeps each colliding skill at `<name>` and lowers its agent

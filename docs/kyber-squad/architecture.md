@@ -456,9 +456,10 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 118 files — 21 agents, 23 skills, plus projected
-  closures — with authored relative links resolving in the output; a file named only in a code
-  span is packaged but not rendered. That count is the current
+  the principal. A fresh Copilot render is 119 files — 21 agents, 23 skills, plus projected
+  closures — with authored relative links resolving in the output; every skill resource
+  reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
+  packaged-only Codex skill-UI metadata. That count is the current
   contract in [requirements](requirements.md) (KS-001 and the golden-render requirement). The
   Hotshot-era 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
@@ -467,9 +468,11 @@ and validates.
   `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
   `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
   recursive package formats retain all 66 skill resources (89 files under
-  `products/kyber-squad/skills/`) and resolve the retained references. They
-  remain until the
-  [content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) passes.
+  `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
+  now has a reviewed disposition in the
+  [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
+  in its skill directory as its durable home, portable policy lives in the
+  `products/kyber-squad/standards/` templates, and nothing was deleted.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.
