@@ -2,7 +2,7 @@
 id: plans/2026-09-28-kyberdash-sea-release-integrity
 title: KyberDash released-binary integrity (issue 157)
 doc-type: plan
-status: draft
+status: current
 component: KyberDash
 owner: dpalfery
 last-reviewed: 2026-09-28
@@ -17,7 +17,7 @@ keywords:
 
 # KyberDash released-binary integrity (issue 157)
 
-**Status: Draft**
+**Status: Ready**
 
 Input: [GitHub issue #157](https://github.com/dpalfery/kyber-weave/issues/157), a bug filed
 against `0.1.7-rc.14` on macOS `darwin-arm64`.
@@ -25,9 +25,13 @@ against `0.1.7-rc.14` on macOS `darwin-arm64`.
 `development-mode: test-first`. The conductor relayed that the user did not opt out, so the
 default stands. Every implementation task below has a Test-contract row.
 
-Decisions D1–D3 are answered and recorded under [Approved decisions](#approved-decisions). The
-plan stays Draft until the conductor presents the approve-and-execute gate and relays explicit
-approval of the plan and its Test contract.
+Approved for execution. The user chose "Approve and execute" on 2026-09-28 via the conductor,
+and that approval covers the plan and its Test contract (P3). Decisions D1–D3 are recorded
+under [Approved decisions](#approved-decisions).
+
+While this plan is open, frontmatter `status` is `current`, because the ontology's closed
+status set has no `ready` value. This heading and the plan index carry the lifecycle word
+Ready.
 
 ## Problem and goal
 
@@ -58,16 +62,10 @@ The tray popover shows the result on its next report poll.
 | D1 | **D1-A.** Embed the built SPA in the SEA blob as one `web.json` asset, which `kyberdash web` serves from memory. The archive layout, `scripts/install.sh`, and `SelfUpdater` stay unchanged. | User via conductor, 2026-09-28. |
 | D2 | **D2-B.** The web server's store handle opens `canon.db` read-only once it exists, **and** reopens it when the file at that path is replaced (device or inode change). The concrete design is in [Defect 3 (D2-B)](#defect-3-d2-b). This is not the architect's recommendation (D2-A). | User via conductor, 2026-09-28. |
 | D3 | **D3-A.** No migration of existing `tray.json` records. The next `kyber-weave update`, which hands off to `kyberdash menubar --update`, rewrites the record, and so does `kyberdash menubar --force`. | User via conductor, 2026-09-28. |
+| P3 | Plan and Test contract approved: approve and execute. | User via conductor, 2026-09-28. The gate stated that approval also approves the Test contract. |
 
-The approve-and-execute gate has not been presented. The Test contract below is not yet
-approved.
-
-## Decision ledger (Draft only)
-
-No decision is open. D1–D3 moved to [Approved decisions](#approved-decisions) on 2026-09-28.
 D2-B raised no further user choice. Its design details — what is compared, when, the handle
 swap, and exclusions — are engineering choices recorded in [Defect 3 (D2-B)](#defect-3-d2-b).
-Each follows from the answer and is not a new user choice.
 
 ## Investigation findings
 
@@ -667,7 +665,7 @@ review.
 - **Warn-once on a failed open or close.** It hides repeated failures after the first. The
   first failure is still logged with its cause.
 - **Merge gate.** `docs validate . --merge-ready` fails with `KW-DOC-LIFECYCLE-003` while this
-  file sits in `docs/plans/`. That is the merge gate, not a defect of this Draft.
+  file sits in `docs/plans/`. That is the merge gate, not a defect of this plan.
 
 ## Out of scope (follow-ups, not authorized)
 
@@ -704,8 +702,10 @@ Each item becomes a todo only if the user accepts it.
 8. Two Windows facts behind D2-B are unverified: that SQLite's Windows VFS refuses a rename
    over an open database, and that Node's BigInt `stat` `ino` is stable on NTFS. Both matter
    only on Windows, where T3(e)/(f) skip.
-9. `docs validate` and `docs drift` have not been run for this revision. The architect had no
-   shell, and the conductor runs them.
+9. The architect has no shell and ran neither documentation check. The conductor reported
+   that, for the revision at commit `b124a2c`, `docs validate .` and `docs drift .` each
+   returned 0 findings, and `--merge-ready` reported only the expected
+   `KW-DOC-LIFECYCLE-003`. The conductor re-runs both checks after this finalizing edit.
 
 ## Review
 
