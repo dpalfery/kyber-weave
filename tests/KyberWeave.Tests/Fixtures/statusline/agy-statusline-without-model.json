@@ -1,0 +1,15 @@
+{
+  "conversation_id": "synthetic-conversation-agy-0001",
+  "session_id": "synthetic-session-agy-0001",
+  "workspace": {
+    "current_dir": "/synthetic/kyber-agy-workspace"
+  },
+  "context_window": {
+    "current_usage": {
+      "input_tokens": 1024,
+      "output_tokens": 64,
+      "cache_creation_input_tokens": 8,
+      "cache_read_input_tokens": 4
+    }
+  }
+}
