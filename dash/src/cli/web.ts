@@ -3,7 +3,7 @@ import { execFile } from 'child_process'
 import { readFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { createRequire } from 'node:module'
-import { join, normalize, extname, dirname, sep } from 'path'
+import { join, normalize, extname, dirname, sep, posix as posixPath } from 'path'
 import { fileURLToPath } from 'url'
 import { AddressInfo } from 'net'
 import { applyHtmlBrand, BRAND } from '../brand-overlay.js'
@@ -18,18 +18,123 @@ const KYBERDASH_VERSION = String(
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
-// Locate the built React dashboard (dist/dash). Works both when running from a
-// published package, where tsup has bundled this module to dist/ and the built
-// assets sit beside it, and from source, where this file is src/cli/web.ts and
-// the assets are two levels up at dash/dist/dash (web/vite.config.ts's outDir).
-function resolveDashDir(): string | null {
-  const candidates = [
-    process.env['KYBERDASH_DASH_DIR'],
-    join(HERE, 'dash'),
-    join(HERE, '..', '..', 'dist', 'dash'),
-  ].filter(Boolean) as string[]
+const EMBEDDED_WEB_ASSET_KEY = 'web.json'
+const EMBEDDED_WEB_ASSET_FORMAT = 'kyberdash-web/1'
+
+interface EmbeddedWebAsset {
+  format: string
+  files: Record<string, string>
+}
+
+function isEmbeddedWebAsset(value: unknown): value is EmbeddedWebAsset {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as { format?: unknown; files?: unknown }
+  return (
+    candidate.format === EMBEDDED_WEB_ASSET_FORMAT &&
+    typeof candidate.files === 'object' &&
+    candidate.files !== null
+  )
+}
+
+// Normalizes a raw request path (or a packed-asset key) into the form used as a key in
+// the embedded-asset map: POSIX separators, no leading slash, '.' segments collapsed. A
+// '..' segment that would escape the root is left in an unresolved (and therefore
+// unmatchable) form by `posix.normalize` rather than resolved against the real
+// filesystem, so a traversal attempt can only miss the map - it can never address a file
+// outside it, because the map holds only real relative paths written by
+// `pack-sea-web.mjs`.
+function normalizeEmbeddedPath(raw: string): string {
+  const posixLike = raw.replace(/\\/g, '/')
+  const normalized = posixPath.normalize(posixLike).replace(/^\/+/, '')
+  return normalized === '.' ? '' : normalized
+}
+
+function parseEmbeddedWebAssets(raw: string): Map<string, Buffer> | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!isEmbeddedWebAsset(parsed)) return null
+
+  const files = new Map<string, Buffer>()
+  for (const [key, value] of Object.entries(parsed.files)) {
+    if (typeof value !== 'string') continue
+    files.set(normalizeEmbeddedPath(key), Buffer.from(value, 'base64'))
+  }
+  return files
+}
+
+type StaticSource = { kind: 'dir'; dir: string } | { kind: 'embedded'; files: Map<string, Buffer> }
+
+// Locate the static source for the built React dashboard. The order is:
+//
+// 1. `KYBERDASH_DASH_DIR`, an explicit override that always wins.
+// 2. The `web.json` SEA asset embedded at release-build time (D1-A). Parsed once here,
+//    at server start, not per request.
+// 3. The two on-disk candidates a non-SEA process can have: a published package, where
+//    tsup has bundled this module to dist/ and the built assets sit beside it, and a
+//    source checkout, where this file is src/cli/web.ts and the assets are two levels up
+//    at dash/dist/dash (web/vite.config.ts's outDir).
+//
+// A SEA binary has no source tree beside it, so step 3 does not apply once step 1 has
+// been ruled out: a released binary with no embedded dashboard gets the "not built" page
+// rather than an accidental match against an unrelated directory that happens to sit next
+// to the installed executable.
+//
+// `isSea` and `getEmbeddedAsset` are passed in rather than imported statically here: `web.ts`
+// is imported by test files that mock the `node:sea` builtin at the top of the file, and a
+// static top-level `import '../sea.js'` would resolve `node:sea` during module linking, before
+// those tests' own mock functions exist. `runWebDashboard` loads `../sea.js` with a dynamic
+// `import()` instead, deferring that resolution until the function actually runs.
+function resolveStaticSource(
+  isSea: () => boolean,
+  getEmbeddedAsset: (key: string) => string | undefined,
+): StaticSource | null {
+  const override = process.env['KYBERDASH_DASH_DIR']
+  if (override) {
+    if (existsSync(join(override, 'index.html'))) {
+      return { kind: 'dir', dir: override }
+    }
+    // The override is set but rejected: without this, an operator who set a
+    // typo'd or not-yet-built KYBERDASH_DASH_DIR gets a dashboard served from
+    // the embedded asset (or a dev candidate) with no sign their override did
+    // nothing. Logged once here, at server start, not per request — same as
+    // the two SEA-branch causes below.
+    console.warn(
+      `${BRAND.cliName}: KYBERDASH_DASH_DIR is set to "${override}", but no usable index.html was found there`,
+    )
+  }
+
+  if (isSea()) {
+    const raw = getEmbeddedAsset(EMBEDDED_WEB_ASSET_KEY)
+    if (raw === undefined) {
+      // Distinct from the malformed case below: this SEA binary was built with no
+      // web.json asset embedded at all (e.g. pack-sea-web.mjs did not run), so there is
+      // nothing to parse. Logged once here, at server start, not per request.
+      console.warn(
+        `${BRAND.cliName}: running as a packaged binary, but no "${EMBEDDED_WEB_ASSET_KEY}" dashboard asset is embedded`,
+      )
+      return null
+    }
+    const files = parseEmbeddedWebAssets(raw)
+    if (!files || !files.has('index.html')) {
+      // Distinct from the missing-asset case above: a web.json asset is present, but it
+      // either failed to parse (bad JSON, wrong format string, missing/invalid `files`)
+      // or parsed without an `index.html` entry. Either way, the embedded asset itself is
+      // the problem, not its absence.
+      console.warn(
+        `${BRAND.cliName}: embedded "${EMBEDDED_WEB_ASSET_KEY}" dashboard asset is present but malformed (failed to parse or missing index.html)`,
+      )
+      return null
+    }
+    return { kind: 'embedded', files }
+  }
+
+  const candidates = [join(HERE, 'dash'), join(HERE, '..', '..', 'dist', 'dash')]
   for (const dir of candidates) {
-    if (existsSync(join(dir, 'index.html'))) return dir
+    if (existsSync(join(dir, 'index.html'))) return { kind: 'dir', dir }
   }
   return null
 }
@@ -47,13 +152,29 @@ const CONTENT_TYPES: Record<string, string> = {
   '.map': 'application/json',
 }
 
-const NOT_BUILT_PAGE =
-  '<!doctype html><meta charset="utf-8">' +
-  '<body style="font-family:system-ui;background:#0a0a0b;color:#e7e7ea;padding:48px;line-height:1.6">' +
-  '<h2>Dashboard not built yet</h2>' +
+function notBuiltPage(hintHtml: string): string {
+  return (
+    '<!doctype html><meta charset="utf-8">' +
+    '<body style="font-family:system-ui;background:#0a0a0b;color:#e7e7ea;padding:48px;line-height:1.6">' +
+    '<h2>Dashboard not built yet</h2>' +
+    hintHtml +
+    '<p>The CLI keeps serving the live data API in the meantime.</p></body>'
+  )
+}
+
+// Two hints for two causes of "no static source found" (resolveStaticSource()
+// returned null): a source checkout or published package that has not run its web
+// build, versus a released SEA binary with no `web.json` asset embedded. The SEA case
+// has no source tree to build, so its hint must not tell the operator to run `npm`.
+const DEV_NOT_BUILT_HINT_HTML =
   '<p>Build the web UI once, then reload:</p>' +
-  '<pre style="background:#141417;padding:12px 16px;border-radius:8px;color:#ff8c42">cd dash &amp;&amp; npm install &amp;&amp; npm run build</pre>' +
-  '<p>The CLI keeps serving the live data API in the meantime.</p></body>'
+  '<pre style="background:#141417;padding:12px 16px;border-radius:8px;color:#ff8c42">cd dash &amp;&amp; npm install &amp;&amp; npm run build</pre>'
+const SEA_NOT_BUILT_HINT_HTML =
+  '<p>This build has no web dashboard embedded. Install a release that includes it, ' +
+  'or set <code>KYBERDASH_DASH_DIR</code> to a built <code>dist/dash</code> directory.</p>'
+
+const DEV_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not built. Run: cd dash && npm install && npm run build'
+const SEA_NOT_BUILT_HINT_TEXT = 'Dashboard UI is not embedded in this build. Install a release that includes it.'
 
 function openBrowser(url: string): void {
   // execFile, not exec: the arguments go to the process as an argv array, so no
@@ -105,7 +226,12 @@ export async function runWebDashboard(opts: {
     throw new UnknownViewError(opts.view, formatValidViewForms())
   }
 
-  const dashDir = resolveDashDir()
+  // Dynamic import, not a static top-level one: see the comment on resolveStaticSource.
+  const { runningAsSea, embeddedTextAsset } = await import('../sea.js')
+
+  // Resolved once, at server start: the embedded-asset case parses `web.json` here
+  // rather than per request (D1-A).
+  const staticSource = resolveStaticSource(runningAsSea, embeddedTextAsset)
   const bridge = opts.kyberBridge ?? new KyberBridge()
   const writeStdout = opts.writeStdout ?? ((text: string) => { process.stdout.write(text) })
 
@@ -113,6 +239,27 @@ export async function runWebDashboard(opts: {
     const html = applyHtmlBrand(await readFile(filePath, 'utf8'))
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
     res.end(html)
+  }
+
+  const serveEmbedded = (res: import('http').ServerResponse, files: Map<string, Buffer>, key: string): void => {
+    const buf = files.get(key)
+    if (buf === undefined) {
+      // Unknown path, including any traversal attempt: the map holds only real
+      // relative paths written by pack-sea-web.mjs, so a miss can only mean the SPA
+      // should route this client-side. It never reaches a file outside the map.
+      const indexHtml = applyHtmlBrand(files.get('index.html')!.toString('utf8'))
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(indexHtml)
+      return
+    }
+    if (extname(key) === '.html') {
+      const html = applyHtmlBrand(buf.toString('utf8'))
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end(html)
+    } else {
+      res.writeHead(200, { 'content-type': CONTENT_TYPES[extname(key)] ?? 'application/octet-stream' })
+      res.end(buf)
+    }
   }
 
   const server = createServer(async (req, res) => {
@@ -136,12 +283,20 @@ export async function runWebDashboard(opts: {
 
       if (handleKyberRequest(req, res, url, bridge)) return
 
-      if (!dashDir) {
+      if (!staticSource) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(NOT_BUILT_PAGE)
+        res.end(notBuiltPage(runningAsSea() ? SEA_NOT_BUILT_HINT_HTML : DEV_NOT_BUILT_HINT_HTML))
         return
       }
 
+      if (staticSource.kind === 'embedded') {
+        let pathname = decodeURIComponent(url.pathname)
+        if (pathname === '/' || pathname === '') pathname = 'index.html'
+        serveEmbedded(res, staticSource.files, normalizeEmbeddedPath(pathname))
+        return
+      }
+
+      const dashDir = staticSource.dir
       let pathname = decodeURIComponent(url.pathname)
       if (pathname === '/' || pathname === '') pathname = '/index.html'
       const filePath = normalize(join(dashDir, pathname))
@@ -197,8 +352,8 @@ export async function runWebDashboard(opts: {
       apiVersion: REPORT_SCHEMA_VERSION,
     })}\n`,
   )
-  if (!dashDir) {
-    writeStdout(`\n  Dashboard UI is not built. Run: cd dash && npm install && npm run build\n`)
+  if (!staticSource) {
+    writeStdout(`\n  ${runningAsSea() ? SEA_NOT_BUILT_HINT_TEXT : DEV_NOT_BUILT_HINT_TEXT}\n`)
   }
   writeStdout(`\n  ${BRAND.productName} dashboard at ${url}\n  Press Ctrl+C to stop.\n\n`)
   if (opts.open) (opts.openUrl ?? openBrowser)(joinViewUrl(url, opts.view))
