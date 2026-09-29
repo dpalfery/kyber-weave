@@ -1,6 +1,7 @@
 // SQLite query bridge for the canonical KyberDash store.
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import type { BigIntStats } from 'node:fs'
 import { inflateSync } from 'node:zlib'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -186,7 +187,32 @@ export type KyberBridgeOptions = {
    * production falls back to the already-open `canonDb` handle.
    */
   store?: CanonStore
+  /**
+   * How often the private store accessor is allowed to `stat` `canonPath` and
+   * reopen or drop the owned handle, in milliseconds. `0` means every access.
+   * Ignored for an injected `canonDb` or a `:memory:` bridge — neither is ever
+   * probed. Default 1000ms.
+   */
+  reopenCheckIntervalMs?: number
+  /** Clock used for the reopen throttle. Default `Date.now`. */
+  now?: () => number
 }
+
+/** File identity used to detect a replaced `canonPath` (device + inode). */
+type FileIdentity = { dev: bigint; ino: bigint }
+
+/** Default interval between reopen probes when `reopenCheckIntervalMs` is not given. */
+const DEFAULT_REOPEN_CHECK_INTERVAL_MS = 1000
+
+/**
+ * Minimum gap between two "failed to stat" warnings for the same bridge
+ * instance while the failure keeps recurring. A persistent, non-ENOENT stat
+ * failure (EACCES, EMFILE, ELOOP, ...) must keep giving an operator a symptom
+ * rather than warning once and then serving stale data silently forever —
+ * see the durability note on {@link KyberBridge.reconcile}. Measured by the
+ * injected `now`, so it is deterministic under test.
+ */
+const STAT_FAILURE_WARN_INTERVAL_MS = 60_000
 
 /**
  * Unclipped inspector payload. `_clip` stays on the session list and the
@@ -552,6 +578,30 @@ export class KyberBridge {
   readonly canonPath: string
   readonly ratesPath: string | undefined
 
+  /**
+   * `true` only for a handle this bridge opened itself from `canonPath`: no
+   * injected `canonDb`, and `canonPath` is not `:memory:`. Only such a handle
+   * is ever probed, reopened, or dropped by {@link getDb}.
+   */
+  private readonly ownsHandle: boolean
+  private readonly reopenCheckIntervalMs: number
+  private readonly now: () => number
+  private closed = false
+  /** dev/ino recorded from the stat taken immediately before the current owned handle was opened. */
+  private identity?: FileIdentity
+  /** `undefined` until the first probe runs; construction counts as the first probe. */
+  private lastProbeAt?: number
+  private warnedOpenFailed = false
+  private warnedCloseFailed = false
+  /**
+   * `now()` value at the most recent "failed to stat" warning, or
+   * `undefined` before the first one. A persistent stat failure re-warns
+   * once {@link STAT_FAILURE_WARN_INTERVAL_MS} has elapsed since this,
+   * rather than warning only once ever per instance — see the durability
+   * note on {@link reconcile}.
+   */
+  private lastStatFailureWarnAt?: number
+
   constructor(options?: KyberBridgeOptions) {
     this.canonPath =
       options?.canonPath ??
@@ -562,33 +612,186 @@ export class KyberBridge {
 
     this.store = options?.store
 
+    this.reopenCheckIntervalMs = options?.reopenCheckIntervalMs ?? DEFAULT_REOPEN_CHECK_INTERVAL_MS
+    this.now = options?.now ?? Date.now
+
+    this.ownsHandle = options?.canonDb === undefined && this.canonPath !== ':memory:'
+
     if (options?.canonDb) {
       this.canonDb = options.canonDb
       try {
         this.canonDb.exec('PRAGMA busy_timeout = 5000')
       } catch {}
+    } else if (this.canonPath === ':memory:') {
+      this.canonDb = this.openMemoryDb()
     } else {
-      this.canonDb = this.openDb(this.canonPath)
+      // Construction counts as the first probe.
+      this.lastProbeAt = this.now()
+      this.reconcile()
     }
-
   }
 
-  private openDb(filePath: string): DatabaseSync | undefined {
-    if (filePath !== ':memory:' && !existsSync(filePath)) {
-      return undefined
-    }
+  private openMemoryDb(): DatabaseSync | undefined {
     try {
-      const isMemory = filePath === ':memory:'
-      const db = new DatabaseSync(
-        filePath,
-        isMemory ? { open: true } : { open: true, readOnly: true }
-      )
-      db.exec('PRAGMA busy_timeout = 5000')
+      const db = new DatabaseSync(':memory:', { open: true })
+      try {
+        db.exec('PRAGMA busy_timeout = 5000')
+      } catch (pragmaErr) {
+        // The native handle opened successfully; a pragma failing right
+        // after must not leak it. Close it here — before rethrowing into
+        // the same failure handling a failed open takes below — because
+        // this `db` is a local variable the outer catch never sees, and
+        // it is never assigned anywhere the caller could close it from.
+        try {
+          db.close()
+        } catch {
+          // Best-effort: the handle is being discarded either way.
+        }
+        throw pragmaErr
+      }
       return db
     } catch (err) {
-      console.warn(`[KyberBridge] Failed to open SQLite database at ${filePath}:`, err)
+      console.warn('[KyberBridge] Failed to open SQLite database at :memory::', err)
       return undefined
     }
+  }
+
+  /**
+   * Statically compare `canonPath`'s current file identity against the owned
+   * handle's, and open, reopen, or drop the handle so it always follows the
+   * file currently at `canonPath`. Only ever touches a handle this bridge
+   * opened itself — see {@link ownsHandle}. Identity is `dev`/`ino`
+   * (BigInt, because Windows file indexes can exceed 2^53); size and mtime
+   * are not compared because an ordinary in-place write changes both without
+   * replacing the file.
+   */
+  private reconcile(): void {
+    let info: BigIntStats | undefined
+    try {
+      info = statSync(this.canonPath, { bigint: true, throwIfNoEntry: false })
+    } catch (err) {
+      // `throwIfNoEntry: false` only suppresses ENOENT — the confirmed
+      // "file absent" case, which statSync signals by returning `undefined`
+      // rather than throwing. Anything that reaches this catch (EACCES,
+      // EMFILE, ELOOP, a transient I/O error, ...) is NOT that signal, so it
+      // must not be treated the same as "absent": doing so would silently
+      // tear down a live, healthy handle over a transient failure of the
+      // stat call itself. Keep whatever handle is currently held exactly as
+      // it is, and let the next throttled probe retry the stat normally. If
+      // no handle was held yet, there is nothing to tear down, but the
+      // warning still fires so this is distinguishable from the normal,
+      // silent, confirmed-absent case.
+      //
+      // Durability: a persistent failure (a stuck permission problem, an
+      // exhausted file-descriptor table, ...) must not go silent after one
+      // warning. An unattended `kyberdash web` process would otherwise keep
+      // serving whatever it already had — possibly stale — forever, with no
+      // ongoing symptom for an operator to notice. So this re-warns at most
+      // once per `STAT_FAILURE_WARN_INTERVAL_MS` for as long as the failure
+      // keeps recurring, rather than only once ever per instance.
+      const nowTs = this.now()
+      if (
+        this.lastStatFailureWarnAt === undefined ||
+        nowTs - this.lastStatFailureWarnAt >= STAT_FAILURE_WARN_INTERVAL_MS
+      ) {
+        this.lastStatFailureWarnAt = nowTs
+        console.warn(`[KyberBridge] Failed to stat ${this.canonPath}, keeping current handle:`, err)
+      }
+      return
+    }
+
+    const stat: FileIdentity | undefined = info === undefined ? undefined : { dev: info.dev, ino: info.ino }
+
+    if (stat === undefined) {
+      // Confirmed absent (statSync returned rather than threw). Drop any
+      // handle rather than keep serving an unlinked database. Silent, per
+      // design: an absent file is not a failure.
+      if (this.canonDb !== undefined) {
+        this.closeHandle()
+      }
+      this.identity = undefined
+      return
+    }
+
+    if (
+      this.canonDb !== undefined &&
+      this.identity !== undefined &&
+      stat.dev === this.identity.dev &&
+      stat.ino === this.identity.ino
+    ) {
+      // Present, same file: keep the handle.
+      return
+    }
+
+    // Present, and either no handle yet or a different file: close the old
+    // handle first, then open the new one and record its pre-open identity.
+    if (this.canonDb !== undefined) {
+      this.closeHandle()
+    }
+
+    try {
+      const db = new DatabaseSync(this.canonPath, { readOnly: true })
+      try {
+        db.exec('PRAGMA busy_timeout = 5000')
+      } catch (pragmaErr) {
+        // The native handle opened successfully; a pragma failing right
+        // after must not leak it. Close it here — before rethrowing into
+        // the same failure handling a failed open takes below — because
+        // this `db` is a local variable the outer catch never sees, and
+        // `this.canonDb` is never assigned it.
+        try {
+          db.close()
+        } catch {
+          // Best-effort: the handle is being discarded either way.
+        }
+        throw pragmaErr
+      }
+      this.canonDb = db
+      this.identity = stat
+    } catch (err) {
+      if (!this.warnedOpenFailed) {
+        this.warnedOpenFailed = true
+        console.warn(`[KyberBridge] Failed to open SQLite database at ${this.canonPath}:`, err)
+      }
+      this.canonDb = undefined
+      this.identity = undefined
+    }
+  }
+
+  /** Closes the current handle, warning once per instance on failure, and always drops the reference. */
+  private closeHandle(): void {
+    try {
+      this.canonDb?.close()
+    } catch (err) {
+      if (!this.warnedCloseFailed) {
+        this.warnedCloseFailed = true
+        console.warn(`[KyberBridge] Failed to close SQLite database at ${this.canonPath}:`, err)
+      }
+    }
+    this.canonDb = undefined
+  }
+
+  /**
+   * The private store accessor every query goes through. For an injected
+   * handle or a `:memory:` bridge this just returns the current handle — it
+   * is never probed. For an owned handle it probes at most once per
+   * `reopenCheckIntervalMs` (measured by `now`), so an idle server never
+   * stats and a query never sees two handles in one call. Callers capture
+   * the result once per method and reuse the local variable for the rest of
+   * that method's body.
+   */
+  private getDb(): DatabaseSync | undefined {
+    if (this.closed) return undefined
+    if (!this.ownsHandle) return this.canonDb
+
+    const elapsed = this.lastProbeAt === undefined ? Number.POSITIVE_INFINITY : this.now() - this.lastProbeAt
+    if (this.lastProbeAt !== undefined && elapsed < this.reopenCheckIntervalMs) {
+      return this.canonDb
+    }
+
+    this.lastProbeAt = this.now()
+    this.reconcile()
+    return this.canonDb
   }
 
   private hasTable(db: DatabaseSync | undefined, tableName: string): boolean {
@@ -604,31 +807,31 @@ export class KyberBridge {
   }
 
   /**
-   * Close open SQLite database handles.
+   * Close open SQLite database handles. After this the accessor never probes
+   * or opens again, even if the file at `canonPath` changes.
    */
   close(): void {
-    try {
-      this.canonDb?.close()
-    } catch {}
-    this.canonDb = undefined
+    this.closed = true
+    this.closeHandle()
   }
 
   /**
    * List all available sessions from the canonical store, sorted by started DESC.
    */
   listSessions(limit?: number): SessionSummary[] {
+    const db = this.getDb()
     const list: SessionSummary[] = []
 
     // The canonical derived `session` cache is the only reporting authority.
     // Raw `records` are never synthesized into sessions here: projection
     // (projectCanonicalStore) is what turns accepted spans into derived rows,
     // so a record-only group is not yet a session and must not appear.
-    if (this.hasTable(this.canonDb, 'session')) {
+    if (this.hasTable(db, 'session')) {
       try {
         let rows: SessionDbRow[] = []
         try {
           // Fast path: use json_extract so we don't pull large payload blobs across the bridge
-          rows = this.canonDb!
+          rows = db!
             .prepare(
               'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, ' +
                 "json_extract(payload, '$.summary') as summary_json, " +
@@ -638,7 +841,7 @@ export class KyberBridge {
             .all() as unknown as SessionDbRow[]
         } catch {
           // Fallback if SQLite json functions are unavailable
-          rows = this.canonDb!
+          rows = db!
             .prepare(
               'SELECT session_id, harness, label, is_subagent, parent_session, agent_name, repo, branch, started, ended, payload ' +
                 'FROM session ORDER BY started DESC'
@@ -715,9 +918,10 @@ export class KyberBridge {
       return payload === undefined ? null : (_clip(payload) as T)
     }
 
-    if (this.hasTable(this.canonDb, 'session')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'session')) {
       try {
-        const row = this.canonDb!
+        const row = db!
           .prepare('SELECT payload FROM session WHERE session_id = ?')
           .get(sessionId) as { payload: string } | undefined
         if (row && typeof row.payload === 'string') {
@@ -757,9 +961,10 @@ export class KyberBridge {
       return attributes === undefined ? null : { spanId, attributes }
     }
 
-    if (this.hasTable(this.canonDb, 'records')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'records')) {
       try {
-        const row = this.canonDb!
+        const row = db!
           .prepare('SELECT raw FROM records WHERE span_id = ?')
           .get(spanId) as { raw: unknown } | undefined
         if (row && row.raw !== null && row.raw !== undefined) {
@@ -849,6 +1054,7 @@ export class KyberBridge {
     if (!sessionId || turnIndex < 0 || isNaN(turnIndex)) return null
     if (!this.sessionKnown(sessionId)) return null
 
+    const db = this.getDb()
     let targetSpanId: string | undefined
     let model: string | undefined
 
@@ -880,9 +1086,9 @@ export class KyberBridge {
           targetSpanId = target.spanId
           model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
         }
-      } else if (this.hasTable(this.canonDb, 'records')) {
+      } else if (this.hasTable(db, 'records')) {
         try {
-          const rows = this.canonDb!
+          const rows = db!
             .prepare('SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp')
             .all(sessionId) as Record<string, unknown>[]
           const turnRows = rows.filter((r) => r.op === 'llm.invoke')
@@ -1121,9 +1327,10 @@ export class KyberBridge {
    */
   private sessionKnown(sessionId: string): boolean {
     if (this.store?.getSessionPayload(sessionId) !== undefined) return true
-    if (this.hasTable(this.canonDb, 'session')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'session')) {
       try {
-        const row = this.canonDb!.prepare('SELECT 1 FROM session WHERE session_id = ?').get(sessionId)
+        const row = db!.prepare('SELECT 1 FROM session WHERE session_id = ?').get(sessionId)
         if (row) return true
       } catch {
         // Older or partial schemas still fall through to the records check.
@@ -1153,11 +1360,12 @@ export class KyberBridge {
   }
 
   private loadContentRecordsFromDb(sessionId: string, spanId?: string): ContentSourceRecord[] {
-    if (!this.hasTable(this.canonDb, 'records')) return []
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return []
 
     if (spanId) {
       try {
-        const row = this.canonDb!
+        const row = db!
           .prepare('SELECT * FROM records WHERE span_id = ?')
           .get(spanId) as Record<string, unknown> | undefined
         if (row === undefined) return []
@@ -1181,7 +1389,7 @@ export class KyberBridge {
     }
 
     try {
-      const rows = this.canonDb!
+      const rows = db!
         .prepare(
           'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
         )
@@ -1193,7 +1401,7 @@ export class KyberBridge {
       }))
     } catch {
       try {
-        const rows = this.canonDb!
+        const rows = db!
           .prepare('SELECT * FROM records WHERE trace_id = ? ORDER BY timestamp')
           .all(sessionId) as Record<string, unknown>[]
         return rows.map((row) => ({
@@ -1213,9 +1421,10 @@ export class KyberBridge {
    */
   private recordsForSessionKey(sessionKey: string): CanonicalRecord[] {
     if (this.store) return this.store.recordsForSession(sessionKey)
-    if (!this.hasTable(this.canonDb, 'records')) return []
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return []
     try {
-      const rows = this.canonDb!
+      const rows = db!
         .prepare(
           'SELECT * FROM records WHERE COALESCE(session_id, trace_id) = ? ORDER BY timestamp',
         )
@@ -1304,9 +1513,10 @@ export class KyberBridge {
    */
   private canonicalRecords(): CanonicalRecord[] {
     if (this.store) return this.store.listAll()
-    if (!this.hasTable(this.canonDb, 'records')) return []
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) return []
     try {
-      const rows = this.canonDb!
+      const rows = db!
         .prepare('SELECT * FROM records ORDER BY timestamp')
         .all() as unknown as import('../canon/store.js').RecordRow[]
       return rows.map(toRecord)
@@ -1362,22 +1572,23 @@ export class KyberBridge {
   }
 
   getQuarantine(limit = 200): QuarantineRow[] {
+    const db = this.getDb()
     const results: QuarantineRow[] = []
     const seenSpanIds = new Set<string>()
 
     // 1. Primary: canon.db
-    if (this.hasTable(this.canonDb, 'quarantine')) {
+    if (this.hasTable(db, 'quarantine')) {
       try {
         let rows: QuarantineDbRow[] = []
         try {
-          rows = this.canonDb!
+          rows = db!
             .prepare(
               'SELECT span_id, source, name, namespaces, reason, seen_at ' +
                 'FROM quarantine ORDER BY seen_at DESC'
             )
             .all() as unknown as QuarantineDbRow[]
         } catch {
-          rows = this.canonDb!
+          rows = db!
             .prepare(
               'SELECT span_id, namespaces, reason FROM quarantine ORDER BY span_id'
             )
@@ -1411,8 +1622,9 @@ export class KyberBridge {
     if (this.store) {
       return this.store.countQuarantine()
     }
-    if (!this.hasTable(this.canonDb, 'quarantine')) return 0
-    const row = this.canonDb!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
+    const db = this.getDb()
+    if (!this.hasTable(db, 'quarantine')) return 0
+    const row = db!.prepare('SELECT COUNT(*) AS n FROM quarantine').get() as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
@@ -1423,13 +1635,14 @@ export class KyberBridge {
    * Reads canonical diagnostics, deduplicated by the store's problem identity.
    */
   getProblems(limit = 200): ProblemRow[] {
+    const db = this.getDb()
     const results: ProblemRow[] = []
     const seenKeys = new Set<string>()
 
     // 1. Primary: canon.db ('problem' or 'problems' table)
-    const canonTable = this.hasTable(this.canonDb, 'problem')
+    const canonTable = this.hasTable(db, 'problem')
       ? 'problem'
-      : this.hasTable(this.canonDb, 'problems')
+      : this.hasTable(db, 'problems')
         ? 'problems'
         : null
 
@@ -1437,13 +1650,13 @@ export class KyberBridge {
       try {
         let rows: ProblemDbRow[] = []
         try {
-          rows = this.canonDb!
+          rows = db!
             .prepare(
               `SELECT id, session_id, span_id, severity, code, message, at, harness FROM ${canonTable} ORDER BY id DESC`
             )
             .all() as unknown as ProblemDbRow[]
         } catch {
-          rows = this.canonDb!
+          rows = db!
             .prepare(
               `SELECT id, span_id, severity, code, message, location FROM ${canonTable} ORDER BY id DESC`
             )
@@ -1481,13 +1694,14 @@ export class KyberBridge {
     if (this.store) {
       return this.store.countProblems()
     }
-    const table = this.hasTable(this.canonDb, 'problem')
+    const db = this.getDb()
+    const table = this.hasTable(db, 'problem')
       ? 'problem'
-      : this.hasTable(this.canonDb, 'problems')
+      : this.hasTable(db, 'problems')
         ? 'problems'
         : null
     if (table === null) return 0
-    const row = this.canonDb!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
+    const row = db!.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as
       | { n?: number }
       | undefined
     return Number(row?.n) || 0
@@ -1498,11 +1712,12 @@ export class KyberBridge {
    * a later failure does not hide the last successful refresh.
    */
   getRefreshState(): RefreshState {
+    const db = this.getDb()
     const latest = (status: 'success' | 'failure' | 'running') => {
       try {
         if (this.store) return this.store.latestRefreshRun(status)
-        if (!this.hasTable(this.canonDb, 'refresh_run')) return undefined
-        const row = this.canonDb!
+        if (!this.hasTable(db, 'refresh_run')) return undefined
+        const row = db!
           .prepare(
             'SELECT started_at, completed_at, pid, summary FROM refresh_run WHERE status = ? ORDER BY started_at DESC LIMIT 1',
           )
@@ -1550,7 +1765,8 @@ export class KyberBridge {
     if (this.store) {
       return this.store.costContributionsForSessions(uniqueIds)
     }
-    if (!this.hasTable(this.canonDb, 'records')) {
+    const db = this.getDb()
+    if (!this.hasTable(db, 'records')) {
       throw new Error('canonical records table is unavailable for cost lookup')
     }
 
@@ -1559,7 +1775,7 @@ export class KyberBridge {
     for (let offset = 0; offset < uniqueIds.length; offset += chunkSize) {
       const chunk = uniqueIds.slice(offset, offset + chunkSize)
       const placeholders = chunk.map(() => '?').join(', ')
-      const rows = this.canonDb!
+      const rows = db!
         .prepare(
           `SELECT COALESCE(session_id, trace_id) AS session_key, cost_json
            FROM records WHERE COALESCE(session_id, trace_id) IN (${placeholders})`,
@@ -1600,7 +1816,8 @@ export class KyberBridge {
       return findings
     }
 
-    if (this.hasTable(this.canonDb, 'finding')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'finding')) {
       try {
         let sql = 'SELECT * FROM finding'
         const params: unknown[] = []
@@ -1621,7 +1838,7 @@ export class KyberBridge {
           sql += ' LIMIT ?'
           params.push(Math.floor(options.limit))
         }
-        const rows = this.canonDb!.prepare(sql).all(...(params as (string | number)[])) as unknown as FindingDbRow[]
+        const rows = db!.prepare(sql).all(...(params as (string | number)[])) as unknown as FindingDbRow[]
         return rows.map(toFinding)
       } catch (err) {
         console.warn('[KyberBridge] Failed querying findings from canon.db:', err)
@@ -1640,9 +1857,10 @@ export class KyberBridge {
       return this.store.getFinding(id)
     }
 
-    if (this.hasTable(this.canonDb, 'finding')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'finding')) {
       try {
-        const row = this.canonDb!
+        const row = db!
           .prepare('SELECT * FROM finding WHERE id = ?')
           .get(id) as unknown as FindingDbRow | undefined
         return row === undefined ? undefined : toFinding(row)
@@ -1668,7 +1886,8 @@ export class KyberBridge {
       return this.store.listPredictions(options)
     }
 
-    if (this.hasTable(this.canonDb, 'prediction')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'prediction')) {
       try {
         let sql = 'SELECT * FROM prediction'
         const conds: string[] = []
@@ -1694,7 +1913,7 @@ export class KyberBridge {
           params.push(Math.floor(options.limit))
         }
 
-        const rows = this.canonDb!.prepare(sql).all(...params) as unknown as PredictionDbRow[]
+        const rows = db!.prepare(sql).all(...params) as unknown as PredictionDbRow[]
         return rows.map(toPrediction)
       } catch (err) {
         console.warn('[KyberBridge] Failed querying predictions from canon.db:', err)
@@ -1713,9 +1932,10 @@ export class KyberBridge {
       return this.store.getPrediction(id)
     }
 
-    if (this.hasTable(this.canonDb, 'prediction')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'prediction')) {
       try {
-        const row = this.canonDb!
+        const row = db!
           .prepare('SELECT * FROM prediction WHERE id = ?')
           .get(id) as unknown as PredictionDbRow | undefined
         return row === undefined ? undefined : toPrediction(row)
@@ -1737,13 +1957,14 @@ export class KyberBridge {
       return prediction
     }
 
-    if (this.canonDb) {
+    const db = this.getDb()
+    if (db) {
       const errorBar = prediction.errorBar ? JSON.stringify(prediction.errorBar) : null
       const payload = prediction.payload ? JSON.stringify(prediction.payload) : null
       const createdAt = prediction.createdAt || prediction.timestamp || new Date().toISOString()
       const id = prediction.id || `pred-${prediction.findingId}-${prediction.runId}`
       try {
-        this.canonDb
+        db
           .prepare(
             `INSERT OR REPLACE INTO prediction (
               id, finding_id, run_id, predicted_waste_tokens, confidence,
@@ -1797,9 +2018,10 @@ export class KyberBridge {
     if (this.store) {
       return this.store.listHarnessRollups()
     }
-    if (this.hasTable(this.canonDb, 'harness_rollup')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'harness_rollup')) {
       try {
-        const rows = this.canonDb!
+        const rows = db!
           .prepare('SELECT * FROM harness_rollup ORDER BY harness ASC')
           .all() as unknown as HarnessRollupDbRow[]
         return rows.map(toHarnessRollupRow)
@@ -1818,9 +2040,10 @@ export class KyberBridge {
     if (this.store) {
       return this.store.getHarnessRollup(harness)
     }
-    if (this.hasTable(this.canonDb, 'harness_rollup')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'harness_rollup')) {
       try {
-        const row = this.canonDb!
+        const row = db!
           .prepare('SELECT * FROM harness_rollup WHERE harness = ?')
           .get(harness) as unknown as HarnessRollupDbRow | undefined
         return row === undefined ? undefined : toHarnessRollupRow(row)
@@ -1839,12 +2062,13 @@ export class KyberBridge {
     if (this.store) {
       return this.store.listRuns(harnessId)
     }
-    if (this.hasTable(this.canonDb, 'run')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'run')) {
       try {
         const rows = (
           harnessId === undefined
-            ? this.canonDb!.prepare('SELECT * FROM run ORDER BY started DESC').all()
-            : this.canonDb!.prepare('SELECT * FROM run WHERE harness = ? ORDER BY started DESC').all(harnessId)
+            ? db!.prepare('SELECT * FROM run ORDER BY started DESC').all()
+            : db!.prepare('SELECT * FROM run WHERE harness = ? ORDER BY started DESC').all(harnessId)
         ) as unknown as RunDbRow[]
         return rows.map(toRunRow)
       } catch (err) {
@@ -1862,9 +2086,10 @@ export class KyberBridge {
     if (this.store) {
       return this.store.getRun(id)
     }
-    if (this.hasTable(this.canonDb, 'run')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'run')) {
       try {
-        const row = this.canonDb!
+        const row = db!
           .prepare('SELECT * FROM run WHERE run_id = ?')
           .get(id) as unknown as RunDbRow | undefined
         return row === undefined ? undefined : toRunRow(row)
@@ -1883,12 +2108,13 @@ export class KyberBridge {
     if (this.store) {
       return this.store.listExecutions(runId)
     }
-    if (this.hasTable(this.canonDb, 'execution')) {
+    const db = this.getDb()
+    if (this.hasTable(db, 'execution')) {
       try {
         const rows = (
           runId === undefined
-            ? this.canonDb!.prepare('SELECT * FROM execution ORDER BY started, execution_id').all()
-            : this.canonDb!.prepare('SELECT * FROM execution WHERE run_id = ? ORDER BY started, execution_id').all(runId)
+            ? db!.prepare('SELECT * FROM execution ORDER BY started, execution_id').all()
+            : db!.prepare('SELECT * FROM execution WHERE run_id = ? ORDER BY started, execution_id').all(runId)
         ) as unknown as ExecutionDbRow[]
         return rows.map(toExecutionRow)
       } catch (err) {
@@ -1930,21 +2156,22 @@ export class KyberBridge {
    * Return metadata: rate definitions, tokenizer info, span/quarantine counts, and harness presence.
    */
   getMeta(): KyberMetaResult {
+    const db = this.getDb()
     let spanCount = 0
     let quarantinedCount = 0
 
     // Count canonical spans.
-    if (this.hasTable(this.canonDb, 'records')) {
+    if (this.hasTable(db, 'records')) {
       try {
-        const r = this.canonDb!.prepare('SELECT COUNT(*) as c FROM records').get() as { c: number }
+        const r = db!.prepare('SELECT COUNT(*) as c FROM records').get() as { c: number }
         spanCount += Number(r.c) || 0
       } catch {}
     }
 
     // Count canonical quarantine entries.
-    if (this.hasTable(this.canonDb, 'quarantine')) {
+    if (this.hasTable(db, 'quarantine')) {
       try {
-        const r = this.canonDb!.prepare('SELECT COUNT(*) as c FROM quarantine').get() as {
+        const r = db!.prepare('SELECT COUNT(*) as c FROM quarantine').get() as {
           c: number
         }
         quarantinedCount += Number(r.c) || 0
@@ -1973,9 +2200,9 @@ export class KyberBridge {
 
     // Harnesses presence from the canonical meta table.
     const perHarness: Record<string, unknown> = {}
-    if (this.hasTable(this.canonDb, 'meta')) {
+    if (this.hasTable(db, 'meta')) {
       try {
-        const rows = this.canonDb!
+        const rows = db!
           .prepare("SELECT key, value FROM meta WHERE key LIKE 'meta:%'")
           .all() as Array<{ key: string; value: string }>
         for (const row of rows) {
@@ -1991,9 +2218,9 @@ export class KyberBridge {
 
     // Ingest sources from the canonical ingest log.
     const sources: Array<{ origin: string; seen: number; new: number }> = []
-    if (this.hasTable(this.canonDb, 'ingest_log')) {
+    if (this.hasTable(db, 'ingest_log')) {
       try {
-        const rows = this.canonDb!
+        const rows = db!
           .prepare(
             'SELECT source as origin, SUM(count) as seen, SUM(count) as new ' +
               'FROM ingest_log GROUP BY source ORDER BY MIN(id)'

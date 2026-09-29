@@ -4,7 +4,7 @@ title: Telemetry inventory — harness signal and content availability
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-09-28
 ---
 
 # Telemetry inventory — verified harness signal and content availability
@@ -40,7 +40,7 @@ Values are never summed across the two sources. `KyberBridge` reads `canon.db` o
 
 | Harness/source | Verified collection outcome | Availability or gate |
 |---|---|---|
-| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. Canonical records must not use harness `gemini`; legacy gemini records are quarantined as `excluded_harness`. | Tool names are available; per-server schemas remain source-dependent. |
+| Gemini statusline / Antigravity | Gemini **model** attribution recognizes `gen_ai.system = "gemini"`; non-model trace noise is quarantined. Antigravity roots (`antigravity` / `antigravity-cli` / `antigravity-ide`) are distinct harness jobs. The `kyberdash kyber antigravity-statusline` recorder appends `agy` payloads to `antigravity-statusline.jsonl`, which refresh resolves to harness **`antigravity-cli`** — the recorder path attributes there, not to `gemini`. Canonical records must not use harness `gemini`; legacy `gemini` records remain quarantined as `excluded_harness` and are not migrated. | Tool names are available; per-server schemas remain source-dependent. |
 | Copilot Chat | Content-enabled OTLP capture maps observed system instructions, messages, rules, skills, tool definitions, tool results, and session identity into canonical buckets. Input-message normalization separates input text from response envelopes without negative residuals. | Observed per-server schema availability remains source-dependent. |
 | Copilot CLI | SQLite ingest preserves its reported ASAD taxonomy, including `context_*_tokens` and `context_tier`. Persisted harness id is `copilot-cli`, not collapsed into `copilot`. | Omitted reported buckets remain unavailable rather than zero. |
 | Copilot VS Code | Native journal request replay into input-side `ReaderTurn` snapshots keyed by native request id via `copilotVscodeReader`. Reconstructs instructions and user message while excluding current model output from input context. | Window and pressure measured; unobserved buckets explicit `null` with reason. |
