@@ -199,6 +199,7 @@ public sealed class SkillResourceDispositionAuditTests
                     findings.Add($"{row.Resource}: is policy-bearing but has no Policy-line ledger rows.");
                 }
             }
+
             foreach (DispositionRow row in dispositions)
             {
                 string expected = DeriveDisposition(row.Resource, ledgerBySource[row.Resource]);
@@ -240,7 +241,7 @@ public sealed class SkillResourceDispositionAuditTests
             {
                 (string skillName, string withinSkillPath) = SplitSkillResource(row.Resource);
                 bool rendered = renderedBySkill.TryGetValue(skillName, out HashSet<string>? resources) &&
-                                 resources.Contains(withinSkillPath);
+                                resources.Contains(withinSkillPath);
                 string expected = rendered ? "rendered" : "packaged-only";
                 if (!string.Equals(expected, row.Delivery, StringComparison.Ordinal))
                 {
@@ -311,7 +312,8 @@ public sealed class SkillResourceDispositionAuditTests
                     continue;
                 }
 
-                if (!CollapsedWhitespace(section.Body).Contains(CollapsedWhitespace(row.Anchor), StringComparison.Ordinal))
+                if (!CollapsedWhitespace(section.Body)
+                        .Contains(CollapsedWhitespace(row.Anchor), StringComparison.Ordinal))
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in " +
@@ -356,7 +358,8 @@ public sealed class SkillResourceDispositionAuditTests
                     continue;
                 }
 
-                bool present = CollapsedWhitespace(content).Contains(CollapsedWhitespace(row.Excerpt), StringComparison.Ordinal);
+                bool present = CollapsedWhitespace(content)
+                    .Contains(CollapsedWhitespace(row.Excerpt), StringComparison.Ordinal);
                 bool shouldBeGone = row.Disposition is "migrated" or "duplicate" or "superseded";
                 if (shouldBeGone && present)
                 {
@@ -415,7 +418,8 @@ public sealed class SkillResourceDispositionAuditTests
                     string token = $"<{technology}-coding-standard>";
                     if (!content.Contains(token, StringComparison.Ordinal))
                     {
-                        findings.Add($"{row.Resource}: does not contain the token '{token}' for its ledger destination '{technology}'.");
+                        findings.Add(
+                            $"{row.Resource}: does not contain the token '{token}' for its ledger destination '{technology}'.");
                     }
                 }
             }
@@ -463,6 +467,30 @@ public sealed class SkillResourceDispositionAuditTests
     }
 
     /// <summary>
+    /// Proves <see cref="DanglingLocalLinks"/> strips query suffixes and URI-decodes local targets
+    /// before checking file existence, matching <c>ResourceClosureBuilder.GetLocalTarget</c>.
+    /// </summary>
+    [Fact]
+    public void LocalLinksWithQueriesAndPercentEncodingResolveCorrectly()
+    {
+        using TempDirectory temp = new();
+        string targetFile = Path.Combine(temp.Path, "target file.md");
+        File.WriteAllText(targetFile, "# Target\n");
+
+        string resourcePath = Path.Combine(temp.Path, "reference.md");
+        File.WriteAllText(
+            resourcePath,
+            "See [target](target%20file.md?query=value#heading) and [missing](missing%20file.md?query=value#heading) for detail.\n");
+
+        IReadOnlyList<string> findings = DanglingLocalLinks([resourcePath]);
+
+        Assert.True(
+            findings.Count == 1 &&
+            findings[0].Contains("missing%20file.md?query=value#heading", StringComparison.Ordinal),
+            "Expected only the missing target to be reported, got: " + string.Join(" | ", findings));
+    }
+
+    /// <summary>
     /// Prevents a ledger Anchor from citing template wording that <c>docs init --kyber-standards</c>
     /// never actually seeds: the embedded <see cref="KyberStandardsTemplates.Render"/> output for
     /// the anchor's technology must contain it verbatim.
@@ -485,7 +513,8 @@ public sealed class SkillResourceDispositionAuditTests
                 (string technology, _) = SplitDestination(row.Destination);
                 if (technology.Length == 0)
                 {
-                    findings.Add($"{row.Source}:{row.Line}: Anchor '{row.Anchor}' has no Destination technology to render.");
+                    findings.Add(
+                        $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' has no Destination technology to render.");
                     continue;
                 }
 
@@ -516,19 +545,25 @@ public sealed class SkillResourceDispositionAuditTests
         Assert.True(findings.Count == 0, string.Join("\n", findings));
     }
 
-    private static string[] OnDiskSkillResourcePaths() =>
-        Directory.EnumerateFiles(Path.Combine(ProductRoot, "skills"), "*", SearchOption.AllDirectories)
+    private static string[] OnDiskSkillResourcePaths()
+    {
+        return Directory.EnumerateFiles(Path.Combine(ProductRoot, "skills"), "*", SearchOption.AllDirectories)
             .Where(path => !string.Equals(Path.GetFileName(path), "SKILL.md", StringComparison.Ordinal))
             .Select(path => Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
             .Order(StringComparer.Ordinal)
             .ToArray();
+    }
 
-    private static string ResourceFilePath(string productRelativeResource) =>
-        Path.Combine(ProductRoot, productRelativeResource.Replace('/', Path.DirectorySeparatorChar));
+    private static string ResourceFilePath(string productRelativeResource)
+    {
+        return Path.Combine(ProductRoot, productRelativeResource.Replace('/', Path.DirectorySeparatorChar));
+    }
 
-    private static bool IsNonLensCodeReviewReference(string resource) =>
-        resource.StartsWith("skills/code-review/references/", StringComparison.Ordinal) &&
-        !resource.StartsWith("skills/code-review/references/lenses/", StringComparison.Ordinal);
+    private static bool IsNonLensCodeReviewReference(string resource)
+    {
+        return resource.StartsWith("skills/code-review/references/", StringComparison.Ordinal) &&
+               !resource.StartsWith("skills/code-review/references/lenses/", StringComparison.Ordinal);
+    }
 
     /// <summary>Implements the D5 disposition-derivation table.</summary>
     private static string DeriveDisposition(string resource, IEnumerable<LedgerRow> ledgerRowsForResource)
@@ -558,7 +593,8 @@ public sealed class SkillResourceDispositionAuditTests
 
     private static (string Technology, string Heading) SplitDestination(string destination)
     {
-        if (string.IsNullOrWhiteSpace(destination) || string.Equals(destination, NoDestination, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(destination) ||
+            string.Equals(destination, NoDestination, StringComparison.Ordinal))
         {
             return (string.Empty, string.Empty);
         }
@@ -569,12 +605,16 @@ public sealed class SkillResourceDispositionAuditTests
             : (destination[..separator].Trim(), destination[(separator + DestinationSeparator.Length)..].Trim());
     }
 
-    private static string CollapsedWhitespace(string text) => WhitespaceRun.Replace(text, " ").Trim();
+    private static string CollapsedWhitespace(string text)
+    {
+        return WhitespaceRun.Replace(text, " ").Trim();
+    }
 
     private static IReadOnlyList<string> DanglingCodingStandardTokens()
     {
         List<string> findings = [];
-        foreach (string file in Directory.EnumerateFiles(Path.Combine(ProductRoot, "skills"), "*", SearchOption.AllDirectories))
+        foreach (string file in Directory.EnumerateFiles(Path.Combine(ProductRoot, "skills"), "*",
+                     SearchOption.AllDirectories))
         {
             string relativePath = Path.GetRelativePath(ProductRoot, file).Replace(Path.DirectorySeparatorChar, '/');
             foreach (Match match in CodingStandardToken.Matches(File.ReadAllText(file)))
@@ -623,13 +663,32 @@ public sealed class SkillResourceDispositionAuditTests
                     continue;
                 }
 
-                string target = url.Split('#')[0];
+                string target = url.Trim();
+                int fragmentIndex = target.IndexOf('#', StringComparison.Ordinal);
+                int queryIndex = target.IndexOf('?', StringComparison.Ordinal);
+                int suffixIndex = fragmentIndex < 0
+                    ? queryIndex
+                    : queryIndex < 0
+                        ? fragmentIndex
+                        : Math.Min(fragmentIndex, queryIndex);
+                if (suffixIndex >= 0)
+                {
+                    target = target[..suffixIndex];
+                }
+
                 if (target.Length == 0)
                 {
                     continue;
                 }
 
-                string resolved = Path.GetFullPath(Path.Combine(directory, target.Replace('/', Path.DirectorySeparatorChar)));
+                target = Uri.UnescapeDataString(target);
+                if (target.Length == 0)
+                {
+                    continue;
+                }
+
+                string resolved =
+                    Path.GetFullPath(Path.Combine(directory, target.Replace('/', Path.DirectorySeparatorChar)));
                 if (!File.Exists(resolved))
                 {
                     findings.Add($"{file}: link '{url}' does not resolve to an existing file.");
@@ -671,7 +730,9 @@ public sealed class SkillResourceDispositionAuditTests
             string line = CellText(cells[1]);
             string excerpt = RequireCodeSpan(cells[2], "Excerpt", $"{source}:{line}");
             string anchorText = CellText(cells[5]);
-            string anchor = anchorText.Length == 0 ? string.Empty : RequireCodeSpan(cells[5], "Anchor", $"{source}:{line}");
+            string anchor = anchorText.Length == 0
+                ? string.Empty
+                : RequireCodeSpan(cells[5], "Anchor", $"{source}:{line}");
             result.Add(new LedgerRow(
                 source,
                 line,
@@ -779,10 +840,12 @@ public sealed class SkillResourceDispositionAuditTests
         return sections;
     }
 
-    private static string HeadingText(HeadingBlock heading) =>
-        string.Concat(heading.Inline?
+    private static string HeadingText(HeadingBlock heading)
+    {
+        return string.Concat(heading.Inline?
             .Descendants<LiteralInline>()
             .Select(literal => literal.Content.ToString()) ?? []).Trim();
+    }
 
     private sealed record DispositionRow(
         string Resource,

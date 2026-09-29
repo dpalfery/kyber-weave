@@ -42,6 +42,9 @@ if (-not (Test-Path -LiteralPath $BodyFile -PathType Leaf)) {
 
 if ([string]::IsNullOrWhiteSpace($Head)) {
     $Head = (git branch --show-current)
+    if ($LASTEXITCODE -ne 0) {
+        throw "git branch --show-current failed with exit code $LASTEXITCODE."
+    }
     if ([string]::IsNullOrWhiteSpace($Head)) {
         throw 'No current branch (detached HEAD); pass -Head.'
     }
@@ -49,6 +52,9 @@ if ([string]::IsNullOrWhiteSpace($Head)) {
 
 if ([string]::IsNullOrWhiteSpace($Repo)) {
     $remoteUrl = (git remote get-url origin 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        throw "git remote get-url origin failed with exit code $LASTEXITCODE."
+    }
     if ($remoteUrl -match '^(?:git@github\.com:|https?://(?:[^/@]+@)?github\.com/|ssh://git@github\.com/)([^/]+)/([^/]+)$') {
         $Repo = "$($Matches[1])/$($Matches[2] -replace '\.git$', '')"
     }

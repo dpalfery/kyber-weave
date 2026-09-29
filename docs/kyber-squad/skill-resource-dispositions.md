@@ -16,7 +16,7 @@ that, for every one of those 66 resources, a reader can answer three questions: 
 content it is, what happens to it, and — where it states a rule a host could reverse — where
 that rule now lives. It is a governed `reference` document (D5) and it outlives the plan that
 created it,
-[`2026-09-28-skill-resource-dispositions.md`](../plans/2026-09-28-skill-resource-dispositions.md).
+[`2026-09-28-skill-resource-dispositions.md`](../archive/plans/2026-09-28-skill-resource-dispositions.md).
 
 **D2 — a skill's own directory is a durable home.** Review lenses, MSBuild/CI technique, MAUI
 platform technique, Pylance/Python procedure, product-owner phase references, PR provider
@@ -42,10 +42,8 @@ starting at a skill's own `SKILL.md`, actually reaches — a file named only in 
 packaged into both archives but never rendered beside its principal. Every resource below is
 `rendered` except `skills/setup-dev-environment/agents/openai.yaml`, which is `packaged-only`
 Codex skill-UI metadata that no instruction links to, and which stays that way by design (D6).
-`skills/second-brain/references/templates.md` is recorded as `rendered` for the state D6
-commits `second-brain/SKILL.md` to: turning its four code-span mentions into Markdown links.
-Today, before that edit lands, the real closure still omits it — this is the one row this
-document expects to disagree with the renderer until that link exists.
+`skills/second-brain/references/templates.md` is `rendered` because `second-brain/SKILL.md`
+links `references/templates.md` across its four template references (D6).
 
 **Records, not guidance.** The Policy-line ledger below quotes verbatim excerpts from the
 resource files so that later edits can be checked against them (A5). A `migrated`,
@@ -115,7 +113,7 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/python-dev/references/fact-grounded-coding.md` | procedure | retain-in-place | rendered | — | Microsoft Learn / Pylance verification procedure, the same shape as the dal-dev Prime Directive; not a host-reversible policy (D2). |
 | `skills/python-dev/references/pylance-docs.md` | technique | retain-in-place | rendered | — | Pylance tool reference; not a host-reversible policy (D2). |
 | `skills/python-dev/references/pylance-refactoring.md` | technique | retain-in-place | rendered | — | Pylance refactoring how-to; not a host-reversible policy (D2). |
-| `skills/second-brain/references/templates.md` | template | retain-in-place | rendered | — | Template content is skill-owned (D2). Delivery is `rendered` for the state task T4d commits `second-brain/SKILL.md` to — turning its four `references/templates.md` code-span mentions into Markdown links (D6). Until that edit lands, the real render closure still omits this file, so this row is expected to disagree with `SquadSourceLoader.Load` until T4d. |
+| `skills/second-brain/references/templates.md` | template | retain-in-place | rendered | — | Template content is skill-owned (D2). Delivery is `rendered` because `second-brain/SKILL.md` links `references/templates.md` across its four template references (D6). |
 | `skills/setup-dev-environment/agents/openai.yaml` | metadata | retain-in-place | packaged-only | — | Codex skill-UI metadata (display name, default prompt, implicit-invocation policy); no instruction references it, so no closure reaches it (D2, D6). |
 | `skills/setup-dev-environment/references/inventory.md` | inventory | retain-in-place | rendered | — | Host bootstrap inventory reference; not a host-reversible policy (D2). |
 | `skills/test-dev/references/e2e-test-patterns.md` | technique | retain-in-place | rendered | — | Playwright E2E technique; not a host-reversible policy (D2). |
@@ -131,7 +129,7 @@ below also carries a `migrated` or `duplicate` row, so the derivation table reso
 
 ## Policy-line ledger
 
-Line numbers are as of base commit `611862e`; the files have not changed since. `Destination`
+Line numbers are as of base commit `611862e` prior to the policy migration. `Destination`
 is `<technology> § <heading>`; `—` where none applies. `Anchor` is set only where `Destination`
 is set. `Reason` is required, and shown, only for `superseded` and `retained` rows.
 
@@ -264,9 +262,9 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 ## Open follow-ups
 
 - The Policy-line ledger covers every normative line in the eight policy-bearing references
-  and the three policy-bearing maui-dev references — not a representative sample. T4a–c edit
-  every source line a ledger row names; no policy line is left behind with two homes.
-- T3 must create two headings that do not exist yet: `data-access-layer § Migrations` and
+  and the three policy-bearing maui-dev references — not a representative sample. T4a–c edited
+  every source line a ledger row names; no policy line was left behind with two homes.
+- T3 created two headings that did not exist previously: `data-access-layer § Migrations` and
   `csharp § Backend-for-frontend`. Every `migrated` row above that targets one of them names
   the exact anchor text T3 writes. `bff-yarp.md:99` restates `:32`'s rule and targets the same
   anchor, so it adds no new anchor for T3 to write.
