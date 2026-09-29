@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-09-28
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -21,7 +21,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 21 canonical agent instruction bodies and 24 canonical skill identities under `products/kyber-squad/`. The skill tree retains 64 supplemental resources, for 88 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, all retained until the skill-resource content-preserving migration is accepted. Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 21 canonical agent instruction bodies and 23 canonical skill identities under `products/kyber-squad/`. The skill tree retains 66 supplemental resources, for 89 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A Copilot-only internal capability profile may validate exact target tool membership but must not replace or widen the shared capability profile or metadata. |
 | **KS-003** | **Deterministic Target Resolution**: For install, resolve deployment targets from explicit CLI flags, saved repository configuration, then strong filesystem markers. For update, a non-empty explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt; when omitted, reuse the receipt roster. Update never re-detects filesystem markers. Uninstall uses the existing receipt roster. The `all` keyword expands strictly to the approved 12-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. |
@@ -89,15 +89,20 @@ If a target harness cannot guarantee the containment or authorization boundaries
 
 ## Golden-render and knowledge-retention requirement
 
-Every canonical raw `SKILL.md` except the two explicitly evolved skills (`product-owner`,
-`bug-crusher`) matches the Hotshot golden bytes, as does every non-evolved agent body; the three
-retired `-v3` identities survive only as folded provenance in their canonical migration reports.
-Renderers project each owner's validated resource closure beside its principal output, so a fresh
-Copilot render emits 113 files with no dangling local references. The tracked root `.github/`
+Every canonical raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`,
+`product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the
+Hotshot golden bytes, as does every non-evolved agent body. The golden `create-pull-request-github`
+skill is retired into `create-pull-request`, and the three retired `-v3` agent identities survive
+only as folded provenance in their canonical migration reports. Renderers project every file an
+owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 119
+files with no dangling link; every skill resource reaches this render except
+`skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
+metadata. The tracked root `.github/`
 self-deployment predates resource delivery and is refreshed only by a release. Both recursive
-package formats retain all supplemental resources. Surplus content remains until the
-[skill-resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) satisfies its
-content-preservation, routing, and deployment acceptance criteria.
+package formats retain all supplemental resources. Every retained resource has a reviewed
+disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):
+non-policy content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 `products/kyber-squad/` is canonical and package authority. The repository root
 `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and

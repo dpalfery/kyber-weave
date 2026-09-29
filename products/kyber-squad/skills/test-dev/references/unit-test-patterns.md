@@ -8,7 +8,7 @@ description: xUnit unit test patterns — NSubstitute mocking, FluentAssertions,
 ## Technology Stack
 
 - **Framework:** xUnit
-- **Mocking:** NSubstitute (prefer over Moq — leaner syntax, no `Setup`/`Returns` duplication)
+- **Mocking:** mock-library choice follows **<test-coding-standard>** § Stack
 - **Assertions:** FluentAssertions (`result.Should().Be(...)`)
 - **Coverage:** Meet the coverage floor the host declares under `review.coverage` in its Kyber-Weave configuration and `kyber-weave review gates` reports
 
@@ -16,9 +16,7 @@ description: xUnit unit test patterns — NSubstitute mocking, FluentAssertions,
 
 ## Naming Convention
 
-```
-MethodName_StateUnderTest_ExpectedBehavior
-```
+Test naming follows **<test-coding-standard>** § Stack.
 
 Examples:
 - `CreateJob_WhenDuplicateArtifact_ThrowsConflictException`
@@ -48,9 +46,9 @@ public async Task CreateJob_WhenDuplicateArtifact_ThrowsConflictException()
 ```
 
 **Rules:**
-- Blank lines between Arrange, Act, Assert sections.
+- Structural conventions (blank-line separation, no inherited test logic) follow
+  **<test-coding-standard>** § Stack.
 - One logical assertion cluster per test — don't assert multiple independent outcomes.
-- No test logic shared via inheritance — use fixtures and builders instead.
 
 ---
 
@@ -77,7 +75,7 @@ repo.GetByIdAsync(-1).ThrowsAsync<InvalidOperationException>();
 
 ## Test Data Builders
 
-Prefer builder classes over inline object creation for complex domain objects:
+Builder-class usage for complex domain objects follows **<test-coding-standard>** § What to assert:
 
 ```csharp
 var job = new IngestionJobBuilder()
@@ -92,10 +90,11 @@ Builders live next to the tests they serve, typically under a `Builders/` folder
 
 ## Hard Rules
 
-- **No `Thread.Sleep` or arbitrary delays.** Use `await`, `WaitForAsync`, or polling helpers with timeout.
+- **No `Thread.Sleep` or arbitrary delays.** Timeout-safe waiting follows
+  **<test-coding-standard>** § What to assert.
 - **No test that only asserts it doesn't throw.** Assert the actual observable outcome.
 - **Tests must be isolated and order-independent.** Each test arranges its own data; no shared mutable state between test methods.
-- **Regression tests for every bug fix.** Test name must encode the broken scenario (link to issue ID in a comment if one exists).
+- Regression-test naming follows **<test-coding-standard>** § What to assert (link to issue ID in a comment if one exists).
 - Test domain logic and service classes only — no infrastructure, no DB, no HTTP.
 
 ---
@@ -103,7 +102,7 @@ Builders live next to the tests they serve, typically under a `Builders/` folder
 ## Python (when needed)
 
 - **Framework:** pytest with `parametrize` for table-driven cases
-- **Mocking:** `unittest.mock` or `pytest-mock`; mock at I/O boundary, never inside domain logic
+- **Mocking:** `unittest.mock` or `pytest-mock`; mock-boundary rules follow **<test-coding-standard>** § Stack
 - **Naming:** `test_<unit>_<scenario>` snake_case
 - **Coverage:** meet the coverage floor the host declares under `review.coverage` in its Kyber-Weave configuration and `kyber-weave review gates` reports (`pytest-cov`)
 

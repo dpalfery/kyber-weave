@@ -64,7 +64,6 @@ public sealed class SquadCanonicalContentTests
         "bug-crusher",
         "code-review",
         "create-pull-request",
-        "create-pull-request-github",
         "csharp-dev",
         "csp-security",
         "dal-dev",

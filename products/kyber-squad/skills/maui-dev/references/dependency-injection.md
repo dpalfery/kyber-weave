@@ -47,7 +47,7 @@ public static class MauiProgram
 | `Transient` | Pages, ViewModels, request-scoped work | Fresh instance per resolution — correct for most UI objects |
 | `Scoped` | Rarely used in MAUI — requires manual `IServiceScope` management | Scoped lifetime doesn't map cleanly to navigation lifetime |
 
-**Never register a ViewModel as Singleton.** Singleton ViewModels retain state across navigations — a user going Back and then forward to the same screen sees stale data.
+ViewModel lifetime rules follow **<maui-coding-standard>** § Dependency injection.
 
 ---
 
@@ -117,7 +117,7 @@ builder.Services.AddSingleton<IPlatformService, DefaultPlatformService>();
 
 | Pitfall | Fix |
 |---|---|
-| **Singleton ViewModel** retains stale data between navigations | Register ViewModels as `Transient` |
+| **Singleton ViewModel** lifetime | See **<maui-coding-standard>** § Dependency injection |
 | **Unregistered Page**: Shell instantiates route types with `ActivatorUtilities.GetServiceOrCreateInstance` and resolves dependencies; transient registration is standard | Register pages as `Transient` in `builder.Services` for explicit lifetime management and reliable dependency resolution |
 | **Service-dependent XAML resources** (e.g., converters) execute before container is ready | Defer container-dependent work to `CreateWindow()` or `OnAppearing()` |
 | **Service Locator pattern** (`ServiceProvider.GetService<T>()` in ViewModel) | Use constructor injection — hides dependencies and complicates testing |

@@ -43,6 +43,8 @@ they are validated against an allow-list, never interpolated from input.
 - **`DISTINCT` is a smell.** It usually means a join is duplicating rows; fix the join.
 - No scalar user-defined functions in `WHERE` or `SELECT` over large sets — they defeat the
   optimizer.
+- Write sargable predicates: do not wrap functions around columns in WHERE or JOIN clauses —
+  transform the input side instead, or the optimizer cannot use an index.
 
 ## T-SQL authoring
 
@@ -53,6 +55,8 @@ they are validated against an allow-list, never interpolated from input.
   script can run twice.
 - Transactions are explicit (`BEGIN TRANSACTION` / `COMMIT`) and short.
 - Narrow results as early as possible: only the rows and columns the caller needs.
+- Use SCOPE_IDENTITY() rather than @@IDENTITY to read back the identity a statement just
+  inserted — @@IDENTITY can return a trigger's insert instead of the caller's.
 
 ## Schema and types
 
@@ -60,7 +64,8 @@ they are validated against an allow-list, never interpolated from input.
   decision.
 - **The narrowest correct type.** `int` / `bigint` for keys, `decimal` for exact and monetary
   values, `date` / `time` / `datetime2` rather than `datetime`, `bit` for booleans, `nvarchar`
-  for Unicode text.
+  for Unicode text. Avoid the deprecated text, ntext, and image types; use `varchar(max)`,
+  `nvarchar(max)`, or `varbinary(max)` instead.
 - **Every table has a clustered index.** The clustered key is narrow, unique, ever-increasing,
   immutable, non-nullable, and fixed-width — an `IDENTITY` or `SEQUENCE` column. Not a
   `uniqueidentifier` unless its values are generated sequentially. When the primary key does
@@ -127,7 +132,10 @@ stops using them, so a rollback does not lose data.
 ## Least privilege
 
 Application accounts get the permissions the application uses, and no more. Nothing routine
-runs as `sa`, `root`, or the schema owner.
+runs as `sa`, `root`, or the schema owner. Never enable `xp_cmdshell`. Use SQLCLR or an
+external process instead of xp_cmdshell for anything that needs to run outside the engine.
+Prefer Microsoft Entra ID or Kerberos authentication over SQL authentication for application
+and pipeline connections.
 
 Sensitive columns are encrypted, hashed, or masked, and a query selects only the columns it
 needs rather than whatever `*` expands to.

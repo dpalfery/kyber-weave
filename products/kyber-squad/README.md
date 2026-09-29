@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **21 canonical agents** and **24 canonical skills**,
+It maintains a target-neutral, declarative catalog of **21 canonical agents** and **23 canonical skills**,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -57,7 +57,7 @@ products/kyber-squad/
 │   ├── task-reviewer/                  # Progressive-disclosure references (Markdown)
 │   ├── tauri-dev.md
 │   └── test-dev.md
-├── skills/                             # 24 canonical skill directories; 88 recursive files
+├── skills/                             # 23 canonical skill directories; 89 recursive files
 │   ├── app-docs-standard/
 │   ├── architecture-decision-record/
 │   ├── azure-cli/
@@ -65,7 +65,6 @@ products/kyber-squad/
 │   ├── bug-crusher/
 │   ├── code-review/
 │   ├── create-pull-request/
-│   ├── create-pull-request-github/
 │   ├── csharp-dev/
 │   ├── csp-security/
 │   ├── dal-dev/
@@ -115,23 +114,27 @@ An agent body may link local Markdown resources beneath the agent's own director
 `conductor/references/*.md`); those links stay authored verbatim and resolve at the deployment
 target (see [Resource Closures](#6-resource-closures-and-progressive-disclosure)).
 
-### 2. Skills (24 Canonical Skills)
+### 2. Skills (23 Canonical Skills)
 
-The 24 canonical skill directories under `skills/` adhere to the Agent Skills open standard
+The 23 canonical skill directories under `skills/` adhere to the Agent Skills open standard
 (`SKILL.md`, optional `scripts/`, `references/`, and asset files). Every raw `SKILL.md` except the
-two explicitly evolved skills (`product-owner`, `bug-crusher`) is byte-identical to the designated
-Hotshot golden copy. The canonical tree also retains 64 supplemental resources, for 88 skill-tree
-files in total; recursive APM and Agent Plugins packages preserve those resources and their local
-references.
+five explicitly evolved skills (`bug-crusher`, `product-owner`, `second-brain`,
+`create-pull-request`, and `pr-review-fix-comments`) is byte-identical to the designated Hotshot
+golden copy; `create-pull-request-github` is retired into `create-pull-request`. The canonical
+tree also retains 66 supplemental resources, for 89 skill-tree files in total; recursive APM and
+Agent Plugins packages preserve those resources and their local references.
 
-Renderers project every validated resource beside its principal output with authored relative
-links preserved, so the former dangling-reference defect is closed at every target: a fresh
-Copilot render now emits the 45 principal files plus each owner's resources (113 files total).
+Renderers project every file an owner's Markdown links reach beside its principal output, with
+authored relative links preserved, so the former dangling-reference defect is closed for every
+linked resource: a fresh Copilot render now emits the 44 principal files plus each owner's linked
+resources (119 files total). Every skill resource reaches every render except
+`skills/setup-dev-environment/agents/openai.yaml`, which is packaged-only Codex skill-UI metadata.
 The tracked root `.github/` self-deployment predates resource delivery and remains a stale
 snapshot until a human refreshes it after a release candidate; packages and fresh renders carry
-resources today. Surplus skill content remains packaged until the
-[content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128)
-meets its acceptance criteria.
+resources today. Every retained resource now has a reviewed disposition in the
+[skill-resource dispositions audit](../../docs/kyber-squad/skill-resource-dispositions.md):
+non-policy content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 `kyber-weave-docs` is intentionally managed separately under
 `.apm/skills/kyber-weave-docs/` for Kyber-Docs distribution and is not part of Kyber-Squad.

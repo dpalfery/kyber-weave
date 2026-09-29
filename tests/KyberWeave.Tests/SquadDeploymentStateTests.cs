@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -1009,6 +1010,88 @@ public sealed class SquadDeploymentStateTests(ITestOutputHelper output)
             SquadDeploymentScope.Project));
         AssertReceiptEqual(plan.Receipt, persisted);
         Assert.DoesNotContain(persisted.Files, f => f.RelativePath == retiredSkillPath);
+    }
+
+    /// <summary>
+    /// Prevents a host that deployed <c>create-pull-request-github</c> before it was retired
+    /// into <c>create-pull-request</c> from keeping the retired skill forever after
+    /// <c>squad update</c>, or from losing an operator's edited copy of it. The rendered set is
+    /// the real canonical Claude render, so the test fails while the retired skill is still
+    /// canonical.
+    /// </summary>
+    [Fact]
+    public async Task CreateUpdateRetiresCreatePullRequestGithubFromAPriorReleaseUnlessLocallyEdited()
+    {
+        const string retiredSkillPath = ".claude/skills/create-pull-request-github/SKILL.md";
+        const string installedContent =
+            "---\nname: create-pull-request-github\ndescription: Prior release\n---\nPrior release guidance\n";
+        const string editedContent =
+            "---\nname: create-pull-request-github\ndescription: Operator edited\n---\nOperator guidance\n";
+        SquadRenderResult render = await new SquadRendererRegistry([new ClaudeRenderer()]).RenderAsync(
+            new SquadRenderRequest(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+                [SquadTarget.Claude],
+                SquadDeploymentScope.Project));
+        Assert.True(render.Success, string.Join("; ", render.Errors));
+        SquadReceipt previousReceipt = Receipt(new SquadOwnedFile(
+            retiredSkillPath,
+            Digest(installedContent),
+            "claude",
+            Adopted: false));
+
+        using (TempDirectory fixture = new TempDirectory())
+        {
+            Write(fixture.Path, retiredSkillPath, installedContent);
+            WriteState(fixture.Path, Lock(), previousReceipt);
+
+            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                render.Files,
+                previousReceipt,
+                [],
+                replaceManaged: false,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+
+            Assert.Contains(
+                plan.PlannedFileChanges,
+                change => change.RelativePath == retiredSkillPath &&
+                          change.Kind == SquadFileMutationKind.Delete);
+            Transaction(fixture.Path).Execute(plan);
+
+            Assert.False(File.Exists(ToPlatformPath(fixture.Path, retiredSkillPath)));
+            SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+                fixture.Path,
+                SquadDeploymentScope.Project));
+            Assert.DoesNotContain(persisted.Files, file => file.RelativePath == retiredSkillPath);
+        }
+
+        foreach (bool replaceManaged in new[] { false, true })
+        {
+            using TempDirectory fixture = new TempDirectory();
+            Write(fixture.Path, retiredSkillPath, editedContent);
+            WriteState(fixture.Path, Lock(), previousReceipt);
+
+            SquadDeploymentPlan plan = SquadDeploymentPlan.CreateUpdate(
+                fixture.Path,
+                SquadDeploymentScope.Project,
+                Lock("1.2.4"),
+                render.Files,
+                previousReceipt,
+                [],
+                replaceManaged,
+                new FixedTimeProvider(InstalledAt.AddDays(1)));
+
+            Assert.DoesNotContain(plan.PlannedFileChanges, change => change.RelativePath == retiredSkillPath);
+            Transaction(fixture.Path).Execute(plan);
+
+            Assert.Equal(editedContent, Read(fixture.Path, retiredSkillPath));
+            SquadReceipt persisted = Assert.IsType<SquadReceipt>(Store(fixture.Path).ReadReceipt(
+                fixture.Path,
+                SquadDeploymentScope.Project));
+            Assert.Contains(persisted.Files, file => file.RelativePath == retiredSkillPath);
+        }
     }
 
     /// <summary>

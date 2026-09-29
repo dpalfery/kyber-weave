@@ -5,9 +5,11 @@ description: Integration test patterns — real SQL Server, LocalDB/Docker, WebA
 
 # Integration Test Patterns (.NET)
 
-## CRITICAL: Never Mock the Database
+## Database Testing
 
-**Integration tests must hit a real SQL Server instance.** Use LocalDB, Docker, or a dedicated test database. Mocked DB tests pass while prod migrations break — this has caused incidents before.
+Never mocking the database in integration tests follows **<test-coding-standard>** §
+Layer boundaries. Use LocalDB, Docker, or a dedicated test database. Mocked DB tests
+pass while prod migrations break — this has caused incidents before.
 
 ---
 
@@ -111,18 +113,17 @@ public class IngestionJobsControllerTests : IClassFixture<WebApplicationFactory<
 
 ## Test Isolation Rules
 
-- Each test must arrange its own data — no shared mutable state between test methods.
-- Tests must be order-independent — don't assume another test ran first.
-- Clean up test data in `DisposeAsync` or use a transaction-per-test pattern.
-- Use unique identifiers (GUID) for test records to avoid conflicts with parallel runs.
+Data isolation, ordering independence, cleanup, and unique test-record identifiers all
+follow **<test-coding-standard>** § Isolation.
 
 ---
 
 ## Hard Rules
 
-- **Never mock the database** in integration tests. Real SQL Server only.
-- **No `Thread.Sleep`.** Use `await`, `WaitForAsync`, or polling helpers with timeout.
-- **Regression test for every bug fix.** Name must encode the broken scenario.
+- **Never mock the database** in integration tests. Real-instance requirements follow
+  **<test-coding-standard>** § Layer boundaries.
+- **No `Thread.Sleep`.** Timeout-safe waiting follows **<test-coding-standard>** § What to assert.
+- Regression-test naming follows **<test-coding-standard>** § What to assert.
 
 ---
 

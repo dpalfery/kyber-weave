@@ -8,14 +8,14 @@ description: ADO.NET repository pattern — ISqlConnectionFactory, IRepository<T
 This is procedure. Persistence policy — ADO.NET, not Dapper, not Entity Framework — is the
 path declared as **<data-access-layer-coding-standard>**.
 
-Do not use EF Core (`DbContext`, `DbSet<T>`, `Include()`, `SaveChangesAsync()`) or Dapper
-(`QueryAsync`, `ExecuteAsync`, `DynamicParameters`).
+The excluded ORMs and the APIs that signal drift toward them are named in
+**<data-access-layer-coding-standard>** § Stack.
 
 ---
 
 ## Connection management
 
-Always inject `ISqlConnectionFactory`. Never `new SqlConnection(...)`.
+Follow **<data-access-layer-coding-standard>** § Stack for the connection-factory contract.
 
 ```csharp
 public sealed class ExampleRepository : IExampleRepository
@@ -56,8 +56,7 @@ public sealed class ExampleRepository : IExampleRepository
 }
 ```
 
-Connection strings come from configuration / Key Vault / managed identity, as declared by
-the **Configuration Policy** registry property. Never a literal, never a committed file.
+Connection-string sourcing follows **<data-access-layer-coding-standard>** § Hard rules.
 
 ---
 
@@ -71,8 +70,8 @@ int affected = await command.ExecuteNonQueryAsync(cancellationToken);
 object? scalar = await command.ExecuteScalarAsync(cancellationToken);
 ```
 
-For a `MERGE` or other multi-statement batch, keep the SQL in a constant and pass every
-value as a typed parameter. Do not interpolate.
+Parameter typing for a `MERGE` or other multi-statement batch follows
+**<data-access-layer-coding-standard>** § Hard rules.
 
 ---
 
@@ -100,9 +99,8 @@ catch
 }
 ```
 
-Use a transaction for multi-statement work that must be atomic, including an audit write
-paired with a data change. Do not nest transactions. Every command inside the scope takes
-the same `SqlTransaction`.
+Transaction scope and nesting follow **<data-access-layer-coding-standard>** § Hard rules.
+Every command inside the scope takes the same `SqlTransaction`.
 
 ---
 
@@ -110,10 +108,11 @@ the same `SqlTransaction`.
 
 - Interface: `<Solution>.Contracts`
 - Implementation and persistence row: `<Solution>.Persistence`
-- DI: `ServiceCollectionExtensions.AddSqlPersistenceServices()` — factory Singleton,
-  repositories Scoped
+- DI: `ServiceCollectionExtensions.AddSqlPersistenceServices()` — lifetimes follow
+  **<data-access-layer-coding-standard>** § Hard rules
 
-On failure, log with structured properties and wrap with context. Do not swallow.
+Failure handling — structured logging and never swallowing — follows
+**<data-access-layer-coding-standard>** § Hard rules.
 
 ```csharp
 _logger.LogError(ex, "Failed to {Operation} for {Entity} {Id}", operation, entityName, id);
