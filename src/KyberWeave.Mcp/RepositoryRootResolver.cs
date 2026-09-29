@@ -18,6 +18,13 @@ public static class RepositoryRootResolver
 {
     public const string EnvironmentVariable = "KYBER_WEAVE_REPO_ROOT";
 
+    /// <summary>
+    /// The environment variable a client can set to assert which absolute root it believes
+    /// the server is bound to. Consulted only when <c>--expect-root</c> is absent; the flag
+    /// wins over the environment.
+    /// </summary>
+    public const string ExpectRootEnvironmentVariable = "KYBER_WEAVE_EXPECT_ROOT";
+
     public static string Resolve(
         IReadOnlyList<string> args,
         string workingDirectory,
@@ -27,6 +34,52 @@ public static class RepositoryRootResolver
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
         string baseDirectory = Path.GetFullPath(workingDirectory);
+        string resolved = ResolveBoundRoot(args, baseDirectory, environmentRoot);
+
+        // A client-asserted expectation is a safety rail, not part of binding: the root is
+        // resolved first (so the error can name both paths) and only then compared. It
+        // catches the reported failure mode where a same-named server is pinned to another
+        // checkout and answers silently.
+        string? expected = ExpectRootArgument(args);
+        if (expected is not null)
+        {
+            string expectedRoot = ResolvePath(expected, baseDirectory);
+            if (!PathsEqual(expectedRoot, resolved))
+            {
+                throw new ExpectedRootMismatchException(
+                    $"The --expect-root value '{expectedRoot}' does not match the resolved MCP " +
+                    $"root '{resolved}'. Refusing to serve because the client expects a different " +
+                    "repository and answers would come from the wrong corpus. Pass the matching " +
+                    "root, or drop --expect-root to accept whatever root resolves.");
+            }
+        }
+
+        return resolved;
+    }
+
+    /// <summary>Whether the argument list supplies a <c>--expect-root</c> flag.</summary>
+    public static bool HasExpectRootArgument(IReadOnlyList<string> args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        return ExpectRootArgument(args) is not null;
+    }
+
+    /// <summary>
+    /// Ordinal path equality after <see cref="Path.GetFullPath(string)"/> normalisation.
+    /// Symlinks are not resolved, so a temp path reported differently by the OS is still
+    /// compared exactly as the caller supplied it.
+    /// </summary>
+    public static bool PathsEqual(string first, string second) =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
+            StringComparison.Ordinal);
+
+    private static string ResolveBoundRoot(
+        IReadOnlyList<string> args,
+        string baseDirectory,
+        string? environmentRoot)
+    {
         string? explicitRoot = ExplicitRoot(args);
         if (explicitRoot is not null)
         {
@@ -43,6 +96,41 @@ public static class RepositoryRootResolver
         }
 
         return RequireInitializedRoot(baseDirectory, "the working directory");
+    }
+
+    private static string? ExpectRootArgument(IReadOnlyList<string> args)
+    {
+        for (int i = 0; i < args.Count; i++)
+        {
+            string argument = args[i];
+            if (argument == "--expect-root")
+            {
+                if (i == args.Count - 1 || string.IsNullOrWhiteSpace(args[i + 1]))
+                {
+                    throw new ArgumentException(
+                        "--expect-root requires a repository path.",
+                        nameof(args));
+                }
+
+                return args[i + 1];
+            }
+
+            const string prefix = "--expect-root=";
+            if (argument.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                string value = argument[prefix.Length..];
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    throw new ArgumentException(
+                        "--expect-root requires a repository path.",
+                        nameof(args));
+                }
+
+                return value;
+            }
+        }
+
+        return null;
     }
 
     private static string? ExplicitRoot(IReadOnlyList<string> args)

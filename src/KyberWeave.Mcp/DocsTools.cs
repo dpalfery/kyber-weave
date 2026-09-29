@@ -81,6 +81,7 @@ public sealed class DocsTools(DocumentIndexHost host)
         int charBudget = DocumentIndex.DefaultCharBudget)
     {
         DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
         IReadOnlyList<DocumentHit> hits = index.Explore(query, maxDocs, charBudget);
 
         if (hits.Count == 0)
@@ -88,14 +89,14 @@ public sealed class DocsTools(DocumentIndexHost host)
             // Saying so plainly is the whole point of the relevance floor. An agent told
             // to use this before grepping needs an explicit signal that it may now grep.
             string docsIndex = Path.Combine(_host.DocsRelativeRoot, "README.md").Replace('\\', '/');
-            return $"""
+            return Lead(provenance, $"""
                 No document in the governed corpus scored above the relevance threshold for '{query}'.
                 {index.DocumentCount} documents were considered.
 
                 This is a real miss, not an empty corpus. Either the subject is undocumented, or the
                 question uses vocabulary the documentation does not. Try naming a component, a doc-id
                 ("webui/architecture"), or a code symbol; or fall back to reading {docsIndex}.
-                """;
+                """);
         }
 
         StringBuilder sb = new();
@@ -118,7 +119,7 @@ public sealed class DocsTools(DocumentIndexHost host)
             AppendJoins(sb, hit);
         }
 
-        return sb.ToString();
+        return Lead(provenance, sb.ToString());
     }
 
     [McpServerTool(Name = "docs_for_symbol", ReadOnly = true, OpenWorld = false)]
@@ -140,12 +141,15 @@ public sealed class DocsTools(DocumentIndexHost host)
         [Description("A bare or fully qualified symbol name, e.g. 'DataProtectionHealthCheck' or 'KyberWeave.Core.Docs.Search.DocumentIndex'. Both forms resolve.")] string symbol)
     {
         DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
         IReadOnlyList<DocumentHit> hits = index.ForSymbol(symbol);
 
         if (hits.Count == 0)
         {
-            return $"No document declares '{symbol}' in its code-refs frontmatter. " +
-                   "It may be undocumented, or documented only in prose.";
+            return Lead(
+                provenance,
+                $"No document declares '{symbol}' in its code-refs frontmatter. " +
+                "It may be undocumented, or documented only in prose.");
         }
 
         StringBuilder sb = new();
@@ -159,7 +163,7 @@ public sealed class DocsTools(DocumentIndexHost host)
             AppendJoins(sb, hit);
         }
 
-        return sb.ToString();
+        return Lead(provenance, sb.ToString());
     }
 
     [McpServerTool(Name = "docs_analysis_candidates", ReadOnly = true, OpenWorld = false)]
@@ -182,14 +186,20 @@ public sealed class DocsTools(DocumentIndexHost host)
         [Description("Maximum candidates to return (1-20). Defaults to 20; larger values are capped at 20.")] int limit = 20,
         [Description("Maximum response characters (up to 12000). Defaults to 12000. Evidence per candidate is capped independently, so one candidate cannot consume the whole page.")] int charBudget = 12000)
     {
+        DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
+        int effectiveBudget = Math.Max(0, Math.Clamp(charBudget, 0, AnalysisCharCap) - provenance.Length - 1);
+
         if (_analysisReader is null)
-            return "Documentation analysis is unavailable in this host.";
+            return Lead(provenance, "Documentation analysis is unavailable in this host.");
 
         if (!TryParseKind(kind, out AnalysisRuleKind? parsedKind))
         {
-            return CapToBudget(
-                $"Unknown documentation-analysis kind '{kind}'. Use duplicate, conflict, or terminology.",
-                Math.Clamp(charBudget, 0, AnalysisCharCap));
+            return Lead(
+                provenance,
+                CapToBudget(
+                    $"Unknown documentation-analysis kind '{kind}'. Use duplicate, conflict, or terminology.",
+                    effectiveBudget));
         }
 
         DocumentationAnalysisResult result;
@@ -199,9 +209,11 @@ public sealed class DocsTools(DocumentIndexHost host)
         }
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
-            return CapToBudget(
-                $"Documentation analysis is unavailable: {exception.Message}",
-                Math.Clamp(charBudget, 0, AnalysisCharCap));
+            return Lead(
+                provenance,
+                CapToBudget(
+                    $"Documentation analysis is unavailable: {exception.Message}",
+                    effectiveBudget));
         }
 
         AnalysisCandidate[] ordered =
@@ -215,13 +227,14 @@ public sealed class DocsTools(DocumentIndexHost host)
         int start = ResolveCursor(ordered, cursor);
         if (start < 0)
         {
-            return CapToBudget(
-                $"The analysis cursor '{cursor}' is no longer present. Start again without a cursor.",
-                Math.Clamp(charBudget, 0, AnalysisCharCap));
+            return Lead(
+                provenance,
+                CapToBudget(
+                    $"The analysis cursor '{cursor}' is no longer present. Start again without a cursor.",
+                    effectiveBudget));
         }
 
         int effectiveLimit = Math.Clamp(limit, 1, AnalysisCandidateCap);
-        int effectiveBudget = Math.Clamp(charBudget, 0, AnalysisCharCap);
         StringBuilder sb = new(Math.Min(effectiveBudget, 4096));
         AppendAnalysisMetrics(sb, result);
 
@@ -230,7 +243,7 @@ public sealed class DocsTools(DocumentIndexHost host)
             sb.AppendLine(parsedKind is null
                 ? "No documentation-analysis candidates are pending."
                 : $"No {parsedKind.Value.ToString().ToUpperInvariant()} candidates are pending.");
-            return CapToBudget(sb.ToString(), effectiveBudget);
+            return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
         }
 
         int emitted = 0;
@@ -252,9 +265,11 @@ public sealed class DocsTools(DocumentIndexHost host)
         }
 
         if (emitted == 0)
-            return CapToBudget(
-                sb.AppendLine("The response budget is too small for a candidate.").ToString(),
-                effectiveBudget);
+            return Lead(
+                provenance,
+                CapToBudget(
+                    sb.AppendLine("The response budget is too small for a candidate.").ToString(),
+                    effectiveBudget));
 
         if (start + emitted < ordered.Length && lastCursor is not null)
         {
@@ -262,7 +277,7 @@ public sealed class DocsTools(DocumentIndexHost host)
             if (sb.Length + footer.Length <= effectiveBudget) sb.Append(footer);
         }
 
-        return CapToBudget(sb.ToString(), effectiveBudget);
+        return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
 
     [McpServerTool(Name = "docs_glossary", ReadOnly = true, OpenWorld = false)]
@@ -282,10 +297,14 @@ public sealed class DocsTools(DocumentIndexHost host)
     public string Glossary(
         [Description("A single glossary term, matched case-insensitively. Pass the term alone, not a sentence.")] string term)
     {
+        DocumentIndex index = _host.Current();
+        string provenance = Provenance(index);
+        int effectiveBudget = Math.Max(0, AnalysisCharCap - provenance.Length - 1);
+
         if (_analysisReader is null)
-            return "The managed documentation glossary is unavailable in this host.";
+            return Lead(provenance, "The managed documentation glossary is unavailable in this host.");
         if (string.IsNullOrWhiteSpace(term))
-            return "Provide a glossary term to look up.";
+            return Lead(provenance, "Provide a glossary term to look up.");
 
         GlossaryLookupResult result;
         try
@@ -294,16 +313,20 @@ public sealed class DocsTools(DocumentIndexHost host)
         }
         catch (Exception exception) when (IsExpectedReadFailure(exception))
         {
-            return CapToBudget(
-                $"The managed documentation glossary is unavailable: {exception.Message}",
-                AnalysisCharCap);
+            return Lead(
+                provenance,
+                CapToBudget(
+                    $"The managed documentation glossary is unavailable: {exception.Message}",
+                    effectiveBudget));
         }
 
         if (result.Senses.Count == 0)
         {
-            return CapToBudget(
-                $"No glossary senses are declared for '{result.Term.ReplaceLineEndings(" ")}'.",
-                AnalysisCharCap);
+            return Lead(
+                provenance,
+                CapToBudget(
+                    $"No glossary senses are declared for '{result.Term.ReplaceLineEndings(" ")}'.",
+                    effectiveBudget));
         }
 
         StringBuilder sb = new();
@@ -339,8 +362,47 @@ public sealed class DocsTools(DocumentIndexHost host)
 
         if (result.Senses.Count > AnalysisCandidateCap)
             sb.AppendLine(CultureInfo.InvariantCulture, $"… {result.Senses.Count - AnalysisCandidateCap} more senses omitted by the hard cap.");
-        return CapToBudget(sb.ToString(), AnalysisCharCap);
+        return Lead(provenance, CapToBudget(sb.ToString(), effectiveBudget));
     }
+
+    /// <summary>
+    /// Reports the provenance of the corpus this server answers from, with no query. This is
+    /// the cheap session-start check an agent calls before trusting any other docs tool.
+    /// </summary>
+    [McpServerTool(Name = "docs_status", ReadOnly = true, OpenWorld = false)]
+    [Description("""
+        Reports the provenance of the documentation corpus this server is answering from:
+        the absolute repository root, the short HEAD revision with a dirty marker, and the
+        live document count.
+
+        Use when starting a documentation task, before trusting an answer from the other
+        docs tools, when a response names a file that does not exist in the checkout being
+        edited, or when several servers could be bound to different repositories and the
+        active corpus must be confirmed. It takes no arguments and always returns the
+        header line that the docs tools lead with.
+
+        An empty corpus is not a failure: the line still reports the root, a document count
+        of zero, and revision markers of unavailable when Git cannot be read.
+        """)]
+    public string DocsStatus()
+    {
+        DocumentIndex index = _host.Current();
+        return Provenance(index);
+    }
+
+    /// <summary>
+    /// The provenance header for a response answered from <paramref name="index"/>. Every
+    /// user-visible return leads with this so a caller can tell which corpus answered.
+    /// </summary>
+    private string Provenance(DocumentIndex index) =>
+        CorpusProvenance.Line(_host.RepositoryRoot, index.DocumentCount, _host.CorpusBuilds);
+
+    /// <summary>
+    /// Puts the provenance line first, then the body. The header is emitted whole and the
+    /// body is what gets clipped, so the tell is never the part truncated away.
+    /// </summary>
+    private static string Lead(string provenance, string body) =>
+        provenance + "\n" + body;
 
     private static bool TryParseKind(string? kind, out AnalysisRuleKind? parsedKind)
     {
