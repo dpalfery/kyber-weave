@@ -88,7 +88,7 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// <para>
 /// <b>Ungoverned base tools.</b> <c>TodoWrite</c> and <c>Skill</c> are granted on every
 /// rendered principal, matching <see cref="ClaudeRenderer"/>'s base. <c>TodoWrite</c> writes
-/// no file and executes nothing. <c>Skill</c> is what makes the 24 canonical skills this
+/// no file and executes nothing. <c>Skill</c> is what makes the canonical skills this
 /// renderer deploys reachable at all; withholding it would deploy a skill tree no agent could
 /// open. The <c>skills</c> frontmatter key is deliberately not emitted, because
 /// <c>resolveSubagentSkillPort</c> treats an absent list as "every discovered skill" and a

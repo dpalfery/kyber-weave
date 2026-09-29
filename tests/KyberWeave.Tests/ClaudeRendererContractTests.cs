@@ -547,6 +547,35 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     /// <summary>
+    /// Pins the Claude model of the <c>fast</c>-profile authoring workers by value. On
+    /// <c>haiku</c>, <c>test-dev</c> twice returned a red contract whose tests passed vacuously
+    /// or failed for the wrong reason, and <c>docs-dev</c> described <c>squad update</c> as
+    /// comparing against canonical bytes rather than the receipt.
+    /// </summary>
+    [Theory]
+    [InlineData("test-dev")]
+    [InlineData("docs-dev")]
+    public async Task RenderAsync_Claude_FastProfileWorkersRunOnSonnet(string agent)
+    {
+        SquadRendererRegistry registry = new([new ClaudeRenderer()]);
+        SquadRenderRequest request = new(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{agent}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agent);
+        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", agent));
+    }
+
+    /// <summary>
     /// Row (b): Project scope renders the primary agent as both a subagent and an entry-point
     /// skill, each with its resource closure, under the same degradation records.
     /// </summary>

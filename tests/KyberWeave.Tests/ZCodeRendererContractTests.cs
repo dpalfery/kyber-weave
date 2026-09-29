@@ -813,7 +813,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
 
     /// <summary>
     /// The ungoverned base appears on every principal. <c>Skill</c> in particular is what
-    /// makes the 24 skills this renderer deploys reachable; without it the skill tree would be
+    /// makes the 23 skills this renderer deploys reachable; without it the skill tree would be
     /// deployed and then unopenable.
     /// </summary>
     [Fact]

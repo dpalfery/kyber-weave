@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-09-28
 status: current
 decided-by:
   - adr/0017-copilot-deterministic-tool-order
@@ -53,7 +53,7 @@ implemented and registered renderers today.
 flowchart TD
     subgraph CanonicalSource["Canonical Product Source (products/kyber-squad/)"]
         Agents["21 Canonical Agents\n(agents/*.md)"]
-        Skills["24 Canonical Skills\n(skills/*)"]
+        Skills["23 Canonical Skills\n(skills/*)"]
         Profiles["Models, Capabilities, Fallbacks\n(profiles/*.yml)"]
         Schemas["JSON Schemas\n(schemas/*.json)"]
     end
@@ -99,8 +99,8 @@ Kyber-Squad treats agent and skill definitions as strictly typed, immutable sour
 - **Canonical Agent Definitions**: Authored in `products/kyber-squad/agents/<name>.md` with closed YAML frontmatter and LF-normalized UTF-8 bodies.
 - **Normalization Pipeline**: `SquadSourceLoader` parses frontmatter against `schemas/agent.schema.json`, validates capability bindings, computes an immutable SHA-256 instruction digest over the normalized body, and emits a structured `AgentIR` model.
 - **Strict Invariants**: Loaders reject undeclared profiles, missing capabilities, invalid invocation modes, path traversal attempts, or unrecognized frontmatter keys.
-- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 24 top-level `SKILL.md`
-  identities. The canonical tree separately retains 64 supplemental files, giving 88 recursive
+- **Canonical Skills and Resources**: `SquadSourceLoader` loads the 23 top-level `SKILL.md`
+  identities. The canonical tree separately retains 66 supplemental files, giving 89 recursive
   skill-tree files; `SquadPacker` carries that complete recursive tree into both package formats.
 
 ---
@@ -455,18 +455,24 @@ and validates.
   what the deployed agent can actually do.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
-  `SquadResourceProjection.Append` places that owner's validated resource closure beside the
-  principal. A fresh Copilot render is 113 files — 21 agents, 24 skills, plus projected
-  closures — with authored relative links resolving in the output. That count is the current
+  `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
+  the principal. A fresh Copilot render is 119 files — 21 agents, 23 skills, plus projected
+  closures — with authored relative links resolving in the output; every skill resource
+  reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
+  packaged-only Codex skill-UI metadata. That count is the current
   contract in [requirements](requirements.md) (KS-001 and the golden-render requirement). The
   Hotshot-era 48-file Copilot tree that omitted resources is historical, not current
   behaviour.
 - **Skill golden bytes and retained resources**: every canonical raw `SKILL.md` except the
-  two explicitly evolved skills (`product-owner`, `bug-crusher`) still matches Hotshot golden
-  bytes. Canonical source and both recursive package formats retain all 64 skill resources
-  (88 files under `products/kyber-squad/skills/`) and resolve the retained references. They
-  remain until the
-  [content-preserving migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) passes.
+  five explicitly evolved skills (`bug-crusher`, `product-owner`, `second-brain`,
+  `create-pull-request`, and `pr-review-fix-comments`) still matches Hotshot golden bytes;
+  `create-pull-request-github` is retired into `create-pull-request`. Canonical source and both
+  recursive package formats retain all 66 skill resources (89 files under
+  `products/kyber-squad/skills/`) and resolve the retained references. Every retained resource
+  now has a reviewed disposition in the
+  [skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays
+  in its skill directory as its durable home, portable policy lives in the
+  `products/kyber-squad/standards/` templates, and nothing was deleted.
 - **Generated-output boundary**: target-rendered `.github` files are deployment output, not
   canonical product or package source, and this synchronization does not add a generated target
   tree to `products/kyber-squad/`.

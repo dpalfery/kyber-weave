@@ -117,7 +117,7 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 ## Feature 3 — Kyber-Squad
 
 Unified multi-harness deployment and lifecycle control plane for 21 canonical agents and
-24 skills, each owner projecting a validated resource closure beside its rendered principal.
+23 skills, each owner projecting a validated resource closure beside its rendered principal.
 The product declares twelve harness targets; all twelve are implemented and registered today
 (`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`).
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.

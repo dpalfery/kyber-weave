@@ -59,3 +59,15 @@ may reasonably reverse. The same is true of
 decisions a host may reasonably reverse — a line length, a state-management library, a naming
 convention. Reversing one is the point of the standard being project-specific; what matters is
 that the repository says which way it went.
+
+## #128 additions
+
+[Issue 128](https://github.com/dpalfery/kyber-weave/issues/128) moved the portable rules the
+skill references stated but the templates lacked into the templates themselves: `xp_cmdshell`,
+Entra ID / Kerberos authentication, `SCOPE_IDENTITY()`, sargable predicates, and the deprecated
+`text`/`ntext`/`image` types in `sql`; a new `## Migrations` section in `data-access-layer`;
+route constraints, the empty-collection response, and no direct `HttpContext` access, plus a
+conditional `## Backend-for-frontend` section, in `csharp`; and per-test cleanup and unique
+record ids in `test`'s `## Isolation`. The line-by-line record of what moved, what stayed in
+the skill as technique, and what was superseded as one host's taste is the audit at
+[`docs/kyber-squad/skill-resource-dispositions.md`](../../../docs/kyber-squad/skill-resource-dispositions.md).
