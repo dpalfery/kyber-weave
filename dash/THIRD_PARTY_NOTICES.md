@@ -110,6 +110,17 @@ endorsement, sponsorship, or affiliation.
 
 ---
 
+## gtk-rs GLib 0.18.5 (patched)
+
+The tray source vendors GLib 0.18.5 from the gtk-rs Project with the upstream
+`VariantStrIter` fix for GHSA-wrw7-89jp-8q8g. Copyright remains with the gtk-rs
+Project contributors. The complete MIT license and project copyright statement
+are preserved in `tray/vendor/glib-0.18.5/LICENSE` and
+`tray/vendor/glib-0.18.5/COPYRIGHT`; the archive hash and patch provenance are
+recorded in `tray/vendor/README.md`.
+
+---
+
 ## CodexBar
 
 The Capacity Dock's provider usage tracking — the set of provider endpoints and response shapes CodeBurn reads to show per-provider quota — was informed by CodexBar (https://github.com/steipete/CodexBar) by Peter Steinberger, an MIT-licensed macOS menubar app for tracking AI provider usage. CodeBurn's adapters are an independent implementation written for the Capacity Dock; CodexBar is credited here as prior art for the approach.

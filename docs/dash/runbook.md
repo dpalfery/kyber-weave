@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-29
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -202,6 +202,15 @@ cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && ca
 `npm --prefix dash run lint` also covers the tray UI. To run the shell against a locally
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
 `KYBERDASH_BIN` at it.
+
+The Linux source build uses GTK 0.18 through Tauri. Its `glib 0.18.5` dependency is
+patched locally for [GHSA-wrw7-89jp-8q8g](https://github.com/advisories/GHSA-wrw7-89jp-8q8g):
+`src-tauri/Cargo.toml` points Cargo at `tray/vendor/glib-0.18.5`, and
+[`tray/vendor/README.md`](../../dash/tray/vendor/README.md) records the verified source
+archive and upstream fix. The tray CI job builds and tests the Linux source and checks
+that Cargo resolves the local crate. The published tray remains macOS and Windows only.
+Remove the patch only after a Tauri update resolves the Linux graph to `glib >= 0.20.0`
+and the Linux gates pass.
 
 Deployed shape (per-user, no administrator rights). On Windows the NSIS installer installs
 for the current user and a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value starts
