@@ -17,7 +17,9 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 ## Active Plans
 
-No active plans.
+| Plan | Status | Date | Development mode | Goal |
+|---|---|---|---|---|
+| [2026-09-28-kyber-utilities-status-line-slice.md](2026-09-28-kyber-utilities-status-line-slice.md) | Ready (amended); approve-and-execute granted 2026-09-28, then re-approved 2026-09-28 through D9 and D10 after T0 triggered C7 | 2026-09-28 | test-first | First Kyber Utilities slice (`kyber-weave utilities statusline deploy\|status\|doctor\|remove`, with its own component and receipt). Imports the user's existing Claude Code, Antigravity CLI (`agy`), and Pi status lines (T0 complete, gitleaks clean), then deploys them at per-user scope on macOS and Linux with manual activation guidance. The Pi variant is a standalone extension extracted from the collector package. Doctor never reads settings files. The `agy` script's direct OTLP post is rewired to `kyberdash kyber antigravity-statusline`, so `agy` data reaches KyberDash as `antigravity-cli` (D10). It never owns or edits shared user settings files and is not a wider utility platform. OpenCode (no implementation exists, D9) and Windows (#163) are deferred to GitHub issues. Ready queue: T4, T15, T16. |
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 

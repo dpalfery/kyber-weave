@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-28
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -384,6 +384,32 @@ supply remains explicitly not measurable.
 This command is implemented and synthetically verified, but it is not active until the
 owner registers it in their Cursor hook configuration and runs a turn. Do not replace or
 edit existing hooks as part of this setup.
+
+### Optional Antigravity status-line collection
+
+`kyberdash kyber antigravity-statusline` reads an Antigravity CLI (`agy`) status-line JSON
+payload on standard input and hands it to KyberDash's Antigravity recorder. It writes
+**nothing to stdout** and always exits **0**, whether it records, ignores, or rejects the
+payload: the status-line host renders stdout and may disable a command that keeps failing,
+so the recorder has to stay invisible to the line it feeds. On a recorder I/O failure it
+writes at most one line to stderr and still exits 0.
+
+An accepted payload appends one JSON line to `antigravity-statusline.jsonl` under
+KyberDash's cache directory (`~/.kyberdash/cache`, overridable with `KYBERDASH_CACHE_DIR`),
+created with directory mode `0700` and file mode `0600`. Refresh discovers that file as a
+source with `project: 'antigravity-cli'`, so `agy` status-line data is attributed to harness
+`antigravity-cli`, never `gemini` (see
+[telemetry inventory](telemetry-inventory.md)).
+
+Wire this command through **Kyber Utilities' `agy` status-line variant**, which invokes it
+as a detached background hand-off — it cannot delay or corrupt the status line — and skips
+it silently when `kyberdash` is not on `PATH`. Do not edit `agy` settings to call it
+directly, and do not replace or edit an existing status-line implementation as part of this
+setup.
+
+The command is implemented and synthetically verified, but it collects nothing until the
+owner deploys the `agy` variant and activates it by hand. No live collection is claimed
+here.
 
 ---
 

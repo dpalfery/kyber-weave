@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-14
+last-reviewed: 2026-09-28
 ---
 
 # Kyber-Weave documentation
@@ -155,6 +155,19 @@ machine. Start at the [KyberDash Overview](dash/README.md) for the value proposi
 
 The `kyberdash` binary installs alongside the CLI — see
 [the version floor](install.md#kyberdash-and-the-version-floor) for which releases publish it.
+
+## Feature 6 — Kyber Utilities
+
+Kyber-owned deployment of per-harness utility artifacts, starting with status lines: files
+staged at per-user locations, recorded in a Kyber Utilities receipt, and activated by hand. It
+never creates, edits, merges, or reads a shared harness settings file. Start at the
+[Kyber Utilities Overview](kyber-utilities/README.md) for the value proposition and the
+ownership boundary.
+
+| Page | Covers |
+|---|---|
+| [Overview & Why Kyber Utilities](kyber-utilities/README.md) | Value proposition, the owned-files-not-settings boundary, the four commands |
+| [Adoption & activation guide](kyber-utilities/onboarding.md) | `utilities statusline deploy\|status\|doctor\|remove`, per-harness activation snippets, the import and privacy-review process |
 
 ---
 

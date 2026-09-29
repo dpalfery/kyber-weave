@@ -65,6 +65,45 @@ describe('kyber CLI registration', () => {
     expect(written).toHaveLength(1)
     expect(posted).toEqual([JSON.parse(written[0]!)])
   })
+
+  it('registers antigravity-statusline and routes its stdin through the recorder seam', async () => {
+    // Synthetic agy statusLine payload (C3): no real conversation id, path, or account data.
+    const payload = {
+      conversation_id: 'synthetic-conversation-0001',
+      session_id: 'synthetic-session-0001',
+      model: { id: 'gemini-3.5-flash-high', display_name: 'Gemini 3.5 Flash (High)' },
+      context_window: {
+        current_usage: {
+          input_tokens: 1024,
+          output_tokens: 64,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      },
+    }
+    const recorded: unknown[] = []
+    const written: string[] = []
+    const program = new Command()
+    program.exitOverride()
+    // Deliberately a variable rather than an inline literal: `recordAntigravityStatusLine`
+    // is the seam this task asks for and is not on `KyberCommandDependencies` yet, and
+    // excess-property checking would turn that into a compile error — which is not valid
+    // RED evidence.
+    const dependencies = {
+      readStdin: async () => JSON.stringify(payload),
+      write: (line: string) => { written.push(line) },
+      recordAntigravityStatusLine: async (input: unknown) => { recorded.push(input); return true },
+    }
+    registerKyberCommands(program, dependencies)
+
+    expect(program.commands.find((command) => command.name() === 'kyber')
+      ?.commands.find((command) => command.name() === 'antigravity-statusline')).toBeDefined()
+
+    await program.parseAsync(['node', 'kyberdash', 'kyber', 'antigravity-statusline'])
+
+    expect(recorded).toEqual([payload])
+    expect(written).toEqual([])
+  })
 })
 
 describe('dash refresh option validation', () => {
