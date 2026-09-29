@@ -91,6 +91,12 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 equivalent; if the server is unavailable, start at the [documentation index](docs/README.md)
 and state that the fallback was necessary. Never retrieve `docs/archive/` as current guidance.
 
+Every docs tool response leads with a `provenance:` line naming the absolute `root=` it
+answered from. Before trusting an answer, confirm that root is this checkout: call
+`docs_status` (it takes no arguments) or read `root=` from the response, and compare it to
+`git rev-parse --show-toplevel`. A mismatch means a same-named server is bound to a different
+repository — do not treat those results as this checkout, and stop using that server.
+
 ## Non-negotiables
 
 **Persisted plans belong in docs.** When a durable plan artifact is warranted, store it under
