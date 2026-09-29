@@ -205,7 +205,9 @@ cd dash/tray/src-tauri && cargo fmt --check && cargo clippy -- -D warnings && ca
 built CLI, build `dash/dist/cli.js` first (`npm --prefix dash run build:cli`) and point
 `KYBERDASH_BIN` at it.
 
-Deployed shape (per-user, no administrator rights). On Windows the NSIS installer installs
+Deployed shape (per-user, no administrator rights). The Windows installer is unsigned; see
+[Windows: unsigned binaries and SmartScreen](../install.md#windows-unsigned-binaries-and-smartscreen)
+for verification and SmartScreen guidance. On Windows the NSIS installer installs
 for the current user and a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value starts
 the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
 
