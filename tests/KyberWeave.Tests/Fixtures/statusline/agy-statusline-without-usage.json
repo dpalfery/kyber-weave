@@ -1,0 +1,11 @@
+{
+  "conversation_id": "synthetic-conversation-agy-0001",
+  "session_id": "synthetic-session-agy-0001",
+  "workspace": {
+    "current_dir": "/synthetic/kyber-agy-workspace"
+  },
+  "model": {
+    "id": "kyber-synthetic-agy-model-id",
+    "display_name": "Kyber Synthetic Agy Model"
+  }
+}

@@ -5,6 +5,7 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Skills;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Update;
+using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Cli.Rendering;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -176,6 +177,36 @@ app.Configure(config =>
         squad.AddCommand<SquadPackCommand>("pack")
             .WithDescription("Package canonical agents and skills into APM and plugin distribution archives.")
             .WithExample("squad", "pack", "--format", "all", "--out", "./dist");
+    });
+
+    // Kyber Utilities Command Branch — deploys Kyber-owned per-harness utility artifacts to
+    // per-user staging locations and prints the activation snippet, without ever owning or
+    // reading a harness settings file (ADR 0026). Its own branch, separate from Squad's.
+    config.AddBranch("utilities", utilities =>
+    {
+        utilities.SetDescription("Deploy Kyber-owned per-harness utility artifacts without touching your settings.");
+
+        utilities.AddBranch("statusline", statusline =>
+        {
+            statusline.SetDescription("Deploy, inspect, diagnose, or remove the Kyber status-line artifacts.");
+
+            statusline.AddCommand<UtilitiesStatusLineDeployCommand>("deploy")
+                .WithDescription("Stage the Kyber-owned status-line artifacts and print the manual activation snippet.")
+                .WithExample("utilities", "statusline", "deploy")
+                .WithExample("utilities", "statusline", "deploy", "--target", "claude", "--dry-run");
+
+            statusline.AddCommand<UtilitiesStatusLineStatusCommand>("status")
+                .WithDescription("Report ok, missing, or drift for each owned status-line file.")
+                .WithExample("utilities", "statusline", "status");
+
+            statusline.AddCommand<UtilitiesStatusLineDoctorCommand>("doctor")
+                .WithDescription("Check owned files, the executable bit, and runtime prerequisites.")
+                .WithExample("utilities", "statusline", "doctor");
+
+            statusline.AddCommand<UtilitiesStatusLineRemoveCommand>("remove")
+                .WithDescription("Delete receipt-owned, unmodified status-line files.")
+                .WithExample("utilities", "statusline", "remove");
+        });
     });
 
     // Code Review Command Branch — the deterministic half of the review system. The
