@@ -231,6 +231,14 @@ jobs:
     # macOS builds run on macos-latest so postject can be followed by an
     # ad-hoc codesign (which is what replaces postject's deliberate
     # invalidation of the embedded codesignature, per design.md D7 caveat b).
+    #
+    # Issue #157 defect 1 (D1-A): the web dashboard is built here too, packed
+    # into the dist-sea/web.json SEA asset, and embedded in the blob alongside
+    # main.js and package.json, so a released `kyberdash web` serves the SPA
+    # from memory instead of the "not built" page. A native-RID smoke test
+    # (below, beside the existing --version check) proves it actually does.
+    # docs/plans/2026-09-28-kyberdash-sea-release-integrity.md carries the
+    # design; scripts/release-local.sh mirrors these same steps.
     name: Build KyberDash ${{ matrix.rid }}
     needs: version
     runs-on: ${{ matrix.os }}
@@ -260,6 +268,13 @@ jobs:
         # ink and yoga-layout are ESM-only and use top-level await, so the SEA
         # bundle cannot be CommonJS. It is emitted as ESM and loaded by
         # src/sea-shim.cjs; tsup.sea.config.ts carries the reasoning.
+        #
+        # The web dashboard (issue #157 defect 1, D1-A) is built and packed
+        # here too, after tsup: `npm --prefix web` builds the Vite SPA into
+        # dist/dash, and scripts/pack-sea-web.mjs packs it into the
+        # dist-sea/web.json asset that the SEA config below embeds. The
+        # packer already fails loudly on a missing index.html; the check
+        # here catches the case where it did not run at all.
         working-directory: dash
         env:
           RELEASE_VERSION: ${{ needs.version.outputs.version }}
@@ -269,6 +284,10 @@ jobs:
           npm version "${RELEASE_VERSION}" --no-git-tag-version --allow-same-version
           npx tsup --config tsup.sea.config.ts
           test -f dist-sea/main.js || { echo "tsup did not emit dist-sea/main.js" >&2; exit 1; }
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix web run build
+          node scripts/pack-sea-web.mjs dist/dash dist-sea/web.json
+          test -f dist-sea/web.json || { echo "pack-sea-web did not emit dist-sea/web.json" >&2; exit 1; }
 
       - name: Build Node SEA for ${{ matrix.rid }}
         working-directory: dash
@@ -320,6 +339,9 @@ jobs:
           # SEA main as CJS whatever its extension. The ESM bundle rides along
           # as an asset, and package.json answers the version lookups that
           # would otherwise resolve off a filesystem the binary does not have.
+          # web.json (issue #157 defect 1, D1-A) is the packed web dashboard;
+          # web.ts's embedded-source resolution reads it through
+          # node:sea's getAsset, the same way it reads main.js.
           # shellcheck disable=SC2154
           cat > "${SEA_CONFIG}" <<EOF
           {
@@ -329,6 +351,7 @@ jobs:
             "disableExperimentalSEAWarning": true,
             "assets": {
               "main.js": "${BUNDLE_DIR}/main.js",
+              "web.json": "${BUNDLE_DIR}/web.json",
               "package.json": "$(pwd)/package.json"
             }
           }
@@ -387,6 +410,12 @@ jobs:
           if [ "${NODE_PLATFORM}" = "${HOST_OS}" ] && [ "${NODE_ARCH}" = "${HOST_ARCH}" ]; then
               "${FINAL_BIN}" --version >/dev/null
               echo "smoke test passed for ${RID}"
+              # Issue #157 defect 1 (D1-A): the embedded dashboard must serve
+              # the SPA, not the "not built" page, once the blob above is
+              # actually injected and runnable. Same native-RID restriction as
+              # the --version check just above.
+              node scripts/sea-web-smoke.mjs "${FINAL_BIN}"
+              echo "dashboard smoke test passed for ${RID}"
           else
               echo "skipping smoke test: ${RID} is cross-built on ${HOST_OS}-${HOST_ARCH}"
           fi

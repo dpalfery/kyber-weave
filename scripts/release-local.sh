@@ -255,8 +255,15 @@ build_kyberdash() {
         quietly npm ci --no-audit --no-fund
         quietly npm version "$VERSION" --no-git-tag-version --allow-same-version
         quietly npx tsup --config tsup.sea.config.ts
+        # Issue #157 defect 1 (D1-A): build and pack the web dashboard too, so the SEA
+        # blob below can embed it as the web.json asset. Mirrors build-kyberdash's
+        # "Bundle dash CLI" step in release.yml.
+        quietly npm --prefix web ci --no-audit --no-fund
+        quietly npm --prefix web run build
+        quietly node scripts/pack-sea-web.mjs dist/dash dist-sea/web.json
     )
     [ -f "${dash}/dist-sea/main.js" ] || die "tsup did not emit dist-sea/main.js"
+    [ -f "${dash}/dist-sea/web.json" ] || die "pack-sea-web did not emit dist-sea/web.json"
 
     # The main script is the CommonJS shim. The ESM bundle and the stamped package.json
     # ride along as assets; tsup.sea.config.ts and src/sea-shim.cjs say why.
@@ -268,6 +275,7 @@ build_kyberdash() {
   "disableExperimentalSEAWarning": true,
   "assets": {
     "main.js": "${dash}/dist-sea/main.js",
+    "web.json": "${dash}/dist-sea/web.json",
     "package.json": "${dash}/package.json"
   }
 }
@@ -298,6 +306,10 @@ EOF
     # --version with Node's version rather than ours.
     reported="$("$binary" --version 2>&1)" || die "kyberdash --version failed: ${reported}"
     [ "$reported" = "$VERSION" ] || die "kyberdash reports '${reported}', expected '${VERSION}'"
+
+    # Issue #157 defect 1 (D1-A): the embedded dashboard must serve the SPA, not the
+    # "not built" page, now that the blob above is injected and runnable.
+    quietly node "${dash}/scripts/sea-web-smoke.mjs" "$binary"
 
     cp "${dash}/THIRD_PARTY_NOTICES.md" "${stage}/out/THIRD_PARTY_NOTICES.md"
     tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
