@@ -156,7 +156,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
         {
             receipt = StatusLineDeploymentPlan.ReadReceipt(target, roots);
         }
-        catch (InvalidDataException ex)
+        catch (Exception ex) when (ex is InvalidDataException or StatusLineDeploymentConflictException)
         {
             AnsiConsole.MarkupLine(
                 $"  [red]fail[/] {Markup.Escape(token)}: {Markup.Escape(ex.Message)}");

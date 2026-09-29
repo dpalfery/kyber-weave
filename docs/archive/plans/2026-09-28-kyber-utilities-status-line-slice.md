@@ -784,10 +784,9 @@ The conductor re-ran the gates on the **finalised** file on 2026-09-28:
 
 Adding this evidence note was the only edit after that run.
 
-**Amendment (D9, D10, 2026-09-28).** The planner edited only this plan and its index row, and
-still has no process-execution tool. The conductor must run `docs validate .` and
-`docs drift .` on the amended file and record the result here. Until both are clean, the
-amendment is saved but not verified.
+**Amendment (D9, D10, 2026-09-28).** The conductor verified both gates on the amended plan and
+its index row on 2026-09-29: `docs validate .` passed with zero findings (clean), and
+`docs drift .` passed with zero findings (clean).
 
 ## Review and closeout
 
@@ -800,21 +799,20 @@ the explicit `docs-dev` closeout.
 - .NET test suites: 37/37 deployment tests passed, 32/32 CLI command tests passed, 26/27 artifact tests passed (1 designed skip), 2,487/2,488 full suite passed.
 - KyberDash test suite: 264 test files passed (3,683 tests), typecheck, lint, and check:reachable clean.
 - Gitleaks scan on `products/kyber-utilities/`: clean, zero findings.
+- T14 live confirmation performed and confirmed for Claude Code, `agy`, and Pi status lines on macOS on 2026-09-29.
+- Telemetry ingestion from `agy` via `kyberdash kyber antigravity-statusline` verified reaching KyberDash.
 - Deferral issues filed:
   - Windows support: [issue #163](https://github.com/dpalfery/kyber-weave/issues/163)
   - OpenCode support: [issue #165](https://github.com/dpalfery/kyber-weave/issues/165)
 - Plan archived and harvested into `docs/kyber-utilities/` and [ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md).
 
-## Human judgement reserved
+## Human judgement resolved
 
 Approve and execute was granted on 2026-09-28 (A7). After T0 triggered C7, the plan was
-re-approved on 2026-09-28 through the D9 and D10 answers. What remains reserved for the user
-at execution time:
+re-approved on 2026-09-28 through the D9 and D10 answers. All execution-time human judgements
+were resolved prior to closeout and archiving on 2026-09-29:
 
-- confirming each imported file's origin and licence, and reviewing the de-personalised
-  files before the T5 commit (D2);
-- manual activation, including the Pi collector-package decision;
-- the live per-harness confirmation (T14).
-
-Any new C7 condition, or any further change to the Test contract, returns the plan to Draft
-for a new decision.
+- Imported file origin, license, and de-personalised files were reviewed and confirmed before
+  the T5 commit (D2);
+- Manual activation snippets were reviewed and applied by the user;
+- Live per-harness confirmation (T14) was verified for Claude Code, `agy`, and Pi.

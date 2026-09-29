@@ -42,7 +42,7 @@ internal sealed class UtilitiesStatusLineToolProbe
         foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
             string candidate = Path.Combine(directory, executable);
-            if (File.Exists(candidate)) return true;
+            if (File.Exists(candidate) && UtilitiesStatusLineCommandComposition.HasExecutableBit(candidate)) return true;
         }
 
         return false;

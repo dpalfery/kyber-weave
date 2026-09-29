@@ -128,7 +128,8 @@ Utilities never deploys there, because a file in that directory is active withou
 `doctor` checks:
 
 - receipt checksum health and the executable bit for each owned file;
-- runtime prerequisites where the import inventory declares them: `jq` and `node`;
+- runtime prerequisites where the import inventory declares them: `jq`, `git`, and `awk` for
+  Claude Code; `python3` and `git` for `agy`; `node` for Pi;
 - each harness binary and its version;
 - for `agy`, whether `kyberdash` is present — a **warning**, not a failure, because the hand-off
   is optional;

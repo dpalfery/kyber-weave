@@ -52,7 +52,20 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
             return 2;
         }
 
-        StatusLineTargetRoots roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+        StatusLineTargetRoots roots;
+        try
+        {
+            roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+            foreach (StatusLineTarget target in targets)
+            {
+                _ = roots.ResolveStagingRoot(target);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            UtilitiesStatusLineCommandComposition.WriteClientInputError(ex.Message);
+            return 2;
+        }
 
         IUtilitiesStatusLineArtifactSource artifacts;
         try
@@ -96,7 +109,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         }
         catch (Exception ex) when (
             ex is StatusLineDeploymentConflictException or InvalidDataException or
-                IOException or UnauthorizedAccessException)
+                IOException or UnauthorizedAccessException or ArgumentException)
         {
             AnsiConsole.MarkupLine(
                 $"[red]kyber-weave utilities statusline: error:[/] {Markup.Escape(ex.Message)}");

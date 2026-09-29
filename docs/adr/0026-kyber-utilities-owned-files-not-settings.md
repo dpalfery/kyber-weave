@@ -57,13 +57,15 @@ second component is tempted to cross it.
 3. **Activation is manual.** The tool prints the exact snippet, with absolute paths, and the user
    applies it to their own settings. A deployed file is inert until then.
 4. **`utilities statusline doctor` never reads settings.** It checks receipt checksums, the
-   executable bit, and prerequisites (`jq`, `node`, the harness binary and its version, and
-   `kyberdash` for the `agy` variant as a warning), then prints the activation snippet.
+   executable bit, and prerequisites (`jq`, `git`, and `awk` for Claude Code; `python3` and `git`
+   for `agy`; `node` for Pi; the harness binary and its version; and `kyberdash` for the `agy`
+   variant as a warning), then prints the activation snippet.
 5. **Scope is per-user, on macOS and Linux.** Windows is not supported in this slice; the
    implementation specifics are recorded in
    [issue #163](https://github.com/dpalfery/kyber-weave/issues/163).
 6. **It is not a wider utility platform.** No plugin registry, no generic utility schema, and no
-   second utility type. The slice is one utility — status lines — for four harnesses.
+   second utility type. The slice is one utility — status lines — for three harnesses (Claude
+   Code, agy, and Pi; OpenCode is deferred under issue #165).
 
 ## Alternatives Considered
 

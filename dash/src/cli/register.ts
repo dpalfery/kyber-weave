@@ -259,10 +259,10 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
       } catch {
         return // stdin unreadable or not JSON: nothing recordable, nothing to say
       }
-      const record =
-        dependencies.recordAntigravityStatusLine ??
-        (await import('../providers/antigravity.js')).recordAntigravityStatusLinePayload
       try {
+        const record =
+          dependencies.recordAntigravityStatusLine ??
+          (await import('../providers/antigravity.js')).recordAntigravityStatusLinePayload
         await record(payload)
       } catch (error) {
         const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))

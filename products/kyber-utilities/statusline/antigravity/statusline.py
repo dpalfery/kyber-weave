@@ -330,7 +330,10 @@ def main():
 
         if selected_quota:
             if "remaining_fraction" in selected_quota:
-                window_pct = float(selected_quota["remaining_fraction"]) * 100.0
+                try:
+                    window_pct = float(selected_quota["remaining_fraction"]) * 100.0
+                except (TypeError, ValueError):
+                    window_pct = None
             reset_in_sec = parse_reset_in_seconds(selected_quota)
 
         if window_pct is None:

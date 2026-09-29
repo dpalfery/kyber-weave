@@ -583,6 +583,70 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
             "user edited is no longer owned and a later removal could not see it.");
     }
 
+    [Fact]
+    public void RemoveDropsMissingFilesFromReceipt()
+    {
+        StatusLineTargetRoots roots = Roots();
+        StatusLineDeploymentPlan.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()).Apply();
+
+        string primaryPath = PinnedStagingPath(StatusLineTarget.Claude, PrimaryArtifactRelativePath);
+        File.Delete(primaryPath);
+
+        StatusLineDeploymentPlan removal = StatusLineDeploymentPlan.CreateRemove(StatusLineTarget.Claude, roots);
+
+        Assert.DoesNotContain(
+            removal.Receipt.Files,
+            file => string.Equals(file.RelativePath, PrimaryArtifactRelativePath, StringComparison.Ordinal));
+
+        removal.Apply();
+
+        StatusLineReceipt? remaining = StatusLineDeploymentPlan.ReadReceipt(StatusLineTarget.Claude, roots);
+        Assert.Null(remaining);
+    }
+
+    [Fact]
+    public void ReceiptRecordsStagingRootAndThrowsConflictWhenOverrideChanges()
+    {
+        string overrideDirA = Path.Combine(_temp.Path, "overrideA");
+        string overrideDirB = Path.Combine(_temp.Path, "overrideB");
+        Directory.CreateDirectory(overrideDirA);
+        Directory.CreateDirectory(overrideDirB);
+
+        string currentOverride = overrideDirA;
+        StatusLineTargetRoots roots = Roots(varName => varName == ClaudeConfigDirectoryVariable ? currentOverride : null);
+
+        StatusLineDeploymentPlan.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()).Apply();
+
+        currentOverride = overrideDirB;
+        StatusLineTargetRoots changedRoots = Roots(varName => varName == ClaudeConfigDirectoryVariable ? currentOverride : null);
+
+        StatusLineDeploymentConflictException ex = Assert.Throws<StatusLineDeploymentConflictException>(() =>
+            StatusLineDeploymentPlan.ReadReceipt(StatusLineTarget.Claude, changedRoots));
+
+        Assert.Contains(overrideDirA, ex.Message, StringComparison.Ordinal);
+        Assert.Contains(overrideDirB, ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeployRefusesSymlinkInStagingPath()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        StatusLineTargetRoots roots = Roots();
+        string harnessRoot = Path.Combine(_temp.Path, HarnessRootRelativePath(StatusLineTarget.Pi));
+        Directory.CreateDirectory(harnessRoot);
+
+        string targetDir = Path.Combine(_temp.Path, "outside");
+        Directory.CreateDirectory(targetDir);
+
+        string linkPath = Path.Combine(harnessRoot, "kyber");
+        File.CreateSymbolicLink(linkPath, targetDir);
+
+        Assert.Throws<StatusLineDeploymentConflictException>(() =>
+            StatusLineDeploymentPlan.CreateDeploy(StatusLineTarget.Pi, roots, Artifacts()));
+    }
+
     // -----------------------------------------------------------------------------------------
     // Helpers.
     // -----------------------------------------------------------------------------------------

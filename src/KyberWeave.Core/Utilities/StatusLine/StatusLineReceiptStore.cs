@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Core.Utilities.StatusLine;
 
@@ -62,13 +63,16 @@ internal sealed class StatusLineReceiptStore
     {
         ArgumentNullException.ThrowIfNull(receipt);
 
-        Directory.CreateDirectory(
-            Path.GetDirectoryName(ReceiptPath) ??
-            throw new InvalidOperationException($"Receipt path '{ReceiptPath}' has no parent directory."));
+        string directory = Path.GetDirectoryName(ReceiptPath) ??
+            throw new InvalidOperationException($"Receipt path '{ReceiptPath}' has no parent directory.");
+        Directory.CreateDirectory(directory);
+
+        string temporaryPath = ReceiptPath + ".tmp";
         File.WriteAllText(
-            ReceiptPath,
+            temporaryPath,
             Serialize(receipt),
             new UTF8Encoding(false));
+        File.Move(temporaryPath, ReceiptPath, overwrite: true);
     }
 
     /// <summary>Removes the receipt, so a completed removal leaves no ownership record behind.</summary>
@@ -86,6 +90,7 @@ internal sealed class StatusLineReceiptStore
             writer.WriteStartObject();
             writer.WriteString("schema", Schema);
             writer.WriteString("target", TargetToken(_target));
+            writer.WriteString("stagingRoot", _roots.ResolveStagingRoot(_target));
             writer.WriteStartArray("files");
             foreach (StatusLineOwnedFile file in receipt.Files)
             {
@@ -139,6 +144,17 @@ internal sealed class StatusLineReceiptStore
                     $"'{TargetToken(_target)}'. Delete it and deploy again to recreate it.");
             }
 
+            string recordedStagingRoot = RequireString(root, "stagingRoot");
+            string currentStagingRoot = _roots.ResolveStagingRoot(_target);
+            if (!SquadFileSystemPathSemantics.AreSame(recordedStagingRoot, currentStagingRoot))
+            {
+                throw new StatusLineDeploymentConflictException(
+                    $"The status-line receipt at '{ReceiptPath}' was deployed to staging root " +
+                    $"'{recordedStagingRoot}', but the current environment resolves staging root " +
+                    $"'{currentStagingRoot}'. Restore the original override or remove the deployment from " +
+                    "its recorded root before deploying or removing in this environment.");
+            }
+
             List<StatusLineOwnedFile> files = [];
             foreach (JsonElement element in RequireArray(root, "files").EnumerateArray())
             {
@@ -157,6 +173,10 @@ internal sealed class StatusLineReceiptStore
             return new StatusLineReceipt(files);
         }
         catch (InvalidDataException)
+        {
+            throw;
+        }
+        catch (StatusLineDeploymentConflictException)
         {
             throw;
         }

@@ -36,7 +36,20 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        StatusLineTargetRoots roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+        StatusLineTargetRoots roots;
+        try
+        {
+            roots = _roots ?? UtilitiesStatusLineCommandComposition.ResolveRoots();
+            foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
+            {
+                _ = roots.ResolveStagingRoot(target);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            UtilitiesStatusLineCommandComposition.WriteClientInputError(ex.Message);
+            return 2;
+        }
 
         AnsiConsole.MarkupLine("[bold]Kyber Utilities status line — remove[/]");
 
@@ -56,7 +69,7 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
             }
             catch (Exception ex) when (
                 ex is StatusLineDeploymentConflictException or InvalidDataException or
-                    IOException or UnauthorizedAccessException)
+                    IOException or UnauthorizedAccessException or ArgumentException)
             {
                 AnsiConsole.MarkupLine(
                     $"  [red]invalid[/] {Markup.Escape(token)}: {Markup.Escape(ex.Message)}");
@@ -84,14 +97,14 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
             foreach (StatusLineOwnedFile retained in plan.Receipt.Files)
                 AnsiConsole.MarkupLine(
                     $"  [yellow]kept[/] {Markup.Escape(token)}: {Markup.Escape(retained.RelativePath)} " +
-                    "(modified locally or already gone)");
+                    "(modified locally)");
         }
 
         AnsiConsole.WriteLine();
-        if (!anyReceipt)
+        if (!anyReceipt && !hasIssues)
         {
             AnsiConsole.MarkupLine("[grey]No Kyber Utilities status-line deployment found. Nothing to remove.[/]");
-            return hasIssues ? 1 : 0;
+            return 0;
         }
 
         if (hasIssues)

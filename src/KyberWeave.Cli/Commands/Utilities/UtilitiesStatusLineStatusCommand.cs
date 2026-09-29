@@ -49,7 +49,7 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
             {
                 receipt = StatusLineDeploymentPlan.ReadReceipt(target, roots);
             }
-            catch (InvalidDataException ex)
+            catch (Exception ex) when (ex is InvalidDataException or StatusLineDeploymentConflictException)
             {
                 AnsiConsole.MarkupLine(
                     $"  [red]invalid[/] {Markup.Escape(UtilitiesStatusLineTargetCatalog.GetToken(target))}: " +

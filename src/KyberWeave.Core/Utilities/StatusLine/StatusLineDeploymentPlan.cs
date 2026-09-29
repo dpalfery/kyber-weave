@@ -51,7 +51,7 @@ public sealed class StatusLineDeploymentPlan
 
     /// <summary>
     /// The receipt this plan will persist: the deployed files for a deploy, and, for a removal, the
-    /// files it keeps because they were edited locally or are already gone.
+    /// files it keeps because they were edited locally.
     /// </summary>
     public StatusLineReceipt Receipt { get; }
 
@@ -118,6 +118,7 @@ public sealed class StatusLineDeploymentPlan
             }
 
             string physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, relativePath);
+            EnsureNoSymlinks(roots.ResolveHarnessRoot(target), physicalPath);
             EnsureOutsideReservedLocations(target, roots, physicalPath, $"'{relativePath}'");
             string digest = Digest(file.Content.Span);
             RefuseUnmanagedOccupant(ownedByPath, relativePath, physicalPath);
@@ -168,7 +169,10 @@ public sealed class StatusLineDeploymentPlan
         foreach (StatusLineOwnedFile owned in existing?.Files ?? [])
         {
             ArgumentNullException.ThrowIfNull(owned);
-            string physicalPath = ResolveOwnedPhysicalPath(target, stagingRoot, owned.RelativePath);
+            string physicalPath = ResolveOwnedPhysicalPath(target, roots, stagingRoot, owned.RelativePath);
+            if (!File.Exists(physicalPath) && !Directory.Exists(physicalPath))
+                continue;
+
             if (File.Exists(physicalPath) && IsUnmodified(physicalPath, owned.Sha256))
             {
                 changes.Add(new PendingChange(
@@ -344,15 +348,17 @@ public sealed class StatusLineDeploymentPlan
         }
     }
 
-    /// <summary>Resolves a receipt-recorded path, refusing one that would escape the staging root.</summary>
+    /// <summary>Resolves a receipt-recorded path, refusing one that would escape the staging root or traverse symlinks.</summary>
     private static string ResolveOwnedPhysicalPath(
         StatusLineTarget target,
+        StatusLineTargetRoots roots,
         string stagingRoot,
         string relativePath)
     {
+        string physicalPath;
         try
         {
-            return SquadPathPolicy.ResolveFile(stagingRoot, relativePath);
+            physicalPath = SquadPathPolicy.ResolveFile(stagingRoot, relativePath);
         }
         catch (Exception exception) when (
             exception is SquadPathContainmentException or SquadDeploymentConflictException)
@@ -361,6 +367,54 @@ public sealed class StatusLineDeploymentPlan
                 $"The status-line receipt for '{target}' records '{relativePath}', which is not a path " +
                 $"beneath the staging root '{stagingRoot}'. Delete the receipt and deploy again.",
                 exception);
+        }
+
+        EnsureNoSymlinks(roots.ResolveHarnessRoot(target), physicalPath);
+        return physicalPath;
+    }
+
+    /// <summary>
+    /// Traverses the path components from the harness root down to <paramref name="physicalPath"/>,
+    /// rejecting any symbolic link or reparse point.
+    /// </summary>
+    private static void EnsureNoSymlinks(string harnessRoot, string physicalPath)
+    {
+        string relative = Path.GetRelativePath(harnessRoot, physicalPath);
+        if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+        {
+            return;
+        }
+
+        string current = harnessRoot;
+        string[] segments = relative.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (string segment in segments)
+        {
+            current = Path.Combine(current, segment);
+            FileSystemInfo info = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+
+            try
+            {
+                if (info.LinkTarget is not null ||
+                    (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+                {
+                    throw new StatusLineDeploymentConflictException(
+                        $"The status-line path '{physicalPath}' traverses symbolic link or reparse point '{current}'. " +
+                        "Kyber Utilities refuses to deploy or remove through symbolic links.");
+                }
+            }
+            catch (StatusLineDeploymentConflictException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // Component does not exist yet.
+            }
         }
     }
 
