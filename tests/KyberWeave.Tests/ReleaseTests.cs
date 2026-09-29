@@ -32,6 +32,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReleaseTests
 {
+    private static readonly char[] OperandsSeparators = { ' ', '\t' };
+
     private static string InstallShPath => Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "install.sh");
 
     private static string ReleaseWorkflowPath =>
@@ -39,12 +41,12 @@ public sealed class ReleaseTests
 
     private static ProcessStartInfo CreateShellStartInfo(string script)
     {
-        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
+        ProcessStartInfo startInfo = new("/bin/sh")
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            UseShellExecute = false,
+            UseShellExecute = false
         };
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add(script);
@@ -190,26 +192,26 @@ public sealed class ReleaseTests
         SkipOnWindows();
 
         const string stub = """
-            stub() {
-                case "$1" in
-                    *page=1)
-                        i=1
-                        printf '['
-                        while [ "$i" -le 100 ]; do
-                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
-                            if [ "$i" -lt 100 ]; then printf ','; fi
-                            i=$((i + 1))
-                        done
-                        printf ']' ;;
-                    *page=2)
-                        printf '[{"tag_name":"v9.0.0/preview","draft":false,"prerelease":true},'
-                        printf '{"tag_name":"v0.3.0-rc.1","draft":true,"prerelease":true},'
-                        printf '{"tag_name":"v0.3.0","draft":false,"prerelease":false},'
-                        printf '{"tag_name":"v0.2.0-rc.1","draft":false,"prerelease":true}]' ;;
-                    *) printf '[]' ;;
-                esac
-            }
-            """;
+                            stub() {
+                                case "$1" in
+                                    *page=1)
+                                        i=1
+                                        printf '['
+                                        while [ "$i" -le 100 ]; do
+                                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
+                                            if [ "$i" -lt 100 ]; then printf ','; fi
+                                            i=$((i + 1))
+                                        done
+                                        printf ']' ;;
+                                    *page=2)
+                                        printf '[{"tag_name":"v9.0.0/preview","draft":false,"prerelease":true},'
+                                        printf '{"tag_name":"v0.3.0-rc.1","draft":true,"prerelease":true},'
+                                        printf '{"tag_name":"v0.3.0","draft":false,"prerelease":false},'
+                                        printf '{"tag_name":"v0.2.0-rc.1","draft":false,"prerelease":true}]' ;;
+                                    *) printf '[]' ;;
+                                esac
+                            }
+                            """;
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
@@ -230,21 +232,21 @@ public sealed class ReleaseTests
         SkipOnWindows();
 
         const string stub = """
-            stub() {
-                case "$1" in
-                    *page=1)
-                        i=1
-                        printf '['
-                        while [ "$i" -le 100 ]; do
-                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
-                            if [ "$i" -lt 100 ]; then printf ','; fi
-                            i=$((i + 1))
-                        done
-                        printf ']' ;;
-                    *) return 22 ;;
-                esac
-            }
-            """;
+                            stub() {
+                                case "$1" in
+                                    *page=1)
+                                        i=1
+                                        printf '['
+                                        while [ "$i" -le 100 ]; do
+                                            printf '{"tag_name":"v0.1.%s-rc.1","draft":false,"prerelease":true}' "$i"
+                                            if [ "$i" -lt 100 ]; then printf ','; fi
+                                            i=$((i + 1))
+                                        done
+                                        printf ']' ;;
+                                    *) return 22 ;;
+                                esac
+                            }
+                            """;
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"\n" + stub +
             "\nkyber_weave_newest_prerelease https://api.invalid/releases stub");
@@ -362,11 +364,11 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
-        sandbox.AppendSumsLine(archive, nameHint: "kyberdash-linux-x64.tar.gz");
+        sandbox.AppendSumsLine(archive, "kyberdash-linux-x64.tar.gz");
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; " +
@@ -382,11 +384,11 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
-        sandbox.AppendSumsLine(archive, nameHint: "kyberdash-linux-x64.tar.gz");
+        sandbox.AppendSumsLine(archive, "kyberdash-linux-x64.tar.gz");
         // Tamper after the sums line is written; the helper should detect the
         // divergence and return non-zero.
         File.AppendAllText(archive, "tampered");
@@ -408,13 +410,13 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
         // Sums file lists a different asset; the basename of the archive
         // being verified is therefore absent.
-        sandbox.AppendSumsLine(archive, nameHint: "kyber-weave-linux-x64.tar.gz");
+        sandbox.AppendSumsLine(archive, "kyber-weave-linux-x64.tar.gz");
 
         ProcessStartInfo startInfo = CreateShellStartInfo(
             ". \"" + InstallShPath + "\"; " +
@@ -430,7 +432,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
@@ -454,7 +456,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string archive = sandbox.WriteArchive(
             "kyberdash-linux-x64.tar.gz",
             "kyberdash binary content for the matcher");
@@ -491,7 +493,7 @@ public sealed class ReleaseTests
     [
         "kyberdash-tray-darwin-arm64.zip",
         "kyberdash-tray-darwin-x64.zip",
-        "kyberdash-tray-win-x64-setup.exe",
+        "kyberdash-tray-win-x64-setup.exe"
     ];
 
     /// <summary>The macOS credentials the job requires before it builds anything.</summary>
@@ -502,7 +504,7 @@ public sealed class ReleaseTests
         "APPLE_SIGNING_IDENTITY",
         "APPLE_API_KEY",
         "APPLE_API_ISSUER",
-        "APPLE_API_KEY_P8",
+        "APPLE_API_KEY_P8"
     ];
 
     /// <summary>
@@ -515,7 +517,7 @@ public sealed class ReleaseTests
     private static readonly string[] RequiredSecretReferences =
     [
         "secrets.APPLE_DEVELOPER_ID_P12_BASE64",
-        "secrets.APPLE_DEVELOPER_ID_P12_PASSWORD",
+        "secrets.APPLE_DEVELOPER_ID_P12_PASSWORD"
     ];
 
     [Fact]
@@ -559,7 +561,7 @@ public sealed class ReleaseTests
             Assert.True(
                 workflow.Contains(reference, StringComparison.Ordinal),
                 $"release.yml does not read {reference}, the name the release environment "
-                    + "actually holds, so the certificate would be empty at signing time.");
+                + "actually holds, so the certificate would be empty at signing time.");
         }
 
         int presenceCheck = workflow.IndexOf("Require the signing secrets", StringComparison.Ordinal);
@@ -593,7 +595,8 @@ public sealed class ReleaseTests
         // release-local.sh reads its Node version from dash/.nvmrc rather than repeating it.
         Match nodeVersion = Regex.Match(job, "NODE_VERSION: \"([^\"]+)\"");
         Assert.True(nodeVersion.Success, "build-kyberdash no longer pins NODE_VERSION.");
-        string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim().TrimStart('v');
+        string nvmrc = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "dash", ".nvmrc")).Trim()
+            .TrimStart('v');
         Assert.True(
             nodeVersion.Groups[1].Value == nvmrc,
             $"build-kyberdash builds on Node {nodeVersion.Groups[1].Value} but dash/.nvmrc, which the local build reads, says {nvmrc}.");
@@ -620,11 +623,12 @@ public sealed class ReleaseTests
             "npm --prefix web run build",
             "scripts/pack-sea-web.mjs",
             "\"web.json\":",
-            "scripts/sea-web-smoke.mjs",
+            "scripts/sea-web-smoke.mjs"
         ];
         foreach (string value in shared)
         {
-            Assert.True(job.Contains(value, StringComparison.Ordinal), $"build-kyberdash no longer contains {value}; update this list with the job.");
+            Assert.True(job.Contains(value, StringComparison.Ordinal),
+                $"build-kyberdash no longer contains {value}; update this list with the job.");
             Assert.True(
                 local.Contains(value, StringComparison.Ordinal),
                 $"scripts/release-local.sh does not use {value}, which build-kyberdash does. Make the same change there.");
@@ -681,8 +685,8 @@ public sealed class ReleaseTests
 
         string scoped = local.Substring(start, end - start);
         // Strip comments: lines whose trimmed text starts with #
-        var lines = scoped.Split('\n');
-        var filtered = lines.Where(line => !line.TrimStart().StartsWith("#", StringComparison.Ordinal));
+        string[] lines = scoped.Split('\n');
+        IEnumerable<string> filtered = lines.Where(line => !line.TrimStart().StartsWith('#'));
         return string.Join("\n", filtered);
     }
 
@@ -694,8 +698,8 @@ public sealed class ReleaseTests
     private static void AssertEmbedsWebDashboard(string label, string text, List<string> violations)
     {
         // Strip comments before checking
-        var lines = text.Split('\n');
-        var filtered = lines.Where(line => !line.TrimStart().StartsWith("#", StringComparison.Ordinal));
+        string[] lines = text.Split('\n');
+        IEnumerable<string> filtered = lines.Where(line => !line.TrimStart().StartsWith('#'));
         string textNoComments = string.Join("\n", filtered);
 
         // Check ordering:
@@ -703,20 +707,23 @@ public sealed class ReleaseTests
         int tsupIndex = textNoComments.IndexOf("tsup --config tsup.sea.config.ts", StringComparison.Ordinal);
         if (tsupIndex < 0)
         {
-            violations.Add($"{label}: 'tsup --config tsup.sea.config.ts' not found; the dashboard embedding order starts there.");
+            violations.Add(
+                $"{label}: 'tsup --config tsup.sea.config.ts' not found; the dashboard embedding order starts there.");
             return;
         }
 
         int webBuildIndex = textNoComments.IndexOf("npm --prefix web run build", StringComparison.Ordinal);
         if (webBuildIndex < 0)
         {
-            violations.Add($"{label}: 'npm --prefix web run build' not found; add it to the 'Bundle dash CLI' step after tsup.");
+            violations.Add(
+                $"{label}: 'npm --prefix web run build' not found; add it to the 'Bundle dash CLI' step after tsup.");
             return;
         }
 
         if (tsupIndex >= webBuildIndex)
         {
-            violations.Add($"{label}: 'tsup --config tsup.sea.config.ts' must come before 'npm --prefix web run build'. Make the same change there.");
+            violations.Add(
+                $"{label}: 'tsup --config tsup.sea.config.ts' must come before 'npm --prefix web run build'. Make the same change there.");
             return;
         }
 
@@ -724,13 +731,15 @@ public sealed class ReleaseTests
         int packIndex = textNoComments.IndexOf("scripts/pack-sea-web.mjs", StringComparison.Ordinal);
         if (packIndex < 0)
         {
-            violations.Add($"{label}: 'scripts/pack-sea-web.mjs' not found; add it after 'npm --prefix web run build'.");
+            violations.Add(
+                $"{label}: 'scripts/pack-sea-web.mjs' not found; add it after 'npm --prefix web run build'.");
             return;
         }
 
         if (webBuildIndex >= packIndex)
         {
-            violations.Add($"{label}: 'npm --prefix web run build' must come before 'scripts/pack-sea-web.mjs'. Make the same change there.");
+            violations.Add(
+                $"{label}: 'npm --prefix web run build' must come before 'scripts/pack-sea-web.mjs'. Make the same change there.");
             return;
         }
 
@@ -744,7 +753,8 @@ public sealed class ReleaseTests
 
         if (packIndex >= seaConfigIndex)
         {
-            violations.Add($"{label}: 'scripts/pack-sea-web.mjs' must come before '--experimental-sea-config'. Make the same change there.");
+            violations.Add(
+                $"{label}: 'scripts/pack-sea-web.mjs' must come before '--experimental-sea-config'. Make the same change there.");
             return;
         }
 
@@ -765,7 +775,8 @@ public sealed class ReleaseTests
 
         if (blobIndex >= smokeIndex)
         {
-            violations.Add($"{label}: 'scripts/sea-web-smoke.mjs' must come after 'NODE_SEA_BLOB' injection. Make the same change there.");
+            violations.Add(
+                $"{label}: 'scripts/sea-web-smoke.mjs' must come after 'NODE_SEA_BLOB' injection. Make the same change there.");
             return;
         }
 
@@ -775,83 +786,200 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
+    /// Issue #157 regression: each archive command's destination path is quoted
+    /// (e.g. <c>"${BIN_DIR}/kyberdash-${RID}.tar.gz"</c>), so a closing <c>"</c> sits
+    /// between the destination-path token and the operand list that follows. The three
+    /// <c>AssertArchiveOperands</c> patterns required <c>\s+</c> to immediately follow that
+    /// token with no tolerance for the quote, so <c>Regex.Match</c> never succeeded against
+    /// the real files — meaning the operand-count/name check below it was silently
+    /// unreachable, regardless of what the real archive commands contained. This pins the
+    /// match, and the operands it extracts, against the real, unmodified release artifacts.
+    /// </summary>
+    [Fact]
+    public void ArchiveOperandRegexesMatchTheQuotedDestinationPathInTheRealReleaseArtifacts()
+    {
+        string job = StripCommentLines(ReadBuildKyberDashJob());
+        string local = ScopeBuildKyberDashFunction();
+
+        // Match through the exact same Regex fields AssertArchiveOperands uses — a copied
+        // literal here would pin a frozen pattern instead of the one production evaluates.
+        Match releaseTar = TarArchiveOperandsRegex.Match(job);
+        Assert.True(
+            releaseTar.Success,
+            "release.yml tar archive: the destination-path regex does not match the real, quoted command line.");
+        Assert.Equal("\"kyberdash${EXE}\" THIRD_PARTY_NOTICES.md", releaseTar.Groups[2].Value.Trim());
+
+        Match releaseZip = ZipArchiveOperandsRegex.Match(job);
+        Assert.True(
+            releaseZip.Success,
+            "release.yml zip archive: the destination-path regex does not match the real, quoted command line.");
+        Assert.Equal(
+            "\"${FINAL_BIN}\" \"${BIN_DIR}/THIRD_PARTY_NOTICES.md\"", releaseZip.Groups[2].Value.Trim());
+
+        Match localTar = TarArchiveOperandsRegex.Match(local);
+        Assert.True(
+            localTar.Success,
+            "release-local.sh tar archive: the destination-path regex does not match the real, quoted command line.");
+        Assert.Equal("kyberdash THIRD_PARTY_NOTICES.md", localTar.Groups[2].Value.Trim());
+    }
+
+    /// <summary>Strips comment lines the same way <see cref="AssertEmbedsWebDashboard"/> does.</summary>
+    private static string StripCommentLines(string text)
+    {
+        string[] lines = text.Split('\n');
+        IEnumerable<string> filtered = lines.Where(line => !line.TrimStart().StartsWith('#'));
+        return string.Join("\n", filtered);
+    }
+
+    /// <summary>
+    /// Matches a tar archive command's destination path and trailing operand list. A single
+    /// field so <see cref="AssertArchiveOperands"/> and
+    /// <see cref="ArchiveOperandRegexesMatchTheQuotedDestinationPathInTheRealReleaseArtifacts"/>
+    /// exercise the same compiled pattern rather than two independently-maintained copies that
+    /// could silently drift apart.
+    /// </summary>
+    private static readonly Regex TarArchiveOperandsRegex =
+        new(@"tar\s+.*?-czf\s+.*?/(kyberdash-[^/\s]+\.\w+)""?\s+(.+)$", RegexOptions.Multiline);
+
+    /// <summary>Same purpose as <see cref="TarArchiveOperandsRegex"/>, for the zip archive command.</summary>
+    private static readonly Regex ZipArchiveOperandsRegex =
+        new(@"zip\s+.*?/(kyberdash-[^/\s]+\.zip)""?\s+(.+)$", RegexOptions.Multiline);
+
+    /// <summary>
     /// Asserts that archive commands in the text name only the expected operands.
     /// For release.yml: tar → ["kyberdash${EXE}", "THIRD_PARTY_NOTICES.md"], zip → ["${FINAL_BIN}", "${BIN_DIR}/THIRD_PARTY_NOTICES.md"]
     /// For release-local.sh: tar → ["kyberdash", "THIRD_PARTY_NOTICES.md"]
-    /// Collects violations into the list.
+    /// Collects violations into the list. A regex that fails to match is itself a violation —
+    /// not a silently-skipped block — so a future edit that breaks the pattern again cannot
+    /// leave this method dark while still reporting a clean result.
     /// </summary>
     private static void AssertArchiveOperands(string label, string text, List<string> violations)
     {
         if (label == "release.yml")
         {
             // Check tar command: tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}" THIRD_PARTY_NOTICES.md
-            Match tarMatch = Regex.Match(text, @"tar\s+.*?-czf\s+.*?/(kyberdash-[^/\s]+\.\w+)\s+(.+)$", RegexOptions.Multiline);
+            // The destination path is quoted, so a closing " sits before the whitespace that
+            // separates it from the operand list; "? tolerates that quote without requiring it.
+            Match tarMatch = TarArchiveOperandsRegex.Match(text);
             if (tarMatch.Success)
             {
                 string operands = tarMatch.Groups[2].Value.Trim();
-                var parts = operands.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 2)
+                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
                 {
                     // Trim quotes from operands
                     string op1 = parts[0].Trim('"');
                     string op2 = parts[1].Trim('"');
                     if (op1 != "kyberdash${EXE}" || op2 != "THIRD_PARTY_NOTICES.md")
                     {
-                        violations.Add($"{label} tar archive: expected operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
+                        violations.Add(
+                            $"{label} tar archive: expected operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
                     }
                 }
                 else
                 {
-                    violations.Add($"{label} tar archive: operands not in expected format.");
+                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
+                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
+                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
+                    violations.Add(
+                        $"{label} tar archive: expected exactly 2 operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Update this list with the job.");
                 }
+            }
+            else
+            {
+                // A non-matching regex must not silently skip the operand check above: that is
+                // exactly the defect this test project already regressed on once (Issue #157).
+                violations.Add(
+                    $"{label} tar archive: destination-path regex did not match; the operand check below it did not run.");
             }
 
             // Check zip command: zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}" "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
-            Match zipMatch = Regex.Match(text, @"zip\s+.*?/(kyberdash-[^/\s]+\.zip)\s+(.+)$", RegexOptions.Multiline);
+            // The destination path is quoted; "? tolerates the closing quote the same way as tar above.
+            Match zipMatch = ZipArchiveOperandsRegex.Match(text);
             if (zipMatch.Success)
             {
                 string operands = zipMatch.Groups[2].Value.Trim();
-                var parts = operands.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 2)
+                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
                 {
                     // Trim quotes from operands
                     string op1 = parts[0].Trim('"');
                     string op2 = parts[1].Trim('"');
                     if (op1 != "${FINAL_BIN}" || op2 != "${BIN_DIR}/THIRD_PARTY_NOTICES.md")
                     {
-                        violations.Add($"{label} zip archive: expected operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
+                        violations.Add(
+                            $"{label} zip archive: expected operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
                     }
                 }
                 else
                 {
-                    violations.Add($"{label} zip archive: operands not in expected format.");
+                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
+                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
+                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
+                    violations.Add(
+                        $"{label} zip archive: expected exactly 2 operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Update this list with the job.");
                 }
+            }
+            else
+            {
+                violations.Add(
+                    $"{label} zip archive: destination-path regex did not match; the operand check below it did not run.");
             }
         }
         else if (label == "release-local.sh")
         {
             // Check tar command: tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
-            Match tarMatch = Regex.Match(text, @"tar\s+.*?-czf\s+.*?/(kyberdash-[^/\s]+\.\w+)\s+(.+)$", RegexOptions.Multiline);
+            // The destination path is quoted; "? tolerates the closing quote the same way as above.
+            Match tarMatch = TarArchiveOperandsRegex.Match(text);
             if (tarMatch.Success)
             {
                 string operands = tarMatch.Groups[2].Value.Trim();
-                var parts = operands.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length >= 2)
+                string[] parts = operands.Split(OperandsSeparators, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
                 {
                     // Trim quotes from operands
                     string op1 = parts[0].Trim('"');
                     string op2 = parts[1].Trim('"');
                     if (op1 != "kyberdash" || op2 != "THIRD_PARTY_NOTICES.md")
                     {
-                        violations.Add($"{label} tar archive: expected operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Make the same change there.");
+                        violations.Add(
+                            $"{label} tar archive: expected operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Make the same change there.");
                     }
                 }
                 else
                 {
-                    violations.Add($"{label} tar archive: operands not in expected format.");
+                    // Exactly two operands are expected — the binary and THIRD_PARTY_NOTICES.md, nothing
+                    // more. A third operand (e.g. a stray debug-symbols file) must fail here rather than
+                    // silently widening the archive contract that install.sh and SelfUpdater.cs rely on.
+                    violations.Add(
+                        $"{label} tar archive: expected exactly 2 operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got {parts.Length} (\"{operands}\"). Make the same change there.");
                 }
             }
+            else
+            {
+                violations.Add(
+                    $"{label} tar archive: destination-path regex did not match; the operand check below it did not run.");
+            }
         }
+    }
+
+    /// <summary>
+    /// Regression for the missing-<c>else</c> gap fixed alongside the regex above: when the
+    /// destination-path regex fails to match — the exact defect that was silently invisible
+    /// before this fix — <see cref="AssertArchiveOperands"/> must record a violation instead of
+    /// leaving <see cref="BuildKyberDashEmbedsTheWebDashboard"/> green with nothing to show for it.
+    /// </summary>
+    [Fact]
+    public void AssertArchiveOperandsReportsAViolationWhenTheDestinationPathRegexDoesNotMatch()
+    {
+        List<string> violations = [];
+
+        AssertArchiveOperands("release.yml", "tar --help\nzip --help\n", violations);
+
+        Assert.Equal(2, violations.Count);
+        Assert.All(
+            violations,
+            violation => Assert.Contains("destination-path regex did not match", violation, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -892,7 +1020,7 @@ public sealed class ReleaseTests
         Assert.True(
             unpinned.Count == 0,
             "Requirement 12.9: pin each of these to a 40-character commit SHA verified "
-                + $"against its repository:\n  {string.Join("\n  ", unpinned)}");
+            + $"against its repository:\n  {string.Join("\n  ", unpinned)}");
     }
 
     /// <summary>Requirement 12.4: the Windows SmartScreen warning is explained in the notes.</summary>
@@ -1043,28 +1171,28 @@ public sealed class ReleaseTests
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "ALL_PROXY",
-        "all_proxy",
+        "all_proxy"
     ];
 
     private const string RedirectServerScript = """
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+                                                from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
+                                                class Handler(BaseHTTPRequestHandler):
+                                                    protocol_version = "HTTP/1.1"
 
-            def do_GET(self):
-                self.send_response(302)
-                self.send_header("Location", "http://example.com/not-loopback")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
+                                                    def do_GET(self):
+                                                        self.send_response(302)
+                                                        self.send_header("Location", "http://example.com/not-loopback")
+                                                        self.send_header("Content-Length", "0")
+                                                        self.end_headers()
 
-            def log_message(self, fmt, *args):
-                return
+                                                    def log_message(self, fmt, *args):
+                                                        return
 
-        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        print(server.server_address[1], flush=True)
-        server.serve_forever()
-        """;
+                                                server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                                                print(server.server_address[1], flush=True)
+                                                server.serve_forever()
+                                                """;
 
     /// <summary>
     /// An unset origin still refuses plain HTTP. The dest file is the download
@@ -1075,16 +1203,16 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "curl-args");
         ProcessResult result = InvokeFetch(
-            origin: null,
-            url: "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt",
-            destination: destination,
-            toolDirectory: PrependDownloader(sandbox, "curl", log),
-            replacePath: false,
-            includeStdout: false);
+            null,
+            "http://127.0.0.1/dpalfery/kyber-weave/releases/download/v0.1.0/SHA256SUMS.txt",
+            destination,
+            PrependDownloader(sandbox, "curl", log),
+            false,
+            false);
 
         Assert.Contains("refusing non-HTTPS URL", result.StandardError, StringComparison.Ordinal);
         Assert.NotEqual(0, result.ExitCode);
@@ -1117,7 +1245,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "curl-args");
         string url = SumsUrl(origin);
@@ -1126,8 +1254,8 @@ public sealed class ReleaseTests
             url,
             destination,
             PrependDownloader(sandbox, "curl", log),
-            replacePath: false,
-            includeStdout: true);
+            false,
+            true);
 
         Assert.True(result.ExitCode == 0, Describe(result));
         List<string[]> invocations = ReadDownloaderInvocations(log);
@@ -1179,7 +1307,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "curl-args");
         string url = explicitTarget.Length == 0 ? SumsUrl(origin) : explicitTarget;
@@ -1188,8 +1316,8 @@ public sealed class ReleaseTests
             url,
             destination,
             PrependDownloader(sandbox, "curl", log),
-            replacePath: false,
-            includeStdout: false);
+            false,
+            false);
 
         Assert.Contains("kyber-weave: error:", result.StandardError, StringComparison.Ordinal);
         Assert.NotEqual(0, result.ExitCode);
@@ -1206,7 +1334,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "wget-args");
         const string origin = "http://127.0.0.1:9";
@@ -1215,8 +1343,8 @@ public sealed class ReleaseTests
             SumsUrl(origin),
             destination,
             IsolatedWgetDirectory(sandbox, log),
-            replacePath: true,
-            includeStdout: false);
+            true,
+            false);
 
         Assert.Contains("wget", result.StandardError, StringComparison.Ordinal);
         Assert.Contains("refusing", result.StandardError, StringComparison.Ordinal);
@@ -1233,7 +1361,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string destination = Path.Combine(sandbox.Root, "download");
         string log = Path.Combine(sandbox.Root, "wget-args");
         const string origin = "https://127.0.0.1:9";
@@ -1243,8 +1371,8 @@ public sealed class ReleaseTests
             url,
             destination,
             IsolatedWgetDirectory(sandbox, log),
-            replacePath: true,
-            includeStdout: false);
+            true,
+            false);
 
         Assert.True(result.ExitCode == 0, Describe(result));
         List<string[]> invocations = ReadDownloaderInvocations(log);
@@ -1263,15 +1391,15 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using PublishedRelease release = PublishedRelease.Create(corruptArchive: false);
+        using PublishedRelease release = PublishedRelease.Create(false);
         string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
         ProcessResult fetch = InvokeFetch(
             release.Origin,
             SumsUrl(release.Origin),
             fetchDest,
-            toolDirectory: null,
-            replacePath: false,
-            includeStdout: false);
+            null,
+            false,
+            false);
 
         // The helper has to accept the loopback URL before the installer body
         // runs. Until it is defined, this fails closed and the body — which
@@ -1298,15 +1426,15 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using PublishedRelease release = PublishedRelease.Create(corruptArchive: true);
+        using PublishedRelease release = PublishedRelease.Create(true);
         string fetchDest = Path.Combine(release.Sandbox.Root, "fetched-sums.txt");
         ProcessResult fetch = InvokeFetch(
             release.Origin,
             SumsUrl(release.Origin),
             fetchDest,
-            toolDirectory: null,
-            replacePath: false,
-            includeStdout: false);
+            null,
+            false,
+            false);
         Assert.True(fetch.ExitCode == 0, Describe(fetch));
 
         ProcessResult install = RunFullInstall(release.InstallDirectory, release.Origin);
@@ -1327,7 +1455,7 @@ public sealed class ReleaseTests
     {
         SkipOnWindows();
 
-        using Sandbox sandbox = new Sandbox();
+        using Sandbox sandbox = new();
         string script = Path.Combine(sandbox.Root, "redirect.py");
         File.WriteAllText(script, RedirectServerScript);
         using ListeningServer server = ListeningServer.Start(script);
@@ -1337,13 +1465,13 @@ public sealed class ReleaseTests
             origin,
             SumsUrl(origin),
             fetchDest,
-            toolDirectory: null,
-            replacePath: false,
-            includeStdout: false);
+            null,
+            false,
+            false);
 
         Assert.True(
             fetch.ExitCode != 127
-                && !fetch.StandardError.Contains("fetch: not found", StringComparison.Ordinal),
+            && !fetch.StandardError.Contains("fetch: not found", StringComparison.Ordinal),
             Describe(fetch));
 
         string log = Path.Combine(sandbox.Root, "curl-args");
@@ -1369,23 +1497,23 @@ public sealed class ReleaseTests
     {
         string prefix = origin.EndsWith('/') ? origin[..^1] : origin;
         return prefix
-            + "/"
-            + ReleaseOwner
-            + "/"
-            + ReleaseRepo
-            + "/releases/download/v"
-            + PinnedVersion
-            + "/SHA256SUMS.txt";
+               + "/"
+               + ReleaseOwner
+               + "/"
+               + ReleaseRepo
+               + "/releases/download/v"
+               + PinnedVersion
+               + "/SHA256SUMS.txt";
     }
 
     private static string Describe(ProcessResult result)
     {
         return "exit "
-            + result.ExitCode.ToString(CultureInfo.InvariantCulture)
-            + "\nstderr:\n"
-            + result.StandardError
-            + "\nstdout:\n"
-            + result.StandardOutput;
+               + result.ExitCode.ToString(CultureInfo.InvariantCulture)
+               + "\nstderr:\n"
+               + result.StandardError
+               + "\nstdout:\n"
+               + result.StandardOutput;
     }
 
     private static void AssertArgSequence(IReadOnlyList<string> args, params string[] expected)
@@ -1457,12 +1585,12 @@ public sealed class ReleaseTests
     /// </summary>
     private static ProcessResult RunFullInstall(string installDir, string origin, string? prependPath = null)
     {
-        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
+        ProcessStartInfo startInfo = new("/bin/sh")
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            UseShellExecute = false,
+            UseShellExecute = false
         };
         startInfo.ArgumentList.Add(InstallShPath);
         startInfo.ArgumentList.Add("--install-dir");
@@ -1508,7 +1636,7 @@ public sealed class ReleaseTests
     {
         string directory = Path.Combine(sandbox.Root, toolName + "-bin");
         Directory.CreateDirectory(directory);
-        WriteDownloader(Path.Combine(directory, toolName), logPath, execRealTool: null);
+        WriteDownloader(Path.Combine(directory, toolName), logPath, null);
         return directory;
     }
 
@@ -1516,7 +1644,7 @@ public sealed class ReleaseTests
     {
         string directory = Path.Combine(sandbox.Root, "curl-bin");
         Directory.CreateDirectory(directory);
-        WriteDownloader(Path.Combine(directory, "curl"), logPath, execRealTool: ResolveExecutable("curl"));
+        WriteDownloader(Path.Combine(directory, "curl"), logPath, ResolveExecutable("curl"));
         return directory;
     }
 
@@ -1530,7 +1658,7 @@ public sealed class ReleaseTests
     {
         string directory = Path.Combine(sandbox.Root, "wget-only");
         Directory.CreateDirectory(directory);
-        WriteDownloader(Path.Combine(directory, "wget"), logPath, execRealTool: null);
+        WriteDownloader(Path.Combine(directory, "wget"), logPath, null);
         if (!OperatingSystem.IsWindows())
         {
             File.CreateSymbolicLink(Path.Combine(directory, "tar"), ResolveExecutable("tar"));
@@ -1550,10 +1678,10 @@ public sealed class ReleaseTests
     private static void WriteDownloader(string path, string logPath, string? execRealTool)
     {
         string body = "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '"
-            + logPath
-            + "'\nprintf '\\n' >> '"
-            + logPath
-            + "'\n";
+                      + logPath
+                      + "'\nprintf '\\n' >> '"
+                      + logPath
+                      + "'\n";
         if (execRealTool is null)
         {
             body += "exit 0\n";
@@ -1612,12 +1740,12 @@ public sealed class ReleaseTests
     /// </summary>
     private static string? TryResolveExecutable(string name)
     {
-        ProcessStartInfo startInfo = new ProcessStartInfo("/bin/sh")
+        ProcessStartInfo startInfo = new("/bin/sh")
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            UseShellExecute = false,
+            UseShellExecute = false
         };
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add("command -v " + name);
@@ -1661,6 +1789,7 @@ public sealed class ReleaseTests
                     path,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
+
             return path;
         }
 
@@ -1681,7 +1810,7 @@ public sealed class ReleaseTests
         {
             try
             {
-                Directory.Delete(_dir, recursive: true);
+                Directory.Delete(_dir, true);
             }
             catch
             {
@@ -1699,8 +1828,9 @@ public sealed class ReleaseTests
         StringBuilder sb = new(bytes.Length * 2);
         foreach (byte b in bytes)
         {
-            sb.Append(b.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
         }
+
         return sb.ToString();
     }
 
@@ -1734,7 +1864,7 @@ public sealed class ReleaseTests
 
         public static PublishedRelease Create(bool corruptArchive)
         {
-            Sandbox sandbox = new Sandbox();
+            Sandbox sandbox = new();
             ListeningServer? server = null;
             try
             {
@@ -1747,12 +1877,12 @@ public sealed class ReleaseTests
                 File.WriteAllText(Path.Combine(stage, "kyber-weave"), InstallPayload);
                 string archive = Path.Combine(tagDir, assetName);
 
-                ProcessStartInfo tar = new ProcessStartInfo(ResolveExecutable("tar"))
+                ProcessStartInfo tar = new(ResolveExecutable("tar"))
                 {
                     RedirectStandardInput = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    UseShellExecute = false,
+                    UseShellExecute = false
                 };
                 tar.ArgumentList.Add("-czf");
                 tar.ArgumentList.Add(archive);
@@ -1811,12 +1941,12 @@ public sealed class ReleaseTests
 
         public static ListeningServer Start(string scriptPath, params string[] arguments)
         {
-            ProcessStartInfo startInfo = new ProcessStartInfo(ResolveExecutable("python3"))
+            ProcessStartInfo startInfo = new(ResolveExecutable("python3"))
             {
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                UseShellExecute = false,
+                UseShellExecute = false
             };
             startInfo.ArgumentList.Add(scriptPath);
             foreach (string argument in arguments)
@@ -1824,7 +1954,7 @@ public sealed class ReleaseTests
                 startInfo.ArgumentList.Add(argument);
             }
 
-            Process process = new Process { StartInfo = startInfo };
+            Process process = new() { StartInfo = startInfo };
             process.Start();
             process.StandardInput.Close();
             Task<string> stderr = process.StandardError.ReadToEndAsync();
@@ -1857,7 +1987,7 @@ public sealed class ReleaseTests
             {
                 if (!process.HasExited)
                 {
-                    process.Kill(entireProcessTree: true);
+                    process.Kill(true);
                 }
             }
             catch (InvalidOperationException)
@@ -1870,5 +2000,4 @@ public sealed class ReleaseTests
             return error;
         }
     }
-
 }

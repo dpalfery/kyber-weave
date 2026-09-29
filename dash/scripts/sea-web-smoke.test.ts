@@ -31,7 +31,7 @@ import { createServer } from 'http'
 const server = createServer((req, res) => {
   if (req.url === '/') {
     res.writeHead(200, { 'content-type': 'text/html' })
-    res.end('<!doctype html><body>Dashboard not built yet</body>')
+    res.end('<!doctype html><body>Dashboard not built</body>')
   } else {
     res.writeHead(404)
     res.end()
@@ -49,7 +49,7 @@ server.listen(0, '127.0.0.1', () => {
     )
 
     // Run the smoke test against this stand-in
-    const DASH_ROOT = join(process.cwd(), 'dash')
+    const DASH_ROOT = process.cwd()
     const result = spawnSync('node', ['scripts/sea-web-smoke.mjs', 'node', standinScript], {
       cwd: DASH_ROOT,
       timeout: 30_000,
@@ -85,7 +85,7 @@ server.listen(0, '127.0.0.1', () => {
 `,
     )
 
-    const DASH_ROOT = join(process.cwd(), 'dash')
+    const DASH_ROOT = process.cwd()
     const result = spawnSync('node', ['scripts/sea-web-smoke.mjs', 'node', standinScript], {
       cwd: DASH_ROOT,
       timeout: 30_000,
@@ -112,7 +112,7 @@ setTimeout(() => process.exit(0), 60_000)
 `,
     )
 
-    const DASH_ROOT = join(process.cwd(), 'dash')
+    const DASH_ROOT = process.cwd()
     const startTime = Date.now()
     const result = spawnSync('node', ['scripts/sea-web-smoke.mjs', 'node', standinScript], {
       cwd: DASH_ROOT,
@@ -153,7 +153,7 @@ setTimeout(() => {
 `,
     )
 
-    const DASH_ROOT = join(process.cwd(), 'dash')
+    const DASH_ROOT = process.cwd()
     const result = spawnSync('node', ['scripts/sea-web-smoke.mjs', 'node', standinScript], {
       cwd: DASH_ROOT,
       timeout: 30_000,

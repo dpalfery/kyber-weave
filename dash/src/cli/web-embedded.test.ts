@@ -11,9 +11,10 @@ import type { Server } from 'http'
 
 import { runWebDashboard } from './web.js'
 import { KyberBridge } from '../server/bridge.js'
+import { BRAND } from '../brand-overlay.js'
 
 // Mock node:sea before importing the module under test
-const mockGetAsset = vi.fn(() => undefined)
+const mockGetAsset = vi.fn((_key: string): string | Buffer | undefined => undefined)
 const mockIsSea = vi.fn(() => false)
 
 vi.mock('node:sea', () => ({
@@ -59,13 +60,12 @@ describe('embedded web dashboard (SEA asset)', () => {
     mockIsSea.mockReturnValue(true)
     mockGetAsset.mockImplementation((key: string) => {
       if (key === 'web.json') {
-        return createWebAsset()
+        return Buffer.from(createWebAsset(), 'utf8')
       }
       return undefined
     })
 
     const testBridge = new KyberBridge({
-      canonDb: undefined as any,
       ratesPath: join(tempHome, 'rates.json'),
     })
 
@@ -94,8 +94,7 @@ describe('embedded web dashboard (SEA asset)', () => {
     expect(res.headers.get('content-type')).toContain('text/html')
     const html = await res.text()
     expect(html).toContain('SENTINEL-ABC123')
-    // Brand overlay is applied
-    expect(html).not.toContain('Test Dashboard')
+    expect(html).toContain(BRAND.htmlTitle)
   })
 
   it('GET /assets/app-abc123.js serves the asset with JavaScript content type', async () => {
@@ -121,6 +120,8 @@ describe('embedded web dashboard (SEA asset)', () => {
     const html = await res.text()
     // Should serve index, not a real file
     expect(html).toContain('SENTINEL-ABC123')
+    // Should not contain package.json content (security check)
+    expect(html).not.toContain('"private"')
   })
 })
 
@@ -144,7 +145,6 @@ describe('embedded dashboard: SEA without web.json', () => {
   it('stdout hint does not mention npm install', async () => {
     let stdout = ''
     const testBridge = new KyberBridge({
-      canonDb: undefined as any,
       ratesPath: join(tempHome, 'rates.json'),
     })
 
@@ -194,10 +194,9 @@ describe('embedded dashboard: KYBERDASH_DASH_DIR override', () => {
 
       try {
         mockIsSea.mockReturnValue(true)
-        mockGetAsset.mockReturnValue(createWebAsset())
+        mockGetAsset.mockReturnValue(Buffer.from(createWebAsset(), 'utf8'))
 
         const testBridge = new KyberBridge({
-          canonDb: undefined as any,
           ratesPath: join(tempHome, 'rates.json'),
         })
 
@@ -225,6 +224,62 @@ describe('embedded dashboard: KYBERDASH_DASH_DIR override', () => {
       }
     } finally {
       await rm(dashDir, { recursive: true, force: true })
+    }
+  })
+
+  it('KYBERDASH_DASH_DIR set to a directory with no index.html warns and falls through to the embedded asset', async () => {
+    const rejectedDir = await mkdtemp(join(tmpdir(), 'override-no-index-'))
+    try {
+      // Deliberately no index.html written here: this is the rejection this test covers.
+
+      const prevEnv = process.env['KYBERDASH_DASH_DIR']
+      process.env['KYBERDASH_DASH_DIR'] = rejectedDir
+
+      try {
+        mockIsSea.mockReturnValue(true)
+        mockGetAsset.mockReturnValue(Buffer.from(createWebAsset(), 'utf8'))
+
+        const testBridge = new KyberBridge({
+          ratesPath: join(tempHome, 'rates.json'),
+        })
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        const server = await runWebDashboard({
+          port: 0,
+          open: false,
+          kyberBridge: testBridge,
+          writeStdout: () => {},
+        })
+
+        try {
+          // The rejected override must not silently vanish: an operator who set a
+          // typo'd or not-yet-built KYBERDASH_DASH_DIR needs to see exactly what
+          // path was tried and rejected, distinct from the two SEA-branch warnings.
+          expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(rejectedDir))
+          expect(warnSpy.mock.calls.some(([msg]) => typeof msg === 'string' && msg.startsWith(BRAND.cliName))).toBe(
+            true,
+          )
+
+          // Falls through to the next resolution step (the embedded SEA asset)
+          // exactly as before: precedence and behavior are unchanged, only the
+          // missing log line was added.
+          const port = (server.address() as AddressInfo).port
+          const base = `http://127.0.0.1:${port}`
+          const res = await fetch(`${base}/`)
+          expect(res.status).toBe(200)
+          const html = await res.text()
+          expect(html).toContain('SENTINEL-ABC123')
+        } finally {
+          warnSpy.mockRestore()
+          await new Promise<void>((resolve) => server.close(() => resolve()))
+        }
+      } finally {
+        if (prevEnv === undefined) delete process.env['KYBERDASH_DASH_DIR']
+        else process.env['KYBERDASH_DASH_DIR'] = prevEnv
+      }
+    } finally {
+      await rm(rejectedDir, { recursive: true, force: true })
     }
   })
 })

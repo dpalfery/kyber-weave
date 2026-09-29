@@ -28,14 +28,8 @@ describe('packWebDirectory - embed web assets in kyberdash-web/1 format', () => 
     await writeFile(join(sourceDir, 'style.css'), 'body { color: red; }')
     await writeFile(join(sourceDir, 'app.js'), 'console.log("test");')
 
-    // Dynamic import because the module doesn't exist until implementation
-    const { packWebDirectory } = await import('./pack-sea-web.mjs').catch(() => ({
-      packWebDirectory: async () => null,
-    }))
-
-    if (!packWebDirectory) {
-      throw new Error('packWebDirectory not implemented')
-    }
+    // Dynamic import: module does not exist until implementation (RED expects this to fail on import)
+    const { packWebDirectory } = await import('./pack-sea-web.mjs')
 
     const result = await packWebDirectory(sourceDir)
     expect(result).toBeDefined()
@@ -62,27 +56,19 @@ describe('packWebDirectory - embed web assets in kyberdash-web/1 format', () => 
     await writeFile(join(sourceDir, 'text.txt'), textContent)
     await writeFile(join(sourceDir, 'binary.dat'), binaryContent)
 
-    const { packWebDirectory } = await import('./pack-sea-web.mjs').catch(() => ({
-      packWebDirectory: async () => null,
-    }))
-
-    if (!packWebDirectory) {
-      throw new Error('packWebDirectory not implemented')
-    }
+    const { packWebDirectory } = await import('./pack-sea-web.mjs')
 
     const result = await packWebDirectory(sourceDir)
 
     // Decode and verify text file
-    if (result.files['text.txt']) {
-      const decoded = Buffer.from(result.files['text.txt'], 'base64').toString('utf8')
-      expect(decoded).toBe(textContent)
-    }
+    expect(result.files['text.txt']).toBeDefined()
+    const decoded = Buffer.from(result.files['text.txt'], 'base64').toString('utf8')
+    expect(decoded).toBe(textContent)
 
     // Decode and verify binary file
-    if (result.files['binary.dat']) {
-      const decoded = Buffer.from(result.files['binary.dat'], 'base64')
-      expect(decoded).toEqual(binaryContent)
-    }
+    expect(result.files['binary.dat']).toBeDefined()
+    const decodedBinary = Buffer.from(result.files['binary.dat'], 'base64')
+    expect(decodedBinary).toEqual(binaryContent)
   })
 
   it('exits non-zero when index.html is missing', async () => {
@@ -90,7 +76,7 @@ describe('packWebDirectory - embed web assets in kyberdash-web/1 format', () => 
     await writeFile(join(sourceDir, 'app.js'), 'console.log("test");')
 
     // Try to run the CLI - it should fail
-    const DASH_ROOT = join(process.cwd(), 'dash')
+    const DASH_ROOT = process.cwd()
     const result = spawnSync('node', ['scripts/pack-sea-web.mjs', sourceDir, join(tempDir, 'output.json')], {
       cwd: DASH_ROOT,
       encoding: 'utf8',
@@ -112,13 +98,7 @@ describe('packWebDirectory - embed web assets in kyberdash-web/1 format', () => 
     await writeFile(join(assetDir, 'style.css'), 'body {}')
     await writeFile(join(fontDir, 'font.woff2'), 'binary-like')
 
-    const { packWebDirectory } = await import('./pack-sea-web.mjs').catch(() => ({
-      packWebDirectory: async () => null,
-    }))
-
-    if (!packWebDirectory) {
-      throw new Error('packWebDirectory not implemented')
-    }
+    const { packWebDirectory } = await import('./pack-sea-web.mjs')
 
     const result = await packWebDirectory(sourceDir)
 

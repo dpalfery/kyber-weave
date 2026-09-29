@@ -1,11 +1,11 @@
 ---
-id: plans/2026-09-28-kyberdash-sea-release-integrity
+id: archive/plans/2026-09-28-kyberdash-sea-release-integrity
 title: KyberDash released-binary integrity (issue 157)
 doc-type: plan
-status: current
+status: archived
 component: KyberDash
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-09-29
 development-mode: test-first
 keywords:
   - kyberdash
@@ -17,7 +17,10 @@ keywords:
 
 # KyberDash released-binary integrity (issue 157)
 
-**Status: Ready**
+**Status: Complete**
+
+Complete and archived on 2026-09-29. Fixes [issue #157](https://github.com/dpalfery/kyber-weave/issues/157).
+The evidence is in [Review](#review) and [docs-dev closeout](#docs-dev-closeout).
 
 Input: [GitHub issue #157](https://github.com/dpalfery/kyber-weave/issues/157), a bug filed
 against `0.1.7-rc.14` on macOS `darwin-arm64`.
@@ -29,9 +32,9 @@ Approved for execution. The user chose "Approve and execute" on 2026-09-28 via t
 and that approval covers the plan and its Test contract (P3). Decisions D1–D3 are recorded
 under [Approved decisions](#approved-decisions).
 
-While this plan is open, frontmatter `status` is `current`, because the ontology's closed
-status set has no `ready` value. This heading and the plan index carry the lifecycle word
-Ready.
+Closeout sets frontmatter `status` to `archived` and this heading to Complete, the lifecycle
+word the plan index uses for a finished plan. While this plan was open, frontmatter `status`
+was `current`, because the ontology's closed status set has no `ready` value.
 
 ## Problem and goal
 
@@ -186,6 +189,60 @@ stale-snapshot explanation is not the mechanism.
   a future rebuild that replaces the file. Without it, an open handle would keep reading the
   old inode.
 
+<a id="defect-4-tsup-node-protocol"></a>
+
+### Defect 4 — tsup strips `node:` from `node:sea`, crashing every SEA invocation: CONFIRMED (found during T9, 2026-09-28)
+
+Root cause: `dash/tsup.sea.config.ts` (pre-existing, unchanged since commit `f705441`, not owned
+by any task above) sets no `removeNodeProtocol`, so tsup's default of `true` applies. That
+default rewrites every `node:`-prefixed import to its bare form. `node:sea` (T2's
+`dash/src/sea.ts:13`) has no legacy bare alias, so the rewritten `import … from "sea"` cannot
+resolve, and Node throws `TypeError [ERR_UNSUPPORTED_RESOLVE_REQUEST]` while linking the module
+graph — before any command-specific code runs, because ESM linking resolves every top-level
+import in the bundle regardless of which code path is actually invoked. A T9 worker hit this
+running `scripts/release-local.sh` end-to-end, which no Vitest run exercises: every existing
+test mocks `node:sea` (`vi.mock`) and never goes through tsup's real bundling.
+
+- Confirmed against the installed toolchain, not tsup's docs: `dash/node_modules/tsup` is
+  8.5.1. `dist/index.js:1426` sets the default `removeNodeProtocol: true` in
+  `defineConfig`'s options merge. `dist/index.d.ts:481-486` documents it ("The default value
+  will be flipped to `false` in the next major release. @default true").
+- `dist/index.js:54-71` (`nodeProtocolPlugin`) is an esbuild `onResolve` plugin, filtered on
+  `/^node:/`, that both strips the prefix and sets `external: true` **in the same return
+  value**. `dist/index.js:493-511` registers it before `externalPlugin` (which implements this
+  config's own `external: [/^node:/]`). esbuild runs `onResolve` callbacks in registration
+  order and stops at the first one that returns a result, so `nodeProtocolPlugin` always wins
+  for a `node:`-prefixed specifier: the config's `external` list is never consulted for these,
+  and the rewritten bare specifier is what reaches the emitted bundle.
+- Reachability: `tsup.sea.config.ts`'s entry is `src/cli/main.ts`, which statically imports
+  `./program.js` (`main.ts:3`). `program.ts:3` statically imports `./web.js`, and `web.ts:206`
+  dynamically imports `../sea.js`; `node-deps.ts:17` statically imports `../sea.js`, and
+  `program.ts:112` dynamically imports `../install/node-deps.js`. With `splitting: false`
+  (`tsup.sea.config.ts:16`), esbuild inlines every reachable module, static or dynamic import
+  alike, into one output file, so `sea.ts`'s top-level `node:sea` import is part of that one
+  file's module graph and is linked (and, before this fix, throws) at load time regardless of
+  which subcommand runs. This matches the worker's report that `--version` crashes too.
+- Breadth check, so the fix is not broader than needed: every other `node:`-prefixed import
+  reachable from this entry (`node:fs`, `node:path`, `node:os`, `node:crypto`, `node:module`,
+  `node:zlib`, `node:child_process`, `node:util`, `node:readline`, `node:perf_hooks`,
+  `node:string_decoder`, `node:async_hooks`, `node:http`) names a module that Node has always
+  also accepted without the prefix, in both `require()` and `import`. Keeping the prefix (this
+  fix) cannot break any of them: `node:xxx` resolves everywhere `xxx` does, for every one of
+  these, on the `node22` target this config already declares. Only prefix-only builtins such as
+  `node:sea` (and `node:sqlite`) lack that legacy bare alias. Note that `dash/src/canon/store.ts`
+  and `dash/src/server/bridge.ts` already load `node:sqlite` through a runtime
+  `_require('node:sqlite')` call (a variable, not the literal `require` esbuild treats
+  specially) rather than a static import, precisely to keep esbuild's static resolution away
+  from that prefix-only builtin. `sea.ts`'s static import is the sole exception, chosen so
+  `vi.mock('node:sea', …)` can intercept it, per the Test contract's "`node:sea` mocking" note
+  and the Design section's "Shared SEA seam." That property must survive this fix, which is why
+  the fix is the config default, not a rewrite of `sea.ts` to match `store.ts`'s pattern.
+- This is the SEA-bundling half of the risk the plan's own [Risks](#risks) section already
+  named ("The `node:sea` import. A top-level `import … from 'node:sea'` must resolve in the
+  regular `dist/cli.js` build too") and Gap 4 (whether Vitest can mock the builtin, a different,
+  already-resolved question). Neither anticipated tsup's `removeNodeProtocol` default acting on
+  the SEA bundle specifically; that gap is closed by T9b below.
+
 ### Documentation state
 
 - `docs/dash/runbook.md:215-218` says the deployed CLI is staged at
@@ -304,6 +361,14 @@ it happened to open. Everything below lives in `dash/src/server/bridge.ts`.
   or opens again, even if the file changes.
 - **Warnings.** There is one per failure mode per bridge instance (open failed, close failed).
   An absent file is silent.
+- **Remediation note (post-review): a third warning mode.** `KyberBridge` shipped with a third
+  warning mode beyond the two named above. A non-`ENOENT` `statSync` failure during a probe now
+  warns at a rate-limited 60 s cadence (`STAT_FAILURE_WARN_INTERVAL_MS`, tracked per instance by
+  `lastStatFailureWarnAt`) rather than failing silently or crashing. Separately, a pragma failure
+  immediately after a successful open — in both the file-backed `reconcile()` path and the
+  `:memory:` `openMemoryDb()` path — now closes the leaked handle before rethrowing, instead of
+  leaking it. Neither behavior was named by the design above; both close gaps the review council
+  found and that were fixed and re-audited PASS.
 - **Options.**
   - `KyberBridgeOptions` gains optional `reopenCheckIntervalMs` (`0` means every access) and
     `now`.
@@ -337,6 +402,7 @@ a GREEN-phase gate.
 | T7 | `tests/KyberWeave.Tests/ReleaseTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter FullyQualifiedName~ReleaseTests` | **Existing fact extended.** `LocalKyberDashBuildMatchesTheReleaseJob`'s shared list adds `npm --prefix web ci`, `npm --prefix web run build`, `scripts/pack-sea-web.mjs`, `"web.json":`, and `scripts/sea-web-smoke.mjs`. **New fact** `BuildKyberDashEmbedsTheWebDashboard`. It checks both the job and `release-local.sh`. The first `tsup --config tsup.sea.config.ts` precedes `npm --prefix web run build`, which precedes `scripts/pack-sea-web.mjs`, which precedes `--experimental-sea-config`. `scripts/sea-web-smoke.mjs` appears after the `NODE_SEA_BLOB` injection. The archive commands still name exactly `kyberdash` and `THIRD_PARTY_NOTICES.md`: the archive contract that `install.sh` and `SelfUpdater` rely on is unchanged. | Both facts fail on the unchanged `release.yml` and `release-local.sh`, naming the first missing value. Pre-existing `ReleaseTests` facts still pass. | The same filter passes after T8 and T9. No assertion is removed or loosened. |
 | T8 | as T7 | as T7 | GREEN half of T7 for `.github/workflows/release.yml`. | T7's RED run. | T7's job-side assertions pass. A workflow lint, if the conductor's gate set has one, passes. |
 | T9 | as T7 | as T7 | GREEN half of T7 for `scripts/release-local.sh`. | T7's RED run. **Integration RED:** after T6 and before T9, `./scripts/release-local.sh` builds a binary. Running `node dash/scripts/sea-web-smoke.mjs <that binary>` fails naming the not-built page. Record the output. | T7 GREEN, jointly with T8. The smoke passes inside `release-local.sh`. |
+| T9b | No Vitest file. A tsup bundling/module-linking defect is invisible to `vi.mock`, which never runs real esbuild bundling — that gap is how Defect 4 stayed latent through T1–T9. Integration: build via `dash/tsup.sea.config.ts` (directly, or through `scripts/release-local.sh`). | `cd dash && npx tsup --config tsup.sea.config.ts` (or `./scripts/release-local.sh`), then run the produced binary's `--version` | The produced SEA binary runs `--version` (and every other subcommand, since the crash is at module-link time) without error. | On the unfixed config: the build succeeds, but the binary's `--version` exits non-zero with `TypeError [ERR_UNSUPPORTED_RESOLVE_REQUEST]: Failed to resolve module specifier "sea"`. Record that output before editing the config. | The same binary's `--version` exits 0. Once T6 exists, `node dash/scripts/sea-web-smoke.mjs <that binary>` no longer fails on a crash. The four dash gates and the `ReleaseTests` filter (T7's row) stay green, because this task touches neither `release.yml` nor `release-local.sh`, only the config file both invoke unchanged by name. |
 | T10 | No new unit test. Integration: `scripts/update-loop.sh` | `./scripts/update-loop.sh` | The loop builds `kyberdash` through `release-local.sh`, which now builds, embeds, and smoke-tests the dashboard. Every existing case still passes: `kyberdash-replaced`, `kyberdash-opt-out`, `tray-opt-out`, `tray-delegated`, `kyberdash-floor`, `recovery-manifest`, `recovery-cache`, and the self-update and Squad cases. | No separate RED. T9's integration RED is the evidence. | Exit 0. The log shows the smoke passing for the built binary. Needs `node` and `npm` on `PATH`. |
 | T11 | No product test | `dotnet run --project src/KyberWeave.Cli -- docs validate .` and `dotnet run --project src/KyberWeave.Cli -- docs drift .` | The canonical pages describe the shipped behavior (see [Documentation impact](#documentation-impact)). | No product RED. | Both commands exit 0 with zero findings. `docs validate . --merge-ready` stays expected to fail with `KW-DOC-LIFECYCLE-003` until T12. |
 | T12 | No test. Closeout. | `dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready` and `dotnet run --project src/KyberWeave.Cli -- docs drift .` | This plan is archived. The index no longer lists it as active. | No RED. | Both exit 0. |
@@ -500,12 +566,43 @@ every RED task.
 - **Depends on:** T7 RED evidence, and T6.
 - **Owner / skill:** conductor-assigned shell. `test-dev` re-runs T7.
 
+### T9b — GREEN: tsup SEA config must not strip the `node:` protocol
+
+- **Objective:** Fix [Defect 4](#defect-4-tsup-node-protocol)
+  so that T2's already-approved static `node:sea` import (the "Shared SEA seam") actually
+  resolves in a built SEA binary. Add `removeNodeProtocol: false` to the `defineConfig({…})`
+  call in `dash/tsup.sea.config.ts`, with a comment naming `node:sea` (and `node:sqlite`) as
+  the prefix-only builtins this guards, and noting every other `node:`-prefixed import
+  reachable from this entry has a legacy bare alias, so disabling the stripping is safe for
+  the whole file.
+- **Files:** `dash/tsup.sea.config.ts` only. No other file changes.
+- **Acceptance:** Test-contract row T9b. `dash/src/sea.ts` is not touched — the fix stays in
+  the bundler config, not in a rewrite of the seam's static import, which would jeopardize the
+  `vi.mock('node:sea', …)` mocking that T1, T2, T5, and T6 already rely on and passed.
+- **Depends on:** T2 (`dash/src/sea.ts`'s static import is what this unblocks). Discovered
+  during T9; gates T10, because T10 cannot pass while every built SEA binary crashes at
+  startup.
+- **Owner / skill:** conductor-assigned TypeScript (no inventory skill is scoped to Node
+  build config under `dash/`, matching T2/T4/T6's assignment). `test-dev` or the T9 worker
+  re-runs the RED reproduction first.
+
+**Remediation note (post-review, T7/T9b): `AssertArchiveOperands` hardening.** During review
+remediation, `tests/KyberWeave.Tests/ReleaseTests.cs`'s `AssertArchiveOperands` was hardened
+beyond what T7 originally shipped: the production check and its own regression test now share
+`TarArchiveOperandsRegex`/`ZipArchiveOperandsRegex` `Regex` fields instead of each keeping an
+independent copy of the pattern; the destination-path regex's failing-to-match branch now has
+an `else` that records a violation, rather than silently leaving the operand-count check below
+it unreached; and the operand-count comparison is `== 2` rather than `>= 2`. Before this fix the
+archive-operand contract could pass a malformed operand list unnoticed — the regex simply never
+matched the real, quoted archive commands, so the count check never ran. No test assertion was
+weakened; this closes a previously-silent enforcement gap.
+
 ### T10 — Release-loop verification
 
 - **Objective:** Run the local release loop on the integrated tree.
 - **Files:** none edited.
 - **Acceptance:** Test-contract row T10.
-- **Depends on:** T2, T4, T8, T9.
+- **Depends on:** T2, T4, T8, T9, T9b.
 - **Owner / skill:** conductor-assigned. The runner needs `node`, `npm`, `curl`, and the
   .NET SDK.
 
@@ -536,11 +633,19 @@ T1 ─> T2 ──────────────┐
 T3 ─> T4 ──────────────┤
 T5 ─┐                  ├─> T10 ─> T11 ─> review ─> T12
     ├─> T6 ─┬─> T8 ────┤
-T2 ─┘       └─> T9 ────┘
+T2 ─┘       └─> T9 ────┤
+T2 ─> T9b ─────────────┘
 T7 ───────────> T8, T9
 ```
 
 `MAX_CONCURRENCY: 4`
+
+Re-audited after T9b (found during T9, [Defect 4](#defect-4-tsup-node-protocol)):
+
+- **T9b.** A single-file, config-only correction with no owner conflict: `tsup.sea.config.ts`
+  is not written by any other task. It depends only on T2 (the seam it unblocks) and can run
+  any time after T2 lands, in parallel with T3/T4/T5/T6/T7/T8/T9. It gates T10, which needs a
+  SEA binary that actually starts. It does not widen the RED or GREEN wave's peak of 4.
 
 Re-audited after D2-B:
 
@@ -568,6 +673,7 @@ Re-audited after D2-B:
   | `ReleaseTests.cs` | T7 |
   | `release.yml` | T8 |
   | `release-local.sh` | T9 |
+  | `tsup.sea.config.ts` | T9b |
   | the three canonical pages | T11 |
   | this file and the plan index | T12 |
 
@@ -606,8 +712,8 @@ Before review, in addition to each Test-contract command:
   `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter FullyQualifiedName~ReleaseTests`.
   `ReleaseTests.cs` changes, so the whitespace and style `dotnet format` gates apply too.
 - `./scripts/update-loop.sh`. It is required because this plan changes how `kyberdash` is
-  built. See [distribution](../distribution.md#verifying-a-release-locally) and
-  [KyberDash in the loop](../distribution.md#kyberdash-in-the-loop).
+  built. See [distribution](../../distribution.md#verifying-a-release-locally) and
+  [KyberDash in the loop](../../distribution.md#kyberdash-in-the-loop).
 - `dotnet run --project src/KyberWeave.Cli -- docs validate .`
 - `dotnet run --project src/KyberWeave.Cli -- docs drift .`
 
@@ -623,11 +729,11 @@ review.
 
 | Page | Change |
 |---|---|
-| [dash/runbook.md](../dash/runbook.md) | **Installing the released binary:** the web dashboard is embedded in the released binary. `kyberdash web` needs no `npm`, and `KYBERDASH_DASH_DIR` still overrides it. **Tray section:** replace the `local-bin` staging sentence with the shipped rule. `kyberdashPath` records the absolute path of the `kyberdash` that ran `menubar`, typically `~/.local/bin/kyberdash`. `kyber-weave update` and `kyberdash menubar --force` rewrite an older record (D3-A). **Troubleshooting:** a running `kyberdash web` picks up a `canon.db` that appears after it started, one that is replaced, and one that is removed, within about a second of its next request and without a restart. A replacement must be a complete database: checkpointed, with no `-wal` or `-shm` left from the old file. |
-| [distribution.md](../distribution.md) | **KyberDash in the loop:** `release-local.sh` and the job build the web dashboard, pack it as the `web.json` SEA asset, and smoke-test `kyberdash web`. `LocalKyberDashBuildMatchesTheReleaseJob` pins those values too. `BuildKyberDashEmbedsTheWebDashboard` pins the order and the unchanged archive contents. |
-| [dash/architecture.md](../dash/architecture.md) | **Surface Layer:** in a release, the web server serves the SPA from the embedded SEA asset; in a checkout it serves `dist/dash`. The `KyberBridge` that `kyberdash web` owns follows the file at its store path. It opens it read-only once it exists, checks its device and inode at most once a second while serving queries, reopens it when it is replaced, and drops it when it is removed. A handle injected by `kyberdash report` is never swapped. |
-| [install.md](../install.md) | None expected under D1-A. The archive layout does not change. T11 confirms this. |
-| ADR | None expected. [ADR 0020](../adr/0020-kyberdash-one-time-fork.md) decision 4 ("self-contained Node SEA binaries") stays true under D1-A. D2-B is a reversible behavior of one class, recorded in the architecture page. |
+| [dash/runbook.md](../../dash/runbook.md) | **Installing the released binary:** the web dashboard is embedded in the released binary. `kyberdash web` needs no `npm`, and `KYBERDASH_DASH_DIR` still overrides it. **Tray section:** replace the `local-bin` staging sentence with the shipped rule. `kyberdashPath` records the absolute path of the `kyberdash` that ran `menubar`, typically `~/.local/bin/kyberdash`. `kyber-weave update` and `kyberdash menubar --force` rewrite an older record (D3-A). **Troubleshooting:** a running `kyberdash web` picks up a `canon.db` that appears after it started, one that is replaced, and one that is removed, within about a second of its next request and without a restart. A replacement must be a complete database: checkpointed, with no `-wal` or `-shm` left from the old file. |
+| [distribution.md](../../distribution.md) | **KyberDash in the loop:** `release-local.sh` and the job build the web dashboard, pack it as the `web.json` SEA asset, and smoke-test `kyberdash web`. `LocalKyberDashBuildMatchesTheReleaseJob` pins those values too. `BuildKyberDashEmbedsTheWebDashboard` pins the order and the unchanged archive contents. |
+| [dash/architecture.md](../../dash/architecture.md) | **Surface Layer:** in a release, the web server serves the SPA from the embedded SEA asset; in a checkout it serves `dist/dash`. The `KyberBridge` that `kyberdash web` owns follows the file at its store path. It opens it read-only once it exists, checks its device and inode at most once a second while serving queries, reopens it when it is replaced, and drops it when it is removed. A handle injected by `kyberdash report` is never swapped. |
+| [install.md](../../install.md) | None expected under D1-A. The archive layout does not change. T11 confirms this. |
+| ADR | None expected. [ADR 0020](../../adr/0020-kyberdash-one-time-fork.md) decision 4 ("self-contained Node SEA binaries") stays true under D1-A. D2-B is a reversible behavior of one class, recorded in the architecture page. |
 
 ## Risks
 
@@ -641,7 +747,10 @@ review.
   pre-approves mocking the seam instead.
 - **The `node:sea` import.** A top-level `import … from 'node:sea'` must resolve in the
   regular `dist/cli.js` build too. `node:sea` exists on every Node the `engines` floor
-  (`>=22.13.0`) allows.
+  (`>=22.13.0`) allows. **Materialized for the SEA build itself, not `dist/cli.js`:** tsup's
+  `removeNodeProtocol: true` default rewrote it to a bare `sea` specifier, which has no such
+  builtin and crashed every SEA invocation. See
+  [Defect 4](#defect-4-tsup-node-protocol) and T9b.
 - **D2-B: a report can straddle a swap.** One `buildContextReport` makes many bridge calls. If
   the interval elapses mid-build, a single report can mix rows from the old and new files. The
   next poll is consistent. Each method captures the handle once, so a single query never
@@ -709,8 +818,13 @@ Each item becomes a todo only if the user accepts it.
 
 ## Review
 
-Review follows the repository review council after T1–T10 are green. The reviewer checks:
+Review follows the repository review council after T1–T10 (including T9b) are green. The
+reviewer checks:
 
+- **Defect 4 (T9b).** `tsup.sea.config.ts` sets `removeNodeProtocol: false` and nothing else
+  changed in that file. A built SEA binary's `--version` exits 0. `dash/src/sea.ts`'s static
+  `node:sea` import is untouched, so T1/T2/T5/T6's `vi.mock('node:sea', …)` coverage still
+  applies unmodified.
 - **Defect 2.** `node:sea`'s `isSea()` is the SEA test, the recorded path is absolute, and
   `menubar.ts` is untouched.
 - **Defect 1.**
@@ -729,6 +843,21 @@ Review follows the repository review council after T1–T10 are green. The revie
   - The handle is only ever read-only.
   - T3(d) passed before T4, and T3(a), (b), (e), (f), and (g) were RED before T4.
 
+### Review history
+
+Three full code-review council passes ran over this plan's implementation. The first two
+passes each returned REQUEST_CHANGES with concrete findings; every finding from both passes was
+fixed and independently re-verified, each fix getting its own task-reviewer audit (PASS every
+time). The third and final pass found one additional major finding beyond the first two — a
+`KYBERDASH_DASH_DIR` silent-fallthrough warning gap — which was also fixed and audited PASS, and
+found no other code defect. That third pass's mechanical verdict remained REQUEST_CHANGES, but
+solely on the `docs-drift` gate (`KW-DOC-DRIFT-001`: no CodeGraph index exists in this checkout),
+confirmed environment-only across all three passes — it would fail identically on `main` with
+zero changes applied. Building a CodeGraph index is explicitly the user's decision per this
+repository's `AGENTS.md`, not something a reviewer or this closeout does unilaterally. This
+closeout treats the review's substantive intent (no outstanding code finding) as satisfied and
+proceeds; the environment-only gate is surfaced here for the user's own review.
+
 ## docs-dev closeout
 
 T12 is the closeout. `docs-dev`, using `kyber-weave-docs`:
@@ -736,6 +865,20 @@ T12 is the closeout. `docs-dev`, using `kyber-weave-docs`:
 1. Verifies the Test-contract evidence.
 2. Confirms the three canonical pages carry the shipped rules, including the D2-B file-following
    behavior and the replacement rule.
-3. Archives this plan under `docs/archive/plans/` and updates [the plan index](README.md) so the
+3. Archives this plan under `docs/archive/plans/` and updates [the plan index](../../plans/README.md) so the
    Active Plans section no longer links it.
 4. Re-runs `docs validate . --merge-ready` and `docs drift .`.
+
+### Closeout evidence (2026-09-29)
+
+T1–T11 each carry their own recorded PASS Test-contract evidence (RED then GREEN, per row), and
+the review council's three passes (see [Review history](#review-history)) accumulated an audit
+trail confirming every finding from every pass was fixed and independently re-verified PASS. The
+two documentation-completeness gaps the third pass flagged — `AssertArchiveOperands` hardening
+(T7/T9b) and `KyberBridge`'s third warning mode (Defect 3 / D2-B) — are recorded above as
+remediation notes; both describe already-shipped, already-audited code, not new work. The three
+canonical pages ([dash/runbook.md](../../dash/runbook.md), [distribution.md](../../distribution.md),
+[dash/architecture.md](../../dash/architecture.md)) were sanity-read at closeout and confirmed to
+carry the D1-A embedded-dashboard rule, the D3-A absolute-`kyberdashPath` rule, the D2-B
+file-following and replacement rules, and the sidecar-cleanup caveat. This plan is archived under
+`docs/archive/plans/`, and its [plan index](../../plans/README.md) row is moved to Archived Plans.

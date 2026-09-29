@@ -6,7 +6,7 @@ status: current
 component: KyberDash
 source-root: dash
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-29
 code-refs:
   - registerKyberCommands
   - refreshHarnessSources
@@ -45,7 +45,9 @@ appear in 0.1.7-rc.9, and the installer skips KyberDash on any release below tha
 Node SEA RID names, and how `kyber-weave update` treats an installed `kyberdash`.
 
 The released binary is the CLI engine — `kyberdash report`, `kyberdash web`, and
-`kyberdash kyber otel`. The tray ships as its own release asset from `0.1.7-rc.13`:
+`kyberdash kyber otel`. The web dashboard is embedded in the released binary as a packed SEA
+asset, so `kyberdash web` needs no `npm` and no checkout to serve it; `KYBERDASH_DASH_DIR`
+still overrides it with a directory of your own build. The tray ships as its own release asset from `0.1.7-rc.13`:
 `kyberdash menubar` installs it, after checking its SHA-256 and — on macOS — its code
 signature, team id and Gatekeeper acceptance (`install.sh --with-menubar` does the same on
 macOS). `kyber-weave update` updates an installed tray by delegating to
@@ -212,10 +214,14 @@ the tray at login (`dash/tray/src-tauri/src/autostart.rs`). On macOS:
   `io.github.dpalfery.kyberdash`) with `RunAtLoad=true` and crash-only
   `KeepAlive { SuccessfulExit = false }`: it starts at login, launchd restarts it after an
   abnormal exit, and an intentional **Quit** stays stopped.
-- `~/.kyberdash/tray.json` names the CLI through `kyberdashPath`. The deployed CLI is a
-  self-contained Node SEA binary staged at
-  `~/Library/Application Support/io.github.dpalfery.kyberdash/local-bin/kyberdash`, so the
-  launchd environment needs no `node`, Homebrew, checkout, or `KYBERDASH_BIN`.
+- `~/.kyberdash/tray.json` names the CLI through `kyberdashPath`, which records the absolute
+  path of the `kyberdash` binary that ran `menubar` — typically `~/.local/bin/kyberdash`,
+  `install.sh`'s default install path, not a copy staged elsewhere — so the launchd
+  environment needs no `node`, Homebrew, checkout, or `KYBERDASH_BIN`. An older record, or one
+  recorded before this fix as a bare `kyberdash` with no directory, is not migrated in place:
+  the next `kyber-weave update` (which hands off to `kyberdash menubar --update`) and
+  `kyberdash menubar --force` both rewrite it, but a plain `kyberdash menubar` run against an
+  already-installed tray leaves an existing record alone.
 - **Quit** through the tray stops it and both children; an abnormal tray exit produces a
   fresh launchd-started tray whose children rebind the same loopback ports.
 
@@ -419,6 +425,18 @@ edit existing hooks as part of this setup.
 
 - **Details**: Schema v13 added a unique `problem_key` on `problems` and collapsed historical duplicates on database open. Schema v14 rekeys that identity by span, code, and location, so diagnostics at distinct locations stay separate.
 - **Backup**: Always verify and retain pre-migration backups (e.g. `~/.kyberdash/canon.db.backup-*`).
+
+### 6. A running `kyberdash web` and a `canon.db` that appears, is replaced, or is removed
+
+- **Behavior**: A running `kyberdash web` server picks up a `canon.db` that appears after it
+  started, one that is replaced by a different file, and one that is removed — all within
+  about a second of its next request, with no restart. Before that, it serves empty results
+  rather than an error.
+- **Replacement must be a complete database**: checkpoint the writer
+  (`PRAGMA wal_checkpoint(TRUNCATE)`) and close it, build the replacement at a sibling path,
+  checkpoint and close that too, then rename it over `canon.db` and remove any leftover
+  `canon.db-wal` or `canon.db-shm` from the old file. A replacement that leaves those sidecars
+  behind can make SQLite misread the new file; the server has no way to detect that case.
 
 ---
 

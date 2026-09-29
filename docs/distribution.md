@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-09-29
 ---
 
 # Distribution and release flow
@@ -274,10 +274,20 @@ yet touched — does not exist in any other shape.
 
 `release-local.sh` builds `kyberdash-<node-rid>.tar.gz` for this machine the way the
 `build-kyberdash` job does: an ESM bundle behind the CommonJS shim, injected into a prebuilt
-Node from nodejs.org, and ad-hoc signed on macOS. The job is the authority.
-`ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` fails when the fuse, the postject
-version, or Node's version in `dash/.nvmrc` disagrees with it. The build needs `node` and
-`npm` on `PATH`. A failed build fails the loop; `--no-kyberdash` is the explicit opt-out.
+Node from nodejs.org, and ad-hoc signed on macOS. Both also build the web dashboard
+(`npm --prefix web ci` and `npm --prefix web run build`), pack it as the `web.json` SEA asset
+with `scripts/pack-sea-web.mjs`, add that asset to the SEA blob alongside the CLI, and
+smoke-test the result with `scripts/sea-web-smoke.mjs` — confirming that the built binary's
+`kyberdash web` serves the SPA rather than the "not built" page. The job is the authority.
+`ReleaseTests.LocalKyberDashBuildMatchesTheReleaseJob` pins those web-build, packing, and
+smoke-test commands too, alongside the fuse, the postject version, and Node's version in
+`dash/.nvmrc`. `BuildKyberDashEmbedsTheWebDashboard` pins the order — tsup, then the web
+build, then the packer, then the SEA blob injection, then the smoke test — and confirms the
+archive still contains exactly `kyberdash` and `THIRD_PARTY_NOTICES.md`, unchanged by the
+embedded dashboard. (`dash/tsup.sea.config.ts` also now sets `removeNodeProtocol: false`, so
+the SEA bundle keeps the `node:` prefix on builtins such as `node:sea` that have no bare
+alias, rather than tsup's default of stripping it.) The build needs `node` and `npm` on
+`PATH`. A failed build fails the loop; `--no-kyberdash` is the explicit opt-out.
 
 Each case starts from a fresh copy of a staged build, with its own `HOME`, so the tray
 record the updater reads is a fixture and never this machine's:
