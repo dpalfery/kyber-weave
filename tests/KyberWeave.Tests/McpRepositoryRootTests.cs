@@ -78,7 +78,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         (string first, string second) = CreateTwoInitializedRepositories();
 
-        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+        ExpectedRootMismatchException error = Assert.Throws<ExpectedRootMismatchException>(() =>
             RepositoryRootResolver.Resolve(
                 ["--repo-root", first, "--expect-root", second],
                 first,

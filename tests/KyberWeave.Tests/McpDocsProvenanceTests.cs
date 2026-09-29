@@ -158,6 +158,10 @@ public sealed class McpDocsProvenanceTests : IDisposable
         Directory.CreateDirectory(rootB);
         DocsScaffolder.Scaffold(rootA, owner: "alpha-team");
         DocsScaffolder.Scaffold(rootB, owner: "beta-team");
+        // Stop git from walking up into a parent checkout when TMPDIR sits inside one:
+        // an invalid local gitdir keeps rev=unavailable / dirty=unknown deterministic.
+        IsolateFromParentGit(rootA);
+        IsolateFromParentGit(rootB);
         File.WriteAllText(
             Path.Combine(rootB, "docs", "second-only.md"),
             "# second-only-marker\n\nThis repository owns a marker no other corpus has.\n");
@@ -171,6 +175,11 @@ public sealed class McpDocsProvenanceTests : IDisposable
         yield return tools.Glossary("documentation");
         yield return tools.AnalysisCandidates(kind: null, cursor: null, limit: 20, charBudget: 4000);
     }
+
+    private static void IsolateFromParentGit(string root) =>
+        File.WriteAllText(
+            Path.Combine(root, ".git"),
+            $"gitdir: {Path.Combine(root, ".git-missing")}{Environment.NewLine}");
 
     private static DocsTools CreateTools(string root) =>
         new(CreateHost(root), new RepositoryDocsAnalysisReader(root));

@@ -46,7 +46,7 @@ public static class RepositoryRootResolver
             string expectedRoot = ResolvePath(expected, baseDirectory);
             if (!PathsEqual(expectedRoot, resolved))
             {
-                throw new InvalidOperationException(
+                throw new ExpectedRootMismatchException(
                     $"The --expect-root value '{expectedRoot}' does not match the resolved MCP " +
                     $"root '{resolved}'. Refusing to serve because the client expects a different " +
                     "repository and answers would come from the wrong corpus. Pass the matching " +

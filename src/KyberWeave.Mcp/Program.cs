@@ -41,8 +41,7 @@ try
         workingDirectory,
         Environment.GetEnvironmentVariable(RepositoryRootResolver.EnvironmentVariable));
 }
-catch (InvalidOperationException ex) when (
-    expectRootFromFlag && ex.Message.Contains("expect-root", StringComparison.OrdinalIgnoreCase))
+catch (ExpectedRootMismatchException ex)
 {
     // A client-asserted root that does not match is a refuse-to-serve, distinct from an
     // unbound root: KW-MCP-ROOT-002 says the binding was intentional but wrong.
@@ -60,7 +59,20 @@ catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
 // expectation wins over the ambient one, so a shell export cannot override a project pin.
 if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
 {
-    string expectedRoot = Path.GetFullPath(expectRootEnvironment, workingDirectory);
+    string expectedRoot;
+    try
+    {
+        expectedRoot = Path.GetFullPath(expectRootEnvironment, workingDirectory);
+    }
+    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        await Console.Error.WriteLineAsync(
+            "KW-MCP-ROOT-002: The KYBER_WEAVE_EXPECT_ROOT value is not a valid path. " +
+            "Refusing to serve.")
+            .ConfigureAwait(false);
+        return 1;
+    }
+
     if (!RepositoryRootResolver.PathsEqual(expectedRoot, repoRoot))
     {
         await Console.Error.WriteLineAsync(

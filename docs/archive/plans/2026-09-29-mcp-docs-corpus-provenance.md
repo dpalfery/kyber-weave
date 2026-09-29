@@ -214,5 +214,5 @@ Harness config migration, multi-server discovery, ServerInfo embedding, Core ran
 On completion PR: archive this plan per lifecycle (`docs validate --merge-ready`), harvest any lasting binding rule into runbook (no ADR expected unless expect-root semantics expand beyond this plan). Update plan index Active → Archived row.
 ## References
 - Issue: https://github.com/dpalfery/kyber-weave/issues/162
-- Prior related containment work: [archive/plans/2026-09-25-mcp-docs-walk-containment.md](../archive/plans/2026-09-25-mcp-docs-walk-containment.md) (symlink walks; not provenance)
-- Runbook: [docgraph/mcp-runbook.md](../docgraph/mcp-runbook.md)
+- Prior related containment work: [archive/plans/2026-09-25-mcp-docs-walk-containment.md](2026-09-25-mcp-docs-walk-containment.md) (symlink walks; not provenance)
+- Runbook: [docgraph/mcp-runbook.md](../../docgraph/mcp-runbook.md)
