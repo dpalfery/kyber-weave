@@ -6,7 +6,7 @@ component: KyberDash
 source-root: dash
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-24
+last-reviewed: 2026-09-29
 decided-by:
   - adr/0020-kyberdash-one-time-fork
   - adr/0008-kyberdash-single-canonical-store
@@ -514,6 +514,18 @@ canonical harnesses that have a derived session inside the report's active day w
 unscoped window counts, stable under harness selection. Findings, dimensions, latest session,
 and cost remain scoped to the selected harness and window — the inventory is how you
 navigate, not a second analytic report.
+
+In a release, the web server (`dash/src/cli/web.ts`) serves the SPA from a `web.json` SEA
+asset embedded in the binary at build time, parsed once at server start; in a source
+checkout it serves `dash/dist/dash` instead. `KYBERDASH_DASH_DIR` overrides either source.
+
+The `KyberBridge` (`dash/src/server/bridge.ts`) that `kyberdash web` owns follows the file
+currently at its store path (`canonPath`) rather than the handle it first opened: it opens
+`canon.db` read-only once the file exists, checks its device and inode at most once a second
+(`reopenCheckIntervalMs`, default 1000 ms) while serving queries, closes the old handle and
+opens the new one when the file is replaced by a different one, and drops the handle —
+serving empty results rather than the removed file's data — when the file is removed. A
+handle injected by `kyberdash report`, and a `:memory:` store, are never probed or swapped.
 
 ### Web Dashboard (dash/web/)
 
