@@ -105,6 +105,11 @@ async function main() {
       process.exitCode = 1
       return
     }
+    if (!body.includes('<div id="root">')) {
+      console.error('sea-web-smoke: served response does not contain the SPA root marker (<div id="root">)')
+      process.exitCode = 1
+      return
+    }
 
     console.log(`sea-web-smoke: ${url}/ served the SPA index`)
     process.exitCode = 0

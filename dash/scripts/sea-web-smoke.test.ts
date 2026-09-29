@@ -136,7 +136,7 @@ setTimeout(() => process.exit(0), 60_000)
 import { createServer } from 'http'
 const server = createServer((req, res) => {
   res.writeHead(200, { 'content-type': 'text/html' })
-  res.end('<!doctype html><body>OK</body>')
+  res.end('<!doctype html><body><div id="root">OK</div></body>')
 })
 server.listen(0, '127.0.0.1', () => {
   const port = server.address().port
@@ -165,5 +165,42 @@ setTimeout(() => {
     expect(result.status).toBe(0)
     // The process should not have printed the "still running" line
     expect(result.stdout + result.stderr).not.toContain('Would still be running')
+  })
+
+  it('exits non-zero when stand-in binary serves HTML without the SPA root marker', async () => {
+    const standinScript = join(tempDir, 'no-root.mjs')
+    await writeFile(
+      standinScript,
+      `
+import { createServer } from 'http'
+const server = createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' })
+    res.end('<!doctype html><body><h1>Unrelated Page</h1></body>')
+  } else {
+    res.writeHead(404)
+    res.end()
+  }
+})
+server.listen(0, '127.0.0.1', () => {
+  const port = server.address().port
+  console.log(JSON.stringify({
+    event: 'kyberdash.web.listening',
+    url: \`http://127.0.0.1:\${port}\`,
+    pid: process.pid
+  }))
+})
+`,
+    )
+
+    const DASH_ROOT = process.cwd()
+    const result = spawnSync('node', ['scripts/sea-web-smoke.mjs', 'node', standinScript], {
+      cwd: DASH_ROOT,
+      timeout: 30_000,
+      encoding: 'utf8',
+    })
+
+    expect(result.status).not.toBe(0)
+    expect(result.stdout + result.stderr).toContain('does not contain the SPA root marker')
   })
 })
