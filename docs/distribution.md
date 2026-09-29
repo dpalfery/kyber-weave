@@ -227,7 +227,7 @@ Output format: `kyber-weave <version>` (e.g. `kyber-weave 0.1.0+714f187ab97d66e1
 
 Release integrity rests on HTTPS transport security plus a complete `SHA256SUMS.txt` manifest that covers all 20 archives and installers. A pre-publish check verifies manifest completeness and correctness before `gh release create` runs, failing the job and preventing publication if assets are missing or unexpected (fail-closed). A post-publish check verifies the published assets after the release is live; on mismatch it fails the job but the release is already public (detective, not preventive). Authenticode, GPG, and other code signatures are deferred per [issue #132](https://github.com/dpalfery/kyber-weave/issues/132);
 Azure signing was ruled out on cost; GPG-signed manifests are not implemented; SignPath
-Foundation is a possible but unverified future option. See [ADR 0026](adr/0026-release-integrity-checksums-signing-deferred.md)
+Foundation is a possible but unverified future option. See [ADR 0027](adr/0027-release-integrity-checksums-signing-deferred.md)
 for the complete decision record.
 
 | Artifact | Signing Status | Notes |

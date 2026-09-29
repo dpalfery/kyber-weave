@@ -1,5 +1,5 @@
 ---
-id: adr/0026-release-integrity-checksums-signing-deferred
+id: adr/0027-release-integrity-checksums-signing-deferred
 title: Release Integrity via SHA-256 Checksums with Code Signing Deferred
 doc-type: adr
 status: current
@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-09-29
 ---
 
-# ADR 0026: Release Integrity via SHA-256 Checksums with Code Signing Deferred
+# ADR 0027: Release Integrity via SHA-256 Checksums with Code Signing Deferred
 
 ## Status
 

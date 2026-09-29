@@ -7,7 +7,7 @@ component: Distribution
 owner: dpalfery
 last-reviewed: 2026-09-29
 archive-date: 2026-09-29
-archive-outcome: Complete - Tasks T1–T8 approved by council (2026-09-29). Post-council tasks T9 and T10 added for technical debt and docs accuracy. T9 passed audit pass 2; T10 escalated one finding (README.md:221) remediated by new task T11 (passed pass 1). Full gate suite re-run verified all work; no second council pass. Durable content in ADR 0026, docs/distribution.md, docs/install.md, and docs/dash/runbook.md.
+archive-outcome: Complete - Tasks T1–T8 approved by council (2026-09-29). Post-council tasks T9 and T10 added for technical debt and docs accuracy. T9 passed audit pass 2; T10 escalated one finding (README.md:221) remediated by new task T11 (passed pass 1). Full gate suite re-run verified all work; no second council pass. Durable content in ADR 0027, docs/distribution.md, docs/install.md, and docs/dash/runbook.md.
 development-mode: standard
 keywords:
   - SHA256SUMS
@@ -39,7 +39,7 @@ verify all work; no second council pass occurred. Every decision is resolved; se
 in the PR. Addresses [issue #132](https://github.com/dpalfery/kyber-weave/issues/132) by
 deferring Authenticode signing and relying on SHA-256 checksums instead.
 
-**Archived 2026-09-29**: Implementation complete. Tasks T1–T8 received council APPROVE. Post-council tasks T9 (bash 3.2 robustness, passed audit pass 2) and T10 (detective/preventive terminology, exhausted 3 audit passes with one escalation) were added per user request for technical debt and docs accuracy. Task T11 was created to remediate T10's escalated README.md:221 finding and passed audit pass 1. Full gate suite re-run verified all work. Durable content harvested into [ADR 0026](../../adr/0026-release-integrity-checksums-signing-deferred.md), [docs/distribution.md](../../distribution.md), [docs/install.md](../../install.md), and [docs/dash/runbook.md](../../dash/runbook.md). User-owned verification steps U1–U4 remain pending (see below).
+**Archived 2026-09-29**: Implementation complete. Tasks T1–T8 received council APPROVE. Post-council tasks T9 (bash 3.2 robustness, passed audit pass 2) and T10 (detective/preventive terminology, exhausted 3 audit passes with one escalation) were added per user request for technical debt and docs accuracy. Task T11 was created to remediate T10's escalated README.md:221 finding and passed audit pass 1. Full gate suite re-run verified all work. Durable content harvested into [ADR 0027](../../adr/0027-release-integrity-checksums-signing-deferred.md), [docs/distribution.md](../../distribution.md), [docs/install.md](../../install.md), and [docs/dash/runbook.md](../../dash/runbook.md). User-owned verification steps U1–U4 remain pending (see below).
 
 ## Problem and goal
 
@@ -97,10 +97,10 @@ The user answered all four in chat on 2026-09-29, and the conductor relayed them
 | Q1 | Manifest file name | **(a)** Keep `SHA256SUMS.txt` only. There is no `SHA256SUMS` alias and no rename. | ANSWERED |
 | Q2 | Manifest coverage | **(a)** An explicit list of 20 assets (finding 5). A missing or unexpected asset fails the release. | ANSWERED |
 | Q3 | Verification of the workflow change | **(a)** The logic lives in `scripts/verify-release-checksums.sh`, which `ReleaseTests` exercises. The first RC after merge is the live test. There is no `dry_run` input. | ANSWERED |
-| Q4 | Durable record of the signing deferral | **(a) plus (b)** A "Code signing status" section in `docs/distribution.md`, **and** an ADR, `docs/adr/0026-release-integrity-checksums-signing-deferred.md` (task T5). The ADR records: SHA-256 checksums as the integrity mechanism; no Authenticode or GPG for now; Azure signing ruled out on cost; SignPath Foundation as the revisit option; issue #132 as the tracker. There is no todo. | ANSWERED |
+| Q4 | Durable record of the signing deferral | **(a) plus (b)** A "Code signing status" section in `docs/distribution.md`, **and** an ADR, `docs/adr/0027-release-integrity-checksums-signing-deferred.md` (task T5). The ADR records: SHA-256 checksums as the integrity mechanism; no Authenticode or GPG for now; Azure signing ruled out on cost; SignPath Foundation as the revisit option; issue #132 as the tracker. There is no todo. | ANSWERED |
 | Q5 | Accept remediation task T6 (T2's two audit findings) and its verification-contract row | **(a)** Accept T6 as written. Decided by conductor under user delegation, 2026-09-29. | ANSWERED |
 | Q6 | T7: fix the script's `--list` argument guard and the release.yml header comment | **(a)** Accept T7, and T6 adds a test for the two-argument `--list` call. Decided by conductor under user delegation, 2026-09-29. | ANSWERED |
-| Q7 | T8a: ADR 0026 accuracy nits (lines 18 and 48) | **(a)** Accept. Decided by conductor under user delegation, 2026-09-29. | ANSWERED |
+| Q7 | T8a: ADR 0027 accuracy nits (lines 18 and 48) | **(a)** Accept. Decided by conductor under user delegation, 2026-09-29. | ANSWERED |
 | Q8 | T8b: replace the `release.yml:383–390` citation in `docs/distribution.md` | **(a)** Replace it with the job and step name. Decided by conductor under user delegation, 2026-09-29. | ANSWERED |
 
 ## Investigation findings
@@ -192,7 +192,7 @@ In:
 - Accurate release-notes text on signing and verification.
 - User documentation of SmartScreen, Mark-of-the-Web, and hash verification on three OSs.
 - Maintainer documentation of signing state and the manifest check.
-- ADR 0026, recording the signing deferral (Q4).
+- ADR 0027, recording the signing deferral (Q4).
 
 Out:
 
@@ -236,7 +236,7 @@ Link targets shared between tasks, fixed here so T1, T3, and T5 can run in paral
 - `docs/install.md#windows-unsigned-binaries-and-smartscreen`, which T3 creates and T1 and T5
   link to.
 - `docs/distribution.md#code-signing-status`, which T3 creates and T5 links to.
-- `docs/adr/0026-release-integrity-checksums-signing-deferred.md` (ADR id `adr/0026`), which
+- `docs/adr/0027-release-integrity-checksums-signing-deferred.md` (ADR id `adr/0027`), which
   T5 creates and T3 links to from the Code signing status section.
 
 Each link resolves once all three tasks have landed. The docs gates in T3 and T5 are run
@@ -332,7 +332,7 @@ the existing fixtures folder.
 - **`docs/distribution.md`:** add a **Code signing status** section:
   - a per-artifact table (finding 8);
   - signing deferred per #132, Azure ruled out on cost, no GPG, SignPath a future option,
-    with a link to ADR 0026 as the decision of record;
+    with a link to ADR 0027 as the decision of record;
   - integrity rests on HTTPS plus `SHA256SUMS.txt`;
   - what the release job's manifest check enforces, and that a new asset means editing the
     expected list.
@@ -351,21 +351,21 @@ the existing fixtures folder.
 
 **Depends on:** none. It uses the link targets fixed in the design.
 
-### T5: ADR 0026, release integrity through checksums with signing deferred
+### T5: ADR 0027, release integrity through checksums with signing deferred
 
 **Required skills:** `docs-dev`, following `architecture-decision-record` and
 `kyber-weave-docs`.
 
 **Files:**
 
-- `docs/adr/0026-release-integrity-checksums-signing-deferred.md` (new)
+- `docs/adr/0027-release-integrity-checksums-signing-deferred.md` (new)
 - `docs/adr/README.md` (one new index row)
 
 **Objective:** Write the ADR to the repository's existing conventions:
 
-- frontmatter `id: adr/0026-release-integrity-checksums-signing-deferred`,
+- frontmatter `id: adr/0027-release-integrity-checksums-signing-deferred`,
   `doc-type: adr`, `status: current`, `owner: dpalfery`, `last-reviewed: 2026-09-29`;
-- title `# ADR 0026: ...`;
+- title `# ADR 0027: ...`;
 - sections Status (Accepted, 2026-09-29), Context, Decision, Alternatives considered, and
   Consequences.
 
@@ -389,7 +389,7 @@ and `docs/install.md` through the fixed link targets.
 
 **Acceptance:**
 
-- The ADR number 0026 is unused (0025 is the highest today, and 0006 is archived, not free).
+- The ADR number 0027 is unused (0026 is assigned to Kyber Utilities per #173, merged 2026-09-28, and 0006 is archived, not free).
 - The index row matches the existing table columns.
 - `docs validate . --merge-ready` and `docs drift .` show zero findings once T3 has landed.
 
@@ -494,13 +494,13 @@ Item (a) is accepted under Q7 (a), and item (b) under Q8 (a).
 
 **Files:**
 
-- (a) `docs/adr/0026-release-integrity-checksums-signing-deferred.md`, lines 18 and 48.
+- (a) `docs/adr/0027-release-integrity-checksums-signing-deferred.md`, lines 18 and 48.
 - (b) `docs/distribution.md`, the `release.yml:383–390` citation in the Code signing status
   table (line 241).
 
 **Objective:**
 
-- **(a) ADR 0026:**
+- **(a) ADR 0027:**
   - Line 18: replace "Linux binaries are unsigned by design" with wording that matches
     finding 8, that Linux binaries are unsigned, as is normal for Linux.
   - Line 48: state the SmartScreen dialog text as typical wording that varies by Windows
@@ -537,11 +537,11 @@ Fix `set -u` unbound-variable errors on empty arrays and empty asset directories
 
 **Note:** Added after council APPROVE per user request; addresses technical debt.
 
-### T10: ADR 0026 and docs detective/preventive accuracy pass
+### T10: ADR 0027 and docs detective/preventive accuracy pass
 
 **Required skill:** `docs-dev`
 
-**Files:** `docs/adr/0026-release-integrity-checksums-signing-deferred.md`, `docs/distribution.md`, `docs/install.md`, `docs/dash/runbook.md`, `README.md`
+**Files:** `docs/adr/0027-release-integrity-checksums-signing-deferred.md`, `docs/distribution.md`, `docs/install.md`, `docs/dash/runbook.md`, `README.md`
 
 **Objective:**
 
@@ -592,10 +592,10 @@ per user escalation from T10; addresses documentation accuracy.
 **Objective:**
 
 - Record the evidence.
-- Confirm that the durable content is harvested into the T3 docs and into ADR 0026 (T5).
+- Confirm that the durable content is harvested into the T3 docs and into ADR 0027 (T5).
 - Archive this plan. Move its index row to Archived Plans, naming `docs/distribution.md`,
-  `docs/install.md`, and ADR 0026 in the Canonical Docs / Harvested ADRs column.
-- Confirm that `docs/adr/README.md` lists ADR 0026.
+  `docs/install.md`, and ADR 0027 in the Canonical Docs / Harvested ADRs column.
+- Confirm that `docs/adr/README.md` lists ADR 0027.
 - Rerun the docs gates.
 
 **Acceptance:** `docs validate . --merge-ready` and `docs drift .` show zero findings, and no
@@ -645,9 +645,9 @@ T10 (T1,T3,T5,T8) ──► T11 (escalation) ──► post-review
 | T7 | `tests/KyberWeave.Tests/ReleaseTests.cs` (existing script tests, plus T6 item 3) | same `ReleaseTests` filter | Short `--list` call exits 1 with the usage error. Correct calls are unchanged. The workflow still parses. | A manual `bash scripts/verify-release-checksums.sh --list /tmp` run showing the usage error. `bash -n`, and `shellcheck` if installed (record ran or not-available). `git diff` of release.yml shows comment lines only. |
 | T8 | No automated test. The docs gates replace it. | same two docs commands as T3 | Zero findings. | Reviewer confirms the ADR still states every Q4 element, and that no `release.yml:<line>` citation remains in `docs/distribution.md`. |
 | T9 | `tests/KyberWeave.Tests/ReleaseTests.cs` and `scripts/verify-release-checksums.sh` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~ReleaseTests"` | Script fix: `set -u` mode does not trigger unbound-variable on empty arrays or empty asset directories under bash 3.2. Regression test `VerifyReleaseChecksumsReportsEveryAssetForEmptyDirectory` passes. Correct calls still work. | Added post-council per user request. Manual test: `bash -u scripts/verify-release-checksums.sh --list /tmp/empty-dir` exits with usage error, not unbound-variable. Note: bash 5+ behavior exercised by CI on Ubuntu; bash 3.2 manually validated during development. |
-| T10 | No automated test. The docs gates replace it. | same two docs commands as T3 | Zero findings. ADR 0026 and docs clearly state: pre-publish is fail-closed and preventive; post-publish "Verify published release assets" is detective (runs after publication, detects and fails job, does not prevent). | Added post-council per user request. Reviewer confirms preventive/detective terminology is accurate and consistent across ADR and distribution/install/dash/README docs. T10 exhausted 3 audit passes and escalated README.md:221 finding. |
+| T10 | No automated test. The docs gates replace it. | same two docs commands as T3 | Zero findings. ADR 0027 and docs clearly state: pre-publish is fail-closed and preventive; post-publish "Verify published release assets" is detective (runs after publication, detects and fails job, does not prevent). | Added post-council per user request. Reviewer confirms preventive/detective terminology is accurate and consistent across ADR and distribution/install/dash/README docs. T10 exhausted 3 audit passes and escalated README.md:221 finding. |
 | T11 | No automated test. The docs gates replace it. | same two docs commands as T3 | Zero findings. README.md line 221 no longer contains stale "terminal TUI Dashboard" reference. | Added to remediate T10's escalated finding. Passed audit pass 1. Stale `.vscode/launch.json` launch-config names spun off as separate follow-up task. |
-| T4 | none (docs lifecycle) | same two docs commands | Zero findings. Plan archived. The archive row names ADR 0026. | `review gates . --out artifacts/gates.json` |
+| T4 | none (docs lifecycle) | same two docs commands | Zero findings. Plan archived. The archive row names ADR 0027. | `review gates . --out artifacts/gates.json` |
 | Post-merge | none (live) | User-owned U1–U4 | The RC release shows all 21 assets. Windows verification: `sha256sum -c` / `sha256sum -c` / PowerShell commands pass. SmartScreen and Unblock flow match docs. (U4 optional) Comment on #132 with RC and docs links. | Run URL and screenshots attached to the PR or to #132. U1–U4 remain PENDING. |
 
 Fresh evidence is required after implementation, and again after any rework driven by review.
