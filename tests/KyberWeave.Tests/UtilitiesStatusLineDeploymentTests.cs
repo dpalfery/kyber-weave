@@ -8,7 +8,7 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Contract suite for the Kyber Utilities status-line deployment core (development mode:
-/// test-first, docs/plans/2026-09-28-kyber-utilities-status-line-slice.md, Test contract row T2).
+/// test-first, docs/archive/plans/2026-09-28-kyber-utilities-status-line-slice.md, Test contract row T2).
 /// Pins per-harness root resolution with environment overrides, the Kyber-owned staging segment and
 /// the auto-load directories it must stay out of, that a plan targets only pinned staging paths and
 /// never a settings path, that an unmanaged file at a target path is refused rather than

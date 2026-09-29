@@ -100,7 +100,7 @@ Explore the Kyber Utilities documentation:
   snippets, the import and privacy-review process, and what `doctor` checks.
 - **[ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md)** — why it deploys owned
   files and never owns harness settings, and why activation is manual.
-- **[Status-line slice plan](../plans/2026-09-28-kyber-utilities-status-line-slice.md)** — the
+- **[Status-line slice plan](../archive/plans/2026-09-28-kyber-utilities-status-line-slice.md)** — the
   approved slice that ships this component.
 - **[Windows support](https://github.com/dpalfery/kyber-weave/issues/163)** — how Windows support
   would be built (deferred).

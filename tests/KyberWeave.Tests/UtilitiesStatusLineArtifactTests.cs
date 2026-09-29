@@ -11,7 +11,7 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Contract suite for the three Kyber-owned status-line artifacts the status-line slice imports
 /// (development mode: test-first,
-/// docs/plans/2026-09-28-kyber-utilities-status-line-slice.md, Test contract row T4).
+/// docs/archive/plans/2026-09-28-kyber-utilities-status-line-slice.md, Test contract row T4).
 /// Pins each variant's declared segments, its runtime dependencies, its safety rules, and its
 /// portability rules against synthetic payloads, before any file is imported.
 /// </summary>

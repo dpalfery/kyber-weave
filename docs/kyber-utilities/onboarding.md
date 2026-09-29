@@ -217,7 +217,7 @@ tests.
 
 - [Kyber Utilities overview](README.md)
 - [ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md) — the ownership boundary
-- [Status-line slice plan](../plans/2026-09-28-kyber-utilities-status-line-slice.md)
+- [Status-line slice plan](../archive/plans/2026-09-28-kyber-utilities-status-line-slice.md)
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — the sibling boundary that rejects owning settings files
 - [KyberDash runbook](../dash/runbook.md) — the `kyberdash kyber antigravity-statusline` stream contract
 - [Honest unobservability](../rules/honest-unobservability.md) — missing values render as absent, never zero

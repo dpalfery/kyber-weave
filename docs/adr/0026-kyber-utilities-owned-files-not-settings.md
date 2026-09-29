@@ -13,12 +13,12 @@ last-reviewed: 2026-09-28
 ## Status
 
 Accepted, 2026-09-28. Records decisions A3–A5, D3–D5 and D7 of the
-[Kyber Utilities status-line slice](../plans/2026-09-28-kyber-utilities-status-line-slice.md),
+[Kyber Utilities status-line slice](../archive/plans/2026-09-28-kyber-utilities-status-line-slice.md),
 approved for execution under A7 on 2026-09-28.
 
 **Amendment, 2026-09-28 (D9).** The harness set in this ADR narrows to Claude Code, `agy`, and
 Pi — three harnesses, not four. Under D9 of the
-[status-line slice](../plans/2026-09-28-kyber-utilities-status-line-slice.md), OpenCode is
+[status-line slice](../archive/plans/2026-09-28-kyber-utilities-status-line-slice.md), OpenCode is
 dropped from the slice: T0 found no OpenCode implementation, so shipping it would need fresh
 authoring, which the slice's rules forbid. OpenCode support is deferred to
 [issue #165](https://github.com/dpalfery/kyber-weave/issues/165). The ownership decision itself
@@ -99,7 +99,7 @@ second component is tempted to cross it.
 
 ## Related
 
-- [Kyber Utilities status-line slice plan](../plans/2026-09-28-kyber-utilities-status-line-slice.md)
+- [Kyber Utilities status-line slice plan](../archive/plans/2026-09-28-kyber-utilities-status-line-slice.md)
 - [Kyber Utilities overview](../kyber-utilities/README.md)
 - [Kyber Utilities adoption and activation guide](../kyber-utilities/onboarding.md)
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — the sibling boundary that rejects

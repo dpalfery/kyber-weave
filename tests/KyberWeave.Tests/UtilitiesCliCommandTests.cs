@@ -7,7 +7,7 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Contract suite for the <c>kyber-weave utilities statusline</c> command surface (development mode:
-/// test-first, docs/plans/2026-09-28-kyber-utilities-status-line-slice.md, Test contract row T6).
+/// test-first, docs/archive/plans/2026-09-28-kyber-utilities-status-line-slice.md, Test contract row T6).
 /// Pins the four verbs — <c>deploy</c>, <c>status</c>, <c>doctor</c>, and <c>remove</c> — as an
 /// operator reaches them: an argv in, an exit code and rendered output out. It pins the exit-2
 /// client-input refusal for the dropped OpenCode target (D9) and for an unknown target, that a deploy

@@ -1,11 +1,11 @@
 ---
-id: plans/2026-09-28-kyber-utilities-status-line-slice
+id: archive/plans/2026-09-28-kyber-utilities-status-line-slice
 title: Kyber Utilities — status-line deployment slice
 doc-type: plan
-status: current
-component: KyberSquad
+status: archived
+component: KyberUtilities
 owner: dpalfery
-last-reviewed: 2026-09-28
+last-reviewed: 2026-09-29
 development-mode: test-first
 keywords:
   - kyber utilities
@@ -18,7 +18,10 @@ keywords:
 
 ## Status
 
-**Ready (amended).** Approval history, in order:
+**Complete.** Complete and archived on 2026-09-29. Closes out the Kyber Utilities status-line deployment slice.
+Follow-up issues: [issue #163](https://github.com/dpalfery/kyber-weave/issues/163) (Windows support), [issue #165](https://github.com/dpalfery/kyber-weave/issues/165) (OpenCode support).
+
+Approval history, in order:
 
 1. **First Ready grant.** On 2026-09-28 the user explicitly chose **approve and execute**,
    and the conductor relayed that choice (A7). That approval covered D1–D8 and the original
@@ -790,6 +793,17 @@ amendment is saved but not verified.
 
 T8 runs the gates and council review after GREEN, and T14 is the user's live check. T9 is
 the explicit `docs-dev` closeout.
+
+### Closeout evidence (T9)
+
+- All gates verified and green on 2026-09-29.
+- .NET test suites: 37/37 deployment tests passed, 32/32 CLI command tests passed, 26/27 artifact tests passed (1 designed skip), 2,487/2,488 full suite passed.
+- KyberDash test suite: 264 test files passed (3,683 tests), typecheck, lint, and check:reachable clean.
+- Gitleaks scan on `products/kyber-utilities/`: clean, zero findings.
+- Deferral issues filed:
+  - Windows support: [issue #163](https://github.com/dpalfery/kyber-weave/issues/163)
+  - OpenCode support: [issue #165](https://github.com/dpalfery/kyber-weave/issues/165)
+- Plan archived and harvested into `docs/kyber-utilities/` and [ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md).
 
 ## Human judgement reserved
 
