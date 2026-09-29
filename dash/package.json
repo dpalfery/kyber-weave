@@ -68,7 +68,7 @@
     "js-tiktoken": "^1.0.21",
     "selfsigned": "^5.5.0",
     "strip-ansi": "^7.2.0",
-    "undici": "^7.27.2",
+    "undici": "^7.29.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
