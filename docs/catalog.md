@@ -4,7 +4,7 @@ title: Component and owner catalog
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-09-27
+last-reviewed: 2026-09-28
 ---
 
 # Component and owner catalog
@@ -24,6 +24,7 @@ answers for it, and where its source lives.
 | KyberSquad | Feature | `src/KyberWeave.Core/Squad` | Agent and skill deployment control plane with twelve declared harness targets, twelve registered renderers, and transactional recovery. | [kyber-squad/architecture.md](kyber-squad/architecture.md) · [kyber-squad/onboarding.md](kyber-squad/onboarding.md) (CLI control plane; executed via `squad`) | dpalfery | 2026-09-27 | current |
 | ReviewCouncil | Feature | `src/KyberWeave.Core/Review` | Parallel code review: a council of specialist lenses over the diff, the host's deterministic gate suite, and a rule-based verdict engine that decides from both. | [code-review/architecture.md](code-review/architecture.md) · [code-review/README.md](code-review/README.md) (Review engine; executed via `review`) | dpalfery | 2026-08-20 | current |
 | KyberDash | Feature | `dash` | Local context-troubleshooting product with three surfaces over one `ContextReport`: the `kyberdash report` CLI, the web dashboard (progressive-disclosure spine, Context Inspector, run comparison), and a Tauri tray for macOS and Windows that owns the web server, scheduled `dash refresh` into canonical `canon.db`, and the OTLP receiver. | [dash/README.md](dash/README.md) · [dash/architecture.md](dash/architecture.md) · [dash/runbook.md](dash/runbook.md) · [dash/telemetry-inventory.md](dash/telemetry-inventory.md) (Interactive multi-surface dashboard) | dpalfery | 2026-09-24 | current |
+| KyberUtilities | Feature | `src/KyberWeave.Core/Utilities` | Per-harness utility deployment control plane, starting with status lines: stages Kyber-owned artifacts at per-user locations, records every owned file with its SHA-256 digest in its own receipt, and prints manual activation guidance. It never creates, edits, merges, or owns a shared harness settings file and deploys nothing into an auto-load directory. | [kyber-utilities/README.md](kyber-utilities/README.md) · [kyber-utilities/onboarding.md](kyber-utilities/onboarding.md) (CLI control plane; executed via `utilities statusline`) | dpalfery | 2026-09-28 | draft |
 | CI Pipelines | Feature | `src/KyberWeave.Core/Diagnostics` | The diagnostic engine every gate reports through: stable rule ids, severity gating, and SARIF. | [ci-pipelines/architecture.md](ci-pipelines/architecture.md) · [ci-pipelines/workflows-runbook.md](ci-pipelines/workflows-runbook.md) | dpalfery | 2026-08-01 | current |
 | Distribution | Supporting | `scripts` | Self-contained platform binaries and the install path that places them. | [install.md](install.md) · [distribution.md](distribution.md) | dpalfery | 2026-08-21 | current |
 

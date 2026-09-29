@@ -8,6 +8,7 @@ import type { Command } from 'commander'
 import { CommanderError, InvalidArgumentError, Option } from 'commander'
 import { CanonStore } from '../canon/store.js'
 import type { CursorHookStdinOptions } from '../otel/cursor-hook.js'
+import type { recordAntigravityStatusLinePayload } from '../providers/antigravity.js'
 import { DEFAULT_HISTORY_WEEKS, refreshHarnessSources } from '../refresh/orchestrator.js'
 import { REFRESH_TRIGGERS, type RefreshTrigger } from '../canon/refresh-run.js'
 import { acquireStoreRefreshLock, readLockHolder, stateDir } from '../refresh/lock.js'
@@ -25,6 +26,7 @@ export type KyberCommandDependencies = {
   write?: (line: string) => void
   writeError?: (line: string) => void
   postCursorHookOtlp?: CursorHookStdinOptions['post']
+  recordAntigravityStatusLine?: typeof recordAntigravityStatusLinePayload
   createStore?: (path: string) => CanonStore
   refreshHarnessSources?: typeof refreshHarnessSources
   acquireStoreRefreshLock?: typeof acquireStoreRefreshLock
@@ -236,6 +238,39 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
         write: dependencies.write ?? ((line) => process.stdout.write(`${line}\n`)),
         ...(dependencies.postCursorHookOtlp === undefined ? {} : { post: dependencies.postCursorHookOtlp }),
       })
+    })
+
+  kyber
+    .command('antigravity-statusline')
+    .description('Record an agy statusLine payload from stdin into the KyberDash cache')
+    .action(async () => {
+      // C9: a status-line host renders whatever this command writes to stdout and may
+      // disable it outright when it exits non-zero, so stdout stays silent and the exit
+      // code stays 0 for every outcome — malformed input, an ignored payload, and a
+      // recorder I/O failure alike. The one permitted emission is a single stderr line
+      // when the recorder itself fails.
+      // exitCode is assigned rather than merely left alone: it is process-global, so a
+      // non-zero value set earlier in the same process would otherwise propagate and
+      // break C9 just as surely as assigning one here would.
+      process.exitCode = 0
+      let payload: unknown
+      try {
+        payload = JSON.parse(await (dependencies.readStdin ?? readStdinText)())
+      } catch {
+        return // stdin unreadable or not JSON: nothing recordable, nothing to say
+      }
+      try {
+        const record =
+          dependencies.recordAntigravityStatusLine ??
+          (await import('../providers/antigravity.js')).recordAntigravityStatusLinePayload
+        await record(payload)
+      } catch (error) {
+        const writeError = dependencies.writeError ?? ((line: string) => process.stderr.write(`${line}\n`))
+        // Newlines are collapsed so the contract's "at most one stderr line" holds even
+        // for a multi-line error message.
+        const detail = (error instanceof Error ? error.message : String(error)).replace(/[\r\n]+/g, ' ')
+        writeError(`kyberdash: antigravity-statusline could not record the payload: ${detail}`)
+      }
     })
 
   // Top-level alias for backwards compatibility: existing invocations targeting
