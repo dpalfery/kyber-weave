@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-28
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -21,9 +21,9 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 21 canonical agent instruction bodies and 24 canonical skill identities under `products/kyber-squad/`. The skill tree retains 64 supplemental resources, for 88 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, all retained until the skill-resource content-preserving migration is accepted. Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 21 canonical agent instruction bodies and 23 canonical skill identities under `products/kyber-squad/`. The skill tree retains 66 supplemental resources, for 89 files total, and agents own 10 progressive-disclosure references; every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A Copilot-only internal capability profile may validate exact target tool membership but must not replace or widen the shared capability profile or metadata. |
-| **KS-003** | **Deterministic Target Resolution**: For install, resolve deployment targets from explicit CLI flags, saved repository configuration, then strong filesystem markers. For update, a non-empty explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt; when omitted, reuse the receipt roster. Update never re-detects filesystem markers. Uninstall uses the existing receipt roster. The `all` keyword expands strictly to the approved 11-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `pi`, `warp`, `factory`, `zcode`). |
+| **KS-003** | **Deterministic Target Resolution**: For install, resolve deployment targets from explicit CLI flags, saved repository configuration, then strong filesystem markers. For update, a non-empty explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt; when omitted, reuse the receipt roster. Update never re-detects filesystem markers. Uninstall uses the existing receipt roster. The `all` keyword expands strictly to the approved 12-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. |
 | **KS-005** | **Version Lockstep**: Enforce exact version equality across the CLI, Squad release asset, and MCP server. Verify all release assets against published SHA-256 checksums without installing external dependencies as side effects. |
 | **KS-006** | **Dual Distribution Packaging**: Provide `squad pack` to build an APM distribution zip containing all agents with their owned resources, all skills with their resources, and MCP configurations, plus an adjunct Agent Plugins v1 artifact exposing the complete recursive portable skill tree and MCP surfaces only — never agents or agent-owned resources. Every rendered role embeds its canonical instruction digest. |
@@ -47,13 +47,13 @@ Every non-native translation emits a structured degradation record in `squad.rec
 
 | Code | Meaning | Example |
 |---|---|---|
-| `role-skill-fallback` | An agent role was projected to a role-skill or an alternative entry point because the target lacks a native agent primitive or primary agent role, or renders a primary agent through an additional entry-point form. | `architect` lowered to skill `architect` on Warp (role-skill fallback); `conductor` lowered to a skill on Pi (native skill entry point); `conductor` rendered as both a subagent and an entry-point skill on Claude (native dual entry point); `conductor` lowered to a slash command on ZCode (command entry point). |
+| `role-skill-fallback` | An agent role was projected to a role-skill or an alternative entry point because the target lacks a native agent primitive or primary agent role, or renders a primary agent through an additional entry-point form. | `architect` lowered to skill `architect` on Warp (role-skill fallback); `conductor` lowered to a skill on Pi (native skill entry point); `conductor` rendered as both a subagent and an entry-point skill on Claude (native dual entry point); `conductor` lowered to a slash command on ZCode (command entry point); `conductor` lowered to a skill on Devin (native skill entry point). |
 | `safety-narrowed` | An interactive confirmation requirement (`ask`) was narrowed to `deny` because the target cannot prompt the user. | A capability requiring `ask` narrowed to `deny` on non-interactive harnesses. |
 | `omitted` | An agent or skill was omitted because a required security or execution constraint cannot be enforced by the target. | A role with unenforceable `deny` constraints omitted to prevent unauthorized execution. |
 | `workspace-binding-required` | An MCP server configuration in an Agent Plugins package requires host-specific repository path bindings. | Client loads portable skills but requires manual MCP workspace binding. |
 | `resource-links-rewritten` | An agent's or skill's resources were projected under a different directory and authored links were rewritten to preserve resolution. | ZCode projects an agent's resource closure under `.zcode/skills/<owner>/` instead of beside the agent file because `.zcode/agents/` and `.zcode/commands/` are scanned recursively, so resources beside a principal would register as phantom agents or commands. |
 | `permission-not-expressible` | A non-deny capability decision cannot be expressed in the target's native permission model without inventing an unverified mapping. | Factory records this for non-deny `network.publish` and `delegate` (no documented tool / `Task` withheld from subagents) and for `mcpServers: []` so parent MCP is not inherited. Claude records this for the unenforced entry-point skill and the nested-roster limitation. |
-| `capability-not-isolable` | A capability grant encompasses an unenforceable security boundary: when `process.execute: allow` and `filesystem.write` is `ask` or `deny` on a target whose shell tool can write files through redirection, the withheld write-tool names are unreachable but the underlying write capability remains accessible. The degradation record's Details names the target, the granted shell tool(s), and the withheld write-tool names. See [plan D11](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md#3-approved-decisions-owner-dpalfery-2026-09-21) for complete tool mappings. | Claude: `Bash`/`PowerShell` vs. `Edit`/`Write`/`NotebookEdit`; Pi: `bash` vs. `edit`/`write`; ZCode: `Bash` vs. `Edit`/`Write`; Factory: `Execute` vs. `Create`/`Edit`/`ApplyPatch`; OpenCode: `bash` vs. `edit`; Antigravity: `run_command` vs. `write_to_file`/`replace_file_content`/`multi_replace_file_content`. On each target, the withheld write tools do not appear in the rendered agent's `tools:` frontmatter key, while the degradation record's Details identifies both the granted shell tool(s) and the withheld write-tool names. |
+| `capability-not-isolable` | A capability grant encompasses an unenforceable security boundary: when `process.execute: allow` and `filesystem.write` is `ask` or `deny` on a target whose shell tool can write files through redirection, the withheld write-tool names are unreachable but the underlying write capability remains accessible. The degradation record's Details names the target, the granted shell tool(s), and the withheld write-tool names. See [plan D11](../archive/plans/2026-09-21-pi-thinking-and-antigravity-native-agents.md#3-approved-decisions-owner-dpalfery-2026-09-21) for complete tool mappings. | Claude: `Bash`/`PowerShell` vs. `Edit`/`Write`/`NotebookEdit`; Pi: `bash` vs. `edit`/`write`; ZCode: `Bash` vs. `Edit`/`Write`; Devin: `exec` vs. `edit`/`write`/`apply_patch`/`notebook_edit`; Factory: `Execute` vs. `Create`/`Edit`/`ApplyPatch`; OpenCode: `bash` vs. `edit`; Antigravity: `run_command` vs. `write_to_file`/`replace_file_content`/`multi_replace_file_content`. On each target, the withheld write tools do not appear in the rendered agent's tool allow-list (the `tools:` frontmatter key, or `allowed-tools:` on Devin), while the degradation record's Details identifies both the granted shell tool(s) and the withheld write-tool names. |
 
 ---
 
@@ -72,9 +72,10 @@ Every non-native translation emits a structured degradation record in `squad.rec
 | **Warp** | Role skills | Implemented and registered | Single-agent context | Lowered (`role-*` on collision) | Harness default; permission-not-expressible for non-deny decisions |
 | **Factory Droids** | Native `.factory/droids` | Implemented and registered | Supported | Not lowered | Explicit tools array (allow-only documented IDs); safety-narrowed on ask; permission-not-expressible for unmapped `network.publish`/`delegate` and `mcpServers: []` |
 | **ZCode** | Native `.zcode/agents` + conductor lowered to `.zcode/commands` | Implemented and registered | Supported (project and global scope) | Lowered (primary agent only, to a slash command) | Native execution + safety-narrowed; always a non-empty tool list because `tools: []` is ZCode's inherit-everything signal; permission-not-expressible for `network.publish`, the unenforceable `delegate` roster, and MCP withheld from the pure orchestrator. MCP is granted to every other agent by enumerated tool name from `toolchain.yml`, and `squad doctor` fails a ZCode install that does not declare those servers |
+| **Devin** | Native `.devin/agents` (directory per agent) + conductor lowered to `.devin/skills` | Implemented and registered | Main session only: subagents cannot delegate, because Devin has no enforceable roster (project and global scope) | Lowered (primary agent only, to a skill) | Explicit `allowed-tools` allow-list, never empty; safety-narrowed on ask; capability-not-isolable for shell-implies-write; permission-not-expressible for `network.publish`, the withheld `delegate` roster, and the lowered conductor's unenforced decisions. MCP is granted by enumerated tool name from `toolchain.yml`. Skills carry no `allowed-tools` or `permissions`: on a Devin skill `allowed-tools` and `permissions.allow` pre-approve, and whether `permissions.deny` reaches the subagents a skill dispatches is undocumented. The lowered conductor carries `triggers: [user]`, since Devin Cloud sees skills but loads no custom subagents |
 
-The eleven rows are the declared target roster. All eleven targets (`copilot`, `cursor`, `claude`, `codex`,
-`antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, and `zcode`) have implemented and registered renderers.
+The twelve rows are the declared target roster. All twelve targets (`copilot`, `cursor`, `claude`, `codex`,
+`antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, and `devin`) have implemented and registered renderers.
 
 ---
 
@@ -88,15 +89,20 @@ If a target harness cannot guarantee the containment or authorization boundaries
 
 ## Golden-render and knowledge-retention requirement
 
-Every canonical raw `SKILL.md` except the two explicitly evolved skills (`product-owner`,
-`bug-crusher`) matches the Hotshot golden bytes, as does every non-evolved agent body; the three
-retired `-v3` identities survive only as folded provenance in their canonical migration reports.
-Renderers project each owner's validated resource closure beside its principal output, so a fresh
-Copilot render emits 113 files with no dangling local references. The tracked root `.github/`
+Every canonical raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher`,
+`product-owner`, `second-brain`, `create-pull-request`, and `pr-review-fix-comments`) matches the
+Hotshot golden bytes, as does every non-evolved agent body. The golden `create-pull-request-github`
+skill is retired into `create-pull-request`, and the three retired `-v3` agent identities survive
+only as folded provenance in their canonical migration reports. Renderers project every file an
+owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 119
+files with no dangling link; every skill resource reaches this render except
+`skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
+metadata. The tracked root `.github/`
 self-deployment predates resource delivery and is refreshed only by a release. Both recursive
-package formats retain all supplemental resources. Surplus content remains until the
-[skill-resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) satisfies its
-content-preservation, routing, and deployment acceptance criteria.
+package formats retain all supplemental resources. Every retained resource has a reviewed
+disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md):
+non-policy content stays in its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 `products/kyber-squad/` is canonical and package authority. The repository root
 `.github/agents/`, `.github/skills/`, `.kyber-weave/squad.lock.yml`, and

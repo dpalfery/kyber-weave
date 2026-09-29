@@ -59,7 +59,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "bug-crusher",
         "code-review",
         "create-pull-request",
-        "create-pull-request-github",
         "csharp-dev",
         "csp-security",
         "dal-dev",
@@ -151,8 +150,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
         }
 
-        // Presence of all 24 canonical skills
-        Assert.Equal(24, CanonicalSkills.Length);
+        // Presence of all 23 canonical skills
+        Assert.Equal(23, CanonicalSkills.Length);
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -167,7 +166,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             name.StartsWith(".kilo/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".warp/", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith(".factory/", StringComparison.OrdinalIgnoreCase) ||
-            name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase));
+            name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith(".zcode/", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith(".devin/", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -196,6 +197,34 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
         Assert.Contains("squad.yml", entryNames);
         Assert.DoesNotContain(entryNames, name => name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Devin reads project agents from <c>.devin/agents/</c>. Like a Pi tree, a rendered Devin
+    /// tree left inside the canonical source is target output and must not ship in the APM
+    /// package; the source is seeded with one so the exclusion is exercised.
+    /// </summary>
+    [Fact]
+    public void Pack_Apm_ExcludesADevinTargetTreeInsideTheSource()
+    {
+        // Arrange
+        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
+        repo.WriteSourceFile(
+            ".devin/agents/x/AGENT.md",
+            "---\nname: x\ndescription: Rendered Devin agent.\nallowed-tools:\n- read\n---\nYou are x.\n");
+        string outDir = Path.Combine(_temp.Path, "apm-devin-out");
+        SquadPackCommand command = new SquadPackCommand(new FakeProcessExecutor(), workingDirectory: repo.Path);
+
+        // Act
+        CommandExecution execution = Capture(() => command.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir }));
+
+        // Assert
+        Assert.True(execution.ExitCode == 0, execution.Output);
+        string archivePath = Assert.Single(Directory.GetFiles(outDir, "kyber-squad-*.zip"));
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
+        Assert.Contains("squad.yml", entryNames);
+        Assert.DoesNotContain(entryNames, name => name.StartsWith(".devin/", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -255,7 +284,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: contains all 24 canonical skills
+        // Portable components only: contains all 23 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -582,7 +611,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             // Solution marker
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
-            // Copy product source from real repo if available, or write all 21 agents and 24 skills
+            // Copy product source from real repo if available, or write all 21 agents and 23 skills
             string realSquadSource = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
             if (Directory.Exists(realSquadSource))
             {

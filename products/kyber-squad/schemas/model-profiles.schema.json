@@ -24,7 +24,8 @@
           "warp": { "type": "string", "minLength": 1 },
           "factory": { "type": "string", "minLength": 1 },
           "pi": { "type": "string", "minLength": 1 },
-          "zcode": { "type": "string", "minLength": 1 }
+          "zcode": { "type": "string", "minLength": 1 },
+          "devin": { "type": "string", "minLength": 1 }
         }
       }
     }

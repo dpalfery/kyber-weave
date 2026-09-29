@@ -25,8 +25,8 @@ Then read the matching sub-file and use only its tools:
 
 | Provider | Sub-file |
 |---|---|
-| Azure DevOps | `providers/azure-devops.md` |
-| GitHub | `providers/github.md` |
+| Azure DevOps | [providers/azure-devops.md](providers/azure-devops.md) |
+| GitHub | [providers/github.md](providers/github.md) |
 
 Rules:
 - Read exactly one provider sub-file per run. Do not mix tools across providers.

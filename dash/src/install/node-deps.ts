@@ -11,9 +11,10 @@ import { createRequire } from 'node:module'
 import { constants } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { getConfigDir } from '../config.js'
+import { runningAsSea } from '../sea.js'
 import { EXPECTED_TEAM_ID, type CommandResult, type InstallDeps, type InstallFs, type Verifier } from './types.js'
 
 async function run(command: string, args: string[]): Promise<CommandResult> {
@@ -135,12 +136,18 @@ export function nodeInstallDeps(overrides: Partial<InstallDeps> = {}): InstallDe
 }
 
 function resolveKyberdashPath(): string {
-  const isSea =
-    typeof (process as { isSea?: () => boolean }).isSea === 'function'
-      ? (process as { isSea?: () => boolean }).isSea?.()
-      : false
-  if (isSea) return process.execPath
-  return process.argv[1] ?? process.execPath
+  // In a SEA, process.argv[1] is the unexpanded argv[0] (e.g., "kyberdash" from a PATH lookup).
+  // We always want an absolute path, so return process.execPath in that case.
+  if (runningAsSea()) {
+    return process.execPath
+  }
+
+  // Not a SEA: resolve the first argument to an absolute path, or fall back to process.execPath.
+  const arg = process.argv[1]
+  if (arg) {
+    return resolve(arg)
+  }
+  return process.execPath
 }
 
 /** The running CLI's version, which is the release the tray comes from (R12.5). */

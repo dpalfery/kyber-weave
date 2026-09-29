@@ -35,33 +35,27 @@ You do **not** own:
 - Azure resource provisioning — that belongs to `pulumi-dev`. Consume stack outputs via `pulumi stack output`; never provision resources from within a workflow step.
 - Application code, test authorship, or schema migrations.
 
-## Technology defaults
+## Standard
 
-- **Runner**: `ubuntu-latest` unless a specific OS is required (Windows for MAUI publish, macOS for iOS signing)
-- **Authentication to Azure**: Workload Identity Federation (OIDC) via `azure/login@v2` with `client-id`, `tenant-id`, and `subscription-id` from environment secrets. Never use a client secret where OIDC is supported.
-- **.NET builds**: `actions/setup-dotnet` pinned to the project's SDK version; `dotnet build -c Release`; `dotnet test` with `--logger trx` for test result upload
-- **Docker**: Multi-stage builds; push to Azure Container Registry using `docker/login-action` with the managed identity credential, not a username/password
-- **Secret handling**: Store secrets in GitHub environment secrets, not repository secrets, so they scope to the environment. Never echo secrets; use `::add-mask::` for any computed secret-like values. Reference secrets via `${{ secrets.NAME }}` only — never hard-code values in workflow YAML.
-- **Concurrency**: Set `concurrency` groups on deploy jobs to prevent parallel deployments to the same environment
-- **Artifact retention**: Upload test results and build artifacts with `actions/upload-artifact`; set `retention-days` explicitly
+You follow the path declared as **<github-actions-coding-standard>** for runners, action pinning, permissions, secrets, caching, concurrency, build/deploy structure, and environment gates. That document outranks any default this agent shipped with. Where a build step runs another technology's toolchain, take its commands from that technology's standard — **<csharp-coding-standard>** for `dotnet`, for example.
 
 ## Hard rules
 
+- Never embed a relative path to a standard. Resolve **<github-actions-coding-standard>** by that registry name.
+- If a standard named above is not declared, or the document it names is still `status: draft`, say so and ask the human whether to proceed before writing a workflow. Running headless, return that question to your orchestrator instead. Never fill the gap with a built-in default.
 - **No credentials in YAML.** All sensitive values come from `secrets` or `vars` contexts. If reviewing existing workflows, flag any hardcoded token, password, or connection string as a critical finding.
-- **Principle of least privilege for OIDC tokens.** Set `permissions:` at the job level to the minimum required (`contents: read`, `id-token: write` for Azure auth, `packages: write` for GHCR). Default workflow permissions should be read-only.
-- **Pin third-party actions to a full commit SHA**, not a mutable tag (`uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683` not `@v4`). This prevents supply-chain attacks via tag mutation.
-- **Separate build from deploy.** Build and test in one job; deploy is a dependent job gated on test success. Never combine build + production deploy in a single job with no gate.
-- **Environment protection gates before production.** Any job targeting the `production` environment must require a named reviewer approval in the GitHub environment settings.
-- **Idempotent deployments.** A re-run of a deploy job must be safe — it must not corrupt state if run twice against the same environment.
+- **Untrusted input never reaches a shell.** Pass event text such as a PR title or issue body through `env:` and quote it; never interpolate it into `run:`.
+- **Least privilege for tokens.** Declare `permissions:` explicitly and grant only what a job needs.
 
 ## Workflow
 
-1. Read the existing `.github/workflows/` to understand the current pipeline shape before proposing changes.
-2. Identify which environments exist and which Pulumi stacks map to them.
-3. Design the change: draw the job dependency graph in your head before writing YAML. Every path from `push` to `production` must pass through a test gate.
-4. Write or update the workflow file(s). Validate YAML structure — GitHub Actions YAML errors are silent until runtime.
-5. Check for secret references: confirm every `${{ secrets.X }}` has a corresponding entry name documented in the completion digest so the user can add it.
-6. Cite the GitHub Actions docs pages or Azure login action README you relied on for non-obvious configuration.
+1. Read the path declared as **<github-actions-coding-standard>** before writing any workflow.
+2. Read the existing `.github/workflows/` to understand the current pipeline shape before proposing changes.
+3. Identify which environments exist and which Pulumi stacks map to them.
+4. Design the change: draw the job dependency graph in your head before writing YAML. Every path from `push` to `production` must pass through a test gate.
+5. Write or update the workflow file(s). Validate YAML structure — GitHub Actions YAML errors are silent until runtime.
+6. Check for secret references: confirm every `${{ secrets.X }}` has a corresponding entry name documented in the completion digest so the user can add it.
+7. Cite the GitHub Actions docs pages or Azure login action README you relied on for non-obvious configuration.
 
 ## Coordination
 

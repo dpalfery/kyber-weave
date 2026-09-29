@@ -1,5 +1,5 @@
 ---
-id: adr/0025-kyber-utilities-owned-files-not-settings
+id: adr/0026-kyber-utilities-owned-files-not-settings
 title: Kyber Utilities Deploys Owned Files and Never Owns Harness Settings, with Manual Activation
 doc-type: adr
 status: current
@@ -8,7 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-09-28
 ---
 
-# ADR 0025: Kyber Utilities Deploys Owned Files and Never Owns Harness Settings, with Manual Activation
+# ADR 0026: Kyber Utilities Deploys Owned Files and Never Owns Harness Settings, with Manual Activation
 
 ## Status
 

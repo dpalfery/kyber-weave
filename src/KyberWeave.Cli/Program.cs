@@ -181,7 +181,7 @@ app.Configure(config =>
 
     // Kyber Utilities Command Branch — deploys Kyber-owned per-harness utility artifacts to
     // per-user staging locations and prints the activation snippet, without ever owning or
-    // reading a harness settings file (ADR 0025). Its own branch, separate from Squad's.
+    // reading a harness settings file (ADR 0026). Its own branch, separate from Squad's.
     config.AddBranch("utilities", utilities =>
     {
         utilities.SetDescription("Deploy Kyber-owned per-harness utility artifacts without touching your settings.");

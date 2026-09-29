@@ -21,14 +21,15 @@ public sealed class KyberStandardsTemplatesTests
         "python",
         "react",
         "sql",
+        "tauri",
         "test"
     ];
 
     /// <summary>
-    /// Kyber-Weave embeds all 10 canonical Kyber Squad coding standards templates.
+    /// Kyber-Weave embeds all 11 canonical Kyber Squad coding standards templates.
     /// </summary>
     [Fact]
-    public void AllEnumeratesAllTenCanonicalTechnologies()
+    public void AllEnumeratesAllElevenCanonicalTechnologies()
     {
         IReadOnlyList<string> all = KyberStandardsTemplates.All;
 
@@ -49,6 +50,7 @@ public sealed class KyberStandardsTemplatesTests
     [InlineData("python")]
     [InlineData("react")]
     [InlineData("sql")]
+    [InlineData("tauri")]
     [InlineData("test")]
     public void TryGetRetrievesTemplateForEachDeclaredTechnology(string technology)
     {

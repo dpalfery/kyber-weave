@@ -5,11 +5,12 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Core/Squad
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-09-28
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
   - adr/0022-antigravity-native-agents
+  - adr/0025-devin-native-agents-and-skill-lowering
 code-refs:
   - SquadDeploymentPlan
 ---
@@ -18,8 +19,8 @@ code-refs:
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
 It manages the installation, update, inspection, and uninstallation of **21 canonical agents** and
-**24 canonical skills**, with transactional recovery and state governance. Eleven harness targets
-are declared; all eleven are currently implemented and registered.
+**23 canonical skills**, with transactional recovery and state governance. Twelve harness targets
+are declared; all twelve are currently implemented and registered.
 
 ---
 
@@ -62,7 +63,7 @@ release to deploy.)
 
 ## Harness Targets and Auto-Detection
 
-Kyber-Squad declares eleven coding-harness targets:
+Kyber-Squad declares twelve coding-harness targets:
 
 | Target Token | Input Aliases | Strong Project Marker | Projection | Renderer Status |
 |---|---|---|---|---|
@@ -77,18 +78,19 @@ Kyber-Squad declares eleven coding-harness targets:
 | `warp` | — | `.warp/` | Role-skill lowering | Implemented and registered |
 | `factory` | `factory-droids` | `.factory/` | Native droids | Implemented and registered |
 | `zcode` | — | `.zcode/` | Native agents (with conductor lowered to slash command) | Implemented and registered |
+| `devin` | — | `.devin/` | Native agents (directory per agent, with conductor lowered to skill) | Implemented and registered |
 
 **Renderer coverage today**: this is the declared roster, not the set that currently installs.
 Rendering canonical source into a harness's native files is Kyber-Weave's own code (see
 [architecture.md](architecture.md#8-rendering)) — as of this writing `claude` (native subagents with primary-agent entry-point skill), `copilot` (native), `cursor` (native),
-`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), and `zcode` (native subagents and skills, with the primary agent lowered to a slash command) have renderers. All eleven declared targets are covered. `kyber-weave squad doctor` reports current coverage.
+`codex` (native), `antigravity` (native: `.agents/agents/<name>/agent.md` + `.agents/skills/<name>/SKILL.md`, [ADR 0022](../adr/0022-antigravity-native-agents.md)), `opencode` (native), `kilo` (native), `pi` (native subagents with primary-agent lowering), `factory` (native), `warp` (fallback role-skill lowering to `.warp/skills/`), `zcode` (native subagents and skills, with the primary agent lowered to a slash command), and `devin` (native subagents and skills, with the primary agent lowered to a skill) have renderers. All twelve declared targets are covered. `kyber-weave squad doctor` reports current coverage.
 
 ### Detection Rules
 
 - **Strong markers only**: Detection activates a target only when its designated directory or specific configuration file is present.
 - **Negative fixtures**: Generic files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, generic `.github/` directories, and `.agents/skills/` are negative fixtures that **never** activate a target.
 - **Antigravity**: Requires explicit `--target antigravity` or configuration entry; `.agents/` will not auto-activate it.
-- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 11 targets.
+- **Interactive fallback**: In an interactive terminal, if no target markers are discovered, `squad install` presents a multi-selection list of all 12 targets.
 - **Non-interactive terminal**: If run without an interactive TTY and without detected or configured targets, `squad install` exits immediately with **exit code 2** and outputs the exact command required (e.g. `kyber-weave squad install --target <target>`).
 - **Target-root echo and confirmation**: Every mutating run (`install`, `update`, `uninstall` without `--dry-run`) prints the resolved absolute target root and its scope (project/global) before any write. An interactive console is then asked to confirm; declining prints `Declined. No changes were made.` and exits with **exit code 2**. `--yes` skips the prompt for automation attached to a terminal; non-interactive consoles (scripts, CI, captured output) echo the root and proceed without prompting.
 - **Deployment root selection**: The root comes from the positional `[path]`, which defaults to the current directory (`.`); `--path <PATH>` wins over that default. Supplying both a non-default positional and `--path` is rejected with **exit code 2** and a hint naming both forms.
@@ -236,6 +238,94 @@ override for `~/.factory`.
 **Inspect:** in a Factory session, `/droids` lists project and personal droids; `/skills`
 lists discovered skills. Confirm names there after install.
 
+### Devin notes
+
+The `devin` target deploys to Devin Desktop — Cognition's desktop app for Windows and macOS,
+formerly Windsurf — whose local agent, Devin Local, reads the Devin CLI's formats. Subagents
+render as `.devin/agents/<name>/AGENT.md` and skills as `.devin/skills/<name>/SKILL.md`. With
+`--global` they go to Devin's user configuration directory: `%APPDATA%\devin\` on Windows,
+`~/.config/devin/` on macOS and Linux (`$XDG_CONFIG_HOME/devin/` when that is set). The
+decisions behind the rendering are in
+[ADR 0025](../adr/0025-devin-native-agents-and-skill-lowering.md).
+
+**Before you install**: select the **Devin Local** agent, not Cascade — Cascade has no
+subagents — and turn on **Subagents (Preview)** in Devin Settings. Keep Devin current: the
+rendered `allowed-tools` lists name `write`, which Devin recognizes from CLI v3000.11.1
+(2026-09-21). If an administrator has set the **Default subagent model** to None, or
+`subagents_enabled` is `false`, no subagent runs and only the `conductor` skill is usable.
+
+**Models**: each subagent pins a Devin model by exact id, effort included, from its model
+profile. Without a pin, Devin runs a custom subagent on its router-chosen default subagent
+model, not on the model you picked, so pinning is what keeps planners and reviewers on a
+frontier model:
+
+| Model profile | Devin model | Agents |
+|---|---|---|
+| `deep-planning` | `claude-opus-5-5-high` | architect, bug-crusher-investigator, sql-database-architect |
+| `general` | `swe-2-high` | dal-dev, github-devops, product-owner, pulumi-dev, tauri-dev |
+| `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
+| `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage, task-reviewer |
+
+The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
+recommendation there. A model outside your organization's allowlist is an administrator
+change, not a Squad one. `devin doctor` flags a profile whose frontmatter Devin rejects, and
+`/session-stats` in a session lists cost by model, which is how to confirm a subagent ran on
+its pin — worth doing after install, because the Grok 4.7 and DeepSeek V4.1 Flash ids follow
+Devin's naming but were not yet in its published model list when they were pinned.
+
+**Devin Cloud**: Cloud sessions — including `devin --cloud` and a `/handoff` from a local
+session — load no custom subagents; Devin documents them as CLI and Desktop only. The model
+pins therefore never apply there. Cloud does discover skills, from `.devin/skills/` and five
+other roots including `.claude/skills/`, `.github/skills/`, and `.agents/skills/`, so the Squad
+skills are visible in Cloud while the Squad agents are not. The `conductor` skill is rendered
+with `triggers: [user]` so Devin never starts it on its own; start it yourself in Desktop, and
+do not invoke it in Cloud, where there is no roster for it to dispatch.
+
+**Loading the same agent twice**: besides `.devin/`, Devin loads `.agents/agents/` and
+`.agents/skills/` natively — exactly where the `antigravity` target writes — and by default
+imports `.claude/skills/`, `.claude/commands/`, `.github/skills/` (and `~/.copilot/skills/`),
+and `.windsurf/skills/` through its `read_config_from` setting. A repository with Squad
+installed for `devin` and for `claude`, `copilot`, or `antigravity` therefore shows Devin two
+definitions of the same agent or skill. `squad doctor` warns when it finds one and names the
+remedy: for an imported tree, turn the import off in `.devin/config.json`, for example
+
+```json
+{
+  "read_config_from": { "claude": false }
+}
+```
+
+— bearing in mind the `claude` import also brings `CLAUDE.md` rules and Claude's MCP servers,
+which turning it off drops too. `.agents/` cannot be turned off, so with Antigravity pick one of
+the two targets per repository.
+
+**Coming from Windsurf**: Devin still imports `.windsurf/skills/`, so hand-authored skills there
+keep loading after installing `devin`. Squad never writes or removes anything under
+`.windsurf/`; a skill there that shares a Squad skill's name is one of the duplicates above.
+
+**Conductor and delegation**: Devin has no primary-agent primitive, so the conductor is
+deployed as the skill `conductor` — invoke it as `/conductor` — and runs in the main Devin Local
+session, which dispatches the specialists as subagents. Its orchestrator boundary — no searching, editing, running commands,
+or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot delegate further
+on Devin: Devin cannot limit nested delegation to a roster, so Squad
+does not enable it. `code-reviewer` therefore applies each review lens itself and says in its
+report that the council ran in-process; `architect` does its own sweeps and hands a live Azure
+question back for the conductor to put to `azure-reader`; `product-owner` does its own external
+research. The receipt records a `permission-not-expressible` degradation for each.
+
+**MCP servers**: subagents' `allowed-tools` name the CodeGraph, context7, and Kyber-Weave MCP
+tools individually. Configure those servers in Devin's `mcp_config.json` (project `.devin/` or
+the user configuration directory); Devin also imports servers from `.mcp.json`,
+`.cursor/mcp.json`, and `opencode.json`. Squad does not write any of them, and `squad doctor`
+does not check them for Devin.
+
+**Plugins**: Devin can install the Agent Plugins archive `squad pack` produces, which exposes
+the skills as `/kyber-squad:<skill>`. Use that or `squad install --target devin`, not both, or
+every skill appears under two names.
+
+**Inspect:** `devin doctor` reports which custom profiles loaded and flags malformed
+frontmatter, and `devin skills list` lists discovered skills. Confirm names there after install.
+
 ---
 
 ## Deployment Scopes
@@ -272,6 +362,7 @@ and `doctor`.
 | `factory` | `~/.factory` (no override) | `droids/<name>.md`, `skills/<name>/SKILL.md` |
 | `warp` | `~/.warp` (no override) | `skills/<name>/SKILL.md` |
 | `zcode` | `$ZCODE_STORAGE_DIR` → `~/.zcode/cli/config.json` `storage.dir` → `~/.zcode` | `agents/<name>.md`, `commands/<name>.md`, `skills/<name>/SKILL.md` |
+| `devin` | Windows: `%APPDATA%\devin`; macOS and Linux: `$XDG_CONFIG_HOME/devin` → `~/.config/devin` | `agents/<name>/AGENT.md`, `skills/<name>/SKILL.md` |
 
 Project-scope output is unchanged: each renderer still emits its `.{harness}/…` (or
 `.agents/skills/…` / `.github/…`) prefix under the project root.
@@ -355,6 +446,12 @@ By default, `squad update` preserves locally modified managed files and reports 
 kyber-weave squad update --replace-managed
 ```
 
+When a release no longer renders a file that an earlier install or update deployed, `squad update`
+deletes it if its bytes still match the receipt. A copy an operator edited stays in place and stays
+owned, even with `--replace-managed`; delete it by hand if it is no longer wanted. This is how
+`create-pull-request-github` leaves a host that deployed it before it was retired into
+`create-pull-request`.
+
 ### Checking Deployment Status and Health
 
 Verify the integrity of installed files, inspect version alignment, and detect unmanaged drift:
@@ -363,7 +460,7 @@ Verify the integrity of installed files, inspect version alignment, and detect u
 kyber-weave squad status
 ```
 
-Run diagnostic checks on renderer coverage (which of the eleven declared targets can install today) and the Kyber-Weave MCP server:
+Run diagnostic checks on renderer coverage (which of the twelve declared targets can install today), the Kyber-Weave MCP server, and — in a workspace with `.devin/` — any Squad agent or skill Devin would load twice:
 
 ```bash
 kyber-weave squad doctor
@@ -404,15 +501,19 @@ kyber-weave squad pack --format all --out ./artifacts
 
 Running `squad pack` outside the repository root fails immediately with a diagnostic directing the operator to rerun the command from the Kyber-Weave repository root (or run `squad install` if deploying agents and skills to a project).
 
-Both archive formats recurse through each skill directory. They contain all 24 canonical
-`SKILL.md` files plus the 64 retained supplemental resources, and retained local skill references
+Both archive formats recurse through each skill directory. They contain all 23 canonical
+`SKILL.md` files plus the 66 retained supplemental resources, and retained local skill references
 must resolve in the extracted package. The APM archive additionally contains the 21 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
-agent-owned resources. A fresh deployment renders every owner's resources beside its principal —
-113 files on Copilot today — with authored relative links resolving inside the target output. The
-tracked root `.github/` self-deployment predates resource delivery and is refreshed only by a
-release; surplus packaged content remains until the
-[resource migration (#128)](https://github.com/dpalfery/kyber-weave/issues/128) is accepted.
+agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
+beside its principal — 119 files on Copilot today — with authored relative links resolving inside
+the target output; every skill resource reaches this render except
+`skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
+metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed
+only by a release. Every retained resource has a reviewed disposition in the
+[skill-resource dispositions audit](skill-resource-dispositions.md): non-policy content stays in
+its skill directory as its durable home, portable policy lives in the
+`products/kyber-squad/standards/` templates, and nothing was deleted.
 
 Rendered `.github` trees are deployment output and are not added to the canonical product tree by
 `squad pack` or the golden synchronization.

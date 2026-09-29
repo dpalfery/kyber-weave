@@ -18,7 +18,7 @@ settings file.
 
 This guide covers the four commands, the per-harness activation snippets, the import and
 privacy-review process, and what `doctor` checks. Read
-[ADR 0025](../adr/0025-kyber-utilities-owned-files-not-settings.md) for why the boundary is where
+[ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md) for why the boundary is where
 it is.
 
 ---
@@ -216,7 +216,7 @@ tests.
 ## Related
 
 - [Kyber Utilities overview](README.md)
-- [ADR 0025](../adr/0025-kyber-utilities-owned-files-not-settings.md) — the ownership boundary
+- [ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md) — the ownership boundary
 - [Status-line slice plan](../plans/2026-09-28-kyber-utilities-status-line-slice.md)
 - [Kyber-Squad architecture](../kyber-squad/architecture.md) — the sibling boundary that rejects owning settings files
 - [KyberDash runbook](../dash/runbook.md) — the `kyberdash kyber antigravity-statusline` stream contract

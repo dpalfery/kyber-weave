@@ -149,9 +149,9 @@ Declaring one and re-running `docs init`:
 2. publishes `<technology-coding-standard>` in the configuration registry;
 3. legalizes `technology: <technology>` in that standard's frontmatter.
 
-Passing `--kyber-standards` to `kyber-weave docs init` seeds all 10 Kyber Squad rich coding
+Passing `--kyber-standards` to `kyber-weave docs init` seeds all 11 Kyber Squad rich coding
 standards templates (`csharp`, `test`, `react`, `python`, `pulumi`, `maui`, `data-access-layer`,
-`sql`, `azure`, `github-actions`), merges them into `ontology.technologies`, and registers
+`sql`, `azure`, `github-actions`, `tauri`), merges them into `ontology.technologies`, and registers
 their paths in Config Reg.
 
 One list, so the three cannot disagree — a standard whose folder, registry property and

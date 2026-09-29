@@ -20,86 +20,58 @@ This skill MUST be loaded whenever working on:
 
 ---
 
-## Current Architecture (CRITICAL — Read Before Coding)
-
-This project uses **direct Azure SDK integrations** alongside the **Microsoft Agent Framework** (https://github.com/microsoft/agent-framework). Do not introduce Semantic Kernel.
-
-### SDK Packages in Use
+## SDK Packages in Use
 - `Azure.AI.OpenAI` — Chat completions, embeddings, vision
 - `Azure.Search.Documents` — Hybrid vector/keyword search, semantic ranking
 - `Azure.AI.DocumentIntelligence` — PDF layout extraction, OCR, table detection
 - `HtmlAgilityPack` — Web content extraction
 
-### Agent System
-The system implements a custom multi-agent RAG pattern:
-
-| Agent | Location | Purpose |
-|---|---|---|
-| `QueryPlannerAgent` | Application / Agents | Analyzes queries via Azure OpenAI chat completions, generates search strategies |
-| `VectorSearchAgent` | Application / Agents | Hybrid vector/keyword search via Azure AI Search |
-| `WebSearchAgent` | Application / Agents | Trusted source web scraping with credibility scoring |
-| `AgentOrchestrator` | Application / Agents | Coordinates sequential agent execution (Vector → Web → PDF) |
-
-### Agent Framework Components
-| Component | Purpose |
-|---|---|
-| `AgentFrameworkAdapter` | Bridge between agents and tool execution |
-| `AgentState` | Execution context, message history, result accumulation |
-| `ToolDefinitions` | Callable tools: `vector_search`, `web_search`, `pdf_search`, `plan_search_strategy` |
-
-### Persistence Wrappers
-| Wrapper | Location | Purpose |
-|---|---|---|
-| `AzureOpenAIClientWrapper` | Persistence / Azure | Resilient Azure OpenAI access with retries and mock support |
-| `AzureSearchClientWrapper` | Persistence / Azure | Azure AI Search operations with health checks and batch indexing |
+The agent-orchestration framework, the concrete agent classes, and any persistence-wrapper
+types are a host's own architecture decision, not portable technique; this skill does not
+prescribe them.
 
 ---
 
 ## Patterns to Follow
 
 ### Embedding Generation
-- **Model**: `text-embedding-3-large` (3072 dimensions)
-- **Batch size**: 100 embeddings per API call (CSV), 10 per call (PDF)
+- **Batch size**: batch embeddings per API call rather than one call per item — larger
+  batches for CSV rows, smaller for PDF chunks
 - **Content format**: `"Field: Value | Field: Value"` for structured data
 - **Error handling**: Retry on transient failures, continue on individual chunk failures
 
 ### Azure AI Search Index
 - **Index name**: `SearchOptions.IndexName` is the sole index reference — do not hardcode a host-specific name; the current configuration may be a single index or partitioned per category
 - **Search type**: Hybrid (vector + keyword + semantic ranking)
-- **Vector algorithm**: HNSW (m=4, efConstruction=400, efSearch=500)
-- **Semantic ranker**: Re-ranks top 50 results
+- **Semantic ranker**: Re-ranks the top search results
 - **Batch indexing**: 100 documents per operation with retry
 
 ### Data Ingestion
-- **CSV**: Row-based chunking preserving relational integrity (grouped by Make/Model/Year), 100 rows per chunk
-- **PDF**: Semantic chunking via Azure Document Intelligence layout model, 500-1500 token chunks with 200 token overlap, GPT-4 Vision for diagrams
+- **CSV**: Row-based chunking preserving relational integrity (grouped by a natural key), 100 rows per chunk
+- **PDF**: Semantic chunking via a layout-aware model, 500-1500 token chunks with 200 token overlap so context is not lost at a chunk boundary, vision-model support for diagrams
 - **Web**: Trusted source scraping with credibility scores (0.7 minimum), rate-limited (5 concurrent, 500ms interval), 1-hour cache TTL
 
 ### Result Fusion
-- Sequential execution: Vector → Web → PDF
+- Sequential execution across result sources
 - Deduplication by document ID
-- Semantic re-ranking with `text-embedding-3-large`
-- Response generation via GPT-4o-mini
+- Semantic re-ranking of the fused results
+- Response generation with citations back to source chunks
 
 ### Resilience
-- All Azure SDK wrappers use Polly policies (retries, circuit breakers)
+- Transient calls use retry policies, with circuit breakers where call volume warrants one
 - Health checks on Azure services
-- Graceful degradation when individual agents fail
+- Graceful degradation when an individual source fails
 
 ---
 
 ## MUST NOT
-- Introduce `Microsoft.SemanticKernel`
-- Use direct Azure SDK calls outside the persistence wrapper layer — always go through `AzureOpenAIClientWrapper` / `AzureSearchClientWrapper`
-- Hardcode Azure endpoints, keys, or connection strings — use environment variables
+- Azure secrets — endpoints, keys, connection strings — follow **<csharp-coding-standard>** § Safety
 - Skip credibility validation for web search results
 - Bypass rate limiting on web scraping operations
 - Create new Azure AI Search indexes without approval — use the index named by `SearchOptions.IndexName`
 
 ## MUST DO
-- Follow the wrapper pattern: Application layer calls wrapper interfaces, Persistence implements them
 - Use parameterized tool definitions for agent communication
-- Track execution state via `AgentState` for all agent operations
 - Include citation tracking (page numbers, sections, figures) for PDF results
 - Preserve document hierarchy (chapters/sections) in chunked content
 - Log all agent operations with structured logging and operation context

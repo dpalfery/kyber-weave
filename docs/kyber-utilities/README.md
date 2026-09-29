@@ -71,7 +71,7 @@ changes a harness's behaviour on its own.
 - It is not a wider utility platform: there is no plugin registry, no generic utility schema, and
   no second utility type. The slice is one utility for three harnesses.
 
-The reasoning behind that boundary is [ADR 0025](../adr/0025-kyber-utilities-owned-files-not-settings.md).
+The reasoning behind that boundary is [ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md).
 
 ---
 
@@ -98,7 +98,7 @@ Explore the Kyber Utilities documentation:
 
 - **[Adoption & activation guide](onboarding.md)** — the four commands, per-harness activation
   snippets, the import and privacy-review process, and what `doctor` checks.
-- **[ADR 0025](../adr/0025-kyber-utilities-owned-files-not-settings.md)** — why it deploys owned
+- **[ADR 0026](../adr/0026-kyber-utilities-owned-files-not-settings.md)** — why it deploys owned
   files and never owns harness settings, and why activation is manual.
 - **[Status-line slice plan](../plans/2026-09-28-kyber-utilities-status-line-slice.md)** — the
   approved slice that ships this component.
