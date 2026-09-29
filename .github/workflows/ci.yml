@@ -87,7 +87,8 @@ jobs:
           dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
           -c ${{ env.CONFIGURATION }}
           --no-build
-          --logger "trx;LogFileName=kyber-weave.trx"
+          --report-trx
+          --report-trx-filename kyber-weave.trx
           --results-directory TestResults
 
       - name: Upload test results

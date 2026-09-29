@@ -37,7 +37,7 @@ You do **not** own:
 
 - **Runner**: `ubuntu-latest` unless a specific OS is required (Windows for MAUI publish, macOS for iOS signing)
 - **Authentication to Azure**: Workload Identity Federation (OIDC) via `azure/login@v2` with `client-id`, `tenant-id`, and `subscription-id` from environment secrets. Never use a client secret where OIDC is supported.
-- **.NET builds**: `actions/setup-dotnet` pinned to the project's SDK version; `dotnet build -c Release`; `dotnet test` with `--logger trx` for test result upload
+- **.NET builds**: `actions/setup-dotnet` pinned to the project's SDK version; `dotnet build -c Release`; with MTP selected in `global.json`, use `dotnet test --report-trx` for test result upload
 - **Docker**: Multi-stage builds; push to Azure Container Registry using `docker/login-action` with the managed identity credential, not a username/password
 - **Secret handling**: Store secrets in GitHub environment secrets, not repository secrets, so they scope to the environment. Never echo secrets; use `::add-mask::` for any computed secret-like values. Reference secrets via `${{ secrets.NAME }}` only — never hard-code values in workflow YAML.
 - **Concurrency**: Set `concurrency` groups on deploy jobs to prevent parallel deployments to the same environment
