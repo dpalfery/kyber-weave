@@ -587,14 +587,7 @@ public sealed class ReleaseTests
     [Fact]
     public void LocalKyberDashBuildMatchesTheReleaseJob()
     {
-        // Normalized because the job is found by LF-delimited keys, and `* text=auto` gives a
-        // Windows checkout CRLF.
-        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
-        int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
-        Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
-        // The job runs to the next two-space-indented key, which is the next job.
-        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
-        string job = next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+        string job = ReadBuildKyberDashJob();
         string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
 
         // release-local.sh reads its Node version from dash/.nvmrc rather than repeating it.
@@ -623,6 +616,11 @@ public sealed class ReleaseTests
             "\"package.json\":",
             "codesign --sign - --force",
             "THIRD_PARTY_NOTICES.md",
+            "npm --prefix web ci",
+            "npm --prefix web run build",
+            "scripts/pack-sea-web.mjs",
+            "\"web.json\":",
+            "scripts/sea-web-smoke.mjs",
         ];
         foreach (string value in shared)
         {
@@ -630,6 +628,229 @@ public sealed class ReleaseTests
             Assert.True(
                 local.Contains(value, StringComparison.Ordinal),
                 $"scripts/release-local.sh does not use {value}, which build-kyberdash does. Make the same change there.");
+        }
+    }
+
+    /// <summary>
+    /// Issue #157, defect 1: the web dashboard is embedded in the released binary.
+    /// The release job and release-local.sh must build, embed, and smoke-test the dashboard
+    /// in the correct order: tsup comes first, then web build, then pack, then SEA config.
+    /// The smoke test runs after the blob is injected.
+    /// </summary>
+    [Fact]
+    public void BuildKyberDashEmbedsTheWebDashboard()
+    {
+        string job = ReadBuildKyberDashJob();
+        string local = ScopeBuildKyberDashFunction();
+
+        // Collect violations from both sources so one message reports both.
+        List<string> violations = [];
+
+        AssertEmbedsWebDashboard("release.yml", job, violations);
+        AssertEmbedsWebDashboard("release-local.sh", local, violations);
+
+        Assert.True(violations.Count == 0, string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// Reads the build-kyberdash job from release.yml, normalized to LF.
+    /// The job is the section from "\n  build-kyberdash:\n" to the next two-space-indented key.
+    /// </summary>
+    private static string ReadBuildKyberDashJob()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath).ReplaceLineEndings("\n");
+        int start = workflow.IndexOf("\n  build-kyberdash:\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release.yml has no build-kyberdash job.");
+        // The job runs to the next two-space-indented key, which is the next job.
+        Match next = Regex.Match(workflow[(start + 1)..], @"\n  [A-Za-z0-9_-]+:\n");
+        return next.Success ? workflow.Substring(start, next.Index + 1) : workflow[start..];
+    }
+
+    /// <summary>
+    /// Extracts the build_kyberdash() function from release-local.sh, then strips comments.
+    /// Scoped from "\nbuild_kyberdash() {\n" to the following "\nif [ -z \"$NO_KYBERDASH\" ]".
+    /// Both markers must exist.
+    /// </summary>
+    private static string ScopeBuildKyberDashFunction()
+    {
+        string local = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "release-local.sh"));
+        int start = local.IndexOf("\nbuild_kyberdash() {\n", StringComparison.Ordinal);
+        Assert.True(start >= 0, "release-local.sh has no build_kyberdash() function.");
+        int end = local.IndexOf("\nif [ -z \"$NO_KYBERDASH\" ]", start, StringComparison.Ordinal);
+        Assert.True(end >= 0, "release-local.sh build_kyberdash() function has no terminating marker.");
+
+        string scoped = local.Substring(start, end - start);
+        // Strip comments: lines whose trimmed text starts with #
+        var lines = scoped.Split('\n');
+        var filtered = lines.Where(line => !line.TrimStart().StartsWith("#", StringComparison.Ordinal));
+        return string.Join("\n", filtered);
+    }
+
+    /// <summary>
+    /// Asserts that the given text (from release.yml job or release-local.sh) embeds the web dashboard
+    /// in the correct order, and that archive commands name only the expected operands.
+    /// Strips comments before checking, and collects violations into the list.
+    /// </summary>
+    private static void AssertEmbedsWebDashboard(string label, string text, List<string> violations)
+    {
+        // Strip comments before checking
+        var lines = text.Split('\n');
+        var filtered = lines.Where(line => !line.TrimStart().StartsWith("#", StringComparison.Ordinal));
+        string textNoComments = string.Join("\n", filtered);
+
+        // Check ordering:
+        // tsup comes before web run build.
+        int tsupIndex = textNoComments.IndexOf("tsup --config tsup.sea.config.ts", StringComparison.Ordinal);
+        if (tsupIndex < 0)
+        {
+            violations.Add($"{label}: 'tsup --config tsup.sea.config.ts' not found; the dashboard embedding order starts there.");
+            return;
+        }
+
+        int webBuildIndex = textNoComments.IndexOf("npm --prefix web run build", StringComparison.Ordinal);
+        if (webBuildIndex < 0)
+        {
+            violations.Add($"{label}: 'npm --prefix web run build' not found; add it to the 'Bundle dash CLI' step after tsup.");
+            return;
+        }
+
+        if (tsupIndex >= webBuildIndex)
+        {
+            violations.Add($"{label}: 'tsup --config tsup.sea.config.ts' must come before 'npm --prefix web run build'. Make the same change there.");
+            return;
+        }
+
+        // web run build comes before pack-sea-web.mjs
+        int packIndex = textNoComments.IndexOf("scripts/pack-sea-web.mjs", StringComparison.Ordinal);
+        if (packIndex < 0)
+        {
+            violations.Add($"{label}: 'scripts/pack-sea-web.mjs' not found; add it after 'npm --prefix web run build'.");
+            return;
+        }
+
+        if (webBuildIndex >= packIndex)
+        {
+            violations.Add($"{label}: 'npm --prefix web run build' must come before 'scripts/pack-sea-web.mjs'. Make the same change there.");
+            return;
+        }
+
+        // pack-sea-web.mjs comes before --experimental-sea-config
+        int seaConfigIndex = textNoComments.IndexOf("--experimental-sea-config", StringComparison.Ordinal);
+        if (seaConfigIndex < 0)
+        {
+            violations.Add($"{label}: '--experimental-sea-config' not found.");
+            return;
+        }
+
+        if (packIndex >= seaConfigIndex)
+        {
+            violations.Add($"{label}: 'scripts/pack-sea-web.mjs' must come before '--experimental-sea-config'. Make the same change there.");
+            return;
+        }
+
+        // Check sea-web-smoke.mjs comes after NODE_SEA_BLOB injection
+        int blobIndex = textNoComments.IndexOf("NODE_SEA_BLOB", StringComparison.Ordinal);
+        if (blobIndex < 0)
+        {
+            violations.Add($"{label}: 'NODE_SEA_BLOB' not found.");
+            return;
+        }
+
+        int smokeIndex = textNoComments.IndexOf("scripts/sea-web-smoke.mjs", StringComparison.Ordinal);
+        if (smokeIndex < 0)
+        {
+            violations.Add($"{label}: 'scripts/sea-web-smoke.mjs' not found; add it after the blob injection.");
+            return;
+        }
+
+        if (blobIndex >= smokeIndex)
+        {
+            violations.Add($"{label}: 'scripts/sea-web-smoke.mjs' must come after 'NODE_SEA_BLOB' injection. Make the same change there.");
+            return;
+        }
+
+        // Check archive still names exactly the expected operands.
+        // Use line-anchored regex with Multiline to capture full lines.
+        AssertArchiveOperands(label, textNoComments, violations);
+    }
+
+    /// <summary>
+    /// Asserts that archive commands in the text name only the expected operands.
+    /// For release.yml: tar → ["kyberdash${EXE}", "THIRD_PARTY_NOTICES.md"], zip → ["${FINAL_BIN}", "${BIN_DIR}/THIRD_PARTY_NOTICES.md"]
+    /// For release-local.sh: tar → ["kyberdash", "THIRD_PARTY_NOTICES.md"]
+    /// Collects violations into the list.
+    /// </summary>
+    private static void AssertArchiveOperands(string label, string text, List<string> violations)
+    {
+        if (label == "release.yml")
+        {
+            // Check tar command: tar -C "${BIN_DIR}" -czf "${BIN_DIR}/kyberdash-${RID}.tar.gz" "kyberdash${EXE}" THIRD_PARTY_NOTICES.md
+            Match tarMatch = Regex.Match(text, @"tar\s+.*?-czf\s+.*?/(kyberdash-[^/\s]+\.\w+)\s+(.+)$", RegexOptions.Multiline);
+            if (tarMatch.Success)
+            {
+                string operands = tarMatch.Groups[2].Value.Trim();
+                var parts = operands.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    // Trim quotes from operands
+                    string op1 = parts[0].Trim('"');
+                    string op2 = parts[1].Trim('"');
+                    if (op1 != "kyberdash${EXE}" || op2 != "THIRD_PARTY_NOTICES.md")
+                    {
+                        violations.Add($"{label} tar archive: expected operands [\"kyberdash${{EXE}}\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
+                    }
+                }
+                else
+                {
+                    violations.Add($"{label} tar archive: operands not in expected format.");
+                }
+            }
+
+            // Check zip command: zip -9 -j "${BIN_DIR}/kyberdash-${RID}.zip" "${FINAL_BIN}" "${BIN_DIR}/THIRD_PARTY_NOTICES.md"
+            Match zipMatch = Regex.Match(text, @"zip\s+.*?/(kyberdash-[^/\s]+\.zip)\s+(.+)$", RegexOptions.Multiline);
+            if (zipMatch.Success)
+            {
+                string operands = zipMatch.Groups[2].Value.Trim();
+                var parts = operands.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    // Trim quotes from operands
+                    string op1 = parts[0].Trim('"');
+                    string op2 = parts[1].Trim('"');
+                    if (op1 != "${FINAL_BIN}" || op2 != "${BIN_DIR}/THIRD_PARTY_NOTICES.md")
+                    {
+                        violations.Add($"{label} zip archive: expected operands [\"${{FINAL_BIN}}\", \"${{BIN_DIR}}/THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Update this list with the job.");
+                    }
+                }
+                else
+                {
+                    violations.Add($"{label} zip archive: operands not in expected format.");
+                }
+            }
+        }
+        else if (label == "release-local.sh")
+        {
+            // Check tar command: tar -C "${stage}/out" -czf "${DEST}/kyberdash-${kyberdash_rid}.tar.gz" kyberdash THIRD_PARTY_NOTICES.md
+            Match tarMatch = Regex.Match(text, @"tar\s+.*?-czf\s+.*?/(kyberdash-[^/\s]+\.\w+)\s+(.+)$", RegexOptions.Multiline);
+            if (tarMatch.Success)
+            {
+                string operands = tarMatch.Groups[2].Value.Trim();
+                var parts = operands.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2)
+                {
+                    // Trim quotes from operands
+                    string op1 = parts[0].Trim('"');
+                    string op2 = parts[1].Trim('"');
+                    if (op1 != "kyberdash" || op2 != "THIRD_PARTY_NOTICES.md")
+                    {
+                        violations.Add($"{label} tar archive: expected operands [\"kyberdash\", \"THIRD_PARTY_NOTICES.md\"] but got [\"{op1}\", \"{op2}\"]. Make the same change there.");
+                    }
+                }
+                else
+                {
+                    violations.Add($"{label} tar archive: operands not in expected format.");
+                }
+            }
         }
     }
 
