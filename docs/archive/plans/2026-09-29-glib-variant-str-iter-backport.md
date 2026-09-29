@@ -85,6 +85,8 @@ The verified crate was vendored with only the two upstream source lines changed.
 Cargo's Linux metadata and reverse dependency tree resolve `glib 0.18.5` from
 the local path, and the lockfile no longer selects the registry copy. The macOS
 tray Rust gates, release build, tray UI gates, KyberDash gates, and documentation
-validation passed locally. The Linux CI job must pass before merging the fix;
-alert #68 remains open until then. The future removal condition is tracked in
+validation passed locally. [PR #177 CI](https://github.com/dpalfery/kyber-weave/actions/runs/36635422504)
+passed the Linux iterator tests and locked release build, along with the macOS
+and Windows tray gates. Alert #68 remains open until merge. The future removal
+condition is tracked in
 [`tauri-glib-upstream-removal.md`](../../todo/tauri-glib-upstream-removal.md).
