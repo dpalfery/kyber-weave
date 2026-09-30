@@ -2208,12 +2208,25 @@ export class CanonStore {
    * Bounded batch of records matching the given harness names (case-insensitive).
    * Used for exclusion remediation sweeps without loading the full history into memory.
    */
-  listRecordsByHarness(harnesses: readonly string[], limit = 500): import('./types.js').CanonicalRecord[] {
+  listRecordsByHarness(
+    harnesses: readonly string[],
+    limit = 500,
+    sources?: readonly string[],
+  ): import('./types.js').CanonicalRecord[] {
     if (harnesses.length === 0 || limit <= 0) return []
     const placeholders = harnesses.map(() => 'LOWER(harness) = ?').join(' OR ')
+    const args: string[] = harnesses.map((h) => h.trim().toLowerCase())
+    // A scoped remediation (renormalize --source) must not see rows from
+    // sources it was not asked to touch; without the filter the sweep
+    // quarantines every excluded-harness row in the database.
+    let sourceClause = ''
+    if (sources !== undefined && sources.length > 0) {
+      sourceClause = ` AND (${sources.map(() => 'source = ?').join(' OR ')})`
+      args.push(...sources)
+    }
     const rows = this.db
-      .prepare(`SELECT * FROM records WHERE ${placeholders} ORDER BY span_id LIMIT ?`)
-      .all(...harnesses.map((h) => h.trim().toLowerCase()), limit) as RecordRow[]
+      .prepare(`SELECT * FROM records WHERE (${placeholders})${sourceClause} ORDER BY span_id LIMIT ?`)
+      .all(...args, limit) as RecordRow[]
     return rows.map(toRecord)
   }
 

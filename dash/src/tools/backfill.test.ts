@@ -121,6 +121,190 @@ describe('renormalizeRecords — retained raw evidence', () => {
     store.close()
   })
 
+  it('re-attributes stored agy rows carrying the Antigravity agent identity', async () => {
+    // Issue #195: the live corpus shape — labeled `gemini`, raw carrying
+    // both `gen_ai.agent.name: 'antigravity'` and `gen_ai.system: 'gemini'`
+    // — re-votes to `antigravity` with content preserved, while a genuine
+    // agent-name-less Gemini row is still quarantined as excluded_harness.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      staleRecord({
+        spanId: 'agy-span-1',
+        traceId: 'agy-trace-1',
+        source: 'agy',
+        harness: 'gemini',
+        content: { conversation_history: 'synthetic agy context' },
+        raw: {
+          'gen_ai.agent.name': 'antigravity',
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 1_200,
+          'gen_ai.usage.output_tokens': 150,
+          'gen_ai.session.id': 'agy-session-1',
+        },
+      }),
+      staleRecord({
+        spanId: 'gemini-span-1',
+        traceId: 'gemini-trace-1',
+        source: 'gemini-cli',
+        harness: 'gemini',
+        raw: {
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 5,
+          'gen_ai.usage.output_tokens': 2,
+        },
+      }),
+    ])
+
+    await buildSessions(store)
+    const report = renormalizeRecords(store)
+    const rebuild = await buildSessions(store)
+
+    expect(report.reattributed).toBeGreaterThanOrEqual(1)
+    expect(store.get('agy-span-1')?.harness).toBe('antigravity')
+    expect(store.get('agy-span-1')?.content).toEqual({
+      conversation_history: 'synthetic agy context',
+    })
+    expect(store.get('gemini-span-1')).toBeUndefined()
+    expect(store.getQuarantine('gemini-span-1')).toEqual(expect.objectContaining({
+      spanId: 'gemini-span-1',
+      // Exact reason: a regression that bypasses Gemini detection must not
+      // pass by relabeling the row `unclaimed`.
+      reason: 'excluded_harness',
+    }))
+    expect(store.listAll().every((record) => record.harness !== 'gemini')).toBe(true)
+    expect(rebuild.built).toBeGreaterThanOrEqual(1)
+    // The re-ingested record names its conversation via `gen_ai.session.id`,
+    // so the session keys on the harness conversation, not the trace.
+    expect(store.getSessionPayload('agy-session-1')).toBeDefined()
+    expect(store.getSessionPayload('gemini-trace-1')).toBeUndefined()
+    store.close()
+  })
+
+  it('restricts renormalization to the requested sources, leaving other traces untouched', async () => {
+    // Issue #195: the live repair must touch only `agy` traces — an
+    // unscoped pass would quarantine file-sourced rows (which carry no OTLP
+    // fingerprint) as unclaimed.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      staleRecord({
+        spanId: 'agy-span-1',
+        traceId: 'agy-trace-1',
+        source: 'agy',
+        harness: 'gemini',
+        raw: {
+          'gen_ai.agent.name': 'antigravity',
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 1_200,
+          'gen_ai.usage.output_tokens': 150,
+        },
+      }),
+      staleRecord({
+        spanId: 'file-span-1',
+        traceId: 'file-trace-1',
+        source: 'codeburn/antigravity-cli',
+        harness: 'antigravity-cli',
+        raw: { provider: 'antigravity', sessionId: 'file-session-1' },
+      }),
+    ])
+
+    const report = renormalizeRecords(store, { sources: ['agy'] })
+
+    expect(report.traces).toBe(1)
+    expect(store.get('agy-span-1')?.harness).toBe('antigravity')
+    expect(store.get('file-span-1')?.harness).toBe('antigravity-cli')
+    expect(store.getQuarantine('file-span-1')).toBeUndefined()
+    store.close()
+  })
+
+  it('leaves excluded-harness rows and sessions from other sources alone on a scoped run', async () => {
+    // The `--source` contract: only requested traces are remediated. A
+    // genuine gemini row from another source — and its derived session —
+    // must survive a scoped run; the tail sweep and session purge are
+    // source-aware too.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      staleRecord({
+        spanId: 'agy-span-1',
+        traceId: 'agy-trace-1',
+        source: 'agy',
+        harness: 'gemini',
+        raw: {
+          'gen_ai.agent.name': 'antigravity',
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 1_200,
+          'gen_ai.usage.output_tokens': 150,
+        },
+      }),
+      staleRecord({
+        spanId: 'other-gemini-span-1',
+        traceId: 'other-gemini-trace-1',
+        source: 'gemini-cli',
+        harness: 'gemini',
+        raw: {
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 5,
+          'gen_ai.usage.output_tokens': 2,
+        },
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'other-gemini-trace-1',
+      harness: 'gemini',
+      payload: { sessionId: 'other-gemini-trace-1', harness: 'gemini' },
+    })
+
+    const report = renormalizeRecords(store, { sources: ['agy'] })
+
+    expect(report.traces).toBe(1)
+    expect(store.get('agy-span-1')?.harness).toBe('antigravity')
+    expect(store.get('other-gemini-span-1')?.harness).toBe('gemini')
+    expect(store.getQuarantine('other-gemini-span-1')).toBeUndefined()
+    expect(store.getSessionPayload('other-gemini-trace-1')).toBeDefined()
+    store.close()
+  })
+
+  it('leaves foreign-source rows sharing a selected trace untouched on a scoped run', async () => {
+    // Attribution groups by (source, trace): a trace can carry rows from two
+    // sources, and scope filtering must apply to the rows re-ingested, not
+    // just the trace selected. The foreign file-shaped row must survive with
+    // harness, content, and quarantine state intact.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      staleRecord({
+        spanId: 'agy-span-1',
+        traceId: 'shared-trace-1',
+        source: 'agy',
+        harness: 'gemini',
+        content: { conversation_history: 'synthetic agy context' },
+        raw: {
+          'gen_ai.agent.name': 'antigravity',
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 1_200,
+          'gen_ai.usage.output_tokens': 150,
+        },
+      }),
+      staleRecord({
+        spanId: 'file-span-1',
+        traceId: 'shared-trace-1',
+        source: 'codeburn/antigravity-cli',
+        harness: 'antigravity-cli',
+        content: { conversation_history: 'synthetic file context' },
+        raw: { provider: 'antigravity', sessionId: 'file-session-1' },
+      }),
+    ])
+
+    const report = renormalizeRecords(store, { sources: ['agy'] })
+
+    expect(report.traces).toBe(1)
+    expect(store.get('agy-span-1')?.harness).toBe('antigravity')
+    expect(store.get('file-span-1')?.harness).toBe('antigravity-cli')
+    expect(store.get('file-span-1')?.content).toEqual({
+      conversation_history: 'synthetic file context',
+    })
+    expect(store.getQuarantine('file-span-1')).toBeUndefined()
+    store.close()
+  })
+
   it('removes mixed-harness Gemini projected sessions (${harness}:${rawId}) during renormalization', async () => {
     const store = new CanonStore(':memory:')
     const traceId = 'mixed-trace-with-gemini'
