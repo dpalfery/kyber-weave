@@ -3316,3 +3316,87 @@ describe('copilot deduplication key prefixes (durable-union contract)', () => {
     expect(/:shutdown-residual:[^:]+:\d{13}$/.test(residual)).toBe(true)
   })
 })
+
+// Issue #186 (R5.2/R5.3): every Copilot parser path that prices through LiteLLM (API list rates)
+// must reach the canonical record as a NON-harness figure, so the projection can reprice it from
+// the credits table. Driven through the real parsers; the assertion is on the synthesized record,
+// independent of how the parser marks the call.
+describe('copilot provider - LiteLLM-derived figures are never harness-basis (issue #186)', () => {
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'copilot-basis-test-'))
+  })
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true })
+    vi.unstubAllEnvs()
+  })
+
+  it('JSONL output-only path: synthesized cost is published, not harness', async () => {
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    const eventsPath = await createSessionDir('sess-basis-jsonl', [
+      modelChange('gpt-4.1'),
+      userMessage('write a function'),
+      assistantMessage({ messageId: 'msg-1', outputTokens: 150 }),
+    ])
+    const calls = await collectCalls({ path: eventsPath, project: 'myproject', provider: 'copilot' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.costUSD).toBeGreaterThan(0)
+
+    const { synthesizeCall } = await import('../synth/synth.js')
+    const cost = synthesizeCall(calls[0]!).cost
+    expect(cost.status).toBe('priced')
+    expect(cost.basis).toBe('published')
+  })
+
+  it('chatSession path: synthesized cost is published, not harness', async () => {
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '1')
+    const filePath = join(tmpDir, 'basis-chat.jsonl')
+    await createChatSessionFile(filePath, [
+      { kind: 0, v: { version: 3, creationDate: 1780157113020, sessionId: 'chat-basis', requests: [] } },
+      { kind: 2, k: ['requests'], v: [chatSessionSampleRequest()] },
+    ])
+    const calls = await collectCalls({ path: filePath, project: 'myproject', provider: 'copilot', sourceType: 'chatsession' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.costUSD).toBeGreaterThan(0)
+
+    const { synthesizeCall } = await import('../synth/synth.js')
+    const cost = synthesizeCall(calls[0]!).cost
+    expect(cost.status).toBe('priced')
+    expect(cost.basis).toBe('published')
+  })
+
+  it('OTel span path: synthesized cost is published, not harness', async () => {
+    if (!isSqliteAvailable()) return
+    const dbPath = join(tmpDir, 'agent-traces.db')
+    vi.stubEnv('KYBERDASH_COPILOT_OTEL_DB', dbPath)
+    vi.stubEnv('KYBERDASH_COPILOT_DISABLE_OTEL', '')
+    createOtelDb(dbPath)
+    insertSpan(dbPath, {
+      spanId: 'span-basis-1',
+      traceId: 'trace-basis-1',
+      operationName: 'chat',
+      startTimeMs: 1000,
+      responseModel: 'gpt-4.1',
+      attrs: {
+        'gen_ai.conversation.id': 'conv-basis',
+        'gen_ai.response.model': 'gpt-4.1',
+        'gen_ai.usage.input_tokens': 1000,
+        'gen_ai.usage.output_tokens': 200,
+        'gen_ai.usage.cache_read.input_tokens': 500,
+        'gen_ai.usage.cache_creation.input_tokens': 50,
+      },
+    })
+    const provider = createCopilotProvider('/nonexistent/jsonl', '/nonexistent/ws')
+    const sources = (await provider.discoverSessions()).filter(s => s.path === dbPath)
+    expect(sources).toHaveLength(1)
+    const calls: ParsedProviderCall[] = []
+    for await (const c of provider.createSessionParser(sources[0]!, new Set()).parse()) calls.push(c)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.costUSD).toBeGreaterThan(0)
+
+    const { synthesizeCall } = await import('../synth/synth.js')
+    const cost = synthesizeCall(calls[0]!).cost
+    expect(cost.status).toBe('priced')
+    expect(cost.basis).toBe('published')
+  })
+})
