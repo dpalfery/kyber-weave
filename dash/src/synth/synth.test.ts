@@ -967,6 +967,37 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(Buffer.byteLength(boundArgs, "utf8")).toBeLessThanOrEqual(65_536)
   })
 
+  it("preserves object shape and flags arguments_truncated when object arguments exceed 64KB (Thread 3)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t3-args-shape",
+      deduplicationKey: "claude:s-t3-args-shape:t-1",
+    })
+    const largeContent = "Z".repeat(100_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_obj_args", name: "Write", arguments: { path: "src/file.ts", content: largeContent } },
+      ],
+      toolResults: [],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_bytes"]).toBeGreaterThan(100_000)
+    expect(toolRecord?.attributes?.["gen_ai.tool.arguments_truncated"]).toBe(true)
+    expect(typeof toolRecord?.attributes?.["gen_ai.tool.arguments_hash"]).toBe("string")
+    const raw = toolRecord?.raw as Record<string, unknown>
+    expect(typeof raw["arguments"]).toBe("object")
+    const boundArgs = raw["arguments"] as Record<string, unknown>
+    expect(boundArgs.path).toBe("src/file.ts")
+    expect(typeof boundArgs.content).toBe("string")
+    expect(Buffer.byteLength(boundArgs.content as string, "utf8")).toBeLessThanOrEqual(65_536)
+  })
+
   it("derives duration from paired toolCall and toolResult timestamps or marks unmeasured (Thread 10)", () => {
     const synthesizer = new Synthesizer()
     const parsedCall = call({

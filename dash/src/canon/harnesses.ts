@@ -151,7 +151,10 @@ function digestSessions(store: CanonStore, harness: string): SessionDigest {
     // and invoked tools. If tools_offered was unobserved, do not fabricate 100% yield
     // from invocation-only tools (schema_tokens === 0).
     if (summary && Array.isArray(summary.tools_offered)) {
-      const invocationsObserved = Array.isArray(summary.tools_invoked) || Array.isArray(payload.tools)
+      const invocationsObserved =
+        (Array.isArray(summary.tools_invoked) && summary.tools_invoked.length > 0) ||
+        (Array.isArray(payload.tools) &&
+          payload.tools.some((t: { invocations?: number }) => (t.invocations ?? 0) > 0))
       if (invocationsObserved) {
         digest.totalDefinedTools += summary.tools_offered.length
         const offeredSet = new Set(summary.tools_offered)

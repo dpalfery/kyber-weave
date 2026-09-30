@@ -374,6 +374,34 @@ describe('Detector 2: duplicate-tool-call', () => {
     expect(findings[0]!.sessionId).toBe('session-1')
   })
 
+  it('does NOT fabricate 250 tokens when tokens cannot be derived, marking estimatedWasteTokens undefined and measurementClass coverage-gap', () => {
+    const call1 = makeMockRecord({
+      spanId: 'tool-call-1',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' } },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+    })
+    const call2 = makeMockRecord({
+      spanId: 'tool-call-2',
+      sessionId: 'session-1',
+      op: 'tool.invoke',
+      name: 'read_file',
+      raw: { arguments: { path: '/src/main.ts' } },
+      tokens: { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 },
+    })
+
+    const findings = detectDuplicateToolCall({
+      records: [call1, call2],
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.estimatedWasteTokens).toBeUndefined()
+    expect(findings[0]!.measurementClass).toBe('coverage-gap')
+    expect(findings[0]!.rankScore).toBe(0)
+  })
+
   it('detects duplicate child tool.invoke records within session turns', () => {
     const turn1 = makeMockRecord({
       spanId: 'llm-turn-1',
