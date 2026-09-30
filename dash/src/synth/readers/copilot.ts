@@ -87,6 +87,7 @@ export function loadCopilotCliCalls(
         reasoningTokens: numberValue(row.reasoning_tokens),
         webSearchRequests: 0,
         costUSD: numberValue(row.cost_usd),
+        costHarnessReported: true,
         tools: [],
         bashCommands: [],
         timestamp: timestampValue(row.created_at),

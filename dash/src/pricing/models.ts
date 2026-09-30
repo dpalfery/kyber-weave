@@ -120,8 +120,17 @@ const GROK_4_6_HIGH_PROMPT_COSTS = buildCosts(4e-6, 12e-6, null, 1e-6, null)
 // threshold. A user-set exact priceOverride still wins over the built-in tier.
 // Kept as a helper so the next tiered model extends this one branch instead of
 // copy-pasting the inline condition.
+// gpt-6-luna: OpenAI's standard tier charges 0.20 input / 0.02 cached / 0.75 output per 1M once
+// a request's input exceeds 272K tokens (https://developers.openai.com/api/docs/pricing,
+// retrieved 2026-09-30). Exactly 272K stays on the base tier. No cache-write rate is published.
+const GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD = 272_000
+const GPT_6_LUNA_HIGH_PROMPT_COSTS = buildCosts(2e-7, 7.5e-7, null, 2e-8, null)
+
 function tieredCostsFor(model: string, baseCosts: ModelCosts, promptTokens: number): ModelCosts {
   if (exactPriceOverrideFor(model)) return baseCosts
+  if (resolveCanonicalModelId(model) === 'gpt-6-luna' && promptTokens > GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD) {
+    return GPT_6_LUNA_HIGH_PROMPT_COSTS
+  }
   if (resolveCanonicalModelId(model) === 'grok-4.6' && promptTokens >= GROK_4_6_PROMPT_TOKEN_THRESHOLD) {
     return GROK_4_6_HIGH_PROMPT_COSTS
   }

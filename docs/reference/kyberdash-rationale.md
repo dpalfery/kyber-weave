@@ -68,8 +68,23 @@ understated, plausible total is accepted where a suspicious one would be questio
 The consequence is that a cost figure travels with its **basis** — a published table or the
 harness's own arithmetic (R5.1) — and a harness the table does not name is priced as
 `out_of_scope`, never from that table. Regression coverage:
-`dash/kyber/canon/cost.scoping.test.ts` (the regression test reproduces the $0.27 fabrication
+`dash/src/canon/cost.scoping.test.ts` (the regression test reproduces the $0.27 fabrication
 when the guard is removed).
+
+Issue #186 was the same hazard in latent form: the Copilot parser priced through LiteLLM and was
+labelled `harness`. Copilot is now priced only from its own credits table, and only the genuine
+reader's `cost_usd` keeps the `harness` basis.
+
+**Known follow-ups (issue #186, non-blocking).**
+
+- The `ratesPath` override branch of `getMeta().rates` is untested.
+- The `published` table's source and date are hardcoded in `bridge.ts` `getMeta` rather than
+  derived from `pricing-provenance.json`.
+- The legacy `cost_usd` fallback in the session row is untested.
+- The Run and Harness cost cells (`RunDetail.tsx:459`, `HarnessDetail.tsx:395`) still use the bare
+  `—` pattern.
+- A full LiteLLM re-snapshot (only `claude-sonnet-5-5` and `gpt-6-luna` were added) is a separate,
+  source-cited change.
 
 ### R5.4, R5.5 — No published rate is not zero
 

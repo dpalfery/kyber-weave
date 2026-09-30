@@ -1,6 +1,8 @@
+import { readFileSync } from 'fs'
 import { describe, it, expect } from 'vitest'
 
 import fallback from './pricing-fallback.json' assert { type: 'json' }
+import snapshot from './litellm-snapshot.json' assert { type: 'json' }
 
 // The gap-fill fallback is generated from models.dev / OpenRouter. These assert
 // the bundler's hygiene guarantees on the committed artifact, so a future
@@ -31,5 +33,43 @@ describe('pricing-fallback.json data hygiene', () => {
     // A per-million value would be >= 1; real per-token rates are tiny.
     const bad = entries.filter(([, v]) => (v[0] ?? 0) >= 1 || (v[1] ?? 0) >= 1)
     expect(bad.map(([k]) => k)).toEqual([])
+  })
+})
+
+// Issue #186 U11: two targeted, source-cited additions to the bundled data. Tuple order is
+// [input, output, cacheWrite, cacheRead, fast] in USD per token.
+describe('issue #186 U11 bundled rate additions', () => {
+  const snap = snapshot as unknown as Record<string, (number | null)[]>
+  const fb = fallback as unknown as Record<string, (number | null)[]>
+  const find = (key: string) => snap[key] ?? fb[key]
+
+  it('carries claude-sonnet-5-5 at 2 / 10 / cache write 2.50 / cache read 0.20 per 1M', () => {
+    const v = find('claude-sonnet-5-5')
+    expect(v).toBeDefined()
+    expect(v![0]).toBeCloseTo(2e-6, 12)
+    expect(v![1]).toBeCloseTo(1e-5, 12)
+    expect(v![2]).toBeCloseTo(2.5e-6, 12)
+    expect(v![3]).toBeCloseTo(2e-7, 12)
+  })
+
+  it('carries gpt-6-luna at 0.10 / 0.50 / cache read 0.01 per 1M (base tier)', () => {
+    const v = find('gpt-6-luna')
+    expect(v).toBeDefined()
+    expect(v![0]).toBeCloseTo(1e-7, 13)
+    expect(v![1]).toBeCloseTo(5e-7, 13)
+    expect(v![3]).toBeCloseTo(1e-8, 13)
+  })
+
+  // Assumed sidecar (JSON cannot carry comments and the rate files are arrays keyed by model,
+  // so provenance is pinned in pricing-provenance.json: { "<model>": { source, retrieved } }).
+  it('cites a vendor source URL and the 2026-09-30 retrieval for each added entry', () => {
+    const prov = JSON.parse(readFileSync(new URL('./pricing-provenance.json', import.meta.url), 'utf8')) as Record<
+      string,
+      { source: string; retrieved: string }
+    >
+    expect(prov['claude-sonnet-5-5'].source).toMatch(/^https:\/\/(platform\.claude\.com|docs\.anthropic\.com)\//)
+    expect(prov['gpt-6-luna'].source).toMatch(/^https:\/\/(developers\.openai\.com|openai\.com)\//)
+    expect(prov['claude-sonnet-5-5'].retrieved).toBe('2026-09-30')
+    expect(prov['gpt-6-luna'].retrieved).toBe('2026-09-30')
   })
 })

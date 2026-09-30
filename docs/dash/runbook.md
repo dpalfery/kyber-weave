@@ -477,6 +477,18 @@ here.
   `canon.db-wal` or `canon.db-shm` from the old file. A replacement that leaves those sidecars
   behind can make SQLite misread the new file; the server has no way to detect that case.
 
+### 7. A model shows "no published rate"
+
+- **Cause**: Claude Code and Codex turns are priced from the bundled published table, and Copilot
+  turns from the Copilot credits table. A model in neither table is honestly unpriced; rates are
+  never inferred from a sibling model.
+- **Fix (Claude Code, Codex)**: Price the model with `priceOverrides` (rates per model) or point
+  it at a priced model with `modelAliases` in the KyberDash config. Both apply on the next
+  projection, with no re-ingest. A Copilot model missing from the credits table cannot be priced
+  this way; overrides and aliases act on the published path only.
+- **Other statuses**: "partially priced" means some turns are unpriced (no figure is shown),
+  "not billed" is a flat-rate model, and "out of scope" means the table does not name the harness.
+
 ---
 
 ## Related Documentation

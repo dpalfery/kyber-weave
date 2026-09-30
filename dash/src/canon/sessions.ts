@@ -16,6 +16,8 @@ import { analyzeContext, type ContextPart, type ContextTurn } from '../analysis/
 import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
+import { priceCopilotTurn } from './copilot-rates.js'
+import { isPublishedTableHarness, pricePublishedTurn } from './published-pricing.js'
 import { contextLimitOf } from './context-window.js'
 import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
 import { buildFindings } from './findings.js'
@@ -23,7 +25,7 @@ import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
 import { CanonStore, type SessionRow } from './store.js'
 import { activeTokenizer, createCachedCounter, loadO200kCounter } from './tokens.js'
-import { notMeasurable, type CanonicalRecord, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
+import { notMeasurable, type CanonicalRecord, type CostBlock, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
 // The default window and the reported-window rule moved to
 // `./context-window.js` so the finding detector can read the same derivation
@@ -274,6 +276,35 @@ export type AsadSessionPayload = {
   [key: string]: unknown
 }
 
+function isCopilotFamily(harness: string): boolean {
+  const id = normalizeHarnessName(harness)
+  return id === 'copilot' || id.startsWith('copilot-')
+}
+
+/**
+ * Projection-time repricing (issue #186, U9). Turn records of API-billed harnesses are priced from
+ * the published table and Copilot-family turns from the credits table; a changed block is written
+ * back so the session summary, payload and cost contributions agree. Harness-reported costs (R5.2)
+ * and other harnesses are left alone, and an unchanged block causes no write.
+ */
+function repriceTurns(store: CanonStore, records: CanonicalRecord[]): CanonicalRecord[] {
+  return records.map((record) => {
+    if (record.op !== 'llm.invoke') return record
+    const model = attributeOf(record, MODEL_KEYS)
+    let next: CostBlock
+    if (isPublishedTableHarness(record.harness)) {
+      next = pricePublishedTurn(record.tokens, model ?? '', record.harness, record.cost)
+    } else if (isCopilotFamily(record.harness)) {
+      next = priceCopilotTurn(record.tokens, model, record.harness, record.cost)
+    } else {
+      return record
+    }
+    if (JSON.stringify(next) === JSON.stringify(record.cost)) return record
+    store.setCost(record.spanId, next)
+    return { ...record, cost: next }
+  })
+}
+
 /**
  * Build (or rebuild) every derived session in the store.
  *
@@ -292,7 +323,7 @@ export async function buildSessions(store: CanonStore): Promise<BuildSessionsRep
   const identities = store.sessionIdentities()
 
   for (const key of store.sessionKeys()) {
-    const grouped = groupByCanonicalHarness(store.recordsForSession(key.key))
+    const grouped = groupByCanonicalHarness(repriceTurns(store, store.recordsForSession(key.key)))
     if (grouped.size === 0) {
       report.skipped += 1
       continue
@@ -481,7 +512,7 @@ export function buildSessionRow(
   }
 
   const timeline = buildTimeline([...records])
-  const cost = sumCosts(records.map((record) => record.cost))
+  const cost = sumCosts(turnRecords.map((record) => record.cost))
 
   const totals = turnRecords.reduce(
     (acc, record) => ({
@@ -563,7 +594,7 @@ export function buildSessionRow(
       schema: schema.measurable ? 1 : 0,
       context: context.measurable ? 1 : 0,
     },
-    problems: [],
+    problems: cost.ok ? [] : [cost.problem],
     reconciliation: turnRecords.map((record) => ({
       request: record.spanId,
       root_input: record.tokens.reportedInput,

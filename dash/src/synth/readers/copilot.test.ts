@@ -82,3 +82,28 @@ describe('loadCopilotCliCalls', () => {
     }
   })
 })
+
+describe('loadCopilotCliCalls: reader-supplied cost_usd stays harness-reported (issue #186, R5.2)', () => {
+  it('a genuine reader figure is carried verbatim on the harness basis', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kyber-copilot-cli-cost-'))
+    const filePath = join(root, 'data.db')
+    const db = new DatabaseSync(filePath)
+    try {
+      db.exec(`
+        CREATE TABLE sessions (id TEXT, session_id TEXT, model TEXT, created_at TEXT, cost_usd REAL,
+          input_tokens INTEGER, output_tokens INTEGER);
+        INSERT INTO sessions VALUES ('cost-row', 'cost-session', 'claude-sonnet-5-5',
+          '2026-09-04T12:00:00.000Z', 0.42, 1000, 200);
+      `)
+      const [call] = loadCopilotCliCalls(filePath)
+      expect(call!.costUSD).toBe(0.42)
+      const { synthesizeCall } = await import('../synth.js')
+      const cost = synthesizeCall(call!).cost
+      expect(cost.basis).toBe('harness')
+      expect(cost.value).toBe(0.42)
+    } finally {
+      db.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})

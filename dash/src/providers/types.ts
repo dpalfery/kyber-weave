@@ -44,6 +44,9 @@ export type ParsedProviderCall = {
   webSearchRequests: number
   costUSD: number
   costIsEstimated?: boolean
+  // True only when `costUSD` is a figure the harness itself reported (e.g. Copilot CLI `cost_usd`),
+  // not one a parser derived from a rate table. Synthesis carries it verbatim on the harness basis.
+  costHarnessReported?: boolean
   tools: string[]
   bashCommands: string[]
   // Subagent types spawned in this call (e.g. 'general-purpose'). Feeds the

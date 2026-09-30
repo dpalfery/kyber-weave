@@ -32,7 +32,30 @@ export type RateTier = {
  * answer from an absent entry, which is a missing rate (R5.4) — or flat
  * per-million prices for that one model, with no context tiers.
  */
-export type Rate = { billed: false } | { billed?: true; inputRate: number; outputRate: number }
+export type Rate =
+  | { billed: false }
+  | {
+      billed?: true
+      inputRate: number
+      outputRate: number
+      /** Per-million rate for cache reads; absent falls back to `inputRate`. */
+      cacheReadRate?: number
+      /** Per-million rate for cache writes; absent falls back to `inputRate`. */
+      cacheWriteRate?: number
+      /** Input-size tiers (R5.6); when present the tier chosen by measured input supplies the rates. */
+      tiers?: RateTierClasses[]
+    }
+
+/** One per-model input-size tier: `upTo` is the inclusive bound on measured input (may be Infinity). */
+export type RateTierClasses = {
+  upTo: number
+  inputRate: number
+  outputRate: number
+  cacheReadRate?: number
+  cacheWriteRate?: number
+}
+
+type ClassRates = Pick<RateTierClasses, 'inputRate' | 'outputRate' | 'cacheReadRate' | 'cacheWriteRate'>
 
 /**
  * A published rate table. `applicability` names the harnesses the table may
@@ -82,8 +105,8 @@ export function measuredInput(tokens: TokenUsage): number {
  * exceeds every tier — the table offers no rate at that size, which is a
  * missing rate (R5.4), not a zero price.
  */
-export function selectTier(tiers: RateTier[], inputTokens: number): RateTier | undefined {
-  let tightest: RateTier | undefined
+export function selectTier<T extends { upTo: number }>(tiers: T[], inputTokens: number): T | undefined {
+  let tightest: T | undefined
   for (const tier of tiers) {
     if (inputTokens <= tier.upTo && (tightest === undefined || tier.upTo < tightest.upTo)) {
       tightest = tier
@@ -108,7 +131,7 @@ export function isHarnessInScope(table: RateTable, harness: string | undefined):
 
 type ModelRateResolution =
   | { kind: 'tiers' }
-  | { kind: 'flat'; rate: { inputRate: number; outputRate: number } }
+  | { kind: 'flat'; rate: ClassRates & { tiers?: RateTierClasses[] } }
   | { kind: 'absent' }
   | { kind: 'not_billed' }
 
@@ -166,13 +189,27 @@ export function priceWithTable(
   }
 
   const inputTokens = measuredInput(tokens)
-  const rate =
-    resolved.kind === 'flat' ? resolved.rate : selectTier(table.tiers, inputTokens)
+  let rate: ClassRates | undefined
+  if (resolved.kind === 'flat') {
+    rate = resolved.rate
+    if (resolved.rate.tiers !== undefined) {
+      rate = selectTier(resolved.rate.tiers, inputTokens)
+    }
+  } else {
+    rate = selectTier(table.tiers, inputTokens)
+  }
   if (rate === undefined) {
     return { basis: 'published', status: 'no_rate' }
   }
 
-  const value = (inputTokens * rate.inputRate + tokens.output * rate.outputRate) / TOKENS_PER_MILLION
+  // Each disjoint class is charged at its own rate; an absent cache rate falls back to the
+  // input rate, which reproduces the single-rate arithmetic.
+  const value =
+    (tokens.freshInput * rate.inputRate +
+      tokens.cacheRead * (rate.cacheReadRate ?? rate.inputRate) +
+      tokens.cacheCreation * (rate.cacheWriteRate ?? rate.inputRate) +
+      tokens.output * rate.outputRate) /
+    TOKENS_PER_MILLION
   return {
     basis: 'published',
     status: 'priced',

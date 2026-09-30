@@ -20,13 +20,18 @@
 //   * `drain()`/`close()` resolve only once the scheduler is quiescent — no
 //     pass in flight and no trailing pass still owed.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import type { DatabaseSync } from 'node:sqlite'
 
 import { ingestBatch } from './ingest.js'
 import { CanonicalProjectionScheduler, projectCanonicalStore } from './projection.js'
 import type { BuildSessionsReport } from './sessions.js'
-import { CanonStore } from './store.js'
+import { CanonStore, SCHEMA_VERSION } from './store.js'
 import type { OtlpSpan } from '../otel/receiver.js'
+import { loadPricing, setModelAliases, setPriceOverrides } from '../pricing/models.js'
+import { priceCopilotTurn } from './copilot-rates.js'
+import { pricePublishedTurn } from './published-pricing.js'
+import type { CanonicalRecord, CostBlock, TokenUsage } from './types.js'
 
 const TRACE_ID = '0af7651916cd43dd8448eb211c80319c'
 const SPAN_ID = 'b7ad6b7169203331'
@@ -252,5 +257,167 @@ describe('CanonicalProjectionScheduler', () => {
     await first
     await later
     store.close()
+  })
+})
+
+// Issue #186 Defect B, decision U9 (plan T11 RED -> T12 GREEN): projection-time repricing.
+// `buildSessions` reprices every turn record that carries no harness-reported cost and writes the
+// changed `cost_json` back to the record, so the list, the cost tile and the report agree. No schema
+// bump. Assumed hook (pinned for T12): inside `buildSessions`, before sessions are summed, per turn
+// record (op 'llm.invoke'), model read from `record.raw` via the existing MODEL_KEYS lookup.
+describe('projectCanonicalStore: projection-time repricing (issue #186, U9)', () => {
+  const STALE: CostBlock = { basis: 'unknown', status: 'no_rate' }
+  const TOK: TokenUsage = {
+    freshInput: 100_000,
+    cacheRead: 200_000,
+    cacheCreation: 10_000,
+    output: 20_000,
+    reportedInput: 310_000,
+    reportedOutput: 20_000,
+  }
+
+  beforeAll(async () => {
+    await loadPricing()
+  })
+  afterEach(() => {
+    setPriceOverrides({})
+    setModelAliases({})
+  })
+
+  function turn(id: string, session: string, harness: string, model: string, cost: CostBlock, minute = 0): CanonicalRecord {
+    return {
+      spanId: id,
+      traceId: `trace-${session}`,
+      parentSpanId: null,
+      sessionId: session,
+      source: 'synthetic',
+      harness,
+      name: `turn ${id}`,
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: `2026-09-04T10:${String(minute).padStart(2, '0')}:00.000Z`,
+      durationMs: 100,
+      status: 'ok',
+      tokens: TOK,
+      content: {},
+      cost,
+      raw: { model },
+    }
+  }
+
+  async function projectOnce(records: CanonicalRecord[]): Promise<CanonStore> {
+    const store = new CanonStore(':memory:')
+    store.upsertMany(records)
+    await projectCanonicalStore(store)
+    return store
+  }
+
+  const sessionCost = (store: CanonStore, id: string) =>
+    (store.getSessionPayload(id) as { summary: { cost: CostBlock } }).summary.cost
+
+  it('keeps SCHEMA_VERSION at 14 (U9: no schema bump)', () => {
+    expect(SCHEMA_VERSION).toBe(14)
+  })
+
+  it('reprices a stale {unknown,no_rate} claude-code turn, rewrites cost_json, and the session cost agrees', async () => {
+    const store = await projectOnce([turn('cc-1', 'cc-s', 'claude-code', 'claude-opus-5', STALE)])
+    try {
+      const expected = pricePublishedTurn(TOK, 'claude-opus-5', 'claude-code')
+      expect(expected.status).toBe('priced')
+      expect(store.get('cc-1')?.cost).toMatchObject({ basis: 'published', status: 'priced' })
+      expect(store.get('cc-1')?.cost.value).toBeCloseTo(expected.value!, 10)
+      expect(sessionCost(store, 'cc-s')).toMatchObject({ basis: 'published', status: 'priced' })
+      expect(sessionCost(store, 'cc-s').value).toBeCloseTo(expected.value!, 10)
+      // The cost tile reads cost_json through costContributionsForSessions; it must agree.
+      const [contribution] = store.costContributionsForSessions(['cc-s'])
+      expect(contribution).toMatchObject({ basis: 'published', status: 'priced' })
+      expect(contribution.value).toBeCloseTo(expected.value!, 10)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reprices codex and copilot-family turns with their own pricers', async () => {
+    const store = await projectOnce([
+      turn('cx-1', 'cx-s', 'codex', 'gpt-5.6-luna', STALE),
+      turn('cp-1', 'cp-s', 'copilot-cli', 'claude-sonnet-5-5', STALE),
+    ])
+    try {
+      const codex = pricePublishedTurn(TOK, 'gpt-5.6-luna', 'codex')
+      const copilot = priceCopilotTurn(TOK, 'claude-sonnet-5-5', 'copilot-cli')
+      expect(codex.status).toBe('priced')
+      expect(copilot.status).toBe('priced')
+      expect(store.get('cx-1')?.cost.value).toBeCloseTo(codex.value!, 10)
+      expect(store.get('cp-1')?.cost.value).toBeCloseTo(copilot.value!, 10)
+      // The two tables differ: a copilot turn is never priced at API list rates (R5.3).
+      expect(sessionCost(store, 'cp-s').value).toBeCloseTo(copilot.value!, 10)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('marks a session with priced and unpriced published turns as partial', async () => {
+    const store = await projectOnce([
+      turn('mx-1', 'mx-s', 'claude-code', 'claude-opus-5', STALE, 0),
+      turn('mx-2', 'mx-s', 'claude-code', 'totally-fictional-model-x', STALE, 1),
+    ])
+    try {
+      const priced = pricePublishedTurn(TOK, 'claude-opus-5', 'claude-code')
+      expect(store.get('mx-2')?.cost).toMatchObject({ basis: 'published', status: 'no_rate' })
+      expect(sessionCost(store, 'mx-s')).toMatchObject({ basis: 'published', status: 'partial' })
+      expect(sessionCost(store, 'mx-s').value).toBeCloseTo(priced.value!, 10)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('never rewrites a harness-reported cost (R5.2) and leaves other harnesses on their current figures', async () => {
+    const harnessCost: CostBlock = { basis: 'harness', status: 'priced', value: 1.25, currency: 'USD' }
+    const store = await projectOnce([
+      turn('hr-1', 'hr-s', 'antigravity-cli', 'claude-opus-5', harnessCost),
+      turn('hr-2', 'hr-cc', 'claude-code', 'claude-opus-5', harnessCost),
+      turn('zc-1', 'zc-s', 'zcode', 'claude-opus-5', STALE),
+    ])
+    try {
+      expect(store.get('hr-1')?.cost).toEqual(harnessCost)
+      expect(store.get('hr-2')?.cost).toEqual(harnessCost)
+      expect(store.get('zc-1')?.cost).toEqual(STALE)
+    } finally {
+      store.close()
+    }
+  })
+
+  it('keeps a fictional model at "no published rate" until a price override is set, then prices it on the next projection', async () => {
+    const store = await projectOnce([turn('ov-1', 'ov-s', 'claude-code', 'fictional-unpublished-model', STALE)])
+    try {
+      expect(store.get('ov-1')?.cost).toMatchObject({ basis: 'published', status: 'no_rate' })
+      setPriceOverrides({ 'fictional-unpublished-model': { input: 3, output: 15 } })
+      await projectCanonicalStore(store)
+      const after = store.get('ov-1')?.cost
+      expect(after).toMatchObject({ basis: 'published', status: 'priced' })
+      expect(after?.value).toBeGreaterThan(0)
+      expect(sessionCost(store, 'ov-s')).toMatchObject({ status: 'priced' })
+    } finally {
+      store.close()
+    }
+  })
+
+  it('reprojects an already-correct store idempotently with no spurious records writes', async () => {
+    const store = await projectOnce([
+      turn('id-1', 'id-s', 'claude-code', 'claude-opus-5', STALE),
+      turn('id-2', 'id-s2', 'copilot', 'claude-sonnet-5-5', STALE),
+    ])
+    try {
+      const db = (store as unknown as { db: DatabaseSync }).db
+      const before = store.get('id-1')?.cost
+      db.exec('CREATE TABLE write_log (span_id TEXT)')
+      db.exec('CREATE TRIGGER log_records_update AFTER UPDATE ON records BEGIN INSERT INTO write_log VALUES (NEW.span_id); END')
+      await projectCanonicalStore(store)
+      const writes = db.prepare('SELECT COUNT(*) AS n FROM write_log').get() as { n: number }
+      expect(writes.n).toBe(0)
+      expect(store.get('id-1')?.cost).toEqual(before)
+    } finally {
+      store.close()
+    }
   })
 })

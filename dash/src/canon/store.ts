@@ -1347,6 +1347,11 @@ export class CanonStore {
       )
   }
 
+  /** Rewrite one record's cost block (projection-time repricing, issue #186 U9). */
+  setCost(spanId: string, cost: CostBlock): void {
+    this.db.prepare('UPDATE records SET cost_json = ? WHERE span_id = ?').run(JSON.stringify(cost), spanId)
+  }
+
   /** Distinct trace ids, the unit attribution votes over. */
   traceIds(): string[] {
     return (
