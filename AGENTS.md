@@ -81,7 +81,13 @@ or locate code:
   current line-numbered source is required.
 - The shell fallback is `codegraph explore "<symbol names or question>"`.
 
-If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
+If there is no `.codegraph/` directory:
+- First occurrence: invoke `setup-dev-environment` skill (standing approval for repo-local fixes per #221)
+  to initialize the index with `codegraph init .` (cleanup: verify git status and revert any tracked-file changes)
+- If blocked: report as BLOCKER in GAPS; conductor will dispatch a fixer agent
+- If the index fails after initialization, report as a documentation finding (file a docs validation issue)
+
+See #221 "Missing-dependency handling" for the blocker->fix->retry loop and standing approval scope.
 <!-- CODEGRAPH_END -->
 
 **Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
