@@ -74,24 +74,25 @@ Do not start with grep, find, or arbitrary file browsing when a semantic index c
 question. MCP tool names may be namespace-qualified by the active harness.
 
 <!-- CODEGRAPH_START -->
-**Code:** When `.codegraph/` exists, use `codegraph_explore` before text search to understand
-or locate code:
+**Code:** When `.codegraph/` exists, use `codegraph_explore` before text search to
+understand or locate code:
 
-- The MCP tool returns relevant symbol definitions and call paths. Name a file or symbol when
-  current line-numbered source is required.
+- The MCP tool returns relevant symbol definitions and call paths. Name a file or symbol
+  when current line-numbered source is required.
 - The shell fallback is `codegraph explore "<symbol names or question>"`.
-
-If there is no `.codegraph/` directory:
-- First occurrence: initialize the index with `codegraph init -y .` (standing approval covers
-  repo-local actions only: builds and project-local dependencies; no system-wide installs; leave
-  tracked files alone)
-- If blocked: report the blocker under GAPS; the conductor relays it and stops that path
-- If the index fails after initialization: proceed with text search (Grep, Glob); state in
-  the result that CodeGraph was unavailable.
 <!-- CODEGRAPH_END -->
 
-See issue #221, "Missing-dependency handling", for the blocker->fix->retry loop and standing
-approval scope.
+If there is no `.codegraph/` directory:
+- First occurrence: The `.claude/settings.json` SessionStart hook runs `codegraph init -y`
+  only when CLAUDE_CODE_REMOTE=true. In local sessions without that hook, the agent
+  initializes once per session with `codegraph init -y .` (standing approval covers
+  repo-local actions only: builds and project-local dependencies; no system-wide installs;
+  leave tracked files alone).
+- If blocked: report the blocker under GAPS and proceed with text search (Grep, Glob),
+  stating in the result that CodeGraph was unavailable; the conductor relays the blocker
+  and stops that path.
+
+See issue #221, "Missing-dependency handling", for the blocker->fix->retry loop.
 
 **Documentation:** Before grepping or reading under `docs/`, use the Kyber-Weave MCP
 `docs_explore` tool. Before renaming, moving, or changing a code symbol's contract, use
