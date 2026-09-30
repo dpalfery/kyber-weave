@@ -150,10 +150,18 @@ fi
 # Step 3: Compute hashes into a temp file, then move to SHA256SUMS.txt.
 # This mirrors the approach in scripts/release-local.sh: write to temp,
 # validate, then atomically rename so the file is never partially written.
-TEMP_SUMS="$(mktemp)"
+# Create the temp file inside ASSET_DIR so the rename is atomic (not a copy
+# across filesystems), and set it up to be removed on exit, error, or signal.
+TEMP_SUMS="${ASSET_DIR}/.SHA256SUMS.XXXXXX"
+TEMP_SUMS="$(mktemp "$TEMP_SUMS")"
 trap 'rm -f "$TEMP_SUMS"' EXIT
 
-sha256sum "${EXPECTED_ASSETS[@]}" > "$TEMP_SUMS"
+# Detect sha256sum availability; fall back to shasum -a 256 on macOS.
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${EXPECTED_ASSETS[@]}" > "$TEMP_SUMS"
+else
+    shasum -a 256 "${EXPECTED_ASSETS[@]}" > "$TEMP_SUMS"
+fi
 
 # Step 4: Assert the manifest format and content.
 # - One line per asset (already guaranteed by the array above).
@@ -177,14 +185,23 @@ while IFS= read -r line; do
 done < "$TEMP_SUMS"
 
 # Verify: check that every line in the manifest corresponds to an existing
-# file with the correct hash. --strict rejects extra files or missing entries.
-if ! sha256sum --check --strict "$TEMP_SUMS" >/dev/null 2>&1; then
-    echo "::error::checksum verification failed" >&2
-    sha256sum --check --strict "$TEMP_SUMS" >&2 || true
-    exit 1
+# file with the correct hash. sha256sum uses --strict; shasum does not support it.
+if command -v sha256sum >/dev/null 2>&1; then
+    if ! sha256sum --check --strict "$TEMP_SUMS" >/dev/null 2>&1; then
+        echo "::error::checksum verification failed" >&2
+        sha256sum --check --strict "$TEMP_SUMS" >&2 || true
+        exit 1
+    fi
+else
+    if ! shasum -a 256 -c "$TEMP_SUMS" >/dev/null 2>&1; then
+        echo "::error::checksum verification failed" >&2
+        shasum -a 256 -c "$TEMP_SUMS" >&2 || true
+        exit 1
+    fi
 fi
 
-# All checks passed. Move the temp file into place.
+# All checks passed. Set the temp file to the correct permissions and move it into place.
+chmod 644 "$TEMP_SUMS"
 mv "$TEMP_SUMS" SHA256SUMS.txt
 
 echo "SHA256SUMS.txt created with ${#EXPECTED_ASSETS[@]} asset hashes"
