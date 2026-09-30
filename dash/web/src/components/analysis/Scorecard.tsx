@@ -204,6 +204,7 @@ export function Scorecard({
                 className="text-density-2xs italic text-tertiary-foreground/80"
                 data-testid="secondary-cost-partial"
                 title="Partial total: some sessions in this run lack measured figures"
+                tabIndex={0}
               >
                 (partial)
               </span>

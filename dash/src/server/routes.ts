@@ -554,21 +554,22 @@ export function handleKyberRequest(
       findingCounts.set(finding.runId, (findingCounts.get(finding.runId) ?? 0) + 1)
     }
     // Measured run figures ride along so the runs table never renders a dash
-    // beside measured data (issue #183). One batched pass for the whole list
-    // (review follow-up: Kilo K2, Copilot C9): all executions, one summary
-    // query, per-run sums through the shared `sumSessionFigures` derivation.
+    // beside measured data (issue #183). One bounded executions read
+    // bucketed in memory plus one summary batch for the whole list, with
+    // per-run sums through the shared `sumSessionFigures` derivation.
     const listedRuns = bridge.listRuns(harnessParam)
-    // Executions are read per listed run — small indexed rows, never the
-    // whole corpus materialized and filtered in memory (open thread on
-    // routes.ts:562). One summary batch then covers every listed session.
+    // One bounded executions read, bucketed in memory (open thread on
+    // routes.ts:567 — the per-run loop reintroduced N+1 round trips on the
+    // landing-page endpoint). Only listed runs' sessions reach the summary
+    // batch, so no other harness's figures are ever read.
+    const listedRunIds = new Set(listedRuns.map((run) => run.runId))
     const executionsByRun = new Map<string, string[]>()
-    for (const run of listedRuns) {
-      const group: string[] = []
-      for (const execution of bridge.listExecutions(run.runId)) {
-        if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) continue
-        group.push(execution.sessionId)
-      }
-      executionsByRun.set(run.runId, group)
+    for (const execution of bridge.listExecutions()) {
+      if (!listedRunIds.has(execution.runId)) continue
+      if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) continue
+      const group = executionsByRun.get(execution.runId) ?? []
+      group.push(execution.sessionId)
+      executionsByRun.set(execution.runId, group)
     }
     const listedSessionIds = [...new Set([...executionsByRun.values()].flat())]
     const listedSummaries = bridge.sessionSummaryFigures(listedSessionIds)

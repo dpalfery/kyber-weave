@@ -412,8 +412,15 @@ export function assembleRollup(
         }
       }
 
-      const runScopeStrict = input.allowCountFallback === false
-      if (childTokens + rootTokens > 0 && !(runScopeStrict && unknownTokens > 0)) {
+      // Open thread harnesses.ts:416 — the unknown guard applies to every
+      // caller, not just the run scope. An execution with unknown totals
+      // never contributes its zero: with any unknown linked execution the
+      // overhead is unobservable, in harness scope as in run scope.
+      if (unknownTokens > 0) {
+        measurability['delegation_overhead'] = notMeasurable(
+          `Token totals are unmeasured for ${unknownTokens} execution${unknownTokens === 1 ? '' : 's'} in ${inScope}; delegation overhead is unobservable.`,
+        )
+      } else if (childTokens + rootTokens > 0) {
         delegationOverhead = Number((childTokens / (childTokens + rootTokens)).toFixed(4))
         measurability['delegation_overhead'] = 'measured'
       } else if (input.allowCountFallback !== false && executions.length > 0) {
@@ -421,11 +428,9 @@ export function assembleRollup(
         measurability['delegation_overhead'] = 'measured'
       } else {
         measurability['delegation_overhead'] = notMeasurable(
-          unknownTokens > 0
-            ? `Token totals are unmeasured for ${unknownTokens} execution${unknownTokens === 1 ? '' : 's'} in ${inScope}; delegation overhead is unobservable.`
-            : executions.length > 0
-              ? `No measured token totals in ${inScope}; delegation overhead is unobservable.`
-              : `No agent executions recorded ${forScope}.`,
+          executions.length > 0
+            ? `No measured token totals in ${inScope}; delegation overhead is unobservable.`
+            : `No agent executions recorded ${forScope}.`,
         )
       }
     }

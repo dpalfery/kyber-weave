@@ -502,6 +502,7 @@ export function RunDetail({
                                       className="ml-1 italic"
                                       data-testid={`turn-cost-partial-${turn.turnIndex}`}
                                       title="Partial figure: this turn's cost block is partial"
+                                      tabIndex={0}
                                     >
                                       (partial)
                                     </span>

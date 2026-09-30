@@ -408,5 +408,8 @@ describe('RunDetail turn cost partial', () => {
     )
 
     expect(html).toContain('data-testid="turn-cost-partial-0"')
+    // Open thread RunDetail.tsx:504 — the explanation must be reachable
+    // without a hovering mouse.
+    expect(html).toContain('tabindex="0"')
   })
 })

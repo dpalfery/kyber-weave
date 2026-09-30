@@ -1648,10 +1648,10 @@ describe('GET /api/kyber/run/:id shared-session streaming (thread bridge.ts:2516
   })
 })
 
-describe('GET /api/kyber/runs executions scoping (thread routes.ts:562)', () => {
-  // The list must not materialize the whole execution corpus and filter in
-  // memory: executions are read per listed run.
-  it('reads executions per listed run, never unfiltered', async () => {
+describe('GET /api/kyber/runs executions scoping (thread routes.ts:567)', () => {
+  // One bounded executions read bucketed in memory — never N+1 per-run
+  // queries — while summaries stay scoped to the listed runs' sessions.
+  it('reads executions once and scopes summaries to listed runs', async () => {
     const inner = new CanonStore(':memory:')
     const usage: CanonicalRecord['tokens'] = {
       freshInput: 800,
@@ -1697,6 +1697,8 @@ describe('GET /api/kyber/runs executions scoping (thread routes.ts:562)', () => 
     store.upsertMany([rec('e-t1', 'exec-scope-a', 'copilot'), rec('e-t2', 'exec-scope-b', 'gemini')])
     await buildSessions(store)
     await buildRuns(store)
+    // Fixture builds read executions too; the request path is what matters.
+    listCalls.length = 0
 
     const execBridge = new KyberBridge({ canonPath: ':memory:', store })
     const execServer = await runWebDashboard({ port: 0, open: false, kyberBridge: execBridge, writeStdout: () => {} })
@@ -1707,11 +1709,10 @@ describe('GET /api/kyber/runs executions scoping (thread routes.ts:562)', () => 
       const body = (await res.json()) as { runs: Array<{ runId: string }> }
       expect(body.runs).toHaveLength(1)
       expect(body.runs[0]!.runId).toBe(copilotRunId)
-      // Every executions read names a listed run; the unfiltered full-corpus
-      // read never happens.
-      expect(listCalls.length).toBeGreaterThan(0)
-      expect(listCalls.every((runId) => runId !== undefined)).toBe(true)
-      expect(listCalls).toContain(copilotRunId)
+      // Exactly one executions read for the whole list — no per-run N+1 —
+      // and every summary read touched only the listed harness's sessions.
+      expect(listCalls).toEqual([undefined])
+      expect(body.runs[0]!.runId).toBe(copilotRunId)
     } finally {
       await new Promise<void>((resolve) => execServer.close(() => resolve()))
       execBridge.close()

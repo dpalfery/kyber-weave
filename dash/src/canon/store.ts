@@ -1587,9 +1587,13 @@ export class CanonStore {
       )
       .get(sessionId) as { input: unknown; output: unknown } | undefined
     if (row === undefined) return undefined
+    // Open thread harnesses.ts:416 — a total the session recorded as
+    // not_measurable is an object, not a number. Coercing it to 0 invents a
+    // measured zero for the delegation denominator; unknown stays unknown.
+    if (typeof row.input !== 'number' || typeof row.output !== 'number') return undefined
     return {
-      input: typeof row.input === 'number' ? row.input : 0,
-      output: typeof row.output === 'number' ? row.output : 0,
+      input: row.input,
+      output: row.output,
     }
   }
 
