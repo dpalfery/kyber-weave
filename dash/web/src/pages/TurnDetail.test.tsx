@@ -3,8 +3,8 @@ import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-import { TurnDetail, asMeasuredFigure, findSessionTurnRow, resolveTurnSessionId, turnRowFigures } from './TurnDetail.js'
-import type { KyberSessionTurnRow } from '../lib/kyberApi.js'
+import { TurnDetail, asMeasuredFigure, findSessionTurnRow, resolveTurnSessionId, turnContentErrorKind, turnRowFigures } from './TurnDetail.js'
+import { KyberApiError, type KyberSessionTurnRow } from '../lib/kyberApi.js'
 
 // The turn surface asked the content route for a run id. Every derived run is
 // keyed `derived:<harness>:<session>` — 1,455 of 1,455 on the measured corpus —
@@ -75,6 +75,15 @@ describe('findSessionTurnRow', () => {
     expect(findSessionTurnRow(rows, 2)).toBeUndefined()
     expect(findSessionTurnRow(undefined, 0)).toBeUndefined()
   })
+
+  it('prefers explicit legacy identity over array position (issue #184 review)', () => {
+    const shuffled: KyberSessionTurnRow[] = [
+      { turn: 2, input: 10 } as KyberSessionTurnRow,
+      { turn: 1, input: 20 } as KyberSessionTurnRow,
+    ]
+    expect(findSessionTurnRow(shuffled, 0)?.input).toBe(20)
+    expect(findSessionTurnRow(shuffled, 1)?.input).toBe(10)
+  })
 })
 
 describe('turnRowFigures', () => {
@@ -110,5 +119,19 @@ describe('TurnDetail header numbering', () => {
 
     expect(html).toContain('data-testid="page-turn"')
     expect(html).toContain('Turn 6')
+  })
+})
+
+// Issue #184 review: the "no such turn" state is for 404s only; every other
+// failure renders the generic load error.
+describe('turnContentErrorKind', () => {
+  it('reports not-found for a 404 KyberApiError', () => {
+    expect(turnContentErrorKind(new KyberApiError(404, '/api/kyber/session/s/turn/9/content'))).toBe('not-found')
+  })
+
+  it('reports load-failed for non-404 failures', () => {
+    expect(turnContentErrorKind(new KyberApiError(500, '/api/kyber/session/s/turn/9/content'))).toBe('load-failed')
+    expect(turnContentErrorKind(new Error('boom'))).toBe('load-failed')
+    expect(turnContentErrorKind(undefined)).toBe('load-failed')
   })
 })

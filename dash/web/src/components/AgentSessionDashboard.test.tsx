@@ -6,12 +6,12 @@ import {
   AgentSessionDashboard,
   AgentSessionContent,
   AgentSessionLoader,
-  matchTurnTransport,
   type AgentSessionPayload,
   type DrawerContent,
   formatDuration,
   formatCredits,
 } from './AgentSessionDashboard.js'
+import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import { SessionInspectorDrawer } from './SessionInspectorDrawer.js'
 import type { TimelineNode } from './analysis/TimelineView.js'
 import type { KyberSessionContext } from '../lib/kyberApi.js'
@@ -1185,17 +1185,42 @@ describe('timeline shape from the canonical store', () => {
   })
 })
 
-// Issue #184: the drawer resolves strictly 0-based transport — payload `index`,
-// positional fallback, or a legacy 1-based `turn` row as `turn - 1`. Never a neighbor.
-describe('matchTurnTransport', () => {
+// Issue #184: the drawer resolves strictly 0-based transport through the shared
+// helper — explicit identity first, array position only for rows that carry
+// neither `index` nor `turn`. Never a neighbor.
+describe('findTurnByTransport (shared drawer lookup)', () => {
   it('matches a 0-based index row and the positional fallback', () => {
-    expect(matchTurnTransport({ index: 4 }, 0, 4)).toBe(true)
-    expect(matchTurnTransport({}, 4, 4)).toBe(true)
-    expect(matchTurnTransport({ index: 3 }, 5, 4)).toBe(false)
+    expect(findTurnByTransport([{ index: 4 }], 4)).toEqual({ index: 4 })
+    expect(findTurnByTransport([{}, {}], 1)).toEqual({})
+    expect(findTurnByTransport([{ index: 3 }], 4)).toBeUndefined()
   })
 
   it('matches a legacy 1-based turn row via turn - 1 only', () => {
-    expect(matchTurnTransport({ turn: 5 }, 9, 4)).toBe(true)
-    expect(matchTurnTransport({ turn: 5 }, 9, 5)).toBe(false)
+    expect(findTurnByTransport([{ turn: 5 }], 4)).toEqual({ turn: 5 })
+    expect(findTurnByTransport([{ turn: 5 }], 5)).toBeUndefined()
+  })
+
+  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+    const rows = [{ turn: 2, spanId: 'span-a' }, { turn: 1, spanId: 'span-b' }]
+    expect(findTurnByTransport(rows, 0)).toEqual({ turn: 1, spanId: 'span-b' })
+    expect(findTurnByTransport(rows, 1)).toEqual({ turn: 2, spanId: 'span-a' })
+  })
+
+  it('never serves a neighboring identified row positionally', () => {
+    expect(findTurnByTransport([{ index: 7 }, { index: 8 }], 0)).toBeUndefined()
+  })
+})
+
+describe('findContextTurn (shared 1-based context lookup)', () => {
+  it('matches engine 1-based index and legacy turn, then position', () => {
+    expect(findContextTurn([{ index: 2 }], 2)).toEqual({ index: 2 })
+    expect(findContextTurn([{ turn: 2 }], 2)).toEqual({ turn: 2 })
+    expect(findContextTurn([{}, {}], 2)).toEqual({})
+  })
+
+  it('prefers explicit identity over an earlier positional match (issue #184 review)', () => {
+    const rows = [{ turn: 2 }, { turn: 1 }]
+    expect(findContextTurn(rows, 1)).toEqual({ turn: 1 })
+    expect(findContextTurn(rows, 2)).toEqual({ turn: 2 })
   })
 })

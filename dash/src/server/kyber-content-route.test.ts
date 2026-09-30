@@ -117,6 +117,31 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         ],
       },
     })
+    // Payload rows whose legacy identity disagrees with array position
+    // (issue #184 review): explicit identity must win over position.
+    store.upsertMany([
+      turn('span-pa', [{ part: 'system_prompt', text: 'precedence A', tokens: 1 }], {
+        sessionId: 'sess-precedence-001',
+        timestamp: '2026-09-03T12:00:00.000Z',
+      }),
+      turn('span-pb', [{ part: 'system_prompt', text: 'precedence B', tokens: 1 }], {
+        sessionId: 'sess-precedence-001',
+        timestamp: '2026-09-03T12:01:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-precedence-001',
+      harness: 'copilot',
+      label: 'Precedence descriptors',
+      payload: {
+        id: 'sess-precedence-001',
+        harness: 'copilot',
+        turns: [
+          { turn: 2, spanId: 'span-pa', model: 'm' },
+          { turn: 1, spanId: 'span-pb', model: 'm' },
+        ],
+      },
+    })
 
     canonDb = new DatabaseSync(':memory:')
 
@@ -315,6 +340,23 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         const res = await fetch(`${base}/api/kyber/session/sess-mixed-001/turn/2/content`)
         expect(res.status).toBe(404)
         assertStandardKyberHeaders(res)
+      })
+
+      it('prefers explicit legacy identity over array position (issue #184 review)', async () => {
+        // Payload order is [{turn: 2}, {turn: 1}]: transport 0 is the second
+        // row (span-pb), transport 1 the first (span-pa). A positional match
+        // would serve span-pa for both.
+        const first = await fetch(`${base}/api/kyber/session/sess-precedence-001/turn/0/content`)
+        expect(first.status).toBe(200)
+        const firstBody = (await first.json()) as TurnContentResult
+        expect(firstBody.spanId).toBe('span-pb')
+        expect(firstBody.assembledText).toContain('precedence B')
+
+        const second = await fetch(`${base}/api/kyber/session/sess-precedence-001/turn/1/content`)
+        expect(second.status).toBe(200)
+        const secondBody = (await second.json()) as TurnContentResult
+        expect(secondBody.spanId).toBe('span-pa')
+        expect(secondBody.assembledText).toContain('precedence A')
       })
     })
 

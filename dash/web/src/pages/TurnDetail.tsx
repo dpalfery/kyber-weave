@@ -4,6 +4,8 @@ import {
   fetchKyberSessionTurns,
   fetchRun,
   fetchTurnContent,
+  findTurnByTransport,
+  isNotFoundError,
   type KyberSessionTurnRow,
   type TurnTokenFigures,
 } from '../lib/kyberApi.js'
@@ -24,34 +26,24 @@ export interface TurnDetailProps {
 }
 
 /**
- * The session whose records a turn's content lives in.
- *
- * A run id is not a session id. Every derived run is keyed
- * `derived:<harness>:<session>`, so asking the content route for a run id 404s
- * — which is what left this page showing "Session or turn content not found"
- * with no context bands. The turn belongs to an execution, and the execution
- * names its session; a turn reached without an execution (from a finding, or
- * any link that names only the run) indexes into the run's first execution
- * rather than resolving to nothing.
- */
-/**
  * The session turn row whose measured counters describe a 0-based `turnIndex`
- * (issue #184). Mirrors the server resolver's strict contract: the payload's
- * 0-based `index`, the positional fallback, or a legacy 1-based `turn` row
- * matched as `turn - 1`. Anything else is no row — never a neighbor.
+ * (issue #184): the shared strict lookup — explicit identity first, position
+ * only for rows carrying neither. Anything else is no row, never a neighbor.
  */
 export function findSessionTurnRow(
   turns: readonly KyberSessionTurnRow[] | undefined,
   turnIndex: number,
 ): KyberSessionTurnRow | undefined {
-  return turns?.find((t, i) => {
-    const legacyTurn: unknown = t.turn
-    return (
-      t.index === turnIndex ||
-      i === turnIndex ||
-      (typeof legacyTurn === 'number' && legacyTurn - 1 === turnIndex)
-    )
-  })
+  return findTurnByTransport(turns, turnIndex)
+}
+
+/**
+ * Which failure the turn page reports (issue #184 review): the "no such turn"
+ * state is for 404s only — network failures and 5xx responses render the
+ * generic load error instead.
+ */
+export function turnContentErrorKind(error: unknown): 'not-found' | 'load-failed' {
+  return isNotFoundError(error) ? 'not-found' : 'load-failed'
 }
 
 /** Coerce a served turn-row counter to a measured figure or null (issue #184, Q3). */
@@ -69,6 +61,17 @@ export function turnRowFigures(row: KyberSessionTurnRow | undefined): TurnTokenF
   }
 }
 
+/**
+ * The session whose records a turn's content lives in.
+ *
+ * A run id is not a session id. Every derived run is keyed
+ * `derived:<harness>:<session>`, so asking the content route for a run id 404s
+ * — which is what left this page showing "Session or turn content not found"
+ * with no context bands. The turn belongs to an execution, and the execution
+ * names its session; a turn reached without an execution (from a finding, or
+ * any link that names only the run) indexes into the run's first execution
+ * rather than resolving to nothing.
+ */
 export function resolveTurnSessionId(
   run: { executions?: readonly { executionId: string; sessionId?: string | null }[] } | undefined,
   executionId: string | undefined,
@@ -100,7 +103,7 @@ export function TurnDetail({
     queryFn: () => fetchRun(runId),
   })
   const sessionId = resolveTurnSessionId(run, executionId)
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['kyber-turn-content', sessionId, turnIndex],
     queryFn: () => fetchTurnContent(sessionId!, turnIndex),
     enabled: !!sessionId,
@@ -140,9 +143,13 @@ export function TurnDetail({
 
         {isLoading ? (
           <Skeleton className="mt-density-stack h-20 w-full" />
-        ) : isError ? (
+        ) : isError && turnContentErrorKind(error) === 'not-found' ? (
           <p className="mt-density-stack text-density-xs text-tertiary-foreground" data-testid="turn-not-found">
             No such turn in this session (session {sessionId ?? 'unknown'} · turn {turnIndex}).
+          </p>
+        ) : isError ? (
+          <p className="mt-density-stack text-density-xs text-tertiary-foreground" data-testid="turn-load-error">
+            Could not load this turn&apos;s content — the request failed. Try again once the dashboard is reachable.
           </p>
         ) : recordedBlocks.length ? (
           <div className="mt-density-stack flex flex-wrap gap-density-cluster">

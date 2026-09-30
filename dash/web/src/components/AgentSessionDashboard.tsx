@@ -8,6 +8,7 @@ import { SessionSpendCharts, CONTEXT_BUCKET_LABELS } from './SessionSpendCharts.
 import { SchemaCostRanking, type SchemaCostAnalysis, type SchemaCostToolRow } from './SchemaCostRanking.js'
 import { TimelineView, type TimelineNode, type CostBlock } from './analysis/TimelineView.js'
 import { SessionCostPanel } from './SessionCostPanel.js'
+import { findContextTurn, findTurnByTransport } from '../lib/kyberApi.js'
 import type {
   KyberContextBucket,
   KyberContextTurn,
@@ -229,22 +230,6 @@ export function formatDuration(ms?: number | null): string {
   const minutes = Math.floor(ms / 60000)
   const seconds = Math.round((ms % 60000) / 1000)
   return `${minutes}m ${seconds}s`
-}
-
-/**
- * Strict 0-based turn match for drawer lookups (issue #184): the payload's
- * 0-based `index`, the positional fallback, or a legacy 1-based `turn` row
- * matched as `turn - 1`. Anything else is no turn — never a neighbor.
- */
-export function matchTurnTransport(
-  turn: { index?: number; turn?: number } | null | undefined,
-  position: number,
-  turnIndex: number,
-): boolean {
-  if (!turn) return false
-  if (turn.index === turnIndex || position === turnIndex) return true
-  const legacy: unknown = turn.turn
-  return typeof legacy === 'number' && legacy - 1 === turnIndex
 }
 
 export function formatCredits(c?: number | null): string {
@@ -489,7 +474,9 @@ export function AgentSessionContent({
     (turnIndex: number, bucketName?: string) => {
       setSelectedSpanId(undefined)
       const turns = session?.turns || []
-      const turn = turns.find((t, i) => matchTurnTransport(t, i, turnIndex))
+      // Shared strict lookup (issue #184 review): explicit identity first,
+      // position only for rows carrying neither.
+      const turn = findTurnByTransport(turns, turnIndex)
       if (!turn) return
 
       const turnNum = turn.index ?? turn.turn ?? turnIndex
@@ -498,10 +485,10 @@ export function AgentSessionContent({
         const contextTurns: KyberContextTurn[] = ctx?.measurable ? ctx.turns : []
         // Context rows carry the engine's 1-based numbering (`TurnPressure.index`,
         // legacy `turn`); the transport `turnIndex` is 0-based, so compare in
-        // 1-based space. Positional `i + 1` aligns the parallel turns arrays.
+        // 1-based space with the shared strict lookup.
         const oneBased = turnIndex + 1
         const ctxTurn: KyberContextTurn | KyberContextBucket | undefined =
-          contextTurns.find((ct, i) => ct.index === oneBased || ct.turn === oneBased || i + 1 === oneBased) ||
+          findContextTurn(contextTurns, oneBased) ||
           (turnNum === 1 ? ctx?.first : undefined) ||
           ctx?.last
 

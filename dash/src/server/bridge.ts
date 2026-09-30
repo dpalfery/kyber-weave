@@ -381,10 +381,41 @@ type ContentSourceRecord = {
  */
 type TurnDescriptor = {
   index?: number
-  /** Legacy 1-based turn number some payload rows carry instead of `index`. */
-  turn?: number
+  /**
+   * Legacy 1-based turn number some payload rows carry instead of `index`.
+   * Unknown at the boundary; `turnTransportIndexOf` checks before use.
+   */
+  turn?: unknown
   spanId?: string
   model?: string
+}
+
+/**
+ * One row's 0-based transport identity (issue #184): an explicit finite
+ * `index` wins; otherwise a finite legacy 1-based `turn` resolves as
+ * `turn - 1`. Anything else is no identity — the row is only reachable
+ * positionally.
+ */
+function turnTransportIndexOf(item: TurnDescriptor): number | undefined {
+  if (typeof item.index === 'number' && Number.isFinite(item.index)) return item.index
+  if (typeof item.turn === 'number' && Number.isFinite(item.turn)) return item.turn - 1
+  return undefined
+}
+
+/**
+ * Strict turn resolution: explicit identity first, array position only for
+ * rows carrying neither `index` nor `turn`. Anything else resolves to
+ * nothing — never a neighboring turn.
+ */
+function resolveTurn<T>(
+  pool: readonly T[],
+  turnIndex: number,
+  identityOf: (item: T) => number | undefined,
+): T | undefined {
+  return (
+    pool.find((item) => identityOf(item) === turnIndex) ??
+    pool.find((item, i) => i === turnIndex && identityOf(item) === undefined)
+  )
 }
 
 /**
@@ -1045,9 +1076,10 @@ export class KyberBridge {
   /**
    * Unclipped assembled turn content for the Context Inspector (Task G1 / Decision D14).
    * Retrieves all blocks and parts for the given turn index, strictly 0-based:
-   * the payload's `turns[].index`, the positional fallback, or a legacy 1-based
-   * `turn` row matched as `turn - 1`. Anything else resolves to nothing (the
-   * route 404s) rather than a neighboring turn (issue #184).
+   * each row resolves by explicit identity (`index`, else legacy 1-based `turn`
+   * as `turn - 1`), and array position only matches rows carrying neither.
+   * Anything else resolves to nothing (the route 404s) rather than a
+   * neighboring turn (issue #184).
    *
    * Sub-divided into canonical context blocks (system_prompt, tool_definitions,
    * instruction_context, conversation_history, tool_result_content) and parts
@@ -1071,12 +1103,7 @@ export class KyberBridge {
       ? (payload.turns as TurnDescriptor[])
       : []
     if (turns.length > 0) {
-      const turnItem = turns.find(
-        (t, i) =>
-          t.index === turnIndex ||
-          i === turnIndex ||
-          (typeof t.turn === 'number' && t.turn - 1 === turnIndex),
-      )
+      const turnItem = resolveTurn(turns, turnIndex, turnTransportIndexOf)
       if (turnItem) {
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
@@ -1089,14 +1116,9 @@ export class KyberBridge {
         const records = this.store.recordsForSession(sessionId)
         const turnRecords = records.filter((r) => r.op === 'llm.invoke')
         const pool = turnRecords.length > 0 ? turnRecords : records
-        const target = pool.find((r, i) => {
-          const d = r as CanonicalRecord & TurnDescriptor
-          return (
-            d.index === turnIndex ||
-            i === turnIndex ||
-            (typeof d.turn === 'number' && d.turn - 1 === turnIndex)
-          )
-        })
+        const target = resolveTurn(pool, turnIndex, (r) =>
+          turnTransportIndexOf(r as CanonicalRecord & TurnDescriptor),
+        )
         if (target) {
           targetSpanId = target.spanId
           model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
@@ -1108,10 +1130,17 @@ export class KyberBridge {
             .all(sessionId) as Record<string, unknown>[]
           const turnRows = rows.filter((r) => r.op === 'llm.invoke')
           const pool = turnRows.length > 0 ? turnRows : rows
-          const target = pool.find((r, i) => {
-            const rawTurn: unknown = r.turn
-            const legacyTurn = typeof rawTurn === 'number' ? rawTurn - 1 : NaN
-            return Number(r.index) === turnIndex || i === turnIndex || legacyTurn === turnIndex
+          // DB rows predate the descriptor shape: `index` may arrive as a
+          // numeric string, and a null/empty index is no identity (unlike
+          // `Number(null)`, which coerces to 0 and would hijack turn 0).
+          const target = resolveTurn(pool, turnIndex, (r) => {
+            const rawIndex: unknown = r.index
+            const index =
+              rawIndex === null || rawIndex === undefined || rawIndex === '' ? undefined : Number(rawIndex)
+            return turnTransportIndexOf({
+              index: typeof index === 'number' && Number.isFinite(index) ? index : undefined,
+              turn: r.turn,
+            })
           })
           if (target) {
             targetSpanId = String(target.span_id)

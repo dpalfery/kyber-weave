@@ -105,14 +105,11 @@ export async function fetchKyberSession(sessionId: string): Promise<KyberSession
 }
 
 /**
- * Measured per-turn rows of the full session payload (`GET /api/kyber/session/:id`).
- * The inspector header (issue #184) reads its token figures from here — measured
- * counters only, never estimates derived from text.
- */
-/**
  * Measured per-turn token figures from the session turn row (issue #184, Q3).
  * Every field is a harness-measured counter or null; consumers render what is
- * measured and state absence plainly — never estimate from text.
+ * measured and state absence plainly — never estimate from text. The rows
+ * themselves come from the full session payload (`GET /api/kyber/session/:id`),
+ * which the inspector header reads for measured counters only.
  */
 export interface TurnTokenFigures {
   input?: number | null
@@ -124,6 +121,72 @@ export interface TurnTokenFigures {
 export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]> {
   const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
   return Array.isArray(body.turns) ? body.turns : []
+}
+
+/** A turn row carrying either numbering shape: 0-based `index`, legacy 1-based `turn`, or neither. */
+export interface TurnIdentity {
+  index?: unknown
+  turn?: unknown
+}
+
+/**
+ * One row's 0-based transport identity (issue #184): an explicit finite `index`
+ * wins; otherwise a finite legacy 1-based `turn` resolves as `turn - 1`.
+ * Anything else is no identity — the row is only reachable positionally.
+ */
+export function turnTransportIndex(row: TurnIdentity | null | undefined): number | undefined {
+  if (row == null) return undefined
+  if (typeof row.index === 'number' && Number.isFinite(row.index)) return row.index
+  if (typeof row.turn === 'number' && Number.isFinite(row.turn)) return row.turn - 1
+  return undefined
+}
+
+/**
+ * One context row's 1-based engine number: the engine's `TurnPressure.index`
+ * wins, else the legacy 1-based `turn`. Anything else has no number.
+ */
+export function contextTurnNumber(row: TurnIdentity | null | undefined): number | undefined {
+  if (row == null) return undefined
+  if (typeof row.index === 'number' && Number.isFinite(row.index)) return row.index
+  if (typeof row.turn === 'number' && Number.isFinite(row.turn)) return row.turn
+  return undefined
+}
+
+function findByIdentity<T>(
+  rows: readonly T[] | undefined,
+  target: number,
+  identityOf: (row: T) => number | undefined,
+  positionOf: (position: number) => number,
+): T | undefined {
+  return (
+    rows?.find((row) => identityOf(row) === target) ??
+    rows?.find((row, i) => positionOf(i) === target && identityOf(row) === undefined)
+  )
+}
+
+/**
+ * Strict 0-based turn lookup shared by the drawer and the turn page
+ * (issue #184): explicit identity first, array position only for rows that
+ * carry neither `index` nor `turn`. Anything else resolves to nothing —
+ * never a neighboring turn.
+ */
+export function findTurnByTransport<T extends TurnIdentity>(
+  rows: readonly T[] | undefined,
+  turnIndex: number,
+): T | undefined {
+  return findByIdentity(rows, turnIndex, turnTransportIndex, (i) => i)
+}
+
+/**
+ * Strict 1-based context lookup for engine-numbered rows: explicit engine
+ * `index` or legacy `turn` first, array position (`i + 1`, the parallel turns
+ * arrays share session order) only for rows carrying neither.
+ */
+export function findContextTurn<T extends TurnIdentity>(
+  rows: readonly T[] | undefined,
+  oneBasedTurn: number,
+): T | undefined {
+  return findByIdentity(rows, oneBasedTurn, contextTurnNumber, (i) => i + 1)
 }
 
 export async function fetchKyberSessions(harness?: string | null): Promise<KyberSessionSummary[]> {
