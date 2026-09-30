@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
 using Xunit;
 using Xunit.Sdk;
+using YamlDotNet.Serialization;
 
 namespace KyberWeave.Tests;
 
@@ -1035,7 +1036,8 @@ public sealed class ReleaseTests
 
     /// <summary>
     /// The tray assets have to reach the checksum manifest, which they do by
-    /// being artifacts the release job downloads before it runs sha256sum.
+    /// being artifacts the release job downloads before it calls
+    /// verify-release-checksums.sh.
     /// </summary>
     [Fact]
     public void TrayAssetsJoinTheChecksumManifest()
@@ -1043,13 +1045,848 @@ public sealed class ReleaseTests
         string workflow = File.ReadAllText(ReleaseWorkflowPath);
 
         Assert.Contains("name: tray-${{ matrix.rid }}", workflow, StringComparison.Ordinal);
-        Assert.Contains("sha256sum *", workflow, StringComparison.Ordinal);
+
+        // The verification step calls the script with the asset directory and version.
+        int verifyIndex = workflow.IndexOf("Verify and compute checksums", StringComparison.Ordinal);
+        Assert.True(verifyIndex >= 0, "release.yml has no 'Verify and compute checksums' step.");
+        string verifyStep = workflow[verifyIndex..];
+        Assert.Contains("bash scripts/verify-release-checksums.sh release-assets \"${VERSION}\"", verifyStep, StringComparison.Ordinal);
 
         // The release job cannot publish what has not been built.
         Assert.Contains(
             "needs: [version, build, build-kyberdash, build-tray, pack-squad]",
             workflow,
             StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The verify-release-checksums.sh step must run before gh release create,
+    /// so that a missing or wrong asset fails before anything is published.
+    /// </summary>
+    [Fact]
+    public void VerifyChecksumStepPrecedesReleaseCreation()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        int verify = workflow.IndexOf("Verify and compute checksums", StringComparison.Ordinal);
+        int create = workflow.IndexOf("Create tag and GitHub Release", StringComparison.Ordinal);
+
+        Assert.True(verify >= 0, "release.yml has no 'Verify and compute checksums' step.");
+        Assert.True(create > verify, "verification step must run before release creation.");
+    }
+
+    /// <summary>
+    /// The post-publish verification step uses the script's --list mode to get
+    /// the expected asset list and compares sorted sets, avoiding duplication
+    /// and keeping the list authoritative in one place.
+    /// </summary>
+    [Fact]
+    public void PostPublishVerificationUsesScriptListMode()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        // The post-publish step must come after release creation.
+        int create = workflow.IndexOf("Create tag and GitHub Release", StringComparison.Ordinal);
+        int verify = workflow.IndexOf("Verify published release assets", StringComparison.Ordinal);
+        Assert.True(create >= 0, "release.yml has no 'Create tag and GitHub Release' step.");
+        Assert.True(verify > create, "post-publish verification must run after release creation.");
+
+        // The post-publish step must call the script with --list flag.
+        int listIndex = workflow.IndexOf("verify-release-checksums.sh --list", StringComparison.Ordinal);
+        Assert.True(listIndex > verify, "post-publish step must call script with --list flag.");
+
+        // Must compare sorted sets to catch both missing and extra assets.
+        int publishIndex = workflow.IndexOf("Verify published release assets", StringComparison.Ordinal);
+        string publishStep = workflow[publishIndex..];
+        Assert.Contains("EXPECTED_SORTED", publishStep, StringComparison.Ordinal);
+        Assert.Contains("PUBLISHED_SORTED", publishStep, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The release notes must accurately describe the signing state: the Windows
+    /// tray and Windows CLI executables are not Authenticode-signed. The notes
+    /// must not contain "EV certificate" (even if split across lines by blockquote markers)
+    /// and must explain the SmartScreen flow with links to the documentation.
+    /// </summary>
+    [Fact]
+    public void ReleaseNotesAccuratelyDescribeWindowsSigningState()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        // Pattern that matches "EV" followed by any whitespace (including newlines and blockquote
+        // markers like "> ") and then "certificate". This catches the old phrasing even if a
+        // markdown blockquote indentation sits between the two words.
+        const string evPattern = @"\bEV\s+(?:>\s*)*certificate";
+
+        // Must say "not Authenticode-signed", not "EV certificate" (even with blockquote breaks).
+        Assert.Contains("not Authenticode-signed", workflow, StringComparison.Ordinal);
+        Assert.DoesNotMatch(evPattern, workflow);
+
+        // Positive control: the pattern must match the old blockquote-split text so the
+        // negative assertion above is not vacuous.
+        string evBlockquote = "not signed with an EV\n          > certificate";
+        Assert.Matches(evPattern, evBlockquote);
+
+        // SmartScreen guidance must be present.
+        Assert.Contains("SmartScreen", workflow, StringComparison.Ordinal);
+        Assert.Contains("More info", workflow, StringComparison.Ordinal);
+        Assert.Contains("Run anyway", workflow, StringComparison.Ordinal);
+
+        // Must mention all three Windows .exe archives.
+        Assert.Contains("kyber-weave-win-x64.zip", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-mcp-win-x64.zip", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyberdash-win-x64.zip", workflow, StringComparison.Ordinal);
+        Assert.Contains("kyberdash-tray-win-x64-setup.exe", workflow, StringComparison.Ordinal);
+
+        // Documentation anchors must be linked as absolute GitHub URLs.
+        Assert.Contains("verifying-a-download", workflow, StringComparison.Ordinal);
+        Assert.Contains("windows-unsigned-binaries-and-smartscreen", workflow, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The release.yml file must parse as valid YAML.
+    /// </summary>
+    [Fact]
+    public void ReleaseWorkflowIsValidYaml()
+    {
+        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+
+        try
+        {
+            Deserializer deserializer = new();
+            object? parsed = deserializer.Deserialize(workflow);
+            Assert.NotNull(parsed);
+        }
+        catch (Exception ex)
+        {
+            Assert.Fail($"release.yml is not valid YAML: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The script lists all expected assets when run with --list mode.
+    /// The list must include the three tray assets: both darwin variants
+    /// (arm64 and x64) and the Windows setup exe.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsListModeOutputsAssetNames()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("--list");
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+
+        // Must output exactly 20 lines (one per asset).
+        string[] lines = result.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(20, lines.Length);
+
+        // The three tray assets must be in the list: both darwin architectures and Windows setup.
+        Assert.Contains("kyberdash-tray-darwin-arm64.zip", lines);
+        Assert.Contains("kyberdash-tray-darwin-x64.zip", lines);
+        Assert.Contains("kyberdash-tray-win-x64-setup.exe", lines);
+
+        // --list mode does not write a manifest.
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// The script's argument guard rejects incomplete --list calls (missing version)
+    /// and no-argument calls with the usage error, not an unbound variable error.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsShortArgumentCalls()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+
+        // Test 1: --list with only directory (missing version) exits 1 with usage error.
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("--list");
+        startInfo.ArgumentList.Add(sandbox.Root);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("usage:", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
+
+        // Test 2: no arguments exits 1 with usage error.
+        ProcessStartInfo startInfo2 = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo2.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+
+        ProcessResult result2 = ProcessRunner.Run(startInfo2, string.Empty);
+
+        Assert.NotEqual(0, result2.ExitCode);
+        Assert.Contains("usage:", result2.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("unbound variable", result2.StandardError, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Helper array of all 20 expected release assets for fixture tests.
+    /// </summary>
+    private static readonly string[] ReleaseAssets =
+    [
+        "kyber-weave-linux-x64.tar.gz",
+        "kyber-weave-linux-arm64.tar.gz",
+        "kyber-weave-osx-x64.tar.gz",
+        "kyber-weave-osx-arm64.tar.gz",
+        "kyber-weave-win-x64.zip",
+        "kyber-weave-mcp-linux-x64.tar.gz",
+        "kyber-weave-mcp-linux-arm64.tar.gz",
+        "kyber-weave-mcp-osx-x64.tar.gz",
+        "kyber-weave-mcp-osx-arm64.tar.gz",
+        "kyber-weave-mcp-win-x64.zip",
+        "kyberdash-darwin-arm64.tar.gz",
+        "kyberdash-darwin-x64.tar.gz",
+        "kyberdash-linux-arm64.tar.gz",
+        "kyberdash-linux-x64.tar.gz",
+        "kyberdash-win-x64.zip",
+        "kyberdash-tray-darwin-arm64.zip",
+        "kyberdash-tray-darwin-x64.zip",
+        "kyberdash-tray-win-x64-setup.exe",
+        "kyber-squad-{0}.zip",
+        "kyber-squad-plugin-{0}.zip"
+    ];
+
+    /// <summary>
+    /// The complete fixture with all 20 expected assets present and no extras.
+    /// The script must exit 0 and create a valid SHA256SUMS.txt.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsAcceptsCompleteFixture()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all 20 expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+
+        // The manifest must have 20 lines (one per asset).
+        string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
+        string[] manifestLines = manifest.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(20, manifestLines.Length);
+
+        // Each line must match the format: 64 hex characters, two spaces, filename.
+        foreach (string line in manifestLines)
+        {
+            Match match = Regex.Match(line, @"^[0-9a-f]{64}  .+$");
+            Assert.True(match.Success, $"Line does not match format: {line}");
+        }
+    }
+
+    /// <summary>
+    /// When an expected asset is missing, the script exits non-zero with an
+    /// error diagnostic naming the missing file.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsMissingAsset()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all assets except one (the last: kyber-squad-plugin-{version}.zip).
+        string missingAsset = string.Format(System.Globalization.CultureInfo.InvariantCulture, ReleaseAssets[ReleaseAssets.Length - 1], version);
+        for (int i = 0; i < ReleaseAssets.Length - 1; i++)
+        {
+            string assetTemplate = ReleaseAssets[i];
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("missing release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains(missingAsset, result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// When an unexpected asset is present, the script exits non-zero with an
+    /// error diagnostic naming the extra file.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsExtraAsset()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Add an extra asset.
+        sandbox.WriteArchive("EXTRA_FILE.txt", "this should not be here");
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains("unexpected release asset", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("EXTRA_FILE.txt", result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// A stale SHA256SUMS.txt from a prior download is deleted before the
+    /// script computes the manifest and emits a warning. The final manifest
+    /// must not contain a line for itself, and the warning must be in stderr.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsDeletesStaleManifestWithWarning()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all 20 expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Write a stale SHA256SUMS.txt.
+        File.WriteAllText(
+            Path.Combine(sandbox.Root, "SHA256SUMS.txt"),
+            "0000000000000000000000000000000000000000000000000000000000000000  kyber-weave-linux-x64.tar.gz\n");
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+
+        // Must emit a warning about discarding stale manifest.
+        Assert.Contains("::warning::discarding stale inbound SHA256SUMS.txt", result.StandardError, StringComparison.Ordinal);
+
+        // The manifest must have been recomputed.
+        string manifest = File.ReadAllText(Path.Combine(sandbox.Root, "SHA256SUMS.txt"));
+
+        // Must not contain the stale hash.
+        Assert.DoesNotContain("0000000000000000000000000000000000000000000000000000000000000000", manifest, StringComparison.Ordinal);
+
+        // Must not name itself.
+        Assert.DoesNotContain("SHA256SUMS.txt", manifest, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A hidden file (dotglob) in the asset directory causes the script to reject
+    /// it as an unexpected asset.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsRejectsHiddenFiles()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all 20 expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Add a hidden file.
+        sandbox.WriteArchive(".hidden-file", "this should not be here");
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(".hidden-file", result.StandardError, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// Against an empty asset directory the script exits non-zero, reports all 20
+    /// expected assets as missing, names the first and last, writes no SHA256SUMS.txt,
+    /// and does not print "unbound variable". The last assertion guards the
+    /// empty-array expansion under set -u on bash older than 4.4 (for example macOS
+    /// /bin/bash 3.2). Newer bash passes regardless.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsReportsEveryAssetForEmptyDirectory()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        // Script must exit non-zero when all assets are missing.
+        Assert.NotEqual(0, result.ExitCode);
+
+        // On bash < 4.4 this fails if an empty-array expansion is unguarded under set -u.
+        Assert.DoesNotContain("unbound variable", result.StandardError, StringComparison.Ordinal);
+
+        // Stderr must report all 20 missing assets.
+        int missingCount = Regex.Count(result.StandardError, "::error::missing release asset:");
+        Assert.Equal(20, missingCount);
+
+        // Must name the first and last expected assets.
+        Assert.Contains("kyber-weave-linux-x64.tar.gz", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("kyber-squad-plugin-" + version + ".zip", result.StandardError, StringComparison.Ordinal);
+
+        // Must not write a manifest when all assets are missing.
+        Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+    }
+
+    /// <summary>
+    /// The script must work with relative asset directory paths (e.g. "release-assets").
+    /// This is how release.yml invokes it. The script does cd "$ASSET_DIR" then creates
+    /// a temp file relative to the current directory, ensuring atomic rename and no
+    /// temp files left behind. This test runs the script from a subdirectory with a
+    /// relative path, mirroring the release.yml invocation form.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsWorksWithRelativeAssetDirectoryPath()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create a subdirectory to simulate the release workflow's directory structure.
+        string releaseDirPath = Path.Combine(sandbox.Root, "release-assets");
+        Directory.CreateDirectory(releaseDirPath);
+
+        // Create all expected assets in the release-assets subdirectory.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(Path.Combine(releaseDirPath, asset), "dummy content for " + asset);
+        }
+
+        // Change to sandbox root and invoke script with relative path "release-assets".
+        // This reproduces the release.yml invocation: cd release-repo && bash scripts/verify-release-checksums.sh release-assets "$VERSION"
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            WorkingDirectory = sandbox.Root  // Set working directory to sandbox root.
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add("release-assets");  // Relative path, as release.yml does.
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(releaseDirPath, "SHA256SUMS.txt")));
+
+        // Verify that no temp files are left behind in the release-assets directory.
+        string[] tempFiles = Directory.GetFiles(releaseDirPath, ".SHA256SUMS.*");
+        Assert.Empty(tempFiles);
+    }
+
+    /// <summary>
+    /// The published SHA256SUMS.txt manifest must have mode 644 (rw-r--r--).
+    /// Asserts that the chmod 644 step in the script runs and produces the correct permissions.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsCreatesManifestWithCorrectPermissions()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        ProcessStartInfo startInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        startInfo.ArgumentList.Add(sandbox.Root);
+        startInfo.ArgumentList.Add(version);
+
+        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+        Assert.Equal(0, result.ExitCode);
+
+        // Verify file exists and has mode 644 (rw-r--r--).
+        string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
+        Assert.True(File.Exists(manifestPath));
+
+        // On Unix platforms, assert exact mode: owner read+write, group read, other read.
+        if (!OperatingSystem.IsWindows())
+        {
+            UnixFileMode mode = File.GetUnixFileMode(manifestPath);
+            UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                                   UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+            Assert.Equal(expected, mode);
+        }
+    }
+
+    /// <summary>
+    /// The trap must clean up temp .SHA256SUMS.* files even when the script fails
+    /// after mktemp (e.g., during hash computation). This test uses a shim that
+    /// fails during hashing to verify the trap runs on all exit paths.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsTrapCleansUpTempFileOnFailureAfterMktemp()
+    {
+        SkipOnWindows();
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets so the script reaches mktemp.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Create a shim directory OUTSIDE the asset dir with a sha256sum shim that exits 3.
+        // This forces failure after mktemp but before mv, triggering the trap.
+        string shimDir = Directory.CreateTempSubdirectory("kyber-weave-trap-test-shim-").FullName;
+        try
+        {
+            string sha256sumShim = Path.Combine(shimDir, "sha256sum");
+            File.WriteAllText(sha256sumShim, "#!/bin/sh\nexit 3\n");
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(sha256sumShim, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            // Run the script with PATH containing the shim dir and standard system paths.
+            // This ensures mktemp and rm resolve, and the failing sha256sum shim takes precedence.
+            ProcessStartInfo startInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.EnvironmentVariables["PATH"] = shimDir + Path.PathSeparator + "/usr/bin:/bin";
+            startInfo.ArgumentList.Add(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            startInfo.ArgumentList.Add(sandbox.Root);
+            startInfo.ArgumentList.Add(version);
+
+            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
+
+            // Script must exit non-zero when the hash command fails.
+            Assert.NotEqual(0, result.ExitCode);
+
+            // Verify that the failure occurred during hashing (not due to missing tools).
+            Assert.DoesNotContain("unexpected release asset", result.StandardError, StringComparison.Ordinal);
+            Assert.DoesNotContain("command not found", result.StandardError, StringComparison.Ordinal);
+
+            // Trap must have cleaned up any temp files despite the hash failure.
+            string[] tempFiles = Directory.GetFiles(sandbox.Root, ".SHA256SUMS.*");
+            Assert.Empty(tempFiles);
+
+            // No manifest must be created when hashing fails.
+            Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(shimDir, true);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    /// <summary>
+    /// When sha256sum is not available, the script must fall back to shasum -a 256
+    /// and produce an identical manifest. This test builds a hermetic bin directory
+    /// OUTSIDE the asset dir, containing symlinks only to the tools the script needs,
+    /// excluding sha256sum to force the fallback on all platforms. Skipped if shasum
+    /// or required tools are unavailable.
+    /// </summary>
+    [Fact]
+    public void VerifyReleaseChecksumsUsesShaSumFallbackWhenSha256sumUnavailable()
+    {
+        SkipOnWindows();
+
+        // Resolve absolute paths for tools under the ambient PATH.
+        // These are external commands the script runs on the shasum-fallback success path (usage-error paths, which call basename, are not exercised).
+        var toolsToResolve = new[] { "rm", "mktemp", "chmod", "mv", "shasum" };
+        var toolPaths = new Dictionary<string, string>();
+
+        foreach (string tool in toolsToResolve)
+        {
+            ProcessStartInfo resolveInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            resolveInfo.ArgumentList.Add("-c");
+            resolveInfo.ArgumentList.Add("command -v " + tool);
+            ProcessResult resolveResult = ProcessRunner.Run(resolveInfo, string.Empty);
+
+            if (resolveResult.ExitCode != 0)
+            {
+                throw SkipException.ForSkip($"Required tool '{tool}' not found in PATH; fallback test skipped.");
+            }
+
+            toolPaths[tool] = resolveResult.StandardOutput.Trim();
+        }
+
+        using Sandbox sandbox = new();
+        string version = "0.1.0";
+
+        // Create all expected assets.
+        foreach (string assetTemplate in ReleaseAssets)
+        {
+            string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
+            sandbox.WriteArchive(asset, "dummy content for " + asset);
+        }
+
+        // Run with full PATH to get baseline manifest using sha256sum (if available) or shasum.
+        ProcessStartInfo normalInfo = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        normalInfo.ArgumentList.Add(
+            Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+        normalInfo.ArgumentList.Add(sandbox.Root);
+        normalInfo.ArgumentList.Add(version);
+        ProcessResult normalResult = ProcessRunner.Run(normalInfo, string.Empty);
+        Assert.Equal(0, normalResult.ExitCode);
+
+        string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
+        string baselineManifest = File.ReadAllText(manifestPath);
+
+        // Create a hermetic bin directory with symlinks only to required tools (no sha256sum).
+        string hermBinDir = Directory.CreateTempSubdirectory("kyber-weave-fallback-test-bin-").FullName;
+        try
+        {
+            foreach (var kvp in toolPaths)
+            {
+                string tool = kvp.Key;
+                string toolPath = kvp.Value;
+
+                // Confirm the resolved path exists, is absolute, and is executable.
+                if (string.IsNullOrWhiteSpace(toolPath) || !File.Exists(toolPath) || !Path.IsPathRooted(toolPath))
+                {
+                    throw SkipException.ForSkip($"Tool '{tool}' resolved to invalid path '{toolPath}'; fallback test skipped.");
+                }
+
+                // Create symlink in hermetic dir.
+                string symLinkPath = Path.Combine(hermBinDir, tool);
+                try
+                {
+                    File.CreateSymbolicLink(symLinkPath, toolPath);
+                }
+                catch (Exception ex)
+                {
+                    throw SkipException.ForSkip($"Failed to create symlink for '{tool}': {ex.Message}; fallback test skipped.");
+                }
+            }
+
+            // Clean up baseline manifest and re-run with hermetic PATH that has shasum but not sha256sum.
+            File.Delete(manifestPath);
+
+            ProcessStartInfo fallbackInfo = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            fallbackInfo.EnvironmentVariables["PATH"] = hermBinDir;
+            fallbackInfo.ArgumentList.Add(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
+            fallbackInfo.ArgumentList.Add(sandbox.Root);
+            fallbackInfo.ArgumentList.Add(version);
+            ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty);
+
+            // Verify sha256sum is not available in the hermetic PATH.
+            ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            verifySha256sumAbsent.EnvironmentVariables["PATH"] = hermBinDir;
+            verifySha256sumAbsent.ArgumentList.Add("-c");
+            verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum >/dev/null 2>&1");
+            ProcessResult verifySha256Result = ProcessRunner.Run(verifySha256sumAbsent, string.Empty);
+            Assert.NotEqual(0, verifySha256Result.ExitCode);
+
+            // Verify shasum IS available in the hermetic PATH.
+            ProcessStartInfo verifyShasumPresent = new("/bin/bash")
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            verifyShasumPresent.EnvironmentVariables["PATH"] = hermBinDir;
+            verifyShasumPresent.ArgumentList.Add("-c");
+            verifyShasumPresent.ArgumentList.Add("command -v shasum >/dev/null 2>&1");
+            ProcessResult verifyShasumResult = ProcessRunner.Run(verifyShasumPresent, string.Empty);
+            Assert.Equal(0, verifyShasumResult.ExitCode);
+
+            Assert.Equal(0, fallbackResult.ExitCode);
+
+            string fallbackManifest = File.ReadAllText(manifestPath);
+
+            // Manifest bytes must be identical (both paths produce the same hash output in the same format).
+            Assert.Equal(baselineManifest, fallbackManifest);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(hermBinDir, true);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
     }
 
     // ---- --with-menubar (task 9.2, Requirement 12.7) ----
