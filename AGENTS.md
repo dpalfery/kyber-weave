@@ -83,14 +83,17 @@ understand or locate code:
 <!-- CODEGRAPH_END -->
 
 If there is no `.codegraph/` directory:
-- First occurrence: The `.claude/settings.json` SessionStart hook runs `codegraph init -y`
-  only when CLAUDE_CODE_REMOTE=true. In local sessions without that hook, the agent
-  initializes once per session with `codegraph init -y .` (standing approval covers
-  repo-local actions only: builds and project-local dependencies; no system-wide installs;
-  leave tracked files alone).
-- If blocked: report the blocker under GAPS and proceed with text search (Grep, Glob),
-  stating in the result that CodeGraph was unavailable; the conductor relays the blocker
-  and stops that path.
+
+- Hook unavailable (local sessions; the `.claude/settings.json` SessionStart hook only
+  runs `codegraph init -y` when CLAUDE_CODE_REMOTE=true): initialize once per session
+  with `codegraph init -y .` (standing approval covers repo-local actions only: builds
+  and project-local dependencies; no system-wide installs; leave tracked files alone).
+- If blocked (no `codegraph` on `PATH`, no write access, a read-only role): report the
+  blocker under GAPS and proceed with text search (Grep, Glob), stating in the result
+  that CodeGraph was unavailable; the conductor relays the blocker and stops that path.
+- If the index is unusable after initialization: fall back to text search (Grep, Glob),
+  stating in the result that CodeGraph was unavailable. Do not report `docs drift` as
+  passing when it was skipped for want of an index.
 
 See issue #221, "Missing-dependency handling", for the blocker->fix->retry loop.
 
