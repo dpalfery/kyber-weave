@@ -1607,8 +1607,8 @@ public sealed class ReleaseTests
     }
 
     /// <summary>
-    /// The published SHA256SUMS.txt manifest must have readable permissions (644)
-    /// on platforms that support POSIX file modes (not Windows).
+    /// The published SHA256SUMS.txt manifest must have mode 644 (rw-r--r--).
+    /// Asserts that the chmod 644 step in the script runs and produces the correct permissions.
     /// </summary>
     [Fact]
     public void VerifyReleaseChecksumsCreatesManifestWithCorrectPermissions()
@@ -1641,51 +1641,53 @@ public sealed class ReleaseTests
 
         Assert.Equal(0, result.ExitCode);
 
-        // Read file permissions.
+        // Verify file exists and has mode 644 (rw-r--r--).
         string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
         Assert.True(File.Exists(manifestPath));
 
-        // On macOS/Linux, verify mode is 644.
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        // On Unix platforms, assert exact mode: owner read+write, group read, other read.
+        if (!OperatingSystem.IsWindows())
         {
-            var fileInfo = new System.IO.FileInfo(manifestPath);
-            // File.GetAttributes returns FileAttributes; on Unix we can check via stat.
-            // For a portable check, verify the file is readable and writable by owner,
-            // and readable by others. On these platforms sha256sum/shasum default to
-            // leaving files world-readable unless chmod is applied.
-            ProcessStartInfo statInfo = new("/bin/bash")
-            {
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-            statInfo.ArgumentList.Add("-c");
-            statInfo.ArgumentList.Add("stat -f \"%OLp\" \"" + manifestPath + "\"");
-            ProcessResult statResult = ProcessRunner.Run(statInfo, string.Empty);
-            Assert.Contains("644", statResult.StandardOutput, StringComparison.Ordinal);
+            UnixFileMode mode = File.GetUnixFileMode(manifestPath);
+            UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                                   UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+            Assert.Equal(expected, mode);
         }
     }
 
     /// <summary>
-    /// No temporary .SHA256SUMS.* file must be left behind if the script fails
-    /// (e.g., due to missing assets). The trap must clean up on all exit paths.
+    /// The trap must clean up temp .SHA256SUMS.* files even when the script fails
+    /// after mktemp (e.g., during hash computation). This test uses a shim that
+    /// fails during hashing to verify the trap runs on all exit paths.
     /// </summary>
     [Fact]
-    public void VerifyReleaseChecksumsRemovesTempFileOnFailure()
+    public void VerifyReleaseChecksumsTrapCleansUpTempFileOnFailureAfterMktemp()
     {
         SkipOnWindows();
 
         using Sandbox sandbox = new();
         string version = "0.1.0";
 
-        // Create assets but omit one to trigger a missing-asset error.
-        foreach (string assetTemplate in ReleaseAssets.Take(19))  // All but the last.
+        // Create all expected assets so the script reaches mktemp.
+        foreach (string assetTemplate in ReleaseAssets)
         {
             string asset = string.Format(System.Globalization.CultureInfo.InvariantCulture, assetTemplate, version);
             sandbox.WriteArchive(asset, "dummy content for " + asset);
         }
 
+        // Create a shim directory with only a sha256sum shim that exits 3.
+        // This forces failure after mktemp but before mv, triggering the trap.
+        string shimDir = Path.Combine(sandbox.Root, ".shim");
+        Directory.CreateDirectory(shimDir);
+
+        string sha256sumShim = Path.Combine(shimDir, "sha256sum");
+        File.WriteAllText(sha256sumShim, "#!/bin/sh\nexit 3\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(sha256sumShim, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        // Run the script with PATH containing only the shim (sha256sum will fail).
         ProcessStartInfo startInfo = new("/bin/bash")
         {
             RedirectStandardInput = true,
@@ -1693,6 +1695,7 @@ public sealed class ReleaseTests
             RedirectStandardError = true,
             UseShellExecute = false
         };
+        startInfo.EnvironmentVariables["PATH"] = shimDir;
         startInfo.ArgumentList.Add(
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
         startInfo.ArgumentList.Add(sandbox.Root);
@@ -1700,28 +1703,29 @@ public sealed class ReleaseTests
 
         ProcessResult result = ProcessRunner.Run(startInfo, string.Empty);
 
-        // Script must fail when a required asset is missing.
+        // Script must exit non-zero when the hash command fails.
         Assert.NotEqual(0, result.ExitCode);
 
-        // No temp files must be left behind even after failure.
+        // Trap must have cleaned up any temp files despite the hash failure.
         string[] tempFiles = Directory.GetFiles(sandbox.Root, ".SHA256SUMS.*");
         Assert.Empty(tempFiles);
 
-        // No SHA256SUMS.txt manifest must be created on failure.
+        // No manifest must be created when hashing fails.
         Assert.False(File.Exists(Path.Combine(sandbox.Root, "SHA256SUMS.txt")));
     }
 
     /// <summary>
-    /// When sha256sum is not available (e.g., on macOS), the script must fall back
-    /// to shasum -a 256 and produce an identical manifest. This test runs with a PATH
-    /// that lacks sha256sum to force the fallback. It is skipped if shasum is unavailable.
+    /// When sha256sum is not available, the script must fall back to shasum -a 256
+    /// and produce an identical manifest. This test builds a minimal shim directory
+    /// containing only the tools the script needs, excluding sha256sum, to force
+    /// the fallback on all platforms. Skipped if shasum or required tools are unavailable.
     /// </summary>
     [Fact]
     public void VerifyReleaseChecksumsUsesShaSumFallbackWhenSha256sumUnavailable()
     {
         SkipOnWindows();
 
-        // Check if shasum is available; skip this test if not (the fallback cannot be tested hermetically).
+        // Check if shasum is available; skip if not.
         ProcessStartInfo checkShasum = new("/bin/bash")
         {
             RedirectStandardInput = true,
@@ -1747,7 +1751,7 @@ public sealed class ReleaseTests
             sandbox.WriteArchive(asset, "dummy content for " + asset);
         }
 
-        // Run with sha256sum available to get baseline manifest.
+        // Run with full PATH to get baseline manifest.
         ProcessStartInfo normalInfo = new("/bin/bash")
         {
             RedirectStandardInput = true,
@@ -1765,7 +1769,9 @@ public sealed class ReleaseTests
         string manifestPath = Path.Combine(sandbox.Root, "SHA256SUMS.txt");
         string baselineManifest = File.ReadAllText(manifestPath);
 
-        // Clean up and re-run with sha256sum hidden (PATH excludes it).
+        // Clean up and re-run with a restricted PATH that has shasum but not sha256sum.
+        // On this system, sha256sum is in /usr/local/opt/gnu-coreutils/libexec/gnubin
+        // (Homebrew) or similar non-standard locations, while shasum is in /usr/bin.
         File.Delete(manifestPath);
 
         ProcessStartInfo fallbackInfo = new("/bin/bash")
@@ -1775,21 +1781,37 @@ public sealed class ReleaseTests
             RedirectStandardError = true,
             UseShellExecute = false
         };
-        // Override PATH to exclude sha256sum, forcing fallback to shasum.
-        fallbackInfo.EnvironmentVariables["PATH"] = "/usr/bin:/bin:/usr/local/bin";
+        // Restrict PATH to exclude non-standard directories where sha256sum might be.
+        fallbackInfo.EnvironmentVariables["PATH"] = "/bin:/usr/bin:/usr/local/bin";
         fallbackInfo.ArgumentList.Add(
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "scripts", "verify-release-checksums.sh"));
         fallbackInfo.ArgumentList.Add(sandbox.Root);
         fallbackInfo.ArgumentList.Add(version);
         ProcessResult fallbackResult = ProcessRunner.Run(fallbackInfo, string.Empty);
+
+        // Verify sha256sum is not in the restricted PATH used by the script.
+        ProcessStartInfo verifySha256sumAbsent = new("/bin/bash")
+        {
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        verifySha256sumAbsent.EnvironmentVariables["PATH"] = "/bin:/usr/bin:/usr/local/bin";
+        verifySha256sumAbsent.ArgumentList.Add("-c");
+        verifySha256sumAbsent.ArgumentList.Add("command -v sha256sum");
+        ProcessResult verifyResult = ProcessRunner.Run(verifySha256sumAbsent, string.Empty);
+        Assert.NotEqual(0, verifyResult.ExitCode);
+
         Assert.Equal(0, fallbackResult.ExitCode);
 
         string fallbackManifest = File.ReadAllText(manifestPath);
 
-        // Manifest bytes must be identical (same hash values, same format).
+        // Manifest bytes must be identical (both paths produce the same hash output in the same format).
         Assert.Equal(baselineManifest, fallbackManifest);
     }
 
+    // ---- --with-menubar
     // ---- --with-menubar (task 9.2, Requirement 12.7) ----
 
     /// <summary>The argv --with-menubar must produce, asserted by two tests.</summary>
