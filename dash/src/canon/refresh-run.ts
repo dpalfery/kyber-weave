@@ -33,7 +33,7 @@ export type RefreshRunRow = {
   summary: string | null
   /**
    * The ingest window, in weeks, this run covered. `null` means the run
-   * predates window tracking (migration 14→15) — window unknown, never 0
+   * predates window tracking (migration 15→16) — window unknown, never 0
    * and never the current default.
    */
   historyWeeks: number | null
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS refresh_run (
   pid INTEGER NOT NULL,
   trigger TEXT NOT NULL,
   summary TEXT,
-  -- The coverage window the run ingested (migration 14→15). NULL on rows
+  -- The coverage window the run ingested (migration 15→16). NULL on rows
   -- written before window tracking: window unknown, never 0.
   history_weeks INTEGER
 );
