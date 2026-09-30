@@ -960,7 +960,7 @@ describe('GET /api/kyber/run/:id (issue #183)', () => {
       cost:
         value === null
           ? { basis: 'unknown', status: 'no_rate' as const }
-          : { basis: 'published', status: 'priced' as const, value, currency: 'USD' },
+          : { basis: 'harness', status: 'priced' as const, value, currency: 'USD' },
       raw: { model: 'gpt-4o', cwd: '/repo' },
     })
     const usage = (fresh: number, read: number, out: number): CanonicalRecord['tokens'] => ({
@@ -1070,7 +1070,7 @@ describe('GET /api/kyber/runs + run detail review follow-ups', () => {
       tokens: usage,
       content: {},
       parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
-      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      cost: { basis: 'harness', status: 'priced', value: 0.01, currency: 'USD' },
       raw: { model: 'gpt-4o', cwd: '/repo' },
     })
     store.upsertMany([rec('rl-t1', 'run-list-a'), rec('rl-t2', 'run-list-a')])
@@ -1126,7 +1126,7 @@ describe('GET /api/kyber/runs + run detail review follow-ups', () => {
       tokens: usage,
       content: {},
       parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
-      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      cost: { basis: 'harness', status: 'priced', value: 0.01, currency: 'USD' },
       raw: { model: 'gpt-4o', cwd: '/repo' },
     })
     inner.upsertMany([rec('sp-t1', 'single-parse-a'), rec('sp-t2', 'single-parse-b')])
@@ -1345,7 +1345,7 @@ describe('GET /api/kyber/runs harness filtering (re-review Kilo 6)', () => {
       tokens: usage,
       content: {},
       parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
-      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      cost: { basis: 'harness', status: 'priced', value: 0.01, currency: 'USD' },
       raw: { model: 'gpt-4o', cwd: '/repo' },
     })
     inner.upsertMany([rec('h-t1', 'harness-scope-a', 'copilot'), rec('h-t2', 'harness-scope-b', 'gemini')])
@@ -1386,6 +1386,10 @@ describe('GET /api/kyber/runs harness filtering (re-review Kilo 6)', () => {
       await new Promise<void>((resolve) => scopeServer.close(() => resolve()))
       scopeBridge.close()
       store.close()
+    }
+  })
+})
+
 // Issue #186 Defect B (plan T11 RED -> T12 GREEN): a store seeded with stale {unknown,no_rate}
 // records must serve priced / partial / out_of_scope session costs after one projection (U9).
 describe('GET /api/kyber/sessions: projection-time repricing (issue #186)', () => {

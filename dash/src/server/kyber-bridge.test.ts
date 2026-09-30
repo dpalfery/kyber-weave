@@ -281,7 +281,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         total_cache_read: 200,
         total_cache_creation: 100,
         schema_tokens_per_turn: 50,
-        cost: { usd: 0.05, basis: 'published_rates' },
+        cost: { usd: 0.05, basis: 'published_rates', status: 'priced', value: 0.05, currency: 'USD' },
         models: ['gpt-4o'],
       },
       problems: ['prob-1'],
@@ -295,7 +295,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { usd: 0.02, basis: 'published_rates' },
+        cost: { usd: 0.02, basis: 'published_rates', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
@@ -392,7 +392,7 @@ describe('KyberBridge: in-memory minimal tables fixture (CI verified)', () => {
         request_count: 2,
         total_input: 400,
         total_output: 200,
-        cost: { usd: 0.02, basis: 'published_rates' },
+        cost: { usd: 0.02, basis: 'published_rates', status: 'priced', value: 0.02, currency: 'USD' },
         models: ['gpt-4o'],
       },
     })
