@@ -7,6 +7,7 @@ import {
   type KyberTurnContentResult,
   type KyberTurnContentBlock,
   type KyberTurnContentPart,
+  type TurnTokenFigures,
 } from '../lib/kyberApi.js'
 import { Skeleton } from './ui/skeleton.js'
 import { XmlFoldedText } from './SessionInspectorDrawer.js'
@@ -45,6 +46,14 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     return false
   }
   return false
+}
+
+/** True when at least one harness-measured counter is present (issue #184, Q3). */
+function hasTurnTokenFigures(figures: TurnTokenFigures | undefined): boolean {
+  if (!figures) return false
+  return (
+    figures.input != null || figures.output != null || figures.fresh != null || figures.cacheRead != null
+  )
 }
 
 export interface CopyButtonProps {
@@ -271,12 +280,23 @@ export function PartTabs({
   )
 }
 
+/**
+ * Where an empty block sits, so the empty state can name it (issue #184).
+ * `turnIndex` is the 0-based transport index the content route resolved.
+ */
+export interface ContentPaneContext {
+  sessionId?: string
+  turnIndex?: number
+  spanId?: string
+}
+
 export interface ContentPaneProps {
   text: string
   label?: string
   truncated?: boolean
   totalLength?: number
   notMeasurable?: { reason: string }
+  context?: ContentPaneContext
   className?: string
 }
 
@@ -290,6 +310,7 @@ export function ContentPane({
   truncated = false,
   totalLength,
   notMeasurable,
+  context,
   className,
 }: ContentPaneProps) {
   const [viewMode, setViewMode] = useState<'formatted' | 'raw'>('formatted')
@@ -314,12 +335,31 @@ export function ContentPane({
   }
 
   if (!text) {
+    // Issue #184: a turn that resolved but recorded no parts names where it
+    // sits (session, 0-based turn, span) so an audit can tell an honest data
+    // gap from a mis-resolved neighbor. Without that context the legacy copy
+    // stands, unchanged.
+    const whereabouts =
+      context && (context.sessionId !== undefined || context.turnIndex !== undefined || context.spanId !== undefined)
+        ? [
+            context.sessionId ? `session ${context.sessionId}` : null,
+            context.turnIndex !== undefined ? `turn ${context.turnIndex}` : null,
+            context.spanId ? `span ${context.spanId}` : null,
+          ]
+            .filter((part): part is string => part !== null)
+            .join(' · ')
+        : null
     return (
       <div
         className={cn('rounded border border-border bg-card/40 p-8 text-center text-xs text-tertiary-foreground italic', className)}
         data-testid="empty-content-pane"
       >
-        No content recorded for this block.
+        <p>No content recorded for this block.</p>
+        {whereabouts ? (
+          <p className="mt-1 font-mono not-italic text-[11px]">
+            {whereabouts} — the harness captured no unclipped content parts here.
+          </p>
+        ) : null}
       </div>
     )
   }
@@ -395,6 +435,7 @@ export interface ContextInspectorProps {
   initialBlockKey?: string
   initialPart?: string
   data?: KyberTurnContentResult
+  turnTokens?: TurnTokenFigures
   onClose?: () => void
   className?: string
 }
@@ -409,6 +450,7 @@ export function ContextInspector({
   initialBlockKey,
   initialPart,
   data: directData,
+  turnTokens,
   onClose,
   className,
 }: ContextInspectorProps) {
@@ -459,7 +501,14 @@ export function ContextInspector({
   // Displayed text, label, and budget status
   const displayedContent = useMemo(() => {
     if (!turnData) {
-      return { text: '', label: '', truncated: false, totalLength: undefined, notMeasurable: undefined }
+      return { text: '', label: '', truncated: false, totalLength: undefined, notMeasurable: undefined, context: undefined }
+    }
+
+    // Where this pane sits, so an empty block can name it (issue #184).
+    const context = {
+      sessionId,
+      turnIndex: turnData.turnIndex,
+      spanId: turnData.spanId,
     }
 
     // 1. Single part selected
@@ -470,6 +519,7 @@ export function ContextInspector({
         truncated: activePart.truncated ?? false,
         totalLength: activePart.totalLength,
         notMeasurable: undefined,
+        context,
       }
     }
 
@@ -481,6 +531,7 @@ export function ContextInspector({
         truncated: activeBlock.truncated ?? false,
         totalLength: activeBlock.totalLength,
         notMeasurable: activeBlock.notMeasurable,
+        context,
       }
     }
 
@@ -491,8 +542,9 @@ export function ContextInspector({
       truncated: turnData.truncated ?? false,
       totalLength: turnData.totalLength,
       notMeasurable: undefined,
+      context,
     }
-  }, [turnData, activeBlock, activePart])
+  }, [turnData, activeBlock, activePart, sessionId])
 
   // Block-level copy text
   const blockCopyText = useMemo(() => {
@@ -532,11 +584,30 @@ export function ContextInspector({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3 bg-card/40">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-foreground uppercase tracking-wide">
-            Turn {turnData.turnIndex}
+            {/* Issue #184: transport is 0-based; humans see 1-based. */}
+            Turn {turnData.turnIndex + 1}
           </span>
           {turnData.model && (
             <span className="rounded bg-interactive-secondary px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
               {turnData.model}
+            </span>
+          )}
+          {hasTurnTokenFigures(turnTokens) ? (
+            <span
+              data-testid="turn-token-figures"
+              title="Harness-measured token counters for this turn"
+              className="rounded bg-interactive-secondary px-2 py-0.5 text-[10px] font-mono tabular-nums text-muted-foreground"
+            >
+              In {fmtTokens(turnTokens?.input)} · Out {fmtTokens(turnTokens?.output)} · Fresh{' '}
+              {fmtTokens(turnTokens?.fresh)} · Cache {fmtTokens(turnTokens?.cacheRead)}
+            </span>
+          ) : (
+            <span
+              data-testid="turn-token-figures-absent"
+              title="The harness recorded no per-turn token counters; nothing is estimated"
+              className="rounded bg-interactive-secondary px-2 py-0.5 text-[10px] font-mono text-tertiary-foreground italic"
+            >
+              token counts not recorded
             </span>
           )}
         </div>
@@ -604,6 +675,7 @@ export function ContextInspector({
             truncated={displayedContent.truncated}
             totalLength={displayedContent.totalLength}
             notMeasurable={displayedContent.notMeasurable}
+            context={displayedContent.context}
           />
         </div>
       </div>
