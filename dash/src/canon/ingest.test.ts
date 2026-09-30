@@ -4,6 +4,7 @@ import { ingestBatch } from './ingest.js'
 import { CanonStore } from './store.js'
 import { otlpSpanToRecord } from '../otel/service.js'
 import type { OtlpSpan } from '../otel/receiver.js'
+import antigravitySpan from './adapters/__fixtures__/antigravity-span.json' with { type: 'json' }
 
 // The live collector had its own normalization that never went through the
 // adapter vote. These tests pin the difference, because the failure it caused
@@ -63,6 +64,29 @@ describe('ingestBatch — per-harness token conventions (R4.2)', () => {
     expect(record?.tokens.freshInput).toBe(251_976 - 243_910)
     expect(record?.tokens.reportedInput).toBe(251_976)
     expect(record?.harness).toBe('copilot')
+    store.close()
+  })
+
+  it('attributes the live agy shape to antigravity, not the excluded gemini identity', () => {
+    // Issue #195: the live Antigravity exporter sets `service.name: 'agy'`
+    // and carries both `gen_ai.agent.name: 'antigravity'` and
+    // `gen_ai.system: 'gemini'`. The agent identity wins the vote, so the
+    // rows land on the surveyed `antigravity` harness the projection keeps.
+    const store = new CanonStore(':memory:')
+    ingestBatch(
+      [
+        span(antigravitySpan as Record<string, unknown>, {
+          resource: { 'service.name': 'agy' },
+        } as Partial<OtlpSpan>),
+      ],
+      store,
+    )
+    const record = store.get('span-1')
+
+    expect(record?.harness).toBe('antigravity')
+    expect(record?.source).toBe('agy')
+    expect(record?.tokens.freshInput).toBe(251_976 - 243_910)
+    expect(record?.tokens.reportedInput).toBe(251_976)
     store.close()
   })
 

@@ -943,4 +943,20 @@ describe('source checkpoint and provenance', () => {
 
     store.close()
   })
+
+  it('restricts the harness batch to the requested sources when given', () => {
+    const store = new CanonStore(':memory:')
+    store.upsert(record({ spanId: 'agy-1', source: 'agy', harness: 'gemini' }))
+    store.upsert(record({ spanId: 'cli-1', source: 'gemini-cli', harness: 'gemini' }))
+
+    expect(store.listRecordsByHarness(['gemini'], 10, ['agy']).map((r) => r.spanId)).toEqual([
+      'agy-1',
+    ])
+    expect(store.listRecordsByHarness(['gemini'], 10).map((r) => r.spanId).sort()).toEqual([
+      'agy-1',
+      'cli-1',
+    ])
+
+    store.close()
+  })
 })

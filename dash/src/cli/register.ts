@@ -128,12 +128,21 @@ export function registerKyberCommands(program: Command, dependencies: KyberComma
     .command('renormalize')
     .description('Re-derive harness attribution and token conversion from stored raw payloads')
     .option('--db <path>', 'Custom path for canon.db SQLite database')
-    .action(async (opts: { db?: string }) => {
+    .option(
+      '--source <source>',
+      'Restrict renormalization to traces containing this source (repeatable). Unset means every trace.',
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .action(async (opts: { db?: string; source?: string[] }) => {
       const { renormalizeRecords } = await import('../tools/backfill.js')
       const { buildSessions } = await import('../canon/sessions.js')
       const store = new CanonStore(resolveDbPath(opts.db))
       try {
-        const report = renormalizeRecords(store)
+        const report = renormalizeRecords(
+          store,
+          opts.source !== undefined && opts.source.length > 0 ? { sources: opts.source } : {},
+        )
         await buildSessions(store)
         console.log(`Traces:        ${report.traces}`)
         console.log(`Reattributed:  ${report.reattributed}`)
