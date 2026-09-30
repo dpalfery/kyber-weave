@@ -163,6 +163,27 @@ describe('T6 derivation does not collapse or seed Gemini', () => {
     store.close()
   })
 
+  it('builds an antigravity session and rollup from live agy records while Gemini stays excluded', async () => {
+    // Issue #195: rows the fix re-attributes to `antigravity` must project
+    // into sessions and rollups; the `gemini` identity itself stays dropped.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      record('a1', 'antigravity', 'agy-1', { source: 'agy' }),
+      record('g1', 'gemini', 'gem-1', { source: 'agy' }),
+    ])
+    const report = await buildSessions(store)
+
+    expect(report.built).toBe(1)
+    expect(store.listSessions('antigravity')).toHaveLength(1)
+    expect(store.listSessions('gemini')).toHaveLength(0)
+
+    const rollups = buildHarnessRollup(store)
+    expect(rollups.map((r) => r.harness)).toContain('antigravity')
+    expect(rollups.map((r) => r.harness)).not.toContain('gemini')
+    expect(store.getHarnessRollup('antigravity')?.sampleCount).toBeGreaterThan(0)
+    store.close()
+  })
+
   it('seeds registered split harnesses, not Gemini, on an empty store', () => {
     const store = new CanonStore(':memory:')
     const rollups = buildHarnessRollup(store)
