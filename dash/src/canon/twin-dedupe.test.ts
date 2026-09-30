@@ -228,3 +228,59 @@ describe('dedupeTwinTurns unreported counters (review)', () => {
     expect(out.map((r) => r.spanId)).toEqual(['otel-zero', 'synth:zero'])
   })
 })
+
+describe('dedupeTwinTurns surplus file content (review)', () => {
+  const same = {
+    freshInput: 2,
+    cacheRead: 39096,
+    cacheCreation: 24977,
+    output: 563,
+    reportedInput: 64075,
+    reportedOutput: 563,
+  }
+  it('merges content keys from surplus file rows instead of dropping them (review)', () => {
+    // The 2×-per-turn file shape (issue #232): one OTLP turn, two file rows
+    // carrying complementary halves. Totals stay OTLP-only, but no content\n    // key vanishes with the dropped duplicate.
+    const out = dedupeTwinTurns([
+      llmInvoke('otel-1', {
+        source: 'claude-code-desktop',
+        harness: 'claude-code',
+        timestamp: '2026-09-23T22:43:53.540Z',
+        tokens: { ...same },
+        content: {},
+      }),
+      llmInvoke('synth:req', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        timestamp: '2026-09-23T22:43:58.000Z',
+        tokens: { ...same },
+        content: { system_prompt: 'hello' },
+        parts: [{ part: 'system_prompt', text: 'hello' }],
+      }),
+      llmInvoke('synth:res', {
+        source: 'codeburn/claude-desktop',
+        harness: 'claude-desktop',
+        timestamp: '2026-09-23T22:43:59.000Z',
+        tokens: { ...same },
+        content: { tool_result_content: 'world' },
+        parts: [{ part: 'tool_result_content', text: 'world' }],
+      }),
+    ])
+
+    expect(out).toHaveLength(1)
+    expect(out[0]!.content).toMatchObject({ system_prompt: 'hello', tool_result_content: 'world' })
+  })
+
+  it('bounds clusters by span, not just adjacency (review)', () => {
+    // A file row chained more than the skew past every OTLP row is not\n    // provably the same turn: it is kept rather than merged into a\n    // cluster it only touches through other file rows.
+    const at = (spanId: string, source: string, harness: string, timestamp: string) =>
+      llmInvoke(spanId, { source, harness, timestamp, tokens: { ...same }, content: {} })
+    const out = dedupeTwinTurns([
+      at('otel-0', 'claude-code-desktop', 'claude-code', '2026-09-23T22:43:00.000Z'),
+      at('synth:mid', 'codeburn/claude-desktop', 'claude-desktop', '2026-09-23T22:43:50.000Z'),
+      at('synth:far', 'codeburn/claude-desktop', 'claude-desktop', '2026-09-23T22:44:40.000Z'),
+    ])
+
+    expect(out.map((r) => r.spanId)).toEqual(['otel-0', 'synth:far'])
+  })
+})

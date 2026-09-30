@@ -478,8 +478,11 @@ export function assembleRollup(
       executionCount: executions.length,
       // Persisted for the findings envelope (issue #191, review): reading
       // the count off the rollup avoids JSON-parsing every session payload
-      // on each `/api/kyber/findings` request.
+      // on each `/api/kyber/findings` request. `windowSessionsTotal` is the
+      // exact session count behind the digest, so readers can verify the
+      // rollup still covers every session before trusting the sum (M2).
       unknownWindowSessions: digest.unknownWindowSessions,
+      windowSessionsTotal: sessions.length,
       dimensions: {
         contextPressureMedian: {
           value: contextPressureMedian,

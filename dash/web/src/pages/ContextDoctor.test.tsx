@@ -4,6 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { ContextDoctor } from './ContextDoctor.js'
 import type { FindingsPage, KyberFinding, KyberHarnessSummary } from '../lib/kyberApi.js'
+import {
+  accumulateFindingsPage,
+  flattenFindingsPages,
+  type FindingsPageAcc,
+} from '../lib/kyberApi.js'
 
 function finding(id: string, detectorId: string, harness: string): KyberFinding {
   return {
@@ -82,5 +87,38 @@ describe('ContextDoctor findings browser (issue #191)', () => {
   it('keeps the ranked top-5 headline card', () => {
     const html = render()
     expect(html).toContain('Highest-Leverage Workspace Findings')
+  })
+})
+
+describe('findings page accumulation (review M1)', () => {
+  const rows = (prefix: string, n: number): KyberFinding[] =>
+    Array.from({ length: n }, (_, i) => finding(`${prefix}-${i}`, 'duplicate-tool-call', 'cursor'))
+
+  it('keeps page 1 when page 2 arrives', () => {
+    // The Load-more bug: accumulating pages 2..N while the first page lived
+    // only in the query made the visible set shrink to a different 25.
+    let pages: FindingsPageAcc[] = []
+    pages = accumulateFindingsPage(pages, 0, rows('p1', 25))
+    pages = accumulateFindingsPage(pages, 25, rows('p2', 25))
+    const flat = flattenFindingsPages(pages)
+    expect(flat).toHaveLength(50)
+    expect(flat[0]?.id).toBe('p1-0')
+    expect(flat[25]?.id).toBe('p2-0')
+  })
+
+  it('never appends the same offset twice', () => {
+    let pages: FindingsPageAcc[] = []
+    pages = accumulateFindingsPage(pages, 0, rows('p1', 25))
+    pages = accumulateFindingsPage(pages, 0, rows('p1', 25))
+    expect(flattenFindingsPages(pages)).toHaveLength(25)
+  })
+
+  it('orders out-of-order arrivals by offset', () => {
+    let pages: FindingsPageAcc[] = []
+    pages = accumulateFindingsPage(pages, 25, rows('p2', 10))
+    pages = accumulateFindingsPage(pages, 0, rows('p1', 25))
+    const flat = flattenFindingsPages(pages)
+    expect(flat[0]?.id).toBe('p1-0')
+    expect(flat).toHaveLength(35)
   })
 })

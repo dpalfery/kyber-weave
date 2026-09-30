@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { APPROXIMATE_TOKENIZER, tokenizerName } from '../canon/tokens.js'
 import { normalizeHarnessName } from '../canon/measurability.js'
-import type { CostBlock } from '../canon/types.js'
 import { refreshProcessIsAlive } from '../canon/refresh-run.js'
 import {
   CanonStore,
@@ -2208,20 +2207,23 @@ export class KyberBridge {
    * underwent.
    */
   countUnknownWindowSessions(scope?: { harness?: string; runId?: string; sessionId?: string }): number {
-    const harness = typeof scope === 'string' ? scope : scope?.harness
-    const runId = typeof scope === 'string' ? undefined : scope?.runId
-    const sessionId = typeof scope === 'string' ? undefined : scope?.sessionId
+    const harness = scope?.harness
+    const runId = scope?.runId
+    const sessionId = scope?.sessionId
     if (sessionId !== undefined && sessionId !== '') {
       const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
       return payload?.context?.contextLimitSource === 'default' ? 1 : 0
     }
     if (runId !== undefined && runId !== '') {
+      // Same fold rule as everywhere else (review): a run scoped to a legacy
+      // front-end name still matches its folded owner's executions.
+      const wantHarness = harness !== undefined && harness !== '' ? normalizeHarnessName(harness) : undefined
       const ids = [
         ...new Set(
           this.listExecutions(runId)
             .filter(
               (execution) =>
-                harness === undefined || harness === '' || execution.harness.toLowerCase() === harness.toLowerCase(),
+                wantHarness === undefined || normalizeHarnessName(execution.harness) === wantHarness,
             )
             .map((execution) => execution.sessionId ?? execution.executionId)
             .filter((id) => id.length > 0),
@@ -2235,16 +2237,28 @@ export class KyberBridge {
     }
     // Harness and workspace scopes read the persisted rollups (review): the
     // count was derived at build time, so each findings request does not
-    // JSON-parse every session payload. With no rollups built yet (fresh
-    // store), fall back to the direct session scan below.
+    // JSON-parse every session payload. A rollup sum is exact only when the
+    // rollups still cover every session (review M2): coverage is verified
+    // against narrow-column counts, and anything uncovered falls back to
+    // the direct session scan rather than wearing a partial sum as a total.
     if (this.store) {
       if (harness !== undefined && harness !== '') {
-        const rollup = this.store.getHarnessRollup(normalizeHarnessName(harness))
-        const count = (rollup?.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
-        if (typeof count === 'number') return count
+        const canonical = normalizeHarnessName(harness)
+        const rollup = this.store.getHarnessRollup(canonical)
+        const covered = (rollup?.payload as { windowSessionsTotal?: unknown } | undefined)?.windowSessionsTotal
+        if (typeof covered === 'number' && covered === (this.store.countSessionsByHarness()[canonical] ?? -1)) {
+          const count = (rollup?.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
+          if (typeof count === 'number') return count
+        }
       } else {
         const rollups = this.store.listHarnessRollups()
-        if (rollups.length > 0) {
+        const byHarness = this.store.countSessionsByHarness()
+        const covered = rollups.length > 0 && rollups.every((rollup) => {
+          const total = (rollup.payload as { windowSessionsTotal?: unknown } | undefined)?.windowSessionsTotal
+          return typeof total === 'number' && total === (byHarness[rollup.harness] ?? -1)
+        })
+        // covered also requires no sessions outside rollup harnesses.
+        if (covered && Object.keys(byHarness).every((h) => rollups.some((rollup) => rollup.harness === h))) {
           return rollups.reduce((sum, rollup) => {
             const count = (rollup.payload as { unknownWindowSessions?: unknown } | undefined)?.unknownWindowSessions
             return sum + (typeof count === 'number' ? count : 0)
@@ -2254,30 +2268,45 @@ export class KyberBridge {
       return this.store.countUnknownWindowSessions(harness)
     }
     const db = this.getDb()
-    // Built rollups first (review): one small table, no session-blob scan.
-    if (this.hasTable(db, 'harness_rollup')) {
+    // Built rollups first (review): one small table, no session-blob scan —
+    // but only when coverage verifies (review M2), else the session scan.
+    if (this.hasTable(db, 'harness_rollup') && this.hasTable(db, 'session')) {
       try {
-        const payloadOf = (payload: unknown): number | undefined => {
-          if (typeof payload !== 'string') return undefined
+        const payloadOf = (payload: unknown): { unknown?: number; total?: number } => {
+          if (typeof payload !== 'string') return {}
           try {
-            const parsed = JSON.parse(payload) as { unknownWindowSessions?: unknown }
-            return typeof parsed.unknownWindowSessions === 'number' ? parsed.unknownWindowSessions : undefined
+            const parsed = JSON.parse(payload) as { unknownWindowSessions?: unknown; windowSessionsTotal?: unknown }
+            return {
+              ...(typeof parsed.unknownWindowSessions === 'number' ? { unknown: parsed.unknownWindowSessions } : {}),
+              ...(typeof parsed.windowSessionsTotal === 'number' ? { total: parsed.windowSessionsTotal } : {}),
+            }
           } catch {
-            return undefined
+            return {}
           }
         }
+        const grouped = db!
+          .prepare('SELECT harness, COUNT(*) AS n FROM session GROUP BY harness')
+          .all() as unknown as { harness: string; n: number }[]
+        const actual: Record<string, number> = {}
+        for (const row of grouped) actual[row.harness] = row.n
         if (harness !== undefined && harness !== '') {
+          const canonical = normalizeHarnessName(harness)
           const row = db!
             .prepare('SELECT payload FROM harness_rollup WHERE harness = ?')
-            .get(normalizeHarnessName(harness)) as unknown as { payload: unknown } | undefined
-          const count = payloadOf(row?.payload)
-          if (count !== undefined) return count
+            .get(canonical) as unknown as { payload: unknown } | undefined
+          const { unknown, total } = payloadOf(row?.payload)
+          if (unknown !== undefined && total === (actual[canonical] ?? -1)) return unknown
         } else {
-          const rows = db!.prepare('SELECT payload FROM harness_rollup').all() as unknown as {
+          const rows = db!.prepare('SELECT harness, payload FROM harness_rollup').all() as unknown as {
+            harness: string
             payload: unknown
           }[]
-          if (rows.length > 0) {
-            return rows.reduce((sum, row) => sum + (payloadOf(row.payload) ?? 0), 0)
+          const covered =
+            rows.length > 0 &&
+            rows.every((row) => payloadOf(row.payload).total === (actual[row.harness] ?? -1)) &&
+            Object.keys(actual).every((h) => rows.some((row) => row.harness === h))
+          if (covered) {
+            return rows.reduce((sum, row) => sum + (payloadOf(row.payload).unknown ?? 0), 0)
           }
         }
       } catch (err) {

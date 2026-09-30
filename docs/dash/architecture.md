@@ -549,7 +549,10 @@ summed across sources for the same turn) instead of double-counting one conversa
 Same-turn observations whose counters differ are left alone (follow-up #231).
 
 Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
-stamp (Decision D17), forcing automatic recomputation whenever detectors are updated.
+stamp (Decision D17): an informational mark of which detector semantics built the rows, so
+tooling and operators can tell a stale finding table from a fresh one. Recomputation itself
+comes from the authoritative rebuild, which rewrites derived rows and prunes what detectors no
+longer emit.
 
 ### Run Comparison and Phase Alignment (Decision D11)
 

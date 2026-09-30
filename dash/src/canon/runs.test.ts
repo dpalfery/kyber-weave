@@ -249,8 +249,11 @@ describe('Decision D13 — Run boundary derivation', () => {
 
     const runs = store.listRuns()
     expect(runs).toHaveLength(1)
+    // Issue #182 fold: the native `claude-desktop:` key prefix is preserved
+    // verbatim while the harness segment is the folded owner `claude-code` —
+    // still exactly one harness segment, never `derived:X:X:`.
     expect(runs[0]!.runId).toBe(
-      'derived:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
+      'derived:claude-code:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
     )
     expect(runs[0]!.groupingRule).toBe('session_fallback')
 
@@ -273,7 +276,7 @@ describe('Decision D13 — Run boundary derivation', () => {
     const after = store.listRuns()
     expect(after).toHaveLength(1)
     expect(after[0]!.runId).toBe(
-      'derived:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
+      'derived:claude-code:claude-desktop:12f4dea4-33da-4f71-bbda-40e48f22e553',
     )
     store.close()
   })

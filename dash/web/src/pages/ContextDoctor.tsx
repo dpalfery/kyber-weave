@@ -5,7 +5,10 @@ import {
   fetchHarnesses,
   fetchRuns,
   fetchFindings,
+  accumulateFindingsPage,
+  flattenFindingsPages,
   type FindingsPage,
+  type FindingsPageAcc,
   type KyberHarnessSummary,
   type KyberFinding,
 } from '../lib/kyberApi.js'
@@ -94,15 +97,16 @@ export function ContextDoctor({
   const [baseline, setBaseline] = useState('none')
   const [detectorFilter, setDetectorFilter] = useState<string | undefined>(undefined)
   const [harnessFilter, setHarnessFilter] = useState<string | undefined>(undefined)
-  // Offset paging (issue #191): Load more advances `offset` and appends the
-  // next page instead of refetching a growing prefix.
+  // Offset paging (issue #191): Load more advances `offset` and every
+  // fetched page — including the first — accumulates, so the visible set
+  // only ever grows (review M1).
   const [offset, setOffset] = useState(0)
-  const [appended, setAppended] = useState<{ offset: number; rows: KyberFinding[] }[]>([])
+  const [pages, setPages] = useState<FindingsPageAcc[]>([])
 
   const resetBrowse = (update: () => void) => {
     update()
     setOffset(0)
-    setAppended([])
+    setPages([])
   }
 
   // Query live harnesses
@@ -145,13 +149,11 @@ export function ContextDoctor({
     initialData: offset === 0 && !filtersActive ? initialFindings : undefined,
   })
 
-  // Accumulate pages past the first as they arrive; the guard keeps a
-  // refetch from appending the same page twice.
+  // Accumulate every page as it arrives; the helper keeps a refetch from
+  // appending the same offset twice.
   useEffect(() => {
-    if (offset === 0 || !pageData) return
-    setAppended((prev) =>
-      prev.some((page) => page.offset === offset) ? prev : [...prev, { offset, rows: pageData.findings }],
-    )
+    if (!pageData) return
+    setPages((prev) => accumulateFindingsPage(prev, offset, pageData.findings))
   }, [pageData, offset])
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {
@@ -166,15 +168,13 @@ export function ContextDoctor({
   }, [harnessesData, runsData])
 
   const headline: KyberFinding[] = headlineData?.findings ?? []
-  // First page renders straight from the query; later pages accumulate above
-  // (effects do not run in static render, where only the first page exists).
+  // Accumulated pages win once any arrived; otherwise the first page renders
+  // straight from the query (effects do not run in static render, where only
+  // the first page exists).
   const browserFindings: KyberFinding[] = useMemo(() => {
-    const first = offset === 0 ? (pageData?.findings ?? []) : []
-    const extra = [...appended].sort((a, b) => a.offset - b.offset).flatMap((page) => page.rows)
-    const current =
-      offset > 0 && pageData && !appended.some((page) => page.offset === offset) ? pageData.findings : []
-    return [...first, ...extra, ...current]
-  }, [pageData, offset, appended])
+    if (pages.length > 0) return flattenFindingsPages(pages)
+    return offset === 0 ? (pageData?.findings ?? []) : []
+  }, [pages, pageData, offset])
   const browserTotal = pageData?.total ?? 0
   const detectorCounts = pageData?.detectorCounts ?? {}
   const unknownWindowSessions = pageData?.unknownWindowSessions ?? 0

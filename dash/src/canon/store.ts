@@ -2112,6 +2112,17 @@ export class CanonStore {
     return findings
   }
 
+  /** Sessions recorded per canonical harness (issue #191 review M2). Narrow
+   * columns only — no payload touch — so coverage checks stay cheap. */
+  countSessionsByHarness(): Record<string, number> {
+    const rows = this.db
+      .prepare('SELECT harness, COUNT(*) AS n FROM session GROUP BY harness')
+      .all() as { harness: string; n: number }[]
+    const counts: Record<string, number> = {}
+    for (const row of rows) counts[row.harness] = row.n
+    return counts
+  }
+
   /**
    * Sessions whose context window no source reported (issue #191, condition
    * 3): the count that keeps a suppressed-default findings list from reading

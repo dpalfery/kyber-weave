@@ -1032,7 +1032,11 @@ describe('GET /api/kyber/run/:id (issue #183)', () => {
       // Measured scorecard: the sessions exported cache counters, so the
       // cache dimension must not claim otherwise.
       expect(body.scorecard.cacheEfficiency?.value).toBeCloseTo(1000 / 3000, 4)
-      expect(body.scorecard.contextHygiene?.value).not.toBeNull()
+      // No turn reports a context window, so pressure is unmeasurable —
+      // never a ratio against the guessed default (issue #181, honest
+      // unobservability applies at run scope exactly as at harness scope).
+      expect(body.scorecard.contextHygiene?.value).toBeNull()
+      expect(body.scorecard.contextHygiene?.reason).toMatch(/context window/i)
     } finally {
       await new Promise<void>((resolve) => runServer.close(() => resolve()))
       runBridge.close()

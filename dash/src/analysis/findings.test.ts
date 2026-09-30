@@ -1501,6 +1501,30 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     store.close()
   })
 
+  it('falls back to the session scan when rollups are stale (review M2)', () => {
+    // A rollup sum is exact only when rollups cover every session: a session
+    // recorded after the last build must still be counted, never silently
+    // dropped from a partial sum wearing an exact label.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const session = (id: string) =>
+      store.upsertSession({
+        sessionId: id,
+        harness: 'cursor',
+        payload: { context: { measurable: true, contextLimit: 200_000, contextLimitSource: 'default', turns: [] } },
+      })
+    session('s-old')
+    buildHarnessRollup(store)
+    session('s-new')
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(2)
+    expect(bridge.listFindingsPage({ harness: 'cursor' }).unknownWindowSessions).toBe(2)
+
+    bridge.close()
+    store.close()
+  })
+
   it('normalizes folded front-end names before filtering (review)', () => {
     // `cursor-agent` is `cursor` at the derived layer (issue #182): a query
     // under the legacy name must answer under the folded owner in every half
@@ -1569,6 +1593,9 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     expect(bridge.listFindingsPage({ sessionId: 's-unknown' }).unknownWindowSessions).toBe(1)
     expect(bridge.listFindingsPage({ runId: 'run-1' }).unknownWindowSessions).toBe(1)
     expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(1)
+    // The run scope folds legacy front-end names the same way (review).
+    expect(bridge.listFindingsPage({ runId: 'run-1', harness: 'cursor-agent' }).unknownWindowSessions).toBe(1)
+    expect(bridge.listFindingsPage({ runId: 'run-1', harness: 'claude-code' }).unknownWindowSessions).toBe(0)
 
     bridge.close()
     store.close()
