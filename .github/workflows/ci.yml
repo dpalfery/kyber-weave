@@ -570,12 +570,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-24.04]
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Tauri Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libgtk-3-dev libxdo-dev libssl-dev libdbus-1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node for Linux tray build
+        if: runner.os == 'Linux'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: dash/.nvmrc
+          cache: npm
+          cache-dependency-path: dash/tray/ui/package-lock.json
+
+      - name: Build tray UI for Linux
+        if: runner.os == 'Linux'
+        working-directory: dash/tray/ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
 
       # Pin is the v1 tag (an ancestor of master). The toolchain is the input,
       # not the action rev — dtolnay/rust-toolchain treats @rev as a rustc
@@ -591,6 +612,27 @@ jobs:
         with:
           workspaces: dash/tray/src-tauri
 
+      - name: Verify patched Linux GLib source
+        if: runner.os == 'Linux'
+        working-directory: dash/tray/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 --filter-platform x86_64-unknown-linux-gnu |
+            jq -e '
+              ([.packages[] | select(.name == "glib" and .version == "0.18.5")]) as $glib |
+              ($glib | length) == 1 and
+              $glib[0].source == null and
+              ($glib[0].manifest_path | endswith("/dash/tray/vendor/glib-0.18.5/Cargo.toml")) and
+              ([.packages[] | select(.name == "glib" and .source != null and
+                (.version | test("^0\\.(1[5-9])\\.")))] | length == 0)
+            '
+          cargo tree --locked -i glib --target x86_64-unknown-linux-gnu
+
+      - name: Test patched GLib string iterator
+        if: runner.os == 'Linux'
+        run: cargo test --release --manifest-path dash/tray/vendor/glib-0.18.5/Cargo.toml test_variant_str_iter
+
       - name: cargo fmt --check
         working-directory: dash/tray/src-tauri
         run: cargo fmt --check
@@ -602,6 +644,11 @@ jobs:
       - name: cargo test
         working-directory: dash/tray/src-tauri
         run: cargo test
+
+      - name: cargo build --release --locked
+        if: runner.os == 'Linux'
+        working-directory: dash/tray/src-tauri
+        run: cargo build --release --locked
 
   ci-summary:
     name: CI Summary
