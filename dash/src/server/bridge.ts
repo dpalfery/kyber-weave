@@ -172,7 +172,14 @@ export type SessionPayload = Record<string, unknown> & {
 /** Measured session-summary figures behind one session, keyed by session id. */
 export type SessionSummaryFigures = Map<
   string,
-  { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number }
+  {
+    turnCount?: number
+    totalInput?: number
+    totalOutput?: number
+    costUsd?: number
+    /** The session's own cost block is partial — its figure is real but incomplete. */
+    costPartial?: true
+  }
 >
 
 /**
@@ -188,9 +195,35 @@ function* asadPayloads(
 }
 
 /**
+ * Collapse executions sharing one session to a single digest input
+ * (re-review #2: Kilo 5 — the old payload Map deduped by session id, and
+ * the stream must not count a shared session twice in digest.count or the
+ * peak-pressure list). Turns still stream per execution; only the digest
+ * dedupes. Executions without a session id have no key and always pass.
+ */
+export function* dedupedRunSessions(
+  source: Generator<{ execution: ExecutionRow; payload: SessionPayload & { context?: unknown } }>,
+): Generator<{ execution: ExecutionRow; payload: SessionPayload & { context?: unknown } }> {
+  const seen = new Set<string>()
+  for (const item of source) {
+    const sessionId = item.execution.sessionId
+    if (typeof sessionId === 'string' && sessionId.length > 0) {
+      if (seen.has(sessionId)) continue
+      seen.add(sessionId)
+    }
+    yield item
+  }
+}
+
+/** A run-figure field that names the cells it marks as subtotals. */
+export type PartialRunField = 'turnCount' | 'totalInput' | 'totalOutput' | 'costUsd'
+
+/**
  * Measured run figures. `costStatus` marks a cost subtotal; `partial` marks
  * any subtotal — a linked session with no summary, or a figure missing from
- * some of the run's summaries. Both are present only when partial.
+ * some of the run's summaries — and `partialFields` names exactly which
+ * cells are subtotals so views mark the right ones (re-review #2: Kilo 4).
+ * All three are present only when partial.
  */
 export type RunMeasuredFigures = {
   turnCount?: number
@@ -199,6 +232,7 @@ export type RunMeasuredFigures = {
   costUsd?: number
   costStatus?: 'partial'
   partial?: true
+  partialFields?: PartialRunField[]
 }
 
 /**
@@ -236,7 +270,10 @@ export function pricedUsd(
  * some summaries but missing in others, marks the whole run `partial`.
  */
 export function sumSessionFigures(
-  summaries: ReadonlyMap<string, { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number }>,
+  summaries: ReadonlyMap<
+    string,
+    { turnCount?: number; totalInput?: number; totalOutput?: number; costUsd?: number; costPartial?: true }
+  >,
   sessionIds: readonly (string | null | undefined)[],
 ): RunMeasuredFigures {
   const uniqueIds = [...new Set(sessionIds)].filter(
@@ -250,12 +287,11 @@ export function sumSessionFigures(
   let seenInput = false
   let seenOutput = false
   let pricedSessions = 0
-  let presentSummaries = 0
+  let partialSessions = 0
   const fieldSeen = { turnCount: 0, totalInput: 0, totalOutput: 0, costUsd: 0 }
   for (const sessionId of uniqueIds) {
     const figures = summaries.get(sessionId)
     if (figures === undefined) continue
-    presentSummaries += 1
     if (figures.turnCount !== undefined) {
       turnCount += figures.turnCount
       seenTurns = true
@@ -276,9 +312,10 @@ export function sumSessionFigures(
       pricedSessions += 1
       fieldSeen.costUsd += 1
     }
+    if (figures.costPartial === true) partialSessions += 1
   }
-  const partialFields = (Object.keys(fieldSeen) as Array<keyof typeof fieldSeen>).some(
-    (field) => fieldSeen[field] > 0 && fieldSeen[field] < presentSummaries,
+  const namedPartials = (Object.keys(fieldSeen) as Array<PartialRunField>).filter(
+    (field) => fieldSeen[field] > 0 && fieldSeen[field] < uniqueIds.length,
   )
   return {
     ...(seenTurns ? { turnCount } : {}),
@@ -286,9 +323,13 @@ export function sumSessionFigures(
     ...(seenOutput ? { totalOutput } : {}),
     ...(pricedSessions > 0 ? { costUsd } : {}),
     // A priced figure beside an unpriced session is a subtotal wearing a
-    // total's suit — mark it partial so the views can say so.
-    ...(pricedSessions > 0 && pricedSessions < uniqueIds.length ? { costStatus: 'partial' as const } : {}),
-    ...(presentSummaries < uniqueIds.length || partialFields ? { partial: true as const } : {}),
+    // total's suit — mark it partial so the views can say so. Any partial
+    // session marks the sum too, even when every session priced something
+    // (re-review #2: Kilo B — otherwise an all-partial run looks complete).
+    ...(pricedSessions > 0 && (pricedSessions < uniqueIds.length || partialSessions > 0)
+      ? { costStatus: 'partial' as const }
+      : {}),
+    ...(namedPartials.length > 0 ? { partial: true as const, partialFields: namedPartials } : {}),
   }
 }
 
@@ -2413,6 +2454,8 @@ export class KyberBridge {
         ...(figure(row.total_input) !== undefined ? { totalInput: figure(row.total_input)! } : {}),
         ...(figure(row.total_output) !== undefined ? { totalOutput: figure(row.total_output)! } : {}),
         ...(cost !== undefined ? { costUsd: cost } : {}),
+        // Re-review #2 (Kilo B): the status a bare figure cannot carry.
+        ...(row.cost_status === 'partial' && cost !== undefined ? { costPartial: true as const } : {}),
       })
     }
     return out
@@ -2589,6 +2632,9 @@ export class KyberBridge {
               ? pricedUsd(block.status, block.value, block.currency, undefined)
               : undefined
           if (value !== undefined) row.costUsd = value
+          // Re-review #2 (Kilo B): a partial block's figure is real but
+          // incomplete — the row says so beside the figure.
+          if (block?.status === 'partial' && value !== undefined) row.costStatus = 'partial'
         }
         rows.push(row)
       })
@@ -2615,7 +2661,7 @@ export class KyberBridge {
   ): Scorecard | undefined {
     const executions = preload.executions ?? this.listExecutions(runId)
     const digest = digestSessionPayloads(
-      asadPayloads(this.streamRunSessionPayloads(executions)),
+      asadPayloads(dedupedRunSessions(this.streamRunSessionPayloads(executions))),
     )
     if (digest.count === 0) return undefined
     const run = this.getRun(runId)

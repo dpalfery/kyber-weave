@@ -796,16 +796,18 @@ const HARNESS_PREFIX_SURVEY: ReadonlyMap<SurveyedHarness, Omit<PrefixAvailabilit
  */
 export function harnessExportsCacheCounter(harness: string, counter: 'read' | 'creation'): boolean {
   const availability = cacheAvailability(harness)
+  // Only an uncatalogued harness (`not_measurable` with `assumed`
+  // confidence) falls back to the data — a documented negative is a
+  // verified record even when its status is not literally `unsupported`
+  // (re-review #2: Kilo 7 — OpenCode is catalogued `not_measurable` with
+  // documented confidence, and its absent counters are absence, not data).
+  if (availability.confidence === 'assumed') return true
   if (availability.status === 'unsupported') return false
-  // Review re-review (Kilo 1): the per-counter flags are the record for
-  // every catalogued harness — Codex is `supported` yet exports no
-  // cache-creation counter, and treating `supported` as both-true minted
-  // fake "on 0 turns" coverage. Only an uncatalogued harness
-  // (`not_measurable`/`assumed`) falls back to the data.
-  if (availability.status === 'supported' || availability.status === 'partial') {
-    return counter === 'read' ? availability.cacheRead : availability.cacheCreation
-  }
-  return true
+  // The per-counter flags are the record for every other catalogued
+  // harness — Codex is `supported` yet exports no cache-creation counter,
+  // and treating `supported` as both-true minted fake "on 0 turns"
+  // coverage (re-review: Kilo 1).
+  return counter === 'read' ? availability.cacheRead : availability.cacheCreation
 }
 
 /**

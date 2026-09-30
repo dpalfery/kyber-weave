@@ -381,6 +381,11 @@ export function assembleRollup(
       let rootTokens = 0
       let childCount = 0
 
+      // Re-review #2 (Kilo A): an execution whose totals are unknown
+      // contributes absence, not zero tokens. In run scope any unknown
+      // linked execution makes the overhead unobservable — counting it as
+      // zero labels a measured 0% on the remaining sessions' tokens alone.
+      let unknownTokens = 0
       for (const exec of input.executions) {
         const isChild = exec.isChild
         let tokens = 0
@@ -388,7 +393,11 @@ export function assembleRollup(
           // Two numbers read out of the stored JSON, rather than parsing a
           // payload that can run to hundreds of megabytes for each execution.
           const totals = input.tokenTotals(exec.sessionId)
-          if (totals !== undefined) tokens = totals.input + totals.output
+          if (totals !== undefined) {
+            tokens = totals.input + totals.output
+          } else {
+            unknownTokens += 1
+          }
         }
 
         if (isChild) {
@@ -399,7 +408,8 @@ export function assembleRollup(
         }
       }
 
-      if (childTokens + rootTokens > 0) {
+      const runScopeStrict = input.allowCountFallback === false
+      if (childTokens + rootTokens > 0 && !(runScopeStrict && unknownTokens > 0)) {
         delegationOverhead = Number((childTokens / (childTokens + rootTokens)).toFixed(4))
         measurability['delegation_overhead'] = 'measured'
       } else if (input.allowCountFallback !== false && executions.length > 0) {
@@ -407,9 +417,11 @@ export function assembleRollup(
         measurability['delegation_overhead'] = 'measured'
       } else {
         measurability['delegation_overhead'] = notMeasurable(
-          executions.length > 0
-            ? `No measured token totals in ${inScope}; delegation overhead is unobservable.`
-            : `No agent executions recorded ${forScope}.`,
+          unknownTokens > 0
+            ? `Token totals are unmeasured for ${unknownTokens} execution${unknownTokens === 1 ? '' : 's'} in ${inScope}; delegation overhead is unobservable.`
+            : executions.length > 0
+              ? `No measured token totals in ${inScope}; delegation overhead is unobservable.`
+              : `No agent executions recorded ${forScope}.`,
         )
       }
     }

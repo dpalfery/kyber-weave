@@ -6,10 +6,14 @@ import { join } from 'node:path'
 
 import {
   KyberBridge,
+  dedupedRunSessions,
   sumSessionFigures,
+  type SessionSummaryFigures,
   _clip,
 } from './bridge.js'
 import { CanonStore } from '../canon/store.js'
+import { buildSessions } from '../canon/sessions.js'
+import { buildRuns } from '../canon/runs.js'
 import type { CanonicalRecord } from '../canon/types.js'
 import { buildContextReport } from '../analysis/report/build.js'
 
@@ -942,6 +946,7 @@ describe('KyberBridge run figures review follow-ups', () => {
         costUsd: 0.01,
         costStatus: 'partial',
         partial: true,
+        partialFields: ['costUsd'],
       })
       // Every session priced: complete, no marker.
       expect(
@@ -953,6 +958,59 @@ describe('KyberBridge run figures review follow-ups', () => {
       bridge.close()
       store.close()
     }
+  })
+
+  // Re-review #2 (Kilo B): when every session's cost block is partial, the
+  // priced count equals the linked count, so neither marker fires and the
+  // total looks complete. A per-session partial flag marks it.
+  it('marks cost partial when every session is partial', () => {
+    const store = new CanonStore(':memory:')
+    const session = (id: string): void => {
+      store.upsertSession({
+        sessionId: id,
+        harness: 'copilot',
+        payload: {
+          id,
+          summary: {
+            turn_count: 1,
+            cost: { basis: 'published', status: 'partial', value: 0.02, currency: 'USD' },
+          },
+        },
+      })
+    }
+    session('sess-ap1')
+    session('sess-ap2')
+    const bridge = new KyberBridge({ canonPath: ':memory:', store })
+    try {
+      const summaries = bridge.sessionSummaryFigures(['sess-ap1', 'sess-ap2'])
+      expect(summaries.get('sess-ap1')?.costUsd).toBe(0.02)
+      // costStatus marks the partial cost; no general `partial` flag — both
+      // sessions are otherwise fully accounted for.
+      expect(sumSessionFigures(summaries, ['sess-ap1', 'sess-ap2'])).toEqual({
+        turnCount: 2,
+        costUsd: 0.04,
+        costStatus: 'partial',
+      })
+    } finally {
+      bridge.close()
+      store.close()
+    }
+  })
+
+  // Re-review #2 (Kilo 4): a field present in some summaries and missing in
+  // others names exactly which cells are subtotals.
+  it('names partially-covered fields', () => {
+    const summaries: SessionSummaryFigures = new Map([
+      ['s-a', { turnCount: 2, totalInput: 500, totalOutput: 50 }],
+      ['s-b', { turnCount: 3 }],
+    ])
+    expect(sumSessionFigures(summaries, ['s-a', 's-b'])).toEqual({
+      turnCount: 5,
+      totalInput: 500,
+      totalOutput: 50,
+      partial: true,
+      partialFields: ['totalInput', 'totalOutput'],
+    })
   })
 
   // Re-review Kilo 5: turn/input/output totals are subtotals when a linked
@@ -972,6 +1030,7 @@ describe('KyberBridge run figures review follow-ups', () => {
         turnCount: 2,
         totalInput: 500,
         partial: true,
+        partialFields: ['turnCount', 'totalInput'],
       })
       // Every linked session accounted for: complete, no marker.
       expect(sumSessionFigures(summaries, ['sess-only'])).toEqual({
@@ -1024,5 +1083,97 @@ describe('KyberBridge run figures review follow-ups', () => {
       // Bridge owns the passed database handle.
       bridge.close()
     }
+  })
+})
+
+describe('KyberBridge run session streaming (re-review #2 Kilo 4/5)', () => {
+  // The generator is lazy: pulling one session parses exactly one payload.
+  // An eager shared Map would parse every session up front.
+  it('streams one payload at a time', async () => {
+    const store = new CanonStore(':memory:')
+    const rec = (spanId: string, sessionId: string): import('../canon/types.js').CanonicalRecord => ({
+      spanId,
+      traceId: `trace-${sessionId}`,
+      parentSpanId: null,
+      sessionId,
+      source: 'synthetic',
+      harness: 'copilot',
+      name: 'canonical run turn',
+      op: 'llm.invoke',
+      kind: 'client',
+      timestamp: '2026-09-04T12:00:00.000Z',
+      durationMs: 100,
+      status: 'ok',
+      tokens: {
+        freshInput: 800,
+        cacheRead: 200,
+        cacheCreation: 0,
+        output: 100,
+        reportedInput: 1000,
+        reportedOutput: 100,
+      },
+      content: {},
+      parts: [{ part: 'system_prompt', text: 'sys', tokens: 600 }],
+      cost: { basis: 'published', status: 'priced', value: 0.01, currency: 'USD' },
+      raw: { model: 'gpt-4o', cwd: '/repo' },
+    })
+    store.upsertMany([rec('st-t1', 'stream-a'), rec('st-t2', 'stream-b')])
+    await buildSessions(store)
+    await buildRuns(store)
+    const runId = store.listRuns('copilot')[0]!.runId
+
+    let payloadReads = 0
+    class CountingStore extends CanonStore {
+      override getSessionPayload(sessionId: string): unknown | undefined {
+        payloadReads += 1
+        return super.getSessionPayload(sessionId)
+      }
+    }
+    const counting = new CountingStore(':memory:')
+    counting.upsertMany([rec('st-t1', 'stream-a'), rec('st-t2', 'stream-b')])
+    await buildSessions(counting)
+    await buildRuns(counting)
+
+    const bridge = new KyberBridge({ canonPath: ':memory:', store: counting })
+    try {
+      const executions = counting.listExecutions(runId)
+      expect(executions).toHaveLength(2)
+      const stream = bridge.streamRunSessionPayloads(executions)
+      const first = stream.next()
+      expect(first.done).toBe(false)
+      // One pull, one parse — the second session is untouched.
+      expect(payloadReads).toBe(1)
+    } finally {
+      bridge.close()
+      store.close()
+      counting.close()
+    }
+  })
+
+  // Two executions sharing one session digest it once, not twice.
+  it('deduplicates shared sessions for the digest', () => {
+    const exec = (id: string): import('../canon/types.js').ExecutionRow => ({
+      executionId: id,
+      runId: 'run-dedup',
+      sessionId: 'sess-shared',
+      parentExecutionId: null,
+      harness: 'copilot',
+      agentName: null,
+      isRoot: true,
+      started: null,
+      ended: null,
+      parentLinkage: 'measured',
+    })
+    function* source(): Generator<{
+      execution: import('../canon/types.js').ExecutionRow
+      payload: Record<string, unknown> & { context?: unknown }
+    }> {
+      const payload = { id: 'sess-shared' }
+      yield { execution: exec('exec-1'), payload }
+      yield { execution: exec('exec-2'), payload }
+    }
+    const seen = [...dedupedRunSessions(source())]
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.execution.executionId).toBe('exec-1')
   })
 })

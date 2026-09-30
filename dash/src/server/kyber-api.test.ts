@@ -1220,8 +1220,10 @@ describe('GET /api/kyber/runs + run detail review follow-ups', () => {
 describe('GET /api/kyber/run/:id delegation with unmeasured sessions (re-review Kilo 3)', () => {
   // buildSessionRow always writes total_output as a number, so a guard that
   // only fires when both totals are missing never fires for built sessions.
-  // A child whose input is unmeasurable must contribute absence — not a
-  // measured zero input — to the delegation denominator.
+  // Re-review #2: even with the guard fixed, counting the unknown child as
+  // zero tokens still labels 0% 'measured' on the root's tokens alone. In
+  // run scope any linked execution with unknown totals makes the overhead
+  // unobservable — the old value-0 assertion below locked the bug in.
   it('ignores unmeasured child input in delegation overhead', async () => {
     const store = new CanonStore(':memory:')
     const measured = (fresh: number, out: number): CanonicalRecord['tokens'] => ({
@@ -1290,9 +1292,11 @@ describe('GET /api/kyber/run/:id delegation with unmeasured sessions (re-review 
       const body = (await res.json()) as {
         scorecard: Record<string, { value: number | null; reason?: string }>
       }
-      // The child's 100 output tokens must not enter the denominator as a
-      // measured zero input: overhead is 0 of the measured root tokens.
-      expect(body.scorecard.delegationOverhead?.value).toBe(0)
+      // The child's tokens are unknown, so no overhead ratio exists to
+      // report — not a measured 0%.
+      expect(body.scorecard.delegationOverhead?.value).toBeNull()
+      expect(body.scorecard.delegationOverhead?.reason).toContain(runId)
+      expect(body.scorecard.delegationOverhead?.reason).not.toContain('does not export')
     } finally {
       await new Promise<void>((resolve) => delegationServer.close(() => resolve()))
       delegationBridge.close()

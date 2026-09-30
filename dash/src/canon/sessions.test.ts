@@ -195,6 +195,26 @@ describe('buildSessionRow', () => {
     expect(JSON.stringify(summary)).not.toContain('"cache_hit_ratio":0')
   })
 
+  // Review re-review #2 (Kilo 7): OpenCode is catalogued `not_measurable`
+  // with documented confidence — a verified negative, not an uncatalogued
+  // gap — so its cache figures stay absent like any unsupported harness.
+  it('omits cache figures for a documented-unmeasurable harness', () => {
+    const row = buildSessionRow(
+      'sess-opencode-cache',
+      [
+        turn('o1', [{ part: 'system_prompt', text: 'a'.repeat(400) }], {
+          harness: 'opencode',
+          tokens: tokens({ freshInput: 1200, cacheRead: 0, cacheCreation: 0, reportedInput: 1200 }),
+        }),
+      ],
+      approximateO200kBase,
+    )
+    const summary = sessionPayload(row).summary as Record<string, unknown>
+    expect(summary.total_input).toBe(1200)
+    expect('cache_hit_ratio' in summary).toBe(false)
+    expect('cache_creation_coverage' in summary).toBe(false)
+  })
+
   // Review re-review (Kilo 1): Codex is `supported` yet exports no
   // cache-creation counter, so coverage stays absent while the read ratio
   // (which Codex does export) is still emitted.

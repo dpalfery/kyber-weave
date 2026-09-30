@@ -565,6 +565,8 @@ export interface KyberRunSummary {
   costStatus?: 'partial'
   /** Present when any run figure is a subtotal over incomplete sessions. */
   partial?: boolean
+  /** Names exactly which run figures are subtotals, so views mark the right cells. */
+  partialFields?: Array<'turnCount' | 'totalInput' | 'totalOutput' | 'costUsd'>
   outcome?: {
     status?: string
     exitCode?: number | null

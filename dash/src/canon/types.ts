@@ -340,6 +340,8 @@ export type RunTurnRow = {
   outputTokens?: number
   /** Priced figure only; absent when the turn's cost block is unpriced. */
   costUsd?: number
+  /** The turn's own cost block is partial — its figure is real but incomplete. */
+  costStatus?: 'partial'
   /** Joined positionally from the session's context turns; omitted on mismatch. */
   contextPressure?: number
   /** cache_read ÷ input when input > 0. */

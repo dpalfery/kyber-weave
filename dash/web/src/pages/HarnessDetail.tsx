@@ -371,8 +371,17 @@ export function HarnessDetail({
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground">
                         {r.executionCount ?? 1}
                       </td>
-                      <td className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground">
+                      {/* Re-review #2 (Kilo 4): the subtotal marker sits on
+                          the cell whose figure is partial — never blanket on
+                          cost when the gap is turns. */}
+                      <td
+                        className="py-2.5 px-3 text-right font-mono tabular-nums text-foreground"
+                        title={r.partialFields?.includes('turnCount') ? 'Partial total: some sessions in this run lack measured figures' : undefined}
+                      >
                         {r.turnCount ?? '—'}
+                        {r.turnCount != null && r.partialFields?.includes('turnCount') && (
+                          <span className="ml-1 italic text-muted-foreground/80">(partial)</span>
+                        )}
                       </td>
                       <td className="py-2.5 px-3">
                         <span
@@ -397,12 +406,12 @@ export function HarnessDetail({
                           (review follow-up: Copilot C7, Kilo K3). */}
                       <td
                         className="py-2.5 px-3 text-right font-mono tabular-nums text-muted-foreground/80"
-                        title={r.costStatus === 'partial' || r.partial === true ? 'Partial total: some sessions in this run are unpriced' : undefined}
+                        title={r.costStatus === 'partial' || r.partialFields?.includes('costUsd') ? 'Partial total: some sessions in this run lack measured figures' : undefined}
                       >
                         {r.costUsd != null ? (
                           <>
                             {usd(r.costUsd)}
-                            {(r.costStatus === 'partial' || r.partial === true) && (
+                            {(r.costStatus === 'partial' || r.partialFields?.includes('costUsd')) && (
                               <span className="ml-1 italic">(partial)</span>
                             )}
                           </>

@@ -309,6 +309,27 @@ describe('RunDetail cost honesty', () => {
 
     expect(html).toContain('partial')
   })
+
+  // Re-review #2 (Kilo 4): `partial: true` alone — the gap is turns or
+  // tokens, not cost — still shows the visible marker.
+  it('shows the visible marker for a non-cost partial', () => {
+    const qc = createTestQueryClient()
+    const html = renderHtml(
+      <QueryClientProvider client={qc}>
+        <RunDetail
+          runId="run-zero"
+          initialRun={{
+            ...pricedZeroRun,
+            costUsd: 0.015,
+            partial: true,
+            partialFields: ['turnCount'],
+          }}
+        />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('data-testid="secondary-cost-partial"')
+  })
 })
 
 // Review re-review (Kilo 5): the partial marker must be visible text, not a
