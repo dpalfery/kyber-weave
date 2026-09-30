@@ -9,7 +9,6 @@ import { KyberBridge } from './bridge.js'
 import { handleKyberRequest } from './routes.js'
 import {
   DERIVED_HARNESSES,
-  POPULATED_HARNESSES,
   USER_CANON,
   refreshTempCanon,
   type RefreshedWorld,
