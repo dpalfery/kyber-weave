@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: Distribution
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-09-29
 ---
 
 # Installing Kyber-Weave
@@ -125,6 +125,97 @@ Windows binaries (`win-x64`) are published on the release, but the install scrip
 handle `.zip` extraction — download the asset from
 [Releases](https://github.com/dpalfery/kyber-weave/releases) and place it on your PATH
 manually. After that, `kyber-weave update` replaces the Windows binaries in place.
+
+## Verifying a download
+
+Every release publishes `SHA256SUMS.txt`, a manifest of SHA-256 hashes for all assets.
+Verify any downloaded archive or installer before extracting or running it.
+
+**Windows PowerShell:**
+
+Run from the directory containing your downloaded files and `SHA256SUMS.txt`. To verify a single file:
+
+```powershell
+$name = "kyber-weave-win-x64.zip"
+$expected = (Get-Content SHA256SUMS.txt | Select-String -SimpleMatch $name) -split '  ' | Select-Object -First 1
+$hash = (Get-FileHash $name -Algorithm SHA256).Hash
+if ($hash -eq $expected) { Write-Host "OK: $name" } else { Write-Host "FAILED: $name" }
+```
+
+To verify all downloaded files at once (skipping missing ones, like `--ignore-missing` in bash):
+
+```powershell
+(Get-Content SHA256SUMS.txt) | foreach {
+    $parts = $_ -split '  '
+    $name = $parts[1]
+    if (Test-Path $name) {
+        $hash = (Get-FileHash $name -Algorithm SHA256).Hash
+        if ($hash -eq $parts[0]) { Write-Host "OK: $name" } else { Write-Host "FAILED: $name" }
+    }
+}
+```
+
+**macOS and Linux:**
+
+Run from the directory containing your downloaded files and `SHA256SUMS.txt`. On macOS, use `shasum`:
+
+```bash
+shasum -a 256 --ignore-missing -c SHA256SUMS.txt
+```
+
+On Linux, use `sha256sum`:
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS.txt
+```
+
+The `--ignore-missing` flag allows you to verify a subset of files if you downloaded
+only some of the release assets. A mismatch causes the command to exit with a non-zero
+status and print a `FAILED` line.
+
+## Windows: unsigned binaries and SmartScreen
+
+The Windows tray installer (`kyberdash-tray-win-x64-setup.exe`) and all Windows `.exe`
+files inside release archives (`kyber-weave`, `kyber-weave-mcp`, and `kyberdash` in
+`win-x64` archives) are **not Authenticode-signed**. Signing has been deferred
+([issue #132](https://github.com/dpalfery/kyber-weave/issues/132)); see
+[Code signing status](distribution.md#code-signing-status) for the rationale and integrity
+model.
+
+### SmartScreen warning and **More info -> Run anyway**
+
+When you run an unsigned Windows `.exe`, SmartScreen typically displays **"Windows protected
+your PC"**. To proceed:
+
+1. Click **More info** to expand the prompt.
+2. Click **Run anyway** at the bottom of the expanded panel.
+
+This is normal for unsigned binaries downloaded from the internet. SmartScreen reputation is
+tracked per file, so binaries from a new release will typically warn again. Verifying the
+SHA-256 hash first (see [Verifying a download](#verifying-a-download) above) confirms the
+binary is intact and matches the published manifest.
+
+### Mark-of-the-Web and extracted `.exe` files
+
+When you extract a `.zip` file containing Windows binaries on NTFS, Windows marks the
+extracted files with the "Mark-of-the-Web" (MOTW) attribute to indicate they came from
+an untrusted source. This causes SmartScreen to show the warning above on first run.
+
+To remove the MOTW attribute:
+
+- **In File Explorer**: Right-click the `.exe` file, select **Properties**, check
+  **Unblock** at the bottom of the **General** tab, and click **Apply**.
+- **In PowerShell**:
+  ```powershell
+  Unblock-File -Path "path\to\kyber-weave.exe"
+  ```
+
+### Automated verification
+
+If you use `kyberdash menubar` to install the tray, it verifies the SHA-256 hash of the
+installer and confirms its code signature on macOS before running it. Manual downloads
+from [Releases](https://github.com/dpalfery/kyber-weave/releases) have no built-in
+verification; hash verification is your responsibility.
 
 ## Verify
 

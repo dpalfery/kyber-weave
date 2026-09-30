@@ -144,7 +144,7 @@ when the user accepts or explicitly asks to retain it. See the todo index for me
 | The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
-| KyberDash — telemetry ingest, the canonical store, any of the four surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it |
+| KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it |
 | Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-weave-docs` skill in [`.apm/skills/`](.apm/skills/kyber-weave-docs/SKILL.md) |
 
