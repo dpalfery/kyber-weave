@@ -1,10 +1,16 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
+import * as ContextExplorerModule from './ContextExplorer.js'
 import { AgentSessionRow, ContextExplorer } from './ContextExplorer.js'
 import type { KyberSessionSummary } from '../lib/kyberApi.js'
+import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
+
+const source = readFileSync(fileURLToPath(new URL('./ContextExplorer.tsx', import.meta.url)), 'utf8')
 
 type InventoryQuery = {
   queryKey: readonly unknown[]
@@ -84,6 +90,24 @@ function mockSessions(sessions = inventory) {
 }
 
 type ExplorerProps = Parameters<typeof ContextExplorer>[0]
+
+function createTestQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+}
+
+const sampleSession: KyberSessionSummary = {
+  ...session('claude-code'),
+  turn_count: 10,
+  cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
+}
+
+/**
+ * The props these assertions reach for on a rendered node.
+ *
+ * React 19 types `ReactElement['props']` as `unknown`, so a node found by test id has
+ * nothing callable on it. Naming the handful of props the suite actually touches keeps
+ * the walker typed without casting each call site past the checker.
+ */
 type TestNodeProps = {
   'data-testid'?: string
   children?: React.ReactNode
@@ -101,8 +125,8 @@ async function loadExplorer(props: ExplorerProps = {}) {
   await queryClient.ensureQueryData(inventoryQuery)
   return renderExplorer(props)
 }
-function html(tree: React.ReactElement) {
-  return renderToStaticMarkup(<QueryClientProvider client={queryClient}>{tree}</QueryClientProvider>)
+function html(tree: React.ReactElement, client: QueryClient = queryClient) {
+  return renderToStaticMarkup(<QueryClientProvider client={client}>{tree}</QueryClientProvider>)
 }
 function nodes(tree: React.ReactNode, predicate: (node: TestNode) => boolean): TestNode[] {
   const found: TestNode[] = []
@@ -260,6 +284,30 @@ describe('ContextExplorer canonical harness inventory', () => {
     clickTab(await loadExplorer(), 'claude-code')
     expect(html(await loadExplorer())).not.toContain('data-testid="agent-session-dashboard"')
   })
+  it('expanding a canonical row mounts AgentSessionDashboard', () => {
+    const detailClient = createTestQueryClient()
+    detailClient.setQueryData(['kyber-session', sampleSession.session_id], {
+      id: sampleSession.session_id,
+      session_id: sampleSession.session_id,
+      harness: sampleSession.harness,
+      label: sampleSession.label,
+      summary: {
+        turn_count: 10,
+        cost: { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' },
+      },
+      turns: [],
+      tools: [],
+      timeline: [],
+    })
+
+    const markup = html(
+      <AgentSessionRow s={sampleSession} open onToggle={() => {}} onSelectSession={() => {}} />,
+      detailClient,
+    )
+
+    expect(markup).toContain('data-testid="agent-session-dashboard"')
+    expect(markup).toContain('data-testid="overview-strip-section"')
+  })
 })
 
 describe('AgentSessionRow parent navigation', () => {
@@ -278,5 +326,73 @@ describe('AgentSessionRow parent navigation', () => {
     expect(stopPropagation).toHaveBeenCalledOnce()
     expect(onSelectSession).toHaveBeenCalledExactlyOnceWith('sess-parent-001')
     expect(onToggle).not.toHaveBeenCalled()
+  })
+})
+
+describe('AgentSessionRow row cost cell (issue #186)', () => {
+  // The cell is addressed by test id; T4 adds `data-testid="agent-session-cost"`.
+  function renderCostCell(cost: KyberSessionSummary['cost'] | undefined): { text: string; title: string } {
+    const target: KyberSessionSummary = { ...sampleSession, cost_usd: null }
+    if (cost !== undefined) target.cost = cost
+    else delete target.cost
+    const markup = html(
+      <AgentSessionRow s={target} open={false} onToggle={() => {}} onSelectSession={() => {}} />,
+      createTestQueryClient(),
+    )
+    const match = /<span([^>]*data-testid="agent-session-cost"[^>]*)>([\s\S]*?)<\/span>/.exec(markup)
+    expect(match, 'row must render an element with data-testid="agent-session-cost"').not.toBeNull()
+    const title = /title="([^"]*)"/.exec(match![1]!)?.[1] ?? ''
+    return { text: match![2]!, title }
+  }
+
+  it('renders the formatted figure (same formatter as the cost tile) for a priced block', () => {
+    const block = { basis: 'published', status: 'priced', value: 0.185, currency: 'USD' } as const
+    const { text } = renderCostCell(block)
+    expect(text).toBe(formatCostFigure(normalizeCostBlock(block)))
+    expect(text).toMatch(/^\$0\.1[89]\d*$/)
+    expect(text).not.toBe('—')
+  })
+
+  it.each([
+    ['no_rate', 'no published rate'],
+    ['not_billed', 'not billed'],
+    ['out_of_scope', 'out of scope'],
+  ] as const)('renders the %s reason in words, never a bare dash or $0.00', (status, words) => {
+    const { text } = renderCostCell({ basis: 'published', status })
+    expect(text).toBe(words)
+    expect(text).toBe(formatCostFigure(normalizeCostBlock({ basis: 'published', status })))
+    expect(text).not.toContain('—')
+    expect(text).not.toContain('$0.00')
+  })
+
+  it('renders "partially priced" with no figure for a partial block (U10)', () => {
+    const { text } = renderCostCell({ basis: 'published', status: 'partial', value: 1.23, currency: 'USD' })
+    expect(text).toBe('partially priced')
+    expect(text).not.toContain('$')
+    expect(text).not.toContain('—')
+  })
+
+  it('renders a dash only when the server sent no cost at all', () => {
+    expect(renderCostCell(undefined).text).toBe('—')
+  })
+
+  it('names the cost basis in the cell title', () => {
+    expect(renderCostCell({ basis: 'published', status: 'no_rate' }).title).toMatch(/published/i)
+    expect(
+      renderCostCell({ basis: 'harness', status: 'priced', value: 0.5, currency: 'USD' }).title,
+    ).toMatch(/harness/i)
+  })
+})
+
+describe('ContextExplorer removed surface', () => {
+  it('does not retain a tree-detail or context-window-toggle path', () => {
+    expect(ContextExplorerModule).not.toHaveProperty('TreeTable')
+    expect(ContextExplorerModule).not.toHaveProperty('SessionDetails')
+    expect(ContextExplorerModule).not.toHaveProperty('SessionDetailsBoundary')
+    expect(source).not.toContain('fetchContextTree')
+    expect(source).not.toContain('/api/context/tree')
+    expect(source).not.toContain("'context-tree'")
+    expect(source).not.toContain('Live window')
+    expect(source).not.toContain('Full history')
   })
 })

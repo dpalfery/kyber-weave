@@ -7,6 +7,7 @@ import { cn, usd } from '../lib/utils.js'
 import { Card } from './ui/card.js'
 import { Skeleton } from './ui/skeleton.js'
 import { AgentSessionDashboard } from './AgentSessionDashboard.js'
+import { formatCostFigure, normalizeCostBlock } from './SessionCostPanel.js'
 
 export type ExplorerProvider = string
 
@@ -133,8 +134,12 @@ export function AgentSessionRow({
         </span>
 
         {/* Cost in USD */}
-        <span className="w-20 shrink-0 text-right text-xs tabular-nums text-foreground font-medium">
-          {costUsd != null ? usd(costUsd) : '—'}
+        <span
+          data-testid="agent-session-cost"
+          title={s.cost ? `Cost basis: ${s.cost.basis}` : undefined}
+          className="w-20 shrink-0 text-right text-xs tabular-nums text-foreground font-medium"
+        >
+          {s.cost ? formatCostFigure(normalizeCostBlock(s.cost)) : costUsd != null ? usd(costUsd) : '—'}
         </span>
 
         {/* Timestamp */}

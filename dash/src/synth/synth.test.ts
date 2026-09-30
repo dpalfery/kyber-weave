@@ -370,6 +370,13 @@ describe('cost blocks (R5.1, R5.2, R5.4)', () => {
     expect(block.status).toBe('priced')
   })
 
+  it('renders a zero figure from a published-rate provider as published no_rate (issue #186)', () => {
+    expect(costBlockFor(call({ costUSD: 0, costIsEstimated: true }))).toEqual({
+      basis: 'published',
+      status: 'no_rate',
+    })
+  })
+
   it('renders a zero figure as no published rate, never a priced $0.00 (R5.4)', () => {
     expect(costBlockFor(call({ costUSD: 0 }))).toEqual({ basis: 'unknown', status: 'no_rate' })
     // A non-finite figure upstream failed to compute is absent, not priced.
