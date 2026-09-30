@@ -82,10 +82,9 @@ or locate code:
 - The shell fallback is `codegraph explore "<symbol names or question>"`.
 
 If there is no `.codegraph/` directory:
-- First occurrence: invoke `setup-dev-environment` skill (standing approval for repo-local
-  fixes per #221) to initialize the index with `codegraph init -y .` (leave tracked
-  files alone)
-- If blocked: report as BLOCKER in GAPS; conductor will dispatch a fixer agent
+- First occurrence: initialize the index with `codegraph init -y .` (standing approval for
+  repo-local fixes per #221; leave tracked files alone)
+- If blocked: report the blocker under GAPS; the conductor relays it and stops that path
 - If the index fails after initialization: proceed with text search (Grep, Glob); state in
   the result that CodeGraph was unavailable. Run `kyber-weave docs validate .` to confirm.
 
