@@ -832,8 +832,49 @@ describe('Backend Contract Tests: /api/kyber/* Endpoints', () => {
         { reason: 'Namespace unmapped', count: 1 },
       ])
 
-      // No source_checkpoint table in this fixture — no statuses invented.
-      expect(body.checkpoints).toEqual([])
+      // No source_checkpoint table in this fixture — unreadable reads as
+      // null (unknown), never [] (genuine zero).
+      expect(body.checkpoints).toBeNull()
+    })
+
+    it('propagates an unreadable checkpoint read as null (unknown), never []', async () => {
+      // MUST FIX thread 4150060217 RED: a failed/impossible checkpoint read
+      // (table absent) must read as null (unknown), never as [] (genuine
+      // zero). Mirrors the harnesses null-read pattern below.
+      const nullDb = new DatabaseSync(':memory:')
+      try {
+        nullDb.exec(`
+          CREATE TABLE session (
+            session_id TEXT PRIMARY KEY, harness TEXT NOT NULL, label TEXT,
+            is_subagent INTEGER, parent_session TEXT, agent_name TEXT, repo TEXT,
+            branch TEXT, started TEXT, ended TEXT, payload TEXT
+          );
+        `)
+        const nullBridge = new KyberBridge({ canonDb: nullDb })
+        const nullServer = await runWebDashboard({
+          port: 0,
+          open: false,
+          kyberBridge: nullBridge,
+          writeStdout: () => {},
+        })
+        try {
+          const nullBase = `http://127.0.0.1:${(nullServer.address() as AddressInfo).port}`
+          const res = await fetch(`${nullBase}/api/kyber/coverage`)
+          expect(res.status).toBe(200)
+          assertStandardKyberHeaders(res)
+          const body = (await res.json()) as { checkpoints: unknown }
+          expect(body.checkpoints).toBeNull()
+        } finally {
+          await new Promise<void>((resolve) => nullServer.close(() => resolve()))
+          nullBridge.close()
+        }
+      } finally {
+        try {
+          nullDb.close()
+        } catch {
+          // The bridge already closed the injected handle.
+        }
+      }
     })
 
     it('reports unknown receiver status when nothing was ever recorded, never zero or running', async () => {

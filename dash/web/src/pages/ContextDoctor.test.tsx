@@ -199,6 +199,25 @@ describe('ContextDoctor ingest + coverage panel (issues #189/#198/#199, T9)', ()
     expect(panel).not.toContain('>0<')
   })
 
+  it('renders unknown checkpoint status when checkpoints is null, never a zero', () => {
+    // MUST FIX thread 4150060217 RED: null checkpoints (unreadable read)
+    // must render an explicit unknown line; [] (genuine zero) keeps no
+    // partial section.
+    const nullCoverage = {
+      ...UNKNOWN_COVERAGE,
+      checkpoints: null,
+    } as unknown as KyberCoverage
+    const html = renderWithQuery(<ContextDoctor initialCoverage={nullCoverage} />)
+    expect(html).toContain('data-testid="coverage-checkpoints-unknown"')
+    expect(html).toContain('checkpoint status not observable from this page')
+  })
+
+  it('renders no partial section for an empty checkpoint list (genuine zero)', () => {
+    const html = renderWithQuery(<ContextDoctor initialCoverage={UNKNOWN_COVERAGE} />)
+    expect(html).not.toContain('data-testid="coverage-checkpoints-unknown"')
+    expect(html).not.toContain('data-testid="coverage-partial"')
+  })
+
   it('renders an unknown coverage window when the run predates window tracking', () => {
     const html = renderWithQuery(<ContextDoctor initialCoverage={UNKNOWN_COVERAGE} />)
     expect(html).toContain('Coverage window unknown')

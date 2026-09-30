@@ -2,6 +2,7 @@ import type { AddressInfo } from 'net'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 
+import { CanonStore } from '../canon/store.js'
 import { runWebDashboard } from '../cli/web.js'
 import { KyberBridge } from './bridge.js'
 
@@ -115,7 +116,7 @@ describe('coverage window RED (PR #230 review-response)', () => {
     }
   })
 
-  it('thread 4150060213: harness window reads use a capped seam, never uncapped listSessions()', async () => {
+  it('thread 4150060213: harness window reads use a narrow-column seam, never uncapped listSessions()', async () => {
     const canonDb = new DatabaseSync(':memory:')
     try {
       seedWindowDb(canonDb)
@@ -130,6 +131,9 @@ describe('coverage window RED (PR #230 review-response)', () => {
         expect(res.status).toBe(200)
         // The window context must not materialize the session table: an
         // uncapped listSessions() call (no limit argument) fails this test.
+        // The raw-db branch instead reads only (harness, started, ended) and
+        // folds to a per-harness maximum in JS epoch ms — payload-free and
+        // uncapped by row count, with no SQL MAX string compare.
         const uncapped = spy.mock.calls.filter((args) => args[0] === undefined)
         expect(uncapped).toHaveLength(0)
       } finally {
@@ -143,6 +147,53 @@ describe('coverage window RED (PR #230 review-response)', () => {
       } catch {
         // The bridge already closed the injected handle.
       }
+    }
+  })
+
+  it('thread 4150228523: store branch uses narrow session-time columns, never listSessions()', async () => {
+    // Store-branch seam: getLatestSessionTimeByHarness must read only the
+    // narrow (harness, started, ended) columns via the payload-free
+    // listSessionTimeColumns() seam — never the full listSessions() table
+    // materialization (SELECT * + payload parse).
+    const store = new CanonStore(':memory:')
+    try {
+      store.startRefreshRun({
+        id: 'win-run',
+        startedAt: '2026-09-30T00:00:00.000Z',
+        pid: process.pid,
+        trigger: 'cli',
+        historyWeeks: 2,
+      })
+      store.completeRefreshRun('win-run', 'success', '2026-09-30T00:30:00.000Z', 'ok')
+      store.upsertHarnessRollup({ harness: 'pi', sampleCount: 1, measurability: {} })
+      store.upsertSession({
+        sessionId: 'sess-pi-1',
+        harness: 'pi',
+        started: '2026-09-20T12:00:00.000Z',
+        ended: '2026-09-20T12:00:00.000Z',
+        payload: {},
+      })
+      const bridge = new KyberBridge({ canonPath: ':memory:', store })
+      const listSpy = vi.spyOn(store, 'listSessions')
+      const server = await runWebDashboard({ port: 0, open: false, kyberBridge: bridge, writeStdout: () => {} })
+      try {
+        const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+        const res = await fetch(`${base}/api/kyber/harnesses`)
+        expect(res.status).toBe(200)
+        // The narrow seam exists on the store.
+        expect(typeof store.listSessionTimeColumns).toBe('function')
+        // The seam folds to the same epoch the report uses (ended ?? started).
+        const times = bridge.getLatestSessionTimeByHarness()
+        expect(times.get('pi')).toBe(Date.parse('2026-09-20T12:00:00.000Z'))
+        // Neither the route nor the direct seam call materialized the table.
+        expect(listSpy).not.toHaveBeenCalled()
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+        listSpy.mockRestore()
+        bridge.close()
+      }
+    } finally {
+      store.close()
     }
   })
 })

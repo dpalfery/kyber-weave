@@ -117,7 +117,8 @@ export function formatCoverageAgo(iso: string, nowMs: number = Date.now()): stri
  */
 export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
   const { refresh, ingest, quarantineByReason, checkpoints } = coverage
-  const partialUnits = checkpoints.filter((unit) => unit.lastStatus === 'partial')
+  const partialUnits =
+    checkpoints === null ? [] : checkpoints.filter((unit) => unit.lastStatus === 'partial')
   const receiverLine =
     ingest.status === 'unknown'
       ? 'no receiver activity recorded — receiver status is not observable from this page'
@@ -171,24 +172,33 @@ export function CoverageIngestPanel({ coverage }: { coverage: KyberCoverage }) {
           ))}
         </ul>
       )}
-      {partialUnits.length > 0 && (
-        <div className="mt-density-cluster text-density-xs" data-testid="coverage-partial">
-          <p>
-            {partialUnits.length} source{partialUnits.length === 1 ? '' : 's'} partial (problems
-            recorded, coverage incomplete)
-          </p>
-          <ul className="mt-density-hair flex flex-col gap-density-hair">
-            {partialUnits.map((unit) => (
-              <li
-                key={`${unit.harnessId}:${unit.sourceKey}`}
-                data-testid="coverage-partial-unit"
-                className="text-muted-foreground"
-              >
-                {unit.harnessId}: {unit.recordCount} records
-              </li>
-            ))}
-          </ul>
-        </div>
+      {checkpoints === null ? (
+        <p
+          className="text-density-xs text-muted-foreground mt-density-hair leading-density"
+          data-testid="coverage-checkpoints-unknown"
+        >
+          checkpoint status not observable from this page
+        </p>
+      ) : (
+        partialUnits.length > 0 && (
+          <div className="mt-density-cluster text-density-xs" data-testid="coverage-partial">
+            <p>
+              {partialUnits.length} source{partialUnits.length === 1 ? '' : 's'} partial (problems
+              recorded, coverage incomplete)
+            </p>
+            <ul className="mt-density-hair flex flex-col gap-density-hair">
+              {partialUnits.map((unit) => (
+                <li
+                  key={`${unit.harnessId}:${unit.sourceKey}`}
+                  data-testid="coverage-partial-unit"
+                  className="text-muted-foreground"
+                >
+                  {unit.harnessId}: {unit.recordCount} records
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
       )}
     </section>
   )

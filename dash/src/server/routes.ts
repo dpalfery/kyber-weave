@@ -215,10 +215,11 @@ function inWindowNoDataReason(
  * The persisted window bound plus the per-harness latest session times that
  * decide per-harness in-window state, or nulls when either is unknowable.
  * Reads are fenced so a locked store degrades to verbatim reasons rather
- * than a 500. The session times come from the bridge's capped
- * `getLatestSessionTimeByHarness` seam (narrow columns folded to a
- * per-harness maximum): this context must never materialize the session
- * table via an uncapped `listSessions()`.
+ * than a 500. The session times come from the bridge's narrow-column
+ * `getLatestSessionTimeByHarness` seam (every session row's
+ * `(harness, started, ended)` folded to a per-harness maximum in JS epoch
+ * ms, payload-free and uncapped — no LIMIT, no SQL MAX): this context must
+ * never materialize the session table via an uncapped `listSessions()`.
  */
 function windowContextOf(bridge: KyberBridge): {
   coveredFrom: string | null
@@ -503,10 +504,10 @@ export function handleKyberRequest(
     // not materialize the quarantine table to tally it. A null reason
     // groups as 'unknown' inside the seam, never dropped.
     const quarantineByReason = bridge.getQuarantineCountsByReason()
-    // An unreadable checkpoint read is unknown, and the ingest panel renders
-    // no partial section for an empty list — so null degrades to [] here
-    // (no claim), while the harness endpoints below carry null as unknown.
-    const checkpoints = bridge.getSourceCheckpointStatuses() ?? []
+    // An unreadable checkpoint read is unknown (null), never []: null means
+    // the checkpoint status is not observable from this page, [] means the
+    // read succeeded and zero units exist (genuine zero).
+    const checkpoints = bridge.getSourceCheckpointStatuses()
     sendKyberJson(res, 200, { refresh, ingest, quarantineByReason, checkpoints })
     return true
   }

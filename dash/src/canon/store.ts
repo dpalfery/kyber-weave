@@ -1798,6 +1798,22 @@ export class CanonStore {
   }
 
   /**
+   * Narrow session-time columns for the coverage-window seam. Only
+   * `(harness, started, ended)` cross the bridge — payload blobs are never
+   * selected and never parsed — so the per-harness latest-time fold stays
+   * cheap no matter how large session payloads grow. Uncapped by design:
+   * every row participates and the maximum folds in JS epoch ms (a SQL MAX
+   * over ISO strings mis-sorts `+02:00`-offset stamps).
+   */
+  listSessionTimeColumns(): Array<{ harness: unknown; started: unknown; ended: unknown }> {
+    return this.db.prepare('SELECT harness, started, ended FROM session').all() as Array<{
+      harness: unknown
+      started: unknown
+      ended: unknown
+    }>
+  }
+
+  /**
    * Store a derived or explicit run. Dropping and rebuilding runs loses nothing;
    * it is rebuildable over records.
    */

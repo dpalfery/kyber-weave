@@ -934,7 +934,8 @@ export interface KyberCoverage {
   refresh: KyberCoverageRefresh
   ingest: KyberCoverageIngest
   quarantineByReason: KyberCoverageQuarantine[]
-  checkpoints: KyberCoverageCheckpoint[]
+  /** Null when the checkpoint read is unobservable; [] means zero units. */
+  checkpoints: KyberCoverageCheckpoint[] | null
 }
 
 export async function fetchCoverage(): Promise<KyberCoverage> {

@@ -848,6 +848,30 @@ describe('sessionTokenTotals', () => {
   })
 })
 
+describe('listSessionTimeColumns', () => {
+  it('reads only (harness, started, ended) without the payload', () => {
+    const store = new CanonStore(':memory:')
+    store.upsertSession({
+      sessionId: 's1',
+      harness: 'cursor',
+      label: null,
+      isSubagent: false,
+      parentSession: null,
+      agentName: null,
+      repo: null,
+      branch: null,
+      started: '2026-09-20T12:00:00.000Z',
+      ended: '2026-09-20T13:00:00.000Z',
+      payload: { summary: 'large-payload-that-must-not-cross' },
+    })
+
+    const cols = store.listSessionTimeColumns()
+    expect(cols).toEqual([{ harness: 'cursor', started: '2026-09-20T12:00:00.000Z', ended: '2026-09-20T13:00:00.000Z' }])
+    expect(JSON.stringify(cols)).not.toContain('large-payload')
+    store.close()
+  })
+})
+
 function checkpoint(overrides: Partial<SourceCheckpoint> = {}): SourceCheckpoint {
   return {
     harnessId: 'pi',

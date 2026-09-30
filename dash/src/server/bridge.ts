@@ -1091,14 +1091,17 @@ export class KyberBridge {
    *
    * <remarks>
    * The harness window check needs one fact per harness — the latest
-   * timestamped session — not the session table. This seam reads only the
-   * narrow `(harness, started, ended)` columns and folds them into a
-   * per-harness maximum in one pass, so payload blobs are never pulled
-   * across the bridge. Recency is `ended ?? started` parsed to epoch ms
-   * (the report's `sessionAt` precedence in `analysis/report/build.ts`):
-   * epoch comparison sorts `+02:00`-offset stamps correctly where a raw
-   * string compare does not. A harness with no parseable timestamp is
-   * absent from the map — unknown, never 0.
+   * timestamped session — not the session table. Both branches of this seam
+   * read only the narrow `(harness, started, ended)` columns (the store
+   * branch via `CanonStore.listSessionTimeColumns`, the raw-db branch via
+   * an explicit narrow SELECT) and fold them into a per-harness maximum in
+   * one pass, so payload blobs are never pulled across the bridge. The fold
+   * is deliberately uncapped — every session row participates — and runs in
+   * JS epoch ms rather than SQL MAX: recency is `ended ?? started` parsed
+   * to epoch ms (the report's `sessionAt` precedence in
+   * `analysis/report/build.ts`) because epoch comparison sorts `+02:00`-
+   * offset stamps correctly where a raw string compare does not. A harness
+   * with no parseable timestamp is absent from the map — unknown, never 0.
    * </remarks>
    */
   getLatestSessionTimeByHarness(): Map<string, number> {
@@ -1114,8 +1117,8 @@ export class KyberBridge {
     }
     if (this.store) {
       try {
-        for (const session of this.store.listSessions()) {
-          track(session.harness, session.started, session.ended)
+        for (const row of this.store.listSessionTimeColumns()) {
+          track(row.harness, row.started, row.ended)
         }
       } catch {
         return new Map<string, number>()
