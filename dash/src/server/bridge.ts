@@ -1995,15 +1995,47 @@ export class KyberBridge {
       ...(limit === undefined ? {} : { limit }),
       offset,
       detectorCounts,
-      unknownWindowSessions: this.countUnknownWindowSessions(options?.harness),
+      unknownWindowSessions: this.countUnknownWindowSessions({
+        ...(options?.harness !== undefined ? { harness: options.harness } : {}),
+        ...(options?.runId !== undefined ? { runId: options.runId } : {}),
+        ...(options?.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      }),
     }
   }
 
   /**
-   * Sessions whose context window no source reported, optionally scoped to
-   * one harness (issue #191, condition 3).
+   * Sessions whose context window no source reported, scoped the way the
+   * findings are: the selected run's sessions, the selected session, or the
+   * harness/workspace scope (issue #191, condition 3). An unscoped count on
+   * a scoped query would warn about suppressions the listed findings never
+   * underwent.
    */
-  countUnknownWindowSessions(harness?: string): number {
+  countUnknownWindowSessions(scope?: { harness?: string; runId?: string; sessionId?: string }): number {
+    const harness = typeof scope === 'string' ? scope : scope?.harness
+    const runId = typeof scope === 'string' ? undefined : scope?.runId
+    const sessionId = typeof scope === 'string' ? undefined : scope?.sessionId
+    if (sessionId !== undefined && sessionId !== '') {
+      const payload = this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(sessionId)
+      return payload?.context?.contextLimitSource === 'default' ? 1 : 0
+    }
+    if (runId !== undefined && runId !== '') {
+      const ids = [
+        ...new Set(
+          this.listExecutions(runId)
+            .filter(
+              (execution) =>
+                harness === undefined || harness === '' || execution.harness.toLowerCase() === harness.toLowerCase(),
+            )
+            .map((execution) => execution.sessionId ?? execution.executionId)
+            .filter((id) => id.length > 0),
+        ),
+      ]
+      return ids.filter(
+        (id) =>
+          this.getSessionPayload<{ context?: { contextLimitSource?: string } }>(id)?.context?.contextLimitSource ===
+          'default',
+      ).length
+    }
     if (this.store) return this.store.countUnknownWindowSessions(harness)
     const db = this.getDb()
     if (!this.hasTable(db, 'session')) return 0

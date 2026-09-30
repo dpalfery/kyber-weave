@@ -337,3 +337,35 @@ describe('Issue #182 — twin front-ends persist one finding', () => {
     store.close()
   })
 })
+
+describe('Issue #182 review — dedupe never crosses sessions', () => {
+  it('keeps identical turns from two sessions of one run', async () => {
+    // One explicit run joining two sessions: session A holds the OTLP row,
+    // session B the file row, same counters seconds apart. They are two
+    // genuine turns in two conversations — collapsing them would delete a
+    // real turn before the detector regroups by session.
+    const peak = (span: string, session: string, source: string, harness: string, timestamp: string) =>
+      turn(span, [], {
+        source,
+        harness,
+        sessionId: session,
+        timestamp,
+        tokens: tokens({ freshInput: 900_000, reportedInput: 900_000 }),
+        raw: { 'gen_ai.request.max_context_tokens': 1_000_000, 'gen_ai.run.id': 'run-shared' },
+      })
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      peak('a-1', 'sess-a', 'claude-code-desktop', 'claude-code', '2026-09-23T10:00:00.000Z'),
+      peak('b-1', 'sess-b', 'codeburn/claude-desktop', 'claude-desktop', '2026-09-23T10:00:05.000Z'),
+    ])
+    await buildRuns(store)
+    expect(store.listRuns()).toHaveLength(1)
+
+    buildFindings(store)
+
+    // One compaction hazard per session: both turns survived the merge.
+    const hazards = persistedCompactionHazards(store)
+    expect(hazards.map((h) => h.sessionId).sort()).toEqual(['sess-a', 'sess-b'])
+    store.close()
+  })
+})

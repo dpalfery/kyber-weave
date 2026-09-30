@@ -138,3 +138,58 @@ describe('dedupeTwinTurns (ADR 0009 D4 source precedence)', () => {
     expect(out.map((r) => r.spanId)).toEqual(['tool-1', 'otel-1'])
   })
 })
+
+describe('dedupeTwinTurns repeated identical turns (review)', () => {
+  const same = {
+    freshInput: 2,
+    cacheRead: 39096,
+    cacheCreation: 24977,
+    output: 563,
+    reportedInput: 64075,
+    reportedOutput: 563,
+  }
+  const otelAt = (spanId: string, timestamp: string) =>
+    llmInvoke(spanId, {
+      source: 'claude-code-desktop',
+      harness: 'claude-code',
+      timestamp,
+      tokens: { ...same },
+      content: {},
+    })
+  const fileAt = (spanId: string, timestamp: string, text?: string) =>
+    llmInvoke(spanId, {
+      source: 'codeburn/claude-desktop',
+      harness: 'claude-desktop',
+      timestamp,
+      tokens: { ...same },
+      ...(text === undefined ? { content: {} } : { content: { system_prompt: text }, parts: [{ part: 'system_prompt', text }] }),
+    })
+
+  it('collapses every repeated twin pair, not just the first timestamp cluster', () => {
+    // Same counters observed twice, five minutes apart: two same-turn pairs,
+    // not one pair plus two keepers.
+    const out = dedupeTwinTurns([
+      otelAt('otel-1', '2026-09-23T22:43:53.540Z'),
+      fileAt('synth:aaa', '2026-09-23T22:43:58.783Z'),
+      otelAt('otel-2', '2026-09-23T22:48:53.540Z'),
+      fileAt('synth:bbb', '2026-09-23T22:48:58.783Z'),
+    ])
+
+    expect(out.map((r) => r.spanId)).toEqual(['otel-1', 'otel-2'])
+  })
+
+  it('pairs file content onto the nearest OTLP turn one-to-one', () => {
+    // Two genuine OTLP turns with identical counters, each with its own file
+    // observation: neither turn may lose the other's content.
+    const out = dedupeTwinTurns([
+      otelAt('otel-1', '2026-09-23T22:43:53.540Z'),
+      fileAt('synth:aaa', '2026-09-23T22:43:58.000Z', 'first turn context'),
+      otelAt('otel-2', '2026-09-23T22:44:03.540Z'),
+      fileAt('synth:bbb', '2026-09-23T22:44:08.000Z', 'second turn context'),
+    ])
+
+    expect(out.map((r) => r.spanId)).toEqual(['otel-1', 'otel-2'])
+    expect(out[0]!.parts).toEqual([{ part: 'system_prompt', text: 'first turn context' }])
+    expect(out[1]!.parts).toEqual([{ part: 'system_prompt', text: 'second turn context' }])
+  })
+})

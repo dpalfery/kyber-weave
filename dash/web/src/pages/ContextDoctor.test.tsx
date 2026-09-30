@@ -31,15 +31,13 @@ const harnessRow: KyberHarnessSummary = {
 
 // Issue #191: the workspace view shows 5 of 115 findings with no way to see
 // the rest. The browser section makes the full set — counts, filters, pages —
-// visible from Context Doctor.
+// visible from Context Doctor. The first page holds FINDINGS_PAGE_SIZE rows;
+// Load more advances the offset (it must not refetch a growing prefix).
+const detectors = ['duplicate-tool-call', 'compaction-hazard', 'dormant-tool-schema']
 const page: FindingsPage = {
-  findings: [
-    finding('f-1', 'duplicate-tool-call', 'cursor'),
-    finding('f-2', 'duplicate-tool-call', 'cursor'),
-    finding('f-3', 'compaction-hazard', 'claude-code'),
-    finding('f-4', 'dormant-tool-schema', 'cursor'),
-    finding('f-5', 'duplicate-tool-call', 'cursor'),
-  ],
+  findings: Array.from({ length: 25 }, (_, i) =>
+    finding(`f-${i + 1}`, detectors[i % detectors.length]!, i % 2 === 0 ? 'cursor' : 'claude-code'),
+  ),
   total: 115,
   offset: 0,
   detectorCounts: {
@@ -75,10 +73,10 @@ describe('ContextDoctor findings browser (issue #191)', () => {
     expect(html).toContain('3 sessions with unknown context window')
   })
 
-  it('offers paging while findings remain beyond the visible slice', () => {
+  it('pages the browser a full page at a time', () => {
     const html = render()
     expect(html).toContain('findings-load-more')
-    expect(html).toContain('5 of 115')
+    expect(html).toContain('25 of 115')
   })
 
   it('keeps the ranked top-5 headline card', () => {

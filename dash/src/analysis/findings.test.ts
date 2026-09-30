@@ -1493,4 +1493,46 @@ describe('Server Bridge & API Route: /api/kyber/findings', () => {
     bridge.close()
     store.close()
   })
+
+  it('scopes the unknown-window count to the selected run and session (review)', () => {
+    // `/findings?sessionId=s-known` must not report unknown-window sessions
+    // from the rest of the workspace: the count is "in scope", matching
+    // the narrowed findings.
+    const path = tempStorePath()
+    const store = new CanonStore(path)
+    const session = (id: string, source: string) =>
+      store.upsertSession({
+        sessionId: id,
+        harness: 'cursor',
+        payload: { context: { measurable: true, contextLimit: 200_000, contextLimitSource: source, turns: [] } },
+      })
+    session('s-known', 'reported')
+    session('s-unknown', 'default')
+    store.upsertRun({
+      runId: 'run-1',
+      harness: 'cursor',
+      groupingBasis: 'derived',
+      groupingRule: 'session_fallback',
+      executionCount: 2,
+    })
+    for (const [executionId, sessionId] of [['exec-1', 's-known'], ['exec-2', 's-unknown']] as const) {
+      store.upsertExecution({
+        executionId,
+        runId: 'run-1',
+        sessionId,
+        harness: 'cursor',
+        isRoot: true,
+        parentLinkage: 'measured',
+      })
+    }
+    const bridge = new KyberBridge({ canonPath: path, store })
+
+    expect(bridge.listFindingsPage({ sessionId: 's-known' }).unknownWindowSessions).toBe(0)
+    expect(bridge.listFindingsPage({ sessionId: 's-unknown' }).unknownWindowSessions).toBe(1)
+    expect(bridge.listFindingsPage({ runId: 'run-1' }).unknownWindowSessions).toBe(1)
+    expect(bridge.listFindingsPage({}).unknownWindowSessions).toBe(1)
+
+    bridge.close()
+    store.close()
+  })
 })

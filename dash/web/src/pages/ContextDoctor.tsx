@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Skeleton } from '../components/ui/skeleton.js'
 import {
@@ -94,7 +94,16 @@ export function ContextDoctor({
   const [baseline, setBaseline] = useState('none')
   const [detectorFilter, setDetectorFilter] = useState<string | undefined>(undefined)
   const [harnessFilter, setHarnessFilter] = useState<string | undefined>(undefined)
-  const [visibleLimit, setVisibleLimit] = useState(FINDINGS_PAGE_SIZE)
+  // Offset paging (issue #191): Load more advances `offset` and appends the
+  // next page instead of refetching a growing prefix.
+  const [offset, setOffset] = useState(0)
+  const [appended, setAppended] = useState<{ offset: number; rows: KyberFinding[] }[]>([])
+
+  const resetBrowse = (update: () => void) => {
+    update()
+    setOffset(0)
+    setAppended([])
+  }
 
   // Query live harnesses
   const { data: harnessesData, isLoading: loadingHarnesses } = useQuery({
@@ -112,30 +121,38 @@ export function ContextDoctor({
     queryFn: () => fetchRuns(),
   })
 
-  // Headline findings across the entire workspace (top-5 card below).
+  // Headline findings across the entire workspace (top-5 card below). The
+  // query fetches a full page; the card renders five via `maxItems`.
   const { data: headlineData, isLoading: loadingFindings } = useQuery({
     queryKey: ['kyber-findings-workspace'],
-    queryFn: () => fetchFindings({ limit: 10 }),
+    queryFn: () => fetchFindings({ limit: FINDINGS_PAGE_SIZE }),
     initialData: initialFindings,
   })
 
   // Full workspace browser (issue #191): server-side detector/harness
-  // filters with per-detector counts over the narrowed set. When no filter
-  // is active the headline envelope already carries the whole answer, so no
-  // second request fires.
-  const browserActive =
-    detectorFilter !== undefined || harnessFilter !== undefined || visibleLimit !== FINDINGS_PAGE_SIZE
-  const { data: browserData, isLoading: loadingBrowser } = useQuery({
-    queryKey: ['kyber-findings-browser', detectorFilter ?? '', harnessFilter ?? '', visibleLimit],
+  // filters with per-detector counts over the narrowed set, paged by
+  // offset. Counts ignore paging, so chips stay comparable across pages.
+  const filtersActive = detectorFilter !== undefined || harnessFilter !== undefined
+  const { data: pageData, isLoading: loadingBrowser } = useQuery({
+    queryKey: ['kyber-findings-browser', detectorFilter ?? '', harnessFilter ?? '', offset],
     queryFn: () =>
       fetchFindings({
         ...(detectorFilter !== undefined ? { detector: detectorFilter } : {}),
         ...(harnessFilter !== undefined ? { harness: harnessFilter } : {}),
-        limit: visibleLimit,
+        limit: FINDINGS_PAGE_SIZE,
+        offset,
       }),
-    enabled: browserActive && initialFindings === undefined,
-    initialData: browserActive ? undefined : initialFindings,
+    initialData: offset === 0 && !filtersActive ? initialFindings : undefined,
   })
+
+  // Accumulate pages past the first as they arrive; the guard keeps a
+  // refetch from appending the same page twice.
+  useEffect(() => {
+    if (offset === 0 || !pageData) return
+    setAppended((prev) =>
+      prev.some((page) => page.offset === offset) ? prev : [...prev, { offset, rows: pageData.findings }],
+    )
+  }, [pageData, offset])
 
   const harnesses = useMemo((): ScorecardMatrixRow[] => {
     const fromRollups = (harnessesData ?? []).filter((h) => isObservedHarness(h.harness))
@@ -149,11 +166,18 @@ export function ContextDoctor({
   }, [harnessesData, runsData])
 
   const headline: KyberFinding[] = headlineData?.findings ?? []
-  const browser: FindingsPage | undefined = browserActive ? browserData : headlineData
-  const browserFindings: KyberFinding[] = browser?.findings ?? []
-  const browserTotal = browser?.total ?? 0
-  const detectorCounts = browser?.detectorCounts ?? {}
-  const unknownWindowSessions = browser?.unknownWindowSessions ?? 0
+  // First page renders straight from the query; later pages accumulate above
+  // (effects do not run in static render, where only the first page exists).
+  const browserFindings: KyberFinding[] = useMemo(() => {
+    const first = offset === 0 ? (pageData?.findings ?? []) : []
+    const extra = [...appended].sort((a, b) => a.offset - b.offset).flatMap((page) => page.rows)
+    const current =
+      offset > 0 && pageData && !appended.some((page) => page.offset === offset) ? pageData.findings : []
+    return [...first, ...extra, ...current]
+  }, [pageData, offset, appended])
+  const browserTotal = pageData?.total ?? 0
+  const detectorCounts = pageData?.detectorCounts ?? {}
+  const unknownWindowSessions = pageData?.unknownWindowSessions ?? 0
   const loadingMatrix = loadingHarnesses || (!harnessesData?.length && loadingRuns)
 
   const detectorChips = useMemo(
@@ -210,10 +234,11 @@ export function ContextDoctor({
             <select
               data-testid="findings-harness-filter"
               value={harnessFilter ?? ''}
-              onChange={(event) => {
-                setHarnessFilter(event.target.value === '' ? undefined : event.target.value)
-                setVisibleLimit(FINDINGS_PAGE_SIZE)
-              }}
+              onChange={(event) =>
+                resetBrowse(() =>
+                  setHarnessFilter(event.target.value === '' ? undefined : event.target.value),
+                )
+              }
             >
               <option value="">All harnesses</option>
               {harnesses.map((row) => (
@@ -243,10 +268,9 @@ export function ContextDoctor({
                 data-testid={`findings-detector-chip-${detector}`}
                 aria-pressed={active}
                 title={active ? `Clear ${detector} filter` : `Show only ${detector} findings`}
-                onClick={() => {
-                  setDetectorFilter(active ? undefined : detector)
-                  setVisibleLimit(FINDINGS_PAGE_SIZE)
-                }}
+                onClick={() =>
+                  resetBrowse(() => setDetectorFilter(active ? undefined : detector))
+                }
               >
                 {detector} ×{count}
               </button>
@@ -270,7 +294,7 @@ export function ContextDoctor({
               <button
                 type="button"
                 data-testid="findings-load-more"
-                onClick={() => setVisibleLimit((n) => n + FINDINGS_PAGE_SIZE)}
+                onClick={() => setOffset((n) => n + FINDINGS_PAGE_SIZE)}
               >
                 Load more ({browserFindings.length} of {browserTotal})
               </button>

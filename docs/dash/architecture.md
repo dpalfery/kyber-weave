@@ -544,8 +544,9 @@ finding (pressure surfaces as unmeasurable instead), and a single-turn peak abov
 window is downgraded to inferred with an aggregate-attribution caveat rather than printed as a
 deterministic percentage. Twin front-end collectors (`claude-desktop` onto `claude-code`,
 `cursor-agent` onto `cursor`) fold onto one canonical harness id, and same-turn observations
-across collectors collapse per ADR 0009 source precedence (OTLP counters win; values are never
+with byte-identical counters collapse per ADR 0009 source precedence (OTLP counters win; values are never
 summed across sources for the same turn) instead of double-counting one conversation.
+Same-turn observations whose counters differ are left alone (follow-up #231).
 
 Findings are materialized in `canon.db` at session/run build time with a `detector_version` schema
 stamp (Decision D17), forcing automatic recomputation whenever detectors are updated.

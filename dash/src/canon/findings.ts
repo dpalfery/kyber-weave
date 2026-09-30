@@ -37,19 +37,20 @@ export function buildFindings(store: CanonStore): BuildFindingsReport {
   const identities = store.sessionIdentities()
 
   for (const run of store.listRuns()) {
-    const gathered: CanonicalRecord[] = []
+    const records: CanonicalRecord[] = []
     for (const execution of store.listExecutions(run.runId)) {
       const sessionId = execution.sessionId ?? execution.executionId
       const share = identities.shareOf(sessionId)
-      gathered.push(
-        ...(share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)),
-      )
+      const shareRecords =
+        share === undefined ? store.recordsForSession(sessionId) : store.recordsForShare(share.key, share.harness)
+      // Twin collectors describe the same turns twice (issue #182, ADR 0009
+      // D4): detectors that count or sum across turns (duplicate-tool-call,
+      // unbounded-delegation) would read one conversation as two. Scoped per
+      // execution, never across them: two sessions' identical turns are two
+      // genuine turns, and the detector regroups by session below.
+      records.push(...dedupeTwinTurns(shareRecords))
     }
-    if (gathered.length === 0) continue
-    // Twin collectors describe the same turns twice (issue #182, ADR 0009
-    // D4): detectors that count or sum across turns (duplicate-tool-call,
-    // unbounded-delegation) would read one conversation as two.
-    const records = dedupeTwinTurns(gathered)
+    if (records.length === 0) continue
 
     report.runsExamined += 1
 

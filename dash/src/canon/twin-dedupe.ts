@@ -19,13 +19,18 @@ import type { CanonicalRecord } from './types.js'
 // from the same source kind (two OTLP rows, two file rows) could be genuine
 // retries and are always kept — dropping telemetry the rule cannot prove
 // duplicated would trade a known over-count for a silent under-count.
+//
+// Matching is exact-counter only: same-turn observations whose counters
+// differ (e.g. the cursor twin's overlapping output figures, issue #231) are
+// left alone. The canonical architecture states this boundary where the
+// contract is described.
 
 /**
- * Maximum timestamp skew for two rows to be the same turn observed twice.
+ * Maximum timestamp gap for two rows to be the same turn observed twice.
  * Live skew measured under 10 s (collectors flush on different schedules);
  * 60 s bounds the risk of merging genuinely repeated identical turns while
  * tolerating that skew. Named, not inlined, so a wrong merge window is
- * traceable to one assumption.
+ * traceable to one assumption instead of looking like a measurement.
  */
 export const TWIN_TURN_MAX_SKEW_MS = 60_000
 
@@ -52,63 +57,41 @@ function hasParts(record: CanonicalRecord): boolean {
 
 /**
  * Collapse same-turn twin observations within one canonical-harness share.
- * Pure: input order is preserved, no record is mutated. Applied by the
+ * Pure: input order is preserved, no record is mutated. Rows sharing exact
+ * counters cluster by timestamp proximity (consecutive gaps within
+ * `TWIN_TURN_MAX_SKEW_MS`); a cluster holding both source kinds is one turn
+ * observed twice, so its file rows drop and its content transplants pairwise
+ * onto the content-less OTel rows nearest in time. Applied by the
  * derived-layer builders (`buildSessions`, `buildRuns`, `buildFindings`)
  * after shares merge, never at ingest — raw records keep both collectors'
  * rows as provenance.
  */
 export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalRecord[] {
-  const anchorByKey = new Map<CounterKey, number>()
-  const fileRowsByKey = new Map<CounterKey, CanonicalRecord[]>()
-  const otelRowsByKey = new Map<CounterKey, CanonicalRecord[]>()
-
+  const byCounter = new Map<CounterKey, CanonicalRecord[]>()
   for (const record of records) {
     if (record.op !== 'llm.invoke') continue
-    const key = counterKey(record.tokens)
-    const seen = anchorByKey.get(key)
-    const at = timestampMs(record)
-    if (seen === undefined) {
-      anchorByKey.set(key, at)
-    } else if (Math.abs(at - seen) > TWIN_TURN_MAX_SKEW_MS) {
-      // Same counters, far apart in time: a repeated identical turn, not a
-      // twin observation. Each keeps its own key so neither is dropped.
-      const apart = `${key}|${at}`
-      anchorByKey.set(apart, at)
-      if (isFileSource(record.source)) {
-        const list = fileRowsByKey.get(apart) ?? []
-        list.push(record)
-        fileRowsByKey.set(apart, list)
-      } else {
-        const list = otelRowsByKey.get(apart) ?? []
-        list.push(record)
-        otelRowsByKey.set(apart, list)
-      }
-      continue
-    }
-    if (isFileSource(record.source)) {
-      const list = fileRowsByKey.get(key) ?? []
-      list.push(record)
-      fileRowsByKey.set(key, list)
-    } else {
-      const list = otelRowsByKey.get(key) ?? []
-      list.push(record)
-      otelRowsByKey.set(key, list)
-    }
+    const list = byCounter.get(counterKey(record.tokens)) ?? []
+    list.push(record)
+    byCounter.set(counterKey(record.tokens), list)
   }
 
-  // A file row is a twin duplicate exactly when its group also holds a
-  // non-file row for the same counters within the skew window.
   const dropped = new Set<CanonicalRecord>()
   const transplant = new Map<CanonicalRecord, CanonicalRecord>()
-  for (const [key, files] of fileRowsByKey) {
-    const otels = otelRowsByKey.get(key)
-    if (otels === undefined || otels.length === 0) continue
-    const keeper = otels[0]!
-    for (const file of files) dropped.add(file)
-    if (!hasParts(keeper)) {
-      const donor = files.find((file) => hasParts(file))
-      if (donor !== undefined) transplant.set(keeper, donor)
+  for (const turns of byCounter.values()) {
+    const ordered = [...turns].sort((a, b) => timestampMs(a) - timestampMs(b))
+    let cluster: CanonicalRecord[] = []
+    const closeCluster = () => {
+      collapseCluster(cluster, dropped, transplant)
+      cluster = []
     }
+    for (const record of ordered) {
+      const previous = cluster[cluster.length - 1]
+      if (previous !== undefined && Math.abs(timestampMs(record) - timestampMs(previous)) > TWIN_TURN_MAX_SKEW_MS) {
+        closeCluster()
+      }
+      cluster.push(record)
+    }
+    closeCluster()
   }
 
   return records.flatMap((record) => {
@@ -125,4 +108,27 @@ export function dedupeTwinTurns(records: readonly CanonicalRecord[]): CanonicalR
       },
     ]
   })
+}
+
+/**
+ * Collapse one proximity cluster: when it holds both source kinds, every
+ * file row is the same turn observed twice and drops; content transplants
+ * one-to-one onto the nearest content-less OTel rows so no turn's file
+ * content is silently discarded with a sibling's duplicate.
+ */
+function collapseCluster(
+  cluster: readonly CanonicalRecord[],
+  dropped: Set<CanonicalRecord>,
+  transplant: Map<CanonicalRecord, CanonicalRecord>,
+): void {
+  if (cluster.length === 0) return
+  const otels = cluster.filter((record) => !isFileSource(record.source))
+  const files = cluster.filter((record) => isFileSource(record.source))
+  if (otels.length === 0 || files.length === 0) return
+  for (const file of files) dropped.add(file)
+  const needy = otels.filter((otel) => !hasParts(otel))
+  const donors = files.filter((file) => hasParts(file))
+  for (let i = 0; i < Math.min(needy.length, donors.length); i++) {
+    transplant.set(needy[i]!, donors[i]!)
+  }
 }

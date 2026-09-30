@@ -387,6 +387,12 @@ describe('FindingList (Decision D6 Ranking & D8 Recommendations)', () => {
     expect(html).toContain('finding-list-empty')
     expect(html).toContain('No findings detected')
   })
+
+  it('omits the heading element when no title is supplied (review)', () => {
+    // An empty <h3> is a nameless heading in the accessibility tree.
+    const html = renderToStaticMarkup(<FindingList findings={[]} title="" />)
+    expect(html).not.toContain('<h3')
+  })
 })
 
 describe('Pages Smoke Rendering: Context Doctor, HarnessDetail, RunDetail', () => {
