@@ -7,7 +7,7 @@ component: Distribution
 owner: dpalfery
 last-reviewed: 2026-09-29
 archive-date: 2026-09-29
-archive-outcome: Complete - Tasks T1–T8 approved by council (2026-09-29). Post-council tasks T9 and T10 added for technical debt and docs accuracy. T9 passed audit pass 2; T10 escalated one finding (README.md:221) remediated by new task T11 (passed pass 1). Full gate suite re-run verified all work; no second council pass. Durable content in ADR 0027, docs/distribution.md, docs/install.md, and docs/dash/runbook.md.
+archive-outcome: Complete - Tasks T1–T8 approved by council (2026-09-29). Post-council technical debt: T9 (bash 3.2 robustness, audit pass 2) and T10 (detective/preventive terminology, 3 passes with escalation) added per user request. T11 remediated T10's README.md:221 finding (audit pass 1). PR #176 review remediation: commits 17de3f9 (temp manifest/shasum fallback), 077b6a4 (temp file/cleanup trap; three tests defective), df09529 (rewrote tests; ubuntu CI failed). T12 (test-dev, ReleaseTests.cs; commits 320d0db, ac88277; audit pass 2) delivered hermetic tests, fixed CI. Durable content in ADR 0027, docs/distribution.md, docs/install.md, docs/dash/runbook.md. U1–U4 pending.
 development-mode: standard
 keywords:
   - SHA256SUMS
@@ -39,7 +39,23 @@ verify all work; no second council pass occurred. Every decision is resolved; se
 in the PR. Addresses [issue #132](https://github.com/dpalfery/kyber-weave/issues/132) by
 deferring Authenticode signing and relying on SHA-256 checksums instead.
 
-**Archived 2026-09-29**: Implementation complete. Tasks T1–T8 received council APPROVE. Post-council tasks T9 (bash 3.2 robustness, passed audit pass 2) and T10 (detective/preventive terminology, exhausted 3 audit passes with one escalation) were added per user request for technical debt and docs accuracy. Task T11 was created to remediate T10's escalated README.md:221 finding and passed audit pass 1. Full gate suite re-run verified all work. Durable content harvested into [ADR 0027](../../adr/0027-release-integrity-checksums-signing-deferred.md), [docs/distribution.md](../../distribution.md), [docs/install.md](../../install.md), and [docs/dash/runbook.md](../../dash/runbook.md). User-owned verification steps U1–U4 remain pending (see below).
+**PR #176 review remediation:** After council APPROVE, post-merge commits 17de3f9 (archive-plan
+Post-merge summary fix; temp manifest moved into asset dir, macOS shasum -a 256 fallback),
+077b6a4 (temp file creation relative to asset dir after cd, cleanup trap before mktemp,
+leftover .SHA256SUMS.* removal, four new tests added), and df09529 (tests rewritten) were
+found to have defective tests: the trap test was vacuous (shim dir inside the asset dir,
+shim-only PATH), and the fallback test asserted sha256sum absent under /bin:/usr/bin:/usr/local/bin,
+which fails on ubuntu-latest. CI ubuntu "Build and test" failed at commits 077b6a4 and df09529.
+Task reviewer exhausted three passes and escalated the two tests to T12. Task T12 (test-dev,
+ReleaseTests.cs only) delivered hermetic, non-vacuous versions via commits 320d0db (trap test
+with shim dir outside asset dir and PATH = shimDir:/usr/bin:/bin plus stderr assertions;
+fallback test with hermetic bin dir of symlinks to rm, mktemp, chmod, mv, shasum only, skip if
+tool missing) and ac88277 (deleted dead code block, corrected comment). T12 passed audit pass 2
+with mutation proofs. CI ubuntu "Build and test" green after ac88277. Lessons: workers'
+self-reported verification must be independently checked; tests that depend on host tool layout
+must build hermetic PATH; CI matrix includes ubuntu, macos, and windows.
+
+**Archived 2026-09-29**: Implementation complete. Tasks T1–T8 received council APPROVE. Post-council tasks T9 (bash 3.2 robustness, passed audit pass 2) and T10 (detective/preventive terminology, exhausted 3 audit passes with one escalation) were added per user request for technical debt and docs accuracy. Task T11 was created to remediate T10's escalated README.md:221 finding and passed audit pass 1. PR #176 review remediation added T12 (test-dev, ReleaseTests.cs; passed audit pass 2; commits 320d0db, ac88277) to fix defective tests found in commits 077b6a4, df09529; T12 fixed CI ubuntu Build and test. Full gate suite re-run verified all work. Durable content harvested into [ADR 0027](../../adr/0027-release-integrity-checksums-signing-deferred.md), [docs/distribution.md](../../distribution.md), [docs/install.md](../../install.md), and [docs/dash/runbook.md](../../dash/runbook.md). User-owned verification steps U1–U4 remain pending (see below).
 
 ## Problem and goal
 
@@ -579,6 +595,45 @@ broader TUI/Dashboard terminology consistency pass, with other stale launch-conf
 **Audit:** `task-reviewer`, first pass resolved the escalation. **Note:** Added post-council 
 per user escalation from T10; addresses documentation accuracy.
 
+### T12: Hermetic release test fixtures
+
+This remediates the defective tests in commits 077b6a4 and df09529. Escalated from task-reviewer
+pass 3 on commits 077b6a4 and df09529 (2026-09-29). Task-reviewer exhausted three passes.
+
+**Required skill:** `test-dev`
+
+**Files:** `tests/KyberWeave.Tests/ReleaseTests.cs` only.
+
+**Objective:**
+
+Deliver hermetic, non-vacuous test fixtures for the trap and fallback cases found defective
+in commits 077b6a4 (trap test vacuous; fallback test asserts sha256sum absent which fails on
+ubuntu-latest) and df09529 (rewrites were still defective):
+
+1. **Trap cleanup test:** Trap dir is **outside** the asset dir (not inside), PATH is set to
+   shimDir:/usr/bin:/bin (not shim-only). Assertions include stderr checks for the trap
+   invocation.
+
+2. **Fallback test:** Build a hermetic bin dir containing only symlinks to rm, mktemp, chmod,
+   mv, and shasum (no sha256sum). Test verifies the script's fallback branch. Skip test if any
+   tool is missing locally. Baseline manifest is byte-identical to the fixture's expected
+   output.
+
+**Acceptance:**
+
+- The trap test passes: creating stale .SHA256SUMS.* files and running the script verifies
+  the trap cleanup.
+- The fallback test passes: the hermetic bin dir lacks sha256sum, the script invokes shasum -a
+  256, the result matches the baseline.
+- Mutation proofs: M1 (delete the script's trap line) makes the trap test fail on leftover
+  .SHA256SUMS.*; M2 (fallback branch `false`) makes the fallback test fail on the exit code.
+- All `ReleaseTests` pass.
+- CI ubuntu "Build and test" is green.
+
+**Audit:** `task-reviewer`, pass 2 resolved the escalation. **Note:** Added post-council via
+escalation from task-reviewer's three passes on commits 077b6a4/df09529. Addresses test
+quality and CI ubuntu stability.
+
 ### T4: Closeout
 
 **Required skill:** `docs-dev`
@@ -601,7 +656,7 @@ per user escalation from T10; addresses documentation accuracy.
 **Acceptance:** `docs validate . --merge-ready` and `docs drift .` show zero findings, and no
 plan remains in `docs/plans/` (`KW-DOC-LIFECYCLE-003`).
 
-**Depends on:** T1, T2, T3, T5, T6, T7, T8, and code review.
+**Depends on:** T1, T2, T3, T5, T6, T7, T8, T9, T10, T11, T12, and code review.
 
 ## Dependency graph and concurrency
 
@@ -614,6 +669,7 @@ T8 ────────────────┘
 
 T9 (T1,T2) ──► post-review
 T10 (T1,T3,T5,T8) ──► T11 (escalation) ──► post-review
+PR-review remediation (17de3f9, 077b6a4, df09529) ──► T12 (escalation)
 ```
 
 - T1, T3, and T5 have disjoint file scopes. They share only the link targets fixed in the
@@ -627,11 +683,14 @@ T10 (T1,T3,T5,T8) ──► T11 (escalation) ──► post-review
 - T10 (docs accuracy) depends on T1, T3, T5, T8 output. T10 exhausted audit passes and
   escalated one finding, which T11 remediates.
 - T11 depends on T10's escalated finding.
+- T12 (test fixes) depends on commits 077b6a4 and df09529 and was escalated from
+  task-reviewer's third pass.
 - Original run: `MAX_CONCURRENCY: 3`, with T1, T3, and T5 running together.
 - Remediation run: `MAX_CONCURRENCY: 2`. T7 and T8 run together. T6 starts once T7 has
   passed audit, and may overlap T8 if T8 is still running.
 - Post-council tasks T9, T10, and T11 were added per user request and verified through
-  task audits and a full gate suite re-run. T4 closeout runs independently.
+  task audits and a full gate suite re-run. PR #176 review remediation escalated T12 to
+  task-reviewer. T4 closeout runs independently.
 
 ## Verification contract (standard mode)
 
@@ -647,6 +706,7 @@ T10 (T1,T3,T5,T8) ──► T11 (escalation) ──► post-review
 | T9 | `tests/KyberWeave.Tests/ReleaseTests.cs` and `scripts/verify-release-checksums.sh` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~ReleaseTests"` | Script fix: `set -u` mode does not trigger unbound-variable on empty arrays or empty asset directories under bash 3.2. Regression test `VerifyReleaseChecksumsReportsEveryAssetForEmptyDirectory` passes. Correct calls still work. | Added post-council per user request. Manual test: `bash -u scripts/verify-release-checksums.sh --list /tmp/empty-dir` exits with usage error, not unbound-variable. Note: bash 5+ behavior exercised by CI on Ubuntu; bash 3.2 manually validated during development. |
 | T10 | No automated test. The docs gates replace it. | same two docs commands as T3 | Zero findings. ADR 0027 and docs clearly state: pre-publish is fail-closed and preventive; post-publish "Verify published release assets" is detective (runs after publication, detects and fails job, does not prevent). | Added post-council per user request. Reviewer confirms preventive/detective terminology is accurate and consistent across ADR and distribution/install/dash/README docs. T10 exhausted 3 audit passes and escalated README.md:221 finding. |
 | T11 | No automated test. The docs gates replace it. | same two docs commands as T3 | Zero findings. README.md line 221 no longer contains stale "terminal TUI Dashboard" reference. | Added to remediate T10's escalated finding. Passed audit pass 1. Stale `.vscode/launch.json` launch-config names spun off as separate follow-up task. |
+| T12 | `tests/KyberWeave.Tests/ReleaseTests.cs` | `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~ReleaseTests"` | Trap test (shim dir outside asset dir; PATH = shimDir:/usr/bin:/bin; stderr assertions) passes; leftover .SHA256SUMS.* trigger trap cleanup. Fallback test (hermetic bin dir: rm, mktemp, chmod, mv, shasum only; no sha256sum; skip if missing) passes; script invokes shasum -a 256 and output matches baseline. Mutation proofs (M1: delete trap line fails on leftover files; M2: fallback `false` fails on exit code) verified. All `ReleaseTests` pass. CI ubuntu green. | Passed audit pass 2. Escalated from task-reviewer's three passes on commits 077b6a4, df09529 defective tests. Commits 320d0db (hermetic fixtures) and ac88277 (dead code deletion, comment fix). Ubuntu CI "Build and test" green after ac88277. |
 | T4 | none (docs lifecycle) | same two docs commands | Zero findings. Plan archived. The archive row names ADR 0027. | `review gates . --out artifacts/gates.json` |
 | Post-merge | none (live) | User-owned U1–U4 | The RC release shows all 21 assets. Windows PowerShell, macOS `shasum -a 256 -c`, and Linux `sha256sum -c` verification passes. SmartScreen and Unblock flow match docs. (U4 optional) Comment on #132 with RC and docs links. | Run URL and screenshots attached to the PR or to #132. U1–U4 remain PENDING. |
 
