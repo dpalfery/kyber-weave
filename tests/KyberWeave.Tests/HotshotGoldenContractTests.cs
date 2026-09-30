@@ -84,6 +84,12 @@ public sealed partial class HotshotGoldenContractTests
         "create-pull-request-github" // consolidated into create-pull-request (plan 2026-09-28)
     ];
 
+    /// <summary>
+    /// Skills authored in Kyber-Squad have no Hotshot baseline; the canonical inventory
+    /// and resource-delivery contracts cover them without altering historical golden bytes.
+    /// </summary>
+    private static readonly string[] CanonicalOnlySkillIdentities = ["code-review-loop"];
+
     private static readonly string[] RetiredAgentIdentities =
     [
         "architect-v3",
@@ -246,6 +252,7 @@ public sealed partial class HotshotGoldenContractTests
         string[] expectedSkills = manifest.Skills
             .Select(entry => SkillName(entry.Path))
             .Except(RetiredSkillIdentities, StringComparer.Ordinal)
+            .Concat(CanonicalOnlySkillIdentities)
             .Order(StringComparer.Ordinal)
             .ToArray();
         AddSequenceMismatch(mismatches, "canonical agents", expectedAgents, source.Agents.Select(agent => agent.Name));
@@ -304,6 +311,7 @@ public sealed partial class HotshotGoldenContractTests
         string[] actualSkillFiles = Directory.EnumerateFiles(skillRoot, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
             .Where(path => !EvolvedSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
+                          !CanonicalOnlySkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal) &&
                           !RetiredSkillIdentities.Contains(CanonicalSkillName(path), StringComparer.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();

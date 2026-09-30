@@ -173,8 +173,8 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             f.RelativePath.StartsWith(".opencode/skills/", StringComparison.Ordinal),
             $"File '{f.RelativePath}' does not start with expected OpenCode directory."));
 
-        // 2. Output counts: exactly 44 principal files (21 agents under .opencode/agents/*.md
-        // + 23 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
+        // 2. Output counts: exactly 45 principal files (21 agents under .opencode/agents/*.md
+        // + 24 skills under .opencode/skills/*/SKILL.md) plus linked resource closures.
         int principalAgentCount = result.Files.Count(f =>
             f.RelativePath.StartsWith(".opencode/agents/", StringComparison.Ordinal) &&
             f.RelativePath.EndsWith(".md", StringComparison.Ordinal) &&
@@ -186,8 +186,8 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             !f.RelativePath[".opencode/skills/".Length..^"/SKILL.md".Length].Contains('/', StringComparison.Ordinal));
 
         Assert.Equal(21, principalAgentCount);
-        Assert.Equal(23, principalSkillCount);
-        Assert.Equal(44, principalAgentCount + principalSkillCount);
+        Assert.Equal(24, principalSkillCount);
+        Assert.Equal(45, principalAgentCount + principalSkillCount);
 
         int suppressedSkillCount = source.Skills.Count(skill => sharedIdentities.Contains(skill.Name));
         int expectedFileCount =
@@ -197,7 +197,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 .Sum(skill => skill.Resources.Count);
 
         Assert.Equal(expectedFileCount, result.Files.Count);
-        Assert.Equal(119, result.Files.Count);
+        Assert.Equal(121, result.Files.Count);
 
         // 3. Native single-projection rule: shared identities (like conductor) must NOT emit a skill
         // under .opencode/skills/conductor/SKILL.md, and no role- prefixes are emitted.

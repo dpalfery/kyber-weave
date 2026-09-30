@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { KyberBridge } from './bridge.js'
+import { sumSessionFigures } from './bridge.js'
 import { runContextReview, type ReviewRequest } from '../analysis/review.js'
 import { createReviewProvider } from '../analysis/review-providers/index.js'
 import { recordPrediction } from '../analysis/calibration.js'
@@ -561,8 +562,29 @@ export function handleKyberRequest(
       if (finding.runId === undefined) continue
       findingCounts.set(finding.runId, (findingCounts.get(finding.runId) ?? 0) + 1)
     }
-    const runs = bridge.listRuns(harnessParam).map((run) => ({
+    // Measured run figures ride along so the runs table never renders a dash
+    // beside measured data (issue #183). One bounded executions read
+    // bucketed in memory plus one summary batch for the whole list, with
+    // per-run sums through the shared `sumSessionFigures` derivation.
+    const listedRuns = bridge.listRuns(harnessParam)
+    // One bounded executions read, bucketed in memory (open thread on
+    // routes.ts:567 — the per-run loop reintroduced N+1 round trips on the
+    // landing-page endpoint). Only listed runs' sessions reach the summary
+    // batch, so no other harness's figures are ever read.
+    const listedRunIds = new Set(listedRuns.map((run) => run.runId))
+    const executionsByRun = new Map<string, string[]>()
+    for (const execution of bridge.listExecutions()) {
+      if (!listedRunIds.has(execution.runId)) continue
+      if (typeof execution.sessionId !== 'string' || execution.sessionId.length === 0) continue
+      const group = executionsByRun.get(execution.runId) ?? []
+      group.push(execution.sessionId)
+      executionsByRun.set(execution.runId, group)
+    }
+    const listedSessionIds = [...new Set([...executionsByRun.values()].flat())]
+    const listedSummaries = bridge.sessionSummaryFigures(listedSessionIds)
+    const runs = listedRuns.map((run) => ({
       ...run,
+      ...sumSessionFigures(listedSummaries, executionsByRun.get(run.runId) ?? []),
       findingCount: findingCounts.get(run.runId) ?? 0,
     }))
     sendKyberJson(res, 200, { runs })
@@ -594,7 +616,35 @@ export function handleKyberRequest(
     const executionTree = bridge.getExecutionTree(id)
     const executions = bridge.listExecutions(id)
     const findings = bridge.listFindings({ runId: id })
-    sendKyberJson(res, 200, { run, executionTree, executions, findings })
+    // Issue #183: the detail payload serves what its views need — measured
+    // per-turn rows, enriched run figures, and a run-scoped scorecard — so
+    // the turn table and scorecard render figures instead of dashes. Summaries
+    // batch once (review follow-up: Kilo K7); session payloads stream one at
+    // a time inside the turns and scorecard builders (re-review: Kilo 4), so
+    // the route never holds the run's payloads at once.
+    const detailSessionIds = executions
+      .map((exec) => exec.sessionId)
+      .filter((sessionId): sessionId is string => typeof sessionId === 'string')
+    const summaries = bridge.sessionSummaryFigures(detailSessionIds)
+    const figures = sumSessionFigures(summaries, detailSessionIds)
+    const enrichedExecutions = executions.map((exec) => {
+      const sessionFigures = exec.sessionId !== null && exec.sessionId !== undefined
+        ? summaries.get(exec.sessionId)
+        : undefined
+      return {
+        ...exec,
+        ...(sessionFigures?.turnCount !== undefined ? { turnCount: sessionFigures.turnCount } : {}),
+        ...(sessionFigures?.costUsd !== undefined ? { costUsd: sessionFigures.costUsd } : {}),
+      }
+    })
+    sendKyberJson(res, 200, {
+      run: { ...run, ...figures },
+      executionTree,
+      executions: enrichedExecutions,
+      findings,
+      turns: bridge.getRunTurns(id, executions),
+      scorecard: bridge.getRunScorecard(id, { executions, summaries }) ?? null,
+    })
     return true
   }
 
