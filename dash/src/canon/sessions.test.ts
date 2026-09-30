@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
 import { tokens, turn } from './fixtures/records.js'
-import { getMeasurability } from './measurability.js'
+import { getMeasurability, measurabilityFor } from './measurability.js'
 import { CanonStore } from './store.js'
 import { activeTokenizer, cacheKey, approximateO200kBase } from './tokens.js'
 import { buildSessionRow, buildSessions, mergeMeasurability } from './sessions.js'
@@ -463,6 +463,57 @@ describe('buildSessionRow', () => {
     expect(contentGetterSpy).not.toHaveBeenCalled()
   })
 
+
+  it('projects 0 tool calls when Claude session has zero tool records, while unmeasured harnesses remain undefined (Thread 3)', () => {
+    // Claude session where tool calls are measurable, but zero were invoked:
+    const claudeTurnNoTools = turn('claude-turn-0', [{ part: 'system_prompt', text: 'hello' }], {
+      source: 'codeburn/claude',
+      harness: 'claude',
+      measurability: measurabilityFor('claude'),
+    })
+    const claudeSession = sessionRow(
+      buildSessionRow('sess-claude-no-tools', [claudeTurnNoTools], approximateO200kBase),
+    )
+    expect(claudeSession.summary?.tool_calls).toBe(0)
+    expect(claudeSession.payload.summary.tool_calls).toBe(0)
+    expect(claudeSession.summary?.tools_invoked).toEqual([])
+    expect(claudeSession.payload.summary.tools_invoked).toEqual([])
+
+    // Unmeasured harness session (e.g. kilo, opencode) where tool calls are not supported:
+    const unmeasuredTurn = turn('kilo-turn-0', [{ part: 'system_prompt', text: 'hello' }], {
+      source: 'codeburn/kilo',
+      harness: 'kilo',
+      measurability: measurabilityFor('kilo'),
+    })
+    const unmeasuredHarnessSession = sessionRow(
+      buildSessionRow('sess-kilo-no-tools', [unmeasuredTurn], approximateO200kBase),
+    )
+    expect(unmeasuredHarnessSession.summary?.tool_calls).toBeUndefined()
+    expect(unmeasuredHarnessSession.payload.summary.tool_calls).toBeUndefined()
+    expect(unmeasuredHarnessSession.summary?.tools_invoked).toBeUndefined()
+    expect(unmeasuredHarnessSession.payload.summary.tools_invoked).toBeUndefined()
+  })
+
+  it('preserves empty array tools_offered when empty tool definitions were observed (Thread 4)', () => {
+    // Observed empty tool catalogue:
+    const turnWithEmptyCatalog = turn('turn-empty-cat', [
+      { part: 'system_prompt', text: 'hi' },
+      { part: 'tool_definitions', text: '[]' },
+    ])
+    const sessionWithEmptyCatalog = sessionRow(
+      buildSessionRow('sess-empty-cat', [turnWithEmptyCatalog], approximateO200kBase),
+    )
+    expect(sessionWithEmptyCatalog.summary?.tools_offered).toEqual([])
+    expect(sessionWithEmptyCatalog.payload.summary.tools_offered).toEqual([])
+
+    // Unobserved tool definitions (no tool_definitions parts):
+    const turnNoDefinitions = turn('turn-no-defs', [{ part: 'system_prompt', text: 'hi' }])
+    const sessionNoDefinitions = sessionRow(
+      buildSessionRow('sess-no-defs', [turnNoDefinitions], approximateO200kBase),
+    )
+    expect(sessionNoDefinitions.summary?.tools_offered).toBeUndefined()
+    expect(sessionNoDefinitions.payload.summary.tools_offered).toBeUndefined()
+  })
 
   it('distinguishes unmeasured tool calls from zero tool calls when harness does not report tools', () => {
     // When no tool records are present and harness did not report tools

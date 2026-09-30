@@ -17,7 +17,7 @@ import { rankSchemas, type ToolDefinition } from '../analysis/schema.js'
 import { auxiliarySpend, buildTimeline, subagentSessions } from '../analysis/timeline.js'
 import { measuredInput, sumCosts } from './cost.js'
 import { contextLimitOf } from './context-window.js'
-import { groupByCanonicalHarness, normalizeHarnessName } from './measurability.js'
+import { groupByCanonicalHarness, normalizeHarnessName, surveyFamily } from './measurability.js'
 import { buildFindings } from './findings.js'
 import { buildHarnessRollup } from './harnesses.js'
 import { buildRuns } from './runs.js'
@@ -591,7 +591,8 @@ export function buildSessionRow(
     toolCalls = toolRecords.length
     toolsInvoked = Array.from(new Set(invocationsOf(records)))
   } else {
-    const toolCallsAvailability = measurability?.tool_calls
+    const isClaude = harness === 'claude' || harness === 'claude-code' || surveyFamily(harness) === 'claude-code'
+    const toolCallsAvailability = measurability?.tool_calls ?? (isClaude ? 'measured' : undefined)
     if (toolCallsAvailability === 'measured' || toolCallsAvailability === 'derived') {
       toolCalls = 0
       toolsInvoked = []
@@ -620,10 +621,7 @@ export function buildSessionRow(
 
   let toolsOffered: string[] | undefined = undefined
   if (definitionParts.length > 0) {
-    const offeredNames = extractOfferedToolNames(definitionParts)
-    if (offeredNames.length > 0) {
-      toolsOffered = offeredNames
-    }
+    toolsOffered = extractOfferedToolNames(definitionParts)
   }
 
   const payload: AsadSessionPayload = {

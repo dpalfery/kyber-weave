@@ -63,8 +63,8 @@ export interface SessionSummaryPayload {
   duration_ms?: number | null
   models?: string[]
   tool_calls?: number | null
-  tools_invoked?: number | null
-  tools_offered?: number | null
+  tools_invoked?: string[] | number | null
+  tools_offered?: string[] | number | null
   error_count?: number | null
   median_ttft_ms?: number | null
   aux_chat_calls?: number | null
@@ -623,12 +623,20 @@ export function AgentSessionContent({
   }
 
   const u = session.summary || {}
-  const toolsOfferedCount = Array.isArray(u.tools_offered)
-    ? u.tools_offered.length
+  const offeredList = Array.isArray(u.tools_offered) ? u.tools_offered : undefined
+  const invokedList = Array.isArray(u.tools_invoked) ? u.tools_invoked : undefined
+  const toolsOfferedCount = offeredList !== undefined
+    ? offeredList.length
     : (typeof u.tools_offered === 'number' ? u.tools_offered : undefined)
-  const toolsInvokedCount = Array.isArray(u.tools_invoked)
-    ? u.tools_invoked.length
+  const toolsInvokedCount = invokedList !== undefined
+    ? invokedList.length
     : (typeof u.tools_invoked === 'number' ? u.tools_invoked : 0)
+  const invokedSet = invokedList !== undefined ? new Set(invokedList) : null
+  const unusedOfferedCount = toolsOfferedCount != null
+    ? (offeredList !== undefined && invokedSet !== null
+        ? offeredList.filter((name) => !invokedSet.has(name)).length
+        : Math.max(0, toolsOfferedCount - toolsInvokedCount))
+    : undefined
   const toolCallsMeasured = typeof u.tool_calls === 'number' && Number.isFinite(u.tool_calls)
   const toolCallsReason = `Tool invocation count was not reported by ${session.harness || 'this adapter'}.`
   const rows = session.reconciliation || []
@@ -1046,7 +1054,7 @@ export function AgentSessionContent({
             </div>
             <div className="mt-0.5 text-[11px] text-tertiary-foreground truncate">
               {toolsOfferedCount != null
-                ? `${toolsOfferedCount - toolsInvokedCount} never called`
+                ? `${unusedOfferedCount ?? 0} never called`
                 : `not exported by ${session.harness || 'adapter'}`}
             </div>
           </Card>
@@ -1090,13 +1098,13 @@ export function AgentSessionContent({
         </div>
 
         {/* Waste Callout Banner */}
-        {u.tools_offered != null && (u.tools_offered - (u.tools_invoked ?? 0)) > 0 && (
+        {toolsOfferedCount != null && unusedOfferedCount != null && unusedOfferedCount > 0 && (
           <div
             className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-foreground/90 space-y-1"
             data-testid="schema-waste-banner"
           >
             <div className="font-semibold text-amber-700 dark:text-amber-300">
-              {u.tools_offered - (u.tools_invoked ?? 0)} of {u.tools_offered} tools were never called.
+              {unusedOfferedCount} of {toolsOfferedCount} tools were never called.
             </div>
             <p className="text-muted-foreground leading-relaxed">
               That represents{' '}

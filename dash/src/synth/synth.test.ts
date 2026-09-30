@@ -819,4 +819,89 @@ describe('Task 5 — child tool.invoke span generation and result truncation', (
     expect(raw["gen_ai.tool.status"]).toBe("ok")
     expect(raw["gen_ai.tool.result_bytes"]).toBe(3)
   })
+  it("truncates multi-byte UTF-8 tool results at code-point boundary when byte length > 64KB (Thread 1)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t5-emoji",
+      deduplicationKey: "claude:s-t5-emoji:t-1",
+    })
+    // 20,000 emoji: 40,000 UTF-16 code units, but 80,000 UTF-8 bytes (> 64KB)
+    const emojiContent = "🚀".repeat(20_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_emoji", name: "Bash", arguments: { command: "cat emoji.txt" } },
+      ],
+      toolResults: [
+        { toolCallId: "tu_emoji", content: emojiContent },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.result_bytes"]).toBe(80_000)
+
+    const part = toolRecord?.parts?.find((p) => p.part === "tool_result_content") as TruncatedContentPart | undefined
+    expect(part).toBeDefined()
+    expect(part?.truncated).toBe(true)
+    const partBytes = Buffer.byteLength(part!.text, "utf8")
+    expect(partBytes).toBeLessThanOrEqual(65_536)
+    expect(partBytes).toBe(65_536)
+    expect(part?.text).toBe("🚀".repeat(16_384))
+  })
+
+  it("bounds raw.result to bounded part text to avoid persisting multi-megabyte payloads (Thread 2)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t5-raw-bound",
+      deduplicationKey: "claude:s-t5-raw-bound:t-1",
+    })
+    const largeContent = "X".repeat(200_000)
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_huge", name: "Bash", arguments: { command: "cat huge.txt" } },
+      ],
+      toolResults: [
+        { toolCallId: "tu_huge", content: largeContent },
+      ],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.attributes?.["gen_ai.tool.result_bytes"]).toBe(200_000)
+    const raw = toolRecord?.raw as Record<string, unknown>
+    expect(raw["result"]).toBe("X".repeat(65_536))
+    expect((raw["result"] as string).length).toBe(65_536)
+  })
+
+  it("marks tool call with no matched result as unset status (Thread 5)", () => {
+    const synthesizer = new Synthesizer()
+    const parsedCall = call({
+      provider: "claude",
+      sessionId: "s-t5-unmatched",
+      deduplicationKey: "claude:s-t5-unmatched:t-1",
+    })
+    const readerTurn: ReaderTurn = {
+      parts: [],
+      toolCalls: [
+        { id: "tu_unmatched", name: "Bash", arguments: { command: "sleep 100" } },
+      ],
+      toolResults: [],
+    }
+
+    const records = synthesizer.synthesize([parsedCall], [readerTurn])
+    const toolRecord = records.find((r) => r.op === "tool.invoke") as ToolInvokeRecord | undefined
+
+    expect(toolRecord).toBeDefined()
+    expect(toolRecord?.status).toBe("unset")
+    expect(toolRecord?.attributes?.["gen_ai.tool.status"]).toBe("unset")
+    expect((toolRecord?.raw as Record<string, unknown>)?.[ "gen_ai.tool.status"]).toBe("unset")
+  })
 });

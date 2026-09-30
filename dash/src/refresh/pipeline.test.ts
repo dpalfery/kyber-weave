@@ -171,7 +171,8 @@ describe('refresh pipeline: parser contract version & checkpoint invalidation', 
       expect(toolRecords).toHaveLength(1)
       expect(toolRecords[0]!.name).toBe('Bash')
       expect(toolRecords[0]!.parentSpanId).toBe(legacyTurnRecord!.spanId)
-      expect(toolRecords[0]!.status).toBe('ok')
+      // Unmatched trailing tool call in transcript has status 'unset'
+      expect(toolRecords[0]!.status).toBe('unset')
       expect(toolRecords[0]!.raw).toMatchObject({
         arguments: { command: 'git status' },
       })

@@ -1372,8 +1372,8 @@ describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', (
       summary: {
         ...sampleSession.summary,
         tool_calls: 3,
-        tools_offered: ["toolA", "toolB"] as unknown as number,
-        tools_invoked: ["toolA"] as unknown as number,
+        tools_offered: ["toolA", "toolB"],
+        tools_invoked: ["toolA"],
       },
     }
 
@@ -1386,6 +1386,73 @@ describe('AgentSessionDashboard: Issue #180 Task 8 Dashboard UI Verification', (
     // Subtitle should format as "1 never called", not "NaN never called"
     expect(offeredMetric).toContain("1 never called")
     expect(offeredMetric).not.toContain("NaN")
+  })
+
+  it("computes unusedOfferedCount via set difference and renders waste banner for string arrays (Threads 6 & 7)", () => {
+    const sessionWithArrayTools: AgentSessionPayload = {
+      ...sampleSession,
+      summary: {
+        ...sampleSession.summary,
+        tool_calls: 3,
+        tools_offered: ["toolA", "toolB"],
+        tools_invoked: ["toolA", "toolX"],
+        unused_schema_per_turn: 500,
+        schema_tokens_per_turn: 2000,
+      },
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithArrayTools} />)
+    const idx = html.indexOf("Tools Offered")
+    const offeredMetric = html.slice(idx, idx + 400)
+
+    // Card subtitle should say "1 never called", NOT "0 never called"
+    expect(offeredMetric).toContain("1 never called")
+    expect(offeredMetric).not.toContain("0 never called")
+
+    // Waste banner MUST be rendered because 1 offered tool was never called!
+    expect(html).toContain('data-testid="schema-waste-banner"')
+    expect(html).toContain("1 of 2 tools were never called.")
+  })
+
+  it("styles timeline status badges according to failure/success/neutral classifications (Thread 8)", () => {
+    const sessionWithStatuses: AgentSessionPayload = {
+      ...sampleSession,
+      timeline: [
+        {
+          spanId: "root-span-1",
+          parentId: null,
+          name: "assistant",
+          op: "llm.turn",
+          kind: "turn",
+          durationMs: 1000,
+          children: [
+            { spanId: "c1", parentId: "root-span-1", name: "t1", op: "tool.invoke", kind: "tool", durationMs: 10, status: "error", children: [] },
+            { spanId: "c2", parentId: "root-span-1", name: "t2", op: "tool.invoke", kind: "tool", durationMs: 10, status: "failure", children: [] },
+            { spanId: "c3", parentId: "root-span-1", name: "t3", op: "tool.invoke", kind: "tool", durationMs: 10, status: "fatal", children: [] },
+            { spanId: "c4", parentId: "root-span-1", name: "t4", op: "tool.invoke", kind: "tool", durationMs: 10, status: "ok", children: [] },
+            { spanId: "c5", parentId: "root-span-1", name: "t5", op: "tool.invoke", kind: "tool", durationMs: 10, status: "success", children: [] },
+            { spanId: "c6", parentId: "root-span-1", name: "t6", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unset", children: [] },
+            { spanId: "c7", parentId: "root-span-1", name: "t7", op: "tool.invoke", kind: "tool", durationMs: 10, status: "unknown", children: [] },
+          ],
+        },
+      ],
+    }
+
+    const html = renderHtml(<AgentSessionDashboard session={sessionWithStatuses} />)
+    const treeView = html.slice(html.indexOf('data-testid="timeline-tree-view"'))
+
+    // error, failure, fatal must have red classes
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*error\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*failure\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-red-[^>]*>\s*fatal\s*</i)
+
+    // ok, success must have green (emerald) classes
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*ok\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-emerald-[^>]*>\s*success\s*</i)
+
+    // unset, unknown must have neutral muted classes (NOT emerald or red)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unset\s*</i)
+    expect(treeView).toMatch(/data-testid="status-badge"[^>]*text-muted-foreground[^>]*>\s*unknown\s*</i)
   })
 });
 

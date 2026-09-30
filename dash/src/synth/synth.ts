@@ -422,6 +422,20 @@ export function synthesizeCall(
 /** Maximum bytes of tool result content stored in content parts before truncation (64KB). */
 export const MAX_TOOL_RESULT_BYTES = 65_536
 
+/**
+ * Truncate a UTF-8 string to at most \`maxBytes\`, cutting strictly at a valid UTF-8 code point boundary.
+ */
+export function truncateUtf8(text: string, maxBytes: number): string {
+  const buf = Buffer.from(text, "utf8")
+  if (buf.byteLength <= maxBytes) return text
+
+  let end = maxBytes
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+    end--
+  }
+  return buf.subarray(0, end).toString("utf8")
+}
+
 export type CanonicalToolRecord = CanonicalRecord & {
   attributes?: Record<string, unknown>
   provider?: string
@@ -440,24 +454,28 @@ export function synthesizeToolCall(
   call?: ParsedProviderCall,
 ): CanonicalToolRecord {
   const isError = toolResult?.isError === true
-  const status = isError ? 'error' : 'ok'
+  const status = toolResult === undefined ? 'unset' : (isError ? 'error' : 'ok')
+  const resultBytes = toolResult?.content !== undefined
+    ? Buffer.byteLength(toolResult.content, 'utf8')
+    : undefined
   const attributes: Record<string, unknown> = {
     'gen_ai.tool.name': toolCall.name,
     'gen_ai.tool.call_id': toolCall.id,
     'gen_ai.tool.status': status,
-    ...(toolResult?.content !== undefined
-      ? { 'gen_ai.tool.result_bytes': Buffer.byteLength(toolResult.content, 'utf8') }
+    ...(resultBytes !== undefined
+      ? { 'gen_ai.tool.result_bytes': resultBytes }
       : {}),
   }
 
   let parts: (ContentPart & { truncated?: boolean })[] = []
   if (toolResult?.content !== undefined) {
     const text = toolResult.content
-    if (text.length > MAX_TOOL_RESULT_BYTES) {
+    const textBytes = resultBytes ?? Buffer.byteLength(text, 'utf8')
+    if (textBytes > MAX_TOOL_RESULT_BYTES) {
       parts = [
         {
           part: 'tool_result_content',
-          text: text.slice(0, MAX_TOOL_RESULT_BYTES),
+          text: truncateUtf8(text, MAX_TOOL_RESULT_BYTES),
           truncated: true,
           order: 0,
         },
@@ -509,7 +527,7 @@ export function synthesizeToolCall(
     raw: {
       ...attributes,
       arguments: toolCall.arguments,
-      result: toolResult?.content,
+      result: parts[0]?.text,
     },
   }
 }
