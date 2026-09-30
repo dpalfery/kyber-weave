@@ -92,6 +92,31 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       label: 'Content drill-down',
       payload: { id: 'sess-content-001', harness: 'copilot' },
     })
+    // Session whose payload carries explicit turn descriptors: one current
+    // 0-based `index` row and one legacy 1-based `turn` row (issue #184).
+    store.upsertMany([
+      turn('span-m0', [{ part: 'system_prompt', text: 'mixed zero', tokens: 2 }], {
+        sessionId: 'sess-mixed-001',
+        timestamp: '2026-09-03T11:00:00.000Z',
+      }),
+      turn('span-m1', [{ part: 'system_prompt', text: 'mixed one', tokens: 2 }], {
+        sessionId: 'sess-mixed-001',
+        timestamp: '2026-09-03T11:01:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-mixed-001',
+      harness: 'copilot',
+      label: 'Mixed turn descriptors',
+      payload: {
+        id: 'sess-mixed-001',
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-m0', model: 'm' },
+          { turn: 2, spanId: 'span-m1', model: 'm' },
+        ],
+      },
+    })
 
     canonDb = new DatabaseSync(':memory:')
 
@@ -258,6 +283,39 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
       const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/999/content`)
       expect(res.status).toBe(404)
       assertStandardKyberHeaders(res)
+    })
+
+    describe('strict 0-based turn resolution (issue #184)', () => {
+      it('returns 404 for a turn index equal to the turn count instead of the last turn', async () => {
+        // sess-content-001 holds 3 turns (indices 0-2). The 1-based
+        // `turns[turnIndex - 1]` fallback serves the last turn with 200 here.
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/3/content`)
+        expect(res.status).toBe(404)
+        assertStandardKyberHeaders(res)
+      })
+
+      it('resolves a 0-based index to exactly that span', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-content-001/turn/2/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.turnIndex).toBe(2)
+        expect(body.spanId).toBe('span-huge')
+      })
+
+      it('resolves a legacy 1-based `turn` descriptor via `turn - 1`', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-mixed-001/turn/1/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-m1')
+        expect(body.assembledText).toContain('mixed one')
+      })
+
+      it('returns 404 past the end of a session with legacy descriptors', async () => {
+        // Two payload turns: valid 0-based indices are 0 and 1.
+        const res = await fetch(`${base}/api/kyber/session/sess-mixed-001/turn/2/content`)
+        expect(res.status).toBe(404)
+        assertStandardKyberHeaders(res)
+      })
     })
 
     it('flags budget truncation when turn content exceeds budget param', async () => {

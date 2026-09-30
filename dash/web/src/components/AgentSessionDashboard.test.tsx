@@ -6,6 +6,7 @@ import {
   AgentSessionDashboard,
   AgentSessionContent,
   AgentSessionLoader,
+  matchTurnTransport,
   type AgentSessionPayload,
   type DrawerContent,
   formatDuration,
@@ -151,7 +152,8 @@ const sampleSession: AgentSessionPayload = {
   ],
   turns: [
     {
-      index: 1,
+      // 0-based payload `index`, matching the served contract (issue #184).
+      index: 0,
       spanId: 'turn-span-1',
       model: 'claude-3-5-sonnet',
       durationMs: 4200,
@@ -168,7 +170,7 @@ const sampleSession: AgentSessionPayload = {
       },
     },
     {
-      index: 2,
+      index: 1,
       spanId: 'turn-span-2',
       model: 'claude-3-5-sonnet',
       durationMs: 5100,
@@ -897,7 +899,8 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       }
       findSpendCharts(turnTree)
       expect(spendCharts).not.toBeNull()
-      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
+      // 0-based transport: the first turn is index 0 (issue #184).
+      ;(spendCharts!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
       expect((drawerFrom(renderWithState())!.props as { contentRequest?: unknown }).contentRequest).toEqual({
         sessionId: 'sess-abc-123',
         span: 'turn-span-1',
@@ -998,7 +1001,7 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
     }
   })
 
-  it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with 1-based index and populates bucket analysis data', () => {
+  it('opens drawer for turn when onSelectTurn is invoked on SessionSpendCharts with a 0-based index and populates bucket analysis data', () => {
     let capturedOpen = false
     let capturedTitle = ''
     let capturedContent: unknown = null
@@ -1035,20 +1038,20 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
 
       expect(spendChartsEl).not.toBeNull()
 
-      // 1-based turn lookup: Turn 1
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
+      // 0-based transport lookup: index 0 is the human-facing Turn 1 (issue #184).
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1')
       expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-1')
 
-      // 1-based turn lookup: Turn 2
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(2)
+      // 0-based transport lookup: index 1 is Turn 2.
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1)
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 2')
       expect((capturedContent as { spanId?: string }).spanId).toBe('turn-span-2')
 
-      // 1-based turn lookup with bucket: tool_definitions
-      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(1, 'tool_definitions')
+      // 0-based turn lookup with bucket: tool_definitions
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
       expect(capturedOpen).toBe(true)
       expect(capturedTitle).toBe('Turn 1 · tool_definitions')
       expect(capturedContent).toBeDefined()
@@ -1179,5 +1182,20 @@ describe('timeline shape from the canonical store', () => {
 
     expect(html).toContain('execution-timeline-section')
     expect(html).toContain('spend-composition-section')
+  })
+})
+
+// Issue #184: the drawer resolves strictly 0-based transport — payload `index`,
+// positional fallback, or a legacy 1-based `turn` row as `turn - 1`. Never a neighbor.
+describe('matchTurnTransport', () => {
+  it('matches a 0-based index row and the positional fallback', () => {
+    expect(matchTurnTransport({ index: 4 }, 0, 4)).toBe(true)
+    expect(matchTurnTransport({}, 4, 4)).toBe(true)
+    expect(matchTurnTransport({ index: 3 }, 5, 4)).toBe(false)
+  })
+
+  it('matches a legacy 1-based turn row via turn - 1 only', () => {
+    expect(matchTurnTransport({ turn: 5 }, 9, 4)).toBe(true)
+    expect(matchTurnTransport({ turn: 5 }, 9, 5)).toBe(false)
   })
 })

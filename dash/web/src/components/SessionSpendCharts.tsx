@@ -1050,6 +1050,11 @@ export function ContextCompositionChart({
   // Extract normalized rows
   const rows = useMemo(() => extractNormalizedContextTurns(context), [context])
 
+  // Issue #184: the engine numbers composition turns 1-based (`TurnPressure.index`)
+  // while transport (URL, router, session `turns[].index`, drawer state) is 0-based.
+  // Convert once at this emit/compare boundary; human-facing labels stay 1-based.
+  const toTransportIndex = (oneBasedTurn: number): number => oneBasedTurn - 1
+
   // Check if measurable is explicitly false
   if (context?.measurable === false) {
     return (
@@ -1182,11 +1187,11 @@ export function ContextCompositionChart({
                   ? 'font-semibold text-foreground'
                   : 'text-tertiary-foreground hover:text-foreground',
               )}
-              onClick={() => onSelectTurn?.(selectedTurnIndex ?? rows[0]?.turnIndex ?? 1, segment.key)}
+              onClick={() => onSelectTurn?.(selectedTurnIndex ?? toTransportIndex(rows[0]?.turnIndex ?? 1), segment.key)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  onSelectTurn?.(selectedTurnIndex ?? rows[0]?.turnIndex ?? 1, segment.key)
+                  onSelectTurn?.(selectedTurnIndex ?? toTransportIndex(rows[0]?.turnIndex ?? 1), segment.key)
                 }
               }}
             >
@@ -1222,7 +1227,7 @@ export function ContextCompositionChart({
       {viewMode === 'bars' && (
         <div data-testid="context-stacked-bars" className="mt-4 space-y-3">
           {rows.map((row) => {
-            const isTurnSelected = selectedTurnIndex === row.turnIndex
+            const isTurnSelected = selectedTurnIndex === toTransportIndex(row.turnIndex)
 
             return (
               <div
@@ -1239,11 +1244,11 @@ export function ContextCompositionChart({
                     tabIndex={0}
                     role="button"
                     className="cursor-pointer font-semibold text-foreground hover:underline focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring rounded-xs"
-                    onClick={() => onSelectTurn?.(row.turnIndex)}
+                    onClick={() => onSelectTurn?.(toTransportIndex(row.turnIndex))}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
-                        onSelectTurn?.(row.turnIndex)
+                        onSelectTurn?.(toTransportIndex(row.turnIndex))
                       }
                     }}
                   >
@@ -1279,13 +1284,13 @@ export function ContextCompositionChart({
                         title={`${segment.label}: ${fmtNum(val)} tokens (${pct.toFixed(1)}%) — click to inspect`}
                         onClick={(e) => {
                           e.stopPropagation()
-                          onSelectTurn?.(row.turnIndex, k)
+                          onSelectTurn?.(toTransportIndex(row.turnIndex), k)
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
                             e.stopPropagation()
-                            onSelectTurn?.(row.turnIndex, k)
+                            onSelectTurn?.(toTransportIndex(row.turnIndex), k)
                           }
                         }}
                         onMouseEnter={() => setHoveredCell({ turnIndex: row.turnIndex, bucket: k })}
@@ -1332,7 +1337,7 @@ export function ContextCompositionChart({
             </thead>
             <tbody>
               {rows.map((row) => {
-                const isSelected = selectedTurnIndex === row.turnIndex
+                const isSelected = selectedTurnIndex === toTransportIndex(row.turnIndex)
 
                 return (
                   <tr
@@ -1346,11 +1351,11 @@ export function ContextCompositionChart({
                       tabIndex={0}
                       role="button"
                       className="px-3 py-2 font-medium tabular-nums cursor-pointer text-foreground hover:underline focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                      onClick={() => onSelectTurn?.(row.turnIndex)}
+                      onClick={() => onSelectTurn?.(toTransportIndex(row.turnIndex))}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
-                          onSelectTurn?.(row.turnIndex)
+                          onSelectTurn?.(toTransportIndex(row.turnIndex))
                         }
                       }}
                     >
@@ -1367,11 +1372,11 @@ export function ContextCompositionChart({
                           tabIndex={0}
                           role="button"
                           className="px-2 py-2 text-right tabular-nums cursor-pointer focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-                          onClick={() => onSelectTurn?.(row.turnIndex, k)}
+                          onClick={() => onSelectTurn?.(toTransportIndex(row.turnIndex), k)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault()
-                              onSelectTurn?.(row.turnIndex, k)
+                              onSelectTurn?.(toTransportIndex(row.turnIndex), k)
                             }
                           }}
                           title={`${CONTEXT_BUCKET_LABELS[k]}: ${fmtNum(val)} tokens`}

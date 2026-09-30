@@ -381,6 +381,8 @@ type ContentSourceRecord = {
  */
 type TurnDescriptor = {
   index?: number
+  /** Legacy 1-based turn number some payload rows carry instead of `index`. */
+  turn?: number
   spanId?: string
   model?: string
 }
@@ -1042,9 +1044,14 @@ export class KyberBridge {
 
   /**
    * Unclipped assembled turn content for the Context Inspector (Task G1 / Decision D14).
-   * Retrieves all blocks and parts for the given turn index (0-indexed or 1-indexed fallback),
-   * sub-divided into canonical context blocks (system_prompt, tool_definitions, instruction_context,
-   * conversation_history, tool_result_content) and parts (including user_messages, assistant_turns, etc.).
+   * Retrieves all blocks and parts for the given turn index, strictly 0-based:
+   * the payload's `turns[].index`, the positional fallback, or a legacy 1-based
+   * `turn` row matched as `turn - 1`. Anything else resolves to nothing (the
+   * route 404s) rather than a neighboring turn (issue #184).
+   *
+   * Sub-divided into canonical context blocks (system_prompt, tool_definitions,
+   * instruction_context, conversation_history, tool_result_content) and parts
+   * (including user_messages, assistant_turns, etc.).
    */
   assembleTurnContent(
     sessionId: string,
@@ -1064,9 +1071,12 @@ export class KyberBridge {
       ? (payload.turns as TurnDescriptor[])
       : []
     if (turns.length > 0) {
-      const turnItem =
-        turns.find((t, i) => t.index === turnIndex || i === turnIndex) ??
-        (turnIndex >= 1 && turnIndex <= turns.length ? turns[turnIndex - 1] : undefined)
+      const turnItem = turns.find(
+        (t, i) =>
+          t.index === turnIndex ||
+          i === turnIndex ||
+          (typeof t.turn === 'number' && t.turn - 1 === turnIndex),
+      )
       if (turnItem) {
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
@@ -1079,9 +1089,14 @@ export class KyberBridge {
         const records = this.store.recordsForSession(sessionId)
         const turnRecords = records.filter((r) => r.op === 'llm.invoke')
         const pool = turnRecords.length > 0 ? turnRecords : records
-        const target =
-          pool.find((r, i) => (r as CanonicalRecord & TurnDescriptor).index === turnIndex || i === turnIndex) ??
-          (turnIndex >= 1 && turnIndex <= pool.length ? pool[turnIndex - 1] : undefined)
+        const target = pool.find((r, i) => {
+          const d = r as CanonicalRecord & TurnDescriptor
+          return (
+            d.index === turnIndex ||
+            i === turnIndex ||
+            (typeof d.turn === 'number' && d.turn - 1 === turnIndex)
+          )
+        })
         if (target) {
           targetSpanId = target.spanId
           model = (target as CanonicalRecord & TurnDescriptor).model ?? target.name
@@ -1093,9 +1108,11 @@ export class KyberBridge {
             .all(sessionId) as Record<string, unknown>[]
           const turnRows = rows.filter((r) => r.op === 'llm.invoke')
           const pool = turnRows.length > 0 ? turnRows : rows
-          const target =
-            pool.find((r, i) => Number(r.index) === turnIndex || i === turnIndex) ??
-            (turnIndex >= 1 && turnIndex <= pool.length ? pool[turnIndex - 1] : undefined)
+          const target = pool.find((r, i) => {
+            const rawTurn: unknown = r.turn
+            const legacyTurn = typeof rawTurn === 'number' ? rawTurn - 1 : NaN
+            return Number(r.index) === turnIndex || i === turnIndex || legacyTurn === turnIndex
+          })
           if (target) {
             targetSpanId = String(target.span_id)
             model = String(target.name || '')

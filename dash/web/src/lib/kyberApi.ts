@@ -104,6 +104,28 @@ export async function fetchKyberSession(sessionId: string): Promise<KyberSession
   return fetchJson<KyberSessionAncestry>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
 }
 
+/**
+ * Measured per-turn rows of the full session payload (`GET /api/kyber/session/:id`).
+ * The inspector header (issue #184) reads its token figures from here — measured
+ * counters only, never estimates derived from text.
+ */
+/**
+ * Measured per-turn token figures from the session turn row (issue #184, Q3).
+ * Every field is a harness-measured counter or null; consumers render what is
+ * measured and state absence plainly — never estimate from text.
+ */
+export interface TurnTokenFigures {
+  input?: number | null
+  output?: number | null
+  fresh?: number | null
+  cacheRead?: number | null
+}
+
+export async function fetchKyberSessionTurns(sessionId: string): Promise<KyberSessionTurnRow[]> {
+  const body = await fetchJson<{ turns?: KyberSessionTurnRow[] }>(`/api/kyber/session/${encodeURIComponent(sessionId)}`)
+  return Array.isArray(body.turns) ? body.turns : []
+}
+
 export async function fetchKyberSessions(harness?: string | null): Promise<KyberSessionSummary[]> {
   const url = harness ? `/api/kyber/sessions?harness=${encodeURIComponent(harness)}` : '/api/kyber/sessions'
   const res = await fetch(url)

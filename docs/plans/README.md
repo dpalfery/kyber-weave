@@ -19,6 +19,8 @@ A plan is open only while it is built. The pull request that finishes it archive
 
 | Plan | Status | Date | Goal |
 |---|---|---|---|
+| [2026-09-30-issue-184.md](2026-09-30-issue-184.md) | Approved; STAGE 2 implementation | 2026-09-30 | Fix [issue #184](https://github.com/dpalfery/kyber-weave/issues/184): one 0-based turn transport with 1-based human display, a strict turn resolver, measured inspector header counts, and a diagnosable empty state. Development mode: test-first. Data-capture gap filed separately as [#216](https://github.com/dpalfery/kyber-weave/issues/216). |
+|---|---|---|---|
 
 Pipeline T9 and spine S-docs harvested 2026-09-13 into [dash/architecture.md](../dash/architecture.md), [dash/runbook.md](../dash/runbook.md), [dash/telemetry-inventory.md](../dash/telemetry-inventory.md), [ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md), and [ADR 0018](../adr/0018-kyberdash-content-retention-purge.md). ADRs 0012–0015 remain the spine harvest (0014 notes that `kyber purge-content` was not shipped). Residual risks (T8 live-source coverage, findings client-side harness filter) live on the archived plans — they are not shipped claims.
 
