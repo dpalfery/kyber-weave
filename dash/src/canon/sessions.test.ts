@@ -166,6 +166,28 @@ describe('buildSessionRow', () => {
     expect(firstTurn?.builtinToolDefinitionTokens).toBe(100)
   })
 
+  it('keeps unparseable tool definitions out of the schema ranking without losing their residence', () => {
+    // Neither blob yields a name. Keying the ranking by name collapses both
+    // into one blank-named row carrying the first blob's cost; instead the
+    // residence stays counted in the context bucket and no blank row ships.
+    const row = buildSessionRow(
+      'sess-1',
+      [
+        turn('s1', [
+          { part: 'tool_definitions', text: 'tools:\n  - name: [unclosed', tokens: 300 },
+          { part: 'tool_definitions', text: 'just some truncated prose, not a catalogue', tokens: 200 },
+        ]),
+        toolInvoke('t1', 's1', 'Read', { harness: 'antigravity', source: 'antigravity' }),
+      ],
+      approximateO200kBase,
+    )
+    const payload = sessionPayload(row)
+    expect(payload.tools.some((tool) => tool.name === '')).toBe(false)
+    expect(payload.tools.some((tool) => tool.name === 'Read')).toBe(true)
+    expect(payload.context.turns?.[0]?.builtinToolDefinitionTokens).toBe(500)
+    expect(payload.summary.tools_offered).toEqual([])
+  })
+
   it('prefers a harness-reported count over tokenizing the text', () => {
     const row = buildSessionRow(
       'sess-1',
@@ -803,8 +825,12 @@ describe('buildSessions token cache', () => {
   // passed the bare encoder, so every rebuild re-tokenized the whole corpus
   // and the table had never held a row. These tests hold the wire in place.
 
-  /** A tool definition that is not JSON, so it reaches the counter verbatim. */
-  const definition = 'a tool that does something useful; '.repeat(30)
+  // A single named definition in canonical spaceless JSON, long enough to
+  // engage the token cache (>= MIN_CACHED_TEXT_LENGTH): the item text the
+  // ranker counts is byte-identical to the blob, so the poisoned cache key
+  // hits. (Unnamed blobs are excluded from the schema ranking, so a
+  // schemaless blob can no longer carry the cache assertion.)
+  const definition = `{"name":"search","description":"${'does something useful; '.repeat(40)}"}`
 
   function cacheRows(store: CanonStore): number {
     return (

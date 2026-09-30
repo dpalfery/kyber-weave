@@ -130,6 +130,12 @@ function toolDefinitionsOf(
     for (const part of record.parts ?? []) {
       if (part.part !== 'tool_definitions') continue
       for (const tool of expandDefinitions(part.text)) {
+        // Unnamed definitions (unparseable blobs, schemaless entries) stay
+        // out of the name-keyed ranking: every one would collapse into a
+        // single blank-named row, silently dropping all but the first
+        // blob's cost. Their residence is already counted in the
+        // `tool_definitions` context bucket, so nothing is lost by skipping.
+        if (!tool.name) continue
         const existing = byName.get(tool.name)
         if (existing === undefined) {
           byName.set(tool.name, {

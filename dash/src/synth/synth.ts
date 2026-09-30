@@ -458,6 +458,86 @@ export type CanonicalToolRecord = CanonicalRecord & {
   model?: string
 }
 
+/** A live reference to one string leaf inside a cloned arguments object. */
+type StringLeaf = {
+  get: () => string
+  set: (value: string) => void
+}
+
+/**
+ * Bound an object-shaped tool-arguments payload to `maxBytes` of serialized
+ * JSON without changing its shape: string leaves are shortened longest-first
+ * until the serialization fits, so small fields (paths, flags) survive intact
+ * and the stored value stays an object. Truncating the serialization itself
+ * would swap the type mid-flight (object to string, and not even valid JSON)
+ * and make duplicate detection compare 64KB prefixes instead of arguments.
+ *
+ * The last-resort empty object only triggers when no string leaf exists to
+ * shorten — a >64KB payload of pure numbers, which transcript input cannot
+ * produce — and is still flagged truncated with the full size and hash kept.
+ */
+export function truncateObjectArguments(
+  args: Record<string, unknown>,
+  maxBytes: number,
+): { bounded: Record<string, unknown>; truncated: boolean } {
+  let clone: Record<string, unknown>
+  try {
+    clone = JSON.parse(JSON.stringify(args)) as Record<string, unknown>
+  } catch {
+    return { bounded: {}, truncated: true }
+  }
+  const serializedSize = (): number => Buffer.byteLength(JSON.stringify(clone) ?? '{}', 'utf8')
+  if (serializedSize() <= maxBytes) return { bounded: clone, truncated: false }
+
+  const leaves: StringLeaf[] = []
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, set: (value: string) => void): void => {
+    if (typeof node === 'string') {
+      let current = node
+      leaves.push({
+        get: () => current,
+        set: (value: string) => {
+          current = value
+          set(value)
+        },
+      })
+    } else if (node !== null && typeof node === 'object' && !seen.has(node)) {
+      seen.add(node)
+      if (Array.isArray(node)) {
+        node.forEach((item, i) => walk(item, (value) => {
+          node[i] = value
+        }))
+      } else {
+        for (const [key, value] of Object.entries(node)) {
+          walk(value, (next) => {
+            (node as Record<string, unknown>)[key] = next
+          })
+        }
+      }
+    }
+  }
+  walk(clone, () => {})
+
+  for (let pass = 0; pass <= leaves.length; pass++) {
+    const overage = serializedSize() - maxBytes
+    if (overage <= 0) return { bounded: clone, truncated: true }
+    let longest: StringLeaf | undefined
+    let longestBytes = 0
+    for (const leaf of leaves) {
+      const size = Buffer.byteLength(leaf.get(), 'utf8')
+      if (size > longestBytes) {
+        longestBytes = size
+        longest = leaf
+      }
+    }
+    if (longest === undefined || longestBytes === 0) break
+    longest.set(truncateUtf8(longest.get(), Math.max(0, longestBytes - overage)))
+  }
+  return serializedSize() <= maxBytes
+    ? { bounded: clone, truncated: true }
+    : { bounded: {}, truncated: true }
+}
+
 /**
  * Synthesize one child `tool.invoke` canonical record from a reader tool call
  * and its paired execution result.
@@ -480,14 +560,17 @@ export function synthesizeToolCall(
     : JSON.stringify(toolCall.arguments ?? {})
   const argsBytes = Buffer.byteLength(serializedArgs, 'utf8')
 
-  let boundedArguments = toolCall.arguments
+  let boundedArguments: string | Record<string, unknown> = toolCall.arguments
+  let argsTruncated = false
   if (typeof toolCall.arguments === 'string') {
     if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
       boundedArguments = truncateUtf8(toolCall.arguments, MAX_TOOL_ARGUMENTS_BYTES)
+      argsTruncated = true
     }
   } else if (toolCall.arguments !== null && typeof toolCall.arguments === 'object') {
     if (argsBytes > MAX_TOOL_ARGUMENTS_BYTES) {
-      boundedArguments = truncateUtf8(serializedArgs, MAX_TOOL_ARGUMENTS_BYTES)
+      boundedArguments = truncateObjectArguments(toolCall.arguments, MAX_TOOL_ARGUMENTS_BYTES).bounded
+      argsTruncated = true
     }
   }
 
@@ -516,6 +599,14 @@ export function synthesizeToolCall(
     ...(toolCall.arguments !== undefined
       ? { 'gen_ai.tool.arguments_bytes': argsBytes }
       : {}),
+    // Identity of the FULL pre-truncation arguments: duplicate detection
+    // keys on this hash when present, so two calls that differ only past
+    // the 64KB prefix never share an identity. It rides into `raw` with the
+    // rest of the attributes, which is what survives the store.
+    ...(toolCall.arguments !== undefined
+      ? { 'gen_ai.tool.arguments_hash': createHash('sha256').update(serializedArgs).digest('hex') }
+      : {}),
+    ...(argsTruncated ? { 'gen_ai.tool.arguments_truncated': true } : {}),
     ...(durationAvailability === 'measured' || durationAvailability === 'derived'
       ? { 'gen_ai.tool.duration_ms': durationMs }
       : {}),

@@ -70,9 +70,12 @@ export type Finding = {
   mechanism: string
   evidenceLinks: FindingEvidenceLink[]
   confidence: FindingConfidence
-  estimatedWasteTokens: number
+  // Absent when the detector could not derive a size (coverage-gap):
+  // no number is invented to fill it. Downstream ranking and display
+  // treat a missing estimate as zero rank, never as zero waste.
+  estimatedWasteTokens?: number
   recommendation: string
-  errorBar: FindingErrorBar
+  errorBar?: FindingErrorBar
   outcomeRiskCaveat: string
   // Contextual linkages and ranking score
   runId?: string
@@ -190,8 +193,8 @@ export function computeRankScore(
  */
 export function rankFindings(findings: readonly Finding[]): Finding[] {
   return [...findings].sort((a, b) => {
-    const scoreA = a.rankScore ?? computeRankScore(a.estimatedWasteTokens, a.confidence)
-    const scoreB = b.rankScore ?? computeRankScore(b.estimatedWasteTokens, b.confidence)
+    const scoreA = a.rankScore ?? computeRankScore(a.estimatedWasteTokens ?? 0, a.confidence)
+    const scoreB = b.rankScore ?? computeRankScore(b.estimatedWasteTokens ?? 0, b.confidence)
 
     if (Math.abs(scoreB - scoreA) > 0.001) {
       return scoreB - scoreA
@@ -210,7 +213,7 @@ export function rankFindings(findings: readonly Finding[]): Finding[] {
     const confDiff = (confOrder[b.confidence] ?? 0) - (confOrder[a.confidence] ?? 0)
     if (confDiff !== 0) return confDiff
 
-    return b.estimatedWasteTokens - a.estimatedWasteTokens
+    return (b.estimatedWasteTokens ?? 0) - (a.estimatedWasteTokens ?? 0)
   })
 }
 
@@ -535,7 +538,7 @@ export type DuplicateToolCallInput = {
   runId?: string
   sessionId?: string
   records?: readonly CanonicalRecord[]
-  calls?: readonly { name: string; arguments?: unknown; spanId?: string; turnIndex?: number; tokens?: number; sessionId?: string }[]
+  calls?: readonly { name: string; arguments?: unknown; argsHash?: string; spanId?: string; turnIndex?: number; tokens?: number; sessionId?: string }[]
   outcome?: OutcomeBlock
 }
 
@@ -554,9 +557,15 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
   type NormalizedCall = {
     name: string
     args: string
+    // Producer hash of the full pre-truncation arguments when the record
+    // carries one: the stored args may be truncated to 64KB, and hashing
+    // the truncated bytes would conflate calls that differ past the prefix.
+    argsHash?: string
     spanId: string
     turnIndex: number
-    tokens: number
+    // Undefined when no counter, byte count, part text, or raw payload
+    // could size the call: the finding stays unmeasured, never defaulted.
+    tokens?: number
     sessionId?: string
   }
 
@@ -573,8 +582,9 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
         attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
         'tool.invoke'
       const args = r.raw && typeof r.raw === 'object' ? (r.raw as Record<string, unknown>)['arguments'] : undefined
-      let tokens = r.tokens.reportedInput + r.tokens.output
-      if (!tokens) {
+      const argsHash = attributeOf(r, ['gen_ai.tool.arguments_hash'])
+      let tokens: number | undefined = r.tokens.reportedInput + r.tokens.output || undefined
+      if (tokens === undefined) {
         const resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
         if (resultBytes && resultBytes > 0) {
           tokens = Math.ceil(resultBytes / 4)
@@ -590,10 +600,10 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
           }
         }
       }
-      tokens = tokens || 250
       calls.push({
         name: toolName.trim(),
         args: serializeToolArgs(args),
+        ...(argsHash !== undefined ? { argsHash } : {}),
         spanId: r.spanId,
         turnIndex: turnIdx,
         tokens,
@@ -609,9 +619,10 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
       calls.push({
         name: c.name.trim(),
         args: serializeToolArgs(c.arguments),
+        ...(c.argsHash !== undefined ? { argsHash: c.argsHash } : {}),
         spanId: c.spanId ?? `tool-call-span-${i}`,
         turnIndex: c.turnIndex ?? i,
-        tokens: c.tokens ?? 250,
+        tokens: c.tokens,
         sessionId: c.sessionId ?? sessionId,
       })
     }
@@ -621,13 +632,14 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
 
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i]!
-    const hashedArgs = crypto.createHash('sha256').update(call.args).digest('hex')
+    const hashedArgs = call.argsHash ?? crypto.createHash('sha256').update(call.args).digest('hex')
     const callSessionId = call.sessionId ?? sessionId ?? ''
     const key = `${callSessionId}::${call.name}::${hashedArgs}`
 
     if (seenMap.has(key)) {
       const firstCall = seenMap.get(key)!
       const wasteTokens = call.tokens
+      const measured = wasteTokens !== undefined
 
       const evidenceLinks: FindingEvidenceLink[] = [
         {
@@ -649,28 +661,36 @@ export function detectDuplicateToolCall(input: DuplicateToolCallInput): Finding[
         'Client-side result caching assumes queried external resources are idempotent; volatile resources may yield stale data if cached.',
       )
 
-      const rankScore = computeRankScore(wasteTokens, 'deterministic', discount)
+      const rankScore = computeRankScore(wasteTokens ?? 0, 'deterministic', discount)
 
       findings.push({
         id: `finding-duplicate-call-${call.name}-${call.spanId}`,
         detectorId: 'duplicate-tool-call',
         title: `Duplicate Tool Call: Identical invocation of "${call.name}"`,
-        mechanism: `The tool "${call.name}" was executed multiple times with identical arguments in the same session, repeating ${wasteTokens} tokens of redundant call and result payloads.`,
+        mechanism: measured
+          ? `The tool "${call.name}" was executed multiple times with identical arguments in the same session, repeating ${wasteTokens} tokens of redundant call and result payloads.`
+          : `The tool "${call.name}" was executed multiple times with identical arguments in the same session, repeating a redundant call and result payload of unmeasured size.`,
         evidenceLinks,
         confidence: 'deterministic',
-        estimatedWasteTokens: wasteTokens,
+        ...(measured
+          ? {
+              estimatedWasteTokens: wasteTokens as number,
+              errorBar: {
+                lower: Math.floor((wasteTokens as number) * 0.8),
+                upper: Math.ceil((wasteTokens as number) * 1.25),
+              },
+            }
+          : {}),
         recommendation,
-        errorBar: {
-          lower: Math.floor(wasteTokens * 0.8),
-          upper: Math.ceil(wasteTokens * 1.25),
-        },
         outcomeRiskCaveat,
         runId,
         sessionId: call.sessionId ?? sessionId,
         rankScore,
-        measurementClass: 'deterministic',
+        measurementClass: measured ? 'deterministic' : 'coverage-gap',
         confidenceBasis: 'Deterministically measured by hashing tool names and whitespace-normalized arguments across execution spans.',
-        whatWouldRaiseIt: 'Deterministic measurement; confidence is at ceiling.',
+        whatWouldRaiseIt: measured
+          ? 'Deterministic measurement; confidence is at ceiling.'
+          : 'Reported token counters or result byte counts on the duplicate tool spans would let the redundant payload be measured.',
       })
     } else {
       seenMap.set(key, call)
@@ -706,6 +726,12 @@ export type OversizedToolResultInput = {
 export const DEFAULT_FINDING_TOKEN_THRESHOLD = 2000
 export const DEFAULT_FINDING_CHAR_THRESHOLD = 8000
 export const DEFAULT_FINDING_BYTE_THRESHOLD = 8000
+// Precedence note: UTF-8 never encodes a string in fewer bytes than its
+// UTF-16 code units, so `bytes >= chars` always holds. At the equal defaults
+// above the byte arm therefore takes precedence and the character arm cannot
+// fire first — it reports only when `charThreshold` is configured tighter
+// than `byteThreshold`, which the arm order (tokens, bytes, characters)
+// guarantees.
 
 /**
  * Detector 3: oversized-tool-result
@@ -766,17 +792,23 @@ export function detectOversizedToolResult(input: OversizedToolResultInput): Find
         (r.name && r.name !== 'tool.invoke' ? r.name : undefined) ??
         attributeOf(r, ['gen_ai.tool.name', 'tool.name']) ??
         'tool'
+      // One fallback order, lazily: attributes first without touching raw;
+      // the raw fallback runs only when the byte count is still unknown and
+      // the content in hand cannot size the result (truncated or absent). A
+      // complete content never decompresses a lazy raw for a number it
+      // already implies, but a keyless attributes map must not stop the
+      // lookup the way the previous hand-rolled twin did.
       const isTruncated = r.parts?.some(p => (p as { truncated?: boolean }).truncated) ?? false
       const recAny = r as unknown as { attributes?: Record<string, unknown> }
-      let resultBytes: number | undefined
-      if (recAny.attributes && typeof recAny.attributes === 'object') {
-        const val = recAny.attributes['gen_ai.tool.result_bytes']
-        if (typeof val === 'number' && Number.isFinite(val)) resultBytes = val
-        else if (typeof val === 'string') {
-          const num = Number(val)
-          if (Number.isFinite(num)) resultBytes = num
-        }
-      } else if (isTruncated || !content) {
+      const attrs = recAny.attributes
+      const attrVal = attrs && typeof attrs === 'object' ? attrs['gen_ai.tool.result_bytes'] : undefined
+      let resultBytes =
+        typeof attrVal === 'number' && Number.isFinite(attrVal)
+          ? attrVal
+          : typeof attrVal === 'string' && Number.isFinite(Number(attrVal))
+            ? Number(attrVal)
+            : undefined
+      if (resultBytes === undefined && (isTruncated || !content)) {
         resultBytes = numberAttributeOf(r, ['gen_ai.tool.result_bytes'])
       }
       const chars = content.length

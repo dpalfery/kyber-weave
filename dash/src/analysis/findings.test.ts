@@ -102,9 +102,9 @@ describe('Decision D5: Finding Contract Compliance field-for-field', () => {
     expect(typeof finding.estimatedWasteTokens).toBe('number')
     expect(finding.estimatedWasteTokens).toBeGreaterThan(0)
     expect(typeof finding.recommendation).toBe('string')
-    expect(typeof finding.errorBar.lower).toBe('number')
-    expect(typeof finding.errorBar.upper).toBe('number')
-    expect(finding.errorBar.lower).toBeLessThanOrEqual(finding.errorBar.upper)
+    expect(typeof finding.errorBar!.lower).toBe('number')
+    expect(typeof finding.errorBar!.upper).toBe('number')
+    expect(finding.errorBar!.lower).toBeLessThanOrEqual(finding.errorBar!.upper)
     expect(typeof finding.outcomeRiskCaveat).toBe('string')
   })
 })
@@ -154,7 +154,7 @@ describe('Detector 1: dormant-tool-schema', () => {
     expect(f.evidenceLinks[0]?.spanId).toBe('turn-1')
     expect(f.evidenceLinks[1]?.spanId).toBe('turn-3')
     expect(f.estimatedWasteTokens).toBeGreaterThan(0)
-    expect(f.errorBar.lower).toBeLessThanOrEqual(f.errorBar.upper)
+    expect(f.errorBar!.lower).toBeLessThanOrEqual(f.errorBar!.upper)
   })
 
   it('does NOT flag tool schema if tool is invoked in any turn', () => {
@@ -402,6 +402,32 @@ describe('Detector 2: duplicate-tool-call', () => {
     expect(findings[0]!.rankScore).toBe(0)
   })
 
+  it('keys duplicates on the full-arguments hash when present, not the truncated stored prefix', () => {
+    const zeroed = { freshInput: 0, cacheRead: 0, cacheCreation: 0, output: 0, reportedInput: 0, reportedOutput: 0 }
+    // Both records store the same 64KB-truncated arguments object; only the
+    // producer hash distinguishes the full pre-truncation arguments.
+    const truncatedArgs = { path: 'src/file.ts', content: 'Z'.repeat(1000) }
+    const mk = (spanId: string, argsHash: string) =>
+      makeMockRecord({
+        spanId,
+        sessionId: 'session-1',
+        op: 'tool.invoke',
+        name: 'Write',
+        raw: {
+          arguments: truncatedArgs,
+          'gen_ai.tool.arguments_hash': argsHash,
+          'gen_ai.tool.arguments_truncated': true,
+        },
+        tokens: zeroed,
+        parts: [],
+      })
+
+    // Different full arguments sharing a truncated prefix: not duplicates.
+    expect(detectDuplicateToolCall({ records: [mk('a', 'hash-one'), mk('b', 'hash-two')] })).toHaveLength(0)
+    // Same full-argument hash: a genuine duplicate.
+    expect(detectDuplicateToolCall({ records: [mk('a', 'hash-same'), mk('b', 'hash-same')] })).toHaveLength(1)
+  })
+
   it('detects duplicate child tool.invoke records within session turns', () => {
     const turn1 = makeMockRecord({
       spanId: 'llm-turn-1',
@@ -482,6 +508,25 @@ describe('Detector 2: duplicate-tool-call', () => {
 })
 
 describe('Detector 3: oversized-tool-result', () => {
+  it('reads result_bytes from raw when attributes are present but carry no byte count', () => {
+    // The hand-rolled attribute read used to stop at a present-but-keyless
+    // attributes map and never consult raw. The truncated part means the
+    // content in hand cannot size the result, so the raw fallback must run.
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-raw-bytes',
+      op: 'tool.invoke',
+      name: 'fetch_api',
+      attributes: { 'gen_ai.tool.name': 'fetch_api' },
+      parts: [{ part: 'tool_result_content', text: 'short', truncated: true }],
+      raw: { result: 'short', 'gen_ai.tool.result_bytes': 20000 },
+    })
+
+    const findings = detectOversizedToolResult({ records: [toolRecord] })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.title).toContain('20000 bytes')
+  })
+
   it('flags tool outputs exceeding token/byte budgets with low yield', () => {
     const bigContent = 'x'.repeat(12000)
     const toolRecord = makeMockRecord({
@@ -638,6 +683,27 @@ describe('Detector 3: oversized-tool-result', () => {
     })
 
     expect(findings.length).toBe(0)
+  })
+
+  it('reports the character arm when charThreshold is tighter than the byte threshold', () => {
+    // ASCII content: 200 characters == 200 bytes, so the byte arm (8000)
+    // stays quiet and the character arm (100) fires with its own unit.
+    const toolRecord = makeMockRecord({
+      spanId: 'tool-res-chars',
+      op: 'tool.invoke',
+      name: 'fetch_api',
+      parts: [{ part: 'tool_result_content', text: 'x'.repeat(200), tokens: 50 }],
+    })
+
+    const findings = detectOversizedToolResult({
+      records: [toolRecord],
+      tokenThreshold: 2000,
+      charThreshold: 100,
+      byteThreshold: 8000,
+    })
+
+    expect(findings.length).toBe(1)
+    expect(findings[0]!.title).toContain('200 characters')
   })
 
   it('does NOT access lazy record.raw when record.name already holds the tool name', () => {

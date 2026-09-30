@@ -494,7 +494,8 @@ export interface KyberFinding {
   mechanism: string
   evidenceLinks: KyberEvidenceLink[]
   confidence: FindingConfidenceLevel
-  estimatedWasteTokens: number
+  // Absent for unmeasured (coverage-gap) findings: render '—', never zero.
+  estimatedWasteTokens?: number
   recommendation: string
   errorBar: {
     lower: number

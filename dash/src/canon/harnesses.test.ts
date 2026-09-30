@@ -508,7 +508,7 @@ describe('buildHarnessRollup — Tool yield aggregation', () => {
           order: 0,
         },
       ],
-      cost: { basis: 'exact', status: 'ok', input: 0.001, output: 0.001, total: 0.002 },
+      cost: { basis: 'published', status: 'priced', value: 0.002, currency: 'USD' },
       measurability: { token_usage: 'measured' },
     }
     const sessionRow = buildSessionRow('sess-offered-no-invocations', [parentWithDefs], (s) => s.length)
