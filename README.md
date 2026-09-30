@@ -153,7 +153,7 @@ that was fixed in `.claude` and left broken in `.cursor`.
 Managing agent roles and skill sets across disparate developer environments leads to
 configuration drift, broken permissions, and fragmented workflows. Kyber-Squad provides a
 **single, unified lifecycle and deployment control plane** for deploying 21 canonical agents
-and 24 skills across 10 coding harnesses.
+and 24 skills across 12 coding harnesses.
 
 **The canonical tree.** Maintains 21 canonical agent bodies and 24 canonical skills under
 [`products/kyber-squad/`](products/kyber-squad/README.md), governed by strict schemas, model
