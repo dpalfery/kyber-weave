@@ -143,12 +143,12 @@ Start at the [Review council overview](code-review/README.md) for the idea and t
 ## Feature 5 — KyberDash
 
 Local telemetry observability and context tuning for agentic workflows: an OTLP receiver and a
-single canonical store feeding four execution surfaces, none of which sends anything off the
+single canonical store feeding three local surfaces, none of which sends anything off the
 machine. Start at the [KyberDash Overview](dash/README.md) for the value proposition.
 
 | Page | Covers |
 |---|---|
-| [Overview & Why KyberDash](dash/README.md) | Value proposition, the four surfaces, capabilities |
+| [Overview & Why KyberDash](dash/README.md) | Value proposition, the three surfaces, capabilities |
 | [Architecture](dash/architecture.md) | Ingest pipeline, canonical store, analyses and surfaces |
 | [Runbook](dash/runbook.md) | Installing the released binary; building, running, and testing each surface locally |
 | [Telemetry inventory](dash/telemetry-inventory.md) | Which signals and content each harness actually makes available |

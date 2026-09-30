@@ -13,10 +13,13 @@
 # Tag push remains for minor/major/dev cuts:
 #   git tag v0.2.0 && git push origin v0.2.0
 #
-# Builds the RID matrix, stamps Version from the tag, attaches archives +
-# SHA256SUMS.txt to a GitHub Release (passing --prerelease for hyphenated
-# pre-releases), and publishes PackAsTool packages (including pre-releases)
-# to GitHub Packages.
+# Builds the RID matrix, stamps Version from the tag, computes and validates a
+# complete SHA256SUMS.txt manifest via scripts/verify-release-checksums.sh,
+# attaches archives + manifest to a GitHub Release (passing --prerelease for
+# hyphenated pre-releases), verifies the published asset set matches the expected
+# list plus SHA256SUMS.txt (failing on missing or extra assets) and byte-compares
+# the published manifest against the local copy, and publishes PackAsTool packages
+# (including pre-releases) to GitHub Packages.
 #
 # npm and Homebrew are not published from this workflow. nuget.org is forbidden.
 
@@ -713,12 +716,15 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Checksums
+      - name: Verify and compute checksums
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
-          cd release-assets
-          sha256sum * | tee SHA256SUMS.txt
-          ls -la
+          bash scripts/verify-release-checksums.sh release-assets "${VERSION}"
+          echo
+          echo "=== Release assets and manifest ==="
+          ls -la release-assets/
 
       - name: Create tag and GitHub Release
         env:
@@ -762,10 +768,22 @@ jobs:
           \`install.sh --with-menubar\` on macOS.
 
           > [!NOTE]
-          > **Windows SmartScreen**: the tray installer is not signed with an EV
-          > certificate, so SmartScreen may warn on first run until the download
-          > builds reputation. Choose **More info -> Run anyway**. The macOS app is
-          > signed with Developer ID (team \`J2UNNQ466J\`) and notarized.
+          > **Windows signing and verification**: the tray installer
+          > (\`kyberdash-tray-win-x64-setup.exe\`) and every Windows .exe file inside
+          > the \`kyber-weave-win-x64.zip\`, \`kyber-weave-mcp-win-x64.zip\`, and
+          > \`kyberdash-win-x64.zip\` archives are **not Authenticode-signed**. When you run them,
+          > Windows SmartScreen displays "Windows protected your PC" — click **More info**,
+          > then **Run anyway** to proceed.
+          >
+          > **Verify the download** before running: see the
+          > [hash verification guide](https://github.com/dpalfery/kyber-weave/blob/main/docs/install.md#verifying-a-download)
+          > for Windows PowerShell (\`Get-FileHash -Algorithm SHA256\`), macOS (\`shasum -a 256 -c\`),
+          > and Linux (\`sha256sum -c\`) commands.
+          >
+          > For more on the unsigned state and SmartScreen behavior, see the
+          > [Windows setup guide](https://github.com/dpalfery/kyber-weave/blob/main/docs/install.md#windows-unsigned-binaries-and-smartscreen).
+          >
+          > The macOS tray app is signed with Developer ID (team \`J2UNNQ466J\`) and notarized.
           EOF
           )"
 
@@ -779,6 +797,64 @@ jobs:
           fi
           ARGS+=(release-assets/*)
           gh "${ARGS[@]}"
+
+      - name: Verify published release assets
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Get the expected asset list from the script. This ensures the
+          # post-publish check uses the same authoritative list as the pre-publish
+          # check, with no hand-copied duplication.
+          EXPECTED_ASSET_LIST=$(bash scripts/verify-release-checksums.sh --list release-assets "${VERSION}")
+          declare -a expected_assets=()
+          while read -r asset; do
+              expected_assets+=("$asset")
+          done <<< "$EXPECTED_ASSET_LIST"
+
+          # Fetch the published release's asset names.
+          ASSETS_JSON="$(gh release view "${TAG}" --json assets --jq '.assets[].name')"
+          declare -a published_assets=()
+          while read -r asset; do
+              published_assets+=("$asset")
+          done <<< "$ASSETS_JSON"
+
+          # Compare expected vs. published as sorted sets: both must contain
+          # exactly the 20 expected assets plus SHA256SUMS.txt (21 total).
+          # Sort and compare to catch both missing and extra assets.
+          echo "Performing asset inventory verification..."
+          declare -a expected_with_manifest=("${expected_assets[@]}" "SHA256SUMS.txt")
+          EXPECTED_SORTED=$(printf '%s\n' "${expected_with_manifest[@]}" | sort)
+          PUBLISHED_SORTED=$(printf '%s\n' "${published_assets[@]}" | sort)
+
+          if [[ "$EXPECTED_SORTED" != "$PUBLISHED_SORTED" ]]; then
+              {
+                  echo "::error::published release asset inventory mismatch"
+                  echo "Expected (${#expected_with_manifest[@]} items):"
+                  printf '%s\n' "$EXPECTED_SORTED"
+                  echo
+                  echo "Published (${#published_assets[@]} items):"
+                  printf '%s\n' "$PUBLISHED_SORTED"
+              } >&2
+              exit 1
+          fi
+
+          # Download the published manifest and compare with the local copy.
+          gh release download "${TAG}" --pattern "SHA256SUMS.txt" --dir /tmp/release-verify
+          if ! diff -q /tmp/release-verify/SHA256SUMS.txt release-assets/SHA256SUMS.txt; then
+              echo "::error::published SHA256SUMS.txt does not match local copy" >&2
+              echo "Expected:" >&2
+              cat release-assets/SHA256SUMS.txt >&2
+              echo "Published:" >&2
+              cat /tmp/release-verify/SHA256SUMS.txt >&2
+              exit 1
+          fi
+
+          echo "Asset inventory verification passed: all ${#expected_assets[@]} expected assets + manifest present"
+          echo "Manifest byte-comparison verification passed"
 
   gh-packages:
     name: Publish GitHub Packages (David Palfery must approve)
