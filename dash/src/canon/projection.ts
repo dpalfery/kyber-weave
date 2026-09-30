@@ -20,6 +20,10 @@ import type { CanonStore } from './store.js'
  * session, run, execution, harness rollup and finding through the
  * authoritative `buildSessions()` pipeline. Rebuilding is always safe — the
  * derived tables are caches over `records`, replaced wholesale.
+ *
+ * Cost write-back (issue #186 U9): `records.cost_json` is the derived, re-derivable cost cache.
+ * The report path reads it, the next projection reprices it (one transaction per session, and no
+ * write when already correct), and a re-ingest overwrite self-heals it.
  */
 export async function projectCanonicalStore(store: CanonStore): Promise<BuildSessionsReport> {
   return buildSessions(store)

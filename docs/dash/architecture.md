@@ -277,6 +277,68 @@ separates `no_rate` from `not_billed` from `out_of_scope` (R5.4, R5.5), and tier
 selects context tiers by measured input size (R5.6). The scoping failure this prevents — a
 table pricing a harness it does not name — is in the [rationale](../reference/kyberdash-rationale.md).
 
+**Repricing at projection time.** Ingest freezes a turn's cost as it arrived, often
+`{unknown, no_rate}`. `buildSessions` reprices every turn record whose block is not
+`basis:'harness'` and writes changed `cost_json` back in the same pass, so the session list, the
+cost tile and the report path (`costContributionsForSessions`) share one answer. There is no
+schema bump (`SCHEMA_VERSION` stays 14); existing stores and later `priceOverrides` /
+`modelAliases` changes take effect on the next projection.
+
+The write-back is the one exception to "every derived table is a cache over `records`". Each
+session's changed blocks go through `CanonStore.setCosts` in **one transaction** (`BEGIN`/`COMMIT`,
+rolled back whole on failure; an empty list is a no-op), so a failing session cannot leave a
+half-repriced one. `records.cost_json` is the derived, re-derivable cost cache: the report path
+reads it, the next projection reprices it, and a re-ingest overwrite self-heals on that next
+projection. Reprojecting a correct store writes nothing, and `harness` blocks are never touched.
+`isCopilotHarness` (`copilot-rates.ts`) is the single Copilot-family predicate used to route a turn
+to the credits table.
+
+**Published-path rules.**
+
+- An absent model is `{published, no_rate}` from `pricePublishedTurn`, not `unknown`: mixing
+  `unknown` with `published` turns makes `sumCosts` refuse the total (`COST_BASIS_MISMATCH`).
+- Cache writes: an absent cache-write rate is billed at the input rate. `gpt-6-luna` has no
+  published cache-write rate, so cache creation is billed as input on both the LiteLLM path and the
+  Copilot credits table (base $0.10, long-context $0.20 per 1M).
+  `claude-sonnet-5-5` keeps its explicit $2.50/M.
+- `gpt-6-luna` long-context tier: one shared `GPT_6_LUNA_PROMPT_TOKEN_THRESHOLD` (272,000,
+  `pricing/models.ts`). Both paths choose the tier by measured input (fresh + cacheRead +
+  cacheCreation); 272,000 stays on the base tier and 272,001 is long.
+- The Copilot reader sets `costHarnessReported` only when `cost_usd` is a finite number. Copilot
+  without the marker defaults to `published`, so a parser that forgets the flag is repriced from the
+  credits table instead of keeping a LiteLLM-derived figure at API list rates.
+- `claude-sonnet-5-5` and `gpt-6-luna` also live in `MANUAL_ENTRIES` of
+  `dash/scripts/bundle-litellm.mjs` (guarded by a test), so a regeneration reproduces them. The
+  bundler writes `dash/src/data/` while the runtime reads `dash/src/pricing/data/` (follow-up F2 in
+  the [rationale](../reference/kyberdash-rationale.md)).
+
+| Harness (normalized) | Priced from | Notes |
+|---|---|---|
+| `claude-code` (`claude-cli`, `claude-desktop`), `codex` (`codex-*`) | The bundled published table: the LiteLLM snapshot plus `pricing-provenance.json`, through `pricePublishedTurn` (`dash/src/canon/published-pricing.ts`) | Cache-aware. `claude-sonnet-5-5` and `gpt-6-luna` (with its >272K tier) were added 2026-09-30 with cited sources. `priceOverrides`, `modelAliases` and `flatRateModels` act on this path. |
+| `copilot` (`copilot-*`) | The Copilot credits table (`dash/src/canon/copilot-rates.ts`; 1 credit = $0.01; GitHub models-and-pricing) | Per-class rates (input, cached input, cache write, output) and input-size tiers. Where the table says cache write is "Not applicable" (`gpt-6-luna`), the input rate is used. A model the table omits is `{published, no_rate}`; overrides and aliases do not reach this path. |
+| Any harness outside the two above | Unchanged: the upstream parser's figure | Additive scope; a harness the LiteLLM table does not name is `out_of_scope` for it (R5.3). |
+
+A genuine harness-reported figure is never repriced (R5.2). For Copilot, only the genuine
+reader's `cost_usd` (marked `costHarnessReported` in `synth/readers/copilot.ts`) is `harness`;
+figures the Copilot parser derives through LiteLLM are `published` and are repriced from the
+credits table. `costBlockFor` returns `{published, no_rate}` for a zero or non-finite figure from
+a published-rate source (`costIsEstimated === true`), and `unknown` only where no pricing was
+attempted.
+
+**Session totals.** `buildSessionRow` sums only turn records; a non-turn span makes no cost
+claim. A session with some unpriced published turns totals `partial` with the priced share. A
+genuine mix of `harness` and `published` turns records `COST_BASIS_MISMATCH` in the payload's
+`problems` (where the cost tile reads it) instead of silently becoming `no_rate`.
+
+**Display.** `KyberBridge.listSessions` maps the canonical `CostBlock` (basis, status, value,
+currency) onto each row as `cost`; `cost_usd` is the block's value only when `status` is `priced`
+and the currency is USD. `AgentSessionRow` renders the cost tile's formatter text ("partially
+priced", "no published rate", "not billed", "out of scope", or the formatted figure); `—` appears
+only when the server sent no cost.
+
+**Rate metadata.** `getMeta().rates` keeps its flat Copilot-credits fields and adds `tables`
+(`published` and `copilot_credits`), each with `source`, `retrieved` and `applies_to`.
+
 ### `Measurability` and honest unobservability
 
 Each source declares per-metric availability independent of value (R10.1). A metric a source
@@ -291,7 +353,7 @@ measured independently from whether individual composition buckets are available
 
 `CanonStore` (`dash/src/canon/store.ts`) is SQLite through the runtime's built-in module —
 upstream already depends on it for two providers, so no new dependency is introduced. The
-schema is a version-controlled constant executed on construction, currently at version 13;
+schema is a version-controlled constant executed on construction, currently at version 14;
 metadata carries the schema version, and a store built by an older version is migrated in
 place on open rather than rebuilt. Idempotent upsert is keyed on the
 record identifier, which makes re-ingest idempotent (R2.5). The tables are `records`,
@@ -299,7 +361,7 @@ record identifier, which makes re-ingest idempotent (R2.5). The tables are `reco
 `quarantined_logs`, `enriched_logs`, `problems`, `ingest_log`, `metadata`,
 `harness_rollup`, `finding`, `prediction`, `source_checkpoint`, `record_provenance`, and `refresh_run`.
 Schema 11 added checkpointing and provenance ([ADR 0016](../adr/0016-kyberdash-harness-source-refresh.md)),
-schema 12 added `refresh_run`, and schema 13 introduced `problem_key` with unique indexing.
+schema 12 added `refresh_run`, schema 13 introduced `problem_key` with unique indexing, and schema 14 rekeyed that identity by span, code, and location.
 `commitSourceUnit` writes records, provenance, and the unit checkpoint together. The raw
 column is compressed (R12.4); the measured cost of not doing
 so is in the [rationale](../reference/kyberdash-rationale.md).
