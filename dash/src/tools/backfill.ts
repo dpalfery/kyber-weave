@@ -234,10 +234,15 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
     if (report.traces % progressEvery === 0) options.onProgress?.(report.traces, traceIds.length)
   }
 
+  // The tail sweep catches excluded-harness rows the per-trace loop never
+  // visits (rows without raw evidence, rows with no trace id). On a scoped
+  // run it sees only the requested sources: quarantining another source's
+  // excluded rows — and deleting their sessions below — would break the
+  // `--source` contract the scoped test pins.
   const excludedHarnesses = [...EXCLUDED_HARNESS_IDENTITIES]
   const EXCLUSION_BATCH_SIZE = 500
   for (;;) {
-    const batch = store.listRecordsByHarness(excludedHarnesses, EXCLUSION_BATCH_SIZE)
+    const batch = store.listRecordsByHarness(excludedHarnesses, EXCLUSION_BATCH_SIZE, options.sources)
     if (batch.length === 0) break
     for (const record of batch) {
       const rawAttrs =
@@ -248,9 +253,14 @@ export function renormalizeRecords(store: CanonStore, options: BackfillOptions =
       deleteDerivedSessions(store, record)
     }
   }
-  for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
-    store.deleteSessionsByHarness(excluded)
+  if (options.sources === undefined) {
+    for (const excluded of EXCLUDED_HARNESS_IDENTITIES) {
+      store.deleteSessionsByHarness(excluded)
+    }
   }
+  // On a scoped run the per-trace loop already deleted the derived sessions
+  // of every row this run quarantined (deleteDerivedSessions above); sessions
+  // from unvisited traces are out of scope and stay.
 
   options.onProgress?.(report.traces, traceIds.length)
   return report

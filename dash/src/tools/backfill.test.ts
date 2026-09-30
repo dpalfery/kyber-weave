@@ -167,7 +167,9 @@ describe('renormalizeRecords — retained raw evidence', () => {
     expect(store.get('gemini-span-1')).toBeUndefined()
     expect(store.getQuarantine('gemini-span-1')).toEqual(expect.objectContaining({
       spanId: 'gemini-span-1',
-      reason: expect.stringMatching(/excluded|unclaimed/i),
+      // Exact reason: a regression that bypasses Gemini detection must not
+      // pass by relabeling the row `unclaimed`.
+      reason: 'excluded_harness',
     }))
     expect(store.listAll().every((record) => record.harness !== 'gemini')).toBe(true)
     expect(rebuild.built).toBeGreaterThanOrEqual(1)
@@ -211,6 +213,53 @@ describe('renormalizeRecords — retained raw evidence', () => {
     expect(store.get('agy-span-1')?.harness).toBe('antigravity')
     expect(store.get('file-span-1')?.harness).toBe('antigravity-cli')
     expect(store.getQuarantine('file-span-1')).toBeUndefined()
+    store.close()
+  })
+
+  it('leaves excluded-harness rows and sessions from other sources alone on a scoped run', async () => {
+    // The `--source` contract: only requested traces are remediated. A
+    // genuine gemini row from another source — and its derived session —
+    // must survive a scoped run; the tail sweep and session purge are
+    // source-aware too.
+    const store = new CanonStore(':memory:')
+    store.upsertMany([
+      staleRecord({
+        spanId: 'agy-span-1',
+        traceId: 'agy-trace-1',
+        source: 'agy',
+        harness: 'gemini',
+        raw: {
+          'gen_ai.agent.name': 'antigravity',
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 1_200,
+          'gen_ai.usage.output_tokens': 150,
+        },
+      }),
+      staleRecord({
+        spanId: 'other-gemini-span-1',
+        traceId: 'other-gemini-trace-1',
+        source: 'gemini-cli',
+        harness: 'gemini',
+        raw: {
+          'gen_ai.system': 'gemini',
+          'gen_ai.usage.input_tokens': 5,
+          'gen_ai.usage.output_tokens': 2,
+        },
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'other-gemini-trace-1',
+      harness: 'gemini',
+      payload: { sessionId: 'other-gemini-trace-1', harness: 'gemini' },
+    })
+
+    const report = renormalizeRecords(store, { sources: ['agy'] })
+
+    expect(report.traces).toBe(1)
+    expect(store.get('agy-span-1')?.harness).toBe('antigravity')
+    expect(store.get('other-gemini-span-1')?.harness).toBe('gemini')
+    expect(store.getQuarantine('other-gemini-span-1')).toBeUndefined()
+    expect(store.getSessionPayload('other-gemini-trace-1')).toBeDefined()
     store.close()
   })
 
