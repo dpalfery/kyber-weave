@@ -479,7 +479,6 @@ export function AgentSessionContent({
       const turn = findTurnByTransport(turns, turnIndex)
       if (!turn) return
 
-      const turnNum = turn.index ?? turn.turn ?? turnIndex
       if (bucketName) {
         const ctx = session?.context
         const contextTurns: KyberContextTurn[] = ctx?.measurable ? ctx.turns : []
@@ -487,10 +486,14 @@ export function AgentSessionContent({
         // legacy `turn`); the transport `turnIndex` is 0-based, so compare in
         // 1-based space with the shared strict lookup.
         const oneBased = turnIndex + 1
+        // Edge fallbacks compare in 1-based space (issue #184 review): the
+        // first turn reads `ctx.first`, the final turn `ctx.last`. Any other
+        // turn without a context row falls back to its own buckets below —
+        // never to the opposite edge of the session.
         const ctxTurn: KyberContextTurn | KyberContextBucket | undefined =
           findContextTurn(contextTurns, oneBased) ||
-          (turnNum === 1 ? ctx?.first : undefined) ||
-          ctx?.last
+          (oneBased === 1 ? ctx?.first : undefined) ||
+          (oneBased === turns.length ? ctx?.last : undefined)
 
         const rawBuckets = ctxTurn?.buckets ?? turn.buckets ?? {}
         const tokens = Number(rawBuckets[bucketName] ?? turn[bucketName] ?? 0)

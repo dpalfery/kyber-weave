@@ -1090,6 +1090,84 @@ describe('AgentSessionDashboard: Interaction & Drawer Integration', () => {
       }
     }
   })
+
+  it('shows the first-turn edge counts, not the last, for Turn 1 when context.turns is empty (issue #184 review)', () => {
+    const edgeSession: AgentSessionPayload = {
+      ...sampleSession,
+      turns: [
+        {
+          index: 0,
+          spanId: 'turn-span-1',
+          model: 'claude-3-5-sonnet',
+          buckets: { tool_definitions: 100 },
+        },
+      ],
+      context: {
+        measurable: true,
+        contextLimit: 200000,
+        turns: [],
+        residualTotal: 0,
+        derivedCounts: false,
+        freshJumpFactor: 2,
+        flaggedTurns: [],
+        sessionAccumulationRate: 0,
+        unmeasuredTurns: 0,
+        first: {
+          buckets: { tool_definitions: 111 },
+          reported_input: 111,
+        },
+        last: {
+          buckets: { tool_definitions: 999 },
+          reported_input: 999,
+        },
+      },
+    }
+
+    let capturedTitle = ''
+    let capturedContent: unknown = null
+
+    const reactInternals = internalsOf()
+    const origState = reactInternals?.H?.useState
+    if (reactInternals?.H) {
+      reactInternals.H.useState = (initial: unknown) => {
+        if (typeof initial === 'boolean') {
+          return [false, () => {}]
+        }
+        if (typeof initial === 'string') {
+          return [capturedTitle, (t: string) => { capturedTitle = t }]
+        }
+        return [capturedContent, (c: unknown) => { capturedContent = c }]
+      }
+    }
+
+    try {
+      const tree = AgentSessionContent({ session: edgeSession })
+      let spendChartsEl: React.ReactElement | null = null
+      const walk = (node: unknown): void => {
+        if (!React.isValidElement(node)) return
+        const props = node.props as Record<string, unknown> | undefined
+        if (props?.onSelectTurn && props?.session) {
+          spendChartsEl = node
+          return
+        }
+        if (props?.children) {
+          React.Children.forEach(props.children, walk)
+        }
+      }
+      walk(tree)
+      expect(spendChartsEl).not.toBeNull()
+
+      ;(spendChartsEl!.props as { onSelectTurn: (i: number, b?: string) => void }).onSelectTurn(0, 'tool_definitions')
+      expect(capturedTitle).toBe('Turn 1 · tool_definitions')
+      const bucketData = capturedContent as { tokens?: number; total?: number }
+      expect(bucketData.tokens).toBe(111)
+      expect(bucketData.total).toBe(111)
+    } finally {
+      if (reactInternals?.H) {
+        reactInternals.H.useState = origState
+      }
+    }
+  })
 })
 
 describe('AgentSessionDashboard: Remote Fetch States', () => {

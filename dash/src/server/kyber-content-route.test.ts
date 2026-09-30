@@ -142,6 +142,58 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         ],
       },
     })
+    // Identity-bearing payload shorter than the record pool (issue #184
+    // review): an unmatched identity must 404, not fall through to a
+    // positional record match.
+    store.upsertMany([
+      turn('span-x0', [{ part: 'system_prompt', text: 'cross X0', tokens: 1 }], {
+        sessionId: 'sess-cross-001',
+        timestamp: '2026-09-03T13:00:00.000Z',
+      }),
+      turn('span-x1', [{ part: 'system_prompt', text: 'cross X1', tokens: 1 }], {
+        sessionId: 'sess-cross-001',
+        timestamp: '2026-09-03T13:01:00.000Z',
+      }),
+      turn('span-x2', [{ part: 'system_prompt', text: 'cross X2', tokens: 1 }], {
+        sessionId: 'sess-cross-001',
+        timestamp: '2026-09-03T13:02:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-cross-001',
+      harness: 'copilot',
+      label: 'Cross-source descriptors',
+      payload: {
+        id: 'sess-cross-001',
+        harness: 'copilot',
+        turns: [
+          { index: 0, spanId: 'span-x0', model: 'm' },
+          { index: 1, spanId: 'span-x1', model: 'm' },
+        ],
+      },
+    })
+    // Payload rows without any identity (issue #184 review): the canonical
+    // positional lookup stays available as the only option.
+    store.upsertMany([
+      turn('span-q0', [{ part: 'system_prompt', text: 'noident Q0', tokens: 1 }], {
+        sessionId: 'sess-noidentity-001',
+        timestamp: '2026-09-03T14:00:00.000Z',
+      }),
+      turn('span-q1', [{ part: 'system_prompt', text: 'noident Q1', tokens: 1 }], {
+        sessionId: 'sess-noidentity-001',
+        timestamp: '2026-09-03T14:01:00.000Z',
+      }),
+    ])
+    store.upsertSession({
+      sessionId: 'sess-noidentity-001',
+      harness: 'copilot',
+      label: 'Identity-free descriptors',
+      payload: {
+        id: 'sess-noidentity-001',
+        harness: 'copilot',
+        turns: [{ spanId: 'span-q0', model: 'm' }],
+      },
+    })
 
     canonDb = new DatabaseSync(':memory:')
 
@@ -357,6 +409,32 @@ describe('Backend Contract Tests: GET /api/kyber/session/:id/content', () => {
         const secondBody = (await second.json()) as TurnContentResult
         expect(secondBody.spanId).toBe('span-pa')
         expect(secondBody.assembledText).toContain('precedence A')
+      })
+
+      it('returns 404 when an identity-bearing payload misses, without falling through to records (issue #184 review)', async () => {
+        // Two identified payload turns but three records: transport 2 matches
+        // no identity, and must not resolve positionally to span-x2.
+        const res = await fetch(`${base}/api/kyber/session/sess-cross-001/turn/2/content`)
+        expect(res.status).toBe(404)
+        assertStandardKyberHeaders(res)
+      })
+
+      it('resolves identified payload turns while the cross-source guard stands', async () => {
+        const res = await fetch(`${base}/api/kyber/session/sess-cross-001/turn/1/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-x1')
+        expect(body.assembledText).toContain('cross X1')
+      })
+
+      it('preserves the canonical positional lookup for identity-free payload rows (issue #184 review)', async () => {
+        // One identity-free payload row, two records: transport 1 has no
+        // payload answer, so the positional record lookup still serves span-q1.
+        const res = await fetch(`${base}/api/kyber/session/sess-noidentity-001/turn/1/content`)
+        expect(res.status).toBe(200)
+        const body = (await res.json()) as TurnContentResult
+        expect(body.spanId).toBe('span-q1')
+        expect(body.assembledText).toContain('noident Q1')
       })
     })
 

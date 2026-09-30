@@ -1107,6 +1107,12 @@ export class KyberBridge {
       if (turnItem) {
         if (typeof turnItem.spanId === 'string') targetSpanId = turnItem.spanId
         if (typeof turnItem.model === 'string') model = turnItem.model
+      } else if (turns.some((t) => turnTransportIndexOf(t) !== undefined)) {
+        // The payload names its turns and none matches: stop here. Falling
+        // through to the positional record lookup below could serve a
+        // neighboring span's content instead of the documented 404
+        // (issue #184 review). Identity-free payloads still fall through.
+        return null
       }
     }
 
