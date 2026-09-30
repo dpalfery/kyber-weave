@@ -57,6 +57,7 @@ import type { HarnessAdapter } from './adapters/base.js'
 import { claudeCodeAdapter } from './adapters/claude-code.js'
 import { copilotAdapter } from './adapters/copilot.js'
 import { geminiAdapter } from './adapters/gemini.js'
+import { antigravityAdapter } from './adapters/antigravity.js'
 import { piAdapter } from './adapters/pi.js'
 import { CANONICAL_CONTENT_KEYS, type Measurability, type MetricAvailability, type NotMeasurable } from './types.js'
 
@@ -367,7 +368,7 @@ export function measurabilityFor(
  * to update.
  */
 const ADAPTERS_BY_HARNESS: ReadonlyMap<string, HarnessAdapter> = new Map(
-  [copilotAdapter, geminiAdapter, piAdapter, claudeCodeAdapter].map((adapter) => [adapter.name, adapter]),
+  [copilotAdapter, geminiAdapter, antigravityAdapter, piAdapter, claudeCodeAdapter].map((adapter) => [adapter.name, adapter]),
 )
 
 // ---------------------------------------------------------------------------
