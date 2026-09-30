@@ -91,6 +91,12 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 equivalent; if the server is unavailable, start at the [documentation index](docs/README.md)
 and state that the fallback was necessary. Never retrieve `docs/archive/` as current guidance.
 
+Every docs tool response leads with a `provenance:` line naming the absolute `root=` it
+answered from. Before trusting an answer, confirm that root is this checkout: call
+`docs_status` (it takes no arguments) or read `root=` from the response, and compare it to
+`git rev-parse --show-toplevel`. A mismatch means a same-named server is bound to a different
+repository — do not treat those results as this checkout, and stop using that server.
+
 ## Non-negotiables
 
 **Persisted plans belong in docs.** When a durable plan artifact is warranted, store it under
@@ -138,7 +144,7 @@ when the user accepts or explicitly asks to retain it. See the todo index for me
 | The engine — parsing, validation, search, export | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
-| KyberDash — telemetry ingest, the canonical store, any of the four surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it |
+| KyberDash — telemetry ingest, the canonical store, any of the three surfaces | [`docs/dash/architecture.md`](docs/dash/architecture.md) for the boundaries, then [`docs/dash/runbook.md`](docs/dash/runbook.md) to run it |
 | Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-weave-docs` skill in [`.apm/skills/`](.apm/skills/kyber-weave-docs/SKILL.md) |
 

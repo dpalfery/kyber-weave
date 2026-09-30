@@ -16,6 +16,12 @@ no sudo, checksum-verified: the `kyber-weave` CLI, the `kyber-weave-mcp` server,
 releases that publish it, the [`kyberdash`](docs/dash/README.md) observability binary. Already
 installed? `kyber-weave update`. [Install details →](docs/install.md)
 
+**Windows users:** download the `.zip` archives from [Releases](https://github.com/dpalfery/kyber-weave/releases),
+verify the SHA-256 hash, and extract them to a directory on your PATH. See
+[Verifying a download](docs/install.md#verifying-a-download) and
+[Windows: unsigned binaries and SmartScreen](docs/install.md#windows-unsigned-binaries-and-smartscreen)
+for detailed guidance.
+
 > **This repository governs its own documentation.** Everything under [`docs/`](docs/)
 > carries conformant frontmatter and passes `kyber-weave docs validate` and `docs drift`
 > with zero findings. If the ontology were unusable, you would see it here first.
@@ -30,7 +36,7 @@ Kyber-Weave provides five integrated features for agent governance and lifecycle
 2. **[ContextHygiene](#feature-2--contexthygiene)** — Skill and harness agent linting, routing readiness scoring, parity drift detection, and security scanning.
 3. **[Kyber-Squad](#feature-3--kyber-squad)** — Unified multi-harness deployment and lifecycle control plane across 10 IDE/CLI harnesses with transactional recovery.
 4. **[CI Pipelines](#feature-4--ci-pipelines)** — Unified diagnostic engine with stable `KW-*` rules, SARIF reporting, and GitHub Actions workflows.
-5. **[KyberDash](#feature-5--kyberdash)** — Local telemetry observability and context tuning for agentic workflows, across four execution surfaces.
+5. **[KyberDash](#feature-5--kyberdash)** — Local telemetry observability and context tuning for agentic workflows, across three local surfaces.
 
 ---
 
@@ -206,13 +212,13 @@ Doctor down to the individual context item: per-turn token breakdown (fresh inpu
 read, cache creation, output), context composition by part type, ranked tool-schema cost with unused-schema waste,
 hierarchical execution timelines, and an inspector that shows the unclipped assembled turn.
 
-**Four local surfaces.** Terminal TUI, browser dashboard, Electron desktop app, and a
-Windows tray companion — all reading the same store.
+**Three local surfaces.** Terminal report (`kyberdash report`), browser dashboard (`kyberdash web`), and a
+macOS/Windows tray (Tauri 2) — all reading the same store.
 
 ```bash
 kyberdash kyber otel        # OTLP receiver on 127.0.0.1:4318
 kyberdash web               # browser dashboard on :4747
-kyberdash report            # terminal TUI
+kyberdash report            # terminal report
 ```
 
 Installed by the same one-line installer as the CLI, from releases that publish it.

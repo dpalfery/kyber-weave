@@ -71,8 +71,8 @@ Every runbook must document the specific test runner commands for validating loc
 - What specific scenarios the test suite guards (e.g., XSS escaping, layout breakpoints, version gating).
 
 ### R5: Multi-Surface Completeness
-If a feature delivers user experiences across multiple surfaces (e.g., KyberDash's Electron app, Windows tray app,
-Web dashboard, and Terminal TUI), the runbook must provide a dedicated section for each surface with its respective
+If a feature delivers user experiences across multiple surfaces (e.g., KyberDash's terminal report, web dashboard,
+and macOS/Windows tray), the runbook must provide a dedicated section for each surface with its respective
 prerequisites, runners, and tests.
 
 ---

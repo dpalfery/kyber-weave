@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-09-26
+last-reviewed: 2026-09-29
 code-refs:
   - DocsTools
   - DrainingStreamServerTransport
@@ -238,6 +238,28 @@ corpus. If the selected directory was not initialized, startup fails on stderr w
 actionable `kyber-weave docs init "<path>"` command. This prevents two repositories under a
 shared parent directory from accidentally reading one another's documentation.
 
+### Asserting the root with `--expect-root`
+
+Resolution decides which root the server binds to; `--expect-root` asserts which root the
+client believes that is. After the ordinary resolution above, the server compares the two
+and refuses to serve when they differ. It is a client-asserted safety rail against the
+reported failure mode — a same-named server pinned to another checkout by a user-scope or
+headless harness config — not a replacement for correct project-local wiring.
+
+```bash
+kyber-weave-mcp --repo-root . --expect-root /Users/you/git/your/repo
+```
+
+The value may also come from the `KYBER_WEAVE_EXPECT_ROOT` environment variable, honoured
+only when the flag is absent: **the CLI flag wins over the environment**, so a shell export
+cannot override a project pin. A relative value, and a value from the environment, resolve
+against the same working directory `--repo-root .` uses.
+
+A mismatch from either source is a refuse-to-serve: the server writes `KW-MCP-ROOT-002: …`
+to **stderr** and exits 1. That is distinct from the `KW-MCP-ROOT-001` an unbound or
+uninitialized root produces. Nothing is served either way, so no answer can come from the
+wrong corpus.
+
 ### The ontology comes from the host config
 
 Once the root is resolved, the server reads `.kyber-weave/kyber-weave.yml` from it and
@@ -252,9 +274,35 @@ This fallback applies to the retrieval corpus initialized at startup. The analys
 glossary tools reload the current config for each call and return an unavailable response
 until the invalid config is fixed; they do not analyze on defaults.
 
+## Provenance on every answer
+
+Every docs tool response — hits, misses, and empty or error prose alike — leads with
+exactly one provenance line:
+
+```text
+provenance: root=/absolute/repo/root rev=1a2b3c4 dirty=no documents=72
+```
+
+- `root` — the absolute repository root the server is bound to, normalised with
+  `Path.GetFullPath`.
+- `rev` — the short HEAD SHA, or the literal `unavailable` when Git cannot be read.
+- `dirty` — `yes` or `no` when `git status` succeeds, otherwise `unknown`. Untracked files
+  are ignored.
+- `documents` — the live document count for the corpus; `0` is allowed.
+
+Git identity is read lazily and cached until the corpus is rebuilt, so the header does not
+shell out on every call. A missing Git, a directory that is not a repository, or a failed
+command are all success paths: the line still renders with `rev=unavailable` and
+`dirty=unknown` rather than inventing a SHA or omitting the root.
+
+The line is emitted whole and any character budget is taken from the body, so the one tell
+that a same-named server answered from another checkout is never the part truncated away.
+Compare `root=` to `git rev-parse --show-toplevel` before trusting an answer: a mismatch
+means the server is bound to a different repository, not this checkout.
+
 ## The tools
 
-All four are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
+All five are declared `ReadOnly` and `OpenWorld = false`, which the SDK maps to the
 protocol's `readOnlyHint` and `openWorldHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
@@ -276,7 +324,7 @@ merit — superseded documents are outside the corpus, so a match is current gui
 logs` puts those nouns in permanently resident text held back only by a negation, and
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only `docs_explore` carries an
-exclusion, because it is the broadest of the four; the narrower three state their territory
+exclusion, because it is the broadest of the five; the narrower four state their territory
 positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — how `maxDocs` and
@@ -331,6 +379,15 @@ glossary proposals enter through `docs glossary --write` at the CLI. The MCP rea
 the current config and corpus for each call; embeddings remain loopback-only and are not
 called unless the local cache is safely ignored.
 
+### `docs_status()`
+
+Reports the provenance of the corpus this server is answering from, with no query and no
+arguments. This is the cheap session-start check: call it once before trusting any other
+docs tool, and compare its `root=` to `git rev-parse --show-toplevel`. It returns exactly
+the provenance line above — nothing else — so an empty corpus is not a failure: the line
+still reports the root, a count of `0`, and unavailable revision markers when Git cannot be
+read.
+
 ## Reading a code join
 
 ```
@@ -362,6 +419,7 @@ after editing documentation or after the CodeGraph daemon rewrites its index.
 | Analysis warns that the cache is unsafe | Run `docs init` to merge `.kyber-weave/.gitignore` with `cache/`; until then deterministic/lexical analysis continues and no document text is sent for embeddings |
 | `docs_glossary` returns no senses | The configured glossary is absent, the term is not present, or its spelling differs; use `docs glossary .` to preview proposals |
 | Client reports a protocol error | Something wrote to stdout; check that you launched `kyber-weave-mcp`, not `kyber-weave` |
+| Answers look right but named files do not exist, or the document count is wrong | A same-named server is bound to a different checkout — compare the `provenance: root=` line to `git rev-parse --show-toplevel`, call `docs_status`, and pin the server with `--expect-root` |
 | Piped requests exit 0 with nothing on stdout | A release up to `v0.1.7-rc.13` dropped replies once stdin closed — upgrade, or keep stdin open until the replies arrive. See [Closing stdin](#closing-stdin) |
 
 ## Related
