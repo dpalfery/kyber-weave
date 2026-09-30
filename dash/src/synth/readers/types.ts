@@ -43,6 +43,28 @@ export type SourceRecordEnvelope = Omit<SourceRecordProvenance, 'nativeRecordId'
 }
 
 /**
+ * Structured tool call invoked by the model during a turn.
+ */
+export interface ReaderToolCall {
+  id: string
+  name: string
+  arguments: Record<string, unknown> | string
+  timestamp?: string
+  durationMs?: number
+}
+
+/**
+ * Structured execution result of a tool call returned to the model.
+ */
+export interface ReaderToolResult {
+  toolCallId: string
+  name?: string
+  content: string
+  isError?: boolean
+  timestamp?: string
+}
+
+/**
  * One model turn's content as the file recorded it. Optional fields are
  * omitted when the file did not carry them; callers must not treat absence
  * as zero.
@@ -63,6 +85,12 @@ export type ReaderTurn = {
   correctionRule?: string
   /** Native turn/message id when the transcript named one. */
   nativeRecordId?: string
+  /** Tool calls invoked in this turn. */
+  toolCalls?: ReaderToolCall[]
+  /** Tool execution results received in this turn. */
+  toolResults?: ReaderToolResult[]
+  /** Tool schemas explicitly offered to the model in this turn, if observed in telemetry. */
+  toolsOffered?: string[]
 }
 
 /**
